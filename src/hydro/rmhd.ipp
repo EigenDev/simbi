@@ -579,8 +579,8 @@ void RMHD<dim>::emit_troubled_cells() const
 template <int dim>
 void RMHD<dim>::cons2prim(const ExecutionPolicy<>& p)
 {
-    const auto gr = gamma / (gamma - 1.0);
-    simbi::parallel_for(p, total_zones, [gr, this] DEV(luint gid) {
+    // const auto gr = gamma / (gamma - 1.0);
+    simbi::parallel_for(p, total_zones, [this] DEV(luint gid) {
         bool workLeftToDo = true;
         volatile __shared__ bool found_failure;
 
@@ -611,33 +611,118 @@ void RMHD<dim>::cons2prim(const ExecutionPolicy<>& p)
             const real b2   = cons[gid].bcomponent(2) * invdV;
             const real b3   = cons[gid].bcomponent(3) * invdV;
             const real dchi = cons[gid].chi * invdV;
-            const real s    = (m1 * b1 + m2 * b2 + m3 * b3);
-            const real ssq  = s * s;
-            const real msq  = (m1 * m1 + m2 * m2 + m3 * m3);
-            const real bsq  = (b1 * b1 + b2 * b2 + b3 * b3);
 
-            int iter       = 0;
-            real qq        = edens_guess[gid];
-            const real tol = d * global::epsilon;
-            real dqq;
+            //==================================================================
+            // ATTEMPT TO RECOVER PRIMITIVES USING KASTAUN ET AL. 2021
+            //==================================================================
+
+            //======= rescale the variables Eqs. (22) - (25)
+            const real invd   = 1.0 / d;
+            const real isqrtd = std::sqrt(invd);
+            const real q      = tau * invd;
+            const real r1     = m1 * invd;
+            const real r2     = m2 * invd;
+            const real r3     = m3 * invd;
+            const real rsq    = r1 * r1 + r2 * r2 + r3 * r3;
+            const real rmag   = std::sqrt(rsq);
+            const real bee1   = b1 * isqrtd;
+            const real bee2   = b2 * isqrtd;
+            const real bee3   = b3 * isqrtd;
+            const real beesq  = bee1 * bee1 + bee2 * bee2 + bee3 * bee3;
+            const real rdb    = r1 * bee1 + r2 * bee2 + r3 * bee3;
+            const real rdbsq  = rdb * rdb;
+            // r-parallel
+            const real rp1 = (rdb / beesq) * bee1;
+            const real rp2 = (rdb / beesq) * bee2;
+            const real rp3 = (rdb / beesq) * bee3;
+            // r-perpendicular
+            const real rperp1 = r1 - rp1;
+            const real rperp2 = r2 - rp2;
+            const real rperp3 = r3 - rp3;
+
+            const real rparr = std::sqrt(rp1 * rp1 + rp2 * rp2 + rp3 * rp3);
+            const real rperp =
+                std::sqrt(rperp1 * rperp1 + rperp2 * rperp2 + rperp3 * rperp3);
+
+            // We use the false position method to solve for the roots
+            real y1 = 0.0;
+            real y2 = 1.0;
+            real f1 = kkc_fmu49(y1, beesq, rdbsq, rmag);
+            real f2 = kkc_fmu49(y2, beesq, rdbsq, rmag);
+
+            bool good_guesses = false;
+            // if good guesses, use them
+            if (std::abs(f1) + std::abs(f2) < 2.0 * global::epsilon) {
+                good_guesses = true;
+            }
+
+            int iter = 0.0;
+            // compute yy in case the initial bracket is not good
+            real yy = 0.5 * (y1 + y2);
+            real f;
+            if (!good_guesses) {
+                do {
+                    yy = (y1 * f2 - y2 * f1) / (f2 - f1);
+                    f  = kkc_fmu49(yy, beesq, rdbsq, rmag);
+                    if (f * f2 < 0.0) {
+                        y1 = y2;
+                        f1 = f2;
+                        y2 = yy;
+                        f2 = f;
+                    }
+                    else {
+                        // use Illinois algorithm to avoid stagnation
+                        f1 = 0.5 * f1;
+                        y2 = yy;
+                        f2 = f;
+                    }
+
+                    if (iter >= global::MAX_ITER || !std::isfinite(f)) {
+                        troubled_cells[gid] = 1;
+                        dt                  = INFINITY;
+                        inFailureState      = true;
+                        found_failure       = true;
+                        break;
+                    }
+                    iter++;
+                } while (std::abs(y1 - y2) > global::epsilon &&
+                         std::abs(f) > global::epsilon);
+            }
+
+            // We found good brackets. Now we can solve for the roots
+            y1 = 0.0;
+            y2 = yy;
+
+            // Evaluate the master function (Eq. 44) at the roots
+            f1   = kkc_fmu44(y1, rmag, rparr, rperp, beesq, rdbsq, q, d, gamma);
+            f2   = kkc_fmu44(y2, rmag, rparr, rperp, beesq, rdbsq, q, d, gamma);
+            iter = 0.0;
             do {
-                auto [f, g] = newton_fg_mhd(gr, tau, d, ssq, bsq, msq, qq);
-                dqq         = f / g;
-                qq -= dqq;
-
-                if (iter >= global::MAX_ITER || !std::isfinite(qq)) {
-                    printf(
-                        "iter: %d, qq: %.2e, bsq: %.2e, msq: %.2e, d: %.2e, "
-                        "tau: %.2e, s: %.2e, ssq: %.2e\n",
-                        iter,
-                        qq,
-                        bsq,
-                        msq,
-                        d,
-                        tau,
-                        s,
-                        ssq
-                    );
+                yy = (y1 * f2 - y2 * f1) / (f2 - f1);
+                f  = kkc_fmu44(
+                    yy,
+                    rmag,
+                    rparr,
+                    rperp,
+                    beesq,
+                    rdbsq,
+                    q,
+                    d,
+                    gamma
+                );
+                if (f * f2 < 0.0) {
+                    y1 = y2;
+                    f1 = f2;
+                    y2 = yy;
+                    f2 = f;
+                }
+                else {
+                    // use Illinois algorithm to avoid stagnation
+                    f1 = 0.5 * f1;
+                    y2 = yy;
+                    f2 = f;
+                }
+                if (iter >= global::MAX_ITER || !std::isfinite(f)) {
                     troubled_cells[gid] = 1;
                     dt                  = INFINITY;
                     inFailureState      = true;
@@ -645,21 +730,39 @@ void RMHD<dim>::cons2prim(const ExecutionPolicy<>& p)
                     break;
                 }
                 iter++;
+            } while (std::abs(y1 - y2) > global::epsilon &&
+                     std::abs(f) > global::epsilon);
 
-            } while (std::abs(dqq) >= tol);
+            // Ok, we have the roots. Now we can compute the primitive variables
+            // Equation (26)
+            const real x = 1.0 / (1.0 + yy * beesq);
 
-            const real qqd   = qq + d;
-            const real rat   = s / qqd;
-            const real fac   = 1.0 / (qqd + bsq);
-            real v1          = fac * (m1 + rat * b1);
-            real v2          = fac * (m2 + rat * b2);
-            real v3          = fac * (m3 + rat * b3);
-            const real vsq   = v1 * v1 + v2 * v2 + v3 * v3;
-            const real wsq   = 1.0 / (1.0 - vsq);
-            const real w     = std::sqrt(wsq);
-            const real chi   = qq / wsq - d * vsq / (1.0 + w);
-            const real pg    = (1.0 / gr) * chi;
-            edens_guess[gid] = qq;
+            // Equation (38)
+            const real rbar_sq = rsq * x * x + yy * x * (1.0 + x) * rdbsq;
+
+            // Equation (39)
+            const real qbar =
+                q - 0.5 * (beesq + yy * yy * x * x * beesq * rperp * rperp);
+
+            // Equation (32) inverted and squared
+            const real vsq  = yy * yy * rbar_sq;
+            const real gbsq = vsq / std::abs(1.0 - vsq);
+            const real w    = std::sqrt(1.0 + gbsq);
+
+            // Equation (41)
+            const real rhohat = d / w;
+
+            // Equation (42)
+            const real epshat = w * (qbar - yy * rbar_sq) + gbsq / (1.0 + w);
+
+            // Equation (43)
+            const real pg = (gamma - 1.0) * rhohat * epshat;
+
+            // velocities Eq. (68)
+            real v1 = yy * x * (r1 + bee1 * rdb * yy);
+            real v2 = yy * x * (r2 + bee2 * rdb * yy);
+            real v3 = yy * x * (r3 + bee3 * rdb * yy);
+
             if constexpr (global::VelocityType ==
                           global::Velocity::FourVelocity) {
                 v1 *= w;
@@ -671,7 +774,7 @@ void RMHD<dim>::cons2prim(const ExecutionPolicy<>& p)
 
             workLeftToDo = false;
 
-            if (qq < 0) {
+            if (!std::isfinite(yy)) {
                 troubled_cells[gid] = 1;
                 inFailureState      = true;
                 found_failure       = true;
@@ -694,7 +797,6 @@ template <int dim>
 DUAL RMHD<dim>::primitive_t
 RMHD<dim>::cons2prim(const RMHD<dim>::conserved_t& cons) const
 {
-    const auto gr   = gamma / (gamma - 1.0);
     const real d    = cons.den;
     const real m1   = cons.momentum(1);
     const real m2   = cons.momentum(2);
@@ -704,51 +806,146 @@ RMHD<dim>::cons2prim(const RMHD<dim>::conserved_t& cons) const
     const real b2   = cons.bcomponent(2);
     const real b3   = cons.bcomponent(3);
     const real dchi = cons.chi;
-    const real s    = (m1 * b1 + m2 * b2 + m3 * b3);
-    const real ssq  = s * s;
-    const real msq  = (m1 * m1 + m2 * m2 + m3 * m3);
-    const real bsq  = (b1 * b1 + b2 * b2 + b3 * b3);
 
-    const real et = tau + d;
-    const real a  = 3.0;
-    const real b  = -4.0 * (et - bsq);
-    const real c  = msq - 2.0 * et * bsq + bsq * bsq;
-    real qq       = (-b + std::sqrt(b * b - 4.0 * a * c)) / (2.0 * a);
-    qq            = my_max(qq, d);
+    //==================================================================
+    // ATTEMPT TO RECOVER PRIMITIVES USING KASTAUN ET AL. 2021
+    //==================================================================
 
-    const real tol = d * global::epsilon;
-    int iter       = 0;
-    real dqq;
+    //======= rescale the variables Eqs. (22) - (25)
+    const real invd   = 1.0 / d;
+    const real isqrtd = std::sqrt(invd);
+    const real q      = tau * invd;
+    const real r1     = m1 * invd;
+    const real r2     = m2 * invd;
+    const real r3     = m3 * invd;
+    const real rsq    = r1 * r1 + r2 * r2 + r3 * r3;
+    const real rmag   = std::sqrt(rsq);
+    const real bee1   = b1 * isqrtd;
+    const real bee2   = b2 * isqrtd;
+    const real bee3   = b3 * isqrtd;
+    const real beesq  = bee1 * bee1 + bee2 * bee2 + bee3 * bee3;
+    const real rdb    = r1 * bee1 + r2 * bee2 + r3 * bee3;
+    const real rdbsq  = rdb * rdb;
+    // r-parallel
+    const real rp1 = (rdb / beesq) * bee1;
+    const real rp2 = (rdb / beesq) * bee2;
+    const real rp3 = (rdb / beesq) * bee3;
+    // r-perpendicular
+    const real rperp1 = r1 - rp1;
+    const real rperp2 = r2 - rp2;
+    const real rperp3 = r3 - rp3;
+
+    const real rparr = std::sqrt(rp1 * rp1 + rp2 * rp2 + rp3 * rp3);
+    const real rperp =
+        std::sqrt(rperp1 * rperp1 + rperp2 * rperp2 + rperp3 * rperp3);
+
+    // We use the false position method to solve for the roots
+    real y1 = 0.0;
+    real y2 = 1.0;
+    real f1 = kkc_fmu49(y1, beesq, rdbsq, rmag);
+    real f2 = kkc_fmu49(y2, beesq, rdbsq, rmag);
+
+    bool good_guesses = false;
+    // if good guesses, use them
+    if (std::abs(f1) + std::abs(f2) < 2.0 * global::epsilon) {
+        good_guesses = true;
+    }
+
+    int iter = 0.0;
+    // compute yy in case the initial bracket is not good
+    real yy = 0.5 * (y1 + y2);
+    real f;
+    if (!good_guesses) {
+        do {
+            yy = (y1 * f2 - y2 * f1) / (f2 - f1);
+            f  = kkc_fmu49(yy, beesq, rdbsq, rmag);
+            if (f * f2 < 0.0) {
+                y1 = y2;
+                f1 = f2;
+                y2 = yy;
+                f2 = f;
+            }
+            else {
+                // use Illinois algorithm to avoid stagnation
+                f1 = 0.5 * f1;
+                y2 = yy;
+                f2 = f;
+            }
+
+            if (iter >= global::MAX_ITER || !std::isfinite(f)) {
+                break;
+            }
+            iter++;
+        } while (std::abs(y1 - y2) > global::epsilon &&
+                 std::abs(f) > global::epsilon);
+    }
+
+    // We found good brackets. Now we can solve for the roots
+    y1 = 0.0;
+    y2 = yy;
+
+    // Evaluate the master function (Eq. 44) at the roots
+    f1   = kkc_fmu44(y1, rmag, rparr, rperp, beesq, rdbsq, q, d, gamma);
+    f2   = kkc_fmu44(y2, rmag, rparr, rperp, beesq, rdbsq, q, d, gamma);
+    iter = 0.0;
     do {
-        auto [f, g] = newton_fg_mhd(gr, tau, d, ssq, bsq, msq, qq);
-        dqq         = f / g;
-        qq -= dqq;
-
-        if (iter >= global::MAX_ITER || !std::isfinite(qq)) {
-            qq = INFINITY;
+        yy = (y1 * f2 - y2 * f1) / (f2 - f1);
+        f  = kkc_fmu44(yy, rmag, rparr, rperp, beesq, rdbsq, q, d, gamma);
+        if (f * f2 < 0.0) {
+            y1 = y2;
+            f1 = f2;
+            y2 = yy;
+            f2 = f;
+        }
+        else {
+            // use Illinois algorithm to avoid stagnation
+            f1 = 0.5 * f1;
+            y2 = yy;
+            f2 = f;
+        }
+        if (iter >= global::MAX_ITER || !std::isfinite(f)) {
             break;
         }
         iter++;
+    } while (std::abs(y1 - y2) > global::epsilon &&
+             std::abs(f) > global::epsilon);
 
-    } while (std::abs(dqq) >= tol);
+    // Ok, we have the roots. Now we can compute the primitive variables
+    // Equation (26)
+    const real x = 1.0 / (1.0 + yy * beesq);
 
-    const real qqd = qq + d;
-    const real rat = s / qqd;
-    const real fac = 1.0 / (qqd + bsq);
-    real v1        = fac * (m1 + rat * b1);
-    real v2        = fac * (m2 + rat * b2);
-    real v3        = fac * (m3 + rat * b3);
-    const real vsq = v1 * v1 + v2 * v2 + v3 * v3;
-    const real wsq = 1.0 / (1.0 - vsq);
-    const real w   = std::sqrt(wsq);
-    const real chi = qq / wsq - d * vsq / (1.0 + w);
-    const real pg  = (1.0 / gr) * chi;
+    // Equation (38)
+    const real rbar_sq = rsq * x * x + yy * x * (1.0 + x) * rdbsq;
+
+    // Equation (39)
+    const real qbar =
+        q - 0.5 * (beesq + yy * yy * x * x * beesq * rperp * rperp);
+
+    // Equation (32) inverted and squared
+    const real vsq  = yy * yy * rbar_sq;
+    const real gbsq = vsq / std::abs(1.0 - vsq);
+    const real w    = std::sqrt(1.0 + gbsq);
+
+    // Equation (41)
+    const real rhohat = d / w;
+
+    // Equation (42)
+    const real epshat = w * (qbar - yy * rbar_sq) + gbsq / (1.0 + w);
+
+    // Equation (43)
+    const real pg = (gamma - 1.0) * rhohat * epshat;
+
+    // velocities Eq. (68)
+    real v1 = yy * x * (r1 + bee1 * rdb * yy);
+    real v2 = yy * x * (r2 + bee2 * rdb * yy);
+    real v3 = yy * x * (r3 + bee3 * rdb * yy);
+
     if constexpr (global::VelocityType == global::Velocity::FourVelocity) {
         v1 *= w;
         v2 *= w;
         v3 *= w;
     }
-    return {d / w, v1, v2, v3, pg, b1, b2, b3, dchi / d};
+    return primitive_t{d / w, v1, v2, v3, pg, b1, b2, b3, dchi / d};
 }
 
 //----------------------------------------------------------------------------------------------------------
@@ -1102,7 +1299,7 @@ RMHD<dim>::prims2flux(const RMHD<dim>::primitive_t& prims, const luint nhat)
     const auto bmu   = mag_fourvec_t(prims);
     const real ind1  = (nhat == 1) ? 0.0 : vn * b1 - v1 * bn;
     const real ind2  = (nhat == 2) ? 0.0 : vn * b2 - v2 * bn;
-    const real ind3  = (nhat == 2) ? 0.0 : vn * b3 - v3 * bn;
+    const real ind3  = (nhat == 3) ? 0.0 : vn * b3 - v3 * bn;
     return {
       d * vn,
       m1 * vn + kronecker(nhat, 1) * p - bn * bmu.one * invlf,
@@ -1240,10 +1437,8 @@ DUAL RMHD<dim>::conserved_t RMHD<dim>::calc_hllc_flux(
                 uhllm - fdb
             );
         }();
-        const real quad = -0.5 * (b + sgn(b) * std::sqrt(b * b - 4.0 * a * c));
-        const auto aS   = c / quad;
-        // const real quad  = 1.0 + std::sqrt(1.0 - 4.0 * a * c / (b * b));
-        // const real aS    = -2.0 * c / (b * quad);
+        const real quad  = -0.5 * (b + sgn(b) * std::sqrt(b * b - 4.0 * a * c));
+        const auto aS    = c / quad;
         const real vp1   = bfn ? 0.0 : (bp1 * aS - fpb1) / bn;   // Eq. (38)
         const real vp2   = bfn ? 0.0 : (bp2 * aS - fpb2) / bn;   // Eq. (38)
         const real invg2 = (1.0 - (aS * aS + vp1 * vp1 + vp2 * vp2));
@@ -2295,16 +2490,17 @@ void RMHD<dim>::simulate(
         // Mignone & McKinney (2007):
         // https://articles.adsabs.harvard.edu/pdf/2007MNRAS.378.1118M (we
         // take vsq = 1)
-        const real bsq = (b1 * b1 + b2 * b2 + b3 * b3);
-        const real msq = (m1 * m1 + m2 * m2 + m3 * m3);
-        const real et  = tau + d;
-        const real a   = 3.0;
-        const real b   = -4.0 * (et - bsq);
-        const real c   = msq - 2.0 * et * bsq + bsq * bsq;
-        const real qq  = (-b + std::sqrt(b * b - 4.0 * a * c)) / (2.0 * a);
-        const real qr  = std::max(qq, d);
-        edens_guess[i] = qr - d;
-        cons[i]        = conserved_t{d, m1, m2, m3, tau, b1, b2, b3, dchi};
+        const real bsq  = (b1 * b1 + b2 * b2 + b3 * b3);
+        const real msq  = (m1 * m1 + m2 * m2 + m3 * m3);
+        const real et   = tau + d;
+        const real a    = 3.0;
+        const real b    = -4.0 * (et - bsq);
+        const real c    = msq - 2.0 * et * bsq + bsq * bsq;
+        const real disc = std::max(b * b - 4.0 * a * c, 0.0);
+        const real qq   = (-b + std::sqrt(disc)) / (2.0 * a);
+        const real qr   = std::max(qq, d);
+        edens_guess[i]  = qr - d;
+        cons[i]         = conserved_t{d, m1, m2, m3, tau, b1, b2, b3, dchi};
     }
 
     // set up the problem and release old state from memory

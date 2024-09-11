@@ -795,7 +795,7 @@ namespace simbi {
             const auto rho = d / w;
             const auto eps =
                 (tau + (1.0 - w) * d + (1.0 - w * w) * p) / (d * w);
-            return (gamma - 1) * rho * eps - p;
+            return (gamma - 1.0) * rho * eps - p;
         }
 
         /**
@@ -815,6 +815,26 @@ namespace simbi {
                 (tau + (1.0 - w) * d + (1.0 - w * w) * p) / (d * w);
             const auto c2 = (gamma - 1) * gamma * eps / (1 + gamma * eps);
             return c2 * v2 - 1;
+        }
+
+        /**
+         * @brief calculate relativistic df/dp from Mignone and Bodo (2005)
+         * @param gamma adiabatic index
+         * @param tau energy density minus rest mass energy
+         * @param d lab frame density
+         * @param S lab frame momentum density
+         * @param p pressure
+         */
+        STATIC auto newton_fg(real gamma, real tau, real d, real s, real p)
+        {
+            const auto et  = tau + d + p;
+            const auto v2  = s * s / (et * et);
+            const auto w   = 1.0 / std::sqrt(1.0 - v2);
+            const auto rho = d / w;
+            const auto eps =
+                (tau + (1.0 - w) * d + (1.0 - w * w) * p) / (d * w);
+            const auto c2 = (gamma - 1) * gamma * eps / (1 + gamma * eps);
+            return std::make_tuple((gamma - 1.0) * rho * eps - p, c2 * v2 - 1);
         }
 
         /**
@@ -840,22 +860,22 @@ namespace simbi {
         )
         {
             //==============================
-            const auto qqd = qq + d;
-            const auto q2  = qqd * qqd;
-            const auto rat = ssq / q2;
-            const auto y1  = 1.0 / (qqd + bsq);
-            const auto y2  = y1 * y1;
+            const auto qqd  = qq + d;
+            const auto q2   = qqd * qqd;
+            const auto rat  = ssq / q2;
+            const auto iqb  = 1.0 / (qqd + bsq);
+            const auto iqb2 = iqb * iqb;
             // Equation (A3)
-            const auto v2  = rat * y1 * (y1 * qqd + 1.0) + msq * y2;
+            const auto v2  = rat * iqb2 * (2.0 * qqd + bsq) + msq * iqb2;
             const auto ig2 = 1.0 - v2;
             const auto g2  = 1.0 / ig2;
             const auto g   = std::sqrt(g2);
             const auto chi = qq * ig2 - d * v2 / (g + 1.0);
 
             const auto dv2_dq =
-                -2.0 * y2 * (3.0 * rat + y1 * (rat * bsq * bsq / qqd + msq));
+                -2.0 * iqb2 * (3.0 * rat + iqb * (rat * bsq * bsq / qqd + msq));
 
-            //===== kinematical and thermodynamics expressions terms section A2
+            //===== kinematical and thermodynamical expressions (Section A2)
             const auto dchi_dq = ig2 - 0.5 * g * (d + 2.0 * chi * g) * dv2_dq;
             const auto drho_dq = -0.5 * d * g * dv2_dq;
 
@@ -868,9 +888,100 @@ namespace simbi {
 
             const auto dp = dp_dchi * dchi_dq + dp_drho * drho_dq;
             return {
-              qq - (pg + tau) + 0.5 * (bsq + (bsq * msq - ssq) * y2),
-              1.0 - dp - (bsq * msq - ssq) * y1 * y2
+              qq - (pg + tau) + 0.5 * (bsq + (bsq * msq - ssq) * iqb2),
+              1.0 - dp - (bsq * msq - ssq) * iqb * iqb2
             };
+        }
+
+        /**
+         * @brief calculate the bracketing function described in Kastaun,
+         * Kalinani, & Colfi (2021)
+         *
+         * @param mu minimization variable
+         * @param beesq rescaled magnetic field squared
+         * @param r vector of rescaled momentum
+         * @param beedr inner product between rescaled magnetic field & momentum
+         * @return Eq. (49)
+         */
+        STATIC real kkc_fmu49(
+            const real mu,
+            const real beesq,
+            const real beedrsq,
+            const real r
+        )
+        {
+            // the minimum enthalpy is unity for non-relativistic flows
+            constexpr real hlim = 1.0;
+
+            // Equation (26)
+            const real x = 1.0 / (1.0 + mu * beesq);
+
+            // Equation (38)
+            const real rbar_sq = r * r * x * x + mu * x * (1.0 + x) * beedrsq;
+
+            return mu * std::sqrt(hlim * hlim + rbar_sq) - 1.0;
+        }
+
+        /**
+         * @brief Returns the master function described in Kastaun, Kalinani, &
+         * Colfi (2021)
+         *
+         * @param mu minimization variable
+         * @param r vector of rescaled momentum
+         * @param rparr parallel component of rescaled momentum vector
+         * @param beesq rescaled magnetic field squared
+         * @param beedr inner product between rescaled magnetic field & momentum
+         * @param qterm rescaled gas energy density
+         * @param dterm mass density
+         * @param gamma adiabatic index
+         * @return Eq. (44)
+         */
+        STATIC real kkc_fmu44(
+            const real mu,
+            const real r,
+            const real rparr,
+            const real rperp,
+            const real beesq,
+            const real beedrsq,
+            const real qterm,
+            const real dterm,
+            const real gamma
+        )
+        {
+            // Equation (26)
+            const real x = 1.0 / (1.0 + mu * beesq);
+
+            // Equation (38)
+            const real rbar_sq = r * r * x * x + mu * x * (1.0 + x) * beedrsq;
+
+            // Equation (39)
+            const real qbar =
+                qterm - 0.5 * (beesq + mu * mu * x * x * beesq * rperp * rperp);
+
+            // Equation (32) inverted and squared
+            const real vsq  = mu * mu * rbar_sq;
+            const real gbsq = vsq / std::abs(1.0 - vsq);
+            const real g    = std::sqrt(1.0 + gbsq);
+
+            // Equation (41)
+            const real rhohat = dterm / g;
+
+            // Equation (42)
+            const real epshat = g * (qbar - mu * rbar_sq) + gbsq / (1.0 + g);
+
+            // Equation (43)
+            const real phat = (gamma - 1.0) * rhohat * epshat;
+            const real ahat = phat / (rhohat * (1.0 + epshat));
+
+            // Equation (46) - (48)
+            const real vhatA = (1.0 + ahat) * (1.0 + epshat) / g;
+            const real vhatB = (1.0 + ahat) * (1.0 + qbar - mu * rbar_sq);
+            const real vhat  = my_max(vhatA, vhatB);
+
+            // Equation (45)
+            const real muhat = 1.0 / (vhat + rbar_sq * mu);
+
+            return mu - muhat;
         }
 
         //======================================
