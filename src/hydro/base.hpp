@@ -420,10 +420,10 @@ namespace simbi {
                 [](real i) { return i == real(0); }
             );
 
-            if (nz > 1) {
+            if (zag > 1) {
                 checkpoint_zones = zag;
             }
-            else if (ny > 1) {
+            else if (yag > 1) {
                 checkpoint_zones = yag;
             }
             else {
