@@ -34,4 +34,4 @@ class SodProblem(BaseConfig):
     
     @simbi_property
     def regime(self) -> str:
-        return "srhd"
+        return "classical"
