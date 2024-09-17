@@ -5,7 +5,6 @@ class MagneticShockTube(BaseConfig):
     Mignone & Bodo (2006), Relativistic MHD Test Problems in 1D Fluid
     """
     nzones    = DynamicArg("nzones", 100, help="number of grid zones", var_type=int)
-    ad_gamma  = DynamicArg("ad-gamma", 2, help="Adiabatic gas index", var_type = float)
     problem   = DynamicArg("problem", 1, help='problem number from Mignone & Bodo (2006)', var_type=int, choices=[1,2,3,4])
     
     @simbi_property
@@ -41,8 +40,11 @@ class MagneticShockTube(BaseConfig):
         return (self.nzones, 1, 1) 
     
     @simbi_property
-    def gamma(self) -> DynamicArg:
-        return self.ad_gamma 
+    def gamma(self) -> float:
+        if self.problem == 1:
+            return 2.0
+        else:
+            return 5.0 / 3.0
     
     @simbi_property
     def regime(self) -> str:
