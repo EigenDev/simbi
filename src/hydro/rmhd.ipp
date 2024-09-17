@@ -1707,12 +1707,14 @@ DUAL RMHD<dim>::conserved_t RMHD<dim>::calc_hlld_flux(
             return fR - uR * vface;
         }
 
+        const real afac = 1.0 / (aRp - aLm);
+
         //-------------------Calculate the HLL Intermediate State
-        const auto hll_state = (uR * aRp - uL * aLm - fR + fL) / (aRp - aLm);
+        const auto hll_state = (uR * aRp - uL * aLm - fR + fL) * afac;
 
         //------------------Calculate the RHLLE Flux---------------
         const auto hll_flux =
-            (fL * aRp - fR * aLm + (uR - uL) * aRp * aLm) / (aRp - aLm);
+            (fL * aRp - fR * aLm + (uR - uL) * aRp * aLm) * afac;
 
         if (quirk_smoothing) {
             if (quirk_strong_shock(prL.p, prR.p)) {
@@ -1731,9 +1733,6 @@ DUAL RMHD<dim>::conserved_t RMHD<dim>::calc_hlld_flux(
         const conserved_t r[2] = {uL * aLm - fL, uR * aRp - fR};
         const real lam[2]      = {aLm, aRp};
 
-        // L / R Alfven prims and Contact prims
-        primitive_t prAL, prAR, prC;
-
         //------------------------------------
         // Iteratively solve for the pressure
         //------------------------------------
@@ -1748,6 +1747,8 @@ DUAL RMHD<dim>::conserved_t RMHD<dim>::calc_hlld_flux(
         constexpr int num_tries      = 15;      // secant tries before giving up
         bool hlld_success            = true;
 
+        // L / R Alfven prims and Contact prims
+        primitive_t prAL, prAR, prC;
         const auto p = [&] {
             if (bn * bn / p0 < prat_lim) {   // Eq.(53)
                 // in this limit, the pressure is found through Eq. (55)
