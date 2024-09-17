@@ -430,8 +430,7 @@ class Visualizer:
                         refcount += 1
 
         if self.setup:
-            ...
-            # ax.set_title(f'{self.setup} t = {setup["time"]:.1f}')
+            ax.set_title(f'{self.setup} t = {setup["time"]:.1f}')
         if self.log:
             ax.set_xscale("log")
             ax.set_yscale("log")
