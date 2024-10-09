@@ -278,13 +278,14 @@ def construct_the_state(
                 "Number of break points must be less than or equal to the number of dimensions"
             )
 
+        # \vector{dx}
         spacings = [
             (geom_tuple[idx][1] - geom_tuple[idx][0]) / model.resolution[idx]
             for idx in range(len(geom_tuple))
         ]
 
         pieces = [
-            (None, round(break_points[idx] / spacings[idx]))
+            (None, round(abs(break_points[idx] - geom_tuple[idx][0]) / spacings[idx]))
             for idx in range(len(break_points))
         ]
 
