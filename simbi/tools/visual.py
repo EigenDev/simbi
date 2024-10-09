@@ -44,6 +44,8 @@ derived = [
     "u3",
     "u",
     "tau-s",
+    "ptot",
+    "pmag"
 ]
 field_choices = [
     "rho",
