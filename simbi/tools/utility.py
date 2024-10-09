@@ -106,6 +106,10 @@ def get_field_str(args: argparse.Namespace) -> Union[str, list[str]]:
             field_str_list.append(r"$\tau_s$")
         elif field in ["b1", "b2", "b3"]:
             field_str_list.append(rf"$B_{field[1]}$")
+        elif field == "pmag":
+            field_str_list.append(r"$p_{\rm mag}$")
+        elif field == "ptot":
+            field_str_list.append(r"$p_{\rm tot}$")
         else:
             field_str_list.append(rf"${field}$")
 
@@ -394,6 +398,18 @@ def prims2var(fields: dict[str, NDArray[numpy_float]], var: str) -> Any:
         return fields["gamma_beta"]
     elif var == "tau-s":
         return (1 - 1 / W**2) ** (-0.5)
+    elif var == "ptot":
+        try: 
+            bsq = fields["b1"]**2 + fields["b2"]**2 + fields["b3"]**2
+            return fields["p"] + 0.5 * bsq 
+        except KeyError:
+            return fields["p"]
+    elif var == "pmag":
+        try: 
+            bsq = fields["b1"]**2 + fields["b2"]**2 + fields["b3"]**2
+            return 0.5 * bsq 
+        except KeyError:
+            raise KeyError("The simulation date is not an MHD run")
     else:
         raise NotImplementedError("derived variable {var} not implemented")
 
