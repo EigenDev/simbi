@@ -128,26 +128,32 @@ namespace simbi {
         RF
     };
 
-    enum IJ {
-        IPJP,
-        IPJM,
-        IMJM,
-        IMJP
-    };
+    namespace IJ {
+        enum corner {
+            NE,
+            SE,
+            SW,
+            NW
+        };
+    };   // namespace IJ
 
-    enum IK {
-        IPKP,
-        IPKM,
-        IMKM,
-        IMKP
-    };
+    namespace IK {
+        enum corner {
+            NE,
+            SE,
+            SW,
+            NW
+        };
+    };   // namespace IK
 
-    enum JK {
-        JPKP,
-        JPKM,
-        JMKM,
-        JMKP
-    };
+    namespace JK {
+        enum corner {
+            NE,
+            SE,
+            SW,
+            NW
+        };
+    }   // namespace JK
 
     enum class CTTYPE {
         ZERO,
