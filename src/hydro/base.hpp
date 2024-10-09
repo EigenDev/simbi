@@ -59,7 +59,7 @@ namespace simbi {
         real hllc_z;
         luint nx, ny, nz, nzones;
         std::vector<real> x1, x2, x3;
-        luint gpu_block_dimx, gpu_block_dimy, gpu_block_dimz;
+        luint gpu_block_dimx, gpu_block_dimy, gpu_block_dimz, global_iter;
 
         // Common members
         DataWriteMembers setup;
@@ -75,7 +75,7 @@ namespace simbi {
         bool null_den, null_mom1, null_mom2, null_mom3, null_nrg;
         bool null_mag1, null_mag2, null_mag3;
         bool nullg1, nullg2, nullg3;
-        luint active_zones, idx_active, total_zones, n, init_chkpt_idx, radius;
+        luint active_zones, idx_active, total_zones, init_chkpt_idx, radius;
         luint xag, yag, zag;
         std::vector<std::string> boundary_conditions;
         simbi::Solver sim_solver;
@@ -264,6 +264,7 @@ namespace simbi {
               gpu_block_dimx(get_xblock_dims()),
               gpu_block_dimy(get_yblock_dims()),
               gpu_block_dimz(get_zblock_dims()),
+              global_iter(0),
               t(init_conditions.tstart),
               tend(init_conditions.tend),
               chkpt_interval(init_conditions.chkpt_interval),
