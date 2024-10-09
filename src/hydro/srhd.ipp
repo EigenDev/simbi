@@ -228,7 +228,7 @@ void SRHD<dim>::emit_troubled_cells() const
                     prims[gid].p,
                     v2,
                     x1mean,
-                    n
+                    global_iter
                 );
             }
             else if constexpr (dim == 2) {
@@ -242,7 +242,7 @@ void SRHD<dim>::emit_troubled_cells() const
                     v2,
                     x1mean,
                     x2mean,
-                    n
+                    global_iter
                 );
             }
             else {
@@ -257,7 +257,7 @@ void SRHD<dim>::emit_troubled_cells() const
                     x1mean,
                     x2mean,
                     x3mean,
-                    n
+                    global_iter
                 );
             }
         }
@@ -2523,7 +2523,6 @@ void SRHD<dim>::simulate(
         }
     }
 
-    this->n = 0;
     // Simulate :)
     try {
         simbi::detail::logger::with_logger(*this, tend, [&] {
