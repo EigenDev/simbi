@@ -674,14 +674,14 @@ class Hydro:
         if self.mhd:
             init_conditions["bsources"] = bsources
             if self.discontinuity:
-                b1 = np.zeros(shape=(nzp + 2, nyp + 2, init_conditions["nxv"]))
-                b2 = np.zeros(shape=(nzp + 2, init_conditions["nyv"], nxp + 2))
-                b3 = np.zeros(shape=(init_conditions["nzv"], nyp + 2, nxp + 2))
+                b1 = np.zeros(shape=(nzp, nyp, init_conditions["nxv"]))
+                b2 = np.zeros(shape=(nzp, init_conditions["nyv"], nxp))
+                b3 = np.zeros(shape=(init_conditions["nzv"], nyp, nxp))
                 
                 region_one = self.x1 < self.geometry[0][2]
                 region_two = np.logical_not(region_one)
                 xc = helpers.calc_centroid(self.x1, coord_system=self.coord_system)
-                a = np.pad(xc, 1, mode="edge") < self.geometry[0][2]
+                a = xc < self.geometry[0][2]
                 b = np.logical_not(a)
                 b1[..., region_one] = self.initial_state[0][5]
                 b1[..., region_two] = self.initial_state[1][5]

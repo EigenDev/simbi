@@ -560,7 +560,7 @@ void RMHD<dim>::emit_troubled_cells() const
                 x1mean,
                 x2mean,
                 x3mean,
-                n
+                global_iter
             );
         }
     }
@@ -1987,18 +1987,12 @@ void RMHD<dim>::advance(const ExecutionPolicy<>& p)
         const real vfaceL = (homolog) ? x1l * hubble_param : hubble_param;
         const real vfaceR = (homolog) ? x1r * hubble_param : hubble_param;
 
-        const auto xg  = xag + 2;
-        const auto yg  = yag + 2;
-        const auto zg  = zag + 2;
-        const auto ks  = kk + 1;
-        const auto js  = jj + 1;
-        const auto is  = ii + 1;
-        const auto xlf = idx3(ii + 0, js, ks, nxv, yg, zg);
-        const auto xrf = idx3(ii + 1, js, ks, nxv, yg, zg);
-        const auto ylf = idx3(is, jj + 0, ks, xg, nyv, zg);
-        const auto yrf = idx3(is, jj + 1, ks, xg, nyv, zg);
-        const auto zlf = idx3(is, js, kk + 0, xg, yg, nzv);
-        const auto zrf = idx3(is, js, kk + 1, xg, yg, nzv);
+        const auto xlf = idx3(ii + 0, jj, kk, nxv, yag, zag);
+        const auto xrf = idx3(ii + 1, jj, kk, nxv, yag, zag);
+        const auto ylf = idx3(ii, jj + 0, kk, xag, nyv, zag);
+        const auto yrf = idx3(ii, jj + 1, kk, xag, nyv, zag);
+        const auto zlf = idx3(ii, jj, kk + 0, xag, yag, nzv);
+        const auto zrf = idx3(ii, jj, kk + 1, xag, yag, nzv);
 
         // // Calc Rimeann Flux at all interfaces
         for (luint q = 0; q < 10; q++) {
@@ -2176,29 +2170,28 @@ void RMHD<dim>::advance(const ExecutionPolicy<>& p)
         auto& b1c = cons[aid].b1;
         auto& b2c = cons[aid].b2;
         auto& b3c = cons[aid].b3;
-        // auto& v3c = prim_buff[tid].get_v3();
 
-        // const auto db1_dx1 = (b1R - b1L) * invdx1;
-        // const auto db2_dx2 = (b2R - b2L) * invdx2;
-        // const auto db3_dx3 = (b3R - b3L) * invdx3;
+        b1L -= dt * step *
+               curl_e(1, e2[IK::SW], e2[IK::NW], e3[IJ::SW], e3[IJ::NW]);
+        b1R -= dt * step *
+               curl_e(1, e2[IK::SE], e2[IK::NE], e3[IJ::SE], e3[IJ::NE]);
 
-        b1L -= dt * step * curl_e(1, e2[IMKM], e2[IMKP], e3[IMJM], e3[IMJP]);
-        b1R -= dt * step * curl_e(1, e2[IPKM], e2[IPKP], e3[IPJM], e3[IPJP]);
-        b2L -= dt * step * curl_e(2, e1[JMKM], e1[JMKP], e3[IMJM], e3[IPJM]);
-        b2R -= dt * step * curl_e(2, e1[JPKM], e1[JPKP], e3[IMJP], e3[IPJP]);
-        b3L -= dt * step * curl_e(3, e1[JMKM], e1[JPKM], e2[IMKM], e2[IPKM]);
-        b3R -= dt * step * curl_e(3, e1[JMKP], e1[JPKP], e2[IMKP], e2[IPKP]);
+        b2L -= dt * step *
+               curl_e(2, e1[JK::SW], e1[JK::NW], e3[IJ::SW], e3[IJ::SE]);
+        b2R -= dt * step *
+               curl_e(2, e1[JK::SE], e1[JK::NE], e3[IJ::NW], e3[IJ::NE]);
 
-        // const auto s = [&] {
-        //     if (use_rk1) {
-        //         return conserved_t{};
-        //     }
-        //     return conserved_t{0.0, b1c, b2c, b3c, b3c * v3c, 0.0, 0.0, v3c};
-        // }();
+        b3L -= dt * step *
+               curl_e(3, e1[JK::SW], e1[JK::SE], e2[IK::SW], e2[IK::SE]);
+        b3R -= dt * step *
+               curl_e(3, e1[JK::NW], e1[JK::NE], e2[IK::NW], e2[IK::NE]);
 
-        // const auto mhd_sx1 = s * db1_dx1;
-        // const auto mhd_sx2 = s * db2_dx2;
+        const auto divb =
+            (b1R - b1L) * invdx1 + (b2R - b2L) * invdx2 + (b3R - b3L) * invdx3;
 
+        if (!goes_to_zero(divb)) {
+            printf("Divergence of B is not zero\n");
+        }
         b1c = static_cast<real>(0.5) * (b1L + b1R);
         b2c = static_cast<real>(0.5) * (b2L + b2R);
         b3c = static_cast<real>(0.5) * (b3L + b3R);
@@ -2543,7 +2536,6 @@ void RMHD<dim>::simulate(
     try {
         simbi::detail::logger::with_logger(*this, tend, [&] {
             advance(activeP);
-            cons2prim(fullP);
             config_ghosts3D(
                 fullP,
                 cons.data(),
@@ -2556,6 +2548,7 @@ void RMHD<dim>::simulate(
                 half_sphere,
                 geometry
             );
+            cons2prim(fullP);
 
             if constexpr (global::on_gpu) {
                 adapt_dt(fullP);
