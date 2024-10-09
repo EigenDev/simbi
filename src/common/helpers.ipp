@@ -970,7 +970,7 @@ namespace simbi {
                                              (x2grid_size - 1) * sx +
                                              (ii + 1)] = cons
                                                 [(kk + 1) * sx * sy +
-                                                 (x2grid_size - 1) * sx +
+                                                 (x2grid_size - 2) * sx +
                                                  (ii + 1)];
                                         break;
                                 }
@@ -2909,7 +2909,7 @@ namespace simbi {
                                 };
                             case Dir::NW:
                             case Dir::SW:
-                                return {ii, jj + (s == Dir::NW), kk};
+                                return {ii + 0, jj + (s == Dir::NW), kk};
                             default:
                                 return {ii + 1, jj + (s == Dir::NE), kk};
                         }
@@ -2934,7 +2934,7 @@ namespace simbi {
                             case Dir::SW:
                                 return {ii - 1, jj + (s == Dir::NW), kk};
                             default:
-                                return {ii, jj + (s == Dir::NE), kk};
+                                return {ii + 0, jj + (s == Dir::NE), kk};
                         }
                     }
                     else if constexpr (C == Corner::SE) {
@@ -2955,7 +2955,7 @@ namespace simbi {
                                 };
                             case Dir::NW:
                             case Dir::SW:
-                                return {ii, jj - (s == Dir::SW), kk};
+                                return {ii + 0, jj - (s == Dir::SW), kk};
                             default:
                                 return {ii + 1, jj - (s == Dir::SE), kk};
                         }
@@ -2981,7 +2981,7 @@ namespace simbi {
                             case Dir::SW:
                                 return {ii - 1, jj - (s == Dir::SW), kk};
                             default:
-                                return {ii, jj - (s == Dir::SE), kk};
+                                return {ii + 0, jj - (s == Dir::SE), kk};
                         }
                     }
                 }
@@ -3004,7 +3004,7 @@ namespace simbi {
                                 };
                             case Dir::NW:
                             case Dir::SW:
-                                return {ii, jj, kk + (s == Dir::NW)};
+                                return {ii + 0, jj, kk + (s == Dir::NW)};
                             default:
                                 return {ii + 1, jj, kk + (s == Dir::NE)};
                         }
@@ -3029,7 +3029,7 @@ namespace simbi {
                             case Dir::SW:
                                 return {ii - 1, jj, kk + (s == Dir::NW)};
                             default:
-                                return {ii, jj, kk + (s == Dir::NE)};
+                                return {ii + 0, jj, kk + (s == Dir::NE)};
                         }
                     }
                     else if constexpr (C == Corner::SE) {
@@ -3050,7 +3050,7 @@ namespace simbi {
                                 };
                             case Dir::NW:
                             case Dir::SW:
-                                return {ii, jj, kk - (s == Dir::SW)};
+                                return {ii + 0, jj, kk - (s == Dir::SW)};
                             default:
                                 return {ii + 1, jj, kk - (s == Dir::SE)};
                         }
@@ -3076,7 +3076,7 @@ namespace simbi {
                             case Dir::SW:
                                 return {ii - 1, jj, kk - (s == Dir::SW)};
                             default:
-                                return {ii, jj, kk - (s == Dir::SE)};
+                                return {ii + 0, jj, kk - (s == Dir::SE)};
                         }
                     }
                 }
@@ -3099,7 +3099,7 @@ namespace simbi {
                                 };
                             case Dir::NW:
                             case Dir::SW:
-                                return {ii, jj, kk + (s == Dir::NW)};
+                                return {ii, jj + 0, kk + (s == Dir::NW)};
                             default:
                                 return {ii, jj + 1, kk + (s == Dir::NE)};
                         }
@@ -3124,7 +3124,7 @@ namespace simbi {
                             case Dir::SW:
                                 return {ii, jj - 1, kk + (s == Dir::NW)};
                             default:
-                                return {ii, jj, kk + (s == Dir::NE)};
+                                return {ii, jj + 0, kk + (s == Dir::NE)};
                         }
                     }
                     else if constexpr (C == Corner::SE) {
@@ -3145,7 +3145,7 @@ namespace simbi {
                                 };
                             case Dir::NW:
                             case Dir::SW:
-                                return {ii, jj, kk - (s == Dir::SW)};
+                                return {ii, jj + 0, kk - (s == Dir::SW)};
                             default:
                                 return {ii, jj + 1, kk - (s == Dir::SE)};
                         }
@@ -3171,54 +3171,12 @@ namespace simbi {
                             case Dir::SW:
                                 return {ii, jj - 1, kk - (s == Dir::SW)};
                             default:
-                                return {ii, jj, kk - (s == Dir::SE)};
+                                return {ii, jj + 0, kk - (s == Dir::SE)};
                         }
                     }
                 }
             }();
-            // if constexpr (P == Plane::IK) {
-            //     if ((s == Dir::S) || (s == Dir::N)) {
-            //         if (s == Dir::S) {
-            //             std::cout << "south"
-            //                       << "\n";
-            //         }
-            //         else {
-            //             std::cout << "north"
-            //                       << "\n";
-            //         }
-            //         printf(
-            //             "ip: %lld, jp: %lld, kp: %lld, ni: %lld, nj: %lld,
-            //             nk: "
-            //             "%lld\n",
-            //             ip,
-            //             jp,
-            //             kp,
-            //             ni,
-            //             nj,
-            //             nk
-            //         );
-            //     }
-            // }
-            // if ((s == Dir::E) || (s == Dir::W)) {
-            //     if (s == Dir::E) {
-            //         std::cout << "east"
-            //                   << "\n";
-            //     }
-            //     else {
-            //         std::cout << "west"
-            //                   << "\n";
-            //     }
-            //     printf(
-            //         "ip: %lld, jp: %lld, kp: %lld, ni: %lld, nj: %lld, nk: "
-            //         "%lld\n",
-            //         ip,
-            //         jp,
-            //         kp,
-            //         ni,
-            //         nj,
-            //         nk
-            //     );
-            // }
+
             return idx3(ip, jp, kp, ni, nj, nk);
         }
     }   // namespace helpers
