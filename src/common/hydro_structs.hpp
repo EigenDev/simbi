@@ -1684,8 +1684,8 @@ namespace rmhd {
 
         DUAL real total_enthalpy(const real gamma) const
         {
-            return gas_enthalpy(gamma) + bsquared() / lorentz_factor_squared() +
-                   vdotb() * vdotb();
+            return rho * gas_enthalpy(gamma) +
+                   bsquared() / lorentz_factor_squared() + vdotb() * vdotb();
         }
 
         DUAL real vsquared() const { return v1 * v1 + v2 * v2 + v3 * v3; }
