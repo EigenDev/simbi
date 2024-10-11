@@ -110,6 +110,8 @@ def get_field_str(args: argparse.Namespace) -> Union[str, list[str]]:
             field_str_list.append(r"$p_{\rm mag}$")
         elif field == "ptot":
             field_str_list.append(r"$p_{\rm tot}$")
+        elif field == 'sigma':
+            field_str_list.append(r"$\sigma$")
         else:
             field_str_list.append(rf"${field}$")
 
@@ -409,7 +411,18 @@ def prims2var(fields: dict[str, NDArray[numpy_float]], var: str) -> Any:
             bsq = fields["b1"]**2 + fields["b2"]**2 + fields["b3"]**2
             return 0.5 * bsq 
         except KeyError:
-            raise KeyError("The simulation date is not an MHD run")
+            raise KeyError("The simulation data is not from an MHD run")
+    elif var == 'sigma':
+        try:
+            bvec = np.array([fields['b1'], fields['b2'], fields['b3']])
+            vvec = np.array([fields['v1'], fields['v2'], fields['v3']])
+            bsquared = np.sum([b ** 2 for b in bvec], axis=0)
+            vsquared = np.sum([v ** 2 for v in vvec], axis=0)
+            vdb      = np.sum([x * y for x, y in zip(bvec, vvec)], axis=0)
+            sigma = np.sqrt(fields['b1']**2 + fields['b2']**2 + fields['b3']**2) / np.sqrt(fields['rho'])
+        except KeyError:
+            raise KeyError("The simulation date is not from an MHD run")
+        return sigma
     else:
         raise NotImplementedError("derived variable {var} not implemented")
 
