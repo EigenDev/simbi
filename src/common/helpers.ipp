@@ -444,343 +444,249 @@ namespace simbi {
             const simbi::Geometry geometry,
             const simbi::BoundaryCondition* boundary_conditions,
             const U* outer_zones,
-            const U* boundary_zones,
+            const U* inflow_zones,
             const bool half_sphere
         )
         {
             const int extent = p.get_full_extent();
-            const int sx     = (global::col_maj) ? 1 : x1grid_size;
-            const int sy     = (global::col_maj) ? x2grid_size : 1;
+            const int sx     = x1grid_size;
+            const int sy     = x2grid_size;
             simbi::parallel_for(p, 0, extent, [=] DEV(const int gid) {
-                const int ii = axid<2, BlkAx::I>(gid, x1grid_size, x2grid_size);
-                const int jj = axid<2, BlkAx::J>(gid, x1grid_size, x2grid_size);
+                const int jj = axid<2, BlkAx::J>(gid, sx, sy);
+                const int ii = axid<2, BlkAx::I>(gid, sx, sy);
+
                 if (first_order) {
                     if (jj < x2grid_size - 2) {
+                        const auto ing  = (jj + 1) * sx + 0;
+                        const auto outg = (jj + 1) * sx + (x1grid_size - 1);
+                        const auto inr  = (jj + 1) * sx + 1;
+                        const auto outr = (jj + 1) * sx + (x1grid_size - 2);
+
                         switch (boundary_conditions[0]) {
                             case simbi::BoundaryCondition::REFLECTING:
-                                cons[(jj + 1) * sx + 0 * sy] =
-                                    cons[(jj + 1) * sx + 1 * sy];
-                                cons[(jj + 1) * sx + 0 * sy].momentum(1) *= -1;
+                                cons[ing] = cons[inr];
+                                cons[ing].momentum(1) *= -1;
                                 break;
                             case simbi::BoundaryCondition::INFLOW:
-                                cons[(jj + 1) * sx + 0 * sy] =
-                                    boundary_zones[0];
+                                cons[ing] = inflow_zones[0];
                                 break;
                             case simbi::BoundaryCondition::PERIODIC:
-                                cons[(jj + 1) * sx + 0 * sy] = cons
-                                    [(jj + 1) * sx + (x1grid_size - 2) * sy];
+                                cons[ing] = cons[outr];
                                 break;
                             default:
-                                cons[(jj + 1) * sx + 0 * sy] =
-                                    cons[(jj + 1) * sx + 1 * sy];
+                                cons[ing] = cons[inr];
                                 break;
                         }
 
                         switch (boundary_conditions[1]) {
                             case simbi::BoundaryCondition::REFLECTING:
-                                cons[(jj + 1) * sx + (x1grid_size - 1) * sy] =
-                                    cons
-                                        [(jj + 1) * sx +
-                                         (x1grid_size - 2) * sy];
-                                cons[(jj + 1) * sx + (x1grid_size - 1) * sy]
-                                    .momentum(1) *= -1;
+                                cons[outg] = cons[outr];
+                                cons[outg].momentum(1) *= -1;
                                 break;
                             case simbi::BoundaryCondition::INFLOW:
-                                cons[(jj + 1) * sx + (x1grid_size - 1) * sy] =
-                                    boundary_zones[1];
+                                cons[outg] = inflow_zones[1];
                                 break;
                             case simbi::BoundaryCondition::PERIODIC:
-                                cons[(jj + 1) * sx + (x1grid_size - 1) * sy] =
-                                    cons[(jj + 1) * sx + 1 * sy];
+                                cons[outg] = cons[ing];
                                 break;
                             default:
-                                cons[(jj + 1) * sx + (x1grid_size - 1) * sy] =
-                                    cons
-                                        [(jj + 1) * sx +
-                                         (x1grid_size - 2) * sy];
+                                cons[outg] = cons[outr];
                                 break;
                         }
+
+                        // if outer zones, fill them in
+                        if (outer_zones) {
+                            cons[outg] = outer_zones[0];
+                        }
                     }
-                    // Fix the ghost zones at the x2 boundaries
                     if (ii < x1grid_size - 2) {
+                        const auto ing  = 0 * sx + (ii + 1);
+                        const auto outg = (x2grid_size - 1) * sx + (ii + 1);
+                        const auto inr  = 1 * sx + (ii + 1);
+                        const auto outr = (x2grid_size - 2) * sx + (ii + 1);
+
                         switch (geometry) {
                             case simbi::Geometry::SPHERICAL:
-                                cons[0 * sx + (ii + 1) * sy] =
-                                    cons[1 * sx + (ii + 1) * sy];
-                                cons[(x2grid_size - 1) * sx + (ii + 1) * sy] =
-                                    cons
-                                        [(x2grid_size - 2) * sx +
-                                         (ii + 1) * sy];
+                                cons[ing]  = cons[inr];
+                                cons[outg] = cons[outr];
                                 if (half_sphere) {
-                                    cons[(x2grid_size - 1) * sx + (ii + 2) * sy]
-                                        .momentum(2) *= -1;
+                                    cons[outg].momentum(2) *= -1;
                                 }
                                 break;
-                            case simbi::Geometry::PLANAR_CYLINDRICAL:
-                                cons[0 * sx + (ii + 1) * sy] = cons
-                                    [(x2grid_size - 2) * sx + (ii + 1) * sy];
-                                cons[(x2grid_size - 1) * sx + (ii + 1) * sy] =
-                                    cons[1 * sx + (ii + 1) * sy];
+                            case simbi::Geometry::CYLINDRICAL:
+                                cons[ing]  = cons[outr];
+                                cons[outg] = cons[inr];
                                 break;
                             default:
                                 switch (boundary_conditions[2]) {
                                     case simbi::BoundaryCondition::REFLECTING:
-                                        cons[0 * sx + (ii + 1) * sy] =
-                                            cons[1 * sx + (ii + 1) * sy];
-                                        cons[0 * sx + (ii + 1) * sy].momentum(2
-                                        ) *= -1;
+                                        cons[ing] = cons[inr];
+                                        cons[ing].momentum(2) *= -1;
                                         break;
                                     case simbi::BoundaryCondition::INFLOW:
-                                        cons[0 * sx + (ii + 1) * sy] =
-                                            boundary_zones[2];
+                                        cons[ing] = inflow_zones[2];
                                         break;
                                     case simbi::BoundaryCondition::PERIODIC:
-                                        cons[0 * sx + (ii + 1) * sy] = cons
-                                            [(x1grid_size - 2) * sx +
-                                             (ii + 1) * sy];
+                                        cons[ing] = cons[outr];
                                         break;
                                     default:
-                                        cons[0 * sx + (ii + 1) * sy] =
-                                            cons[1 * sx + (ii + 1) * sy];
+                                        cons[ing] = cons[inr];
                                         break;
                                 }
 
                                 switch (boundary_conditions[3]) {
                                     case simbi::BoundaryCondition::REFLECTING:
-                                        cons
-                                            [(x2grid_size - 1) * sx +
-                                             (ii + 1) * sy] = cons
-                                                [(x2grid_size - 2) * sx +
-                                                 (ii + 1) * sy];
-                                        cons
-                                            [(x2grid_size - 1) * sx +
-                                             (ii + 1) * sy]
-                                                .momentum(2) *= -1;
+                                        cons[outg] = cons[outr];
+                                        cons[outg].momentum(2) *= -1;
                                         break;
                                     case simbi::BoundaryCondition::INFLOW:
-                                        cons
-                                            [(x2grid_size - 1) * sx +
-                                             (ii + 1) * sy] = boundary_zones[3];
+                                        cons[outg] = inflow_zones[3];
                                         break;
                                     case simbi::BoundaryCondition::PERIODIC:
-                                        cons
-                                            [(x2grid_size - 1) * sx +
-                                             (ii + 1) * sy] =
-                                                cons[1 * sx + (ii + 1) * sy];
+                                        cons[outg] = cons[inr];
                                         break;
                                     default:
-                                        // Fix the ghost zones at the x1
-                                        // boundaries
-                                        cons
-                                            [(x2grid_size - 1) * sx +
-                                             (ii + 1) * sy] = cons
-                                                [(x2grid_size - 2) * sx +
-                                                 (ii + 1) * sy];
+                                        cons[outg] = cons[outr];
                                         break;
                                 }
-
                                 break;
-                        }   // end switch
+                        }
                     }
                 }
                 else {
                     if (jj < x2grid_size - 4) {
-                        switch (boundary_conditions[0]) {
-                            case simbi::BoundaryCondition::REFLECTING:
-                                cons[(jj + 2) * sx + 0 * sy] =
-                                    cons[(jj + 2) * sx + 3 * sy];
-                                cons[(jj + 2) * sx + 1 * sy] =
-                                    cons[(jj + 2) * sx + 2 * sy];
+                        const auto ing   = (jj + 2) * sx + 0;
+                        const auto ingg  = (jj + 2) * sx + 1;
+                        const auto outg  = (jj + 2) * sx + (x1grid_size - 1);
+                        const auto outgg = (jj + 2) * sx + (x1grid_size - 2);
+                        const auto inr   = (jj + 2) * sx + 2;
+                        const auto inrr  = (jj + 2) * sx + 3;
+                        const auto outr  = (jj + 2) * sx + (x1grid_size - 3);
+                        const auto outrr = (jj + 2) * sx + (x1grid_size - 4);
 
-                                cons[(jj + 2) * sx + 0 * sy].momentum(1) *= -1;
-                                cons[(jj + 2) * sx + 1 * sy].momentum(1) *= -1;
-                                break;
+                        switch (boundary_conditions[0]) {
                             case simbi::BoundaryCondition::INFLOW:
-                                cons[(jj + 2) * sx + 0 * sy] =
-                                    boundary_zones[0];
-                                cons[(jj + 2) * sx + 1 * sy] =
-                                    boundary_zones[0];
+                                cons[ing]  = inflow_zones[0];
+                                cons[ingg] = inflow_zones[0];
+                                break;
+                            case simbi::BoundaryCondition::REFLECTING:
+                                cons[ing]  = cons[inrr];
+                                cons[ingg] = cons[inr];
+                                cons[ing].momentum(1) *= -1;
+                                cons[ingg].momentum(1) *= -1;
                                 break;
                             case simbi::BoundaryCondition::PERIODIC:
-                                cons[(jj + 2) * sx + 0 * sy] = cons
-                                    [(jj + 2) * sx + (x1grid_size - 4) * sy];
-                                cons[(jj + 2) * sx + 1 * sy] = cons
-                                    [(jj + 2) * sx + (x1grid_size - 3) * sy];
+                                cons[ing]  = cons[outrr];
+                                cons[ingg] = cons[outr];
                                 break;
                             default:
-                                cons[(jj + 2) * sx + 0 * sy] =
-                                    cons[(jj + 2) * sx + 2 * sy];
-                                cons[(jj + 2) * sx + 1 * sy] =
-                                    cons[(jj + 2) * sx + 2 * sy];
+                                cons[ing]  = cons[inr];
+                                cons[ingg] = cons[inr];
                                 break;
                         }
 
                         switch (boundary_conditions[1]) {
-                            case simbi::BoundaryCondition::REFLECTING:
-                                cons[(jj + 2) * sx + (x1grid_size - 1) * sy] =
-                                    cons
-                                        [(jj + 2) * sx +
-                                         (x1grid_size - 4) * sy];
-                                cons[(jj + 2) * sx + (x1grid_size - 2) * sy] =
-                                    cons
-                                        [(jj + 2) * sx +
-                                         (x1grid_size - 3) * sy];
-
-                                cons[(jj + 2) * sx + (x1grid_size - 1) * sy]
-                                    .momentum(1) *= -1;
-                                cons[(jj + 2) * sx + (x1grid_size - 2) * sy]
-                                    .momentum(1) *= -1;
-                                break;
                             case simbi::BoundaryCondition::INFLOW:
-                                cons[(jj + 2) * sx + 0 * sy] =
-                                    boundary_zones[1];
-                                cons[(jj + 2) * sx + 1 * sy] =
-                                    boundary_zones[1];
+                                cons[outg]  = inflow_zones[1];
+                                cons[outgg] = inflow_zones[1];
+                                break;
+                            case simbi::BoundaryCondition::REFLECTING:
+                                cons[outg]  = cons[outr];
+                                cons[outgg] = cons[outrr];
+                                cons[outg].momentum(1) *= -1;
+                                cons[outgg].momentum(1) *= -1;
                                 break;
                             case simbi::BoundaryCondition::PERIODIC:
-                                cons[(jj + 2) * sx + (x1grid_size - 1) * sy] =
-                                    cons[(jj + 2) * sx + 3 * sy];
-                                cons[(jj + 2) * sx + (x1grid_size - 2) * sy] =
-                                    cons[(jj + 2) * sx + 2 * sy];
+                                cons[outg]  = cons[inrr];
+                                cons[outgg] = cons[inr];
                                 break;
                             default:
-                                cons[(jj + 2) * sx + (x1grid_size - 1) * sy] =
-                                    cons
-                                        [(jj + 2) * sx +
-                                         (x1grid_size - 3) * sy];
-                                cons[(jj + 2) * sx + (x1grid_size - 2) * sy] =
-                                    cons
-                                        [(jj + 2) * sx +
-                                         (x1grid_size - 3) * sy];
+                                cons[outg]  = cons[outr];
+                                cons[outgg] = cons[outr];
                                 break;
                         }
-                    }
 
-                    // Fix the ghost zones at the x2 boundaries
+                        // if outer zones, fill them in
+                        if (outer_zones) {
+                            cons[outg]  = outer_zones[0];
+                            cons[outgg] = outer_zones[0];
+                        }
+                    }
                     if (ii < x1grid_size - 4) {
+                        const auto ing   = 0 * sx + (ii + 2);
+                        const auto ingg  = 1 * sx + (ii + 2);
+                        const auto outg  = (x2grid_size - 1) * sx + (ii + 2);
+                        const auto outgg = (x2grid_size - 2) * sx + (ii + 2);
+                        const auto inr   = 2 * sx + (ii + 2);
+                        const auto inrr  = 3 * sx + (ii + 2);
+                        const auto outr  = (x2grid_size - 3) * sx + (ii + 2);
+                        const auto outrr = (x2grid_size - 4) * sx + (ii + 2);
+
                         switch (geometry) {
                             case simbi::Geometry::SPHERICAL:
-                                cons[0 * sx + (ii + 2) * sy] =
-                                    cons[3 * sx + (ii + 2) * sy];
-                                cons[1 * sx + (ii + 2) * sy] =
-                                    cons[2 * sx + (ii + 2) * sy];
-                                cons[(x2grid_size - 1) * sx + (ii + 2) * sy] =
-                                    cons
-                                        [(x2grid_size - 4) * sx +
-                                         (ii + 2) * sy];
-                                cons[(x2grid_size - 2) * sx + (ii + 2) * sy] =
-                                    cons
-                                        [(x2grid_size - 3) * sx +
-                                         (ii + 2) * sy];
+                                cons[ing]   = cons[inrr];
+                                cons[outg]  = cons[outr];
+                                cons[ingg]  = cons[inr];
+                                cons[outgg] = cons[outr];
                                 if (half_sphere) {
-                                    cons[(x2grid_size - 1) * sx + (ii + 2) * sy]
-                                        .momentum(2) *= -1;
-                                    cons[(x2grid_size - 2) * sx + (ii + 2) * sy]
-                                        .momentum(2) *= -1;
+                                    cons[outg].momentum(2) *= -1;
+                                    cons[outgg].momentum(2) *= -1;
                                 }
                                 break;
-                            case simbi::Geometry::PLANAR_CYLINDRICAL:
-                                cons[0 * sx + (ii + 2) * sy] = cons
-                                    [(x2grid_size - 4) * sx + (ii + 2) * sy];
-                                cons[1 * sx + (ii + 2) * sy] = cons
-                                    [(x2grid_size - 3) * sx + (ii + 2) * sy];
-                                cons[(x2grid_size - 1) * sx + (ii + 2) * sy] =
-                                    cons[2 * sx + (ii + 2) * sy];
-                                cons[(x2grid_size - 2) * sx + (ii + 2) * sy] =
-                                    cons[3 * sx + (ii + 2) * sy];
+                            case simbi::Geometry::CYLINDRICAL:
+                                cons[ing]   = cons[outrr];
+                                cons[outg]  = cons[inr];
+                                cons[ingg]  = cons[outr];
+                                cons[outgg] = cons[inrr];
                                 break;
                             default:
                                 switch (boundary_conditions[2]) {
                                     case simbi::BoundaryCondition::REFLECTING:
-                                        cons[0 * sx + (ii + 2) * sy] =
-                                            cons[3 * sx + (ii + 2) * sy];
-                                        cons[1 * sx + (ii + 2) * sy] =
-                                            cons[2 * sx + (ii + 2) * sy];
-                                        cons[0 * sx + (ii + 2) * sy].momentum(2
-                                        ) *= -1;
-                                        cons[1 * sx + (ii + 2) * sy].momentum(2
-                                        ) *= -1;
+                                        cons[ing] = cons[inr];
+                                        cons[ing].momentum(2) *= -1;
+                                        cons[ingg] = cons[inrr];
+                                        cons[ingg].momentum(2) *= -1;
                                         break;
                                     case simbi::BoundaryCondition::INFLOW:
-                                        cons[0 * sx + (ii + 2) * sy] =
-                                            boundary_zones[2];
-                                        cons[1 * sx + (ii + 2) * sy] =
-                                            boundary_zones[2];
+                                        cons[ing]  = inflow_zones[2];
+                                        cons[ingg] = inflow_zones[2];
                                         break;
                                     case simbi::BoundaryCondition::PERIODIC:
-                                        cons[0 * sx + (ii + 2) * sy] = cons
-                                            [(x2grid_size - 4) * sx +
-                                             (ii + 2) * sy];
-                                        cons[1 * sx + (ii + 2) * sy] = cons
-                                            [(x2grid_size - 3) * sx +
-                                             (ii + 2) * sy];
+                                        cons[ing]  = cons[outrr];
+                                        cons[ingg] = cons[outr];
                                         break;
                                     default:
-                                        cons[0 * sx + (ii + 2) * sy] =
-                                            cons[2 * sx + (ii + 2) * sy];
-                                        cons[1 * sx + (ii + 2) * sy] =
-                                            cons[2 * sx + (ii + 2) * sy];
+                                        cons[ing]  = cons[inr];
+                                        cons[ingg] = cons[inr];
                                         break;
                                 }
 
                                 switch (boundary_conditions[3]) {
                                     case simbi::BoundaryCondition::REFLECTING:
-                                        cons
-                                            [(x2grid_size - 1) * sx +
-                                             (ii + 2) * sy] = cons
-                                                [(x2grid_size - 4) * sx +
-                                                 (ii + 2) * sy];
-                                        cons
-                                            [(x2grid_size - 2) * sx +
-                                             (ii + 2) * sy] = cons
-                                                [(x2grid_size - 3) * sx +
-                                                 (ii + 2) * sy];
-                                        cons
-                                            [(x2grid_size - 1) * sx +
-                                             (ii + 2) * sy]
-                                                .momentum(2) *= -1;
-                                        cons
-                                            [(x2grid_size - 2) * sx +
-                                             (ii + 2) * sy]
-                                                .momentum(2) *= -1;
+                                        cons[outg]  = cons[outr];
+                                        cons[outgg] = cons[outrr];
+                                        cons[outg].momentum(2) *= -1;
+                                        cons[outgg].momentum(2) *= -1;
                                         break;
                                     case simbi::BoundaryCondition::INFLOW:
-                                        cons
-                                            [(x2grid_size - 1) * sx +
-                                             (ii + 2) * sy] = boundary_zones[3];
-                                        cons
-                                            [(x2grid_size - 2) * sx +
-                                             (ii + 2) * sy] = boundary_zones[3];
+                                        cons[outg]  = inflow_zones[3];
+                                        cons[outgg] = inflow_zones[3];
                                         break;
                                     case simbi::BoundaryCondition::PERIODIC:
-                                        cons
-                                            [(x2grid_size - 1) * sx +
-                                             (ii + 2) * sy] =
-                                                cons[3 * sx + (ii + 2) * sy];
-                                        cons
-                                            [(x2grid_size - 2) * sx +
-                                             (ii + 2) * sy] =
-                                                cons[2 * sx + (ii + 2) * sy];
+                                        cons[outg]  = cons[inr];
+                                        cons[outgg] = cons[inrr];
                                         break;
                                     default:
-                                        cons
-                                            [(x2grid_size - 1) * sx +
-                                             (ii + 2) * sy] = cons
-                                                [(x2grid_size - 3) * sx +
-                                                 (ii + 2) * sy];
-                                        cons
-                                            [(x2grid_size - 2) * sx +
-                                             (ii + 2) * sy] = cons
-                                                [(x2grid_size - 3) * sx +
-                                                 (ii + 2) * sy];
+                                        cons[outg]  = cons[outr];
+                                        cons[outgg] = cons[outr];
                                         break;
                                 }
                                 break;
-                        }   // end switch
+                        }
                     }
                 }
             });
-        };
+        }
 
         template <typename T, typename U>
         void config_ghosts3D(
@@ -800,178 +706,100 @@ namespace simbi {
             const int sx     = x1grid_size;
             const int sy     = x2grid_size;
             simbi::parallel_for(p, 0, extent, [=] DEV(const int gid) {
-                const int kk = axid<3, BlkAx::K>(gid, x1grid_size, x2grid_size);
-                const int jj =
-                    axid<3, BlkAx::J>(gid, x1grid_size, x2grid_size, kk);
-                const int ii =
-                    axid<3, BlkAx::I>(gid, x1grid_size, x2grid_size, kk);
+                const int kk = axid<3, BlkAx::K>(gid, sx, sy);
+                const int jj = axid<3, BlkAx::J>(gid, sx, sy, kk);
+                const int ii = axid<3, BlkAx::I>(gid, sx, sy, kk);
 
                 if (first_order) {
                     if (jj < x2grid_size - 2 && kk < x3grid_size - 2) {
+                        const auto jk  = (kk + 1) * sx * sy + (jj + 1) * sx + 0;
+                        const auto ing = jk + 0;
+                        const auto outg = jk + (x1grid_size - 1);
+                        const auto inr  = jk + 1;
+                        const auto outr = jk + (x1grid_size - 2);
 
                         switch (boundary_conditions[0]) {
                             case simbi::BoundaryCondition::REFLECTING:
-                                cons[(kk + 1) * sx * sy + (jj + 1) * sx + 0] =
-                                    cons
-                                        [(kk + 1) * sx * sy + (jj + 1) * sx +
-                                         1];
-                                cons[(kk + 1) * sx * sy + (jj + 1) * sx + 0]
-                                    .momentum(1) *= -1;
+                                cons[ing] = cons[inr];
+                                cons[ing].momentum(1) *= -1;
                                 break;
                             case simbi::BoundaryCondition::INFLOW:
-                                cons[(kk + 1) * sx * sy + (jj + 1) * sx + 0] =
-                                    inflow_zones[0];
+                                cons[ing] = inflow_zones[0];
                                 break;
                             case simbi::BoundaryCondition::PERIODIC:
-                                cons[(kk + 1) * sx * sy + (jj + 1) * sx + 0] =
-                                    cons
-                                        [(kk + 1) * sx * sy + (jj + 1) * sx +
-                                         (x1grid_size - 2)];
+                                cons[ing] = cons[outr];
                                 break;
                             default:
-                                cons[(kk + 1) * sx * sy + (jj + 1) * sx + 0] =
-                                    cons
-                                        [(kk + 1) * sx * sy + (jj + 1) * sx +
-                                         1];
+                                cons[ing] = cons[inr];
                                 break;
                         }
 
                         switch (boundary_conditions[1]) {
                             case simbi::BoundaryCondition::REFLECTING:
-                                cons
-                                    [(kk + 1) * sx * sy + (jj + 1) * sx +
-                                     (x1grid_size - 1)] = cons
-                                        [(kk + 1) * sx * sy + (jj + 1) * sx +
-                                         (x1grid_size - 2)];
-                                cons
-                                    [(kk + 1) * sx * sy + (jj + 1) * sx +
-                                     (x1grid_size - 1)]
-                                        .momentum(1) *= -1;
+                                cons[outg] = cons[outr];
+                                cons[outg].momentum(1) *= -1;
                                 break;
                             case simbi::BoundaryCondition::INFLOW:
-                                cons
-                                    [(kk + 1) * sx * sy + (jj + 1) * sx +
-                                     (x1grid_size - 1)] = inflow_zones[1];
+                                cons[outg] = inflow_zones[1];
                                 break;
                             case simbi::BoundaryCondition::PERIODIC:
-                                cons
-                                    [(kk + 1) * sx * sy + (jj + 1) * sx +
-                                     (x1grid_size - 1)] = cons
-                                        [(kk + 1) * sx * sy + (jj + 1) * sx +
-                                         1];
+                                cons[outg] = cons[ing];
                                 break;
                             default:
-                                cons
-                                    [(kk + 1) * sx * sy + (jj + 1) * sx +
-                                     (x1grid_size - 1)] = cons
-                                        [(kk + 1) * sx * sy + (jj + 1) * sx +
-                                         (x1grid_size - 2)];
+                                cons[outg] = cons[outr];
                                 break;
                         }
                     }
                     // Fix the ghost zones at the x2 boundaries
                     if (ii < x1grid_size - 2 && kk < x3grid_size - 2) {
+                        const auto ik  = (kk + 1) * sx * sy + 0 * sx + (ii + 1);
+                        const auto ing = ik;
+                        const auto outg = ik + (x2grid_size - 1) * sx;
+                        const auto inr  = ik + sx;
+                        const auto outr = ik + (x2grid_size - 2) * sx;
+
                         switch (geometry) {
                             case simbi::Geometry::SPHERICAL:
-                                cons[(kk + 1) * sx * sy + 0 * sx + (ii + 1)] =
-                                    cons
-                                        [(kk + 1) * sx * sy + 1 * sx +
-                                         (ii + 1)];
-                                cons
-                                    [(kk + 1) * sx * sy +
-                                     (x2grid_size - 1) * sx + (ii + 1)] = cons
-                                        [(kk + 1) * sx * sy +
-                                         (x2grid_size - 2) * sx + (ii + 1)];
-
+                                cons[ing]  = cons[inr];
+                                cons[outg] = cons[outr];
                                 if (half_sphere) {
-                                    cons
-                                        [(kk + 1) * sx * sy +
-                                         (x2grid_size - 1) * sx + (ii + 1)]
-                                            .momentum(2) *= -1;
+                                    cons[outg].momentum(2) *= -1;
                                 }
                                 break;
                             case simbi::Geometry::CYLINDRICAL:
-                                cons[(kk + 1) * sx * sy + 0 * sx + (ii + 1)] =
-                                    cons
-                                        [(kk + 1) * sx * sy +
-                                         (x2grid_size - 2) * sx + (ii + 1)];
-                                cons
-                                    [(kk + 1) * sx * sy +
-                                     (x2grid_size - 1) * sx + (ii + 1)] = cons
-                                        [(kk + 1) * sx * sy + 1 * sx +
-                                         (ii + 1)];
+                                cons[ing]  = cons[outr];
+                                cons[outg] = cons[inr];
                                 break;
                             default:
                                 switch (boundary_conditions[2]) {
                                     case simbi::BoundaryCondition::REFLECTING:
-                                        cons
-                                            [(kk + 1) * sx * sy + 0 * sx +
-                                             (ii + 1)] = cons
-                                                [(kk + 1) * sx * sy + 1 * sx +
-                                                 (ii + 1)];
-                                        cons
-                                            [(kk + 1) * sx * sy + 0 * sx +
-                                             (ii + 1)]
-                                                .momentum(2) *= -1;
+                                        cons[ing] = cons[inr];
+                                        cons[ing].momentum(2) *= -1;
                                         break;
                                     case simbi::BoundaryCondition::INFLOW:
-                                        cons
-                                            [(kk + 1) * sx * sy + 0 * sx +
-                                             (ii + 1)] = inflow_zones[2];
+                                        cons[ing] = inflow_zones[2];
                                         break;
                                     case simbi::BoundaryCondition::PERIODIC:
-                                        cons
-                                            [(kk + 1) * sx * sy + 0 * sx +
-                                             (ii + 1)] = cons
-                                                [(kk + 1) * sx * sy +
-                                                 (x2grid_size - 1) * sx +
-                                                 (ii + 1)];
+                                        cons[ing] = cons[outr];
                                         break;
                                     default:
-                                        cons
-                                            [(kk + 1) * sx * sy + 0 * sx +
-                                             (ii + 1)] = cons
-                                                [(kk + 1) * sx * sy + 1 * sx +
-                                                 (ii + 1)];
+                                        cons[ing] = cons[inr];
                                         break;
                                 }
 
                                 switch (boundary_conditions[3]) {
                                     case simbi::BoundaryCondition::REFLECTING:
-                                        cons
-                                            [(kk + 1) * sx * sy +
-                                             (x2grid_size - 1) * sx +
-                                             (ii + 1)] = cons
-                                                [(kk + 1) * sx * sy +
-                                                 (x2grid_size - 2) * sx +
-                                                 (ii + 1)];
-                                        cons
-                                            [(kk + 1) * sx * sy +
-                                             (x2grid_size - 1) * sx + (ii + 1)]
-                                                .momentum(2) *= -1;
+                                        cons[outg] = cons[outr];
+                                        cons[outg].momentum(2) *= -1;
                                         break;
                                     case simbi::BoundaryCondition::INFLOW:
-                                        cons
-                                            [(kk + 1) * sx * sy +
-                                             (x2grid_size - 1) * sx +
-                                             (ii + 1)] = inflow_zones[3];
+                                        cons[outg] = inflow_zones[3];
                                         break;
                                     case simbi::BoundaryCondition::PERIODIC:
-                                        cons
-                                            [(kk + 1) * sx * sy +
-                                             (x2grid_size - 1) * sx +
-                                             (ii + 1)] = cons
-                                                [(kk + 1) * sx * sy + 1 * sx +
-                                                 (ii + 1)];
+                                        cons[outg] = cons[inr];
                                         break;
                                     default:
-                                        cons
-                                            [(kk + 1) * sx * sy +
-                                             (x2grid_size - 1) * sx +
-                                             (ii + 1)] = cons
-                                                [(kk + 1) * sx * sy +
-                                                 (x2grid_size - 2) * sx +
-                                                 (ii + 1)];
+                                        cons[outg] = cons[outr];
                                         break;
                                 }
                                 break;
@@ -980,365 +808,182 @@ namespace simbi {
 
                     // Fix the ghost zones at the x3 boundaries
                     if (jj < x2grid_size - 2 && ii < x1grid_size - 2) {
+                        const auto ij  = 0 * sx * sy + (jj + 1) * sx + (ii + 1);
+                        const auto ing = ij;
+                        const auto outg = ij + (x3grid_size - 1) * sx * sy;
+                        const auto inr  = ij + sx * sy;
+                        const auto outr = ij + (x3grid_size - 2) * sx * sy;
+
                         switch (geometry) {
                             case simbi::Geometry::SPHERICAL:
-                                cons[0 * sx * sy + (jj + 1) * sx + (ii + 1)] =
-                                    cons
-                                        [(x3grid_size - 2) * sx * sy +
-                                         (jj + 1) * sx + (ii + 1)];
-                                cons
-                                    [(x3grid_size - 1) * sx * sy +
-                                     (jj + 1) * sx + (ii + 1)] = cons
-                                        [1 * sx * sy + (jj + 1) * sx +
-                                         (ii + 1)];
+                                cons[ing]  = cons[outr];
+                                cons[outg] = cons[inr];
                                 break;
                             default:
                                 switch (boundary_conditions[4]) {
                                     case simbi::BoundaryCondition::REFLECTING:
-                                        cons
-                                            [0 * sx * sy + (jj + 1) * sx +
-                                             (ii + 1)] = cons
-                                                [1 * sx * sy + (jj + 1) * sx +
-                                                 (ii + 1)];
-                                        cons
-                                            [0 * sx * sy + (jj + 1) * sx +
-                                             (ii + 1)]
-                                                .momentum(3) *= -1;
+                                        cons[ing] = cons[inr];
+                                        cons[ing].momentum(3) *= -1;
                                         break;
                                     case simbi::BoundaryCondition::INFLOW:
-                                        cons
-                                            [0 * sx * sy + (jj + 1) * sx +
-                                             (ii + 1)] = inflow_zones[4];
+                                        cons[ing] = inflow_zones[4];
                                         break;
                                     case simbi::BoundaryCondition::PERIODIC:
-                                        cons
-                                            [0 * sx * sy + (jj + 1) * sx +
-                                             (ii + 1)] = cons
-                                                [(x3grid_size - 2) * sx * sy +
-                                                 (jj + 1) * sx + (ii + 1)];
+                                        cons[ing] = cons[outr];
                                         break;
                                     default:
-                                        cons
-                                            [0 * sx * sy + (jj + 1) * sx +
-                                             (ii + 1)] = cons
-                                                [1 * sx * sy + (jj + 1) * sx +
-                                                 (ii + 1)];
-                                        break;
-                                }
-                                switch (boundary_conditions[5]) {
-                                    case simbi::BoundaryCondition::REFLECTING:
-                                        cons
-                                            [(x3grid_size - 1) * sx * sy +
-                                             (jj + 1) * sx + (ii + 1)] = cons
-                                                [(x2grid_size - 2) * sx * sy +
-                                                 (jj + 1) * sx + (ii + 1)];
-                                        cons
-                                            [(x3grid_size - 1) * sx * sy +
-                                             (jj + 1) * sx + (ii + 1)]
-                                                .momentum(3) *= -1;
-                                        break;
-                                    case simbi::BoundaryCondition::INFLOW:
-                                        cons
-                                            [(x3grid_size - 1) * sx * sy +
-                                             (jj + 1) * sx + (ii + 1)] =
-                                                inflow_zones[5];
-                                        break;
-                                    case simbi::BoundaryCondition::PERIODIC:
-                                        cons
-                                            [(x3grid_size - 1) * sx * sy +
-                                             (jj + 1) * sx + (ii + 1)] = cons
-                                                [1 * sx * sy + (jj + 1) * sx +
-                                                 (ii + 1)];
-                                        break;
-                                    default:
-                                        cons
-                                            [(x3grid_size - 1) * sx * sy +
-                                             (jj + 1) * sx + (ii + 1)] = cons
-                                                [(x3grid_size - 2) * sx * sy +
-                                                 (jj + 1) * sx + (ii + 1)];
+                                        cons[ing] = cons[inr];
                                         break;
                                 }
 
+                                switch (boundary_conditions[5]) {
+                                    case simbi::BoundaryCondition::REFLECTING:
+                                        cons[outg] = cons[outr];
+                                        cons[outg].momentum(3) *= -1;
+                                        break;
+                                    case simbi::BoundaryCondition::INFLOW:
+                                        cons[outg] = inflow_zones[5];
+                                        break;
+                                    case simbi::BoundaryCondition::PERIODIC:
+                                        cons[outg] = cons[inr];
+                                        break;
+                                    default:
+                                        cons[outg] = cons[outr];
+                                        break;
+                                }
                                 break;
                         }
                     }
                 }
                 else {
                     if (jj < x2grid_size - 4 && kk < x3grid_size - 4) {
+                        const auto jk  = (kk + 2) * sx * sy + (jj + 2) * sx + 0;
+                        const auto ing = jk;
+                        const auto ingg  = jk + 1;
+                        const auto outg  = jk + (x1grid_size - 1);
+                        const auto outgg = jk + (x1grid_size - 2);
+                        const auto inr   = jk + 2;
+                        const auto inrr  = jk + 3;
+                        const auto outr  = jk + (x1grid_size - 3);
+                        const auto outrr = jk + (x1grid_size - 4);
 
+                        // fill in the two sets ghost zones for the x1
+                        // boundaries at the inner edge and outer edge for
+                        // second order stencil
                         switch (boundary_conditions[0]) {
-                            case simbi::BoundaryCondition::REFLECTING:
-                                cons[(kk + 2) * sx * sy + (jj + 2) * sx + 0] =
-                                    cons
-                                        [(kk + 2) * sx * sy + (jj + 2) * sx +
-                                         3];
-                                cons[(kk + 2) * sx * sy + (jj + 2) * sx + 1] =
-                                    cons
-                                        [(kk + 2) * sx * sy + (jj + 2) * sx +
-                                         2];
-                                cons[(kk + 2) * sx * sy + (jj + 2) * sx + 0]
-                                    .momentum(1) *= -1;
-                                cons[(kk + 2) * sx * sy + (jj + 2) * sx + 1]
-                                    .momentum(1) *= -1;
-                                break;
                             case simbi::BoundaryCondition::INFLOW:
-                                cons[(kk + 2) * sx * sy + (jj + 2) * sx + 0] =
-                                    inflow_zones[0];
-                                cons[(kk + 2) * sx * sy + (jj + 2) * sx + 1] =
-                                    inflow_zones[0];
+                                cons[ing]  = inflow_zones[0];
+                                cons[ingg] = inflow_zones[0];
+                                break;
+                            case simbi::BoundaryCondition::REFLECTING:
+                                cons[ing]  = cons[inrr];
+                                cons[ingg] = cons[inr];
+                                cons[ing].momentum(1) *= -1;
+                                cons[ingg].momentum(1) *= -1;
                                 break;
                             case simbi::BoundaryCondition::PERIODIC:
-                                cons[(kk + 2) * sx * sy + (jj + 2) * sx + 0] =
-                                    cons
-                                        [(kk + 2) * sx * sy + (jj + 2) * sx +
-                                         (x1grid_size - 4)];
-                                cons[(kk + 2) * sx * sy + (jj + 2) * sx + 1] =
-                                    cons
-                                        [(kk + 2) * sx * sy + (jj + 2) * sx +
-                                         (x1grid_size - 3)];
+                                cons[ing]  = cons[outrr];
+                                cons[ingg] = cons[outr];
                                 break;
                             default:
-                                cons[(kk + 2) * sx * sy + (jj + 2) * sx + 0] =
-                                    cons
-                                        [(kk + 2) * sx * sy + (jj + 2) * sx +
-                                         2];
-                                cons[(kk + 2) * sx * sy + (jj + 2) * sx + 1] =
-                                    cons
-                                        [(kk + 2) * sx * sy + (jj + 2) * sx +
-                                         2];
+                                cons[ing]  = cons[inr];
+                                cons[ingg] = cons[inr];
                                 break;
                         }
 
                         switch (boundary_conditions[1]) {
-                            case simbi::BoundaryCondition::REFLECTING:
-                                cons
-                                    [(kk + 2) * sx * sy + (jj + 2) * sx +
-                                     (x1grid_size - 1)] = cons
-                                        [(kk + 2) * sx * sy + (jj + 2) * sx +
-                                         (x1grid_size - 4)];
-                                cons
-                                    [(kk + 2) * sx * sy + (jj + 2) * sx +
-                                     (x1grid_size - 2)] = cons
-                                        [(kk + 2) * sx * sy + (jj + 2) * sx +
-                                         (x1grid_size - 3)];
-                                cons
-                                    [(kk + 2) * sx * sy + (jj + 2) * sx +
-                                     (x1grid_size - 1)]
-                                        .momentum(1) *= -1;
-                                cons
-                                    [(kk + 2) * sx * sy + (jj + 2) * sx +
-                                     (x1grid_size - 2)]
-                                        .momentum(1) *= -1;
-                                break;
                             case simbi::BoundaryCondition::INFLOW:
-                                cons
-                                    [(kk + 2) * sx * sy + (jj + 2) * sx +
-                                     (x1grid_size - 1)] = inflow_zones[1];
-                                cons
-                                    [(kk + 2) * sx * sy + (jj + 2) * sx +
-                                     (x1grid_size - 2)] = inflow_zones[1];
+                                cons[outg]  = inflow_zones[1];
+                                cons[outgg] = inflow_zones[1];
+                                break;
+                            case simbi::BoundaryCondition::REFLECTING:
+                                cons[outg]  = cons[outr];
+                                cons[outgg] = cons[outrr];
+                                cons[outg].momentum(1) *= -1;
+                                cons[outgg].momentum(1) *= -1;
                                 break;
                             case simbi::BoundaryCondition::PERIODIC:
-                                cons
-                                    [(kk + 2) * sx * sy + (jj + 2) * sx +
-                                     (x1grid_size - 1)] = cons
-                                        [(kk + 2) * sx * sy + (jj + 2) * sx +
-                                         3];
-                                cons
-                                    [(kk + 2) * sx * sy + (jj + 2) * sx +
-                                     (x1grid_size - 2)] = cons
-                                        [(kk + 2) * sx * sy + (jj + 2) * sx +
-                                         2];
+                                cons[outg]  = cons[inrr];
+                                cons[outgg] = cons[inr];
                                 break;
                             default:
-                                cons
-                                    [(kk + 2) * sx * sy + (jj + 2) * sx +
-                                     (x1grid_size - 1)] = cons
-                                        [(kk + 2) * sx * sy + (jj + 2) * sx +
-                                         (x1grid_size - 3)];
-                                cons
-                                    [(kk + 2) * sx * sy + (jj + 2) * sx +
-                                     (x1grid_size - 2)] = cons
-                                        [(kk + 2) * sx * sy + (jj + 2) * sx +
-                                         (x1grid_size - 3)];
+                                cons[outg]  = cons[outr];
+                                cons[outgg] = cons[outr];
                                 break;
                         }
                     }
                     // Fix the ghost zones at the x2 boundaries
                     if (ii < x1grid_size - 4 && kk < x3grid_size - 4) {
+                        const auto ik  = (kk + 2) * sx * sy + 0 * sx + (ii + 2);
+                        const auto ing = ik;
+                        const auto ingg  = ik + 1 * sx;
+                        const auto outg  = ik + (x2grid_size - 1) * sx;
+                        const auto outgg = ik + (x2grid_size - 2) * sx;
+                        const auto inr   = ik + 2 * sx;
+                        const auto inrr  = ik + 3 * sx;
+                        const auto outr  = ik + (x2grid_size - 3) * sx;
+                        const auto outrr = ik + (x2grid_size - 4) * sx;
+
+                        // fill in the two sets ghost zones for the x2
+                        // boundaries at the inner edge and outer edge for
+                        // second order stencil
                         switch (geometry) {
                             case simbi::Geometry::SPHERICAL:
-                                cons[(kk + 2) * sx * sy + 0 * sx + (ii + 2)] =
-                                    cons
-                                        [(kk + 2) * sx * sy + 3 * sx +
-                                         (ii + 2)];
-                                cons[(kk + 2) * sx * sy + 1 * sx + (ii + 2)] =
-                                    cons
-                                        [(kk + 2) * sx * sy + 2 * sx +
-                                         (ii + 2)];
-                                cons
-                                    [(kk + 2) * sx * sy +
-                                     (x2grid_size - 1) * sx + (ii + 2)] = cons
-                                        [(kk + 2) * sx * sy +
-                                         (x2grid_size - 4) * sx + (ii + 2)];
-                                cons
-                                    [(kk + 2) * sx * sy +
-                                     (x2grid_size - 2) * sx + (ii + 2)] = cons
-                                        [(kk + 2) * sx * sy +
-                                         (x2grid_size - 3) * sx + (ii + 2)];
+                                cons[ing]   = cons[inrr];
+                                cons[outg]  = cons[outr];
+                                cons[ingg]  = cons[inr];
+                                cons[outgg] = cons[outr];
                                 if (half_sphere) {
-                                    cons
-                                        [(kk + 2) * sx * sy +
-                                         (x2grid_size - 1) * sx + (ii + 2)]
-                                            .momentum(2) *= -1;
-                                    cons
-                                        [(kk + 2) * sx * sy +
-                                         (x2grid_size - 2) * sx + (ii + 2)]
-                                            .momentum(2) *= -1;
+                                    cons[outg].momentum(2) *= -1;
+                                    cons[outgg].momentum(2) *= -1;
                                 }
                                 break;
                             case simbi::Geometry::CYLINDRICAL:
-                                cons[(kk + 2) * sx * sy + 0 * sx + (ii + 2)] =
-                                    cons
-                                        [(kk + 2) * sx * sy +
-                                         (x2grid_size - 3) * sx + (ii + 2)];
-                                cons[(kk + 2) * sx * sy + 1 * sx + (ii + 2)] =
-                                    cons
-                                        [(kk + 2) * sx * sy +
-                                         (x2grid_size - 2) * sx + (ii + 2)];
-                                cons
-                                    [(kk + 2) * sx * sy +
-                                     (x2grid_size - 1) * sx + (ii + 2)] = cons
-                                        [(kk + 2) * sx * sy + 3 * sx +
-                                         (ii + 2)];
-                                cons
-                                    [(kk + 2) * sx * sy +
-                                     (x2grid_size - 2) * sx + (ii + 2)] = cons
-                                        [(kk + 2) * sx * sy + 2 * sx +
-                                         (ii + 2)];
+                                cons[ing]   = cons[outrr];
+                                cons[outg]  = cons[inr];
+                                cons[ingg]  = cons[outr];
+                                cons[outgg] = cons[inrr];
                                 break;
                             default:
                                 switch (boundary_conditions[2]) {
                                     case simbi::BoundaryCondition::REFLECTING:
-                                        cons
-                                            [(kk + 2) * sx * sy + 0 * sx +
-                                             (ii + 2)] = cons
-                                                [(kk + 2) * sx * sy + 3 * sx +
-                                                 (ii + 2)];
-                                        cons
-                                            [(kk + 2) * sx * sy + 1 * sx +
-                                             (ii + 2)] = cons
-                                                [(kk + 2) * sx * sy + 2 * sx +
-                                                 (ii + 2)];
-                                        cons
-                                            [(kk + 2) * sx * sy + 0 * sx +
-                                             (ii + 2)]
-                                                .momentum(2) *= -1;
-                                        cons
-                                            [(kk + 2) * sx * sy + 1 * sx +
-                                             (ii + 2)]
-                                                .momentum(2) *= -1;
+                                        cons[ing] = cons[inr];
+                                        cons[ing].momentum(2) *= -1;
+                                        cons[ingg] = cons[inrr];
+                                        cons[ingg].momentum(2) *= -1;
                                         break;
                                     case simbi::BoundaryCondition::INFLOW:
-                                        cons
-                                            [(kk + 2) * sx * sy + 0 * sx +
-                                             (ii + 2)] = inflow_zones[2];
-                                        cons
-                                            [(kk + 2) * sx * sy + 1 * sx +
-                                             (ii + 2)] = inflow_zones[2];
+                                        cons[ing]  = inflow_zones[2];
+                                        cons[ingg] = inflow_zones[2];
                                         break;
                                     case simbi::BoundaryCondition::PERIODIC:
-                                        cons
-                                            [(kk + 2) * sx * sy + 0 * sx +
-                                             (ii + 2)] = cons
-                                                [(kk + 2) * sx * sy +
-                                                 (x2grid_size - 4) * sx +
-                                                 (ii + 2)];
-                                        cons
-                                            [(kk + 2) * sx * sy + 1 * sx +
-                                             (ii + 2)] = cons
-                                                [(kk + 2) * sx * sy +
-                                                 (x2grid_size - 3) * sx +
-                                                 (ii + 2)];
+                                        cons[ing]  = cons[outrr];
+                                        cons[ingg] = cons[outr];
                                         break;
                                     default:
-                                        cons
-                                            [(kk + 2) * sx * sy + 0 * sx +
-                                             (ii + 2)] = cons
-                                                [(kk + 2) * sx * sy + 2 * sx +
-                                                 (ii + 2)];
-                                        cons
-                                            [(kk + 2) * sx * sy + 1 * sx +
-                                             (ii + 2)] = cons
-                                                [(kk + 2) * sx * sy + 2 * sx +
-                                                 (ii + 2)];
+                                        cons[ing]  = cons[inr];
+                                        cons[ingg] = cons[inr];
                                         break;
                                 }
 
                                 switch (boundary_conditions[3]) {
                                     case simbi::BoundaryCondition::REFLECTING:
-                                        cons
-                                            [(kk + 2) * sx * sy +
-                                             (x2grid_size - 1) * sx +
-                                             (ii + 2)] = cons
-                                                [(kk + 2) * sx * sy +
-                                                 (x2grid_size - 4) * sx +
-                                                 (ii + 2)];
-                                        cons
-                                            [(kk + 2) * sx * sy +
-                                             (x2grid_size - 2) * sx +
-                                             (ii + 2)] = cons
-                                                [(kk + 2) * sx * sy +
-                                                 (x2grid_size - 3) * sx +
-                                                 (ii + 2)];
-                                        cons
-                                            [(kk + 2) * sx * sy +
-                                             (x2grid_size - 1) * sx + (ii + 2)]
-                                                .momentum(2) *= -1;
-                                        cons
-                                            [(kk + 2) * sx * sy +
-                                             (x2grid_size - 2) * sx + (ii + 2)]
-                                                .momentum(2) *= -1;
+                                        cons[outg]  = cons[outr];
+                                        cons[outgg] = cons[outrr];
+                                        cons[outg].momentum(2) *= -1;
+                                        cons[outgg].momentum(2) *= -1;
                                         break;
                                     case simbi::BoundaryCondition::INFLOW:
-                                        cons
-                                            [(kk + 2) * sx * sy +
-                                             (x2grid_size - 1) * sx +
-                                             (ii + 2)] = inflow_zones[3];
-                                        cons
-                                            [(kk + 2) * sx * sy +
-                                             (x2grid_size - 2) * sx +
-                                             (ii + 2)] = inflow_zones[3];
+                                        cons[outg]  = inflow_zones[3];
+                                        cons[outgg] = inflow_zones[3];
                                         break;
                                     case simbi::BoundaryCondition::PERIODIC:
-                                        cons
-                                            [(kk + 2) * sx * sy +
-                                             (x2grid_size - 1) * sx +
-                                             (ii + 2)] = cons
-                                                [(kk + 2) * sx * sy + 3 * sx +
-                                                 (ii + 2)];
-                                        cons
-                                            [(kk + 2) * sx * sy +
-                                             (x2grid_size - 2) * sx +
-                                             (ii + 2)] = cons
-                                                [(kk + 2) * sx * sy + 2 * sx +
-                                                 (ii + 2)];
+                                        cons[outg]  = cons[inr];
+                                        cons[outgg] = cons[inrr];
                                         break;
                                     default:
-                                        cons
-                                            [(kk + 2) * sx * sy +
-                                             (x2grid_size - 1) * sx +
-                                             (ii + 2)] = cons
-                                                [(kk + 2) * sx * sy +
-                                                 (x2grid_size - 3) * sx +
-                                                 (ii + 2)];
-                                        cons
-                                            [(kk + 2) * sx * sy +
-                                             (x2grid_size - 2) * sx +
-                                             (ii + 2)] = cons
-                                                [(kk + 2) * sx * sy +
-                                                 (x2grid_size - 3) * sx +
-                                                 (ii + 2)];
+                                        cons[outg]  = cons[outr];
+                                        cons[outgg] = cons[outr];
                                         break;
                                 }
                                 break;
@@ -1347,136 +992,66 @@ namespace simbi {
 
                     // Fix the ghost zones at the x3 boundaries
                     if (jj < x2grid_size - 4 && ii < x1grid_size - 4) {
+                        const auto ij  = 0 * sx * sy + (jj + 2) * sx + (ii + 2);
+                        const auto ing = ij;
+                        const auto ingg  = ij + 1 * sx * sy;
+                        const auto outg  = ij + (x3grid_size - 1) * sx * sy;
+                        const auto outgg = ij + (x3grid_size - 2) * sx * sy;
+                        const auto inr   = ij + 2 * sx * sy;
+                        const auto inrr  = ij + 3 * sx * sy;
+                        const auto outr  = ij + (x3grid_size - 3) * sx * sy;
+                        const auto outrr = ij + (x3grid_size - 4) * sx * sy;
+
+                        // fill in the two sets ghost zones for the x3
+                        // boundaries at the inner edge and outer edge for
+                        // second order stencil
                         switch (geometry) {
                             case simbi::Geometry::SPHERICAL:
-                                cons[0 * sx * sy + (jj + 2) * sx + (ii + 2)] =
-                                    cons
-                                        [(x3grid_size - 4) * sx * sy +
-                                         (jj + 2) * sx + (ii + 2)];
-                                cons[1 * sx * sy + (jj + 2) * sx + (ii + 2)] =
-                                    cons
-                                        [(x3grid_size - 3) * sx * sy +
-                                         (jj + 2) * sx + (ii + 2)];
-                                cons
-                                    [(x3grid_size - 1) * sx * sy +
-                                     (jj + 2) * sx + (ii + 2)] = cons
-                                        [3 * sx * sy + (jj + 2) * sx +
-                                         (ii + 2)];
-                                cons
-                                    [(x3grid_size - 2) * sx * sy +
-                                     (jj + 2) * sx + (ii + 2)] = cons
-                                        [2 * sx * sy + (jj + 2) * sx +
-                                         (ii + 2)];
+                                cons[ing]   = cons[outrr];
+                                cons[outg]  = cons[inr];
+                                cons[ingg]  = cons[outr];
+                                cons[outgg] = cons[inrr];
                                 break;
                             default:
                                 switch (boundary_conditions[4]) {
                                     case simbi::BoundaryCondition::REFLECTING:
-                                        cons
-                                            [0 * sx * sy + (jj + 2) * sx +
-                                             (ii + 2)] = cons
-                                                [3 * sx * sy + (jj + 2) * sx +
-                                                 (ii + 2)];
-                                        cons
-                                            [1 * sx * sy + (jj + 2) * sx +
-                                             (ii + 2)] = cons
-                                                [2 * sx * sy + (jj + 2) * sx +
-                                                 (ii + 2)];
-                                        cons
-                                            [0 * sx * sy + (jj + 2) * sx +
-                                             (ii + 2)]
-                                                .momentum(3) *= -1;
-                                        cons
-                                            [1 * sx * sy + (jj + 2) * sx +
-                                             (ii + 2)]
-                                                .momentum(3) *= -1;
+                                        cons[ing]  = cons[inr];
+                                        cons[ingg] = cons[inrr];
+                                        cons[ing].momentum(3) *= -1;
+                                        cons[ingg].momentum(3) *= -1;
                                         break;
                                     case simbi::BoundaryCondition::INFLOW:
-                                        cons
-                                            [0 * sx * sy + (jj + 2) * sx +
-                                             (ii + 2)] = inflow_zones[4];
-                                        cons
-                                            [1 * sx * sy + (jj + 2) * sx +
-                                             (ii + 2)] = inflow_zones[4];
+                                        cons[ing]  = inflow_zones[4];
+                                        cons[ingg] = inflow_zones[4];
                                         break;
                                     case simbi::BoundaryCondition::PERIODIC:
-                                        cons
-                                            [0 * sx * sy + (jj + 2) * sx +
-                                             (ii + 2)] = cons
-                                                [(x3grid_size - 4) * sx * sy +
-                                                 (jj + 2) * sx + (ii + 2)];
-                                        cons
-                                            [1 * sx * sy + (jj + 2) * sx +
-                                             (ii + 2)] = cons
-                                                [(x3grid_size - 3) * sx * sy +
-                                                 (jj + 2) * sx + (ii + 2)];
+                                        cons[ing]  = cons[outrr];
+                                        cons[ingg] = cons[outr];
                                         break;
                                     default:
-                                        cons
-                                            [0 * sx * sy + (jj + 2) * sx +
-                                             (ii + 2)] = cons
-                                                [2 * sx * sy + (jj + 2) * sx +
-                                                 (ii + 2)];
-                                        cons
-                                            [1 * sx * sy + (jj + 2) * sx +
-                                             (ii + 2)] = cons
-                                                [2 * sx * sy + (jj + 2) * sx +
-                                                 (ii + 2)];
+                                        cons[ing]  = cons[inr];
+                                        cons[ingg] = cons[inr];
                                         break;
                                 }
+
                                 switch (boundary_conditions[5]) {
                                     case simbi::BoundaryCondition::REFLECTING:
-                                        cons
-                                            [(x3grid_size - 1) * sx * sy +
-                                             (jj + 2) * sx + (ii + 2)] = cons
-                                                [(x3grid_size - 4) * sx * sy +
-                                                 (jj + 2) * sx + (ii + 2)];
-                                        cons
-                                            [(x3grid_size - 2) * sx * sy +
-                                             (jj + 2) * sx + (ii + 2)] = cons
-                                                [(x3grid_size - 3) * sx * sy +
-                                                 (jj + 2) * sx + (ii + 2)];
-                                        cons
-                                            [(x3grid_size - 1) * sx * sy +
-                                             (jj + 2) * sx + (ii + 2)]
-                                                .momentum(3) *= -1;
-                                        cons
-                                            [(x3grid_size - 2) * sx * sy +
-                                             (jj + 2) * sx + (ii + 2)]
-                                                .momentum(3) *= -1;
+                                        cons[outg]  = cons[outr];
+                                        cons[outgg] = cons[outrr];
+                                        cons[outg].momentum(3) *= -1;
+                                        cons[outgg].momentum(3) *= -1;
                                         break;
                                     case simbi::BoundaryCondition::INFLOW:
-                                        cons
-                                            [(x3grid_size - 1) * sx * sy +
-                                             (jj + 2) * sx + (ii + 2)] =
-                                                inflow_zones[5];
-                                        cons
-                                            [(x3grid_size - 2) * sx * sy +
-                                             (jj + 2) * sx + (ii + 2)] =
-                                                inflow_zones[5];
+                                        cons[outg]  = inflow_zones[5];
+                                        cons[outgg] = inflow_zones[5];
                                         break;
                                     case simbi::BoundaryCondition::PERIODIC:
-                                        cons
-                                            [(x3grid_size - 1) * sx * sy +
-                                             (jj + 2) * sx + (ii + 2)] = cons
-                                                [3 * sx * sy + (jj + 2) * sx +
-                                                 (ii + 2)];
-                                        cons
-                                            [(x3grid_size - 2) * sx * sy +
-                                             (jj + 2) * sx + (ii + 2)] = cons
-                                                [2 * sx * sy + (jj + 2) * sx +
-                                                 (ii + 2)];
+                                        cons[outg]  = cons[inr];
+                                        cons[outgg] = cons[inrr];
                                         break;
                                     default:
-                                        cons
-                                            [(x3grid_size - 1) * sx * sy +
-                                             (jj + 2) * sx + (ii + 2)] = cons
-                                                [(x3grid_size - 3) * sx * sy +
-                                                 (jj + 2) * sx + (ii + 2)];
-                                        cons
-                                            [(x3grid_size - 2) * sx * sy +
-                                             (jj + 2) * sx + (ii + 2)] = cons
-                                                [(x3grid_size - 3) * sx * sy +
-                                                 (jj + 2) * sx + (ii + 2)];
+                                        cons[outg]  = cons[outr];
+                                        cons[outgg] = cons[outr];
                                         break;
                                 }
                                 break;
