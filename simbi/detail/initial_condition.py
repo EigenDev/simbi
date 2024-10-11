@@ -58,12 +58,12 @@ def calc_labframe_momentum(
     if len(bfields) == 0:
         vdb: FloatOrArray = 0.0
         bsq: FloatOrArray = 0.0
-        vdb_bvec: FloatOrArray = vdb * bfields
+        vdb_bvec: FloatOrArray = 0.0
     else:
         vdb = dot_product(velocity, bfields)
         bsq = dot_product(bfields, bfields)
         vdb_bvec = vdb * bfields
-        
+
     return (
         (rho * lorentz * lorentz * enthalpy + bsq) * velocity - vdb_bvec
     )
@@ -244,7 +244,7 @@ def initializeModel(
     model.u = np.pad(model.u * volume_factor, npad, "edge")
 
 
-@release_memory
+# @release_memory
 def construct_the_state(
     model: Any,
     initial_state: NDArray[numpy_float]
