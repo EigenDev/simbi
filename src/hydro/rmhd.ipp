@@ -628,14 +628,15 @@ void RMHD<dim>::cons2prim(const ExecutionPolicy<>& p)
             const real bee1   = b1 * isqrtd;
             const real bee2   = b2 * isqrtd;
             const real bee3   = b3 * isqrtd;
-            const real beesq  = bee1 * bee1 + bee2 * bee2 + bee3 * bee3;
-            const real rdb    = r1 * bee1 + r2 * bee2 + r3 * bee3;
-            const real rdbsq  = rdb * rdb;
-            // r-parallel
+            const real beesq =
+                bee1 * bee1 + bee2 * bee2 + bee3 * bee3 + global::epsilon;
+            const real rdb   = r1 * bee1 + r2 * bee2 + r3 * bee3;
+            const real rdbsq = rdb * rdb;
+            // r-parallel Eq. (25.a)
             const real rp1 = (rdb / beesq) * bee1;
             const real rp2 = (rdb / beesq) * bee2;
             const real rp3 = (rdb / beesq) * bee3;
-            // r-perpendicular
+            // r-perpendicular, Eq. (25.b)
             const real rperp1 = r1 - rp1;
             const real rperp2 = r2 - rp2;
             const real rperp3 = r3 - rp3;
@@ -658,7 +659,7 @@ void RMHD<dim>::cons2prim(const ExecutionPolicy<>& p)
 
             int iter = 0.0;
             // compute yy in case the initial bracket is not good
-            real yy = 0.5 * (y1 + y2);
+            real yy = static_cast<real>(0.5) * (y1 + y2);
             real f;
             if (!good_guesses) {
                 do {
@@ -770,7 +771,7 @@ void RMHD<dim>::cons2prim(const ExecutionPolicy<>& p)
                 v3 *= w;
             }
             prims[gid] =
-                primitive_t{d / w, v1, v2, v3, pg, b1, b2, b3, dchi / d};
+                primitive_t{rhohat, v1, v2, v3, pg, b1, b2, b3, dchi / d};
 
             workLeftToDo = false;
 
@@ -852,7 +853,7 @@ RMHD<dim>::cons2prim(const RMHD<dim>::conserved_t& cons) const
     }
 
     int iter = 0.0;
-    // compute yy in case the initial bracket is not good
+    // compute yy in case the initial bracket is good
     real yy = 0.5 * (y1 + y2);
     real f;
     if (!good_guesses) {
@@ -1286,10 +1287,10 @@ RMHD<dim>::prims2flux(const RMHD<dim>::primitive_t& prims, const luint nhat)
     const real invlf = 1.0 / lf;
     const real vdotb = prims.vdotb();
     const real bsq   = prims.bsquared();
-    const real p     = prims.total_pressure();
+    const real ptot  = prims.total_pressure();
     const real chi   = prims.chi;
-    const real vn    = prims.vcomponent(nhat);
-    const real bn    = prims.bcomponent(nhat);
+    const real vn    = (nhat == 1) ? v1 : (nhat == 2) ? v2 : v3;
+    const real bn    = (nhat == 1) ? b1 : (nhat == 2) ? b2 : b3;
     const real d     = rho * lf;
     const real ed    = d * h * lf;
     const real m1    = (ed + bsq) * v1 - vdotb * b1;
@@ -1302,9 +1303,9 @@ RMHD<dim>::prims2flux(const RMHD<dim>::primitive_t& prims, const luint nhat)
     const real ind3  = (nhat == 3) ? 0.0 : vn * b3 - v3 * bn;
     return {
       d * vn,
-      m1 * vn + kronecker(nhat, 1) * p - bn * bmu.one * invlf,
-      m2 * vn + kronecker(nhat, 2) * p - bn * bmu.two * invlf,
-      m3 * vn + kronecker(nhat, 3) * p - bn * bmu.three * invlf,
+      m1 * vn + kronecker(nhat, 1) * ptot - bn * bmu.one * invlf,
+      m2 * vn + kronecker(nhat, 2) * ptot - bn * bmu.two * invlf,
+      m3 * vn + kronecker(nhat, 3) * ptot - bn * bmu.three * invlf,
       mn - d * vn,
       ind1,
       ind2,
@@ -1996,10 +1997,10 @@ void RMHD<dim>::advance(const ExecutionPolicy<>& p)
 
         // // Calc Rimeann Flux at all interfaces
         for (luint q = 0; q < 10; q++) {
-            const auto vdir = 1 * ((luint) (q - 2) < (4 - 2)) -
-                              1 * ((luint) (q - 6) < (8 - 6));
-            const auto hdir = 1 * ((luint) (q - 4) < (6 - 4)) -
-                              1 * ((luint) (q - 8) < (10 - 8));
+            const auto vdir =
+                1 * ((luint) (q - 2) < 2) - 1 * ((luint) (q - 6) < 2);
+            const auto hdir =
+                1 * ((luint) (q - 4) < 2) - 1 * ((luint) (q - 8) < 2);
 
             // fluxes in i direction
             pL = prim_buff
@@ -2186,12 +2187,14 @@ void RMHD<dim>::advance(const ExecutionPolicy<>& p)
         b3R -= dt * step *
                curl_e(3, e1[JK::NW], e1[JK::NE], e2[IK::NW], e2[IK::NE]);
 
+        // if constexpr (global::debug_mode) {
         const auto divb =
             (b1R - b1L) * invdx1 + (b2R - b2L) * invdx2 + (b3R - b3L) * invdx3;
 
         if (!goes_to_zero(divb)) {
-            printf("Divergence of B is not zero\n");
+            printf("Divergence of B is not zero!\n");
         }
+        // }
         b1c = static_cast<real>(0.5) * (b1L + b1R);
         b2c = static_cast<real>(0.5) * (b2L + b2R);
         b3c = static_cast<real>(0.5) * (b3L + b3R);
