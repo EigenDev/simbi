@@ -45,7 +45,8 @@ derived = [
     "u",
     "tau-s",
     "ptot",
-    "pmag"
+    "pmag",
+    "sigma",
 ]
 field_choices = [
     "rho",
@@ -518,6 +519,7 @@ class Visualizer:
                         else:
                             var = fields[field]
 
+                    
                     if self.units:
                         if field in ["p", "energy", "energy_rst"]:
                             var *= util.edens_scale.value
@@ -530,7 +532,7 @@ class Visualizer:
                     yy = (
                         mesh["x2"] if self.ndim == 2 else mesh[f"x{self.projection[1]}"]
                     )
-
+                    
                     if setup["coord_system"] == "axis_cylindrical" and idx == 1:
                         xx *= -1
 
@@ -777,7 +779,8 @@ class Visualizer:
                 time *= util.time_scale
 
             if self.setup:
-                title = f"{self.setup} t = {time:.{precision}f}"
+                timmy = 10
+                title = f"{self.setup} t = {timmy:.{precision}f}"
                 if self.cartesian:
                     ax.set_title(title)
                 else:
