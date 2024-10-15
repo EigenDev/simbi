@@ -314,7 +314,7 @@ DUAL real RMHD<dim>::curl_e(
                     return invdx2 * (ekr - ekl) - invdx3 * (ejr - ejl);
                 }
                 else if (nhat == 2) {
-                    return invdx3 * (ejr - ejl) - invdx1 * (ekr - ekl);
+                    return invdx3 * (ekr - ekl) - invdx1 * (ejr - ejl);
                 }
                 else {
                     return invdx1 * (ekr - ekl) - invdx2 * (ejr - ejl);
@@ -1996,35 +1996,21 @@ void RMHD<dim>::advance(const ExecutionPolicy<>& p)
         const auto zrf = idx3(ii, jj, kk + 1, xag, yag, nzv);
 
         // // Calc Rimeann Flux at all interfaces
-        for (luint q = 0; q < 10; q++) {
-            const auto vdir =
-                1 * ((luint) (q - 2) < 2) - 1 * ((luint) (q - 6) < 2);
-            const auto hdir =
-                1 * ((luint) (q - 4) < 2) - 1 * ((luint) (q - 8) < 2);
+        for (int q = 0; q < 10; q++) {
+            const auto vdir = in_range(q, 2, 3) - in_range(q, 6, 7);
+            const auto hdir = in_range(q, 4, 5) - in_range(q, 8, 9);
 
+            int jshft = tya + vdir * (yag > 1);
+            int kshft = tza + hdir * (zag > 1);
             // fluxes in i direction
-            pL = prim_buff
-                [idx3(txa + (q % 2) - 1, tya + vdir, tza + hdir, sx, sy, 0)];
-            pR = prim_buff
-                [idx3(txa + (q % 2) + 0, tya + vdir, tza + hdir, sx, sy, 0)];
+            pL = prim_buff[idx3(txa + (q % 2) - 1, jshft, kshft, sx, sy, 0)];
+            pR = prim_buff[idx3(txa + (q % 2) + 0, jshft, kshft, sx, sy, 0)];
 
             if (!use_pcm) {
-                pLL = prim_buff[idx3(
-                    txa + (q % 2) - 2,
-                    tya + vdir,
-                    tza + hdir,
-                    sx,
-                    sy,
-                    0
-                )];
-                pRR = prim_buff[idx3(
-                    txa + (q % 2) + 1,
-                    tya + vdir,
-                    tza + hdir,
-                    sx,
-                    sy,
-                    0
-                )];
+                pLL =
+                    prim_buff[idx3(txa + (q % 2) - 2, jshft, kshft, sx, sy, 0)];
+                pRR =
+                    prim_buff[idx3(txa + (q % 2) + 1, jshft, kshft, sx, sy, 0)];
 
                 pL = pL + plm_gradient(pL, pLL, pR, plm_theta) * 0.5;
                 pR = pR - plm_gradient(pR, pL, pRR, plm_theta) * 0.5;
@@ -2032,29 +2018,17 @@ void RMHD<dim>::advance(const ExecutionPolicy<>& p)
             ib_modify<dim>(pR, pL, object_x[(q % 2)], 1);
             f[q] = (this->*riemann_solve)(pL, pR, 1, 0);
 
+            int ishft = txa + vdir;
+            kshft     = tza + hdir * (zag > 1);
             // fluxes in j direction
-            pL = prim_buff
-                [idx3(txa + vdir, tya + (q % 2) - 1, tza + hdir, sx, sy, 0)];
-            pR = prim_buff
-                [idx3(txa + vdir, tya + (q % 2) + 0, tza + hdir, sx, sy, 0)];
+            pL = prim_buff[idx3(ishft, tya + (q % 2) - 1, kshft, sx, sy, 0)];
+            pR = prim_buff[idx3(ishft, tya + (q % 2) + 0, kshft, sx, sy, 0)];
 
             if (!use_pcm) {
-                pLL = prim_buff[idx3(
-                    txa + vdir,
-                    tya + (q % 2) - 2,
-                    tza + hdir,
-                    sx,
-                    sy,
-                    0
-                )];
-                pRR = prim_buff[idx3(
-                    txa + vdir,
-                    tya + (q % 2) + 1,
-                    tza + hdir,
-                    sx,
-                    sy,
-                    0
-                )];
+                pLL =
+                    prim_buff[idx3(ishft, tya + (q % 2) - 2, kshft, sx, sy, 0)];
+                pRR =
+                    prim_buff[idx3(ishft, tya + (q % 2) + 1, kshft, sx, sy, 0)];
 
                 pL = pL + plm_gradient(pL, pLL, pR, plm_theta) * 0.5;
                 pR = pR - plm_gradient(pR, pL, pRR, plm_theta) * 0.5;
@@ -2062,29 +2036,17 @@ void RMHD<dim>::advance(const ExecutionPolicy<>& p)
             ib_modify<dim>(pR, pL, object_y[(q % 2)], 2);
             g[q] = (this->*riemann_solve)(pL, pR, 2, 0);
 
+            jshft = tya + hdir * (yag > 1);
+            ishft = txa + vdir;
             // fluxes in k direction
-            pL = prim_buff
-                [idx3(txa + vdir, tya + hdir, tza + (q % 2) - 1, sx, sy, 0)];
-            pR = prim_buff
-                [idx3(txa + vdir, tya + hdir, tza + (q % 2) + 0, sx, sy, 0)];
+            pL = prim_buff[idx3(ishft, jshft, tza + (q % 2) - 1, sx, sy, 0)];
+            pR = prim_buff[idx3(ishft, jshft, tza + (q % 2) + 0, sx, sy, 0)];
 
             if (!use_pcm) {
-                pLL = prim_buff[idx3(
-                    txa + vdir,
-                    tya + hdir,
-                    tza + (q % 2) - 2,
-                    sx,
-                    sy,
-                    0
-                )];
-                pRR = prim_buff[idx3(
-                    txa + vdir,
-                    tya + hdir,
-                    tza + (q % 2) + 1,
-                    sx,
-                    sy,
-                    0
-                )];
+                pLL =
+                    prim_buff[idx3(ishft, jshft, tza + (q % 2) - 2, sx, sy, 0)];
+                pRR =
+                    prim_buff[idx3(ishft, jshft, tza + (q % 2) + 1, sx, sy, 0)];
 
                 pL = pL + plm_gradient(pL, pLL, pR, plm_theta) * 0.5;
                 pR = pR - plm_gradient(pR, pL, pRR, plm_theta) * 0.5;
@@ -2178,9 +2140,9 @@ void RMHD<dim>::advance(const ExecutionPolicy<>& p)
                curl_e(1, e2[IK::SE], e2[IK::NE], e3[IJ::SE], e3[IJ::NE]);
 
         b2L -= dt * step *
-               curl_e(2, e1[JK::SW], e1[JK::NW], e3[IJ::SW], e3[IJ::SE]);
+               curl_e(2, e3[IJ::SW], e3[IJ::SE], e1[JK::SW], e1[JK::NW]);
         b2R -= dt * step *
-               curl_e(2, e1[JK::SE], e1[JK::NE], e3[IJ::NW], e3[IJ::NE]);
+               curl_e(2, e3[IJ::NW], e3[IJ::NE], e1[JK::SE], e1[JK::NE]);
 
         b3L -= dt * step *
                curl_e(3, e1[JK::SW], e1[JK::SE], e2[IK::SW], e2[IK::SE]);

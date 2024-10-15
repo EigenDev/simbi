@@ -56,10 +56,12 @@ def calc_labframe_momentum(
     bfields: NDArray[numpy_float],
 ) -> NDArray[Any]:
     if len(bfields) == 0:
+        bvec: FloatOrArray = 0.0
         vdb: FloatOrArray = 0.0
         bsq: FloatOrArray = 0.0
         vdb_bvec: FloatOrArray = 0.0
     else:
+        bvec = bfields
         vdb = dot_product(velocity, bfields)
         bsq = dot_product(bfields, bfields)
         vdb_bvec = vdb * bfields
