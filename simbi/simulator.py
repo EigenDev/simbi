@@ -351,9 +351,9 @@ class Hydro:
                 cgeom[idx] = val[:2]
                 
         for didx, dir in zip(range(self.dimensionality), [self.x1, self.x2, self.x3]):
-            if not dir:
+            if len(dir) == 0:
                 dir[:] = vfunc[csp[didx]](*cgeom[didx], verts[didx])
-            elif dir.shape[0] != verts[didx]:
+            elif dir.shape[0] + 1 != verts[didx]:
                 raise ValueError(f"x{didx+1} vertices does not match the x{didx+1}-resolution + 1")
             
         self.x1 = np.asanyarray(self.x1)
@@ -689,6 +689,10 @@ class Hydro:
                 b2[..., b] = self.initial_state[1][6]
                 b3[..., a] = self.initial_state[0][7]
                 b3[..., b] = self.initial_state[1][7]
+            else:
+                b1 = self.initial_state[5]
+                b2 = self.initial_state[6]
+                b3 = self.initial_state[7]
             init_conditions["bfield"] = [b1.flat, b2.flat, b3.flat]
         lambdas: dict[str, Optional[Callable[..., float]]] = {
             "dens_lambda": None,
@@ -726,6 +730,9 @@ class Hydro:
 
         state_contig = self.u.reshape(self.u.shape[0], -1)
 
+        print(self.u.shape)
+        print(init_conditions["bfield"])
+        zzz = input("")
         sim_state().run(
             state=state_contig,
             dim=self.dimensionality,
