@@ -1467,7 +1467,7 @@ class Visualizer:
 def visualize(parser: argparse.ArgumentParser, ndim: int) -> None:
     viz = Visualizer(parser, ndim)
     if viz.kind == "movie":
-        if viz.ndim == 3:
+        if viz.ndim == 3 and not viz.oned_slice:
             raise NotImplementedError("3D movies not yet implemented")
         viz.animate()
     else:
