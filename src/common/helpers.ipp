@@ -1126,10 +1126,9 @@ namespace simbi {
         {
 #if GPU_CODE
             real cfl_dt, v1p, v1m, v2p, v2m;
-            const luint ii = blockDim.x * blockIdx.x + threadIdx.x;
-            const luint jj = blockDim.y * blockIdx.y + threadIdx.y;
-            const luint gid =
-                flattened_index(ii, jj, luint(0), self->nx, self->ny, luint(1));
+            const luint ii  = blockDim.x * blockIdx.x + threadIdx.x;
+            const luint jj  = blockDim.y * blockIdx.y + threadIdx.y;
+            const luint gid = idx2(ii, jj, self->nx, self->ny);
             if ((ii < self->nx) && (jj < self->ny)) {
                 real plus_v1, plus_v2, minus_v1, minus_v2;
                 if constexpr (is_relativistic<T>::value) {
@@ -1293,11 +1292,10 @@ namespace simbi {
         {
 #if GPU_CODE
             real cfl_dt;
-            const luint ii = blockDim.x * blockIdx.x + threadIdx.x;
-            const luint jj = blockDim.y * blockIdx.y + threadIdx.y;
-            const luint kk = blockDim.z * blockIdx.z + threadIdx.z;
-            const luint gid =
-                flattened_index(ii, jj, kk, self->nx, self->ny, self->nz);
+            const luint ii  = blockDim.x * blockIdx.x + threadIdx.x;
+            const luint jj  = blockDim.y * blockIdx.y + threadIdx.y;
+            const luint kk  = blockDim.z * blockIdx.z + threadIdx.z;
+            const luint gid = idx3(ii, jj, kk, self->nx, self->ny, self->nz);
             if ((ii < self->nx) && (jj < self->ny) && (kk < self->nz)) {
                 real plus_v1, plus_v2, minus_v1, minus_v2, plus_v3, minus_v3;
 
@@ -1503,10 +1501,9 @@ namespace simbi {
         {
 #if GPU_CODE
             real cfl_dt, v1p, v1m, v2p, v2m;
-            const luint ii = blockDim.x * blockIdx.x + threadIdx.x;
-            const luint jj = blockDim.y * blockIdx.y + threadIdx.y;
-            const luint gid =
-                flattened_index(ii, jj, luint(0), self->nx, self->ny, luint(1));
+            const luint ii  = blockDim.x * blockIdx.x + threadIdx.x;
+            const luint jj  = blockDim.y * blockIdx.y + threadIdx.y;
+            const luint gid = idx2(ii, jj, self->nx, self->ny);
             if ((ii < self->nx) && (jj < self->ny)) {
                 real plus_v1, plus_v2, minus_v1, minus_v2;
                 if constexpr (is_relativistic_mhd<T>::value) {
@@ -1671,168 +1668,108 @@ namespace simbi {
         )
         {
 #if GPU_CODE
-            real cfl_dt;
-            const luint ii = blockDim.x * blockIdx.x + threadIdx.x;
-            const luint jj = blockDim.y * blockIdx.y + threadIdx.y;
-            const luint kk = blockDim.z * blockIdx.z + threadIdx.z;
-            const luint gid =
-                flattened_index(ii, jj, kk, self->nx, self->ny, self->nz);
+            const luint ii  = blockDim.x * blockIdx.x + threadIdx.x;
+            const luint jj  = blockDim.y * blockIdx.y + threadIdx.y;
+            const luint kk  = blockDim.z * blockIdx.z + threadIdx.z;
+            const luint ia  = ii + self->radius;
+            const luint ja  = jj + self->radius;
+            const luint ka  = kk + self->radius;
+            const luint gid = idx3(ii, jj, kk, self->nx, self->ny, self->nz);
+            const luint aid = idx3(ia, ja, ka, self->nx, self->ny, self->nz);
 
             if ((ii < self->nx) && (jj < self->ny) && (kk < self->nz)) {
-                real plus_v1, plus_v2, minus_v1, minus_v2, plus_v3, minus_v3;
-
-                if constexpr (is_relativistic_mhd<T>::value) {
-                    if constexpr (dt_type == TIMESTEP_TYPE::ADAPTIVE) {
-                        real cs, speeds[4];
-                        self->calc_max_wave_speeds(
-                            prim_buffer[gid],
-                            1,
-                            speeds,
-                            cs
-                        );
-                        plus_v1  = std::abs(speeds[3]);
-                        minus_v1 = std::abs(speeds[0]);
-                        self->calc_max_wave_speeds(
-                            prim_buffer[gid],
-                            2,
-                            speeds,
-                            cs
-                        );
-                        plus_v2  = std::abs(speeds[3]);
-                        minus_v2 = std::abs(speeds[0]);
-                        self->calc_max_wave_speeds(
-                            prim_buffer[gid],
-                            3,
-                            speeds,
-                            cs
-                        );
-                        plus_v3  = std::abs(speeds[3]);
-                        minus_v3 = std::abs(speeds[0]);
-                    }
-                    else {
-                        plus_v1  = 1.0;
-                        plus_v2  = 1.0;
-                        plus_v3  = 1.0;
-                        minus_v1 = 1.0;
-                        minus_v2 = 1.0;
-                        minus_v3 = 1.0;
-                    }
+                real v1p, v1m, v2p, v2m, v3p, v3m, cfl_dt, cs;
+                real speeds[4];
+                const auto prims = prim_buffer;
+                // Left/Right wave speeds
+                if constexpr (dt_type == TIMESTEP_TYPE::ADAPTIVE) {
+                    self->calc_max_wave_speeds(prims[aid], 1, speeds, cs);
+                    v1p = std::abs(speeds[3]);
+                    v1m = std::abs(speeds[0]);
+                    self->calc_max_wave_speeds(prims[aid], 2, speeds, cs);
+                    v2p = std::abs(speeds[3]);
+                    v2m = std::abs(speeds[0]);
+                    self->calc_max_wave_speeds(prims[aid], 3, speeds, cs);
+                    v3p = std::abs(speeds[3]);
+                    v3m = std::abs(speeds[0]);
                 }
                 else {
-                    const real rho = prim_buffer[gid].rho;
-                    const real p   = prim_buffer[gid].p;
-                    const real v1  = prim_buffer[gid].get_v1();
-                    const real v2  = prim_buffer[gid].get_v2();
-                    const real v3  = prim_buffer[gid].get_v3();
-
-                    real cs  = std::sqrt(self->gamma * p / rho);
-                    plus_v1  = (v1 + cs);
-                    plus_v2  = (v2 + cs);
-                    plus_v3  = (v3 + cs);
-                    minus_v1 = (v1 - cs);
-                    minus_v2 = (v2 - cs);
-                    minus_v3 = (v3 - cs);
+                    v1p = 1.0;
+                    v1m = 1.0;
+                    v2p = 1.0;
+                    v2m = 1.0;
+                    v3p = 1.0;
+                    v3m = 1.0;
                 }
 
-                const auto ireal =
-                    helpers::get_real_idx(ii, self->radius, self->nxv);
-                const auto jreal =
-                    helpers::get_real_idx(jj, self->radius, self->nyv);
-                const auto kreal =
-                    helpers::get_real_idx(kk, self->radius, self->nzv);
-
-                const auto x1l = self->get_x1face(ireal, 0);
-                const auto x1r = self->get_x1face(ireal, 1);
-                const auto dx1 = x1r - x1l;
-                const auto x2l = self->get_x2face(jreal, 0);
-                const auto x2r = self->get_x2face(jreal, 1);
-                const auto dx2 = x2r - x2l;
-                const auto x3l = self->get_x3face(kreal, 0);
-                const auto x3r = self->get_x3face(kreal, 1);
-                const auto dx3 = x3r - x3l;
-
-                // printf("dx1: %f, dx2: %f, dx3: %f\n", dx1, dx2, dx3);
                 switch (geometry) {
                     case simbi::Geometry::CARTESIAN:
-                        {
+                        cfl_dt = std ::min(
+                            {self->dx1 / (my_max(v1p, v1m)),
+                             self->dx2 / (my_max(v2p, v2m)),
+                             self->dx3 / (my_max(v3p, v3m))}
+                        );
 
-                            cfl_dt = helpers::my_min3(
-                                dx1 / (helpers::my_max(
-                                          std::abs(plus_v1),
-                                          std::abs(minus_v1)
-                                      )),
-                                dx2 / (helpers::my_max(
-                                          std::abs(plus_v2),
-                                          std::abs(minus_v2)
-                                      )),
-                                dx3 / (helpers::my_max(
-                                          std::abs(plus_v3),
-                                          std::abs(minus_v3)
-                                      ))
-                            );
-                            break;
-                        }
+                        break;
                     case simbi::Geometry::SPHERICAL:
                         {
-                            const real rmean =
-                                0.75 *
-                                (x1r * x1r * x1r * x1r - x1l * x1l * x1l * x1l
-                                ) /
-                                (x1r * x1r * x1r - x1l * x1l * x1l);
-                            const real th = 0.5 * (x2l + x2r);
-                            cfl_dt        = helpers::my_min3(
-                                dx1 / (helpers::my_max(
-                                          std::abs(plus_v1),
-                                          std::abs(minus_v1)
-                                      )),
-                                rmean * dx2 /
-                                    (helpers::my_max(
-                                        std::abs(plus_v2),
-                                        std::abs(minus_v2)
-                                    )),
-                                rmean * std::sin(th) * dx3 /
-                                    (helpers::my_max(
-                                        std::abs(plus_v3),
-                                        std::abs(minus_v3)
-                                    ))
+                            const auto ireal = helpers::get_real_idx(
+                                ii,
+                                self->radius,
+                                self->nxv
+                            );
+                            const auto jreal = helpers::get_real_idx(
+                                jj,
+                                self->radius,
+                                self->nyv
+                            );
+
+                            const real x1l = self->get_x1face(ireal, 0);
+                            const real x1r = self->get_x1face(ireal, 1);
+                            const real dx1 = x1r - x1l;
+
+                            const real x2l   = self->get_x2face(jreal, 0);
+                            const real x2r   = self->get_x2face(jreal, 1);
+                            const real rmean = get_cell_centroid(
+                                x1r,
+                                x1l,
+                                simbi::Geometry::SPHERICAL
+                            );
+                            const real th    = 0.5 * (x2r + x2l);
+                            const real rproj = rmean * std::sin(th);
+                            cfl_dt           = std::min(
+                                {dx1 / (my_max(v1p, v1m)),
+                                           rmean * self->dx2 / (my_max(v2p, v2m)),
+                                           rproj * self->dx3 / (my_max(v3p, v3m))}
                             );
                             break;
                         }
-                    case simbi::Geometry::CYLINDRICAL:
+                    default:
                         {
-                            const real rmean =
-                                (2.0 / 3.0) *
-                                (x1r * x1r * x1r - x1l * x1l * x1l) /
-                                (x1r * x1r - x1l * x1l);
-                            const real th = 0.5 * (x2l + x2r);
-                            cfl_dt        = helpers::my_min3(
-                                dx1 / (helpers::my_max(
-                                          std::abs(plus_v1),
-                                          std::abs(minus_v1)
-                                      )),
-                                rmean * dx2 /
-                                    (helpers::my_max(
-                                        std::abs(plus_v2),
-                                        std::abs(minus_v2)
-                                    )),
-                                dx3 / (helpers::my_max(
-                                          std::abs(plus_v3),
-                                          std::abs(minus_v3)
-                                      ))
+                            const auto ireal = helpers::get_real_idx(
+                                ii,
+                                self->radius,
+                                self->nxv
+                            );
+                            const real x1l = self->get_x1face(ireal, 0);
+                            const real x1r = self->get_x1face(ireal, 1);
+                            const real dx1 = x1r - x1l;
+
+                            const real rmean = get_cell_centroid(
+                                x1r,
+                                x1l,
+                                simbi::Geometry::CYLINDRICAL
+                            );
+                            cfl_dt = std::min(
+                                {dx1 / (my_max(v1p, v1m)),
+                                 rmean * self->dx2 / (my_max(v2p, v2m)),
+                                 self->dx3 / (my_max(v3p, v3m))}
                             );
                             break;
                         }
-                }   // end switch
-                // printf("[%lu], cfl: %f, cfl_dt: %f\n", gid, self->cfl,
-                // cfl_dt);
+                }
+
                 dt_min[gid] = self->cfl * cfl_dt;
-                // printf(
-                //     "dt_min[%lu] = %f, cfl: %f, cfl_dt: %f\n",
-                //     gid,
-                //     dt_min[gid],
-                //     self->cfl,
-                //     cfl_dt
-                // );
             }
 #endif
         }
@@ -2141,24 +2078,6 @@ namespace simbi {
 #else
             return object;
 #endif
-        }
-
-        template <typename index_type, typename T>
-        DUAL index_type flattened_index(
-            index_type ii,
-            index_type jj,
-            index_type kk,
-            T ni,
-            T nj,
-            T nk
-        )
-        {
-            if constexpr (global::col_maj) {
-                return ii * nk * nj + jj * nk + kk;
-            }
-            else {
-                return kk * nj * ni + jj * ni + ii;
-            }
         }
 
         template <int dim, BlkAx axis, typename T>
