@@ -408,8 +408,13 @@ def prims2var(fields: dict[str, NDArray[numpy_float]], var: str) -> Any:
             return fields["p"]
     elif var == "pmag":
         try: 
+            vvec = np.array([fields['v1'], fields['v2'], fields['v3']])
+            lorentzsq = calc_lorentz_factor(fields) ** 2
+            bvec = np.array([fields['b1'], fields['b2'], fields['b3']])
+            vdotb = np.sum([x * y for x, y in zip(vvec, bvec)], axis=0)
             bsq = fields["b1"]**2 + fields["b2"]**2 + fields["b3"]**2
-            return 0.5 * bsq 
+            
+            return 0.5 * (bsq / lorentzsq + vdotb**2)
         except KeyError:
             raise KeyError("The simulation data is not from an MHD run")
     elif var == 'sigma':
