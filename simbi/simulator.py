@@ -730,9 +730,6 @@ class Hydro:
 
         state_contig = self.u.reshape(self.u.shape[0], -1)
 
-        print(self.u.shape)
-        print(init_conditions["bfield"])
-        zzz = input("")
         sim_state().run(
             state=state_contig,
             dim=self.dimensionality,
