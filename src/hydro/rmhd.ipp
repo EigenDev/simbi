@@ -625,17 +625,16 @@ void RMHD<dim>::cons2prim(const ExecutionPolicy<>& p)
             const real r3     = m3 * invd;
             const real rsq    = r1 * r1 + r2 * r2 + r3 * r3;
             const real rmag   = std::sqrt(rsq);
-            const real bee1   = b1 * isqrtd;
-            const real bee2   = b2 * isqrtd;
-            const real bee3   = b3 * isqrtd;
-            const real beesq =
-                bee1 * bee1 + bee2 * bee2 + bee3 * bee3 + global::epsilon;
-            const real rdb   = r1 * bee1 + r2 * bee2 + r3 * bee3;
-            const real rdbsq = rdb * rdb;
+            const real h1     = b1 * isqrtd;
+            const real h2     = b2 * isqrtd;
+            const real h3     = b3 * isqrtd;
+            const real beesq  = h1 * h1 + h2 * h2 + h3 * h3 + global::epsilon;
+            const real rdb    = r1 * h1 + r2 * h2 + r3 * h3;
+            const real rdbsq  = rdb * rdb;
             // r-parallel Eq. (25.a)
-            const real rp1 = (rdb / beesq) * bee1;
-            const real rp2 = (rdb / beesq) * bee2;
-            const real rp3 = (rdb / beesq) * bee3;
+            const real rp1 = (rdb / beesq) * h1;
+            const real rp2 = (rdb / beesq) * h2;
+            const real rp3 = (rdb / beesq) * h3;
             // r-perpendicular, Eq. (25.b)
             const real rperp1 = r1 - rp1;
             const real rperp2 = r2 - rp2;
@@ -760,9 +759,9 @@ void RMHD<dim>::cons2prim(const ExecutionPolicy<>& p)
             const real pg = (gamma - 1.0) * rhohat * epshat;
 
             // velocities Eq. (68)
-            real v1 = yy * x * (r1 + bee1 * rdb * yy);
-            real v2 = yy * x * (r2 + bee2 * rdb * yy);
-            real v3 = yy * x * (r3 + bee3 * rdb * yy);
+            real v1 = yy * x * (r1 + h1 * rdb * yy);
+            real v2 = yy * x * (r2 + h2 * rdb * yy);
+            real v3 = yy * x * (r3 + h3 * rdb * yy);
 
             if constexpr (global::VelocityType ==
                           global::Velocity::FourVelocity) {
@@ -821,16 +820,16 @@ RMHD<dim>::cons2prim(const RMHD<dim>::conserved_t& cons) const
     const real r3     = m3 * invd;
     const real rsq    = r1 * r1 + r2 * r2 + r3 * r3;
     const real rmag   = std::sqrt(rsq);
-    const real bee1   = b1 * isqrtd;
-    const real bee2   = b2 * isqrtd;
-    const real bee3   = b3 * isqrtd;
-    const real beesq  = bee1 * bee1 + bee2 * bee2 + bee3 * bee3;
-    const real rdb    = r1 * bee1 + r2 * bee2 + r3 * bee3;
+    const real h1     = b1 * isqrtd;
+    const real h2     = b2 * isqrtd;
+    const real h3     = b3 * isqrtd;
+    const real beesq  = h1 * h1 + h2 * h2 + h3 * h3;
+    const real rdb    = r1 * h1 + r2 * h2 + r3 * h3;
     const real rdbsq  = rdb * rdb;
     // r-parallel
-    const real rp1 = (rdb / beesq) * bee1;
-    const real rp2 = (rdb / beesq) * bee2;
-    const real rp3 = (rdb / beesq) * bee3;
+    const real rp1 = (rdb / beesq) * h1;
+    const real rp2 = (rdb / beesq) * h2;
+    const real rp3 = (rdb / beesq) * h3;
     // r-perpendicular
     const real rperp1 = r1 - rp1;
     const real rperp2 = r2 - rp2;
@@ -937,9 +936,9 @@ RMHD<dim>::cons2prim(const RMHD<dim>::conserved_t& cons) const
     const real pg = (gamma - 1.0) * rhohat * epshat;
 
     // velocities Eq. (68)
-    real v1 = yy * x * (r1 + bee1 * rdb * yy);
-    real v2 = yy * x * (r2 + bee2 * rdb * yy);
-    real v3 = yy * x * (r3 + bee3 * rdb * yy);
+    real v1 = yy * x * (r1 + h1 * rdb * yy);
+    real v2 = yy * x * (r2 + h2 * rdb * yy);
+    real v3 = yy * x * (r3 + h3 * rdb * yy);
 
     if constexpr (global::VelocityType == global::Velocity::FourVelocity) {
         v1 *= w;
@@ -1161,22 +1160,25 @@ void RMHD<dim>::adapt_dt()
     static auto& thread_pool =
         simbi::pooling::ThreadPool::instance(simbi::pooling::get_nthreads());
     std::atomic<real> min_dt = INFINITY;
-    thread_pool.parallel_for(total_zones, [&](luint gid) {
+    thread_pool.parallel_for(active_zones, [&](luint gid) {
         real v1p, v1m, v2p, v2m, v3p, v3m, cfl_dt, cs;
         real speeds[4];
-        const luint kk    = axid<dim, BlkAx::K>(gid, nx, ny);
-        const luint jj    = axid<dim, BlkAx::J>(gid, nx, ny, kk);
-        const luint ii    = axid<dim, BlkAx::I>(gid, nx, ny, kk);
-        const luint ireal = get_real_idx(ii, radius, xag);
+        const luint kk  = axid<dim, BlkAx::K>(gid, xag, yag);
+        const luint jj  = axid<dim, BlkAx::J>(gid, xag, yag, kk);
+        const luint ii  = axid<dim, BlkAx::I>(gid, xag, yag, kk);
+        const luint ia  = ii + radius;
+        const luint ja  = jj + radius;
+        const luint ka  = kk + radius;
+        const luint aid = idx3(ia, ja, ka, nx, ny, nz);
         // Left/Right wave speeds
         if constexpr (dt_type == TIMESTEP_TYPE::ADAPTIVE) {
-            calc_max_wave_speeds(prims[gid], 1, speeds, cs);
+            calc_max_wave_speeds(prims[aid], 1, speeds, cs);
             v1p = std::abs(speeds[3]);
             v1m = std::abs(speeds[0]);
-            calc_max_wave_speeds(prims[gid], 2, speeds, cs);
+            calc_max_wave_speeds(prims[aid], 2, speeds, cs);
             v2p = std::abs(speeds[3]);
             v2m = std::abs(speeds[0]);
-            calc_max_wave_speeds(prims[gid], 3, speeds, cs);
+            calc_max_wave_speeds(prims[aid], 3, speeds, cs);
             v3p = std::abs(speeds[3]);
             v3m = std::abs(speeds[0]);
         }
@@ -1189,9 +1191,6 @@ void RMHD<dim>::adapt_dt()
             v3m = 1.0;
         }
 
-        const real x1l = get_x1face(ireal, 0);
-        const real x1r = get_x1face(ireal, 1);
-        const real dx1 = x1r - x1l;
         switch (geometry) {
             case simbi::Geometry::CARTESIAN:
                 cfl_dt = std ::min(
@@ -1203,6 +1202,10 @@ void RMHD<dim>::adapt_dt()
                 break;
             case simbi::Geometry::SPHERICAL:
                 {
+                    const real x1l = get_x1face(ii, 0);
+                    const real x1r = get_x1face(ii, 1);
+                    const real dx1 = x1r - x1l;
+
                     const real x2l = get_x2face(jj, 0);
                     const real x2r = get_x2face(jj, 1);
                     const real rmean =
@@ -1218,6 +1221,10 @@ void RMHD<dim>::adapt_dt()
                 }
             default:
                 {
+                    const real x1l = get_x1face(ii, 0);
+                    const real x1r = get_x1face(ii, 1);
+                    const real dx1 = x1r - x1l;
+
                     const real rmean = get_cell_centroid(
                         x1r,
                         x1l,
@@ -1271,9 +1278,10 @@ void RMHD<dim>::adapt_dt(const ExecutionPolicy<>& p)
 //                                            FLUX CALCULATIONS
 //===================================================================================================================
 template <int dim>
-DUAL RMHD<dim>::conserved_t
-RMHD<dim>::prims2flux(const RMHD<dim>::primitive_t& prims, const luint nhat)
-    const
+DUAL RMHD<dim>::conserved_t RMHD<dim>::prims2flux(
+    const RMHD<dim>::primitive_t& prims,
+    const luint nhat
+) const
 {
     const real rho   = prims.rho;
     const real v1    = prims.vcomponent(1);
@@ -2429,7 +2437,6 @@ void RMHD<dim>::simulate(
     prims.resize(total_zones);
     troubled_cells.resize(total_zones, 0);
     dt_min.resize(total_zones);
-    edens_guess.resize(total_zones);
 
     // Copy the state array into real & profile variables
     for (size_t i = 0; i < total_zones; i++) {
@@ -2502,7 +2509,7 @@ void RMHD<dim>::simulate(
         simbi::detail::logger::with_logger(*this, tend, [&] {
             advance(activeP);
             config_ghosts3D(
-                fullP,
+                activeP,
                 cons.data(),
                 nx,
                 ny,
@@ -2516,7 +2523,7 @@ void RMHD<dim>::simulate(
             cons2prim(fullP);
 
             if constexpr (global::on_gpu) {
-                adapt_dt(fullP);
+                adapt_dt(activeP);
             }
             else {
                 adapt_dt();
