@@ -1193,13 +1193,16 @@ void RMHD<dim>::adapt_dt()
 
         switch (geometry) {
             case simbi::Geometry::CARTESIAN:
-                cfl_dt = std ::min(
-                    {dx1 / (std::max(v1p, v1m)),
-                     dx2 / (std::max(v2p, v2m)),
-                     dx3 / (std::max(v3p, v3m))}
-                );
+                {
+                    cfl_dt = std ::min(
+                        {dx1 / (std::max(v1p, v1m)),
+                         dx2 / (std::max(v2p, v2m)),
+                         dx3 / (std::max(v3p, v3m))}
+                    );
 
-                break;
+                    break;
+                }
+
             case simbi::Geometry::SPHERICAL:
                 {
                     const real x1l = get_x1face(ii, 0);
@@ -1278,10 +1281,9 @@ void RMHD<dim>::adapt_dt(const ExecutionPolicy<>& p)
 //                                            FLUX CALCULATIONS
 //===================================================================================================================
 template <int dim>
-DUAL RMHD<dim>::conserved_t RMHD<dim>::prims2flux(
-    const RMHD<dim>::primitive_t& prims,
-    const luint nhat
-) const
+DUAL RMHD<dim>::conserved_t
+RMHD<dim>::prims2flux(const RMHD<dim>::primitive_t& prims, const luint nhat)
+    const
 {
     const real rho   = prims.rho;
     const real v1    = prims.vcomponent(1);
@@ -2436,7 +2438,9 @@ void RMHD<dim>::simulate(
     cons.resize(total_zones);
     prims.resize(total_zones);
     troubled_cells.resize(total_zones, 0);
-    dt_min.resize(total_zones);
+    if constexpr (global::BuildPlatform == global::Platform::GPU) {
+        dt_min.resize(active_zones);
+    }
 
     // Copy the state array into real & profile variables
     for (size_t i = 0; i < total_zones; i++) {
@@ -2451,21 +2455,6 @@ void RMHD<dim>::simulate(
         const real b2   = state[6][i];
         const real b3   = state[7][i];
         const real dchi = state[8][i];
-
-        // take the positive root of A(27) from
-        // Mignone & McKinney (2007):
-        // https://articles.adsabs.harvard.edu/pdf/2007MNRAS.378.1118M (we
-        // take vsq = 1)
-        const real bsq  = (b1 * b1 + b2 * b2 + b3 * b3);
-        const real msq  = (m1 * m1 + m2 * m2 + m3 * m3);
-        const real et   = tau + d;
-        const real a    = 3.0;
-        const real b    = -4.0 * (et - bsq);
-        const real c    = msq - 2.0 * et * bsq + bsq * bsq;
-        const real disc = std::max(b * b - 4.0 * a * c, 0.0);
-        const real qq   = (-b + std::sqrt(disc)) / (2.0 * a);
-        const real qr   = std::max(qq, d);
-        edens_guess[i]  = qr - d;
         cons[i]         = conserved_t{d, m1, m2, m3, tau, b1, b2, b3, dchi};
     }
 
@@ -2491,7 +2480,7 @@ void RMHD<dim>::simulate(
     if (t == 0 || init_chkpt_idx == 0) {
         write_to_file(*this);
         config_ghosts3D(
-            fullP,
+            activeP,
             cons.data(),
             nx,
             ny,
