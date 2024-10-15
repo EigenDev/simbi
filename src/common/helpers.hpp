@@ -1190,6 +1190,18 @@ namespace simbi {
         template <Plane P, Corner C, Dir s>
         DUAL lint cidx(lint ii, lint jj, lint kk, luint ni, luint nj, luint nk);
 
+        /**
+         * @brief check if a value is within a range
+         *
+         * @tparam IndexType
+         * @param val
+         * @param lower
+         * @param upper
+         * @return bool
+         */
+        template <class IndexType>
+        DUAL bool in_range(IndexType val, IndexType lower, IndexType upper);
+
         // configure the ghost zones in 1D hydro
         template <typename T, typename U>
         void config_ghosts1D(
@@ -1366,14 +1378,6 @@ namespace simbi {
         // solve the quartic equation
         template <typename T>
         DUAL int quartic(T b, T c, T d, T e, T res[4]);
-
-        // solve the cubic equation
-        template <typename T>
-        DUAL int cubicPluto(T b, T c, T d, T z[]);
-
-        // solve the quartic equation
-        template <typename T>
-        DUAL int quarticPluto(T b, T c, T d, T e, T res[4]);
 
         // swap any two values
         template <typename T>
