@@ -487,7 +487,7 @@ namespace simbi {
                                 cons[outg] = inflow_zones[1];
                                 break;
                             case simbi::BoundaryCondition::PERIODIC:
-                                cons[outg] = cons[ing];
+                                cons[outg] = cons[inr];
                                 break;
                             default:
                                 cons[outg] = cons[outr];
@@ -2415,6 +2415,12 @@ namespace simbi {
                 }
                 gpu::api::synchronize();
             }
+        }
+
+        template <class IndexType>
+        DUAL bool in_range(IndexType val, IndexType lower, IndexType upper)
+        {
+            return (luint) (val - lower) <= (luint) (upper - lower);
         }
 
         template <int dim, typename T, typename idx>
