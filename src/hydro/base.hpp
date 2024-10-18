@@ -309,11 +309,10 @@ namespace simbi {
             zag = (nz == 1)                                  ? 1
                   : (init_conditions.spatial_order == "pcm") ? nz - 2
                                                              : nz - 4;
-
-            nxv          = xag + 1;
-            nyv          = yag + 1;
-            nzv          = zag + 1;
-            nv           = nxv * nyv * nzv;
+            nxv = xag + 1;
+            nyv = yag + 1;
+            nzv = zag + 1;
+            nv  = nxv * nyv * nzv;
             idx_active   = (init_conditions.spatial_order == "pcm") ? 1 : 2;
             active_zones = xag * yag * zag;
             x1min        = x1[0];
@@ -325,6 +324,7 @@ namespace simbi {
                 dx1 = (x1[nxv - 1] - x1[0]) / (nxv - 1);
             }
             invdx1 = 1.0 / dx1;
+
             // Define the source terms
             density_source = std::move(init_conditions.sources[0]);
             m1_source      = std::move(init_conditions.sources[1]);
