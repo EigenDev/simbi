@@ -63,6 +63,18 @@ def parse_plotting_arguments(
         help="logarithmic plotting scale",
     )
     plot_parser.add_argument(
+        "--semilogx",
+        default=False,
+        action=argparse.BooleanOptionalAction,
+        help="logarithmic plotting scale for x-axis",
+    )
+    plot_parser.add_argument(
+        "--semilogy",
+        default=False,
+        action=argparse.BooleanOptionalAction,
+        help="logarithmic plotting scale for y-axis",
+    )
+    plot_parser.add_argument(
         "--kinetic",
         default=False,
         action="store_true",
