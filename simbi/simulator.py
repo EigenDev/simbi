@@ -185,9 +185,9 @@ class Hydro:
                 f"Detecting a {self.dimensionality}D run, but only {nres} resolution args"
             )
 
-        initial_state = np.asanyarray(initial_state)
+        initial_state = np.asanyarray(initial_state, dtype=object)
         size = len(initial_state[0])
-        if not all(len(x) == size for x in initial_state):
+        if not all(len(x) == size for x in initial_state) and not self.mhd:
             initial_state = helpers.pad_jagged_array(initial_state)
 
         nstates = len(initial_state)
@@ -341,7 +341,7 @@ class Hydro:
         # for 1D runs
         if not helpers.tuple_of_tuples(cgeom):
             cgeom = [cgeom]
-            
+        
         # if there is a breakpoint in the geometry
         # ignore it for now
         for idx, val in enumerate(cgeom):
@@ -353,7 +353,7 @@ class Hydro:
         for didx, dir in zip(range(self.dimensionality), [self.x1, self.x2, self.x3]):
             if len(dir) == 0:
                 dir[:] = vfunc[csp[didx]](*cgeom[didx], verts[didx])
-            elif dir.shape[0] + 1 != verts[didx]:
+            elif dir.shape[0] != verts[didx]:
                 raise ValueError(f"x{didx+1} vertices does not match the x{didx+1}-resolution + 1")
             
         self.x1 = np.asanyarray(self.x1)
@@ -729,7 +729,7 @@ class Hydro:
             helpers.print_progress()
 
         state_contig = self.u.reshape(self.u.shape[0], -1)
-
+        
         sim_state().run(
             state=state_contig,
             dim=self.dimensionality,
