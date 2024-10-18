@@ -142,8 +142,6 @@ DUAL real RMHD<dim>::calc_edge_emf(
     const RMHD<dim>::conserved_t& fe,
     const RMHD<dim>::conserved_t& fs,
     const RMHD<dim>::conserved_t& fn,
-    const ndarray<real>& bstagp1,
-    const ndarray<real>& bstagp2,
     const RMHD<dim>::primitive_t* prims,
     const luint ii,
     const luint jj,
@@ -165,6 +163,23 @@ DUAL real RMHD<dim>::calc_edge_emf(
     const auto nwidx = cidx<P, C, Dir::NW>(ia, ja, ka, sx, sy, sz);
     const auto neidx = cidx<P, C, Dir::NE>(ia, ja, ka, sx, sy, sz);
 
+    // if constexpr (P == Plane::JK) {
+    //     const auto idx = idx3(ia, ja, ka, nx, ny, nz);
+    //     if constexpr (C == Corner::NW) {
+    //         if (ka == radius && prims[idx].rho != 1.e-4) {
+    //             const auto calc = idx3(ia, ja - 1, ka + 1, sx, sy, sz);
+    //             const auto eidx = idx3(ia, ja - 1, ka, sx, sy, sz);
+    //             if (prims[nwidx].rho != prims[eidx].rho) {
+    //                 printf("nwidx: %llu, expected: %llu\n", nwidx, calc);
+    //                 printf("%llu, %llu, %llu\n", ia, ja, ka);
+    //                 printf("prim[CENTRAL]: %f\n", prims[idx].rho);
+    //                 printf("prim[NW]: %f\n", prims[nwidx].rho);
+    //                 printf("prims[W]: %f\n", prims[eidx].rho);
+    //             }
+    //         }
+    //     }
+    // }
+
     // get surrounding primitives
     const auto swp = prims[swidx];
     const auto sep = prims[seidx];
@@ -179,121 +194,156 @@ DUAL real RMHD<dim>::calc_edge_emf(
     const real one_eighth = static_cast<real>(0.125);
     const real eavg       = static_cast<real>(0.25) * (ew + ee + es + en);
 
+    // if constexpr (P == Plane::IJ && C == Corner::NE) {
+    //     const auto cswidx = idx3(ia, ja, ka, sx, sy, sz);
+    //     const auto cnwidx = idx3(ia, ja + 1, ka, sx, sy, sz);
+    //     printf(
+    //         "[NE] swidx: %llu, cswidx: %llu, nwidx: %llu, cnwidx: %llu\n",
+    //         swidx,
+    //         cswidx,
+    //         nwidx,
+    //         cnwidx
+    //     );
+    //     printf("[%llu, %llu, %llu]\n", ka - radius, ja - radius, ia -
+    //     radius); printf("ew: %f, ee: %f, es: %f, en: %f\n", ew, ee, es, en);
+    //     printf("esw: %f, ese: %f, enw: %f, ene: %f\n", esw, ese, enw, ene);
+    // }
+    // if constexpr (P == Plane::IJ && C == Corner::NW) {
+    //     const auto cswidx = idx3(ia - 1, ja, ka, sx, sy, sz);
+    //     const auto cnwidx = idx3(ia - 1, ja + 1, ka, sx, sy, sz);
+    //     printf(
+    //         "[NW] swidx: %llu, cswidx: %llu, nwidx: %llu, cnwidx: %llu\n",
+    //         swidx,
+    //         cswidx,
+    //         nwidx,
+    //         cnwidx
+    //     );
+    //     printf("[%llu, %llu, %llu]\n", ka - radius, ja - radius, ia -
+    //     radius); printf("ew: %f, ee: %f, es: %f, en: %f\n", ew, ee, es, en);
+    //     printf("esw: %f, ese: %f, enw: %f, ene: %f\n", esw, ese, enw, ene);
+    // }
+
     // Decides at compile time which method to use
     switch (comp_ct_type) {
         case CTTYPE::ZERO:   // Eq. (40)
             {
-                const real de_dq2L = ew - esw + ee - ese;
-                const real de_dq2R = enw - ew + ene - ee;
-                const real de_dq1L = es - esw + en - enw;
-                const real de_dq1R = ese - es + ene - en;
                 return (
-                    eavg + one_eighth * (de_dq2L - de_dq2R + de_dq1L - de_dq1R)
+                    static_cast<real>(0.5) * (es + en + ew + ee) -
+                    static_cast<real>(0.25) * (esw + enw + ese + ene)
                 );
             }
         case CTTYPE::CONTACT:   // Eq. (51)
             {
-                const real de_dq2L = [&]() {
-                    if (fs.den > 0) {
-                        return static_cast<real>(2.0) * (ew - esw);
-                    }
-                    else if (fs.den < 0) {
-                        return static_cast<real>(2.0) * (ee - ese);
-                    }
-                    return ew - esw + ee - ese;
-                }();
-
-                const real de_dq2R = [&]() {
-                    if (fn.den > 0) {
-                        return static_cast<real>(2.0) * (enw - ew);
-                    }
-                    else if (fn.den < 0) {
-                        return static_cast<real>(2.0) * (ene - ee);
-                    }
-                    return enw - ew + ene - ee;
-                }();
-
-                const real de_dq1L = [&]() {
-                    if (fw.den > 0) {
+                // j + 1/4
+                const real de_dqjL = [&] {
+                    if (fw.den > 0.0) {
                         return static_cast<real>(2.0) * (es - esw);
                     }
-                    else if (fw.den < 0) {
+                    else if (fw.den < 0.0) {
                         return static_cast<real>(2.0) * (en - enw);
                     }
                     return es - esw + en - enw;
                 }();
 
-                const real de_dq1R = [&]() {
-                    if (fe.den > 0) {
+                // j + 3/4
+                const real de_dqjR = [&] {
+                    if (fe.den > 0.0) {
                         return static_cast<real>(2.0) * (ese - es);
                     }
-                    else if (fe.den < 0) {
+                    else if (fe.den < 0.0) {
                         return static_cast<real>(2.0) * (ene - en);
                     }
                     return ese - es + ene - en;
                 }();
 
+                // k + 1/4
+                const real de_dqkL = [&] {
+                    if (fs.den > 0.0) {
+                        return static_cast<real>(2.0) * (ew - esw);
+                    }
+                    else if (fs.den < 0.0) {
+                        return static_cast<real>(2.0) * (ee - ese);
+                    }
+                    return ew - esw + ee - ese;
+                }();
+
+                // k + 3/4
+                const real de_dqkR = [&] {
+                    if (fn.den > 0.0) {
+                        return static_cast<real>(2.0) * (enw - ew);
+                    }
+                    else if (fn.den < 0.0) {
+                        return static_cast<real>(2.0) * (ene - ee);
+                    }
+                    return enw - ew + ene - ee;
+                }();
+
                 return (
-                    eavg + one_eighth * (de_dq2L - de_dq2R + de_dq1L - de_dq1R)
+                    eavg + one_eighth * (de_dqjL - de_dqjR + de_dqkL - de_dqkR)
                 );
             }
         default:   // ALPHA, Eq. (49)
             {
-                constexpr real alpha = 0.1;
-                // compute permutation indices
-                const auto np1 = (P == Plane::JK) ? 2 : 1;
-                const auto np2 = (P == Plane::IJ) ? 2 : 3;
+                return 0.0;
+                // constexpr real alpha = 0.1;
+                // // compute permutation indices
+                // const auto np1 = (P == Plane::JK) ? 2 : 1;
+                // const auto np2 = (P == Plane::IJ) ? 2 : 3;
 
-                // face-center magnetic field indices
-                const auto [nx1, ny1, nz1] = [&] {
-                    if constexpr (P == Plane::JK) {
-                        return std::make_tuple(xag + 2, nyv, zag + 2);   // B2
-                    }
-                    return std::make_tuple(nxv, yag + 2, zag + 2);   // B1
-                }();
-                const auto sidx = cidx<P, C, Dir::S>(ii, jj, kk, nx1, ny1, nz1);
-                const auto nidx = cidx<P, C, Dir::N>(ii, jj, kk, nx1, ny1, nz1);
+                // // face-center magnetic field indices
+                // const auto [nx1, ny1, nz1] = [&] {
+                //     if constexpr (P == Plane::JK) {
+                //         return std::make_tuple(xag + 2, nyv, zag + 2);   //
+                //         B2
+                //     }
+                //     return std::make_tuple(nxv, yag + 2, zag + 2);   // B1
+                // }();
+                // const auto sidx = cidx<P, C, Dir::S>(ii, jj, kk, nx1, ny1,
+                // nz1); const auto nidx = cidx<P, C, Dir::N>(ii, jj, kk, nx1,
+                // ny1, nz1);
 
-                const auto [nx2, ny2, nz2] = [&] {
-                    if constexpr (P == Plane::IJ) {   // B2
-                        return std::make_tuple(xag + 2, nyv, zag + 2);
-                    }
-                    return std::make_tuple(xag + 2, yag + 2, nzv);   // B3
-                }();
-                const auto eidx = cidx<P, C, Dir::E>(ii, jj, kk, nx2, ny2, nz2);
-                const auto widx = cidx<P, C, Dir::W>(ii, jj, kk, nx2, ny2, nz2);
+                // const auto [nx2, ny2, nz2] = [&] {
+                //     if constexpr (P == Plane::IJ) {   // B2
+                //         return std::make_tuple(xag + 2, nyv, zag + 2);
+                //     }
+                //     return std::make_tuple(xag + 2, yag + 2, nzv);   // B3
+                // }();
+                // const auto eidx = cidx<P, C, Dir::E>(ii, jj, kk, nx2, ny2,
+                // nz2); const auto widx = cidx<P, C, Dir::W>(ii, jj, kk, nx2,
+                // ny2, nz2);
 
-                // perpendicular mean field 1
-                const auto bp1sw = swp.bcomponent(np1);
-                const auto bp1nw = nwp.bcomponent(np1);
-                const auto bp1se = sep.bcomponent(np1);
-                const auto bp1ne = nep.bcomponent(np1);
+                // // perpendicular mean field 1
+                // const auto bp1sw = swp.bcomponent(np1);
+                // const auto bp1nw = nwp.bcomponent(np1);
+                // const auto bp1se = sep.bcomponent(np1);
+                // const auto bp1ne = nep.bcomponent(np1);
 
-                // perpendicular mean field 2
-                const auto bp2sw = swp.bcomponent(np2);
-                const auto bp2nw = nwp.bcomponent(np2);
-                const auto bp2se = sep.bcomponent(np2);
-                const auto bp2ne = nep.bcomponent(np2);
+                // // perpendicular mean field 2
+                // const auto bp2sw = swp.bcomponent(np2);
+                // const auto bp2nw = nwp.bcomponent(np2);
+                // const auto bp2se = sep.bcomponent(np2);
+                // const auto bp2ne = nep.bcomponent(np2);
 
-                // perpendicular staggered field 1
-                const auto bp1s = bstagp1[sidx];
-                const auto bp1n = bstagp1[nidx];
-                // perpendicular staggered field 2
-                const auto bp2e = bstagp2[eidx];
-                const auto bp2w = bstagp2[widx];
+                // // perpendicular staggered field 1
+                // const auto bp1s = bstagp1[sidx];
+                // const auto bp1n = bstagp1[nidx];
+                // // perpendicular staggered field 2
+                // const auto bp2e = bstagp2[eidx];
+                // const auto bp2w = bstagp2[widx];
 
-                const real de_dq2L = (ew - esw + ee - ese) +
-                                     alpha * (bp2e - bp2se - bp2w + bp2sw);
-                const real de_dq2R = (enw - ew + ene - ee) +
-                                     alpha * (bp2ne - bp2e - bp2nw + bp2w);
-                const real de_dq1L = (es - esw + en - enw) +
-                                     alpha * (bp1s - bp1sw - bp1n + bp1nw);
-                const real de_dq1R = (ese - es + ene - en) +
-                                     alpha * (bp1se - bp1s - bp1ne + bp1n);
+                // const real de_dq2L = (ew - esw + ee - ese) +
+                //                      alpha * (bp2e - bp2se - bp2w + bp2sw);
+                // const real de_dq2R = (enw - ew + ene - ee) +
+                //                      alpha * (bp2ne - bp2e - bp2nw + bp2w);
+                // const real de_dq1L = (es - esw + en - enw) +
+                //                      alpha * (bp1s - bp1sw - bp1n + bp1nw);
+                // const real de_dq1R = (ese - es + ene - en) +
+                //                      alpha * (bp1se - bp1s - bp1ne + bp1n);
 
-                return (
-                    eavg + one_eighth * (de_dq2L - de_dq2R + de_dq1L - de_dq1R)
-                );
+                // return (
+                //     eavg + one_eighth * (de_dq2L - de_dq2R + de_dq1L -
+                //     de_dq1R)
+                // );
             }
     }
 };
@@ -301,139 +351,55 @@ DUAL real RMHD<dim>::calc_edge_emf(
 template <int dim>
 DUAL real RMHD<dim>::curl_e(
     const luint nhat,
-    const real ejl,
-    const real ejr,
-    const real ekl,
-    const real ekr
+    const real ej[4],
+    const real ek[4],
+    const int side
 ) const
 {
     switch (geometry) {
         case Geometry::CARTESIAN:
             {
                 if (nhat == 1) {
-                    return invdx2 * (ekr - ekl) - invdx3 * (ejr - ejl);
+                    // if (!goes_to_zero(ej[IJ::NE] - ej[IJ::NW])) {
+                    //     printf(
+                    //         "ej[IJ::NE]: %f, ej[IJ::NW]: %f\n",
+                    //         ej[IJ::NE],
+                    //         ej[IJ::NW]
+                    //     );
+                    // }
+                    if (side == 0) {
+                        return invdx2 * (ek[IJ::NW] - ek[IJ::SW]) -
+                               invdx3 * (ej[IK::NW] - ej[IK::SW]);
+                    }
+                    return invdx2 * (ek[IJ::NE] - ek[IJ::SE]) -
+                           invdx3 * (ej[IK::NE] - ej[IK::SE]);
                 }
                 else if (nhat == 2) {
-                    return invdx3 * (ekr - ekl) - invdx1 * (ejr - ejl);
+                    // if (!goes_to_zero(ek[IJ::NW] - ek[IJ::SW])) {
+                    //     printf(
+                    //         "ek[IJ::NW]: %f, ek[IJ::SW]: %f\n",
+                    //         ek[IJ::NW],
+                    //         ek[IJ::SW]
+                    //     );
+                    // }
+                    if (side == 0) {
+                        return invdx3 * (ek[JK::NW] - ek[JK::SW]) -
+                               invdx1 * (ej[IJ::SE] - ej[IJ::SW]);
+                    }
+                    return invdx3 * (ek[JK::NE] - ek[JK::SE]) -
+                           invdx1 * (ej[IJ::NE] - ej[IJ::NW]);
                 }
                 else {
-                    return invdx1 * (ekr - ekl) - invdx2 * (ejr - ejl);
+                    if (side == 0) {
+                        return invdx1 * (ek[IK::SE] - ek[IK::SW]) -
+                               invdx2 * (ej[JK::SE] - ej[JK::SW]);
+                    }
+                    return invdx1 * (ek[IK::NE] - ek[IK::NW]) -
+                           invdx2 * (ej[JK::NE] - ej[JK::NW]);
                 }
             }
         default:
             return 0.0;
-            // case Geometry::SPHERICAL:
-            //     {
-            //         curl_e = [] {
-            //             if constexpr (dim == 1) {
-            //                 if (nhat == 2) {
-            //                     return (1.0 / r / dr) * (rl * e3l - rr *
-            //                     e3r);
-            //                 }
-            //                 else {
-            //                     return (1.0 / r / dr) * (rr * e2r - rl *
-            //                     e2l);
-            //                 }
-            //             }
-            //             else if constexpr (dim == 2) {
-            //                 if (nhat == 1) {
-            //                     (1.0 / (r * dth * std::sin(th))) *
-            //                         (e3r * std::sin(thr) - e3l *
-            //                         std::sin(thl));
-            //                 }
-            //                 else if (nhat == 2) {
-            //                     return (1.0 / r / dr) * (rl * e3l - rr *
-            //                     e3r);
-            //                 }
-            //                 else {
-            //                     return (1.0 / r) * ((rr * e2r - rl * e2l) /
-            //                     dr +
-            //                                         (e1l - e1r) / dth);
-            //                 }
-            //             }
-            //             else {
-            //                 if (nhat == 1) {
-            //                     (1.0 / (r * std::sin(th))) *
-            //                         ((e3r * std::sin(thr) - e3l *
-            //                         std::sin(thl)) *
-            //                              invdx2 +
-            //                          (e2l - e2r) * invdx3);
-            //                 }
-            //                 else if (nhat == 2) {
-            //                     return (1.0 / r) *
-            //                            (1.0 / std::sin(th) * invdx3 * (e1r -
-            //                            e1l) +
-            //                             (rl * e3l - rr * e3r) / dr);
-            //                 }
-            //                 else {
-            //                     return (1.0 / r) * ((rr * e2r - rl * e2l) /
-            //                     dr +
-            //                                         (e1l - e1r) / dth);
-            //                 }
-            //             }
-            //         }();
-            //         return b -= dt * step * curl_e;
-            //     }
-            // default:
-            //     {
-            //         curl_e = [] {
-            //             if constexpr (dim == 1) {
-            //                 if (nhat == 2) {
-            //                     return (e3l - e3r) / dr;
-            //                 }
-            //                 else {
-            //                     return (1.0 / r) * (rr * e2r - rl * e2l) /
-            //                     dr;
-            //                 }
-            //             }
-            //             else if constexpr (dim == 2) {
-            //                 switch (geometry) {
-            //                     case Geometry::AXIS_CYLINDRICAL:
-            //                         {
-            //                             if (nhat == 1) {
-            //                                 (e2l - e2r) * invdx3;
-            //                             }
-            //                             else if (nhat == 2) {
-            //                                 return (e1r - e1l) * invdx3 +
-            //                                        (e3l - e3r) * invdx1;
-            //                             }
-            //                             else {
-            //                                 return (1.0 / r / dr) *
-            //                                        (rr * e2r - rl e2l);
-            //                             }
-            //                         }
-            //                     default:
-            //                         if (nhat == 1) {
-            //                             (e3r - e3l) * invdx2 / r;
-            //                         }
-            //                         else if (nhat == 2) {
-            //                             return (e3l - e3r) * invdx1;
-            //                         }
-            //                         else {
-            //                             return (1.0 / r) *
-            //                                    ((rr * e2r - rl e2l) / dr +
-            //                                     (e1l - e1r) * invdx2);
-            //                         }
-            //                 }
-            //             }
-            //             else {
-            //                 if (nhat == 1) {
-            //                     (e3r - e3l) * invdx2 / r + (e2l - e2r) *
-            //                     invdx3;
-            //                 }
-            //                 else if (nhat == 2) {
-            //                     return (e1r - e1l) * invdx3 + (e3l - e3r) *
-            //                     invdx1;
-            //                 }
-            //                 else {
-            //                     return (1.0 / r) * ((rr * e2r - rl e2l) / dr
-            //                     +
-            //                                         (e1l - e1r) * invdx2);
-            //                 }
-            //             }
-            //         }();
-            //         return b -= dt * step * curl_e;
-            //     }
     }
 }
 
@@ -959,8 +925,7 @@ template <int dim>
 DUAL void RMHD<dim>::calc_max_wave_speeds(
     const RMHD<dim>::primitive_t& prims,
     const luint nhat,
-    real speeds[],
-    real& cs2
+    real speeds[4]
 ) const
 {
     /*
@@ -999,7 +964,7 @@ DUAL void RMHD<dim>::calc_max_wave_speeds(
     */
     const real rho   = prims.rho;
     const real h     = prims.gas_enthalpy(gamma);
-    cs2              = (gamma * prims.p / (rho * h));
+    const real cs2   = (gamma * prims.p / (rho * h));
     const auto bmu   = mag_fourvec_t(prims);
     const real bmusq = bmu.inner_product();
     const real bn    = prims.bcomponent(nhat);
@@ -1091,25 +1056,19 @@ DUAL RMHD<dim>::eigenvals_t RMHD<dim>::calc_eigenvals(
     const luint nhat
 ) const
 {
-    real cs2L, cs2R;
     real speeds[4];
 
     // left side
-    calc_max_wave_speeds(primsL, nhat, speeds, cs2L);
+    calc_max_wave_speeds(primsL, nhat, speeds);
     const real lpL = speeds[3];
     const real lmL = speeds[0];
 
     // right_side
-    calc_max_wave_speeds(primsR, nhat, speeds, cs2R);
+    calc_max_wave_speeds(primsR, nhat, speeds);
     const real lpR = speeds[3];
     const real lmR = speeds[0];
 
-    return {
-      my_min(lmL, lmR),
-      my_max(lpL, lpR),
-      std::sqrt(cs2L),
-      std::sqrt(cs2R)
-    };
+    return {my_min(lmL, lmR), my_max(lpL, lpR)};
 };
 
 //-----------------------------------------------------------------------------------------
@@ -1161,7 +1120,7 @@ void RMHD<dim>::adapt_dt()
         simbi::pooling::ThreadPool::instance(simbi::pooling::get_nthreads());
     std::atomic<real> min_dt = INFINITY;
     thread_pool.parallel_for(active_zones, [&](luint gid) {
-        real v1p, v1m, v2p, v2m, v3p, v3m, cfl_dt, cs;
+        real v1p, v1m, v2p, v2m, v3p, v3m, cfl_dt;
         real speeds[4];
         const luint kk  = axid<dim, BlkAx::K>(gid, xag, yag);
         const luint jj  = axid<dim, BlkAx::J>(gid, xag, yag, kk);
@@ -1172,13 +1131,13 @@ void RMHD<dim>::adapt_dt()
         const luint aid = idx3(ia, ja, ka, nx, ny, nz);
         // Left/Right wave speeds
         if constexpr (dt_type == TIMESTEP_TYPE::ADAPTIVE) {
-            calc_max_wave_speeds(prims[aid], 1, speeds, cs);
+            calc_max_wave_speeds(prims[aid], 1, speeds);
             v1p = std::abs(speeds[3]);
             v1m = std::abs(speeds[0]);
-            calc_max_wave_speeds(prims[aid], 2, speeds, cs);
+            calc_max_wave_speeds(prims[aid], 2, speeds);
             v2p = std::abs(speeds[3]);
             v2m = std::abs(speeds[0]);
-            calc_max_wave_speeds(prims[aid], 3, speeds, cs);
+            calc_max_wave_speeds(prims[aid], 3, speeds);
             v3p = std::abs(speeds[3]);
             v3m = std::abs(speeds[0]);
         }
@@ -1194,6 +1153,14 @@ void RMHD<dim>::adapt_dt()
         switch (geometry) {
             case simbi::Geometry::CARTESIAN:
                 {
+                    const real x1l = get_x1face(ii, 0);
+                    const real x1r = get_x1face(ii, 1);
+                    const real dx1 = x1r - x1l;
+
+                    const real x2l = get_x1face(jj, 0);
+                    const real x2r = get_x1face(jj, 1);
+                    const real dx2 = x2r - x2l;
+
                     cfl_dt = std ::min(
                         {dx1 / (std::max(v1p, v1m)),
                          dx2 / (std::max(v2p, v2m)),
@@ -1905,398 +1872,452 @@ void RMHD<dim>::advance(const ExecutionPolicy<>& p)
 {
     const luint extent  = p.get_full_extent();
     const auto prim_dat = prims.data();
-    simbi::parallel_for(p, extent, [p, prim_dat, this] DEV(const luint idx) {
-        // x1,x2,x3 hydro riemann fluxes
-        conserved_t f[10];
-        conserved_t g[10];
-        conserved_t h[10];
-        primitive_t pL, pLL, pR, pRR;
+    // copy the bfield vectors as to not modify the original
+    const auto b1_data = bstag1;
+    const auto b2_data = bstag2;
+    const auto b3_data = bstag3;
+    simbi::parallel_for(
+        p,
+        extent,
+        [p, prim_dat, b1_data, b2_data, b3_data, this] DEV(const luint idx) {
+            // x1,x2,x3 hydro riemann fluxes
+            conserved_t f[10];
+            conserved_t g[10];
+            conserved_t h[10];
+            primitive_t pL, pLL, pR, pRR;
 
-        // e1, e2, e3 values at cell edges
-        real e1[4], e2[4], e3[4];
+            // e1, e2, e3 values at cell edges
+            real e1[4], e2[4], e3[4];
 
-        // primitive buffer that returns dynamic shared array
-        // if working with shared memory on GPU, identity otherwise
-        const auto prim_buff = sm_or_identity(prim_dat);
+            // primitive buffer that returns dynamic shared array
+            // if working with shared memory on GPU, identity otherwise
+            const auto prb = sm_or_identity(prim_dat);
 
-        const luint kk = axid<dim, BlkAx::K>(idx, xag, yag);
-        const luint jj = axid<dim, BlkAx::J>(idx, xag, yag, kk);
-        const luint ii = axid<dim, BlkAx::I>(idx, xag, yag, kk);
+            const luint kk = axid<dim, BlkAx::K>(idx, xag, yag);
+            const luint jj = axid<dim, BlkAx::J>(idx, xag, yag, kk);
+            const luint ii = axid<dim, BlkAx::I>(idx, xag, yag, kk);
 
-        if constexpr (global::on_gpu) {
-            if ((ii >= xag) || (jj >= yag) || (kk >= zag)) {
-                return;
-            }
-        }
-
-        const luint ia  = ii + radius;
-        const luint ja  = jj + radius;
-        const luint ka  = kk + radius;
-        const luint tx  = (global::on_sm) ? threadIdx.x : 0;
-        const luint ty  = (global::on_sm) ? threadIdx.y : 0;
-        const luint tz  = (global::on_sm) ? threadIdx.z : 0;
-        const luint txa = (global::on_sm) ? tx + radius : ia;
-        const luint tya = (global::on_sm) ? ty + radius : ja;
-        const luint tza = (global::on_sm) ? tz + radius : ka;
-        const luint aid = idx3(ia, ja, ka, nx, ny, nz);
-        const luint tid = idx3(txa, tya, tza, sx, sy, sz);
-
-        if constexpr (global::on_sm) {
-            load_shared_buffer<dim>(
-                p,
-                prim_buff,
-                prims,
-                nx,
-                ny,
-                nz,
-                sx,
-                sy,
-                tx,
-                ty,
-                tz,
-                txa,
-                tya,
-                tza,
-                ia,
-                ja,
-                ka,
-                radius
-            );
-        }
-        else {
-            // cast away unused lambda capture
-            (void) p;
-        }
-
-        const auto il = get_real_idx(ii - 1, 0, xag);
-        const auto ir = get_real_idx(ii + 1, 0, xag);
-        const auto jl = get_real_idx(jj - 1, 0, yag);
-        const auto jr = get_real_idx(jj + 1, 0, yag);
-        const auto kl = get_real_idx(kk - 1, 0, zag);
-        const auto kr = get_real_idx(kk + 1, 0, zag);
-
-        // object to left or right? (x1-direction)
-        const bool object_x[2] = {
-          ib_check<dim>(object_pos, il, jj, kk, xag, yag, 1),
-          ib_check<dim>(object_pos, ir, jj, kk, xag, yag, 1)
-        };
-
-        // object in front or behind? (x2-direction)
-        const bool object_y[2] = {
-          ib_check<dim>(object_pos, ii, jl, kk, xag, yag, 2),
-          ib_check<dim>(object_pos, ii, jr, kk, xag, yag, 2)
-        };
-
-        // object above or below? (x3-direction)
-        const bool object_z[2] = {
-          ib_check<dim>(object_pos, ii, jj, kl, xag, yag, 3),
-          ib_check<dim>(object_pos, ii, jj, kr, xag, yag, 3)
-        };
-
-        const real x1l    = get_x1face(ii, 0);
-        const real x1r    = get_x1face(ii, 1);
-        const real vfaceL = (homolog) ? x1l * hubble_param : hubble_param;
-        const real vfaceR = (homolog) ? x1r * hubble_param : hubble_param;
-
-        const auto xlf = idx3(ii + 0, jj, kk, nxv, yag, zag);
-        const auto xrf = idx3(ii + 1, jj, kk, nxv, yag, zag);
-        const auto ylf = idx3(ii, jj + 0, kk, xag, nyv, zag);
-        const auto yrf = idx3(ii, jj + 1, kk, xag, nyv, zag);
-        const auto zlf = idx3(ii, jj, kk + 0, xag, yag, nzv);
-        const auto zrf = idx3(ii, jj, kk + 1, xag, yag, nzv);
-
-        // // Calc Rimeann Flux at all interfaces
-        for (int q = 0; q < 10; q++) {
-            const auto vdir = in_range(q, 2, 3) - in_range(q, 6, 7);
-            const auto hdir = in_range(q, 4, 5) - in_range(q, 8, 9);
-
-            int jshft = tya + vdir * (yag > 1);
-            int kshft = tza + hdir * (zag > 1);
-            // fluxes in i direction
-            pL = prim_buff[idx3(txa + (q % 2) - 1, jshft, kshft, sx, sy, 0)];
-            pR = prim_buff[idx3(txa + (q % 2) + 0, jshft, kshft, sx, sy, 0)];
-
-            if (!use_pcm) {
-                pLL =
-                    prim_buff[idx3(txa + (q % 2) - 2, jshft, kshft, sx, sy, 0)];
-                pRR =
-                    prim_buff[idx3(txa + (q % 2) + 1, jshft, kshft, sx, sy, 0)];
-
-                pL = pL + plm_gradient(pL, pLL, pR, plm_theta) * 0.5;
-                pR = pR - plm_gradient(pR, pL, pRR, plm_theta) * 0.5;
-            }
-            ib_modify<dim>(pR, pL, object_x[(q % 2)], 1);
-            f[q] = (this->*riemann_solve)(pL, pR, 1, 0);
-
-            int ishft = txa + vdir;
-            kshft     = tza + hdir * (zag > 1);
-            // fluxes in j direction
-            pL = prim_buff[idx3(ishft, tya + (q % 2) - 1, kshft, sx, sy, 0)];
-            pR = prim_buff[idx3(ishft, tya + (q % 2) + 0, kshft, sx, sy, 0)];
-
-            if (!use_pcm) {
-                pLL =
-                    prim_buff[idx3(ishft, tya + (q % 2) - 2, kshft, sx, sy, 0)];
-                pRR =
-                    prim_buff[idx3(ishft, tya + (q % 2) + 1, kshft, sx, sy, 0)];
-
-                pL = pL + plm_gradient(pL, pLL, pR, plm_theta) * 0.5;
-                pR = pR - plm_gradient(pR, pL, pRR, plm_theta) * 0.5;
-            }
-            ib_modify<dim>(pR, pL, object_y[(q % 2)], 2);
-            g[q] = (this->*riemann_solve)(pL, pR, 2, 0);
-
-            jshft = tya + hdir * (yag > 1);
-            ishft = txa + vdir;
-            // fluxes in k direction
-            pL = prim_buff[idx3(ishft, jshft, tza + (q % 2) - 1, sx, sy, 0)];
-            pR = prim_buff[idx3(ishft, jshft, tza + (q % 2) + 0, sx, sy, 0)];
-
-            if (!use_pcm) {
-                pLL =
-                    prim_buff[idx3(ishft, jshft, tza + (q % 2) - 2, sx, sy, 0)];
-                pRR =
-                    prim_buff[idx3(ishft, jshft, tza + (q % 2) + 1, sx, sy, 0)];
-
-                pL = pL + plm_gradient(pL, pLL, pR, plm_theta) * 0.5;
-                pR = pR - plm_gradient(pR, pL, pRR, plm_theta) * 0.5;
-            }
-            ib_modify<dim>(pR, pL, object_z[(q % 2)], 3);
-            h[q] = (this->*riemann_solve)(pL, pR, 3, 0);
-        }
-
-        // compute edge emfs in clockwise direction wrt cell plane
-        detail::for_sequence(detail::make_index_sequence<4>(), [&](auto qidx) {
-            constexpr auto q      = static_cast<luint>(qidx);
-            constexpr auto corner = static_cast<Corner>(q);
-            auto widx             = q == 0 ? 1 : q == 1 ? 0 : q == 2 ? 6 : 7;
-            auto eidx             = q == 0 ? 3 : q == 1 ? 2 : q == 2 ? 0 : 1;
-            auto sidx             = q == 0 ? 1 : q == 1 ? 7 : q == 2 ? 6 : 0;
-            auto nidx             = q == 0 ? 3 : q == 1 ? 1 : q == 2 ? 0 : 2;
-
-            e3[q] = calc_edge_emf<Plane::IJ, corner>(
-                g[widx],
-                g[eidx],
-                f[sidx],
-                f[nidx],
-                bstag1,
-                bstag2,
-                prim_buff,
-                ii,
-                jj,
-                kk,
-                txa,
-                tya,
-                tza,
-                3
-            );
-
-            widx  = q == 0 ? 1 : q == 1 ? 0 : q == 2 ? 6 : 7;
-            eidx  = q == 0 ? 3 : q == 1 ? 2 : q == 2 ? 0 : 1;
-            sidx  = q == 0 ? 1 : q == 1 ? 9 : q == 2 ? 8 : 0;
-            nidx  = q == 0 ? 5 : q == 1 ? 1 : q == 2 ? 0 : 4;
-            e2[q] = calc_edge_emf<Plane::IK, corner>(
-                h[widx],
-                h[eidx],
-                f[sidx],
-                f[nidx],
-                bstag1,
-                bstag3,
-                prim_buff,
-                ii,
-                jj,
-                kk,
-                txa,
-                tya,
-                tza,
-                2
-            );
-
-            widx  = q == 0 ? 1 : q == 1 ? 0 : q == 2 ? 8 : 9;
-            eidx  = q == 0 ? 5 : q == 1 ? 4 : q == 2 ? 0 : 1;
-            sidx  = q == 0 ? 1 : q == 1 ? 9 : q == 2 ? 8 : 0;
-            nidx  = q == 0 ? 5 : q == 1 ? 1 : q == 2 ? 0 : 4;
-            e1[q] = calc_edge_emf<Plane::JK, corner>(
-                h[widx],
-                h[eidx],
-                g[sidx],
-                g[nidx],
-                bstag2,
-                bstag3,
-                prim_buff,
-                ii,
-                jj,
-                kk,
-                txa,
-                tya,
-                tza,
-                1
-            );
-        });
-
-        auto& b1L = bstag1[xlf];
-        auto& b1R = bstag1[xrf];
-        auto& b2L = bstag2[ylf];
-        auto& b2R = bstag2[yrf];
-        auto& b3L = bstag3[zlf];
-        auto& b3R = bstag3[zrf];
-        auto& b1c = cons[aid].b1;
-        auto& b2c = cons[aid].b2;
-        auto& b3c = cons[aid].b3;
-
-        b1L -= dt * step *
-               curl_e(1, e2[IK::SW], e2[IK::NW], e3[IJ::SW], e3[IJ::NW]);
-        b1R -= dt * step *
-               curl_e(1, e2[IK::SE], e2[IK::NE], e3[IJ::SE], e3[IJ::NE]);
-
-        b2L -= dt * step *
-               curl_e(2, e3[IJ::SW], e3[IJ::SE], e1[JK::SW], e1[JK::NW]);
-        b2R -= dt * step *
-               curl_e(2, e3[IJ::NW], e3[IJ::NE], e1[JK::SE], e1[JK::NE]);
-
-        b3L -= dt * step *
-               curl_e(3, e1[JK::SW], e1[JK::SE], e2[IK::SW], e2[IK::SE]);
-        b3R -= dt * step *
-               curl_e(3, e1[JK::NW], e1[JK::NE], e2[IK::NW], e2[IK::NE]);
-
-        // if constexpr (global::debug_mode) {
-        const auto divb =
-            (b1R - b1L) * invdx1 + (b2R - b2L) * invdx2 + (b3R - b3L) * invdx3;
-
-        if (!goes_to_zero(divb)) {
-            printf("Divergence of B is not zero!\n");
-        }
-        // }
-        b1c = static_cast<real>(0.5) * (b1L + b1R);
-        b2c = static_cast<real>(0.5) * (b2L + b2R);
-        b3c = static_cast<real>(0.5) * (b3L + b3R);
-
-        // TODO: implement functional source and gravity
-        const auto source_terms = conserved_t{};
-        // Gravity
-        const auto gravity = conserved_t{};
-
-        // Advance depending on geometry
-        switch (geometry) {
-            case simbi::Geometry::CARTESIAN:
-                {
-                    cons[aid] -=
-                        ((f[RF] - f[LF]) * invdx1 + (g[RF] - g[LF]) * invdx2 +
-                         (h[RF] - h[LF]) * invdx3 - source_terms - gravity) *
-                        dt * step;
-                    break;
+            if constexpr (global::on_gpu) {
+                if ((ii >= xag) || (jj >= yag) || (kk >= zag)) {
+                    return;
                 }
-            case simbi::Geometry::SPHERICAL:
-                {
-                    const real rl = x1l + vfaceL * step * dt;
-                    const real rr = x1r + vfaceR * step * dt;
-                    const real tl = get_x2face(jj, 0);
-                    const real tr = get_x2face(jj, 1);
-                    const real ql = get_x3face(kk, 0);
-                    const real qr = get_x3face(kk, 1);
-                    const real rmean =
-                        get_cell_centroid(rr, rl, simbi::Geometry::SPHERICAL);
-                    const real s1R    = rr * rr;
-                    const real s1L    = rl * rl;
-                    const real s2R    = std::sin(tr);
-                    const real s2L    = std::sin(tl);
-                    const real thmean = 0.5 * (tl + tr);
-                    const real sint   = std::sin(thmean);
-                    const real dV1    = rmean * rmean * (rr - rl);
-                    const real dV2    = rmean * sint * (tr - tl);
-                    const real dV3    = rmean * sint * (qr - ql);
-                    const real cot    = std::cos(thmean) / sint;
+            }
 
-                    // Grab central primitives
-                    const real rhoc = prim_buff[tid].rho;
-                    const real uc   = prim_buff[tid].get_v1();
-                    const real vc   = prim_buff[tid].get_v2();
-                    const real wc   = prim_buff[tid].get_v3();
-                    const real pc   = prim_buff[tid].total_pressure();
-                    const auto bmuc = mag_fourvec_t(prim_buff[tid]);
+            const luint ia  = ii + radius;
+            const luint ja  = jj + radius;
+            const luint ka  = kk + radius;
+            const luint tx  = (global::on_sm) ? threadIdx.x : 0;
+            const luint ty  = (global::on_sm) ? threadIdx.y : 0;
+            const luint tz  = (global::on_sm) ? threadIdx.z : 0;
+            const luint txa = (global::on_sm) ? tx + radius : ia;
+            const luint tya = (global::on_sm) ? ty + radius : ja;
+            const luint tza = (global::on_sm) ? tz + radius : ka;
+            const luint aid = idx3(ia, ja, ka, nx, ny, nz);
+            const luint tid = idx3(txa, tya, tza, sx, sy, sz);
 
-                    const real hc   = prim_buff[tid].gas_enthalpy(gamma);
-                    const real gam2 = prim_buff[tid].lorentz_factor_squared();
+            if constexpr (global::on_sm) {
+                load_shared_buffer<dim>(
+                    p,
+                    prb,
+                    prims,
+                    nx,
+                    ny,
+                    nz,
+                    sx,
+                    sy,
+                    tx,
+                    ty,
+                    tz,
+                    txa,
+                    tya,
+                    tza,
+                    ia,
+                    ja,
+                    ka,
+                    radius
+                );
+            }
+            else {
+                // cast away unused lambda capture
+                (void) p;
+            }
 
-                    const auto geom_source = conserved_t{
-                      0.0,
-                      (rhoc * hc * gam2 * (vc * vc + wc * wc) -
-                       bmuc.two * bmuc.two - bmuc.three * bmuc.three) /
-                              rmean +
-                          pc * (s1R - s1L) / dV1,
-                      (rhoc * hc * gam2 * (wc * wc * cot - uc * vc) -
-                       bmuc.three * bmuc.three * cot + bmuc.one * bmuc.two) /
-                              rmean +
-                          pc * (s2R - s2L) / dV2,
-                      -(rhoc * hc * gam2 * wc * (uc + vc * cot) -
-                        bmuc.three * bmuc.one - bmuc.three * bmuc.two * cot) /
-                          rmean,
-                      0.0,
-                      0.0,
-                      0.0,
-                      0.0
-                    };
-                    cons[aid] -= ((f[RF] * s1R - f[LF] * s1L) / dV1 +
-                                  (g[RF] * s2R - g[LF] * s2L) / dV2 +
-                                  (h[RF] - h[LF]) / dV3 - geom_source -
-                                  source_terms - gravity) *
-                                 dt * step;
-                    break;
+            const auto il = get_real_idx(ii - 1, 0, xag);
+            const auto ir = get_real_idx(ii + 1, 0, xag);
+            const auto jl = get_real_idx(jj - 1, 0, yag);
+            const auto jr = get_real_idx(jj + 1, 0, yag);
+            const auto kl = get_real_idx(kk - 1, 0, zag);
+            const auto kr = get_real_idx(kk + 1, 0, zag);
+
+            // object to left or right? (x1-direction)
+            const bool object_x[2] = {
+              ib_check<dim>(object_pos, il, jj, kk, xag, yag, 1),
+              ib_check<dim>(object_pos, ir, jj, kk, xag, yag, 1)
+            };
+
+            // object in front or behind? (x2-direction)
+            const bool object_y[2] = {
+              ib_check<dim>(object_pos, ii, jl, kk, xag, yag, 2),
+              ib_check<dim>(object_pos, ii, jr, kk, xag, yag, 2)
+            };
+
+            // object above or below? (x3-direction)
+            const bool object_z[2] = {
+              ib_check<dim>(object_pos, ii, jj, kl, xag, yag, 3),
+              ib_check<dim>(object_pos, ii, jj, kr, xag, yag, 3)
+            };
+
+            const real x1l    = get_x1face(ii, 0);
+            const real x1r    = get_x1face(ii, 1);
+            const real vfaceL = (homolog) ? x1l * hubble_param : hubble_param;
+            const real vfaceR = (homolog) ? x1r * hubble_param : hubble_param;
+
+            const auto xlf = idx3(ii + 0, jj, kk, nxv, yag, zag);
+            const auto xrf = idx3(ii + 1, jj, kk, nxv, yag, zag);
+            const auto ylf = idx3(ii, jj + 0, kk, xag, nyv, zag);
+            const auto yrf = idx3(ii, jj + 1, kk, xag, nyv, zag);
+            const auto zlf = idx3(ii, jj, kk + 0, xag, yag, nzv);
+            const auto zrf = idx3(ii, jj, kk + 1, xag, yag, nzv);
+
+            const auto xe = xag - 1 + radius;
+            const auto ye = yag - 1 + radius;
+            const auto ze = zag - 1 + radius;
+
+            // Calc Rimeann Flux at all interfaces
+            for (int q = 0; q < 10; q++) {
+                const auto vdir = in_range(q, 2, 3) - in_range(q, 6, 7);
+                const auto hdir = in_range(q, 4, 5) - in_range(q, 8, 9);
+
+                int ishft, jshft, kshft;
+                jshft = tya + vdir * in_range<lint>(tya + vdir, radius, ye);
+                kshft = tza + hdir * in_range<lint>(tza + hdir, radius, ze);
+                // fluxes in i direction
+                pL = prb[idx3(txa + (q % 2) - 1, jshft, kshft, sx, sy, 0)];
+                pR = prb[idx3(txa + (q % 2) + 0, jshft, kshft, sx, sy, 0)];
+
+                if (!use_pcm) {
+                    pLL = prb[idx3(txa + (q % 2) - 2, jshft, kshft, sx, sy, 0)];
+                    pRR = prb[idx3(txa + (q % 2) + 1, jshft, kshft, sx, sy, 0)];
+
+                    pL = pL + plm_gradient(pL, pLL, pR, plm_theta) * 0.5;
+                    pR = pR - plm_gradient(pR, pL, pRR, plm_theta) * 0.5;
                 }
-            default:
-                {
-                    const real rl = x1l + vfaceL * step * dt;
-                    const real rr = x1r + vfaceR * step * dt;
-                    const real ql = get_x2face(jj, 0);
-                    const real qr = get_x2face(jj, 1);
-                    const real zl = get_x3face(kk, 0);
-                    const real zr = get_x3face(kk, 1);
-                    const real rmean =
-                        get_cell_centroid(rr, rl, simbi::Geometry::CYLINDRICAL);
-                    const real s1R = rr * (zr - zl) * (qr - ql);
-                    const real s1L = rl * (zr - zl) * (qr - ql);
-                    const real s2R = (rr - rl) * (zr - zl);
-                    const real s2L = (rr - rl) * (zr - zl);
-                    const real s3L = rmean * (rr - rl) * (zr - zl);
-                    const real s3R = s3L;
-                    // const real thmean = 0.5 * (tl + tr);
-                    const real dV = rmean * (rr - rl) * (zr - zl) * (qr - ql);
-                    const real invdV = 1.0 / dV;
+                ib_modify<dim>(pR, pL, object_x[(q % 2)], 1);
+                f[q] = (this->*riemann_solve)(pL, pR, 1, 0);
 
-                    // Grab central primitives
-                    const real rhoc = prim_buff[tid].rho;
-                    const real uc   = prim_buff[tid].get_v1();
-                    const real vc   = prim_buff[tid].get_v2();
-                    // const real wc   = prim_buff[tid].get_v3();
-                    const real pc   = prim_buff[tid].total_pressure();
-                    const auto bmuc = mag_fourvec_t(prim_buff[tid]);
+                ishft = txa + vdir * in_range<lint>(txa + vdir, radius, xe);
+                // fluxes in j direction
+                pL = prb[idx3(ishft, tya + (q % 2) - 1, kshft, sx, sy, 0)];
+                pR = prb[idx3(ishft, tya + (q % 2) + 0, kshft, sx, sy, 0)];
 
-                    const real hc   = prim_buff[tid].gas_enthalpy(gamma);
-                    const real gam2 = prim_buff[tid].lorentz_factor_squared();
+                if (!use_pcm) {
+                    pLL = prb[idx3(ishft, tya + (q % 2) - 2, kshft, sx, sy, 0)];
+                    pRR = prb[idx3(ishft, tya + (q % 2) + 1, kshft, sx, sy, 0)];
 
-                    const auto geom_source = conserved_t{
-                      0.0,
-                      (rhoc * hc * gam2 * (vc * vc) - bmuc.two * bmuc.two -
-                       bmuc.three * bmuc.three) /
-                              rmean +
-                          pc * (s1R - s1L) * invdV,
-                      -(rhoc * hc * gam2 * uc * vc - bmuc.one * bmuc.two) /
-                          rmean,
-                      0.0,
-                      0.0,
-                      0.0,
-                      0.0,
-                      0.0
-                    };
-                    cons[aid] -= ((f[RF] * s1R - f[LF] * s1L) * invdV +
-                                  (g[RF] * s2R - g[LF] * s2L) * invdV +
-                                  (h[RF] * s3R - h[LF] * s3L) * invdV -
-                                  geom_source - source_terms) *
-                                 dt * step;
-                    break;
+                    pL = pL + plm_gradient(pL, pLL, pR, plm_theta) * 0.5;
+                    pR = pR - plm_gradient(pR, pL, pRR, plm_theta) * 0.5;
                 }
-        }   // end switch
-    });
+                ib_modify<dim>(pR, pL, object_y[(q % 2)], 2);
+                g[q] = (this->*riemann_solve)(pL, pR, 2, 0);
+
+                jshft = tya + hdir * in_range<lint>(tya + hdir, radius, ye);
+                // fluxes in k direction
+                pL = prb[idx3(ishft, jshft, tza + (q % 2) - 1, sx, sy, 0)];
+                pR = prb[idx3(ishft, jshft, tza + (q % 2) + 0, sx, sy, 0)];
+
+                if (!use_pcm) {
+                    pLL = prb[idx3(ishft, jshft, tza + (q % 2) - 2, sx, sy, 0)];
+                    pRR = prb[idx3(ishft, jshft, tza + (q % 2) + 1, sx, sy, 0)];
+
+                    pL = pL + plm_gradient(pL, pLL, pR, plm_theta) * 0.5;
+                    pR = pR - plm_gradient(pR, pL, pRR, plm_theta) * 0.5;
+                }
+                ib_modify<dim>(pR, pL, object_z[(q % 2)], 3);
+                h[q] = (this->*riemann_solve)(pL, pR, 3, 0);
+            }
+
+            // compute edge emfs in clockwise direction wrt cell plane
+            detail::for_sequence(
+                detail::make_index_sequence<4>(),
+                [&](auto qidx) {
+                    constexpr auto q      = static_cast<luint>(qidx);
+                    constexpr auto corner = static_cast<Corner>(q);
+                    auto widx = q == 0 ? 1 : q == 1 ? 0 : q == 2 ? 6 : 7;
+                    auto eidx = q == 0 ? 3 : q == 1 ? 2 : q == 2 ? 0 : 1;
+                    auto sidx = q == 0 ? 1 : q == 1 ? 7 : q == 2 ? 6 : 0;
+                    auto nidx = q == 0 ? 3 : q == 1 ? 1 : q == 2 ? 0 : 2;
+
+                    e3[q] = calc_edge_emf<Plane::IJ, corner>(
+                        g[widx],
+                        g[eidx],
+                        f[sidx],
+                        f[nidx],
+                        prb,
+                        ii,
+                        jj,
+                        kk,
+                        txa,
+                        tya,
+                        tza,
+                        3
+                    );
+
+                    widx  = q == 0 ? 1 : q == 1 ? 0 : q == 2 ? 6 : 7;
+                    eidx  = q == 0 ? 3 : q == 1 ? 2 : q == 2 ? 0 : 1;
+                    sidx  = q == 0 ? 1 : q == 1 ? 9 : q == 2 ? 8 : 0;
+                    nidx  = q == 0 ? 5 : q == 1 ? 1 : q == 2 ? 0 : 4;
+                    e2[q] = calc_edge_emf<Plane::IK, corner>(
+                        h[widx],
+                        h[eidx],
+                        f[sidx],
+                        f[nidx],
+                        prb,
+                        ii,
+                        jj,
+                        kk,
+                        txa,
+                        tya,
+                        tza,
+                        2
+                    );
+
+                    widx  = q == 0 ? 1 : q == 1 ? 0 : q == 2 ? 8 : 9;
+                    eidx  = q == 0 ? 5 : q == 1 ? 4 : q == 2 ? 0 : 1;
+                    sidx  = q == 0 ? 1 : q == 1 ? 9 : q == 2 ? 8 : 0;
+                    nidx  = q == 0 ? 5 : q == 1 ? 1 : q == 2 ? 0 : 4;
+                    e1[q] = calc_edge_emf<Plane::JK, corner>(
+                        h[widx],
+                        h[eidx],
+                        g[sidx],
+                        g[nidx],
+                        prb,
+                        ii,
+                        jj,
+                        kk,
+                        txa,
+                        tya,
+                        tza,
+                        1
+                    );
+                }
+            );
+
+            auto& b1L = bstag1[xlf];
+            auto& b1R = bstag1[xrf];
+            auto& b2L = bstag2[ylf];
+            auto& b2R = bstag2[yrf];
+            auto& b3L = bstag3[zlf];
+            auto& b3R = bstag3[zrf];
+            auto& b1c = cons[aid].b1;
+            auto& b2c = cons[aid].b2;
+            auto& b3c = cons[aid].b3;
+
+            b1L = b1_data[xlf] - dt * step * curl_e(1, e2, e3, 0);
+            b1R = b1_data[xrf] - dt * step * curl_e(1, e2, e3, 1);
+
+            b2L = b2_data[ylf] - dt * step * curl_e(2, e3, e1, 0);
+            b2R = b2_data[yrf] - dt * step * curl_e(2, e3, e1, 1);
+
+            b3L = b3_data[zlf] - dt * step * curl_e(3, e1, e2, 0);
+            b3R = b3_data[zrf] - dt * step * curl_e(3, e1, e2, 1);
+
+            // if constexpr (global::debug_mode) {
+            const auto divb = (b1R - b1L) * invdx1 + (b2R - b2L) * invdx2 +
+                              (b3R - b3L) * invdx3;
+
+            if (!goes_to_zero(divb)) {
+                if (kk == 0 && jj == 2 && ii == 4) {
+                    printf("========================================\n");
+                    printf("DIV.B: %.2e\n", divb);
+                    printf(
+                        "[%llu, %llu, %llu] b1r - b1l: %f, b2r - b2l: %f, "
+                        "b3r "
+                        "- "
+                        "b3l: %f\n",
+                        kk,
+                        jj,
+                        ii,
+                        (b1R - b1L) * invdx1,
+                        (b2R - b2L) * invdx2,
+                        (b3R - b3L) * invdx3
+                    );
+
+                    printf(
+                        "[%llu, %llu, %llu] b1L: %f, b1R: %f, b2L: %f, "
+                        "b2R: "
+                        "%f, "
+                        "b3L: %f, b3R: %f\n",
+                        kk,
+                        jj,
+                        ii,
+                        b1L,
+                        b1R,
+                        b2L,
+                        b2R,
+                        b3L,
+                        b3R
+                    );
+                    printf(
+                        "b1diff: %f, b2diff: %f, b3diff: %f\n",
+                        dt * step * curl_e(1, e2, e3, 1) -
+                            dt * step * curl_e(1, e2, e3, 0),
+                        dt * step * curl_e(2, e3, e1, 1) -
+                            dt * step * curl_e(2, e3, e1, 0),
+                        dt * step * curl_e(3, e1, e2, 1) -
+                            dt * step * curl_e(3, e1, e2, 0)
+                    );
+                    printf(
+                        "e3[NE]: %f, e3[SE]: %f, e3[SW]: %f, e3[NW]: %f\n",
+                        e3[IJ::NE],
+                        e3[IJ::SE],
+                        e3[IJ::SW],
+                        e3[IJ::NW]
+                    );
+                    printf("========================================\n");
+                    printf("Divergence of B is not zero!\n");
+                    std::cin.get();
+                }
+            }
+            // }
+            b1c = static_cast<real>(0.5) * (b1R + b1L);
+            b2c = static_cast<real>(0.5) * (b2R + b2L);
+            b3c = static_cast<real>(0.5) * (b3R + b3L);
+
+            // TODO: implement functional source and gravity
+            const auto source_terms = conserved_t{};
+            // Gravity
+            const auto gravity = conserved_t{};
+
+            // Advance depending on geometry
+            switch (geometry) {
+                case simbi::Geometry::CARTESIAN:
+                    {
+                        cons[aid] -= ((f[RF] - f[LF]) * invdx1 +
+                                      (g[RF] - g[LF]) * invdx2 +
+                                      (h[RF] - h[LF]) * invdx3 - source_terms -
+                                      gravity) *
+                                     dt * step;
+                        break;
+                    }
+                case simbi::Geometry::SPHERICAL:
+                    {
+                        const real rl    = x1l + vfaceL * step * dt;
+                        const real rr    = x1r + vfaceR * step * dt;
+                        const real tl    = get_x2face(jj, 0);
+                        const real tr    = get_x2face(jj, 1);
+                        const real ql    = get_x3face(kk, 0);
+                        const real qr    = get_x3face(kk, 1);
+                        const real rmean = get_cell_centroid(
+                            rr,
+                            rl,
+                            simbi::Geometry::SPHERICAL
+                        );
+                        const real s1R    = rr * rr;
+                        const real s1L    = rl * rl;
+                        const real s2R    = std::sin(tr);
+                        const real s2L    = std::sin(tl);
+                        const real thmean = 0.5 * (tl + tr);
+                        const real sint   = std::sin(thmean);
+                        const real dV1    = rmean * rmean * (rr - rl);
+                        const real dV2    = rmean * sint * (tr - tl);
+                        const real dV3    = rmean * sint * (qr - ql);
+                        const real cot    = std::cos(thmean) / sint;
+
+                        // Grab central primitives
+                        const real rhoc = prb[tid].rho;
+                        const real uc   = prb[tid].get_v1();
+                        const real vc   = prb[tid].get_v2();
+                        const real wc   = prb[tid].get_v3();
+                        const real pc   = prb[tid].total_pressure();
+                        const auto bmuc = mag_fourvec_t(prb[tid]);
+
+                        const real hc   = prb[tid].gas_enthalpy(gamma);
+                        const real gam2 = prb[tid].lorentz_factor_squared();
+
+                        const auto geom_source = conserved_t{
+                          0.0,
+                          (rhoc * hc * gam2 * (vc * vc + wc * wc) -
+                           bmuc.two * bmuc.two - bmuc.three * bmuc.three) /
+                                  rmean +
+                              pc * (s1R - s1L) / dV1,
+                          (rhoc * hc * gam2 * (wc * wc * cot - uc * vc) -
+                           bmuc.three * bmuc.three * cot + bmuc.one * bmuc.two
+                          ) / rmean +
+                              pc * (s2R - s2L) / dV2,
+                          -(rhoc * hc * gam2 * wc * (uc + vc * cot) -
+                            bmuc.three * bmuc.one - bmuc.three * bmuc.two * cot
+                          ) / rmean,
+                          0.0,
+                          0.0,
+                          0.0,
+                          0.0
+                        };
+                        cons[aid] -= ((f[RF] * s1R - f[LF] * s1L) / dV1 +
+                                      (g[RF] * s2R - g[LF] * s2L) / dV2 +
+                                      (h[RF] - h[LF]) / dV3 - geom_source -
+                                      source_terms - gravity) *
+                                     dt * step;
+                        break;
+                    }
+                default:
+                    {
+                        const real rl    = x1l + vfaceL * step * dt;
+                        const real rr    = x1r + vfaceR * step * dt;
+                        const real ql    = get_x2face(jj, 0);
+                        const real qr    = get_x2face(jj, 1);
+                        const real zl    = get_x3face(kk, 0);
+                        const real zr    = get_x3face(kk, 1);
+                        const real rmean = get_cell_centroid(
+                            rr,
+                            rl,
+                            simbi::Geometry::CYLINDRICAL
+                        );
+                        const real s1R = rr * (zr - zl) * (qr - ql);
+                        const real s1L = rl * (zr - zl) * (qr - ql);
+                        const real s2R = (rr - rl) * (zr - zl);
+                        const real s2L = (rr - rl) * (zr - zl);
+                        const real s3L = rmean * (rr - rl) * (zr - zl);
+                        const real s3R = s3L;
+                        // const real thmean = 0.5 * (tl + tr);
+                        const real dV =
+                            rmean * (rr - rl) * (zr - zl) * (qr - ql);
+                        const real invdV = 1.0 / dV;
+
+                        // Grab central primitives
+                        const real rhoc = prb[tid].rho;
+                        const real uc   = prb[tid].get_v1();
+                        const real vc   = prb[tid].get_v2();
+                        // const real wc   = prb[tid].get_v3();
+                        const real pc   = prb[tid].total_pressure();
+                        const auto bmuc = mag_fourvec_t(prb[tid]);
+
+                        const real hc   = prb[tid].gas_enthalpy(gamma);
+                        const real gam2 = prb[tid].lorentz_factor_squared();
+
+                        const auto geom_source = conserved_t{
+                          0.0,
+                          (rhoc * hc * gam2 * (vc * vc) - bmuc.two * bmuc.two -
+                           bmuc.three * bmuc.three) /
+                                  rmean +
+                              pc * (s1R - s1L) * invdV,
+                          -(rhoc * hc * gam2 * uc * vc - bmuc.one * bmuc.two) /
+                              rmean,
+                          0.0,
+                          0.0,
+                          0.0,
+                          0.0,
+                          0.0
+                        };
+                        cons[aid] -= ((f[RF] * s1R - f[LF] * s1L) * invdV +
+                                      (g[RF] * s2R - g[LF] * s2L) * invdV +
+                                      (h[RF] * s3R - h[LF] * s3L) * invdV -
+                                      geom_source - source_terms) *
+                                     dt * step;
+                        break;
+                    }
+            }   // end switch
+        }
+    );
 }
 
 // //===================================================================================================================
@@ -2427,9 +2448,9 @@ void RMHD<dim>::simulate(
     }
 
     // allocate space for face-centered magnetic fields
-    bstag1.resize(nxv * (yag + 2) * (zag + 2));
-    bstag2.resize((xag + 2) * nyv * (zag + 2));
-    bstag3.resize((xag + 2) * (yag + 2) * nzv);
+    bstag1.resize(nxv * yag * zag);
+    bstag2.resize(xag * nyv * zag);
+    bstag3.resize(xag * yag * nzv);
     bstag1 = bfield[0];
     bstag2 = bfield[1];
     bstag3 = bfield[2];
@@ -2465,6 +2486,19 @@ void RMHD<dim>::simulate(
     compute_bytes_and_strides<primitive_t>(dim);
     print_shared_mem();
     set_the_riemann_solver();
+
+    config_ghosts3D(
+        activeP,
+        cons.data(),
+        nx,
+        ny,
+        nz,
+        spatial_order == "pcm",
+        bcs.data(),
+        inflow_zones.data(),
+        half_sphere,
+        geometry
+    );
     cons2prim(fullP);
     if constexpr (global::on_gpu) {
         adapt_dt<TIMESTEP_TYPE::MINIMUM>(fullP);
@@ -2479,18 +2513,6 @@ void RMHD<dim>::simulate(
     // Save initial condition
     if (t == 0 || init_chkpt_idx == 0) {
         write_to_file(*this);
-        config_ghosts3D(
-            activeP,
-            cons.data(),
-            nx,
-            ny,
-            nz,
-            spatial_order == "pcm",
-            bcs.data(),
-            inflow_zones.data(),
-            half_sphere,
-            geometry
-        );
     }
 
     // Simulate :)

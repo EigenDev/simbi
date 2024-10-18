@@ -71,7 +71,7 @@ namespace simbi {
         /* Shared Data Members */
         ndarray<primitive_t> prims;
         ndarray<conserved_t> cons, outer_zones, inflow_zones;
-        ndarray<real> edens_guess, dt_min, bstag1, bstag2, bstag3;
+        ndarray<real> dt_min, bstag1, bstag2, bstag3;
         bool scalar_all_zeros;
         luint nzone_edges;
 
@@ -100,8 +100,7 @@ namespace simbi {
         DUAL void calc_max_wave_speeds(
             const primitive_t& prims,
             const luint nhat,
-            real speeds[],
-            real& cs2
+            real speeds[4]
         ) const;
 
         DUAL eigenvals_t calc_eigenvals(
@@ -192,10 +191,9 @@ namespace simbi {
 
         DUAL real curl_e(
             const luint nhat,
-            const real ejl,
-            const real ejr,
-            const real ekl,
-            const real ekr
+            const real ej[4],
+            const real ek[4],
+            const int side
         ) const;
 
         /**
@@ -208,8 +206,6 @@ namespace simbi {
             const conserved_t& fe,
             const conserved_t& fs,
             const conserved_t& fn,
-            const ndarray<real>& bstagp1,
-            const ndarray<real>& bstagp2,
             const primitive_t* prims,
             const luint ii,
             const luint jj,
@@ -226,7 +222,6 @@ namespace simbi {
         {
             cons.copyToGpu();
             prims.copyToGpu();
-            edens_guess.copyToGpu();
             dt_min.copyToGpu();
             density_source.copyToGpu();
             m1_source.copyToGpu();
