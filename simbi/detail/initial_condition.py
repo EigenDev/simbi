@@ -18,15 +18,8 @@ def dot_product(a: NDArray[Any], b: NDArray[Any]) -> Any:
     return np.sum([x * y for x, y in zip(a, b)], axis=0)
 
 
-def calc_lorentz_factor(
-    vsquared: NDArray[Any],
-    regime: str
-) -> FloatOrArray:
-    return (
-        1.0
-        if regime == "classical"
-        else (1.0 - np.asanyarray(vsquared)) ** (-0.5)
-    )
+def calc_lorentz_factor(vsquared: NDArray[Any], regime: str) -> FloatOrArray:
+    return 1.0 if regime == "classical" else (1.0 - np.asanyarray(vsquared)) ** (-0.5)
 
 
 def calc_spec_enthalpy(
@@ -36,15 +29,11 @@ def calc_spec_enthalpy(
     regime: str,
 ) -> FloatOrArray:
     return (
-        1.0
-        if regime == "classical"
-        else 1.0 + gamma * pressure / (rho * (gamma - 1.0))
+        1.0 if regime == "classical" else 1.0 + gamma * pressure / (rho * (gamma - 1.0))
     )
 
-def calc_labframe_densiity(
-    rho: FloatOrArray,
-    lorentz: FloatOrArray
-) -> FloatOrArray:
+
+def calc_labframe_densiity(rho: FloatOrArray, lorentz: FloatOrArray) -> FloatOrArray:
     return rho * lorentz
 
 
@@ -66,9 +55,7 @@ def calc_labframe_momentum(
         bsq = dot_product(bfields, bfields)
         vdb_bvec = vdb * bfields
 
-    return (
-        (rho * lorentz * lorentz * enthalpy + bsq) * velocity - vdb_bvec
-    )
+    return (rho * lorentz * lorentz * enthalpy + bsq) * velocity - vdb_bvec
 
 
 def calc_labframe_energy(
@@ -79,7 +66,7 @@ def calc_labframe_energy(
     pressure: FloatOrArray,
     velocity: NDArray[numpy_float],
     bfields: NDArray[numpy_float],
-    regime: str
+    regime: str,
 ) -> FloatOrArray:
     if len(bfields) == 0:
         bsq: FloatOrArray = 0.0
@@ -87,14 +74,19 @@ def calc_labframe_energy(
     else:
         bsq = dot_product(bfields, bfields)
         vdb = dot_product(velocity, bfields)
-        
+
     vsq: FloatOrArray = dot_product(velocity, velocity)
 
     return (
         pressure / (gamma - 1.0) + 0.5 * rho * vsq + 0.5 * bsq
         if regime == "classical"
-        else (rho * lorentz * lorentz * enthalpy - pressure
-              - rho * lorentz + 0.5 * bsq + 0.5 * (bsq * vsq - vdb ** 2))
+        else (
+            rho * lorentz * lorentz * enthalpy
+            - pressure
+            - rho * lorentz
+            + 0.5 * bsq
+            + 0.5 * (bsq * vsq - vdb**2)
+        )
     )
 
 
@@ -108,11 +100,7 @@ def flatten_fully(x: Any) -> Any:
         return np.asanyarray(x)
 
 
-def load_checkpoint(
-        model: Any,
-        filename: str,
-        dim: int,
-        mesh_motion: bool) -> None:
+def load_checkpoint(model: Any, filename: str, dim: int, mesh_motion: bool) -> None:
     print(f"Loading from checkpoint: {filename}...", flush=True)
     setup: dict[str, Any] = {}
     volume_factor: Union[float, NDArray[numpy_float]] = 1.0
@@ -158,7 +146,8 @@ def load_checkpoint(
                 )
             elif ndim == 2:
                 volume_factor = helpers.calc_cell_volume2D(
-                    x1=mesh["x1"], x2=mesh["x2"], coord_system=setup["coord_system"])
+                    x1=mesh["x1"], x2=mesh["x2"], coord_system=setup["coord_system"]
+                )
             elif ndim == 3:
                 volume_factor = helpers.calc_cell_volume3D(
                     x1=mesh["x1"],
@@ -171,16 +160,14 @@ def load_checkpoint(
                 npad = tuple(
                     tuple(val)
                     for val in [
-                        [((ds["first_order"] ^ 1) + 1),
-                         ((ds["first_order"] ^ 1) + 1)]
+                        [((ds["first_order"] ^ 1) + 1), ((ds["first_order"] ^ 1) + 1)]
                     ]
                     * ndim
                 )
                 volume_factor = np.pad(volume_factor, npad, "edge")
 
         rho = hf.get("rho")[:]
-        v = [(hf.get(f"v{dim}") or hf.get(f"v"))[:]
-             for dim in range(1, ndim + 1)]
+        v = [(hf.get(f"v{dim}") or hf.get(f"v"))[:] for dim in range(1, ndim + 1)]
         p = hf.get("p")[:]
         chi = (hf.get("chi") or np.zeros_like(rho))[:]
         rho = flatten_fully(rho.reshape(nz, ny, nx))
@@ -220,8 +207,7 @@ def load_checkpoint(
         if ndim >= 3:
             model.x3 = mesh["x3"]
 
-        model.u = np.array(
-            [rho * W, *momentum, e, rho * W * chi]) * volume_factor
+        model.u = np.array([rho * W, *momentum, e, rho * W * chi]) * volume_factor
 
         model.chkpt_idx = ds["chkpt_idx"]
 
@@ -247,10 +233,7 @@ def initializeModel(
 
 
 # @release_memory
-def construct_the_state(
-    model: Any,
-    initial_state: NDArray[numpy_float]
-) -> None:
+def construct_the_state(model: Any, initial_state: NDArray[numpy_float]) -> None:
     if not model.mhd:
         model.nvars = 3 + model.dimensionality
     else:
@@ -267,9 +250,7 @@ def construct_the_state(
             f"Initializing Problem With a {str(model.dimensionality)}D Discontinuity..."
         )
 
-        if len(
-                model.geometry) == 3 and isinstance(
-                model.geometry[0], (int, float)):
+        if len(model.geometry) == 3 and isinstance(model.geometry[0], (int, float)):
             geom_tuple: Any = (model.geometry,)
         else:
             geom_tuple = model.geometry
@@ -292,10 +273,8 @@ def construct_the_state(
         ]
 
         # partition the grid based on user-defined partition coordinates
-        partition_inds: list[Any] = list(
-            product(*[permutations(x) for x in pieces]))
-        partition_inds = [tuple([slice(*y) for y in x])
-                          for x in partition_inds]
+        partition_inds: list[Any] = list(product(*[permutations(x) for x in pieces]))
+        partition_inds = [tuple([slice(*y) for y in x]) for x in partition_inds]
         partitions = [model.u[(..., *sector)] for sector in partition_inds]
 
         for idx, part in enumerate(partitions):
@@ -303,13 +282,11 @@ def construct_the_state(
             rho, *velocity, pressure = state[: model.number_of_non_em_terms]
             velocity = np.asanyarray(velocity)
             # check if there are any bfields
-            mean_bfields = state[model.number_of_non_em_terms:]
+            mean_bfields = state[model.number_of_non_em_terms :]
 
             vsqr = dot_product(velocity, velocity)
             lorentz_factor = calc_lorentz_factor(vsqr, model.regime)
-            enthalpy = calc_spec_enthalpy(
-                rho, pressure, model.gamma, model.regime
-            )
+            enthalpy = calc_spec_enthalpy(rho, pressure, model.gamma, model.regime)
 
             energy = calc_labframe_energy(
                 model.gamma,
@@ -319,34 +296,38 @@ def construct_the_state(
                 pressure,
                 velocity,
                 mean_bfields,
-                model.regime
+                model.regime,
             )
-            
+
             dens = calc_labframe_densiity(rho, lorentz_factor)
             mom = calc_labframe_momentum(
                 rho, lorentz_factor, enthalpy, velocity, mean_bfields
             )
 
             if model.dimensionality == 1:
-                part[...] = np.array(
-                    [dens, *mom, energy, *mean_bfields])[:, None]
+                part[...] = np.array([dens, *mom, energy, *mean_bfields])[:, None]
             else:
                 part[...] = (
                     part[...].transpose()
                     + np.array([dens, *mom, energy, *mean_bfields])
                 ).transpose()
     else:
-        rho, * \
-            velocity, pressure = initial_state[: model.number_of_non_em_terms]
+        rho, *velocity, pressure = initial_state[: model.number_of_non_em_terms]
         velocity = np.asanyarray(velocity)
         # check if there are any bfields
-        mean_bfields = initial_state[model.number_of_non_em_terms:]
+        bfields_stag = initial_state[model.number_of_non_em_terms :]
+        if len(bfields_stag) != 0:
+            mean_bfields = np.array(
+                [
+                    0.5 * (bfields_stag[0][..., 1:] + bfields_stag[0][..., :-1]),
+                    0.5 * (bfields_stag[1][:, 1:] + bfields_stag[1][:, :-1]),
+                    0.5 * (bfields_stag[2][1:] + bfields_stag[2][:-1]),
+                ]
+            )
 
         vsqr = dot_product(velocity, velocity)
         lorentz_factor = calc_lorentz_factor(vsqr, model.regime)
-        enthalpy = calc_spec_enthalpy(
-            rho, pressure, model.gamma, model.regime
-        )
+        enthalpy = calc_spec_enthalpy(rho, pressure, model.gamma, model.regime)
 
         model.init_density = calc_labframe_densiity(rho, lorentz_factor)
         model.init_momentum = calc_labframe_momentum(
@@ -354,13 +335,13 @@ def construct_the_state(
         )
         model.init_energy = calc_labframe_energy(
             model.gamma,
-            rho, 
-            lorentz_factor, 
-            enthalpy, 
-            pressure, 
-            velocity, 
+            rho,
+            lorentz_factor,
+            enthalpy,
+            pressure,
+            velocity,
             mean_bfields,
-            model.regime
+            model.regime,
         )
 
         model.u[...] = np.array(
