@@ -341,10 +341,10 @@ class Visualizer:
                                     yvar = var[zidx, yidx]
                                 if self.shock_coord:
                                     shock_location = np.argmax(yvar)
-                                    xvar = mesh["x1"] / mesh["x1"][shock_location]
+                                    xvar = x / x[shock_location]
                                     scale = yvar[shock_location]
                                 else:
-                                    xvar = mesh["x1"]
+                                    xvar = x
                                 # s = ["0.1", "1", "10"]
                                 # if idx == 0:
                                 #     # d = rf"$v_{{\rm wind}} = {s[fidx]}$, $z={x2coord:.0f}$"
@@ -439,6 +439,10 @@ class Visualizer:
             ax.set_yscale("log")
         elif setup["x1_cell_spacing"] == "log":
             ax.set_xscale("log")
+        elif self.semilogx:
+            ax.set_xscale("log")
+        elif self.semilogy:
+            ax.set_yscale("log")
 
         if len(self.fields) == 1:
             ax.set_ylabel(field_str)
@@ -519,7 +523,6 @@ class Visualizer:
                         else:
                             var = fields[field]
 
-                    
                     if self.units:
                         if field in ["p", "energy", "energy_rst"]:
                             var *= util.edens_scale.value
@@ -779,8 +782,7 @@ class Visualizer:
                 time *= util.time_scale
 
             if self.setup:
-                timmy = 10
-                title = f"{self.setup} t = {timmy:.{precision}f}"
+                title = f"{self.setup} t = {time:.{precision}f}"
                 if self.cartesian:
                     ax.set_title(title)
                 else:
@@ -807,8 +809,25 @@ class Visualizer:
             else:
                 ax.set_ylim(*self.ylims)
                 ax.set_aspect("equal")
-                ax.set_xlabel("$x$")
-                ax.set_ylabel("$z$")
+                if self.ndim == 3:
+                    if self.projection[0] == 1:
+                        xlabel = "$x_1$"
+                    elif self.projection[0] == 2:
+                        xlabel = "$x_2$"
+                    else:
+                        xlabel = "$x_3$"
+                    
+                    if self.projection[1] == 1:
+                        ylabel = "$x_1$"
+                    elif self.projection[1] == 2:
+                        ylabel = "$x_2$"
+                    else:
+                        ylabel = "$x_3$"
+                else:
+                    xlabel = "$x$"
+                    ylabel = "$y$"
+                ax.set_xlabel(xlabel)
+                ax.set_ylabel(ylabel)
 
             if self.xmax:
                 ax.set_rmax(self.xmax)
@@ -1418,7 +1437,7 @@ class Visualizer:
                 # if self.refs:
                 # x = mesh['x1']
                 # self.refs[idx].set_data(x, self.refy * (x / self.refx) ** (-3/2))
-            elif self.ndim == 2:
+            else:
                 if len(self.fields) > 1:
                     self.frames[idx].set_array(var.ravel())
                 else:
@@ -1468,7 +1487,8 @@ def visualize(parser: argparse.ArgumentParser, ndim: int) -> None:
     viz = Visualizer(parser, ndim)
     if viz.kind == "movie":
         if viz.ndim == 3 and not viz.oned_slice:
-            raise NotImplementedError("3D movies not yet implemented")
+            ...
+            # raise NotImplementedError("3D movies not yet implemented")
         viz.animate()
     else:
         viz.plot()
