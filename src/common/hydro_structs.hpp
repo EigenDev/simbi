@@ -1754,18 +1754,13 @@ namespace rmhd {
     };
 
     struct Eigenvals {
-        real afL, afR, csL, csR;
+        real afL, afR;
 
         Eigenvals() = default;
 
         ~Eigenvals() = default;
 
         DUAL Eigenvals(real afL, real afR) : afL(afL), afR(afR) {}
-
-        DUAL Eigenvals(real afL, real afR, real csL, real csR)
-            : afL(afL), afR(afR), csL(csL), csR(csR)
-        {
-        }
 
         // DUAL Eigenvals(real afL, real afR,
         // real asL, real asR, real csL, real csR) : afL(afL),
