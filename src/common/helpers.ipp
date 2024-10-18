@@ -712,8 +712,9 @@ namespace simbi {
 
                 if (first_order) {
                     if (jj < x2grid_size - 2 && kk < x3grid_size - 2) {
-                        const auto jk  = (kk + 1) * sx * sy + (jj + 1) * sx + 0;
-                        const auto ing = jk + 0;
+                        const auto ka   = (kk + 1) * sy * sx;
+                        const auto jk   = ka + (jj + 1) * sx + 0;
+                        const auto ing  = jk + 0;
                         const auto outg = jk + (x1grid_size - 1);
                         const auto inr  = jk + 1;
                         const auto outr = jk + (x1grid_size - 2);
@@ -743,11 +744,26 @@ namespace simbi {
                                 cons[outg] = inflow_zones[1];
                                 break;
                             case simbi::BoundaryCondition::PERIODIC:
-                                cons[outg] = cons[ing];
+                                cons[outg] = cons[inr];
                                 break;
                             default:
                                 cons[outg] = cons[outr];
                                 break;
+                        }
+
+                        // if located at the corners, set the ghost zones to the
+                        // same as the inner zones
+                        const bool kc = kk < 1 || kk + 2 >= x3grid_size - 2;
+
+                        if (kc) {
+                            // get corner indices in i-k plane
+                            const auto kq = kk == 0 ? kk : kk + 2;
+                            const auto jk_kci =
+                                kq * sy * sx + (jj + 1) * sx + 0;
+                            const auto jk_kco = kq * sy * sx + (jj + 1) * sx +
+                                                (x1grid_size - 1);
+                            cons[jk_kci] = cons[ing];
+                            cons[jk_kco] = cons[outg];
                         }
                     }
                     // Fix the ghost zones at the x2 boundaries
@@ -804,6 +820,21 @@ namespace simbi {
                                 }
                                 break;
                         }
+
+                        // if located at the corners, set the ghost zones to the
+                        // same as the inner zones
+                        const bool ic = ii < 1 || (ii + 2) >= x1grid_size - 2;
+
+                        if (ic) {
+                            // get corner indices in i-j plane
+                            const auto iq = ii < 1 ? ii : ii + 2;
+                            const auto ik_ici =
+                                (kk + 1) * sy * sx + 0 * sx + iq;
+                            const auto ik_ico = (kk + 1) * sy * sx +
+                                                (x2grid_size - 1) * sx + iq;
+                            cons[ik_ici] = cons[ing];
+                            cons[ik_ico] = cons[outg];
+                        }
                     }
 
                     // Fix the ghost zones at the x3 boundaries
@@ -852,6 +883,21 @@ namespace simbi {
                                         break;
                                 }
                                 break;
+                        }
+
+                        // if located at the corners, set the ghost zones to the
+                        // same as the inner zones
+                        const bool jc = jj < 1 || jj + 2 >= x2grid_size - 2;
+
+                        if (jc) {
+                            // get corner indices in j-k plane
+                            const auto jq = jj < 1 ? jj : jj + 2;
+                            const auto ij_jci =
+                                0 * sy * sx + jq * sx + (ii + 1);
+                            const auto ij_jco = (x3grid_size - 1) * sy * sx +
+                                                jq * sx + (ii + 1);
+                            cons[ij_jci] = cons[ing];
+                            cons[ij_jco] = cons[outg];
                         }
                     }
                 }
@@ -910,6 +956,25 @@ namespace simbi {
                                 cons[outg]  = cons[outr];
                                 cons[outgg] = cons[outr];
                                 break;
+                        }
+
+                        const bool kc = kk < 2 || (kk + 4) >= x3grid_size - 4;
+                        if (kc) {
+                            // get corner indices in i-k plane
+                            const auto kq = kk < 2 ? kk : kk + 4;
+                            const auto jk_kci =
+                                kq * sy * sx + (jj + 2) * sx + 0;
+                            const auto jk_kcii =
+                                kq * sy * sx + (jj + 2) * sx + 1;
+                            const auto jk_kco = kq * sy * sx + (jj + 2) * sx +
+                                                (x1grid_size - 1);
+                            const auto jk_kcoo = kq * sy * sx + (jj + 2) * sx +
+                                                 (x1grid_size - 2);
+
+                            cons[jk_kci]  = cons[ing];
+                            cons[jk_kco]  = cons[outg];
+                            cons[jk_kcii] = cons[ingg];
+                            cons[jk_kcoo] = cons[outgg];
                         }
                     }
                     // Fix the ghost zones at the x2 boundaries
@@ -978,8 +1043,8 @@ namespace simbi {
                                         cons[outgg] = inflow_zones[3];
                                         break;
                                     case simbi::BoundaryCondition::PERIODIC:
-                                        cons[outg]  = cons[inr];
-                                        cons[outgg] = cons[inrr];
+                                        cons[outg]  = cons[inrr];
+                                        cons[outgg] = cons[inr];
                                         break;
                                     default:
                                         cons[outg]  = cons[outr];
@@ -987,6 +1052,24 @@ namespace simbi {
                                         break;
                                 }
                                 break;
+                        }
+
+                        const bool ic = ii < 2 || ii + 4 >= x1grid_size - 4;
+                        if (ic) {
+                            // get corner indices in i-j plane
+                            const auto iq = ii < 2 ? ii : ii + 4;
+                            const auto ik_ici =
+                                (kk + 2) * sy * sx + 0 * sx + iq;
+                            const auto ik_icii =
+                                (kk + 2) * sy * sx + 1 * sx + iq;
+                            const auto ik_ico = (kk + 2) * sy * sx +
+                                                (x2grid_size - 1) * sx + iq;
+                            const auto ik_icoo = (kk + 2) * sy * sx +
+                                                 (x2grid_size - 2) * sx + iq;
+                            cons[ik_ici]  = cons[ing];
+                            cons[ik_ico]  = cons[outg];
+                            cons[ik_icii] = cons[ingg];
+                            cons[ik_icoo] = cons[outgg];
                         }
                     }
 
@@ -1046,8 +1129,8 @@ namespace simbi {
                                         cons[outgg] = inflow_zones[5];
                                         break;
                                     case simbi::BoundaryCondition::PERIODIC:
-                                        cons[outg]  = cons[inr];
-                                        cons[outgg] = cons[inrr];
+                                        cons[outg]  = cons[inrr];
+                                        cons[outgg] = cons[inr];
                                         break;
                                     default:
                                         cons[outg]  = cons[outr];
@@ -1055,6 +1138,24 @@ namespace simbi {
                                         break;
                                 }
                                 break;
+                        }
+
+                        const bool jc = jj < 2 || jj + 4 >= x2grid_size - 4;
+                        if (jc) {
+                            // get corner indices in j-k plane
+                            const auto jq = jj < 2 ? jj : jj + 4;
+                            const auto ij_jci =
+                                0 * sy * sx + jq * sx + (ii + 2);
+                            const auto ij_jcii =
+                                1 * sy * sx + jq * sx + (ii + 2);
+                            const auto ij_jco = (x3grid_size - 1) * sy * sx +
+                                                jq * sx + (ii + 2);
+                            const auto ij_jcoo = (x3grid_size - 2) * sy * sx +
+                                                 jq * sx + (ii + 2);
+                            cons[ij_jci]  = cons[ing];
+                            cons[ij_jco]  = cons[outg];
+                            cons[ij_jcii] = cons[ingg];
+                            cons[ij_jcoo] = cons[outgg];
                         }
                     }
                 }
@@ -1968,6 +2069,161 @@ namespace simbi {
             }
             return nroots;
         }
+
+        // solve the cubic equation (Pluto)
+        // template <typename T>
+        // DUAL T cubicPluto(T b, T c, T d, T res[3])
+        // {
+        //     double b2;
+        //     double Q, R;
+        //     double sQ, arg, theta, cs, sn, p;
+        //     const double one_3  = 1.0 / 3.0;
+        //     const double one_27 = 1.0 / 27.0;
+        //     const double sqrt3  = std::sqrt(3.0);
+
+        //     b2 = b * b;
+
+        //     /*  ----------------------------------------------
+        //          the expression for f should be
+        //          Q = c - b*b/3.0; however, to avoid negative
+        //          round-off making h > 0.0 or g^2/4 - h < 0.0
+        //          we let c --> c(1- 1.1e-16)
+        //         ---------------------------------------------- */
+
+        //     Q = b2 * one_3 -
+        //         c * (1.0 - 1.e-16); /* = 3*Q, with Q given by Eq. [5.6.10] */
+        //     R = b * (2.0 * b2 - 9.0 * c) * one_27 +
+        //         d; /* = 2*R, with R given by Eq. [5.6.10] */
+
+        //     Q = my_max(Q, 0.0);
+        //     /*
+        //     if (fabs(Q) < 1.e-18){
+        //       print ("CubicSolve() very small Q = %12.6e\n",Q);
+        //       QUIT_PLUTO(1);
+        //     }
+        //     if (Q < 0.0){
+        //       print ("! CubicSolve(): Q = %8.3 < 0 \n",Q);
+        //       QUIT_PLUTO(1);
+        //     }
+        //     */
+
+        //     /* -------------------------------------------------------
+        //         We assume the cubic *always* has 3 real root for
+        //         which R^2 > Q^3.
+        //         It follows that Q is always > 0
+        //        ------------------------------------------------------- */
+
+        //     sQ  = std::sqrt(Q) / sqrt3;
+        //     arg = -1.5 * R / (Q * sQ);
+
+        //     /*  this is to prevent unpleseant situation
+        //         where both g and i are close to zero       */
+
+        //     arg = my_max(-1.0, arg);
+        //     arg = my_min(1.0, arg);
+
+        //     theta = std::acos(arg) *
+        //             one_3; /* Eq. [5.6.11], note that  pi/3 < theta < 0 */
+
+        //     cs = std::cos(theta);         /*   > 0   */
+        //     sn = sqrt3 * std::sin(theta); /*   > 0   */
+        //     p  = -b * one_3;
+
+        //     res[0] = -sQ * (cs + sn) + p;
+        //     res[1] = -sQ * (cs - sn) + p;
+        //     res[2] = 2.0 * sQ * cs + p;
+
+        //     /* -- Debug
+        //       if(debug_print) {
+        //         int l;
+        //         double x, f;
+        //         print
+        //       ("===========================================================\n");
+        //         print ("> Resolvent cubic:\n");
+        //         print ("  g(x)  = %18.12e + x*(%18.12e + x*(%18.12e + x))\n",
+        //         d,
+        //       c, b); print ("  Q     = %8.3e\n",Q); print ("  arg-1 =
+        //       %8.3e\n", -1.5*R/(Q*sQ)-1.0);
+
+        //         print ("> Cubic roots = %8.3e  %8.3e
+        //         %8.3e\n",z[0],z[1],z[2]); for (l = 0; l < 3; l++){  // check
+        //         accuracy of solution
+
+        //           x = z[l];
+        //           f = d + x*(c + x*(b + x));
+        //           print ("  verify: g(x[%d]) = %8.3e\n",l,f);
+        //         }
+
+        //         print
+        //       ("===========================================================\n");
+        //       }
+        //     */
+        //     return (0);
+        // }
+
+        // template <typename T>
+        // DUAL int quarticPluto(T b, T c, T d, T e, T res[4])
+        // {
+        //     int n, j, ifail;
+        //     double b2, sq;
+        //     double a2, a1, a0, u[4];
+        //     double p, q, r, f;
+        //     const double three_256 = 3.0 / 256.0;
+        //     const double one_64    = 1.0 / 64.0;
+        //     double sz1, sz2, sz3, sz4;
+
+        //     b2 = b * b;
+
+        //     /* --------------------------------------------------------------
+        //        1) Compute cubic coefficients using the method outlined in
+        //           http://eqworld.ipmnet.ru/En/solutions/ae/ae0108.pdf
+        //        --------------------------------------------------------------
+        //        */
+
+        //     p = c - b2 * 0.375;
+        //     q = d + b2 * b * 0.125 - b * c * 0.5;
+        //     r = e - 3.0 * b2 * b2 / 256.0 + b2 * c / 16.0 - 0.25 * b * d;
+
+        //     a2 = 2.0 * p;
+        //     a1 = p * p - 4.0 * r;
+        //     a0 = -q * q;
+
+        //     ifail = cubicPluto(a2, a1, a0, u);
+        //     if (ifail != 0) {
+        //         return 1;
+        //     }
+
+        //     u[0] = my_max(u[0], 0.0);
+        //     u[1] = my_max(u[1], 0.0);
+        //     u[2] = my_max(u[2], 0.0);
+
+        //     if (u[0] != u[0] || u[1] != u[1] || u[2] != u[2]) {
+        //         return 1;
+        //     }
+
+        //     sq  = -0.5 * (q >= 0.0 ? 1.0 : -1.0);
+        //     sz1 = sq * std::sqrt(u[0]);
+        //     sz2 = sq * std::sqrt(u[1]);
+        //     sz3 = sq * std::sqrt(u[2]);
+
+        //     res[0] = -0.25 * b + sz1 + sz2 + sz3;
+        //     res[1] = -0.25 * b + sz1 - sz2 - sz3;
+        //     res[2] = -0.25 * b - sz1 + sz2 - sz3;
+        //     res[3] = -0.25 * b - sz1 - sz2 + sz3;
+        //     if constexpr (global::BuildPlatform == global::Platform::GPU) {
+        //         iterativeQuickSort(res, 0, 3);
+        //     }
+        //     else {
+        //         recursiveQuickSort(res, 0, 3);
+        //     }
+        //     /*
+        //       if (debug_print){
+        //         print ("Quartic roots = %f  %f  %f  %f; q =
+        //       %8.3e\n",z[0],z[1],z[2],z[3],q); CheckSolutions(b,c,d,e,z);
+        //       }
+        //     */
+        //     return 0;
+        // }
 
         // Function to swap two elements
         template <typename T>
