@@ -166,11 +166,6 @@ namespace simbi {
         VAN_LEER
     };
 
-    enum class RT {
-        IN,   // inclusive
-        EX    // exclusive
-    };
-
     constexpr auto comp_wave_speed    = WaveSpeeds::MIGNONE_AND_BODO_05;
     constexpr auto comp_ct_type       = CTTYPE::CONTACT;
     constexpr auto comp_slope_limiter = LIMITER::MINMOD;
