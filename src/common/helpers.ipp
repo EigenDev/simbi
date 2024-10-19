@@ -1546,13 +1546,8 @@ namespace simbi {
             if (ii < self->total_zones) {
                 if constexpr (is_relativistic_mhd<T>::value) {
                     if constexpr (dt_type == TIMESTEP_TYPE::ADAPTIVE) {
-                        real cs, speeds[4];
-                        self->calc_max_wave_speeds(
-                            prim_buffer[gid],
-                            1,
-                            speeds,
-                            cs
-                        );
+                        real speeds[4];
+                        self->calc_max_wave_speeds(prim_buffer[gid], 1, speeds);
                         vPlus  = std::abs(speeds[3]);
                         vMinus = std::abs(speeds[0]);
                     }
@@ -1609,21 +1604,11 @@ namespace simbi {
                 real plus_v1, plus_v2, minus_v1, minus_v2;
                 if constexpr (is_relativistic_mhd<T>::value) {
                     if constexpr (dt_type == TIMESTEP_TYPE::ADAPTIVE) {
-                        real cs, speeds[4];
-                        self->calc_max_wave_speeds(
-                            prim_buffer[gid],
-                            1,
-                            speeds,
-                            cs
-                        );
+                        real speeds[4];
+                        self->calc_max_wave_speeds(prim_buffer[gid], 1, speeds);
                         plus_v1  = std::abs(speeds[3]);
                         minus_v1 = std::abs(speeds[0]);
-                        self->calc_max_wave_speeds(
-                            prim_buffer[gid],
-                            2,
-                            speeds,
-                            cs
-                        );
+                        self->calc_max_wave_speeds(prim_buffer[gid], 2, speeds);
                         plus_v2  = std::abs(speeds[3]);
                         minus_v2 = std::abs(speeds[0]);
                     }
@@ -1779,18 +1764,18 @@ namespace simbi {
             const luint aid = idx3(ia, ja, ka, self->nx, self->ny, self->nz);
 
             if ((ii < self->nx) && (jj < self->ny) && (kk < self->nz)) {
-                real v1p, v1m, v2p, v2m, v3p, v3m, cfl_dt, cs;
+                real v1p, v1m, v2p, v2m, v3p, v3m, cfl_dt;
                 real speeds[4];
                 const auto prims = prim_buffer;
                 // Left/Right wave speeds
                 if constexpr (dt_type == TIMESTEP_TYPE::ADAPTIVE) {
-                    self->calc_max_wave_speeds(prims[aid], 1, speeds, cs);
+                    self->calc_max_wave_speeds(prims[aid], 1, speeds);
                     v1p = std::abs(speeds[3]);
                     v1m = std::abs(speeds[0]);
-                    self->calc_max_wave_speeds(prims[aid], 2, speeds, cs);
+                    self->calc_max_wave_speeds(prims[aid], 2, speeds);
                     v2p = std::abs(speeds[3]);
                     v2m = std::abs(speeds[0]);
-                    self->calc_max_wave_speeds(prims[aid], 3, speeds, cs);
+                    self->calc_max_wave_speeds(prims[aid], 3, speeds);
                     v3p = std::abs(speeds[3]);
                     v3m = std::abs(speeds[0]);
                 }
