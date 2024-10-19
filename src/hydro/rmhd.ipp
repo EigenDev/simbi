@@ -543,10 +543,10 @@ void RMHD<dim>::emit_troubled_cells() const
  * @return none
  */
 template <int dim>
-void RMHD<dim>::cons2prim(const ExecutionPolicy<>& p)
+void RMHD<dim>::cons2prim()
 {
     // const auto gr = gamma / (gamma - 1.0);
-    simbi::parallel_for(p, total_zones, [this] DEV(luint gid) {
+    simbi::parallel_for(fullP, [this] DEV(luint gid) {
         bool workLeftToDo = true;
         volatile __shared__ bool found_failure;
 
@@ -1115,6 +1115,39 @@ template <int dim>
 template <TIMESTEP_TYPE dt_type>
 void RMHD<dim>::adapt_dt()
 {
+#if GPU_CODE
+    if constexpr (dim == 1) {
+        // LAUNCH_ASYNC((compute_dt<primitive_t,dt_type>),
+        // p.gridSize, p.blockSize, this, prims.data(), dt_min.data());
+        compute_dt<primitive_t, dt_type>
+            <<<activeP.gridSize, activeP.blockSize>>>(
+                this,
+                prims.data(),
+                dt_min.data()
+            );
+    }
+    else {
+        // LAUNCH_ASYNC((compute_dt<primitive_t,dt_type>),
+        // p.gridSize, p.blockSize, this, prims.data(), dt_min.data(),
+        // geometry);
+        compute_dt<primitive_t, dt_type>
+            <<<activeP.gridSize, activeP.blockSize>>>(
+                this,
+                prims.data(),
+                dt_min.data(),
+                geometry
+            );
+    }
+    // LAUNCH_ASYNC((deviceReduceWarpAtomicKernel<dim>), p.gridSize,
+    // p.blockSize, this, dt_min.data(), active_zones);
+
+    deviceReduceWarpAtomicKernel<dim><<<activeP.gridSize, activeP.blockSize>>>(
+        this,
+        dt_min.data(),
+        total_zones
+    );
+    gpu::api::deviceSynch();
+#else
     // singleton instance of thread pool. lazy-evaluated
     static auto& thread_pool =
         simbi::pooling::ThreadPool::instance(simbi::pooling::get_nthreads());
@@ -1211,38 +1244,8 @@ void RMHD<dim>::adapt_dt()
         pooling::update_minimum(min_dt, cfl_dt);
     });
     dt = cfl * min_dt;
-};
-
-template <int dim>
-template <TIMESTEP_TYPE dt_type>
-void RMHD<dim>::adapt_dt(const ExecutionPolicy<>& p)
-{
-#if GPU_CODE
-    if constexpr (dim == 1) {
-        // LAUNCH_ASYNC((compute_dt<primitive_t,dt_type>),
-        // p.gridSize, p.blockSize, this, prims.data(), dt_min.data());
-        compute_dt<primitive_t, dt_type>
-            <<<p.gridSize, p.blockSize>>>(this, prims.data(), dt_min.data());
-    }
-    else {
-        // LAUNCH_ASYNC((compute_dt<primitive_t,dt_type>),
-        // p.gridSize, p.blockSize, this, prims.data(), dt_min.data(),
-        // geometry);
-        compute_dt<primitive_t, dt_type><<<p.gridSize, p.blockSize>>>(
-            this,
-            prims.data(),
-            dt_min.data(),
-            geometry
-        );
-    }
-    // LAUNCH_ASYNC((deviceReduceWarpAtomicKernel<dim>), p.gridSize,
-    // p.blockSize, this, dt_min.data(), active_zones);
-
-    deviceReduceWarpAtomicKernel<dim>
-        <<<p.gridSize, p.blockSize>>>(this, dt_min.data(), total_zones);
-    gpu::api::deviceSynch();
 #endif
-}
+};
 
 //===================================================================================================================
 //                                            FLUX CALCULATIONS
@@ -1864,28 +1867,149 @@ DUAL RMHD<dim>::conserved_t RMHD<dim>::calc_hlld_flux(
     return net_flux;
 };
 
+template <int dim>
+void RMHD<dim>::riemann_fluxes()
+{
+    const auto prim_dat = prims.data();
+    simbi::parallel_for(activeP, [prim_dat, this] DEV(const luint idx) {
+        primitive_t pL, pLL, pR, pRR;
+
+        // primitive buffer that returns dynamic shared array
+        // if working with shared memory on GPU, identity otherwise
+        const auto prb = sm_or_identity(prim_dat);
+
+        const luint kk = axid<dim, BlkAx::K>(idx, xag, yag);
+        const luint jj = axid<dim, BlkAx::J>(idx, xag, yag, kk);
+        const luint ii = axid<dim, BlkAx::I>(idx, xag, yag, kk);
+
+        if constexpr (global::on_gpu) {
+            if ((ii >= xag) || (jj >= yag) || (kk >= zag)) {
+                return;
+            }
+        }
+
+        const luint ia  = ii + radius;
+        const luint ja  = jj + radius;
+        const luint ka  = kk + radius;
+        const luint tx  = (global::on_sm) ? threadIdx.x : 0;
+        const luint ty  = (global::on_sm) ? threadIdx.y : 0;
+        const luint tz  = (global::on_sm) ? threadIdx.z : 0;
+        const luint txa = (global::on_sm) ? tx + radius : ia;
+        const luint tya = (global::on_sm) ? ty + radius : ja;
+        const luint tza = (global::on_sm) ? tz + radius : ka;
+
+        if constexpr (global::on_sm) {
+            load_shared_buffer<dim>(
+                fullP,
+                prb,
+                prims,
+                nx,
+                ny,
+                nz,
+                sx,
+                sy,
+                tx,
+                ty,
+                tz,
+                txa,
+                tya,
+                tza,
+                ia,
+                ja,
+                ka,
+                radius
+            );
+        }
+
+        const auto il = get_real_idx(ii - 1, 0, xag);
+        const auto ir = get_real_idx(ii + 1, 0, xag);
+        const auto jl = get_real_idx(jj - 1, 0, yag);
+        const auto jr = get_real_idx(jj + 1, 0, yag);
+        const auto kl = get_real_idx(kk - 1, 0, zag);
+        const auto kr = get_real_idx(kk + 1, 0, zag);
+
+        // object to left or right? (x1-direction)
+        const bool object_x[2] = {
+          ib_check<dim>(object_pos, il, jj, kk, xag, yag, 1),
+          ib_check<dim>(object_pos, ir, jj, kk, xag, yag, 1)
+        };
+
+        // object in front or behind? (x2-direction)
+        const bool object_y[2] = {
+          ib_check<dim>(object_pos, ii, jl, kk, xag, yag, 2),
+          ib_check<dim>(object_pos, ii, jr, kk, xag, yag, 2)
+        };
+
+        // object above or below? (x3-direction)
+        const bool object_z[2] = {
+          ib_check<dim>(object_pos, ii, jj, kl, xag, yag, 3),
+          ib_check<dim>(object_pos, ii, jj, kr, xag, yag, 3)
+        };
+
+        // Calc Rimeann Flux at all interfaces
+        for (int q = 0; q < 2; q++) {
+            const auto xf = idx3(ii + q, jj, kk, nxv, yag, zag);
+            const auto yf = idx3(ii, jj + q, kk, xag, nyv, zag);
+            const auto zf = idx3(ii, jj, kk + q, xag, yag, nzv);
+            // fluxes in i direction
+            pL = prb[idx3(txa + q - 1, ja, ka, sx, sy, 0)];
+            pR = prb[idx3(txa + q + 0, ja, ka, sx, sy, 0)];
+
+            if (!use_pcm) {
+                pLL = prb[idx3(txa + q - 2, ja, ka, sx, sy, 0)];
+                pRR = prb[idx3(txa + q + 1, ja, ka, sx, sy, 0)];
+
+                pL = pL + plm_gradient(pL, pLL, pR, plm_theta) * 0.5;
+                pR = pR - plm_gradient(pR, pL, pRR, plm_theta) * 0.5;
+            }
+            ib_modify<dim>(pR, pL, object_x[q], 1);
+            fri[xf] = (this->*riemann_solve)(pL, pR, 1, 0);
+
+            // fluxes in j direction
+            pL = prb[idx3(ia, tya + q - 1, ka, sx, sy, 0)];
+            pR = prb[idx3(ia, tya + q + 0, ka, sx, sy, 0)];
+
+            if (!use_pcm) {
+                pLL = prb[idx3(ia, tya + q - 2, ka, sx, sy, 0)];
+                pRR = prb[idx3(ia, tya + q + 1, ka, sx, sy, 0)];
+
+                pL = pL + plm_gradient(pL, pLL, pR, plm_theta) * 0.5;
+                pR = pR - plm_gradient(pR, pL, pRR, plm_theta) * 0.5;
+            }
+            ib_modify<dim>(pR, pL, object_y[q], 2);
+            gri[yf] = (this->*riemann_solve)(pL, pR, 2, 0);
+
+            // fluxes in k direction
+            pL = prb[idx3(ia, ja, tza + q - 1, sx, sy, 0)];
+            pR = prb[idx3(ia, ja, tza + q + 0, sx, sy, 0)];
+
+            if (!use_pcm) {
+                pLL = prb[idx3(ia, ja, tza + q - 2, sx, sy, 0)];
+                pRR = prb[idx3(ia, ja, tza + q + 1, sx, sy, 0)];
+
+                pL = pL + plm_gradient(pL, pLL, pR, plm_theta) * 0.5;
+                pR = pR - plm_gradient(pR, pL, pRR, plm_theta) * 0.5;
+            }
+            ib_modify<dim>(pR, pL, object_z[q], 3);
+            hri[zf] = (this->*riemann_solve)(pL, pR, 3, 0);
+        }
+    });
+}
+
 //===================================================================================================================
 //                                            UDOT CALCULATIONS
 //===================================================================================================================
 template <int dim>
-void RMHD<dim>::advance(const ExecutionPolicy<>& p)
+void RMHD<dim>::advance()
 {
-    const luint extent  = p.get_full_extent();
     const auto prim_dat = prims.data();
     // copy the bfield vectors as to not modify the original
     const auto b1_data = bstag1;
     const auto b2_data = bstag2;
     const auto b3_data = bstag3;
     simbi::parallel_for(
-        p,
-        extent,
-        [p, prim_dat, b1_data, b2_data, b3_data, this] DEV(const luint idx) {
-            // x1,x2,x3 hydro riemann fluxes
-            conserved_t f[10];
-            conserved_t g[10];
-            conserved_t h[10];
-            primitive_t pL, pLL, pR, pRR;
-
+        activeP,
+        [prim_dat, b1_data, b2_data, b3_data, this] DEV(const luint idx) {
             // e1, e2, e3 values at cell edges
             real e1[4], e2[4], e3[4];
 
@@ -1917,7 +2041,7 @@ void RMHD<dim>::advance(const ExecutionPolicy<>& p)
 
             if constexpr (global::on_sm) {
                 load_shared_buffer<dim>(
-                    p,
+                    activeP,
                     prb,
                     prims,
                     nx,
@@ -1937,35 +2061,6 @@ void RMHD<dim>::advance(const ExecutionPolicy<>& p)
                     radius
                 );
             }
-            else {
-                // cast away unused lambda capture
-                (void) p;
-            }
-
-            const auto il = get_real_idx(ii - 1, 0, xag);
-            const auto ir = get_real_idx(ii + 1, 0, xag);
-            const auto jl = get_real_idx(jj - 1, 0, yag);
-            const auto jr = get_real_idx(jj + 1, 0, yag);
-            const auto kl = get_real_idx(kk - 1, 0, zag);
-            const auto kr = get_real_idx(kk + 1, 0, zag);
-
-            // object to left or right? (x1-direction)
-            const bool object_x[2] = {
-              ib_check<dim>(object_pos, il, jj, kk, xag, yag, 1),
-              ib_check<dim>(object_pos, ir, jj, kk, xag, yag, 1)
-            };
-
-            // object in front or behind? (x2-direction)
-            const bool object_y[2] = {
-              ib_check<dim>(object_pos, ii, jl, kk, xag, yag, 2),
-              ib_check<dim>(object_pos, ii, jr, kk, xag, yag, 2)
-            };
-
-            // object above or below? (x3-direction)
-            const bool object_z[2] = {
-              ib_check<dim>(object_pos, ii, jj, kl, xag, yag, 3),
-              ib_check<dim>(object_pos, ii, jj, kr, xag, yag, 3)
-            };
 
             const real x1l    = get_x1face(ii, 0);
             const real x1r    = get_x1face(ii, 1);
@@ -1979,79 +2074,33 @@ void RMHD<dim>::advance(const ExecutionPolicy<>& p)
             const auto zlf = idx3(ii, jj, kk + 0, xag, yag, nzv);
             const auto zrf = idx3(ii, jj, kk + 1, xag, yag, nzv);
 
-            const auto xe = xag - 1 + radius;
-            const auto ye = yag - 1 + radius;
-            const auto ze = zag - 1 + radius;
-
-            // Calc Rimeann Flux at all interfaces
-            for (int q = 0; q < 10; q++) {
-                const auto vdir = in_range(q, 2, 3) - in_range(q, 6, 7);
-                const auto hdir = in_range(q, 4, 5) - in_range(q, 8, 9);
-
-                int ishft, jshft, kshft;
-                jshft = tya + vdir * in_range<lint>(tya + vdir, radius, ye);
-                kshft = tza + hdir * in_range<lint>(tza + hdir, radius, ze);
-                // fluxes in i direction
-                pL = prb[idx3(txa + (q % 2) - 1, jshft, kshft, sx, sy, 0)];
-                pR = prb[idx3(txa + (q % 2) + 0, jshft, kshft, sx, sy, 0)];
-
-                if (!use_pcm) {
-                    pLL = prb[idx3(txa + (q % 2) - 2, jshft, kshft, sx, sy, 0)];
-                    pRR = prb[idx3(txa + (q % 2) + 1, jshft, kshft, sx, sy, 0)];
-
-                    pL = pL + plm_gradient(pL, pLL, pR, plm_theta) * 0.5;
-                    pR = pR - plm_gradient(pR, pL, pRR, plm_theta) * 0.5;
-                }
-                ib_modify<dim>(pR, pL, object_x[(q % 2)], 1);
-                f[q] = (this->*riemann_solve)(pL, pR, 1, 0);
-
-                ishft = txa + vdir * in_range<lint>(txa + vdir, radius, xe);
-                // fluxes in j direction
-                pL = prb[idx3(ishft, tya + (q % 2) - 1, kshft, sx, sy, 0)];
-                pR = prb[idx3(ishft, tya + (q % 2) + 0, kshft, sx, sy, 0)];
-
-                if (!use_pcm) {
-                    pLL = prb[idx3(ishft, tya + (q % 2) - 2, kshft, sx, sy, 0)];
-                    pRR = prb[idx3(ishft, tya + (q % 2) + 1, kshft, sx, sy, 0)];
-
-                    pL = pL + plm_gradient(pL, pLL, pR, plm_theta) * 0.5;
-                    pR = pR - plm_gradient(pR, pL, pRR, plm_theta) * 0.5;
-                }
-                ib_modify<dim>(pR, pL, object_y[(q % 2)], 2);
-                g[q] = (this->*riemann_solve)(pL, pR, 2, 0);
-
-                jshft = tya + hdir * in_range<lint>(tya + hdir, radius, ye);
-                // fluxes in k direction
-                pL = prb[idx3(ishft, jshft, tza + (q % 2) - 1, sx, sy, 0)];
-                pR = prb[idx3(ishft, jshft, tza + (q % 2) + 0, sx, sy, 0)];
-
-                if (!use_pcm) {
-                    pLL = prb[idx3(ishft, jshft, tza + (q % 2) - 2, sx, sy, 0)];
-                    pRR = prb[idx3(ishft, jshft, tza + (q % 2) + 1, sx, sy, 0)];
-
-                    pL = pL + plm_gradient(pL, pLL, pR, plm_theta) * 0.5;
-                    pR = pR - plm_gradient(pR, pL, pRR, plm_theta) * 0.5;
-                }
-                ib_modify<dim>(pR, pL, object_z[(q % 2)], 3);
-                h[q] = (this->*riemann_solve)(pL, pR, 3, 0);
-            }
-
             // compute edge emfs in clockwise direction wrt cell plane
             detail::for_sequence(
                 detail::make_index_sequence<4>(),
                 [&](auto qidx) {
                     constexpr auto q      = static_cast<luint>(qidx);
                     constexpr auto corner = static_cast<Corner>(q);
-                    auto widx = q == 0 ? 1 : q == 1 ? 0 : q == 2 ? 6 : 7;
-                    auto eidx = q == 0 ? 3 : q == 1 ? 2 : q == 2 ? 0 : 1;
-                    auto sidx = q == 0 ? 1 : q == 1 ? 7 : q == 2 ? 6 : 0;
-                    auto nidx = q == 0 ? 3 : q == 1 ? 1 : q == 2 ? 0 : 2;
+
+                    // calc directional indices for i-j plane
+                    auto north = corner == Corner::NE || corner == Corner::NW;
+                    auto east  = corner == Corner::NE || corner == Corner::SE;
+                    auto south = !north;
+                    auto west  = !east;
+                    auto qn    = my_min<lint>(jj + north, yag - 1);
+                    auto qs    = my_max<lint>(jj - south, 0);
+                    auto qe    = my_min<lint>(ii + east, xag - 1);
+                    auto qw    = my_max<lint>(ii - west, 0);
+
+                    auto nidx = idx3(ii + east, qn, kk, nxv, yag, zag);
+                    auto sidx = idx3(ii + east, qs, kk, nxv, yag, zag);
+                    auto eidx = idx3(qe, jj + north, kk, xag, nyv, zag);
+                    auto widx = idx3(qw, jj + north, kk, xag, nyv, zag);
 
                     e3[q] = calc_edge_emf<Plane::IJ, corner>(
-                        g[widx],
-                        g[eidx],
-                        f[sidx],
-                        f[nidx],
+                        gri[widx],
+                        gri[eidx],
+                        fri[sidx],
+                        fri[nidx],
                         prb,
                         ii,
                         jj,
@@ -2062,15 +2111,20 @@ void RMHD<dim>::advance(const ExecutionPolicy<>& p)
                         3
                     );
 
-                    widx  = q == 0 ? 1 : q == 1 ? 0 : q == 2 ? 6 : 7;
-                    eidx  = q == 0 ? 3 : q == 1 ? 2 : q == 2 ? 0 : 1;
-                    sidx  = q == 0 ? 1 : q == 1 ? 9 : q == 2 ? 8 : 0;
-                    nidx  = q == 0 ? 5 : q == 1 ? 1 : q == 2 ? 0 : 4;
+                    // calc directional indices for i-k plane
+                    qn    = my_min<lint>(kk + north, zag - 1);
+                    qs    = my_max<lint>(kk - south, 0);
+                    qe    = my_min<lint>(ii + east, xag - 1);
+                    qw    = my_max<lint>(ii - west, 0);
+                    nidx  = idx3(ii + east, jj, qn, nxv, yag, zag);
+                    sidx  = idx3(ii + east, jj, qs, nxv, yag, zag);
+                    eidx  = idx3(qe, jj, kk + north, xag, yag, nzv);
+                    widx  = idx3(qw, jj, kk + north, xag, yag, nzv);
                     e2[q] = calc_edge_emf<Plane::IK, corner>(
-                        h[widx],
-                        h[eidx],
-                        f[sidx],
-                        f[nidx],
+                        hri[widx],
+                        hri[eidx],
+                        fri[sidx],
+                        fri[nidx],
                         prb,
                         ii,
                         jj,
@@ -2081,15 +2135,20 @@ void RMHD<dim>::advance(const ExecutionPolicy<>& p)
                         2
                     );
 
-                    widx  = q == 0 ? 1 : q == 1 ? 0 : q == 2 ? 8 : 9;
-                    eidx  = q == 0 ? 5 : q == 1 ? 4 : q == 2 ? 0 : 1;
-                    sidx  = q == 0 ? 1 : q == 1 ? 9 : q == 2 ? 8 : 0;
-                    nidx  = q == 0 ? 5 : q == 1 ? 1 : q == 2 ? 0 : 4;
+                    // calc directional indices for j-k plane
+                    qn    = my_min<lint>(kk + north, zag - 1);
+                    qs    = my_max<lint>(kk - south, 0);
+                    qe    = my_min<lint>(jj + east, yag - 1);
+                    qw    = my_max<lint>(jj - west, 0);
+                    nidx  = idx3(ii, jj + east, qn, xag, nyv, zag);
+                    sidx  = idx3(ii, jj + east, qs, xag, nyv, zag);
+                    eidx  = idx3(ii, qe, kk + north, xag, yag, nzv);
+                    widx  = idx3(ii, qe, kk + north, xag, yag, nzv);
                     e1[q] = calc_edge_emf<Plane::JK, corner>(
-                        h[widx],
-                        h[eidx],
-                        g[sidx],
-                        g[nidx],
+                        hri[widx],
+                        hri[eidx],
+                        gri[sidx],
+                        gri[nidx],
                         prb,
                         ii,
                         jj,
@@ -2192,10 +2251,10 @@ void RMHD<dim>::advance(const ExecutionPolicy<>& p)
             switch (geometry) {
                 case simbi::Geometry::CARTESIAN:
                     {
-                        cons[aid] -= ((f[RF] - f[LF]) * invdx1 +
-                                      (g[RF] - g[LF]) * invdx2 +
-                                      (h[RF] - h[LF]) * invdx3 - source_terms -
-                                      gravity) *
+                        cons[aid] -= ((fri[xrf] - fri[xlf]) * invdx1 +
+                                      (gri[yrf] - gri[ylf]) * invdx2 +
+                                      (hri[zrf] - hri[zlf]) * invdx3 -
+                                      source_terms - gravity) *
                                      dt * step;
                         break;
                     }
@@ -2252,10 +2311,10 @@ void RMHD<dim>::advance(const ExecutionPolicy<>& p)
                           0.0,
                           0.0
                         };
-                        cons[aid] -= ((f[RF] * s1R - f[LF] * s1L) / dV1 +
-                                      (g[RF] * s2R - g[LF] * s2L) / dV2 +
-                                      (h[RF] - h[LF]) / dV3 - geom_source -
-                                      source_terms - gravity) *
+                        cons[aid] -= ((fri[xrf] * s1R - fri[xlf] * s1L) / dV1 +
+                                      (gri[yrf] * s2R - gri[ylf] * s2L) / dV2 +
+                                      (hri[zrf] - hri[zlf]) / dV3 -
+                                      geom_source - source_terms - gravity) *
                                      dt * step;
                         break;
                     }
@@ -2308,11 +2367,12 @@ void RMHD<dim>::advance(const ExecutionPolicy<>& p)
                           0.0,
                           0.0
                         };
-                        cons[aid] -= ((f[RF] * s1R - f[LF] * s1L) * invdV +
-                                      (g[RF] * s2R - g[LF] * s2L) * invdV +
-                                      (h[RF] * s3R - h[LF] * s3L) * invdV -
-                                      geom_source - source_terms) *
-                                     dt * step;
+                        cons[aid] -=
+                            ((fri[xrf] * s1R - fri[xlf] * s1L) * invdV +
+                             (gri[yrf] * s2R - gri[ylf] * s2L) * invdV +
+                             (hri[zrf] * s3R - hri[zlf] * s3L) * invdV -
+                             geom_source - source_terms) *
+                            dt * step;
                         break;
                     }
             }   // end switch
@@ -2451,6 +2511,11 @@ void RMHD<dim>::simulate(
     bstag1.resize(nxv * yag * zag);
     bstag2.resize(xag * nyv * zag);
     bstag3.resize(xag * yag * nzv);
+    // allocate space for Riemann fluxes
+    fri.resize(nxv * yag * zag);
+    gri.resize(xag * nyv * zag);
+    hri.resize(xag * yag * nzv);
+    // set the staggered magnetic fields to ics
     bstag1 = bfield[0];
     bstag2 = bfield[1];
     bstag3 = bfield[2];
@@ -2499,13 +2564,8 @@ void RMHD<dim>::simulate(
         half_sphere,
         geometry
     );
-    cons2prim(fullP);
-    if constexpr (global::on_gpu) {
-        adapt_dt<TIMESTEP_TYPE::MINIMUM>(fullP);
-    }
-    else {
-        adapt_dt<TIMESTEP_TYPE::MINIMUM>();
-    }
+    cons2prim();
+    adapt_dt<TIMESTEP_TYPE::MINIMUM>();
 
     // Using a sigmoid decay function to represent when the source terms
     // turn off.
@@ -2518,7 +2578,8 @@ void RMHD<dim>::simulate(
     // Simulate :)
     try {
         simbi::detail::logger::with_logger(*this, tend, [&] {
-            advance(activeP);
+            riemann_fluxes();
+            advance();
             config_ghosts3D(
                 activeP,
                 cons.data(),
@@ -2531,14 +2592,8 @@ void RMHD<dim>::simulate(
                 half_sphere,
                 geometry
             );
-            cons2prim(fullP);
-
-            if constexpr (global::on_gpu) {
-                adapt_dt(activeP);
-            }
-            else {
-                adapt_dt();
-            }
+            cons2prim();
+            adapt_dt();
             time_constant =
                 sigmoid(t, engine_duration, step * dt, constant_sources);
 
