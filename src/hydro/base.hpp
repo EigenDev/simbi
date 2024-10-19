@@ -182,9 +182,8 @@ namespace simbi {
                     }
                 }
             }
-            radius = (spatial_order == "pcm") ? 1 : 2;
-            step   = (time_order == "rk1") ? 1.0 : 0.5;
-            sx     = (global::on_sm) ? xblockdim + 2 * radius : nx;
+            step = (time_order == "rk1") ? 1.0 : 0.5;
+            sx   = (global::on_sm) ? xblockdim + 2 * radius : nx;
             sy = (dim < 2) ? 1 : (global::on_sm) ? yblockdim + 2 * radius : ny;
             sz = (dim < 3) ? 1 : (global::on_sm) ? zblockdim + 2 * radius : nz;
             xblockspace  = xblockdim + 2 * radius;
@@ -301,19 +300,18 @@ namespace simbi {
 
         void initialize(const InitialConditions& init_conditions)
         {
+            const bool pcm = spatial_order == "pcm";
+            radius         = pcm ? 1 : 2;
             // Define simulation params
-            xag = (init_conditions.spatial_order == "pcm") ? nx - 2 : nx - 4;
-            yag = (ny == 1)                                  ? 1
-                  : (init_conditions.spatial_order == "pcm") ? ny - 2
-                                                             : ny - 4;
-            zag = (nz == 1)                                  ? 1
-                  : (init_conditions.spatial_order == "pcm") ? nz - 2
-                                                             : nz - 4;
+            xag = nx - 2 * radius;
+            yag = (ny == 1) ? 1 : ny - 2 * radius;
+            zag = (nz == 1) ? 1 : nz - 2 * radius;
             nxv = xag + 1;
             nyv = yag + 1;
             nzv = zag + 1;
-            nv  = nxv * nyv * nzv;
-            idx_active   = (init_conditions.spatial_order == "pcm") ? 1 : 2;
+
+            nv           = nxv * nyv * nzv;
+            idx_active   = pcm ? 1 : 2;
             active_zones = xag * yag * zag;
             x1min        = x1[0];
             x1max        = x1[nxv - 1];

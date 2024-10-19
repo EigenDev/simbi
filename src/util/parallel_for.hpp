@@ -79,6 +79,26 @@ namespace simbi {
 #endif
         });
     }
+
+    template <typename F, global::Platform P = global::BuildPlatform>
+    void parallel_for(const ExecutionPolicy<>& p, F function)
+    {
+        const auto last  = static_cast<luint>(p.get_full_extent());
+        const auto first = static_cast<luint>(0);
+        simbi::launch(p, [=] DEV() {
+#if GPU_CODE
+            for (auto idx : range(first, last, globalThreadCount())) {
+                function(idx);
+            }
+#else
+            // singleton instance of thread pool. lazy-evaluated
+            static auto& thread_pool = simbi::pooling::ThreadPool::instance(
+                simbi::pooling::get_nthreads()
+            );
+            thread_pool.parallel_for(first, last, function);
+#endif
+        });
+    }
 }   // namespace simbi
 
 #endif

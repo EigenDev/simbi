@@ -70,7 +70,7 @@ namespace simbi {
 
         /* Shared Data Members */
         ndarray<primitive_t> prims;
-        ndarray<conserved_t> cons, outer_zones, inflow_zones;
+        ndarray<conserved_t> cons, outer_zones, inflow_zones, fri, gri, hri;
         ndarray<real> dt_min, bstag1, bstag2, bstag3;
         bool scalar_all_zeros;
         luint nzone_edges;
@@ -83,7 +83,7 @@ namespace simbi {
         );
         ~RMHD();
 
-        void cons2prim(const ExecutionPolicy<>& p);
+        void cons2prim();
 
         /**
          * Return the primitive
@@ -94,8 +94,8 @@ namespace simbi {
          * @return none
          */
         DUAL primitive_t cons2prim(const conserved_t& cons) const;
-
-        void advance(const ExecutionPolicy<>& p);
+        void riemann_fluxes();
+        void advance();
 
         DUAL void calc_max_wave_speeds(
             const primitive_t& prims,
@@ -157,9 +157,6 @@ namespace simbi {
 
         template <TIMESTEP_TYPE dt_type = TIMESTEP_TYPE::ADAPTIVE>
         void adapt_dt();
-
-        template <TIMESTEP_TYPE dt_type = TIMESTEP_TYPE::ADAPTIVE>
-        void adapt_dt(const ExecutionPolicy<>& p);
 
         void simulate(
             std::function<real(real)> const& a,
@@ -241,6 +238,9 @@ namespace simbi {
             bstag1.copyToGpu();
             bstag2.copyToGpu();
             bstag3.copyToGpu();
+            fri.copyToGpu();
+            gri.copyToGpu();
+            hri.copyToGpu();
         }
 
         DUAL real hlld_vdiff(
