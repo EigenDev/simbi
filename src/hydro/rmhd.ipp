@@ -1251,9 +1251,10 @@ void RMHD<dim>::adapt_dt()
 //                                            FLUX CALCULATIONS
 //===================================================================================================================
 template <int dim>
-DUAL RMHD<dim>::conserved_t
-RMHD<dim>::prims2flux(const RMHD<dim>::primitive_t& prims, const luint nhat)
-    const
+DUAL RMHD<dim>::conserved_t RMHD<dim>::prims2flux(
+    const RMHD<dim>::primitive_t& prims,
+    const luint nhat
+) const
 {
     const real rho   = prims.rho;
     const real v1    = prims.vcomponent(1);
@@ -2188,53 +2189,8 @@ void RMHD<dim>::advance()
                 if (kk == 0 && jj == 2 && ii == 4) {
                     printf("========================================\n");
                     printf("DIV.B: %.2e\n", divb);
-                    printf(
-                        "[%llu, %llu, %llu] b1r - b1l: %f, b2r - b2l: %f, "
-                        "b3r "
-                        "- "
-                        "b3l: %f\n",
-                        kk,
-                        jj,
-                        ii,
-                        (b1R - b1L) * invdx1,
-                        (b2R - b2L) * invdx2,
-                        (b3R - b3L) * invdx3
-                    );
-
-                    printf(
-                        "[%llu, %llu, %llu] b1L: %f, b1R: %f, b2L: %f, "
-                        "b2R: "
-                        "%f, "
-                        "b3L: %f, b3R: %f\n",
-                        kk,
-                        jj,
-                        ii,
-                        b1L,
-                        b1R,
-                        b2L,
-                        b2R,
-                        b3L,
-                        b3R
-                    );
-                    printf(
-                        "b1diff: %f, b2diff: %f, b3diff: %f\n",
-                        dt * step * curl_e(1, e2, e3, 1) -
-                            dt * step * curl_e(1, e2, e3, 0),
-                        dt * step * curl_e(2, e3, e1, 1) -
-                            dt * step * curl_e(2, e3, e1, 0),
-                        dt * step * curl_e(3, e1, e2, 1) -
-                            dt * step * curl_e(3, e1, e2, 0)
-                    );
-                    printf(
-                        "e3[NE]: %f, e3[SE]: %f, e3[SW]: %f, e3[NW]: %f\n",
-                        e3[IJ::NE],
-                        e3[IJ::SE],
-                        e3[IJ::SW],
-                        e3[IJ::NW]
-                    );
                     printf("========================================\n");
                     printf("Divergence of B is not zero!\n");
-                    std::cin.get();
                 }
             }
             // }
