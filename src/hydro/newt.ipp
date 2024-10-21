@@ -217,7 +217,7 @@ void Newtonian<dim>::emit_troubled_cells() const
             const real x1mean = calc_any_mean(x1l, x1r, x1_cell_spacing);
             const real x2mean = calc_any_mean(x2l, x2r, x2_cell_spacing);
             const real x3mean = calc_any_mean(x3l, x3r, x3_cell_spacing);
-            const real rho    = cons[gid].den;
+            const real rho    = cons[gid].dens();
             const real v1     = cons[gid].momentum(1) / rho;
             const real v2     = (dim < 2) ? cons[gid].momentum(2) / rho : 0.0;
             const real v3     = (dim < 3) ? cons[gid].momentum(3) / rho : 0.0;
@@ -227,8 +227,8 @@ void Newtonian<dim>::emit_troubled_cells() const
                     stderr,
                     "\nPrimitives in bad  state\nDensity: %.2e, Pressure: "
                     "%.2e, Vsq: %.2e, x1coord: %.2e, iter: %" PRIu64 "\n",
-                    cons[gid].den,
-                    prims[gid].p,
+                    cons[gid].dens(),
+                    prims[gid].p(),
                     vsq,
                     x1mean,
                     global_iter
@@ -242,8 +242,8 @@ void Newtonian<dim>::emit_troubled_cells() const
                     "Pressure: "
                     "%.2e, Vsq: %.2e, x1coord: %.2e, x2coord: %.2e, iter: "
                     "%" PRIu64 "\n",
-                    cons[gid].den,
-                    prims[gid].p,
+                    cons[gid].dens(),
+                    prims[gid].p(),
                     vsq,
                     x1mean,
                     x2mean,
@@ -256,8 +256,8 @@ void Newtonian<dim>::emit_troubled_cells() const
                     "\nPrimitives in bad  state\nDensity: %.2e, Pressure: "
                     "%.2e, Vsq: %.2e, x1coord: %.2e, x2coord: %.2e, "
                     "x3coord: %.2e, iter: %" PRIu64 "\n",
-                    cons[gid].den,
-                    prims[gid].p,
+                    cons[gid].dens(),
+                    prims[gid].p(),
                     vsq,
                     x1mean,
                     x2mean,
@@ -315,13 +315,13 @@ void Newtonian<dim>::cons2prim(const ExecutionPolicy<>& p)
                     invdV            = 1.0 / dV;
                 }
             }
-            const real rho     = cons_data[gid].den * invdV;
+            const real rho     = cons_data[gid].dens() * invdV;
             const real v1      = (cons_data[gid].momentum(1) / rho) * invdV;
             const real v2      = (cons_data[gid].momentum(2) / rho) * invdV;
             const real v3      = (cons_data[gid].momentum(3) / rho) * invdV;
-            const real rho_chi = cons_data[gid].chi * invdV;
+            const real rho_chi = cons_data[gid].chi() * invdV;
             const real pre =
-                (gamma - 1.0) * (cons_data[gid].nrg -
+                (gamma - 1.0) * (cons_data[gid].nrg() -
                                  0.5 * rho * (v1 * v1 + v2 * v2 + v3 * v3));
             if constexpr (dim == 1) {
                 prim_data[gid] = {rho, v1, pre, rho_chi / rho};
@@ -352,13 +352,13 @@ DUAL Newtonian<dim>::eigenvals_t Newtonian<dim>::calc_eigenvals(
     const luint nhat
 ) const
 {
-    const real rhoL = primsL.rho;
+    const real rhoL = primsL.rho();
     const real vL   = primsL.vcomponent(nhat);
-    const real pL   = primsL.p;
+    const real pL   = primsL.p();
 
-    const real rhoR = primsR.rho;
+    const real rhoR = primsR.rho();
     const real vR   = primsR.vcomponent(nhat);
-    const real pR   = primsR.p;
+    const real pR   = primsR.p();
 
     const real csR = std::sqrt(gamma * pR / rhoR);
     const real csL = std::sqrt(gamma * pL / rhoL);
@@ -424,11 +424,11 @@ template <int dim>
 DUAL Newtonian<dim>::conserved_t
 Newtonian<dim>::prims2cons(const Newtonian<dim>::primitive_t& prims) const
 {
-    const real rho = prims.rho;
+    const real rho = prims.rho();
     const real v1  = prims.vcomponent(1);
     const real v2  = prims.vcomponent(2);
     const real v3  = prims.vcomponent(3);
-    const real et  = prims.get_energy_density(gamma);
+    const real et  = prims.total_energy(gamma);
     if constexpr (dim == 1) {
         return {rho, rho * v1, et};
     }
@@ -458,11 +458,11 @@ void Newtonian<dim>::adapt_dt()
         const luint ii    = axid<dim, BlkAx::I>(gid, nx, ny, kk);
         const luint ireal = get_real_idx(ii, radius, xag);
         // Left/Right wave speeds
-        const real rho = prims[gid].rho;
+        const real rho = prims[gid].rho();
         const real v1  = prims[gid].vcomponent(1);
         const real v2  = prims[gid].vcomponent(2);
         const real v3  = prims[gid].vcomponent(3);
-        const real pre = prims[gid].p;
+        const real pre = prims[gid].p();
         const real cs  = std::sqrt(gamma * pre / rho);
 
         v1m = std::abs(v1 - cs);
@@ -621,14 +621,14 @@ DUAL Newtonian<dim>::conserved_t Newtonian<dim>::prims2flux(
     const luint nhat
 ) const
 {
-    const real rho      = prims.rho;
+    const real rho      = prims.rho();
     const real v1       = prims.vcomponent(1);
     const real v2       = prims.vcomponent(2);
     const real v3       = prims.vcomponent(3);
-    const real pressure = prims.p;
-    const real chi      = prims.chi;
+    const real pressure = prims.p();
+    const real chi      = prims.chi();
     const real vn       = nhat == 1 ? v1 : nhat == 2 ? v2 : v3;
-    const real et       = prims.get_energy_density(gamma);
+    const real et       = prims.total_energy(gamma);
     const real m1       = rho * v1;
     if constexpr (dim == 1) {
         return {
@@ -695,11 +695,11 @@ DUAL Newtonian<dim>::conserved_t Newtonian<dim>::calc_hlle_flux(
     }();
 
     // Upwind the scalar concentration
-    if (net_flux.den < 0.0) {
-        net_flux.chi = prR.chi * net_flux.den;
+    if (net_flux.dens() < 0.0) {
+        net_flux.chi() = prR.chi() * net_flux.dens();
     }
     else {
-        net_flux.chi = prL.chi * net_flux.den;
+        net_flux.chi() = prL.chi() * net_flux.dens();
     }
 
     return net_flux;
@@ -733,11 +733,11 @@ DUAL Newtonian<dim>::conserved_t Newtonian<dim>::calc_hllc_flux(
         const real aStar = lambda.aStar;
         const real pStar = lambda.pStar;
         if (vface <= aStar) {
-            real pressure = prL.p;
-            real v        = prL.v1;
-            real rho      = uL.den;
-            real m        = uL.m1;
-            real energy   = uL.nrg;
+            real pressure = prL.p();
+            real v        = prL.v1();
+            real rho      = uL.dens();
+            real m        = uL.m1();
+            real energy   = uL.nrg();
             real cofac    = 1.0 / (aL - aStar);
 
             real rhoStar = cofac * (aL - v) * rho;
@@ -751,11 +751,11 @@ DUAL Newtonian<dim>::conserved_t Newtonian<dim>::calc_hllc_flux(
             return fL + (star_state - uL) * aL - star_state * vface;
         }
         else {
-            real pressure = prR.p;
-            real v        = prR.v1;
-            real rho      = uR.den;
-            real m        = uR.m1;
-            real energy   = uR.nrg;
+            real pressure = prR.p();
+            real v        = prR.v1();
+            real rho      = uR.dens();
+            real m        = uR.m1();
+            real energy   = uR.nrg();
             real cofac    = 1.0 / (aR - aStar);
 
             real rhoStar = cofac * (aR - v) * rho;
@@ -779,12 +779,12 @@ DUAL Newtonian<dim>::conserved_t Newtonian<dim>::calc_hllc_flux(
         constexpr real ma_lim = 0.10;
 
         // --------------Compute the L Star State----------
-        real pressure = prL.p;
-        real rho      = uL.den;
+        real pressure = prL.p();
+        real rho      = uL.dens();
         real m1       = uL.momentum(1);
         real m2       = uL.momentum(2);
         real m3       = uL.momentum(3);
-        real edens    = uL.nrg;
+        real edens    = uL.nrg();
         real cofactor = 1.0 / (aL - aStar);
 
         const real vL = prL.vcomponent(nhat);
@@ -809,12 +809,12 @@ DUAL Newtonian<dim>::conserved_t Newtonian<dim>::calc_hllc_flux(
             }
         }();
 
-        pressure = prR.p;
-        rho      = uR.den;
+        pressure = prR.p();
+        rho      = uR.dens();
         m1       = uR.momentum(1);
         m2       = uR.momentum(2);
         m3       = uR.momentum(3);
-        edens    = uR.nrg;
+        edens    = uR.nrg();
         cofactor = 1.0 / (aR - aStar);
 
         rhostar = cofactor * (aR - vR) * rho;
@@ -848,11 +848,11 @@ DUAL Newtonian<dim>::conserved_t Newtonian<dim>::calc_hllc_flux(
                         face_starState * vface;
 
         // upwind the concentration
-        if (net_flux.den < 0.0) {
-            net_flux.chi = prR.chi * net_flux.den;
+        if (net_flux.dens() < 0.0) {
+            net_flux.chi() = prR.chi() * net_flux.dens();
         }
         else {
-            net_flux.chi = prL.chi * net_flux.den;
+            net_flux.chi() = prL.chi() * net_flux.dens();
         }
 
         return net_flux;
@@ -1518,33 +1518,36 @@ void Newtonian<dim>::advance(const ExecutionPolicy<>& p)
 
             // Gravity
             const auto gm1_source =
-                nullg1 ? 0 : g1_source[real_loc] * cons_data[aid].den;
+                nullg1 ? 0 : g1_source[real_loc] * cons_data[aid].dens();
             const auto tid            = tza * sx * sy + tya * sx + txa;
             const conserved_t gravity = [&] {
                 if constexpr (dim == 1) {
                     // cast away unused lambda captures
                     (void) g2_source;
                     (void) g3_source;
-                    const auto ge_source = gm1_source * prim_buff[tid].v1;
+                    const auto ge_source = gm1_source * prim_buff[tid].v1();
                     return conserved_t{0.0, gm1_source, ge_source};
                 }
                 else if constexpr (dim == 2) {
                     // cast away unused lambda capture
                     (void) g3_source;
                     const auto gm2_source =
-                        nullg2 ? 0 : g2_source[real_loc] * cons_data[aid].den;
-                    const auto ge_source = gm1_source * prim_buff[tid].v1 +
-                                           gm2_source * prim_buff[tid].v2;
+                        nullg2 ? 0
+                               : g2_source[real_loc] * cons_data[aid].dens();
+                    const auto ge_source = gm1_source * prim_buff[tid].v1() +
+                                           gm2_source * prim_buff[tid].v2();
                     return conserved_t{0.0, gm1_source, gm2_source, ge_source};
                 }
                 else {
                     const auto gm2_source =
-                        nullg2 ? 0 : g2_source[real_loc] * cons_data[aid].den;
+                        nullg2 ? 0
+                               : g2_source[real_loc] * cons_data[aid].dens();
                     const auto gm3_source =
-                        nullg3 ? 0 : g3_source[real_loc] * cons_data[aid].den;
-                    const auto ge_source = gm1_source * prim_buff[tid].v1 +
-                                           gm2_source * prim_buff[tid].v2 +
-                                           gm3_source * prim_buff[tid].v3;
+                        nullg3 ? 0
+                               : g3_source[real_loc] * cons_data[aid].dens();
+                    const auto ge_source = gm1_source * prim_buff[tid].v1() +
+                                           gm2_source * prim_buff[tid].v2() +
+                                           gm3_source * prim_buff[tid].v3();
                     return conserved_t{
                       0.0,
                       gm1_source,
@@ -1574,7 +1577,7 @@ void Newtonian<dim>::advance(const ExecutionPolicy<>& p)
                             const real dV =
                                 4.0 * M_PI * rmean * rmean * (rrf - rlf);
                             const real factor = (mesh_motion) ? dV : 1;
-                            const real pc     = prim_buff[txa].p;
+                            const real pc     = prim_buff[txa].p();
                             const real invdV  = 1.0 / dV;
                             const auto geom_sources =
                                 conserved_t{0.0, pc * (sR - sL) * invdV, 0.0};
@@ -1623,10 +1626,10 @@ void Newtonian<dim>::advance(const ExecutionPolicy<>& p)
                             const real factor = (mesh_motion) ? dV : 1;
 
                             // Grab central primitives
-                            const real rhoc = prim_buff[tid].rho;
-                            const real uc   = prim_buff[tid].v1;
-                            const real vc   = prim_buff[tid].v2;
-                            const real pc   = prim_buff[tid].p;
+                            const real rhoc = prim_buff[tid].rho();
+                            const real uc   = prim_buff[tid].v1();
+                            const real vc   = prim_buff[tid].v2();
+                            const real pc   = prim_buff[tid].p();
 
                             const conserved_t geom_source = {
                               0.0,
@@ -1665,10 +1668,10 @@ void Newtonian<dim>::advance(const ExecutionPolicy<>& p)
                             const real s2L   = (rr - rl);
 
                             // Grab central primitives
-                            const real rhoc = prim_buff[tid].rho;
-                            const real uc   = prim_buff[tid].v1;
-                            const real vc   = prim_buff[tid].v2;
-                            const real pc   = prim_buff[tid].p;
+                            const real rhoc = prim_buff[tid].rho();
+                            const real uc   = prim_buff[tid].v1();
+                            const real vc   = prim_buff[tid].v2();
+                            const real pc   = prim_buff[tid].p();
 
                             const conserved_t geom_source = {
                               0.0,
@@ -1701,7 +1704,7 @@ void Newtonian<dim>::advance(const ExecutionPolicy<>& p)
                             const real s2L   = rmean * (rr - rl);
 
                             // Grab central primitives
-                            const real pc          = prim_buff[tid].p;
+                            const real pc          = prim_buff[tid].p();
                             const auto geom_source = conserved_t{
                               0.0,
                               pc * (s1R - s1L) * invdV,
@@ -1753,11 +1756,11 @@ void Newtonian<dim>::advance(const ExecutionPolicy<>& p)
                             const real cot    = std::cos(thmean) / sint;
 
                             // Grab central primitives
-                            const real rhoc = prim_buff[tid].rho;
-                            const real uc   = prim_buff[tid].v1;
-                            const real vc   = prim_buff[tid].v2;
-                            const real wc   = prim_buff[tid].v3;
-                            const real pc   = prim_buff[tid].p;
+                            const real rhoc = prim_buff[tid].rho();
+                            const real uc   = prim_buff[tid].v1();
+                            const real vc   = prim_buff[tid].v2();
+                            const real wc   = prim_buff[tid].v3();
+                            const real pc   = prim_buff[tid].p();
 
                             const auto geom_source = conserved_t{
                               0.0,
@@ -1800,11 +1803,11 @@ void Newtonian<dim>::advance(const ExecutionPolicy<>& p)
                             const real invdV = 1.0 / dV;
 
                             // Grab central primitives
-                            const real rhoc = prim_buff[tid].rho;
-                            const real uc   = prim_buff[tid].v1;
-                            const real vc   = prim_buff[tid].v2;
+                            const real rhoc = prim_buff[tid].rho();
+                            const real uc   = prim_buff[tid].v1();
+                            const real vc   = prim_buff[tid].v2();
                             // const real wc   = prim_buff[tid].v3;
-                            const real pc = prim_buff[tid].p;
+                            const real pc = prim_buff[tid].p();
 
                             const auto geom_source = conserved_t{
                               0.0,

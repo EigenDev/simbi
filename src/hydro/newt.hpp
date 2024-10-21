@@ -34,20 +34,9 @@ namespace simbi {
     template <int dim>
     struct Newtonian : public HydroBase {
         // set the primitive and conservative types at compile time
-        using primitive_t = typename std::conditional_t<
-            dim == 1,
-            hydro1d::Primitive,
-            std::conditional_t<
-                dim == 2,
-                hydro2d::Primitive,
-                hydro3d::Primitive>>;
-        using conserved_t = typename std::conditional_t<
-            dim == 1,
-            hydro1d::Conserved,
-            std::conditional_t<
-                dim == 2,
-                hydro2d::Conserved,
-                hydro3d::Conserved>>;
+        using primitive_t = anyPrimitive<dim, Regime::NEWTONIAN>;
+        using conserved_t = anyConserved<dim, Regime::NEWTONIAN>;
+
         using primitive_soa_t = typename std::conditional_t<
             dim == 1,
             hydro1d::PrimitiveSOA,

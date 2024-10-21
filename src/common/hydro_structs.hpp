@@ -20,8 +20,21 @@
 
 #include "build_options.hpp"
 #include "enums.hpp"
+#include "traits.hpp"
 #include <cmath>
 #include <vector>
+
+using namespace simbi;
+
+/**
+ * @brief kronecker delta
+ *
+ * @param i
+ * @param j
+ * @return 1 for identity, 0 otherwise
+ */
+STATIC
+constexpr unsigned int kdelta(luint i, luint j) { return (i == j); }
 
 //---------------------------------------------------------------------------------------------------------
 //  HELPER-GLOBAL-STRUCTS
@@ -74,533 +87,1069 @@ struct InitialConditions {
 
 namespace generic_hydro {
     // implementing curiously recurring template pattern (CRTP)
-    template <int dim, typename Derived>
-    struct Primitive {
-    };
-
-    template <typename Derived>
-    struct Primitive<1, Derived> {
-        real rho, v1, p, chi;
-
+    template <int dim, typename Derived, Regime R>
+    struct anyHydro {
+        constexpr static int nmem = []() {
+            if constexpr (R == Regime::RMHD) {
+                return 9;
+            }
+            return 3 + dim;
+        }();
+        real vals[nmem];
         // Default Destructor
-        ~Primitive() = default;
+        ~anyHydro() = default;
 
         // Default Constructor
-        Primitive() = default;
+        anyHydro() = default;
 
-        // Copy-Assignment Constructor
+        // Generic Constructor
+        template <typename... Args>
+        anyHydro(Args... args) : vals{static_cast<real>(args)...}
+        {
+            // if chi not defined, set to zero
+            if constexpr (sizeof...(args) == nmem - 1) {
+                vals[nmem - 1] = 0.0;
+            }
+            else {
+                static_assert(
+                    sizeof...(args) == nmem,
+                    "Number of arguments must match nmem"
+                );
+            }
+        }
+
+        // access operator for the values
+        DUAL real& operator[](const luint i) { return vals[i]; }
+
+        DUAL real operator[](const luint i) const { return vals[i]; }
+
+        // Copy Constructor
         DUAL Derived& operator=(const Derived& other)
         {
-            rho = other.rho;
-            v1  = other.v1;
-            p   = other.p;
-            chi = other.chi;
+            for (luint i = 0; i < nmem; i++) {
+                vals[i] = other.vals[i];
+            }
             return *self();
         }
 
-        DUAL Primitive(real rho, real v1, real p)
-            : rho(rho), v1(v1), p(p), chi(0.0)
+        // Move Constructor
+        DUAL Derived& operator=(Derived&& other)
         {
+            for (luint i = 0; i < nmem; i++) {
+                vals[i] = other.vals[i];
+            }
+            return *self();
         }
 
-        DUAL Primitive(real rho, real v1, real p, real chi)
-            : rho(rho), v1(v1), p(p), chi(chi)
-        {
-        }
-
-        DUAL Primitive(const Primitive& prim)
-            : rho(prim.rho), v1(prim.v1), p(prim.p), chi(prim.chi)
-        {
-        }
-
+        // + operator
         DUAL Derived operator+(const Derived& prim) const
         {
-            return Derived(
-                rho + prim.rho,
-                v1 + prim.v1,
-                p + prim.p,
-                chi + prim.chi
-            );
+            Derived result;
+            for (luint i = 0; i < nmem; i++) {
+                result.vals[i] = vals[i] + prim.vals[i];
+            }
+            return result;
         }
 
+        // - operator
         DUAL Derived operator-(const Derived& prim) const
         {
-            return Derived(
-                rho - prim.rho,
-                v1 - prim.v1,
-                p - prim.p,
-                chi - prim.chi
-            );
+            Derived result;
+            for (luint i = 0; i < nmem; i++) {
+                result.vals[i] = vals[i] - prim.vals[i];
+            }
+            return result;
         }
 
+        // Scalar division
         DUAL Derived operator/(const real c) const
         {
-            return Derived(rho / c, v1 / c, p / c, chi / c);
+            Derived result;
+            for (luint i = 0; i < nmem; i++) {
+                result.vals[i] = vals[i] / c;
+            }
+            return result;
         }
 
+        // Scalar multiplication
         DUAL Derived operator*(const real c) const
         {
-            return Derived(rho * c, v1 * c, p * c, chi * c);
+            Derived result;
+            for (luint i = 0; i < nmem; i++) {
+                result.vals[i] = vals[i] * c;
+            }
+            return result;
         }
 
-      private:
-        DUAL Derived* self() { return static_cast<Derived*>(this); }
-    };
-
-    template <typename Derived>
-    struct Primitive<2, Derived> {
-        real rho, v1, v2, p, chi;
-
-        // Default Constructor
-        Primitive() = default;
-
-        // Default Destructor
-        ~Primitive() = default;
-
-        // Copy-Assignment Constructor
-        DUAL Derived& operator=(const Derived& other)
+        DUAL Derived& operator-=(const Derived& prim)
         {
-            rho = other.rho;
-            v1  = other.v1;
-            v2  = other.v2;
-            p   = other.p;
-            chi = other.chi;
+            for (luint i = 0; i < nmem; i++) {
+                vals[i] -= prim.vals[i];
+            }
             return *self();
         }
 
-        DUAL Primitive(real rho, real v1, real v2, real p)
-            : rho(rho), v1(v1), v2(v2), p(p), chi(0.0)
+        DUAL Derived& operator+=(const Derived& prim)
         {
-        }
-
-        DUAL Primitive(real rho, real v1, real v2, real p, real chi)
-            : rho(rho), v1(v1), v2(v2), p(p), chi(chi)
-        {
-        }
-
-        DUAL Primitive(const Primitive& prims)
-            : rho(prims.rho),
-              v1(prims.v1),
-              v2(prims.v2),
-              p(prims.p),
-              chi(prims.chi)
-        {
-        }
-
-        DUAL Derived operator+(const Derived& prims) const
-        {
-            return Derived(
-                rho + prims.rho,
-                v1 + prims.v1,
-                v2 + prims.v2,
-                p + prims.p,
-                chi + prims.chi
-            );
-        }
-
-        DUAL Derived operator-(const Derived& prims) const
-        {
-            return Derived(
-                rho - prims.rho,
-                v1 - prims.v1,
-                v2 - prims.v2,
-                p - prims.p,
-                chi - prims.chi
-            );
-        }
-
-        DUAL Derived operator*(const real c) const
-        {
-            return Derived(rho * c, v1 * c, v2 * c, p * c, chi * c);
-        }
-
-        DUAL Derived operator/(const real c) const
-        {
-            return Derived(rho / c, v1 / c, v2 / c, p / c, chi / c);
-        }
-
-      private:
-        DUAL Derived* self() { return static_cast<Derived*>(this); }
-    };
-
-    template <typename Derived>
-    struct Primitive<3, Derived> {
-        real rho, v1, v2, v3, p, chi;
-
-        // Default Constructor
-        Primitive() = default;
-
-        // Default Destructor
-        ~Primitive() = default;
-
-        // Copy-Assignment Constructor
-        DUAL Derived& operator=(const Derived& other)
-        {
-            rho = other.rho;
-            v1  = other.v1;
-            v2  = other.v2;
-            v3  = other.v3;
-            p   = other.p;
-            chi = other.chi;
-            return *self();
-        }
-
-        DUAL Primitive(real rho, real v1, real v2, real v3, real p)
-            : rho(rho), v1(v1), v2(v2), v3(v3), p(p), chi(0.0)
-        {
-        }
-
-        DUAL Primitive(real rho, real v1, real v2, real v3, real p, real chi)
-            : rho(rho), v1(v1), v2(v2), v3(v3), p(p), chi(chi)
-        {
-        }
-
-        DUAL Primitive(const Primitive& prims)
-            : rho(prims.rho),
-              v1(prims.v1),
-              v2(prims.v2),
-              v3(prims.v3),
-              p(prims.p),
-              chi(prims.chi)
-        {
-        }
-
-        DUAL Derived operator+(const Derived& prims) const
-        {
-            return Derived(
-                rho + prims.rho,
-                v1 + prims.v1,
-                v2 + prims.v2,
-                v3 + prims.v3,
-                p + prims.p,
-                chi + prims.chi
-            );
-        }
-
-        DUAL Derived operator-(const Derived& prims) const
-        {
-            return Derived(
-                rho - prims.rho,
-                v1 - prims.v1,
-                v2 - prims.v2,
-                v3 - prims.v3,
-                p - prims.p,
-                chi - prims.chi
-            );
-        }
-
-        DUAL Derived operator*(const real c) const
-        {
-            return Derived(rho * c, v1 * c, v2 * c, v3 * c, p * c, chi * c);
-        }
-
-        DUAL Derived operator/(const real c) const
-        {
-            return Derived(rho / c, v1 / c, v2 / c, v3 / c, p / c, chi / c);
-        }
-
-      private:
-        DUAL Derived* self() { return static_cast<Derived*>(this); }
-    };
-
-    template <int dim, typename Derived>
-    struct Conserved {
-    };
-
-    template <typename Derived>
-    struct Conserved<1, Derived> {
-        real den, m1, nrg, chi;
-
-        // Default Destructor
-        ~Conserved() = default;
-
-        // Default Constructor
-        Conserved() = default;
-
-        // Copy-Assignment Constructor
-        DUAL Derived& operator=(const Derived& other)
-        {
-            den = other.den;
-            m1  = other.m1;
-            nrg = other.nrg;
-            chi = other.chi;
-            return *self();
-        }
-
-        DUAL Conserved(real den, real m1, real nrg)
-            : den(den), m1(m1), nrg(nrg), chi(0.0)
-        {
-        }
-
-        DUAL Conserved(real den, real m1, real nrg, real chi)
-            : den(den), m1(m1), nrg(nrg), chi(chi)
-        {
-        }
-
-        DUAL Conserved(const Conserved& prim)
-            : den(prim.den), m1(prim.m1), nrg(prim.nrg), chi(prim.chi)
-        {
-        }
-
-        DUAL Derived operator+(const Derived& prim) const
-        {
-            return Derived(
-                den + prim.den,
-                m1 + prim.m1,
-                nrg + prim.nrg,
-                chi + prim.chi
-            );
-        }
-
-        DUAL Derived operator-(const Derived& prim) const
-        {
-            return Derived(
-                den - prim.den,
-                m1 - prim.m1,
-                nrg - prim.nrg,
-                chi - prim.chi
-            );
-        }
-
-        DUAL Derived operator/(const real c) const
-        {
-            return Derived(den / c, m1 / c, nrg / c, chi / c);
-        }
-
-        DUAL Derived operator*(const real c) const
-        {
-            return Derived(den * c, m1 * c, nrg * c, chi * c);
-        }
-
-        DUAL Derived& operator-=(const Derived& cons)
-        {
-            den -= cons.den;
-            m1 -= cons.m1;
-            nrg -= cons.nrg;
-            chi -= cons.chi;
+            for (luint i = 0; i < nmem; i++) {
+                vals[i] += prim.vals[i];
+            }
             return *self();
         }
 
       private:
         DUAL Derived* self() { return static_cast<Derived*>(this); }
     };
-
-    template <typename Derived>
-    struct Conserved<2, Derived> {
-        real den, m1, m2, nrg, chi;
-
-        // Default Constructor
-        Conserved() = default;
-
-        // Default Destructor
-        ~Conserved() = default;
-
-        // Copy-Assignment Constructor
-        DUAL Derived& operator=(const Derived& other)
-        {
-            den = other.den;
-            m1  = other.m1;
-            m2  = other.m2;
-            nrg = other.nrg;
-            chi = other.chi;
-            return *self();
-        }
-
-        DUAL Conserved(real den, real m1, real m2, real nrg)
-            : den(den), m1(m1), m2(m2), nrg(nrg), chi(0.0)
-        {
-        }
-
-        DUAL Conserved(real den, real m1, real m2, real nrg, real chi)
-            : den(den), m1(m1), m2(m2), nrg(nrg), chi(chi)
-        {
-        }
-
-        DUAL Conserved(const Conserved& prims)
-            : den(prims.den),
-              m1(prims.m1),
-              m2(prims.m2),
-              nrg(prims.nrg),
-              chi(prims.chi)
-        {
-        }
-
-        DUAL Derived operator+(const Derived& cons) const
-        {
-            return Derived(
-                den + cons.den,
-                m1 + cons.m1,
-                m2 + cons.m2,
-                nrg + cons.nrg,
-                chi + cons.chi
-            );
-        }
-
-        DUAL Derived operator-(const Derived& cons) const
-        {
-            return Derived(
-                den - cons.den,
-                m1 - cons.m1,
-                m2 - cons.m2,
-                nrg - cons.nrg,
-                chi - cons.chi
-            );
-        }
-
-        DUAL Derived operator*(const real c) const
-        {
-            return Derived(den * c, m1 * c, m2 * c, nrg * c, chi * c);
-        }
-
-        DUAL Derived operator/(const real c) const
-        {
-            return Derived(den / c, m1 / c, m2 / c, nrg / c, chi / c);
-        }
-
-        DUAL Derived& operator-=(const Derived& cons)
-        {
-            den -= cons.den;
-            m1 -= cons.m1;
-            m2 -= cons.m2;
-            nrg -= cons.nrg;
-            chi -= cons.chi;
-            return *self();
-        }
-
-      private:
-        DUAL Derived* self() { return static_cast<Derived*>(this); }
-    };
-
-    template <typename Derived>
-    struct Conserved<3, Derived> {
-        real den, m1, m2, m3, nrg, chi;
-
-        // Default Constructor
-        Conserved() = default;
-
-        // Default Destructor
-        ~Conserved() = default;
-
-        // Copy-Assignment Constructor
-        DUAL Derived& operator=(const Derived& other)
-        {
-            den = other.den;
-            m1  = other.m1;
-            m2  = other.m2;
-            m3  = other.m3;
-            nrg = other.nrg;
-            chi = other.chi;
-            return *self();
-        }
-
-        DUAL Conserved(real den, real m1, real m2, real m3, real nrg)
-            : den(den), m1(m1), m2(m2), m3(m3), nrg(nrg), chi(0.0)
-        {
-        }
-
-        DUAL Conserved(real den, real m1, real m2, real m3, real nrg, real chi)
-            : den(den), m1(m1), m2(m2), m3(m3), nrg(nrg), chi(chi)
-        {
-        }
-
-        DUAL Conserved(const Conserved& prims)
-            : den(prims.den),
-              m1(prims.m1),
-              m2(prims.m2),
-              m3(prims.m3),
-              nrg(prims.nrg),
-              chi(prims.chi)
-        {
-        }
-
-        DUAL Derived operator+(const Derived& prims) const
-        {
-            return Derived(
-                den + prims.den,
-                m1 + prims.m1,
-                m2 + prims.m2,
-                m3 + prims.m3,
-                nrg + prims.nrg,
-                chi + prims.chi
-            );
-        }
-
-        DUAL Derived operator-(const Derived& prims) const
-        {
-            return Derived(
-                den - prims.den,
-                m1 - prims.m1,
-                m2 - prims.m2,
-                m3 - prims.m3,
-                nrg - prims.nrg,
-                chi - prims.chi
-            );
-        }
-
-        DUAL Derived operator*(const real c) const
-        {
-            return Derived(den * c, m1 * c, m2 * c, m3 * c, nrg * c, chi * c);
-        }
-
-        DUAL Derived operator/(const real c) const
-        {
-            return Derived(den / c, m1 / c, m2 / c, m3 / c, nrg / c, chi / c);
-        }
-
-        DUAL Derived& operator-=(const Derived& cons)
-        {
-            den -= cons.den;
-            m1 -= cons.m1;
-            m2 -= cons.m2;
-            m3 -= cons.m3;
-            nrg -= cons.nrg;
-            chi -= cons.chi;
-            return *self();
-        }
-
-      private:
-        DUAL Derived* self() { return static_cast<Derived*>(this); }
-    };
-
 }   // namespace generic_hydro
+
+// Forward declare the structs
+template <int dim, Regime R>
+struct anyConserved;
+
+template <int dim, Regime R>
+struct anyPrimitive;
+
+template <int dim>
+struct mag_four_vec {
+  private:
+    real lorentz, vdb;
+
+  public:
+    real zero, one, two, three;
+
+    mag_four_vec() = default;
+
+    ~mag_four_vec() = default;
+
+    DUAL mag_four_vec(const anyPrimitive<dim, Regime::RMHD>& prim)
+        : lorentz(prim.lorentz_factor()),
+          vdb(prim.vdotb()),
+          zero(lorentz * vdb),
+          one(prim.b1() / lorentz + lorentz * prim.get_v1() * vdb),
+          two(prim.b2() / lorentz + lorentz * prim.get_v2() * vdb),
+          three(prim.b3() / lorentz + lorentz * prim.get_v3() * vdb)
+    {
+    }
+
+    DUAL mag_four_vec(const mag_four_vec& c)
+        : lorentz(c.lorentz),
+          vdb(c.vdb),
+          zero(c.zero),
+          one(c.one),
+          two(c.two),
+          three(c.three)
+    {
+    }
+
+    DUAL real inner_product() const
+    {
+        return -zero * zero + one * one + two * two + three * three;
+    }
+
+    DUAL constexpr real normal(const luint nhat) const
+    {
+        return nhat == 1 ? one : nhat == 2 ? two : three;
+    }
+};
+
+template <int dim, Regime R>
+struct anyConserved : generic_hydro::anyHydro<dim, anyConserved<dim, R>, R> {
+    using generic_hydro::anyHydro<dim, anyConserved<dim, R>, R>::anyHydro;
+
+    // Define accessors for the conserved variables
+    DUAL real& dens() { return this->vals[0]; }
+
+    DUAL constexpr real dens() const { return this->vals[0]; }
+
+    DUAL real& m1() { return this->vals[1]; }
+
+    DUAL constexpr real m1() const { return this->vals[1]; }
+
+    DUAL real& m2()
+    {
+        if constexpr (dim > 1) {
+            return this->vals[2];
+        }
+        else {
+            static_assert(dim > 1, "m2 is not defined for dim = 1");
+        }
+    }
+
+    DUAL constexpr real m2() const
+    {
+        if constexpr (dim > 1) {
+            return this->vals[2];
+        }
+        else {
+            return static_cast<real>(0.0);
+        }
+    }
+
+    DUAL real& m3()
+    {
+        if constexpr (dim > 2) {
+            return this->vals[3];
+        }
+        else {
+            static_assert(dim < 3, "m3 is not defined for dim < 3");
+        }
+    }
+
+    DUAL constexpr real m3() const
+    {
+        if constexpr (dim > 2) {
+            return this->vals[3];
+        }
+        else {
+            return static_cast<real>(0.0);
+        }
+    }
+
+    DUAL real& nrg() { return this->vals[dim + 1]; }
+
+    DUAL constexpr real nrg() const { return this->vals[dim + 1]; }
+
+    DUAL real& b1()
+    {
+        if constexpr (R == Regime::RMHD) {
+            return this->vals[dim + 2];
+        }
+        else {
+            static_assert(R == Regime::RMHD, "b1 is not defined for non-RMHD");
+        }
+    }
+
+    DUAL constexpr real b1() const
+    {
+        if constexpr (R == Regime::RMHD) {
+            return this->vals[dim + 2];
+        }
+        else {
+            return static_cast<real>(0.0);
+        }
+    }
+
+    DUAL real& b2()
+    {
+        if constexpr (R == Regime::RMHD) {
+            return this->vals[dim + 3];
+        }
+        else {
+            static_assert(R == Regime::RMHD, "b2 is not defined for non-RMHD");
+        }
+    }
+
+    DUAL constexpr real b2() const
+    {
+        if constexpr (R == Regime::RMHD) {
+            return this->vals[dim + 3];
+        }
+        else {
+            return static_cast<real>(0.0);
+        }
+    }
+
+    DUAL real& b3()
+    {
+        if constexpr (R == Regime::RMHD) {
+            return this->vals[dim + 4];
+        }
+        else {
+            static_assert(R == Regime::RMHD, "b3 is not defined for non-RMHD");
+        }
+    }
+
+    DUAL constexpr real b3() const
+    {
+        if constexpr (R == Regime::RMHD) {
+            return this->vals[dim + 4];
+        }
+        else {
+            return static_cast<real>(0.0);
+        }
+    }
+
+    DUAL real& chi() { return this->vals[dim + 2 + 3 * (R == Regime::RMHD)]; }
+
+    DUAL constexpr real chi() const
+    {
+        return this->vals[dim + 2 + 3 * (R == Regime::RMHD)];
+    }
+
+    DUAL constexpr real total_energy() const
+    {
+        if constexpr (R == Regime::RMHD || R == Regime::SRHD) {
+            return nrg() + dens();
+        }
+        else {
+            return nrg();
+        }
+    }
+
+    DUAL real& e1() { return b1(); };
+
+    DUAL constexpr real e1() const { return b1(); }
+
+    DUAL real& e2() { return b2(); };
+
+    DUAL constexpr real e2() const { return b2(); }
+
+    DUAL real& e3() { return b3(); };
+
+    DUAL constexpr real e3() const { return b3(); }
+
+    //=========================================================================
+    DUAL constexpr real bsquared() const
+    {
+        return b1() * b1() + b2() * b2() + b3() * b3();
+    }
+
+    DUAL constexpr void calc_electric_field(const luint nhat)
+    {
+        if constexpr (R == Regime::RMHD) {
+            if (nhat == 1) {
+                e1() = 0.0;
+                global::swap(e2(), e3());
+                e3() *= -1.0;
+            }
+            else if (nhat == 2) {
+                e2() = 0.0;
+                global::swap(e1(), e3());
+                e1() *= -1.0;
+            }
+            else {
+                e3() = 0.0;
+                global::swap(e2(), e1());
+                e2() *= -1.0;
+            }
+        }
+    }
+
+    DUAL real momentum(const luint nhat) const
+    {
+        if (nhat == 1) {
+            return m1();
+        }
+        else if (nhat == 2) {
+            return m2();
+        }
+        else {
+            return m3();
+        }
+    }
+
+    DUAL real& momentum(const luint nhat = 1)
+    {
+        if (nhat == 1) {
+            return m1();
+        }
+        if constexpr (dim > 1) {
+            if (nhat == 2) {
+                return m2();
+            }
+            if constexpr (dim > 2) {
+                if (nhat == 3) {
+                    return m3();
+                }
+            }
+        }
+        return m1();
+    }
+
+    DUAL real bcomponent(const luint nhat) const
+    {
+        if (nhat == 1) {
+            return b1();
+        }
+        else if (nhat == 2) {
+            return b2();
+        }
+        else {
+            return b3();
+        }
+    }
+
+    DUAL real& bcomponent(const luint nhat = 1)
+    {
+        if (nhat == 1) {
+            return b1();
+        }
+        if constexpr (dim > 1) {
+            if (nhat == 2) {
+                return b2();
+            }
+        }
+        if constexpr (dim > 2) {
+            if (nhat == 3) {
+                return b3();
+            }
+        }
+        // throw an error if the dimension is not correct
+        return b1();
+    }
+
+    DUAL real ecomponent(const luint nhat) const
+    {
+        if (nhat == 1) {
+            return e1();
+        }
+        else if (nhat == 2) {
+            return e2();
+        }
+        else {
+            return e3();
+        }
+    }
+
+    // change the -= overload if on an mhd run
+    // to skip the magnetic fields
+    DUAL anyConserved& operator-=(const anyConserved& cons)
+    {
+        if constexpr (R == Regime::RMHD) {
+            for (luint i = 0; i < this->nmem; i++) {
+                if (i < dim + 2 || i > dim + 4) {
+                    this->vals[i] -= cons.vals[i];
+                }
+            }
+        }
+        else {
+            for (luint i = 0; i < this->nmem; i++) {
+                this->vals[i] -= cons.vals[i];
+            }
+        }
+        return *this;
+    }
+};
+
+template <int dim, Regime R>
+struct anyPrimitive : generic_hydro::anyHydro<dim, anyPrimitive<dim, R>, R> {
+    using generic_hydro::anyHydro<dim, anyPrimitive<dim, R>, R>::anyHydro;
+
+    // Define accessors for the primitive variables
+    DUAL real& rho() { return this->vals[0]; }
+
+    DUAL constexpr real rho() const { return this->vals[0]; }
+
+    DUAL real& v1() { return this->vals[1]; }
+
+    DUAL constexpr real v1() const { return this->vals[1]; }
+
+    DUAL real& v2()
+    {
+        if constexpr (dim > 1) {
+            return this->vals[2];
+        }
+        else {
+            static_assert(dim > 1, "v2 is not defined for dim = 1");
+        }
+    }
+
+    DUAL constexpr real v2() const
+    {
+        if constexpr (dim > 1) {
+            return this->vals[2];
+        }
+    }
+
+    DUAL real& v3()
+    {
+        if constexpr (dim > 2) {
+            return this->vals[3];
+        }
+        else {
+            static_assert(dim > 2, "v3 is not defined for dim < 3");
+        }
+    }
+
+    DUAL constexpr real v3() const
+    {
+        if constexpr (dim > 2) {
+            return this->vals[3];
+        }
+        else {
+            static_assert(dim > 2, "v3 is not defined for dim < 3");
+        }
+    }
+
+    DUAL real& p() { return this->vals[dim + 1]; }
+
+    DUAL constexpr real p() const { return this->vals[dim + 1]; }
+
+    // Define accessors for bfield if RMHD
+    DUAL real& b1()
+    {
+        if constexpr (R == Regime::RMHD) {
+            return this->vals[dim + 2];
+        }
+        else {
+            static_assert(R == Regime::RMHD, "b1 is not defined for non-RMHD");
+        }
+    }
+
+    DUAL constexpr real b1() const
+    {
+        if constexpr (R == Regime::RMHD) {
+            return this->vals[dim + 2];
+        }
+        else {
+            return static_cast<real>(0.0);
+        }
+    }
+
+    DUAL real& b2()
+    {
+        if constexpr (R == Regime::RMHD) {
+            return this->vals[dim + 3];
+        }
+        else {
+            static_assert(R == Regime::RMHD, "b2 is not defined for non-RMHD");
+        }
+    }
+
+    DUAL constexpr real b2() const
+    {
+        if constexpr (R == Regime::RMHD) {
+            return this->vals[dim + 3];
+        }
+        else {
+            return static_cast<real>(0.0);
+        }
+    }
+
+    DUAL real& b3()
+    {
+        if constexpr (R == Regime::RMHD) {
+            return this->vals[dim + 4];
+        }
+        else {
+            static_assert(R == Regime::RMHD, "b3 is not defined for non-RMHD");
+        }
+    }
+
+    DUAL constexpr real b3() const
+    {
+        if constexpr (R == Regime::RMHD) {
+            return this->vals[dim + 4];
+        }
+        else {
+            return static_cast<real>(0.0);
+        }
+    }
+
+    DUAL real& chi() { return this->vals[dim + 2 + 3 * (R == Regime::RMHD)]; }
+
+    DUAL constexpr real chi() const
+    {
+        return this->vals[dim + 2 + 3 * (R == Regime::RMHD)];
+    }
+
+    DUAL constexpr real alfven() const { return p(); }
+
+    DUAL real& alfven() { return p(); }
+
+    //=========================================================================
+
+    DUAL constexpr real vsquared() const
+    {
+        if constexpr (dim == 1) {
+            return v1() * v1();
+        }
+        else if constexpr (dim == 2) {
+            return v1() * v1() + v2() * v2();
+        }
+        else {
+            return v1() * v1() + v2() * v2() + v3() * v3();
+        }
+    }
+
+    DUAL constexpr real get_v1() const
+    {
+        if constexpr (R == Regime::SRHD || R == Regime::RMHD) {
+            if constexpr (global::VelocityType == global::Velocity::Beta) {
+                return v1();
+            }
+            else {
+                return v1() / std::sqrt(1.0 + vsquared());
+            }
+        }
+        else {
+            return v1();
+        }
+    }
+
+    DUAL constexpr real get_v2() const
+    {
+        if constexpr (dim > 1) {
+            if constexpr (R == Regime::SRHD || R == Regime::RMHD) {
+                if constexpr (global::VelocityType == global::Velocity::Beta) {
+                    return v2();
+                }
+                else {
+                    return v2() / std::sqrt(1.0 + vsquared());
+                }
+            }
+            else {
+                return v2();
+            }
+        }
+        else {
+            return static_cast<real>(0.0);
+        }
+    }
+
+    DUAL constexpr real get_v3() const
+    {
+        if constexpr (dim > 2) {
+            if constexpr (R == Regime::SRHD || R == Regime::RMHD) {
+                if constexpr (global::VelocityType == global::Velocity::Beta) {
+                    return v3();
+                }
+                else {
+                    return v3() / std::sqrt(1.0 + vsquared());
+                }
+            }
+            else {
+                return v3();
+            }
+        }
+        else {
+            return static_cast<real>(0.0);
+        }
+    }
+
+    DUAL constexpr real vcomponent(const luint nhat) const
+    {
+        if constexpr (dim == 1) {
+            if (nhat > 1) {
+                return static_cast<real>(0.0);
+            }
+            return v1();
+        }
+        else if constexpr (dim == 2) {
+            if (nhat > 2) {
+                return static_cast<real>(0.0);
+            }
+            return (nhat == 1 ? v1() : v2());
+        }
+        else {
+            return (nhat == 1 ? v1() : (nhat == 2) ? v2() : v3());
+        }
+    }
+
+    DUAL constexpr real& vcomponent(const luint nhat)
+    {
+        if constexpr (dim == 1) {
+            if (nhat > 1) {
+                return v1();
+            }
+            return v1();
+        }
+        else if constexpr (dim == 2) {
+            if (nhat > 2) {
+                return v1();
+            }
+            return (nhat == 1 ? v1() : v2());
+        }
+        else {
+            return (nhat == 1 ? v1() : (nhat == 2) ? v2() : v3());
+        }
+    }
+
+    DUAL constexpr real lorentz_factor() const
+    {
+        if constexpr (R == Regime::SRHD || R == Regime::RMHD) {
+            return 1.0 / std::sqrt(1.0 - vsquared());
+        }
+        else {
+            return 1.0;
+        }
+    }
+
+    DUAL constexpr real lorentz_factor_squared() const
+    {
+        if constexpr (R == Regime::SRHD || R == Regime::RMHD) {
+            return 1.0 / (1.0 - vsquared());
+        }
+        else {
+            return 1.0;
+        }
+    }
+
+    DUAL constexpr real total_energy(const real gamma) const
+    {
+        if constexpr (R == Regime::NEWTONIAN) {
+            return p() / (gamma - 1.0) + 0.5 * rho() * vsquared();
+        }
+        else if constexpr (R == Regime::SRHD) {
+            return rho() * lorentz_factor_squared() * enthalpy(gamma) - p();
+        }
+        else {
+            return rho() * lorentz_factor_squared() * enthalpy(gamma) - p() +
+                   0.5 * (bsquared() + bsquared() + vsquared() * bsquared() -
+                          vdotb() * vdotb());
+        }
+    }
+
+    DUAL constexpr real enthalpy(real gamma) const
+    {
+        if constexpr (R == Regime::SRHD || R == Regime::RMHD) {
+            return 1.0 + gamma * p() / (rho() * (gamma - 1.0));
+        }
+        else {
+            return 1.0;
+        }
+    }
+
+    DUAL constexpr real total_pressure() const
+    {
+        if constexpr (R == Regime::RMHD) {
+            return p() + 0.5 * (bsquared() / lorentz_factor_squared() +
+                                vdotb() * vdotb());
+        }
+        else {
+            return p();
+        }
+    }
+
+    DUAL constexpr real bcomponent(const luint nhat) const
+    {
+        if constexpr (R == Regime::RMHD) {
+            return (
+                nhat == 1     ? this->vals[dim + 2]
+                : (nhat == 2) ? this->vals[dim + 3]
+                              : this->vals[dim + 4]
+            );
+        }
+        else {
+            return static_cast<real>(0.0);
+        }
+    }
+
+    DUAL constexpr real& bcomponent(const luint nhat)
+    {
+        if constexpr (R == Regime::RMHD) {
+            return (
+                nhat == 1     ? this->vals[dim + 2]
+                : (nhat == 2) ? this->vals[dim + 3]
+                              : this->vals[dim + 4]
+            );
+        }
+        else {
+            return this->vals[dim + 3];
+        }
+    }
+
+    DUAL real ecomponent(luint nhat) const
+    {
+        if constexpr (R == Regime::RMHD) {
+            if (nhat == 1) {
+                return vcomponent(3) * b2() - vcomponent(2) * b3();
+            }
+            else if (nhat == 2) {
+                return vcomponent(1) * b3() - vcomponent(3) * b1();
+            }
+            return vcomponent(2) * b1() - vcomponent(1) * b2();
+        }
+        else {
+            return static_cast<real>(0.0);
+        }
+    }
+
+    DUAL constexpr real vdotb() const
+    {
+        if constexpr (R == Regime::RMHD) {
+            return vcomponent(1) * bcomponent(1) +
+                   vcomponent(2) * bcomponent(2) +
+                   vcomponent(3) * bcomponent(3);
+        }
+        else {
+            return static_cast<real>(0.0);
+        }
+    }
+
+    DUAL constexpr real bsquared() const
+    {
+        return b1() * b1() + b2() * b2() + b3() * b3();
+    }
+
+    DUAL anyConserved<dim, R> to_conserved(real gamma) const
+    {
+        if constexpr (R == Regime::NEWTONIAN) {
+            const real rho = this->rho();
+            const real v1  = vcomponent(1);
+            const real v2  = vcomponent(2);
+            const real v3  = vcomponent(3);
+            const real p   = this->p();
+            const real et  = p / (gamma - 1) + 0.5 * rho * vsquared();
+            if constexpr (dim == 1) {
+                return {rho, rho * v1, et};
+            }
+            else if constexpr (dim == 2) {
+                return {rho, rho * v1, rho * v2, et};
+            }
+            else {
+                return {rho, rho * v1, rho * v2, rho * v3, et};
+            }
+        }
+        else if constexpr (R == Regime::SRHD) {
+            const real rho = this->rho();
+            const real v1  = vcomponent(1);
+            const real v2  = vcomponent(2);
+            const real v3  = vcomponent(3);
+            const real p   = this->p();
+            const real lf  = lorentz_factor();
+            const real h   = enthalpy(gamma);
+            const real d   = rho * lf;
+            const real ed  = d * lf * h;
+            if constexpr (dim == 1) {
+                return {d, ed * v1, ed - p - d};
+            }
+            else if constexpr (dim == 2) {
+                return {d, ed * v1, ed * v2, ed - p - d};
+            }
+            else {
+                return {d, ed * v1, ed * v2, ed * v3, ed - p - d};
+            }
+        }
+        else {
+            const real rho = this->rho();
+            const real v1  = vcomponent(1);
+            const real v2  = vcomponent(2);
+            const real v3  = vcomponent(3);
+            const real pg  = this->p();
+            const real b1  = bcomponent(1);
+            const real b2  = bcomponent(2);
+            const real b3  = bcomponent(3);
+            const real lf  = lorentz_factor();
+            const real h   = enthalpy(gamma);
+            const real vdb = vdotb();
+            const real bsq = bsquared();
+            const real vsq = vsquared();
+            const real d   = rho * lf;
+            const real ed  = d * h * lf;
+
+            return {
+              d,
+              (ed + bsq) * v1 - vdb * b1,
+              (ed + bsq) * v2 - vdb * b2,
+              (ed + bsq) * v3 - vdb * b3,
+              ed - pg - d +
+                  static_cast<real>(0.5) * (bsq + vsq * bsq - vdb * vdb),
+              b1,
+              b2,
+              b3,
+              d * chi()
+            };
+        }
+    }
+
+    DUAL anyConserved<dim, R> to_flux(const real gamma, const luint nhat) const
+    {
+        if constexpr (R == Regime::NEWTONIAN) {
+            const real rho = this->rho();
+            const real v1  = vcomponent(1);
+            const real v2  = vcomponent(2);
+            const real v3  = vcomponent(3);
+            const real p   = this->p();
+            const real vn  = nhat == 1 ? v1 : nhat == 2 ? v2 : v3;
+            const real et  = p / (gamma - 1) + 0.5 * rho * vsquared();
+            const real m1  = rho * v1;
+            if constexpr (dim == 1) {
+                return {
+                  m1,
+                  m1 * vn + kdelta(nhat, 1) * p,
+                  (et + p) * vn,
+                  rho * vn * chi()
+                };
+            }
+            else if constexpr (dim == 2) {
+                const real m2 = rho * v2;
+                return {
+                  rho * vn,
+                  m1 * vn + kdelta(nhat, 1) * p,
+                  m2 * vn + kdelta(nhat, 2) * p,
+                  (et + p) * vn,
+                  rho * vn * chi()
+                };
+            }
+            else {
+                const real m2 = rho * v2;
+                const real m3 = rho * v3;
+                return {
+                  rho * vn,
+                  m1 * vn + kdelta(nhat, 1) * p,
+                  m2 * vn + kdelta(nhat, 2) * p,
+                  m3 * vn + kdelta(nhat, 3) * p,
+                  (et + p) * vn,
+                  rho * vn * chi()
+                };
+            }
+        }
+        else if constexpr (R == Regime::SRHD) {
+            const real rho = this->rho();
+            const real v1  = vcomponent(1);
+            const real v2  = vcomponent(2);
+            const real v3  = vcomponent(3);
+            const real p   = this->p();
+            const real vn  = (nhat == 1) ? v1 : (nhat == 2) ? v2 : v3;
+            const real lf  = lorentz_factor();
+
+            const real h  = enthalpy(gamma);
+            const real d  = rho * lf;
+            const real ed = d * lf * h;
+            const real s1 = ed * v1;
+            const real s2 = ed * v2;
+            const real s3 = ed * v3;
+            const real mn = (nhat == 1) ? s1 : (nhat == 2) ? s2 : s3;
+            if constexpr (dim == 1) {
+                return {
+                  d * vn,
+                  s1 * vn + kdelta(nhat, 1) * p,
+                  mn - d * vn,
+                  d * vn * chi()
+                };
+            }
+            else if constexpr (dim == 2) {
+                return {
+                  d * vn,
+                  s1 * vn + kdelta(nhat, 1) * p,
+                  s2 * vn + kdelta(nhat, 2) * p,
+                  mn - d * vn,
+                  d * vn * chi()
+                };
+            }
+            else {
+                return {
+                  d * vn,
+                  s1 * vn + kdelta(nhat, 1) * p,
+                  s2 * vn + kdelta(nhat, 2) * p,
+                  s3 * vn + kdelta(nhat, 3) * p,
+                  mn - d * vn,
+                  d * vn * chi()
+                };
+            }
+        }
+        else {
+            const real rho   = this->rho();
+            const real v1    = vcomponent(1);
+            const real v2    = vcomponent(2);
+            const real v3    = vcomponent(3);
+            const real b1    = bcomponent(1);
+            const real b2    = bcomponent(2);
+            const real b3    = bcomponent(3);
+            const real h     = enthalpy(gamma);
+            const real lf    = lorentz_factor();
+            const real invlf = 1.0 / lf;
+            const real vdb   = vdotb();
+            const real bsq   = bsquared();
+            const real ptot  = total_pressure();
+            const real vn    = (nhat == 1) ? v1 : (nhat == 2) ? v2 : v3;
+            const real bn    = (nhat == 1) ? b1 : (nhat == 2) ? b2 : b3;
+            const real d     = rho * lf;
+            const real ed    = d * h * lf;
+            const real m1    = (ed + bsq) * v1 - vdb * b1;
+            const real m2    = (ed + bsq) * v2 - vdb * b2;
+            const real m3    = (ed + bsq) * v3 - vdb * b3;
+            const real mn    = (nhat == 1) ? m1 : (nhat == 2) ? m2 : m3;
+            const auto bmu   = mag_fourvec_t(this);
+            const real ind1  = (nhat == 1) ? 0.0 : vn * b1 - v1 * bn;
+            const real ind2  = (nhat == 2) ? 0.0 : vn * b2 - v2 * bn;
+            const real ind3  = (nhat == 3) ? 0.0 : vn * b3 - v3 * bn;
+            return {
+              d * vn,
+              m1 * vn + kdelta(nhat, 1) * ptot - bn * bmu.one * invlf,
+              m2 * vn + kdelta(nhat, 2) * ptot - bn * bmu.two * invlf,
+              m3 * vn + kdelta(nhat, 3) * ptot - bn * bmu.three * invlf,
+              mn - d * vn,
+              ind1,
+              ind2,
+              ind3,
+              d * vn * chi()
+            };
+        }
+    }
+};
+
+// Define the traits for the structs
+template <>
+struct is_prim_struct<anyPrimitive<1, Regime::NEWTONIAN>> {
+    static constexpr bool value = true;
+};
+
+template <>
+struct is_prim_struct<anyPrimitive<2, Regime::NEWTONIAN>> {
+    static constexpr bool value = true;
+};
+
+template <>
+struct is_prim_struct<anyPrimitive<3, Regime::NEWTONIAN>> {
+    static constexpr bool value = true;
+};
+
+template <>
+struct is_prim_struct<anyPrimitive<1, Regime::SRHD>> {
+    static constexpr bool value = true;
+};
+
+template <>
+struct is_prim_struct<anyPrimitive<2, Regime::SRHD>> {
+    static constexpr bool value = true;
+};
+
+template <>
+struct is_prim_struct<anyPrimitive<3, Regime::SRHD>> {
+    static constexpr bool value = true;
+};
+
+template <>
+struct is_prim_struct<anyPrimitive<1, Regime::RMHD>> {
+    static constexpr bool value = true;
+};
+
+template <>
+struct is_prim_struct<anyPrimitive<2, Regime::RMHD>> {
+    static constexpr bool value = true;
+};
+
+template <>
+struct is_prim_struct<anyPrimitive<3, Regime::RMHD>> {
+    static constexpr bool value = true;
+};
+
+template <>
+struct is_mhd_struct<anyConserved<1, Regime::RMHD>> {
+    static constexpr bool value = true;
+};
+
+template <>
+struct is_mhd_struct<anyConserved<2, Regime::RMHD>> {
+    static constexpr bool value = true;
+};
+
+template <>
+struct is_mhd_struct<anyConserved<3, Regime::RMHD>> {
+    static constexpr bool value = true;
+};
+
+template <>
+struct is_mhd_struct<anyPrimitive<1, Regime::RMHD>> {
+    static constexpr bool value = true;
+};
+
+template <>
+struct is_mhd_struct<anyPrimitive<2, Regime::RMHD>> {
+    static constexpr bool value = true;
+};
+
+template <>
+struct is_mhd_struct<anyPrimitive<3, Regime::RMHD>> {
+    static constexpr bool value = true;
+};
 
 //=======================================================
 //                        NEWTONIAN
 //=======================================================
 namespace hydro1d {
-    struct Primitive : generic_hydro::Primitive<1, Primitive> {
-        using generic_hydro::Primitive<1, Primitive>::Primitive;
-
-        DUAL constexpr real get_v() const { return v1; }
-
-        DUAL constexpr real vcomponent(const luint nhat) const
-        {
-            if (nhat > 1) {
-                return 0;
-            }
-            return v1;
-        }
-
-        DUAL real get_energy_density(real gamma) const
-        {
-            return p / (gamma - 1.0) + 0.5 * (rho * v1 * v1);
-        }
-    };
-
-    struct Conserved : generic_hydro::Conserved<1, Conserved> {
-        using generic_hydro::Conserved<1, Conserved>::Conserved;
-
-        DUAL constexpr real& momentum() { return m1; }
-
-        DUAL constexpr real momentum(const luint nhat) const
-        {
-            if (nhat == 1) {
-                return m1;
-            }
-            return 0;
-        }
-    };
-
     struct PrimitiveSOA {
         PrimitiveSOA() = default;
 
@@ -627,44 +1176,6 @@ namespace hydro1d {
 }   // namespace hydro1d
 
 namespace hydro2d {
-    struct Conserved : generic_hydro::Conserved<2, Conserved> {
-        using generic_hydro::Conserved<2, Conserved>::Conserved;
-
-        DUAL constexpr real momentum(const luint nhat) const
-        {
-            if (nhat > 2) {
-                return 0;
-            }
-            return (nhat == 1 ? m1 : m2);
-        }
-
-        DUAL constexpr real& momentum(const luint nhat)
-        {
-            return (nhat == 1 ? m1 : m2);
-        }
-    };
-
-    struct Primitive : generic_hydro::Primitive<2, Primitive> {
-        using generic_hydro::Primitive<2, Primitive>::Primitive;
-
-        DUAL constexpr real get_v1() const { return v1; }
-
-        DUAL constexpr real get_v2() const { return v2; }
-
-        DUAL constexpr real vcomponent(const luint nhat) const
-        {
-            if (nhat > 2) {
-                return 0;
-            }
-            return (nhat == 1 ? v1 : v2);
-        }
-
-        DUAL real get_energy_density(real gamma) const
-        {
-            return p / (gamma - 1) + 0.5 * (rho * (v1 * v1 + v2 * v2));
-        }
-    };
-
     struct PrimitiveSOA {
         PrimitiveSOA() = default;
 
@@ -692,41 +1203,6 @@ namespace hydro2d {
 }   // namespace hydro2d
 
 namespace hydro3d {
-    struct Conserved : generic_hydro::Conserved<3, Conserved> {
-        using generic_hydro::Conserved<3, Conserved>::Conserved;
-
-        DUAL constexpr real momentum(const luint nhat) const
-        {
-            return (nhat == 1 ? m1 : (nhat == 2) ? m2 : m3);
-        }
-
-        DUAL constexpr real& momentum(const luint nhat)
-        {
-            return (nhat == 1 ? m1 : (nhat == 2) ? m2 : m3);
-        }
-    };
-
-    struct Primitive : generic_hydro::Primitive<3, Primitive> {
-        using generic_hydro::Primitive<3, Primitive>::Primitive;
-
-        DUAL constexpr real get_v1() const { return v1; }
-
-        DUAL constexpr real get_v2() const { return v2; }
-
-        DUAL constexpr real get_v3() const { return v3; }
-
-        DUAL constexpr real vcomponent(const luint nhat) const
-        {
-            return (nhat == 1 ? v1 : (nhat == 2) ? v2 : v3);
-        }
-
-        DUAL real get_energy_density(real gamma) const
-        {
-            return p / (gamma - 1) +
-                   0.5 * (rho * (v1 * v1 + v2 * v2 + v3 * v3));
-        }
-    };
-
     struct PrimitiveSOA {
         std::vector<real> rho, v1, v2, v3, p, chi;
         PrimitiveSOA()  = default;
@@ -754,67 +1230,6 @@ namespace hydro3d {
 //=============================================
 
 namespace sr1d {
-    struct Primitive : generic_hydro::Primitive<1, Primitive> {
-        using generic_hydro::Primitive<1, Primitive>::Primitive;
-
-        DUAL constexpr real get_v() const
-        {
-            if constexpr (global::VelocityType == global::Velocity::Beta) {
-                return v1;
-            }
-            else {
-                return v1 / std::sqrt(1.0 + v1 * v1);
-            }
-        }
-
-        DUAL constexpr real lorentz_factor() const
-        {
-            if constexpr (global::VelocityType == global::Velocity::Beta) {
-                return 1.0 / std::sqrt(1.0 - v1 * v1);
-            }
-            else {
-                return std::sqrt(1.0 + v1 * v1);
-            }
-        }
-
-        DUAL constexpr real lorentz_factor_squared() const
-        {
-            if constexpr (global::VelocityType == global::Velocity::Beta) {
-                return 1.0 / (1.0 - v1 * v1);
-            }
-            else {
-                return (1.0 + v1 * v1);
-            }
-        }
-
-        DUAL constexpr real vcomponent(const luint nhat) const
-        {
-            if (nhat == 1) {
-                return get_v();
-            }
-            return 0.0;
-        }
-
-        DUAL real get_enthalpy(real gamma) const
-        {
-            return 1.0 + gamma * p / (rho * (gamma - 1.0));
-        }
-    };
-
-    struct Conserved : generic_hydro::Conserved<1, Conserved> {
-        using generic_hydro::Conserved<1, Conserved>::Conserved;
-
-        DUAL constexpr real& momentum() { return m1; }
-
-        DUAL constexpr real momentum(const luint nhat) const
-        {
-            if (nhat == 1) {
-                return m1;
-            }
-            return 0.0;
-        }
-    };
-
     struct PrimitiveSOA {
         PrimitiveSOA() = default;
 
@@ -841,80 +1256,6 @@ namespace sr1d {
 }   // namespace sr1d
 
 namespace sr2d {
-    struct Conserved : generic_hydro::Conserved<2, Conserved> {
-        using generic_hydro::Conserved<2, Conserved>::Conserved;
-
-        DUAL constexpr real momentum(const luint nhat) const
-        {
-            if (nhat > 2) {
-                return 0;
-            }
-            return (nhat == 1 ? m1 : m2);
-        }
-
-        DUAL constexpr real& momentum(const luint nhat)
-        {
-            return (nhat == 1 ? m1 : m2);
-        }
-    };
-
-    struct Primitive : generic_hydro::Primitive<2, Primitive> {
-        using generic_hydro::Primitive<2, Primitive>::Primitive;
-
-        DUAL constexpr real vcomponent(const luint nhat) const
-        {
-            if (nhat > 2) {
-                return 0.0;
-            }
-            return (nhat == 1 ? get_v1() : get_v2());
-        }
-
-        DUAL real lorentz_factor() const
-        {
-            if constexpr (global::VelocityType == global::Velocity::Beta) {
-                return 1.0 / std::sqrt(1.0 - (v1 * v1 + v2 * v2));
-            }
-            else {
-                return std::sqrt(1.0 + (v1 * v1 + v2 * v2));
-            }
-        }
-
-        DUAL real lorentz_factor_squared() const
-        {
-            if constexpr (global::VelocityType == global::Velocity::Beta) {
-                return 1.0 / (1.0 - (v1 * v1 + v2 * v2));
-            }
-            else {
-                return (1.0 + (v1 * v1 + v2 * v2));
-            }
-        }
-
-        DUAL constexpr real get_v1() const
-        {
-            if constexpr (global::VelocityType == global::Velocity::Beta) {
-                return v1;
-            }
-            else {
-                return v1 / std::sqrt(1.0 + v1 * v1 + v2 * v2);
-            }
-        }
-
-        DUAL constexpr real get_v2() const
-        {
-            if constexpr (global::VelocityType == global::Velocity::Beta) {
-                return v2;
-            }
-            else {
-                return v2 / std::sqrt(1.0 + v1 * v1 + v2 * v2);
-            }
-        }
-
-        DUAL real get_enthalpy(real gamma) const
-        {
-            return 1.0 + gamma * p / (rho * (gamma - 1.0));
-        }
-    };
-
     struct PrimitiveSOA {
         PrimitiveSOA() = default;
 
@@ -941,84 +1282,6 @@ namespace sr2d {
 }   // namespace sr2d
 
 namespace sr3d {
-    struct Conserved : generic_hydro::Conserved<3, Conserved> {
-        using generic_hydro::Conserved<3, Conserved>::Conserved;
-
-        DUAL constexpr real momentum(const luint nhat) const
-        {
-            return (nhat == 1 ? m1 : (nhat == 2) ? m2 : m3);
-        }
-
-        DUAL constexpr real& momentum(const luint nhat)
-        {
-            return (nhat == 1 ? m1 : (nhat == 2) ? m2 : m3);
-        }
-    };
-
-    struct Primitive : generic_hydro::Primitive<3, Primitive> {
-        using generic_hydro::Primitive<3, Primitive>::Primitive;
-
-        DUAL constexpr real vcomponent(const luint nhat) const
-        {
-            return nhat == 1 ? get_v1() : (nhat == 2) ? get_v2() : get_v3();
-        }
-
-        DUAL real lorentz_factor() const
-        {
-            if constexpr (global::VelocityType == global::Velocity::Beta) {
-                return 1.0 / std::sqrt(1.0 - (v1 * v1 + v2 * v2 + v3 * v3));
-            }
-            else {
-                return std::sqrt(1.0 + (v1 * v1 + v2 * v2 + v3 * v3));
-            }
-        }
-
-        DUAL real lorentz_factor_squared() const
-        {
-            if constexpr (global::VelocityType == global::Velocity::Beta) {
-                return 1.0 / (1.0 - (v1 * v1 + v2 * v2 + v3 * v3));
-            }
-            else {
-                return (1.0 + (v1 * v1 + v2 * v2 + v3 * v3));
-            }
-        }
-
-        DUAL constexpr real get_v1() const
-        {
-            if constexpr (global::VelocityType == global::Velocity::Beta) {
-                return v1;
-            }
-            else {
-                return v1 / std::sqrt(1.0 + v1 * v1 + v2 * v2 + v3 * v3);
-            }
-        }
-
-        DUAL constexpr real get_v2() const
-        {
-            if constexpr (global::VelocityType == global::Velocity::Beta) {
-                return v2;
-            }
-            else {
-                return v2 / std::sqrt(1.0 + v1 * v1 + v2 * v2 + v3 * v3);
-            }
-        }
-
-        DUAL constexpr real get_v3() const
-        {
-            if constexpr (global::VelocityType == global::Velocity::Beta) {
-                return v3;
-            }
-            else {
-                return v3 / std::sqrt(1.0 + v1 * v1 + v2 * v2 + v3 * v3);
-            }
-        }
-
-        DUAL real get_enthalpy(real gamma) const
-        {
-            return 1.0 + gamma * p / (rho * (gamma - 1.0));
-        }
-    };
-
     struct PrimitiveSOA {
         PrimitiveSOA()  = default;
         ~PrimitiveSOA() = default;
@@ -1045,706 +1308,6 @@ namespace sr3d {
 //               RMHD
 //================================
 namespace rmhd {
-    template <int dim>
-    struct AnyConserved {
-        real den, m1, m2, m3, nrg, b1, b2, b3, chi;
-
-        AnyConserved() = default;
-
-        ~AnyConserved() = default;
-
-        DUAL AnyConserved(real den, real m1, real nrg, real b1)
-            : den(den),
-              m1(m1),
-              m2(0.0),
-              m3(0.0),
-              nrg(nrg),
-              b1(b1),
-              b2(0.0),
-              b3(0.0),
-              chi(0.0)
-        {
-        }
-
-        DUAL AnyConserved(real den, real m1, real nrg, real b1, real chi)
-            : den(den),
-              m1(m1),
-              m2(0.0),
-              m3(0.0),
-              nrg(nrg),
-              b1(b1),
-              b2(0.0),
-              b3(0.0),
-              chi(chi)
-        {
-        }
-
-        DUAL
-        AnyConserved(real den, real m1, real m2, real nrg, real b1, real b2)
-            : den(den),
-              m1(m1),
-              m2(m2),
-              m3(0.0),
-              nrg(nrg),
-              b1(b1),
-              b2(b2),
-              b3(0.0),
-              chi(0.0)
-        {
-        }
-
-        DUAL AnyConserved(
-            real den,
-            real m1,
-            real m2,
-            real nrg,
-            real b1,
-            real b2,
-            real chi
-        )
-            : den(den),
-              m1(m1),
-              m2(m2),
-              m3(0.0),
-              nrg(nrg),
-              b1(b1),
-              b2(b2),
-              b3(0.0),
-              chi(chi)
-        {
-        }
-
-        DUAL AnyConserved(
-            real den,
-            real m1,
-            real m2,
-            real m3,
-            real nrg,
-            real b1,
-            real b2,
-            real b3
-        )
-            : den(den),
-              m1(m1),
-              m2(m2),
-              m3(m3),
-              nrg(nrg),
-              b1(b1),
-              b2(b2),
-              b3(b3),
-              chi(0.0)
-        {
-        }
-
-        DUAL AnyConserved(
-            real den,
-            real m1,
-            real m2,
-            real m3,
-            real nrg,
-            real b1,
-            real b2,
-            real b3,
-            real chi
-        )
-            : den(den),
-              m1(m1),
-              m2(m2),
-              m3(m3),
-              nrg(nrg),
-              b1(b1),
-              b2(b2),
-              b3(b3),
-              chi(chi)
-        {
-        }
-
-        DUAL AnyConserved(const AnyConserved& u)
-            : den(u.den),
-              m1(u.m1),
-              m2(u.m2),
-              m3(u.m3),
-              nrg(u.nrg),
-              b1(u.b1),
-              b2(u.b2),
-              b3(u.b3),
-              chi(u.chi)
-        {
-        }
-
-        DUAL AnyConserved operator+(const AnyConserved& p) const
-        {
-            return AnyConserved(
-                den + p.den,
-                m1 + p.m1,
-                m2 + p.m2,
-                m3 + p.m3,
-                nrg + p.nrg,
-                b1 + p.b1,
-                b2 + p.b2,
-                b3 + p.b3,
-                chi + p.chi
-            );
-        }
-
-        DUAL AnyConserved operator-(const AnyConserved& p) const
-        {
-            return AnyConserved(
-                den - p.den,
-                m1 - p.m1,
-                m2 - p.m2,
-                m3 - p.m3,
-                nrg - p.nrg,
-                b1 - p.b1,
-                b2 - p.b2,
-                b3 - p.b3,
-                chi - p.chi
-            );
-        }
-
-        DUAL AnyConserved operator*(const real c) const
-        {
-            return AnyConserved(
-                den * c,
-                m1 * c,
-                m2 * c,
-                m3 * c,
-                nrg * c,
-                b1 * c,
-                b2 * c,
-                b3 * c,
-                chi * c
-            );
-        }
-
-        DUAL AnyConserved operator/(const real c) const
-        {
-            return AnyConserved(
-                den / c,
-                m1 / c,
-                m2 / c,
-                m3 / c,
-                nrg / c,
-                b1 / c,
-                b2 / c,
-                b3 / c,
-                chi / c
-            );
-        }
-
-        DUAL AnyConserved& operator+=(const AnyConserved& cons)
-        {
-            den += cons.den;
-            m1 += cons.m1;
-            m2 += cons.m2;
-            m3 += cons.m3;
-            nrg += cons.nrg;
-            b1 += cons.b1;
-            b2 += cons.b2;
-            b3 += cons.b3;
-            chi += cons.chi;
-            return *this;
-        }
-
-        DUAL AnyConserved& operator-=(const AnyConserved& cons)
-        {
-            den -= cons.den;
-            m1 -= cons.m1;
-            m2 -= cons.m2;
-            m3 -= cons.m3;
-            nrg -= cons.nrg;
-            // b1 -= cons.b1;
-            // b2 -= cons.b2;
-            // b3 -= cons.b3;
-            chi -= cons.chi;
-            return *this;
-        }
-
-        DUAL AnyConserved& operator*=(const real c)
-        {
-            den *= c;
-            m1 *= c;
-            m2 *= c;
-            m3 *= c;
-            nrg *= c;
-            b1 *= c;
-            b2 *= c;
-            b3 *= c;
-            chi *= c;
-            return *this;
-        }
-
-        DUAL real total_energy() const { return den + nrg; }
-
-        DUAL constexpr real momentum(const luint nhat) const
-        {
-            return (nhat == 1 ? m1 : (nhat == 2) ? m2 : m3);
-        }
-
-        DUAL constexpr real& momentum(const luint nhat)
-        {
-            return (nhat == 1 ? m1 : (nhat == 2) ? m2 : m3);
-        }
-
-        DUAL constexpr real& momentum() { return m1; }
-
-        DUAL constexpr real bcomponent(const luint nhat) const
-        {
-            return (nhat == 1 ? b1 : (nhat == 2) ? b2 : b3);
-        }
-
-        DUAL constexpr real& bcomponent(const luint nhat)
-        {
-            return (nhat == 1 ? b1 : (nhat == 2) ? b2 : b3);
-        }
-
-        //-------- E-field accessors ---------
-        // constexpr real e1() { return b1; }
-        DUAL constexpr real& e1() { return b1; }
-
-        // constexpr real e2() { return b2; }
-        DUAL constexpr real& e2() { return b2; }
-
-        // constexpr real e3() { return b3; }
-        DUAL constexpr real& e3() { return b3; }
-
-        DUAL constexpr real ecomponent(luint nhat) const
-        {
-            if (nhat == 1) {
-                return b1;
-            }
-            else if (nhat == 2) {
-                return b2;
-            }
-            else {
-                return b3;
-            }
-        }
-
-        DUAL void calc_electric_field(const luint nhat)
-        {
-            if (nhat == 1) {
-                e1() = 0.0;
-                global::swap(e2(), e3());
-                e3() *= -1.0;
-            }
-            else if (nhat == 2) {
-                e2() = 0.0;
-                global::swap(e1(), e3());
-                e1() *= -1.0;
-            }
-            else {
-                e3() = 0.0;
-                global::swap(e2(), e1());
-                e2() *= -1.0;
-            }
-        }
-    };
-
-    template <int dim>
-    struct AnyPrimitive {
-        real rho, v1, v2, v3, p, b1, b2, b3, chi;
-
-        AnyPrimitive() = default;
-
-        ~AnyPrimitive() = default;
-
-        DUAL AnyPrimitive& operator=(const AnyPrimitive& other
-        )   // III. copy assignment
-        {
-            if (this == &other) {
-                return *this;
-            }
-
-            rho = other.rho;
-            v1  = other.v1;
-            v2  = other.v2;
-            v3  = other.v3;
-            p   = other.p;
-            b1  = other.b1;
-            b2  = other.b2;
-            b3  = other.b3;
-            chi = other.chi;
-
-            return *this;
-        }
-
-        DUAL AnyPrimitive(real rho, real v1, real p, real b1)
-            : rho(rho),
-              v1(v1),
-              v2(0.0),
-              v3(0.0),
-              p(p),
-              b1(b1),
-              b2(0.0),
-              b3(0.0),
-              chi(0.0)
-        {
-        }
-
-        DUAL AnyPrimitive(real rho, real v1, real p, real b1, real chi)
-            : rho(rho),
-              v1(v1),
-              v2(0.0),
-              v3(0.0),
-              p(p),
-              b1(b1),
-              b2(0.0),
-              b3(0.0),
-              chi(chi)
-        {
-        }
-
-        DUAL AnyPrimitive(real rho, real v1, real v2, real p, real b1, real b2)
-            : rho(rho),
-              v1(v1),
-              v2(v2),
-              v3(0.0),
-              p(p),
-              b1(b1),
-              b2(b2),
-              b3(0.0),
-              chi(0.0)
-        {
-        }
-
-        DUAL AnyPrimitive(
-            real rho,
-            real v1,
-            real v2,
-            real p,
-            real b1,
-            real b2,
-            real chi
-        )
-            : rho(rho),
-              v1(v1),
-              v2(v2),
-              v3(0.0),
-              p(p),
-              b1(b1),
-              b2(b2),
-              b3(0.0),
-              chi(chi)
-        {
-        }
-
-        DUAL AnyPrimitive(
-            real rho,
-            real v1,
-            real v2,
-            real v3,
-            real p,
-            real b1,
-            real b2,
-            real b3
-        )
-            : rho(rho),
-              v1(v1),
-              v2(v2),
-              v3(v3),
-              p(p),
-              b1(b1),
-              b2(b2),
-              b3(b3),
-              chi(0.0)
-        {
-        }
-
-        DUAL AnyPrimitive(
-            real rho,
-            real v1,
-            real v2,
-            real v3,
-            real p,
-            real b1,
-            real b2,
-            real b3,
-            real chi
-        )
-            : rho(rho),
-              v1(v1),
-              v2(v2),
-              v3(v3),
-              p(p),
-              b1(b1),
-              b2(b2),
-              b3(b3),
-              chi(chi)
-        {
-        }
-
-        DUAL AnyPrimitive(const AnyPrimitive& c)
-            : rho(c.rho),
-              v1(c.v1),
-              v2(c.v2),
-              v3(c.v3),
-              p(c.p),
-              b1(c.b1),
-              b2(c.b2),
-              b3(c.b3),
-              chi(c.chi)
-        {
-        }
-
-        DUAL AnyPrimitive operator+(const AnyPrimitive& e) const
-        {
-            return AnyPrimitive(
-                rho + e.rho,
-                v1 + e.v1,
-                v2 + e.v2,
-                v3 + e.v3,
-                p + e.p,
-                b1 + e.b1,
-                b2 + e.b2,
-                b3 + e.b3,
-                chi + e.chi
-            );
-        }
-
-        DUAL AnyPrimitive operator-(const AnyPrimitive& e) const
-        {
-            return AnyPrimitive(
-                rho - e.rho,
-                v1 - e.v1,
-                v2 - e.v2,
-                v3 - e.v3,
-                p - e.p,
-                b1 - e.b1,
-                b2 - e.b2,
-                b3 - e.b3,
-                chi - e.chi
-            );
-        }
-
-        DUAL AnyPrimitive operator*(const real c) const
-        {
-            return AnyPrimitive(
-                rho * c,
-                v1 * c,
-                v2 * c,
-                v3 * c,
-                p * c,
-                b1 * c,
-                b2 * c,
-                b3 * c,
-                chi * c
-            );
-        }
-
-        DUAL AnyPrimitive operator/(const real c) const
-        {
-            return AnyPrimitive(
-                rho / c,
-                v1 / c,
-                v2 / c,
-                v3 / c,
-                p / c,
-                b1 / c,
-                b2 / c,
-                b3 / c,
-                chi / c
-            );
-        }
-
-        DUAL AnyPrimitive& operator+=(const AnyPrimitive& prims)
-        {
-            rho += prims.rho;
-            v1 += prims.v1;
-            v2 += prims.v2;
-            v3 += prims.v3;
-            p += prims.p;
-            b1 += prims.b1;
-            b2 += prims.b2;
-            b3 += prims.b3;
-            chi += prims.chi;
-            return *this;
-        }
-
-        DUAL AnyPrimitive& operator-=(const AnyPrimitive& prims)
-        {
-            rho -= prims.rho;
-            v1 -= prims.v1;
-            v2 -= prims.v2;
-            v3 -= prims.v3;
-            p -= prims.p;
-            b1 -= prims.b1;
-            b2 -= prims.b2;
-            b3 -= prims.b3;
-            chi -= prims.chi;
-            return *this;
-        }
-
-        DUAL AnyPrimitive& operator*=(const real c)
-        {
-            rho *= c;
-            v1 *= c;
-            v2 *= c;
-            v3 *= c;
-            p *= c;
-            b1 *= c;
-            b2 *= c;
-            b3 *= c;
-            chi *= c;
-            return *this;
-        }
-
-        // I've run out of variables, but I
-        // need to store the Alfven speed
-        // for the HLLD solver, so I'll store
-        // it in the pressure variable
-        DUAL constexpr real alfven() const { return p; }
-
-        DUAL constexpr real& alfven() { return p; }
-
-        DUAL constexpr real vcomponent(const luint nhat) const
-        {
-            return nhat == 1 ? get_v1() : (nhat == 2) ? get_v2() : get_v3();
-        }
-
-        DUAL constexpr real& vcomponent(const luint nhat)
-        {
-            return nhat == 1 ? v1 : (nhat == 2) ? v2 : v3;
-        }
-
-        DUAL constexpr real bcomponent(const luint nhat) const
-        {
-            return nhat == 1 ? b1 : (nhat == 2) ? b2 : b3;
-        }
-
-        DUAL constexpr real& bcomponent(const luint nhat)
-        {
-            return nhat == 1 ? b1 : (nhat == 2) ? b2 : b3;
-        }
-
-        DUAL constexpr real get_v1() const
-        {
-            if constexpr (global::VelocityType == global::Velocity::Beta) {
-                return v1;
-            }
-            else {
-                return v1 / std::sqrt(1.0 + v1 * v1 + v2 * v2 + v3 * v3);
-            }
-        }
-
-        DUAL constexpr real get_v2() const
-        {
-            if constexpr (global::VelocityType == global::Velocity::Beta) {
-                return v2;
-            }
-            else {
-                return v2 / std::sqrt(1.0 + v1 * v1 + v2 * v2 + v3 * v3);
-            }
-        }
-
-        DUAL constexpr real get_v3() const
-        {
-            if constexpr (global::VelocityType == global::Velocity::Beta) {
-                return v3;
-            }
-            else {
-                return v3 / std::sqrt(1.0 + v1 * v1 + v2 * v2 + v3 * v3);
-            }
-        }
-
-        DUAL constexpr real lorentz_factor() const
-        {
-            if constexpr (global::VelocityType == global::Velocity::Beta) {
-                return 1.0 / std::sqrt(1.0 - (v1 * v1 + v2 * v2 + v3 * v3));
-            }
-            else {
-                return std::sqrt(1.0 + (v1 * v1 + v2 * v2 + v3 * v3));
-            }
-        }
-
-        DUAL constexpr real lorentz_factor_squared() const
-        {
-            if constexpr (global::VelocityType == global::Velocity::Beta) {
-                return 1.0 / (1.0 - (v1 * v1 + v2 * v2 + v3 * v3));
-            }
-            else {
-                return (1.0 + (v1 * v1 + v2 * v2 + v3 * v3));
-            }
-        }
-
-        DUAL real gas_enthalpy(real gamma) const
-        {
-            return 1.0 + gamma * p / (rho * (gamma - 1.0));
-        }
-
-        DUAL real vdotb() const { return (v1 * b1 + v2 * b2 + v3 * b3); }
-
-        DUAL real bsquared() const { return (b1 * b1 + b2 * b2 + b3 * b3); }
-
-        DUAL real total_pressure() const
-        {
-            return p + 0.5 * (bsquared() / lorentz_factor_squared() +
-                              vdotb() * vdotb());
-        }
-
-        DUAL real total_enthalpy(const real gamma) const
-        {
-            return rho * gas_enthalpy(gamma) +
-                   bsquared() / lorentz_factor_squared() + vdotb() * vdotb();
-        }
-
-        DUAL real vsquared() const { return v1 * v1 + v2 * v2 + v3 * v3; }
-
-        DUAL real ecomponent(luint nhat) const
-        {
-            if (nhat == 1) {
-                return v3 * b2 - v2 * b3;
-            }
-            else if (nhat == 2) {
-                return v1 * b3 - v3 * b1;
-            }
-            return v2 * b1 - v1 * b2;
-        }
-    };
-
-    template <int dim>
-    struct mag_four_vec {
-      private:
-        real lorentz, vdb;
-
-      public:
-        real zero, one, two, three;
-
-        mag_four_vec() = default;
-
-        ~mag_four_vec() = default;
-
-        DUAL mag_four_vec(const AnyPrimitive<dim>& prim)
-            : lorentz(prim.lorentz_factor()),
-              vdb(prim.vdotb()),
-              zero(lorentz * vdb),
-              one(prim.b1 / lorentz + lorentz * prim.get_v1() * vdb),
-              two(prim.b2 / lorentz + lorentz * prim.get_v2() * vdb),
-              three(prim.b3 / lorentz + lorentz * prim.get_v3() * vdb)
-        {
-        }
-
-        DUAL mag_four_vec(const mag_four_vec& c)
-            : lorentz(c.lorentz),
-              vdb(c.vdb),
-              zero(c.zero),
-              one(c.one),
-              two(c.two),
-              three(c.three)
-        {
-        }
-
-        DUAL real inner_product() const
-        {
-            return -zero * zero + one * one + two * two + three * three;
-        }
-
-        DUAL constexpr real normal(const luint nhat) const
-        {
-            return nhat == 1 ? one : nhat == 2 ? two : three;
-        }
-    };
-
     struct PrimitiveSOA {
         PrimitiveSOA() = default;
 

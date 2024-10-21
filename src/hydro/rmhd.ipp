@@ -236,10 +236,10 @@ DUAL real RMHD<dim>::calc_edge_emf(
             {
                 // j + 1/4
                 const real de_dqjL = [&] {
-                    if (fw.den > 0.0) {
+                    if (fw.dens() > 0.0) {
                         return static_cast<real>(2.0) * (es - esw);
                     }
-                    else if (fw.den < 0.0) {
+                    else if (fw.dens() < 0.0) {
                         return static_cast<real>(2.0) * (en - enw);
                     }
                     return es - esw + en - enw;
@@ -247,10 +247,10 @@ DUAL real RMHD<dim>::calc_edge_emf(
 
                 // j + 3/4
                 const real de_dqjR = [&] {
-                    if (fe.den > 0.0) {
+                    if (fe.dens() > 0.0) {
                         return static_cast<real>(2.0) * (ese - es);
                     }
-                    else if (fe.den < 0.0) {
+                    else if (fe.dens() < 0.0) {
                         return static_cast<real>(2.0) * (ene - en);
                     }
                     return ese - es + ene - en;
@@ -258,10 +258,10 @@ DUAL real RMHD<dim>::calc_edge_emf(
 
                 // k + 1/4
                 const real de_dqkL = [&] {
-                    if (fs.den > 0.0) {
+                    if (fs.dens() > 0.0) {
                         return static_cast<real>(2.0) * (ew - esw);
                     }
-                    else if (fs.den < 0.0) {
+                    else if (fs.dens() < 0.0) {
                         return static_cast<real>(2.0) * (ee - ese);
                     }
                     return ew - esw + ee - ese;
@@ -269,10 +269,10 @@ DUAL real RMHD<dim>::calc_edge_emf(
 
                 // k + 3/4
                 const real de_dqkR = [&] {
-                    if (fn.den > 0.0) {
+                    if (fn.dens() > 0.0) {
                         return static_cast<real>(2.0) * (enw - ew);
                     }
-                    else if (fn.den < 0.0) {
+                    else if (fn.dens() < 0.0) {
                         return static_cast<real>(2.0) * (ene - ee);
                     }
                     return enw - ew + ene - ee;
@@ -506,7 +506,7 @@ void RMHD<dim>::emit_troubled_cells() const
             const real m1  = cons[gid].momentum(1);
             const real m2  = cons[gid].momentum(2);
             const real m3  = cons[gid].momentum(3);
-            const real et  = (cons[gid].den + cons[gid].nrg);
+            const real et  = (cons[gid].dens() + cons[gid].nrg());
             const real b1  = cons[gid].bcomponent(1);
             const real b2  = cons[gid].bcomponent(2);
             const real b3  = cons[gid].bcomponent(3);
@@ -519,8 +519,8 @@ void RMHD<dim>::emit_troubled_cells() const
                 "\nCons2Prim cannot converge\nDensity: %.2e, Pressure: "
                 "%.2e, Vsq: %.2e, Bsq: %.2e, x1coord: %.2e, x2coord: "
                 "%.2e, x3coord: %.2e, iter: %" PRIu64 "\n",
-                cons[gid].den / w,
-                prims[gid].p,
+                cons[gid].dens() / w,
+                prims[gid].p(),
                 vsq,
                 bsq,
                 x1mean,
@@ -568,15 +568,15 @@ void RMHD<dim>::cons2prim()
                 const real dV    = get_cell_volume(ireal, jreal, kreal);
                 invdV            = 1.0 / dV;
             }
-            const real d    = cons[gid].den * invdV;
+            const real d    = cons[gid].dens() * invdV;
             const real m1   = cons[gid].momentum(1) * invdV;
             const real m2   = cons[gid].momentum(2) * invdV;
             const real m3   = cons[gid].momentum(3) * invdV;
-            const real tau  = cons[gid].nrg * invdV;
+            const real tau  = cons[gid].nrg() * invdV;
             const real b1   = cons[gid].bcomponent(1) * invdV;
             const real b2   = cons[gid].bcomponent(2) * invdV;
             const real b3   = cons[gid].bcomponent(3) * invdV;
-            const real dchi = cons[gid].chi * invdV;
+            const real dchi = cons[gid].chi() * invdV;
 
             //==================================================================
             // ATTEMPT TO RECOVER PRIMITIVES USING KASTAUN ET AL. 2021
@@ -763,15 +763,15 @@ template <int dim>
 DUAL RMHD<dim>::primitive_t
 RMHD<dim>::cons2prim(const RMHD<dim>::conserved_t& cons) const
 {
-    const real d    = cons.den;
+    const real d    = cons.dens();
     const real m1   = cons.momentum(1);
     const real m2   = cons.momentum(2);
     const real m3   = cons.momentum(3);
-    const real tau  = cons.nrg;
+    const real tau  = cons.nrg();
     const real b1   = cons.bcomponent(1);
     const real b2   = cons.bcomponent(2);
     const real b3   = cons.bcomponent(3);
-    const real dchi = cons.chi;
+    const real dchi = cons.chi();
 
     //==================================================================
     // ATTEMPT TO RECOVER PRIMITIVES USING KASTAUN ET AL. 2021
@@ -962,9 +962,9 @@ DUAL void RMHD<dim>::calc_max_wave_speeds(
     -b2*g**2*vx**2 + bx**2*cs**2 - cs**2*g**4*h*rho*vx**4 -
     cs**2*g**2*h*rho*vx**2 + g**4*h*rho*vx**4]
     */
-    const real rho   = prims.rho;
-    const real h     = prims.gas_enthalpy(gamma);
-    const real cs2   = (gamma * prims.p / (rho * h));
+    const real rho   = prims.rho();
+    const real h     = prims.enthalpy(gamma);
+    const real cs2   = (gamma * prims.p() / (rho * h));
     const auto bmu   = mag_fourvec_t(prims);
     const real bmusq = bmu.inner_product();
     const real bn    = prims.bcomponent(nhat);
@@ -1078,16 +1078,16 @@ template <int dim>
 DUAL RMHD<dim>::conserved_t
 RMHD<dim>::prims2cons(const RMHD<dim>::primitive_t& prims) const
 {
-    const real rho   = prims.rho;
+    const real rho   = prims.rho();
     const real v1    = prims.vcomponent(1);
     const real v2    = prims.vcomponent(2);
     const real v3    = prims.vcomponent(3);
-    const real pg    = prims.p;
+    const real pg    = prims.p();
     const real b1    = prims.bcomponent(1);
     const real b2    = prims.bcomponent(2);
     const real b3    = prims.bcomponent(3);
     const real lf    = prims.lorentz_factor();
-    const real h     = prims.gas_enthalpy(gamma);
+    const real h     = prims.enthalpy(gamma);
     const real vdotb = prims.vdotb();
     const real bsq   = prims.bsquared();
     const real vsq   = prims.vsquared();
@@ -1103,7 +1103,7 @@ RMHD<dim>::prims2cons(const RMHD<dim>::primitive_t& prims) const
       b1,
       b2,
       b3,
-      d * prims.chi
+      d * prims.chi()
     };
 };
 
@@ -1251,25 +1251,24 @@ void RMHD<dim>::adapt_dt()
 //                                            FLUX CALCULATIONS
 //===================================================================================================================
 template <int dim>
-DUAL RMHD<dim>::conserved_t RMHD<dim>::prims2flux(
-    const RMHD<dim>::primitive_t& prims,
-    const luint nhat
-) const
+DUAL RMHD<dim>::conserved_t
+RMHD<dim>::prims2flux(const RMHD<dim>::primitive_t& prims, const luint nhat)
+    const
 {
-    const real rho   = prims.rho;
+    const real rho   = prims.rho();
     const real v1    = prims.vcomponent(1);
     const real v2    = prims.vcomponent(2);
     const real v3    = prims.vcomponent(3);
     const real b1    = prims.bcomponent(1);
     const real b2    = prims.bcomponent(2);
     const real b3    = prims.bcomponent(3);
-    const real h     = prims.gas_enthalpy(gamma);
+    const real h     = prims.enthalpy(gamma);
     const real lf    = prims.lorentz_factor();
     const real invlf = 1.0 / lf;
     const real vdotb = prims.vdotb();
     const real bsq   = prims.bsquared();
     const real ptot  = prims.total_pressure();
-    const real chi   = prims.chi;
+    const real chi   = prims.chi();
     const real vn    = (nhat == 1) ? v1 : (nhat == 2) ? v2 : v3;
     const real bn    = (nhat == 1) ? b1 : (nhat == 2) ? b2 : b3;
     const real d     = rho * lf;
@@ -1331,11 +1330,11 @@ DUAL RMHD<dim>::conserved_t RMHD<dim>::calc_hlle_flux(
     }();
 
     // Upwind the scalar concentration
-    if (net_flux.den < 0.0) {
-        net_flux.chi = prR.chi * net_flux.den;
+    if (net_flux.dens() < 0.0) {
+        net_flux.chi() = prR.chi() * net_flux.dens();
     }
     else {
-        net_flux.chi = prL.chi * net_flux.den;
+        net_flux.chi() = prL.chi() * net_flux.dens();
     }
     net_flux.calc_electric_field(nhat);
     return net_flux;
@@ -1376,7 +1375,7 @@ DUAL RMHD<dim>::conserved_t RMHD<dim>::calc_hllc_flux(
             (fL * aRp - fR * aLm + (uR - uL) * aRp * aLm) / (aRp - aLm);
 
         if (quirk_smoothing) {
-            if (quirk_strong_shock(prL.p, prR.p)) {
+            if (quirk_strong_shock(prL.p(), prR.p())) {
                 return hll_flux - hll_state * vface;
             }
         }
@@ -1393,13 +1392,13 @@ DUAL RMHD<dim>::conserved_t RMHD<dim>::calc_hllc_flux(
         // check if normal magnetic field is approaching zero
         const auto bfn = goes_to_zero(bn);
 
-        const real uhlld = hll_state.den;
+        const real uhlld = hll_state.dens();
         const real uhllm = hll_state.momentum(nhat);
-        const real uhlle = hll_state.nrg + uhlld;
+        const real uhlle = hll_state.nrg() + uhlld;
 
-        const real fhlld = hll_flux.den;
+        const real fhlld = hll_flux.dens();
         const real fhllm = hll_flux.momentum(nhat);
-        const real fhlle = hll_flux.nrg + fhlld;
+        const real fhlle = hll_flux.nrg() + fhlld;
         const real fpb1  = hll_flux.bcomponent(np1);
         const real fpb2  = hll_flux.bcomponent(np2);
 
@@ -1433,13 +1432,13 @@ DUAL RMHD<dim>::conserved_t RMHD<dim>::calc_hllc_flux(
         const auto pr      = on_left ? prL : prR;
         const auto ws      = on_left ? aLm : aRp;
 
-        const real d     = u.den;
+        const real d     = u.dens();
         const real mnorm = u.momentum(nhat);
         const real ump1  = u.momentum(np1);
         const real ump2  = u.momentum(np2);
         const real fmp1  = f.momentum(np1);
         const real fmp2  = f.momentum(np2);
-        const real tau   = u.nrg;
+        const real tau   = u.nrg();
         const real et    = tau + d;
         const real cfac  = 1.0 / (ws - aS);
 
@@ -1457,11 +1456,11 @@ DUAL RMHD<dim>::conserved_t RMHD<dim>::calc_hllc_flux(
 
         // start state
         conserved_t us;
-        us.den              = ds;
+        us.dens()           = ds;
         us.momentum(nhat)   = mn;
         us.momentum(np1)    = mp1;
         us.momentum(np2)    = mp2;
-        us.nrg              = es - ds;
+        us.nrg()            = es - ds;
         us.bcomponent(nhat) = bn;
         us.bcomponent(np1)  = bfn ? vs * pr.bcomponent(np1) : bp1;
         us.bcomponent(np2)  = bfn ? vs * pr.bcomponent(np2) : bp2;
@@ -1469,11 +1468,11 @@ DUAL RMHD<dim>::conserved_t RMHD<dim>::calc_hllc_flux(
         return f + (us - u) * ws - us * vface;
     }();
     // upwind the concentration
-    if (net_flux.den < 0.0) {
-        net_flux.chi = prR.chi * net_flux.den;
+    if (net_flux.dens() < 0.0) {
+        net_flux.chi() = prR.chi() * net_flux.dens();
     }
     else {
-        net_flux.chi = prL.chi * net_flux.den;
+        net_flux.chi() = prL.chi() * net_flux.dens();
     }
     net_flux.calc_electric_field(nhat);
     return net_flux;
@@ -1699,7 +1698,7 @@ DUAL RMHD<dim>::conserved_t RMHD<dim>::calc_hlld_flux(
             (fL * aRp - fR * aLm + (uR - uL) * aRp * aLm) * afac;
 
         if (quirk_smoothing) {
-            if (quirk_strong_shock(prL.p, prR.p)) {
+            if (quirk_strong_shock(prL.p(), prR.p())) {
                 return hll_flux - hll_state * vface;
             }
         }
@@ -1807,18 +1806,18 @@ DUAL RMHD<dim>::conserved_t RMHD<dim>::calc_hlld_flux(
         const real vdba = pa.vdotb();
 
         const real fac = 1.0 / (lc - vna);
-        const real da  = rc.den * fac;
+        const real da  = rc.dens() * fac;
         const real ea  = (rc.total_energy() + p * vna - vdba * bn) * fac;
         const real mn  = (ea + p) * vna - vdba * bn;
         const real mp1 = (ea + p) * vp1 - vdba * bp1;
         const real mp2 = (ea + p) * vp2 - vdba * bp2;
 
         conserved_t ua;
-        ua.den              = da;
+        ua.dens()           = da;
         ua.momentum(nhat)   = mn;
         ua.momentum(np1)    = mp1;
         ua.momentum(np2)    = mp2;
-        ua.nrg              = ea - da;
+        ua.nrg()            = ea - da;
         ua.bcomponent(nhat) = bn;
         ua.bcomponent(np1)  = bp1;
         ua.bcomponent(np2)  = bp2;
@@ -1845,11 +1844,11 @@ DUAL RMHD<dim>::conserved_t RMHD<dim>::calc_hlld_flux(
         const real mpc2 = (ec + p) * vp2C - vdbC * bp2C;
 
         conserved_t ut;
-        ut.den              = dc;
+        ut.dens()           = dc;
         ut.momentum(nhat)   = mnc;
         ut.momentum(np1)    = mpc1;
         ut.momentum(np2)    = mpc2;
-        ut.nrg              = ec - dc;
+        ut.nrg()            = ec - dc;
         ut.bcomponent(nhat) = bnC;
         ut.bcomponent(np1)  = bp1C;
         ut.bcomponent(np2)  = bp2C;
@@ -1858,11 +1857,11 @@ DUAL RMHD<dim>::conserved_t RMHD<dim>::calc_hlld_flux(
     }();
 
     // upwind the concentration
-    if (net_flux.den < 0.0) {
-        net_flux.chi = prR.chi * net_flux.den;
+    if (net_flux.dens() < 0.0) {
+        net_flux.chi() = prR.chi() * net_flux.dens();
     }
     else {
-        net_flux.chi = prL.chi * net_flux.den;
+        net_flux.chi() = prL.chi() * net_flux.dens();
     }
     net_flux.calc_electric_field(nhat);
     return net_flux;
@@ -2168,9 +2167,9 @@ void RMHD<dim>::advance()
             auto& b2R = bstag2[yrf];
             auto& b3L = bstag3[zlf];
             auto& b3R = bstag3[zrf];
-            auto& b1c = cons[aid].b1;
-            auto& b2c = cons[aid].b2;
-            auto& b3c = cons[aid].b3;
+            auto& b1c = cons[aid].b1();
+            auto& b2c = cons[aid].b2();
+            auto& b3c = cons[aid].b3();
 
             b1L = b1_data[xlf] - dt * step * curl_e(1, e2, e3, 0);
             b1R = b1_data[xrf] - dt * step * curl_e(1, e2, e3, 1);
@@ -2239,14 +2238,14 @@ void RMHD<dim>::advance()
                         const real cot    = std::cos(thmean) / sint;
 
                         // Grab central primitives
-                        const real rhoc = prb[tid].rho;
+                        const real rhoc = prb[tid].rho();
                         const real uc   = prb[tid].get_v1();
                         const real vc   = prb[tid].get_v2();
                         const real wc   = prb[tid].get_v3();
                         const real pc   = prb[tid].total_pressure();
                         const auto bmuc = mag_fourvec_t(prb[tid]);
 
-                        const real hc   = prb[tid].gas_enthalpy(gamma);
+                        const real hc   = prb[tid].enthalpy(gamma);
                         const real gam2 = prb[tid].lorentz_factor_squared();
 
                         const auto geom_source = conserved_t{
@@ -2299,14 +2298,14 @@ void RMHD<dim>::advance()
                         const real invdV = 1.0 / dV;
 
                         // Grab central primitives
-                        const real rhoc = prb[tid].rho;
+                        const real rhoc = prb[tid].rho();
                         const real uc   = prb[tid].get_v1();
                         const real vc   = prb[tid].get_v2();
                         // const real wc   = prb[tid].get_v3();
                         const real pc   = prb[tid].total_pressure();
                         const auto bmuc = mag_fourvec_t(prb[tid]);
 
-                        const real hc   = prb[tid].gas_enthalpy(gamma);
+                        const real hc   = prb[tid].enthalpy(gamma);
                         const real gam2 = prb[tid].lorentz_factor_squared();
 
                         const auto geom_source = conserved_t{

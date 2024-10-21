@@ -203,67 +203,6 @@ namespace simbi {
         //  HELPER-TEMPLATES
         //---------------------------------------------------------------------------------------------------------
         //-------------Define Function Templates-------------------------
-
-        // Handle 3D primitive arrays whether SR or Newtonian
-        template <typename T, typename U>
-        typename std::enable_if<is_3D_primitive<U>::value>::type
-        writeToProd(T* from, PrimData* to);
-
-        // Handle 2D primitive arrays whether SR or Newtonian
-        template <typename T, typename U>
-        typename std::enable_if<is_2D_primitive<U>::value>::type
-        writeToProd(T* from, PrimData* to);
-
-        // Handle 1D primitive arrays whether SR or Newtonian
-        template <typename T, typename U>
-        typename std::enable_if<is_1D_primitive<U>::value>::type
-        writeToProd(T* from, PrimData* to);
-
-        // Handle 3D primitive arrays whether RMHD or NMHD
-        template <typename T, typename U>
-        typename std::enable_if<is_3D_mhd_primitive<U>::value>::type
-        writeToProd(T* from, PrimData* to);
-
-        // Handle 2D primitive arrays whether RMHD or NMHD
-        template <typename T, typename U>
-        typename std::enable_if<is_2D_mhd_primitive<U>::value>::type
-        writeToProd(T* from, PrimData* to);
-
-        // Handle 1d primitive arrays whether RMHD or NMHD
-        template <typename T, typename U>
-        typename std::enable_if<is_1D_mhd_primitive<U>::value>::type
-        writeToProd(T* from, PrimData* to);
-
-        // Convert 3D vector of structs to struct of vectors
-        template <typename T, typename U, typename arr_type>
-        typename std::enable_if<is_3D_primitive<U>::value, T>::type
-        vec2struct(const arr_type& p);
-
-        // Convert 2D vector of structs to struct of vectors
-        template <typename T, typename U, typename arr_type>
-        typename std::enable_if<is_2D_primitive<U>::value, T>::type
-        vec2struct(const arr_type& p);
-
-        // Convert 1D vector of structs to struct of vectors
-        template <typename T, typename U, typename arr_type>
-        typename std::enable_if<is_1D_primitive<U>::value, T>::type
-        vec2struct(const arr_type& p);
-
-        // Convert 3D MHD vector of structs to struct of vectors
-        template <typename T, typename U, typename arr_type>
-        typename std::enable_if<is_3D_mhd_primitive<U>::value, T>::type
-        vec2struct(const arr_type& p);
-
-        // Convert 2D MHD vector of structs to struct of vectors
-        template <typename T, typename U, typename arr_type>
-        typename std::enable_if<is_2D_mhd_primitive<U>::value, T>::type
-        vec2struct(const arr_type& p);
-
-        // Convert 1D MHD vector of structs to struct of vectors
-        template <typename T, typename U, typename arr_type>
-        typename std::enable_if<is_1D_mhd_primitive<U>::value, T>::type
-        vec2struct(const arr_type& p);
-
         // custom string formatter
         template <typename... Args>
         std::string string_format(const std::string& format, Args... args);
@@ -323,13 +262,11 @@ namespace simbi {
          * @param dim
          * @param size
          */
+        template <typename T>
         void write_hdf5(
             const std::string data_directory,
             const std::string filename,
-            const PrimData prims,
-            const DataWriteMembers system,
-            const int dim,
-            const int size
+            const T& state
         );
 
         /**
@@ -415,289 +352,21 @@ namespace simbi {
             }
         }
 
-        // the plm gradient in 3D hydro
+        // the plm gradient for generic hydro
         template <typename T>
-        STATIC typename std::enable_if<is_3D_primitive<T>::value, T>::type
+        STATIC T
         plm_gradient(const T& a, const T& b, const T& c, const real plm_theta)
         {
-            const real rho = minmod(
-                (a - b).rho * plm_theta,
-                (c - b).rho * 0.5,
-                (c - a).rho * plm_theta
-            );
-            const real v1 = minmod(
-                (a - b).v1 * plm_theta,
-                (c - b).v1 * 0.5,
-                (c - a).v1 * plm_theta
-            );
-            const real v2 = minmod(
-                (a - b).v2 * plm_theta,
-                (c - b).v2 * 0.5,
-                (c - a).v2 * plm_theta
-            );
-            const real v3 = minmod(
-                (a - b).v3 * plm_theta,
-                (c - b).v3 * 0.5,
-                (c - a).v3 * plm_theta
-            );
-            const real pre = minmod(
-                (a - b).p * plm_theta,
-                (c - b).p * 0.5,
-                (c - a).p * plm_theta
-            );
-            const real chi = minmod(
-                (a - b).chi * plm_theta,
-                (c - b).chi * 0.5,
-                (c - a).chi * plm_theta
-            );
-            return T{rho, v1, v2, v3, pre, chi};
-        }
-
-        // the plm gradient in 2D hydro
-        template <typename T>
-        STATIC typename std::enable_if<is_2D_primitive<T>::value, T>::type
-        plm_gradient(const T& a, const T& b, const T& c, const real plm_theta)
-        {
-            const real rho = minmod(
-                (a - b).rho * plm_theta,
-                (c - b).rho * 0.5,
-                (c - a).rho * plm_theta
-            );
-            const real v1 = minmod(
-                (a - b).v1 * plm_theta,
-                (c - b).v1 * 0.5,
-                (c - a).v1 * plm_theta
-            );
-            const real v2 = minmod(
-                (a - b).v2 * plm_theta,
-                (c - b).v2 * 0.5,
-                (c - a).v2 * plm_theta
-            );
-            const real pre = minmod(
-                (a - b).p * plm_theta,
-                (c - b).p * 0.5,
-                (c - a).p * plm_theta
-            );
-            const real chi = minmod(
-                (a - b).chi * plm_theta,
-                (c - b).chi * 0.5,
-                (c - a).chi * plm_theta
-            );
-            return T{rho, v1, v2, pre, chi};
-        }
-
-        // the plm gradient in 1D hydro
-        template <typename T>
-        STATIC typename std::enable_if<is_1D_primitive<T>::value, T>::type
-        plm_gradient(const T& a, const T& b, const T& c, const real plm_theta)
-        {
-            const real rho = minmod(
-                (a - b).rho * plm_theta,
-                (c - b).rho * 0.5,
-                (c - a).rho * plm_theta
-            );
-            const real v1 = minmod(
-                (a - b).v1 * plm_theta,
-                (c - b).v1 * 0.5,
-                (c - a).v1 * plm_theta
-            );
-            const real pre = minmod(
-                (a - b).p * plm_theta,
-                (c - b).p * 0.5,
-                (c - a).p * plm_theta
-            );
-            const real chi = minmod(
-                (a - b).chi * plm_theta,
-                (c - b).chi * 0.5,
-                (c - a).chi * plm_theta
-            );
-            return T{rho, v1, pre, chi};
-        }
-
-        /**
-         * @brief
-         * @param[in/out/in,out]a: center
-         * @param[in/out/in,out]b: left of center
-         * @param[in/out/in,out]c: right of center
-         * @param[in/out/in,out]plm_theta:
-         * @return          STATIC
-         * @retval
-         */
-        template <typename T>
-        STATIC typename std::enable_if<is_3D_mhd_primitive<T>::value, T>::type
-        plm_gradient(const T& a, const T& b, const T& c, const real plm_theta)
-        {
-            switch (comp_slope_limiter) {
-                case LIMITER::MINMOD:
-                    {
-                        const real rho = minmod(
-                            (a - b).rho * plm_theta,
-                            (c - b).rho * 0.5,
-                            (c - a).rho * plm_theta
-                        );
-                        const real v1 = minmod(
-                            (a - b).v1 * plm_theta,
-                            (c - b).v1 * 0.5,
-                            (c - a).v1 * plm_theta
-                        );
-                        const real v2 = minmod(
-                            (a - b).v2 * plm_theta,
-                            (c - b).v2 * 0.5,
-                            (c - a).v2 * plm_theta
-                        );
-                        const real v3 = minmod(
-                            (a - b).v3 * plm_theta,
-                            (c - b).v3 * 0.5,
-                            (c - a).v3 * plm_theta
-                        );
-                        const real pre = minmod(
-                            (a - b).p * plm_theta,
-                            (c - b).p * 0.5,
-                            (c - a).p * plm_theta
-                        );
-                        const real b1 = minmod(
-                            (a - b).b1 * plm_theta,
-                            (c - b).b1 * 0.5,
-                            (c - a).b1 * plm_theta
-                        );
-                        const real b2 = minmod(
-                            (a - b).b2 * plm_theta,
-                            (c - b).b2 * 0.5,
-                            (c - a).b2 * plm_theta
-                        );
-                        const real b3 = minmod(
-                            (a - b).b3 * plm_theta,
-                            (c - b).b3 * 0.5,
-                            (c - a).b3 * plm_theta
-                        );
-                        const real chi = minmod(
-                            (a - b).chi * plm_theta,
-                            (c - b).chi * 0.5,
-                            (c - a).chi * plm_theta
-                        );
-                        return T{rho, v1, v2, v3, pre, b1, b2, b3, chi};
-                    }
-
-                default:
-                    {
-                        const real rho = vanLeer((c - a).rho, -(b - a).rho);
-                        const real v1  = vanLeer((c - a).v1, -(b - a).v1);
-                        const real v2  = vanLeer((c - a).v2, -(b - a).v2);
-                        const real v3  = vanLeer((c - a).v3, -(b - a).v3);
-                        const real pre = vanLeer((c - a).p, -(b - a).p);
-                        const real b1  = vanLeer((c - a).b1, -(b - a).b1);
-                        const real b2  = vanLeer((c - a).b2, -(b - a).b2);
-                        const real b3  = vanLeer((c - a).b3, -(b - a).b3);
-                        const real chi = vanLeer((c - a).chi, -(b - a).chi);
-                        return T{rho, v1, v2, v3, pre, b1, b2, b3, chi};
-                    }
+            T result;
+            constexpr auto count = T::nmem;
+            for (auto qq = 0; qq < count; qq++) {
+                result[qq] = minmod(
+                    (a[qq] - b[qq]) * plm_theta,
+                    (c[qq] - b[qq]) * 0.5,
+                    (c[qq] - a[qq]) * plm_theta
+                );
             }
-        }
-
-        // the plm gradient in 2D MHD
-        template <typename T>
-        STATIC typename std::enable_if<is_2D_mhd_primitive<T>::value, T>::type
-        plm_gradient(const T& a, const T& b, const T& c, const real plm_theta)
-        {
-            const real rho = minmod(
-                (a - b).rho * plm_theta,
-                (c - b).rho * 0.5,
-                (c - a).rho * plm_theta
-            );
-            const real v1 = minmod(
-                (a - b).v1 * plm_theta,
-                (c - b).v1 * 0.5,
-                (c - a).v1 * plm_theta
-            );
-            const real v2 = minmod(
-                (a - b).v2 * plm_theta,
-                (c - b).v2 * 0.5,
-                (c - a).v2 * plm_theta
-            );
-            const real v3 = minmod(
-                (a - b).v3 * plm_theta,
-                (c - b).v3 * 0.5,
-                (c - a).v3 * plm_theta
-            );
-            const real pre = minmod(
-                (a - b).p * plm_theta,
-                (c - b).p * 0.5,
-                (c - a).p * plm_theta
-            );
-            const real b1 = minmod(
-                (a - b).b1 * plm_theta,
-                (c - b).b1 * 0.5,
-                (c - a).b1 * plm_theta
-            );
-            const real b2 = minmod(
-                (a - b).b2 * plm_theta,
-                (c - b).b2 * 0.5,
-                (c - a).b2 * plm_theta
-            );
-            const real b3 = minmod(
-                (a - b).b3 * plm_theta,
-                (c - b).b3 * 0.5,
-                (c - a).b3 * plm_theta
-            );
-            const real chi = minmod(
-                (a - b).chi * plm_theta,
-                (c - b).chi * 0.5,
-                (c - a).chi * plm_theta
-            );
-            return T{rho, v1, v2, v3, pre, b1, b2, b3, chi};
-        }
-
-        // the plm gradient in 1D MHD
-        template <typename T>
-        STATIC typename std::enable_if<is_1D_mhd_primitive<T>::value, T>::type
-        plm_gradient(const T& a, const T& b, const T& c, const real plm_theta)
-        {
-            const real rho = minmod(
-                (a - b).rho * plm_theta,
-                (c - b).rho * 0.5,
-                (c - a).rho * plm_theta
-            );
-            const real v1 = minmod(
-                (a - b).v1 * plm_theta,
-                (c - b).v1 * 0.5,
-                (c - a).v1 * plm_theta
-            );
-            const real v2 = minmod(
-                (a - b).v2 * plm_theta,
-                (c - b).v2 * 0.5,
-                (c - a).v2 * plm_theta
-            );
-            const real v3 = minmod(
-                (a - b).v3 * plm_theta,
-                (c - b).v3 * 0.5,
-                (c - a).v3 * plm_theta
-            );
-            const real pre = minmod(
-                (a - b).p * plm_theta,
-                (c - b).p * 0.5,
-                (c - a).p * plm_theta
-            );
-            const real b1 = minmod(
-                (a - b).b1 * plm_theta,
-                (c - b).b1 * 0.5,
-                (c - a).b1 * plm_theta
-            );
-            const real b2 = minmod(
-                (a - b).b2 * plm_theta,
-                (c - b).b2 * 0.5,
-                (c - a).b2 * plm_theta
-            );
-            const real b3 = minmod(
-                (a - b).b3 * plm_theta,
-                (c - b).b3 * 0.5,
-                (c - a).b3 * plm_theta
-            );
-            const real chi = minmod(
-                (a - b).chi * plm_theta,
-                (c - b).chi * 0.5,
-                (c - a).chi * plm_theta
-            );
-            return T{rho, v1, v2, v3, pre, b1, b2, b3, chi};
+            return result;
         }
 
         /**
@@ -741,84 +410,7 @@ namespace simbi {
         }
 
         /**
-         * @brief Calculate the RMHD Lorentz factor according to Mignone and
-         * Bodo (2006)
-         *
-         * @param ssq s-squared
-         * @param bsq b-squared
-         * @param msq m-squared
-         * @param qq  variational parameter
-         * @return Lorentz factor from Eq.(18)
-         */
-        STATIC real calc_rmhd_lorentz(
-            const real ssq,
-            const real bsq,
-            const real msq,
-            const real qq
-        )
-        {
-            return std::sqrt(
-                1.0 - (ssq * (2.0 * qq + bsq) + msq * qq * qq) /
-                          ((qq + bsq) * (qq + bsq) * qq * qq)
-            );
-        }
-
-        /**
-         * @brief Calculate the RMHD gas pressure according to Mignone and Bodo
-         * (2006)
-         *
-         * @param gr reduced adiabatic index
-         * @param d lab frame density
-         * @param w lorentz factor
-         * @param qq rho * h * g *g
-         * @return gas pressure from Eq.(19)
-         */
-        STATIC real
-        calc_rmhd_pg(const real gr, const real d, const real w, const real qq)
-        {
-            return (qq - d * w) / (gr * w * w);
-        }
-
-        /**
-         * @brief calculate relativistic f(p) from Mignone and Bodo (2005)
-         * @param gamma adiabatic index
-         * @param tau energy density minus rest mass energy
-         * @param d lab frame density
-         * @param S lab frame momentum density
-         * @param p pressure
-         */
-        STATIC real newton_f(real gamma, real tau, real d, real s, real p)
-        {
-            const auto et  = tau + d + p;
-            const auto v2  = s * s / (et * et);
-            const auto w   = 1.0 / std::sqrt(1.0 - v2);
-            const auto rho = d / w;
-            const auto eps =
-                (tau + (1.0 - w) * d + (1.0 - w * w) * p) / (d * w);
-            return (gamma - 1.0) * rho * eps - p;
-        }
-
-        /**
-         * @brief calculate relativistic df/dp from Mignone and Bodo (2005)
-         * @param gamma adiabatic index
-         * @param tau energy density minus rest mass energy
-         * @param d lab frame density
-         * @param S lab frame momentum density
-         * @param p pressure
-         */
-        STATIC real newton_g(real gamma, real tau, real d, real s, real p)
-        {
-            const auto et = tau + d + p;
-            const auto v2 = s * s / (et * et);
-            const auto w  = 1.0 / std::sqrt(1.0 - v2);
-            const auto eps =
-                (tau + (1.0 - w) * d + (1.0 - w * w) * p) / (d * w);
-            const auto c2 = (gamma - 1) * gamma * eps / (1 + gamma * eps);
-            return c2 * v2 - 1;
-        }
-
-        /**
-         * @brief calculate relativistic df/dp from Mignone and Bodo (2005)
+         * @brief calculate relativistic f & df/dp from Mignone and Bodo (2005)
          * @param gamma adiabatic index
          * @param tau energy density minus rest mass energy
          * @param d lab frame density
@@ -835,62 +427,6 @@ namespace simbi {
                 (tau + (1.0 - w) * d + (1.0 - w * w) * p) / (d * w);
             const auto c2 = (gamma - 1) * gamma * eps / (1 + gamma * eps);
             return std::make_tuple((gamma - 1.0) * rho * eps - p, c2 * v2 - 1);
-        }
-
-        /**
-         * @brief calculate relativistic mhd f(q) & df/dq from Mignone &
-         * McKinney (2007)
-         * @param gr adiabatic index coeff (gamma / (gamma - 1))
-         * @param tau energy density
-         * @param d lab frame density
-         * @param ssq s-squared
-         * @param bsq b-squared
-         * @param msq m-squared
-         * @param qq energy density
-         * @return Eq.(20)
-         */
-        STATIC std::tuple<real, real> newton_fg_mhd(
-            real gr,
-            real tau,
-            real d,
-            real ssq,
-            real bsq,
-            real msq,
-            real qq
-        )
-        {
-            //==============================
-            const auto qqd  = qq + d;
-            const auto q2   = qqd * qqd;
-            const auto rat  = ssq / q2;
-            const auto iqb  = 1.0 / (qqd + bsq);
-            const auto iqb2 = iqb * iqb;
-            // Equation (A3)
-            const auto v2  = rat * iqb2 * (2.0 * qqd + bsq) + msq * iqb2;
-            const auto ig2 = 1.0 - v2;
-            const auto g2  = 1.0 / ig2;
-            const auto g   = std::sqrt(g2);
-            const auto chi = qq * ig2 - d * v2 / (g + 1.0);
-
-            const auto dv2_dq =
-                -2.0 * iqb2 * (3.0 * rat + iqb * (rat * bsq * bsq / qqd + msq));
-
-            //===== kinematical and thermodynamical expressions (Section A2)
-            const auto dchi_dq = ig2 - 0.5 * g * (d + 2.0 * chi * g) * dv2_dq;
-            const auto drho_dq = -0.5 * d * g * dv2_dq;
-
-            //====== IDEAL EOS
-            const auto dp_dchi = 1.0 / gr;
-            const auto dp_drho = 0.0;
-            const auto pg      = chi * dp_dchi;
-
-            //========= TODO: include Taub Adiabat
-
-            const auto dp = dp_dchi * dchi_dq + dp_drho * drho_dq;
-            return {
-              qq - (pg + tau) + 0.5 * (bsq + (bsq * msq - ssq) * iqb2),
-              1.0 - dp - (bsq * msq - ssq) * iqb * iqb2
-            };
         }
 
         /**
@@ -1073,10 +609,9 @@ namespace simbi {
          * @return true if smoothing needed, false otherwise
          */
         STATIC
-        bool quirk_strong_shock(real pl, real pr)
+        bool quirk_strong_shock(const real pl, const real pr)
         {
-            return std::abs(pr - pl) / helpers::my_min(pl, pr) >
-                   QUIRK_THRESHOLD;
+            return std::abs(pr - pl) / my_min(pl, pr) > QUIRK_THRESHOLD;
         }
 
         /**
@@ -1413,16 +948,6 @@ namespace simbi {
             const idx ni,
             const idx nj,
             const int side
-        );
-
-        template <typename index_type, typename T>
-        DUAL index_type flattened_index(
-            index_type ii,
-            index_type jj,
-            index_type kk,
-            T ni,
-            T nj,
-            T nk
         );
 
         template <int dim, BlkAx axis, typename T>

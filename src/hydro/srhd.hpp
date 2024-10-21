@@ -34,14 +34,8 @@ namespace simbi {
     template <int dim>
     struct SRHD : public HydroBase {
         // set the primitive and conservative types at compile time
-        using primitive_t = typename std::conditional_t<
-            dim == 1,
-            sr1d::Primitive,
-            std::conditional_t<dim == 2, sr2d::Primitive, sr3d::Primitive>>;
-        using conserved_t = typename std::conditional_t<
-            dim == 1,
-            sr1d::Conserved,
-            std::conditional_t<dim == 2, sr2d::Conserved, sr3d::Conserved>>;
+        using primitive_t     = anyPrimitive<dim, Regime::SRHD>;
+        using conserved_t     = anyConserved<dim, Regime::SRHD>;
         using primitive_soa_t = typename std::conditional_t<
             dim == 1,
             sr1d::PrimitiveSOA,

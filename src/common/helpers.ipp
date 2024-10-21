@@ -1,4 +1,5 @@
 
+#include "H5Cpp.h"
 #include "util/device_api.hpp"
 #include "util/parallel_for.hpp"
 
@@ -20,257 +21,11 @@ namespace simbi {
             );   // We don't want the '\0' inside
         }
 
-        template <typename T, typename U>
-        typename std::enable_if<is_3D_primitive<U>::value>::type
-        writeToProd(T* from, PrimData* to)
-        {
-            to->rho = from->rho;
-            to->v1  = from->v1;
-            to->v2  = from->v2;
-            to->v3  = from->v3;
-            to->p   = from->p;
-            to->chi = from->chi;
-        }
-
-        // Handle 2D primitive arrays whether SR or Newtonian
-        template <typename T, typename U>
-        typename std::enable_if<is_2D_primitive<U>::value>::type
-        writeToProd(T* from, PrimData* to)
-        {
-            to->rho = from->rho;
-            to->v1  = from->v1;
-            to->v2  = from->v2;
-            to->p   = from->p;
-            to->chi = from->chi;
-        }
-
-        template <typename T, typename U>
-        typename std::enable_if<is_1D_primitive<U>::value>::type
-        writeToProd(T* from, PrimData* to)
-        {
-            to->rho = from->rho;
-            to->v1  = from->v1;
-            to->p   = from->p;
-            to->chi = from->chi;
-        }
-
-        template <typename T, typename U>
-        typename std::enable_if<is_3D_mhd_primitive<U>::value>::type
-        writeToProd(T* from, PrimData* to)
-        {
-            to->rho = from->rho;
-            to->v1  = from->v1;
-            to->v2  = from->v2;
-            to->v3  = from->v3;
-            to->p   = from->p;
-            to->b1  = from->b1;
-            to->b2  = from->b2;
-            to->b3  = from->b3;
-            to->chi = from->chi;
-        }
-
-        // Handle 2D primitive arrays whether SR or Newtonian
-        template <typename T, typename U>
-        typename std::enable_if<is_2D_mhd_primitive<U>::value>::type
-        writeToProd(T* from, PrimData* to)
-        {
-            to->rho = from->rho;
-            to->v1  = from->v1;
-            to->v2  = from->v2;
-            to->v3  = from->v3;
-            to->p   = from->p;
-            to->b1  = from->b1;
-            to->b2  = from->b2;
-            to->b3  = from->b3;
-            to->chi = from->chi;
-        }
-
-        template <typename T, typename U>
-        typename std::enable_if<is_1D_mhd_primitive<U>::value>::type
-        writeToProd(T* from, PrimData* to)
-        {
-            to->rho = from->rho;
-            to->v1  = from->v1;
-            to->v2  = from->v2;
-            to->v3  = from->v3;
-            to->p   = from->p;
-            to->b1  = from->b1;
-            to->b2  = from->b2;
-            to->b3  = from->b3;
-            to->chi = from->chi;
-        }
-
-        template <typename T, typename U, typename arr_type>
-        typename std::enable_if<is_1D_primitive<U>::value, T>::type
-        vec2struct(const arr_type& p)
-        {
-            T sprims;
-            size_t nzones = p.size();
-
-            sprims.rho.reserve(nzones);
-            sprims.v1.reserve(nzones);
-            sprims.p.reserve(nzones);
-            sprims.chi.reserve(nzones);
-            for (size_t i = 0; i < nzones; i++) {
-                sprims.rho.push_back(p[i].rho);
-                sprims.v1.push_back(p[i].v1);
-                sprims.p.push_back(p[i].p);
-                sprims.chi.push_back(p[i].chi);
-            }
-
-            return sprims;
-        }
-
-        template <typename T, typename U, typename arr_type>
-        typename std::enable_if<is_2D_primitive<U>::value, T>::type
-        vec2struct(const arr_type& p)
-        {
-            T sprims;
-            size_t nzones = p.size();
-
-            sprims.rho.reserve(nzones);
-            sprims.v1.reserve(nzones);
-            sprims.v2.reserve(nzones);
-            sprims.p.reserve(nzones);
-            sprims.chi.reserve(nzones);
-            for (size_t i = 0; i < nzones; i++) {
-                sprims.rho.push_back(p[i].rho);
-                sprims.v1.push_back(p[i].v1);
-                sprims.v2.push_back(p[i].v2);
-                sprims.p.push_back(p[i].p);
-                sprims.chi.push_back(p[i].chi);
-            }
-
-            return sprims;
-        }
-
-        template <typename T, typename U, typename arr_type>
-        typename std::enable_if<is_3D_primitive<U>::value, T>::type
-        vec2struct(const arr_type& p)
-        {
-            T sprims;
-            size_t nzones = p.size();
-
-            sprims.rho.reserve(nzones);
-            sprims.v1.reserve(nzones);
-            sprims.v2.reserve(nzones);
-            sprims.v3.reserve(nzones);
-            sprims.p.reserve(nzones);
-            sprims.chi.reserve(nzones);
-            for (size_t i = 0; i < nzones; i++) {
-                sprims.rho.push_back(p[i].rho);
-                sprims.v1.push_back(p[i].v1);
-                sprims.v2.push_back(p[i].v2);
-                sprims.v3.push_back(p[i].v3);
-                sprims.p.push_back(p[i].p);
-                sprims.chi.push_back(p[i].chi);
-            }
-
-            return sprims;
-        }
-
-        template <typename T, typename U, typename arr_type>
-        typename std::enable_if<is_1D_mhd_primitive<U>::value, T>::type
-        vec2struct(const arr_type& p)
-        {
-            T sprims;
-            size_t nzones = p.size();
-
-            sprims.rho.reserve(nzones);
-            sprims.v1.reserve(nzones);
-            sprims.v2.reserve(nzones);
-            sprims.v3.reserve(nzones);
-            sprims.p.reserve(nzones);
-            sprims.b1.reserve(nzones);
-            sprims.b2.reserve(nzones);
-            sprims.b3.reserve(nzones);
-            sprims.chi.reserve(nzones);
-            for (size_t i = 0; i < nzones; i++) {
-                sprims.rho.push_back(p[i].rho);
-                sprims.v1.push_back(p[i].v1);
-                sprims.v2.push_back(p[i].v2);
-                sprims.v3.push_back(p[i].v3);
-                sprims.p.push_back(p[i].p);
-                sprims.b1.push_back(p[i].b1);
-                sprims.b2.push_back(p[i].b2);
-                sprims.b3.push_back(p[i].b3);
-                sprims.chi.push_back(p[i].chi);
-            }
-
-            return sprims;
-        }
-
-        template <typename T, typename U, typename arr_type>
-        typename std::enable_if<is_2D_mhd_primitive<U>::value, T>::type
-        vec2struct(const arr_type& p)
-        {
-            T sprims;
-            size_t nzones = p.size();
-
-            sprims.rho.reserve(nzones);
-            sprims.v1.reserve(nzones);
-            sprims.v2.reserve(nzones);
-            sprims.v3.reserve(nzones);
-            sprims.p.reserve(nzones);
-            sprims.b1.reserve(nzones);
-            sprims.b2.reserve(nzones);
-            sprims.b3.reserve(nzones);
-            sprims.chi.reserve(nzones);
-            for (size_t i = 0; i < nzones; i++) {
-                sprims.rho.push_back(p[i].rho);
-                sprims.v1.push_back(p[i].v1);
-                sprims.v2.push_back(p[i].v2);
-                sprims.v3.push_back(p[i].v3);
-                sprims.p.push_back(p[i].p);
-                sprims.b1.push_back(p[i].b1);
-                sprims.b2.push_back(p[i].b2);
-                sprims.b3.push_back(p[i].b3);
-                sprims.chi.push_back(p[i].chi);
-            }
-
-            return sprims;
-        }
-
-        template <typename T, typename U, typename arr_type>
-        typename std::enable_if<is_3D_mhd_primitive<U>::value, T>::type
-        vec2struct(const arr_type& p)
-        {
-            T sprims;
-            size_t nzones = p.size();
-
-            sprims.rho.reserve(nzones);
-            sprims.v1.reserve(nzones);
-            sprims.v2.reserve(nzones);
-            sprims.v3.reserve(nzones);
-            sprims.p.reserve(nzones);
-            sprims.b1.reserve(nzones);
-            sprims.b2.reserve(nzones);
-            sprims.b3.reserve(nzones);
-            sprims.chi.reserve(nzones);
-            for (size_t i = 0; i < nzones; i++) {
-                sprims.rho.push_back(p[i].rho);
-                sprims.v1.push_back(p[i].v1);
-                sprims.v2.push_back(p[i].v2);
-                sprims.v3.push_back(p[i].v3);
-                sprims.p.push_back(p[i].p);
-                sprims.b1.push_back(p[i].b1);
-                sprims.b2.push_back(p[i].b2);
-                sprims.b3.push_back(p[i].b3);
-                sprims.chi.push_back(p[i].chi);
-            }
-
-            return sprims;
-        }
-
         template <typename Sim_type>
         void write_to_file(Sim_type& sim_state)
         {
             sim_state.prims.copyFromGpu();
             sim_state.cons.copyFromGpu();
-            sim_state.setup.x1max = sim_state.x1max;
-            sim_state.setup.x1min = sim_state.x1min;
-
-            PrimData prods;
             static auto data_directory      = sim_state.data_directory;
             static auto step                = sim_state.init_chkpt_idx;
             static auto tbefore             = sim_state.tstart;
@@ -290,14 +45,6 @@ namespace simbi {
                 tchunk_order_of_mag += 1;
             }
 
-            // Transform vector of primitive structs to struct of primitive
-            // vectors
-            auto transfer_prims = vec2struct<
-                typename Sim_type::primitive_soa_t,
-                typename Sim_type::primitive_t>(sim_state.prims);
-            writeToProd<
-                typename Sim_type::primitive_soa_t,
-                typename Sim_type::primitive_t>(&transfer_prims, &prods);
             std::string tnow;
             if (sim_state.dlogt != 0) {
                 const auto time_order_of_mag = std::floor(std::log10(step));
@@ -327,14 +74,7 @@ namespace simbi {
             sim_state.setup.chkpt_idx = step;
             tbefore                   = sim_state.t;
             step++;
-            write_hdf5(
-                data_directory,
-                filename,
-                prods,
-                sim_state.setup,
-                sim_state.dimensions,
-                sim_state.total_zones
-            );
+            write_hdf5(data_directory, filename, sim_state);
         }
 
         template <typename T, typename U>
@@ -753,18 +493,19 @@ namespace simbi {
 
                         // if located at the corners, set the ghost zones to the
                         // same as the inner zones
-                        const bool kc = kk < 1 || kk + 2 >= x3grid_size - 2;
+                        // const bool kc = kk < 1 || kk + 2 >= x3grid_size - 2;
 
-                        if (kc) {
-                            // get corner indices in i-k plane
-                            const auto kq = kk == 0 ? kk : kk + 2;
-                            const auto jk_kci =
-                                kq * sy * sx + (jj + 1) * sx + 0;
-                            const auto jk_kco = kq * sy * sx + (jj + 1) * sx +
-                                                (x1grid_size - 1);
-                            cons[jk_kci] = cons[ing];
-                            cons[jk_kco] = cons[outg];
-                        }
+                        // if (kc) {
+                        //     // get corner indices in i-k plane
+                        //     const auto kq = kk == 0 ? kk : kk + 2;
+                        //     const auto jk_kci =
+                        //         kq * sy * sx + (jj + 1) * sx + 0;
+                        //     const auto jk_kco = kq * sy * sx + (jj + 1) * sx
+                        //     +
+                        //                         (x1grid_size - 1);
+                        //     cons[jk_kci] = cons[ing];
+                        //     cons[jk_kco] = cons[outg];
+                        // }
                     }
                     // Fix the ghost zones at the x2 boundaries
                     if (ii < x1grid_size - 2 && kk < x3grid_size - 2) {
@@ -823,18 +564,19 @@ namespace simbi {
 
                         // if located at the corners, set the ghost zones to the
                         // same as the inner zones
-                        const bool ic = ii < 1 || (ii + 2) >= x1grid_size - 2;
+                        // const bool ic = ii < 1 || (ii + 2) >= x1grid_size -
+                        // 2;
 
-                        if (ic) {
-                            // get corner indices in i-j plane
-                            const auto iq = ii < 1 ? ii : ii + 2;
-                            const auto ik_ici =
-                                (kk + 1) * sy * sx + 0 * sx + iq;
-                            const auto ik_ico = (kk + 1) * sy * sx +
-                                                (x2grid_size - 1) * sx + iq;
-                            cons[ik_ici] = cons[ing];
-                            cons[ik_ico] = cons[outg];
-                        }
+                        // if (ic) {
+                        //     // get corner indices in i-j plane
+                        //     const auto iq = ii < 1 ? ii : ii + 2;
+                        //     const auto ik_ici =
+                        //         (kk + 1) * sy * sx + 0 * sx + iq;
+                        //     const auto ik_ico = (kk + 1) * sy * sx +
+                        //                         (x2grid_size - 1) * sx + iq;
+                        //     cons[ik_ici] = cons[ing];
+                        //     cons[ik_ico] = cons[outg];
+                        // }
                     }
 
                     // Fix the ghost zones at the x3 boundaries
@@ -887,18 +629,18 @@ namespace simbi {
 
                         // if located at the corners, set the ghost zones to the
                         // same as the inner zones
-                        const bool jc = jj < 1 || jj + 2 >= x2grid_size - 2;
+                        // const bool jc = jj < 1 || jj + 2 >= x2grid_size - 2;
 
-                        if (jc) {
-                            // get corner indices in j-k plane
-                            const auto jq = jj < 1 ? jj : jj + 2;
-                            const auto ij_jci =
-                                0 * sy * sx + jq * sx + (ii + 1);
-                            const auto ij_jco = (x3grid_size - 1) * sy * sx +
-                                                jq * sx + (ii + 1);
-                            cons[ij_jci] = cons[ing];
-                            cons[ij_jco] = cons[outg];
-                        }
+                        // if (jc) {
+                        //     // get corner indices in j-k plane
+                        //     const auto jq = jj < 1 ? jj : jj + 2;
+                        //     const auto ij_jci =
+                        //         0 * sy * sx + jq * sx + (ii + 1);
+                        //     const auto ij_jco = (x3grid_size - 1) * sy * sx +
+                        //                         jq * sx + (ii + 1);
+                        //     cons[ij_jci] = cons[ing];
+                        //     cons[ij_jco] = cons[outg];
+                        // }
                     }
                 }
                 else {
@@ -958,24 +700,26 @@ namespace simbi {
                                 break;
                         }
 
-                        const bool kc = kk < 2 || (kk + 4) >= x3grid_size - 4;
-                        if (kc) {
-                            // get corner indices in i-k plane
-                            const auto kq = kk < 2 ? kk : kk + 4;
-                            const auto jk_kci =
-                                kq * sy * sx + (jj + 2) * sx + 0;
-                            const auto jk_kcii =
-                                kq * sy * sx + (jj + 2) * sx + 1;
-                            const auto jk_kco = kq * sy * sx + (jj + 2) * sx +
-                                                (x1grid_size - 1);
-                            const auto jk_kcoo = kq * sy * sx + (jj + 2) * sx +
-                                                 (x1grid_size - 2);
+                        // const bool kc = kk < 2 || (kk + 4) >= x3grid_size -
+                        // 4; if (kc) {
+                        //     // get corner indices in i-k plane
+                        //     const auto kq = kk < 2 ? kk : kk + 4;
+                        //     const auto jk_kci =
+                        //         kq * sy * sx + (jj + 2) * sx + 0;
+                        //     const auto jk_kcii =
+                        //         kq * sy * sx + (jj + 2) * sx + 1;
+                        //     const auto jk_kco = kq * sy * sx + (jj + 2) * sx
+                        //     +
+                        //                         (x1grid_size - 1);
+                        //     const auto jk_kcoo = kq * sy * sx + (jj + 2) * sx
+                        //     +
+                        //                          (x1grid_size - 2);
 
-                            cons[jk_kci]  = cons[ing];
-                            cons[jk_kco]  = cons[outg];
-                            cons[jk_kcii] = cons[ingg];
-                            cons[jk_kcoo] = cons[outgg];
-                        }
+                        //     cons[jk_kci]  = cons[ing];
+                        //     cons[jk_kco]  = cons[outg];
+                        //     cons[jk_kcii] = cons[ingg];
+                        //     cons[jk_kcoo] = cons[outgg];
+                        // }
                     }
                     // Fix the ghost zones at the x2 boundaries
                     if (ii < x1grid_size - 4 && kk < x3grid_size - 4) {
@@ -1054,23 +798,23 @@ namespace simbi {
                                 break;
                         }
 
-                        const bool ic = ii < 2 || ii + 4 >= x1grid_size - 4;
-                        if (ic) {
-                            // get corner indices in i-j plane
-                            const auto iq = ii < 2 ? ii : ii + 4;
-                            const auto ik_ici =
-                                (kk + 2) * sy * sx + 0 * sx + iq;
-                            const auto ik_icii =
-                                (kk + 2) * sy * sx + 1 * sx + iq;
-                            const auto ik_ico = (kk + 2) * sy * sx +
-                                                (x2grid_size - 1) * sx + iq;
-                            const auto ik_icoo = (kk + 2) * sy * sx +
-                                                 (x2grid_size - 2) * sx + iq;
-                            cons[ik_ici]  = cons[ing];
-                            cons[ik_ico]  = cons[outg];
-                            cons[ik_icii] = cons[ingg];
-                            cons[ik_icoo] = cons[outgg];
-                        }
+                        // const bool ic = ii < 2 || ii + 4 >= x1grid_size - 4;
+                        // if (ic) {
+                        //     // get corner indices in i-j plane
+                        //     const auto iq = ii < 2 ? ii : ii + 4;
+                        //     const auto ik_ici =
+                        //         (kk + 2) * sy * sx + 0 * sx + iq;
+                        //     const auto ik_icii =
+                        //         (kk + 2) * sy * sx + 1 * sx + iq;
+                        //     const auto ik_ico = (kk + 2) * sy * sx +
+                        //                         (x2grid_size - 1) * sx + iq;
+                        //     const auto ik_icoo = (kk + 2) * sy * sx +
+                        //                          (x2grid_size - 2) * sx + iq;
+                        //     cons[ik_ici]  = cons[ing];
+                        //     cons[ik_ico]  = cons[outg];
+                        //     cons[ik_icii] = cons[ingg];
+                        //     cons[ik_icoo] = cons[outgg];
+                        // }
                     }
 
                     // Fix the ghost zones at the x3 boundaries
@@ -1140,23 +884,24 @@ namespace simbi {
                                 break;
                         }
 
-                        const bool jc = jj < 2 || jj + 4 >= x2grid_size - 4;
-                        if (jc) {
-                            // get corner indices in j-k plane
-                            const auto jq = jj < 2 ? jj : jj + 4;
-                            const auto ij_jci =
-                                0 * sy * sx + jq * sx + (ii + 2);
-                            const auto ij_jcii =
-                                1 * sy * sx + jq * sx + (ii + 2);
-                            const auto ij_jco = (x3grid_size - 1) * sy * sx +
-                                                jq * sx + (ii + 2);
-                            const auto ij_jcoo = (x3grid_size - 2) * sy * sx +
-                                                 jq * sx + (ii + 2);
-                            cons[ij_jci]  = cons[ing];
-                            cons[ij_jco]  = cons[outg];
-                            cons[ij_jcii] = cons[ingg];
-                            cons[ij_jcoo] = cons[outgg];
-                        }
+                        // const bool jc = jj < 2 || jj + 4 >= x2grid_size - 4;
+                        // if (jc) {
+                        //     // get corner indices in j-k plane
+                        //     const auto jq = jj < 2 ? jj : jj + 4;
+                        //     const auto ij_jci =
+                        //         0 * sy * sx + jq * sx + (ii + 2);
+                        //     const auto ij_jcii =
+                        //         1 * sy * sx + jq * sx + (ii + 2);
+                        //     const auto ij_jco = (x3grid_size - 1) * sy * sx +
+                        //                         jq * sx + (ii + 2);
+                        //     const auto ij_jcoo = (x3grid_size - 2) * sy * sx
+                        //     +
+                        //                          jq * sx + (ii + 2);
+                        //     cons[ij_jci]  = cons[ing];
+                        //     cons[ij_jco]  = cons[outg];
+                        //     cons[ij_jcii] = cons[ingg];
+                        //     cons[ij_jcoo] = cons[outgg];
+                        // }
                     }
                 }
             });
@@ -2587,16 +2332,16 @@ namespace simbi {
         DUAL void ib_modify(T& lhs, const T& rhs, const bool ib, const idx side)
         {
             if (ib) {
-                lhs.rho = rhs.rho;
-                lhs.v1  = (1 - 2 * (side == 1)) * rhs.v1;
+                lhs.rho() = rhs.rho();
+                lhs.v1()  = (1 - 2 * (side == 1)) * rhs.v1();
                 if constexpr (dim > 1) {
-                    lhs.v2 = (1 - 2 * (side == 2)) * rhs.v2;
+                    lhs.v2() = (1 - 2 * (side == 2)) * rhs.v2();
                 }
                 if constexpr (dim > 2) {
-                    lhs.v3 = (1 - 2 * (side == 3)) * rhs.v3;
+                    lhs.v3() = (1 - 2 * (side == 3)) * rhs.v3();
                 }
-                lhs.p   = rhs.p;
-                lhs.chi = rhs.chi;
+                lhs.p()   = rhs.p();
+                lhs.chi() = rhs.chi();
             }
         }
 
@@ -2919,6 +2664,203 @@ namespace simbi {
             }();
 
             return idx3(ip, jp, kp, ni, nj, nk);
+        }
+
+        template <typename T>
+        void write_hdf5(
+            const std::string data_directory,
+            const std::string filename,
+            const T& state
+        )
+        {
+            const auto full_filename = data_directory + filename;
+            std::cout << "\n[Writing File...: " << full_filename << "]\n";
+            // Create a new file using the default property list.
+            H5::H5File file(full_filename, H5F_ACC_TRUNC);
+
+            // Create the data space for the dataset.
+            hsize_t dims[1]   = {state.nx * state.ny * state.nz};
+            hsize_t dimx[1]   = {state.x1.size()};
+            hsize_t dimy[1]   = {state.x2.size()};
+            hsize_t dimz[1]   = {state.x3.size()};
+            hsize_t dim_bc[1] = {state.setup.boundary_conditions.size()};
+
+            H5::DataSpace hdataspace(1, dims);
+            H5::DataSpace hdataspace_x1(1, dimx);
+            H5::DataSpace hdataspace_x2(1, dimy);
+            H5::DataSpace hdataspace_x3(1, dimz);
+            H5::DataSpace hdataspace_bc(1, dim_bc);
+
+            // Create empty dataspace for attributes
+            H5::DataSpace attr_dataspace(H5S_NULL);
+            H5::DataType attr_type(H5::PredType::NATIVE_INT);
+            // create attribute data space that houses scalar type
+            H5::DataSpace scalar_dataspace(H5S_SCALAR);
+
+            //==================================================================
+            // DATA TYPES
+            //==================================================================
+            // Define the real-type for the data in the file.
+            H5::DataType real_type = H5::PredType::NATIVE_DOUBLE;
+
+            // int-type
+            H5::DataType int_type = H5::PredType::NATIVE_INT;
+
+            // bool-type
+            H5::DataType bool_type = H5::PredType::NATIVE_HBOOL;
+
+            // scalar-type
+            H5::DataType scalar_type = H5::PredType::NATIVE_DOUBLE;
+
+            // Define the string type for variable string length
+            H5::StrType str_type(H5::PredType::C_S1, H5T_VARIABLE);
+
+            //==================================================================
+            //  BOUNDARY CONDITIONS
+            //==================================================================
+            // convert the string to a char array
+            std::vector<const char*> arr_c_str;
+            for (auto ii = 0; ii < dim_bc[0]; ++ii) {
+                arr_c_str.push_back(state.setup.boundary_conditions[ii].c_str()
+                );
+            }
+
+            // Write the boundary conditions to the file
+            H5::DataSet bc_dataset = file.createDataSet(
+                "boundary_conditions",
+                str_type,
+                hdataspace_bc
+            );
+            bc_dataset.write(arr_c_str.data(), str_type);
+            bc_dataset.close();
+
+            //==================================================================
+            //  X1, X2, X3 DATA
+            //==================================================================
+            H5::DataSet dataset;
+            // helper lambda for writing to any dataset
+            auto write_dataset = [&](const std::string& name,
+                                     const auto& data,
+                                     const auto& dataspace) {
+                dataset = file.createDataSet(name, real_type, dataspace);
+                dataset.write(data.data(), real_type);
+                dataset.close();
+            };
+
+            // Create datasets for the x1, x2, and x3 data
+            write_dataset("x1", state.x1, hdataspace_x1);
+            write_dataset("x2", state.x2, hdataspace_x2);
+            write_dataset("x3", state.x3, hdataspace_x3);
+
+            //==================================================================
+            //  PRIMITIVE DATA
+            //==================================================================
+            // helper lambda for writing the prim data using a for 1D loop
+            // and hyperslab selection
+            auto write_prims = [&](const std::string& name,
+                                   const auto& dataspace,
+                                   const auto member) {
+                // Write the data using a for loop
+                dataset = file.createDataSet(name, real_type, dataspace);
+                for (hsize_t i = 0; i < state.prims.size(); ++i) {
+                    hsize_t offset[1] = {i};
+                    hsize_t count[1]  = {1};
+                    H5::DataSpace memspace(1, count);
+                    dataspace.selectHyperslab(H5S_SELECT_SET, count, offset);
+                    dataset.write(
+                        &state.prims[i][member],
+                        real_type,
+                        memspace,
+                        dataspace
+                    );
+                }
+                dataset.close();
+            };
+            write_prims("rho", hdataspace, 0);
+            write_prims("v1", hdataspace, 1);
+            if (state.dimensions > 1) {
+                write_prims("v2", hdataspace, 2);
+            }
+            if (state.dimensions > 2) {
+                write_prims("v3", hdataspace, 3);
+            }
+            write_prims("p", hdataspace, state.dimensions + 1);
+            if (state.setup.regime == "srmhd") {
+                write_prims("b1", hdataspace, state.dimensions + 2);
+                write_prims("b2", hdataspace, state.dimensions + 3);
+                write_prims("b3", hdataspace, state.dimensions + 4);
+                write_prims("chi", hdataspace, state.dimensions + 5);
+            }
+            else {
+                write_prims("chi", hdataspace, state.dimensions + 2);
+            }
+            //==================================================================
+            //  ATTRIBUTE DATA
+            //==================================================================
+            // create dataset for simulation information
+            H5::DataSet sim_info =
+                file.createDataSet("sim_info", attr_type, attr_dataspace);
+
+            // write simulation information in attributes and then close the
+            // file
+            const auto& setup = state.setup;
+            const std::vector<std::pair<std::string, const void*>> attributes =
+                {{"current_time", &setup.t},
+                 {"time_step", &setup.dt},
+                 {"spatial_order", setup.spatial_order.c_str()},
+                 {"time_order", setup.time_order.c_str()},
+                 {"using_gamma_beta", &setup.using_fourvelocity},
+                 {"mesh_motion", &setup.mesh_motion},
+                 {"x1max", &setup.x1max},
+                 {"x1min", &setup.x1min},
+                 {"x2max", &setup.x2max},
+                 {"x2min", &setup.x2min},
+                 {"x3max", &setup.x3max},
+                 {"x3min", &setup.x3min},
+                 {"adiabatic_gamma", &setup.ad_gamma},
+                 {"nx", &setup.nx},
+                 {"ny", &setup.ny},
+                 {"nz", &setup.nz},
+                 {"chkpt_idx", &setup.chkpt_idx},
+                 {"xactive_zones", &setup.xactive_zones},
+                 {"yactive_zones", &setup.yactive_zones},
+                 {"zactive_zones", &setup.zactive_zones},
+                 {"geometry", setup.coord_system.c_str()},
+                 {"regime", setup.regime.c_str()},
+                 {"dimensions", &setup.dimensions},
+                 {"x1_cell_spacing", setup.x1_cell_spacing.c_str()},
+                 {"x2_cell_spacing", setup.x2_cell_spacing.c_str()},
+                 {"x3_cell_spacing", setup.x3_cell_spacing.c_str()}};
+
+            for (const auto& [name, value] : attributes) {
+                H5::DataType type;
+                if (name == "spatial_order" || name == "time_order" ||
+                    name == "geometry" || name == "regime" ||
+                    name.find("cell_spacing") != std::string::npos) {
+                    // convert the value to a string
+                    std::string copy = *static_cast<const std::string*>(value);
+                    auto st = H5::StrType(H5::PredType::C_S1, copy.size() + 1);
+                    type    = st;
+                }
+                else if (name == "using_gamma_beta" || name == "mesh_motion") {
+                    type = bool_type;
+                }
+                else if (name == "nx" || name == "ny" || name == "nz" ||
+                         name == "chkpt_idx" ||
+                         name.find("active_zones") != std::string::npos ||
+                         name == "dimensions") {
+                    type = int_type;
+                }
+                else {
+                    type = real_type;
+                }
+
+                auto att =
+                    sim_info.createAttribute(name, type, scalar_dataspace);
+                att.write(type, value);
+                att.close();
+            }
+            sim_info.close();
         }
     }   // namespace helpers
 }   // namespace simbi

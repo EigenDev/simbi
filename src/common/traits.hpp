@@ -68,6 +68,16 @@ namespace rmhd {
 //                  PRIMITIVE TYPE TRAITS
 //==========================================================================
 template <typename T>
+struct is_prim_struct {
+    static const bool value = false;
+};
+
+template <typename T>
+struct is_mhd_struct {
+    static const bool value = false;
+};
+
+template <typename T>
 struct is_1D_primitive {
     static const bool value = false;
 };

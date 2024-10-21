@@ -25,6 +25,12 @@ namespace simbi {
         LOGSPACE,
     };
 
+    enum class Regime {
+        NEWTONIAN,
+        SRHD,
+        RMHD,
+    };
+
     enum class Geometry {
         CARTESIAN,
         SPHERICAL,
@@ -63,11 +69,6 @@ namespace simbi {
         PERIODIC,
     };
 
-    enum class HydroRegime {
-        RELATIVISTC,
-        NEWTONIAN,
-    };
-
     enum class WaveSpeeds {
         SCHNEIDER_ET_AL_93,
         MIGNONE_AND_BODO_05,
@@ -84,12 +85,6 @@ namespace simbi {
         K,
         J,
         I
-    };
-
-    enum class Pos {
-        center,
-        left_face,
-        right_face,
     };
 
     enum class Dir {
