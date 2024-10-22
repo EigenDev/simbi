@@ -283,7 +283,7 @@ template <int dim>
 void Newtonian<dim>::cons2prim()
 {
     const auto* const ccons = cons.data();
-    simbi::parallel_for(fullP, [ccons, this] DEV(const luint gid) {
+    simbi::parallel_for(fullP, total_zones, [ccons, this] DEV(const luint gid) {
         real invdV = 1.0;
         if (homolog) {
             if constexpr (dim == 1) {
@@ -1449,47 +1449,47 @@ void Newtonian<dim>::simulate(
     // Simulate :)
     try {
         simbi::detail::logger::with_logger(*this, tend, [&] {
-            advance();
+            // advance();
             cons2prim();
-            if constexpr (dim == 1) {
-                config_ghosts1D(
-                    fullP,
-                    cons.data(),
-                    nx,
-                    spatial_order == "pcm",
-                    bcs.data(),
-                    outer_zones.data(),
-                    inflow_zones.data()
-                );
-            }
-            else if constexpr (dim == 2) {
-                config_ghosts2D(
-                    fullP,
-                    cons.data(),
-                    nx,
-                    ny,
-                    spatial_order == "pcm",
-                    geometry,
-                    bcs.data(),
-                    outer_zones.data(),
-                    inflow_zones.data(),
-                    half_sphere
-                );
-            }
-            else {
-                config_ghosts3D(
-                    fullP,
-                    cons.data(),
-                    nx,
-                    ny,
-                    nz,
-                    spatial_order == "pcm",
-                    bcs.data(),
-                    inflow_zones.data(),
-                    half_sphere,
-                    geometry
-                );
-            }
+            // if constexpr (dim == 1) {
+            //     config_ghosts1D(
+            //         fullP,
+            //         cons.data(),
+            //         nx,
+            //         spatial_order == "pcm",
+            //         bcs.data(),
+            //         outer_zones.data(),
+            //         inflow_zones.data()
+            //     );
+            // }
+            // else if constexpr (dim == 2) {
+            //     config_ghosts2D(
+            //         fullP,
+            //         cons.data(),
+            //         nx,
+            //         ny,
+            //         spatial_order == "pcm",
+            //         geometry,
+            //         bcs.data(),
+            //         outer_zones.data(),
+            //         inflow_zones.data(),
+            //         half_sphere
+            //     );
+            // }
+            // else {
+            //     config_ghosts3D(
+            //         fullP,
+            //         cons.data(),
+            //         nx,
+            //         ny,
+            //         nz,
+            //         spatial_order == "pcm",
+            //         bcs.data(),
+            //         inflow_zones.data(),
+            //         half_sphere,
+            //         geometry
+            //     );
+            // }
 
             if constexpr (global::on_gpu) {
                 adapt_dt(fullP);
