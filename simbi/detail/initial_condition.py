@@ -324,6 +324,8 @@ def construct_the_state(model: Any, initial_state: NDArray[numpy_float]) -> None
                     0.5 * (bfields_stag[2][1:] + bfields_stag[2][:-1]),
                 ]
             )
+        else:
+            mean_bfields = []
 
         vsqr = dot_product(velocity, velocity)
         lorentz_factor = calc_lorentz_factor(vsqr, model.regime)
