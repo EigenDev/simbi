@@ -51,10 +51,10 @@ namespace simbi {
                 if (time_order_of_mag > tchunk_order_of_mag) {
                     tchunk_order_of_mag += 1;
                 }
-                tnow = create_step_str(step, tchunk_order_of_mag);
+                tnow = format_real(step);
             }
             else if (!sim_state.inFailureState) {
-                tnow = create_step_str(t_interval, tchunk_order_of_mag);
+                tnow = format_real(t_interval);
             }
             else {
                 if (sim_state.wasInterrupted) {

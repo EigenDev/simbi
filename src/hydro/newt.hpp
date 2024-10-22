@@ -36,14 +36,14 @@ namespace simbi {
         // set the primitive and conservative types at compile time
         using primitive_t = anyPrimitive<dim, Regime::NEWTONIAN>;
         using conserved_t = anyConserved<dim, Regime::NEWTONIAN>;
-
-        using primitive_soa_t = typename std::conditional_t<
-            dim == 1,
-            hydro1d::PrimitiveSOA,
-            std::conditional_t<
-                dim == 2,
-                hydro2d::PrimitiveSOA,
-                hydro3d::PrimitiveSOA>>;
+        template <typename T>
+        using RiemannFuncPointer = conserved_t (T::*)(
+            const primitive_t&,
+            const primitive_t&,
+            const luint,
+            const real
+        ) const;
+        RiemannFuncPointer<Newtonian<dim>> riemann_solve;
         using eigenvals_t = typename std::conditional_t<
             dim == 1,
             hydro1d::Eigenvals,
@@ -82,9 +82,8 @@ namespace simbi {
         );
         ~Newtonian();
 
-        void cons2prim(const ExecutionPolicy<>& p);
-
-        void advance(const ExecutionPolicy<>& p);
+        void cons2prim();
+        void advance();
 
         DUAL eigenvals_t calc_eigenvals(
             const primitive_t& primsL,
@@ -92,32 +91,36 @@ namespace simbi {
             const luint nhat
         ) const;
 
-        DUAL conserved_t prims2cons(const primitive_t& prims) const;
-
         DUAL conserved_t calc_hllc_flux(
-            const conserved_t& uL,
-            const conserved_t& uR,
-            const conserved_t& fL,
-            const conserved_t& fR,
             const primitive_t& prL,
             const primitive_t& prR,
             const luint nhat,
             const real vface = 0.0
         ) const;
-
-        DUAL conserved_t
-        prims2flux(const primitive_t& prims, const luint nhat) const;
 
         DUAL conserved_t calc_hlle_flux(
-            const conserved_t& uL,
-            const conserved_t& uR,
-            const conserved_t& fL,
-            const conserved_t& fR,
             const primitive_t& prL,
             const primitive_t& prR,
             const luint nhat,
             const real vface = 0.0
         ) const;
+
+        DUAL void set_riemann_solver()
+        {
+            switch (sim_solver) {
+                case Solver::HLLE:
+                    this->riemann_solve = &Newtonian<dim>::calc_hlle_flux;
+                    break;
+                default:
+                    this->riemann_solve = &Newtonian<dim>::calc_hllc_flux;
+                    break;
+            }
+        }
+
+        void set_the_riemann_solver()
+        {
+            SINGLE(helpers::hybrid_set_riemann_solver, this);
+        }
 
         void adapt_dt();
         void adapt_dt(const ExecutionPolicy<>& p);

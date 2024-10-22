@@ -1,5 +1,6 @@
 #include "common/helpers.hpp"
 #include "H5Cpp.h"
+#include <iomanip>
 #include <thread>
 
 //==================================
@@ -41,22 +42,45 @@ namespace simbi {
             return "\033[1;31mSimulation Crashed\033[0m";
         }
 
-        //====================================================================================================
-        //                                  WRITE DATA TO FILE
-        //====================================================================================================
-        std::string
-        create_step_str(const real current_time, const int max_order_of_mag)
+        std::string format_real(real value)
         {
-            if (current_time == 0) {
-                return "000_000";
+            std::ostringstream oss;
+            oss << std::fixed << std::setprecision(3) << value;
+            std::string str = oss.str();
+
+            // Replace decimal point with underscore
+            std::replace(str.begin(), str.end(), '.', '_');
+
+            // Pad with zeros if necessary
+            if (str.find('_') == std::string::npos) {
+                str += "_000";
             }
-            const int current_time_int = std::round(1e3 * current_time);
-            const int num_zeros =
-                max_order_of_mag - static_cast<int>(std::log10(current_time));
-            std::string time_string =
-                std::string(num_zeros, '0') + std::to_string(current_time_int);
-            separate<3, '_'>(time_string);
-            return time_string;
+            else {
+                while (str.substr(str.find('_') + 1).length() < 3) {
+                    str += "0";
+                }
+            }
+
+            // Ensure the string is at least in the hundreds place
+            if (str[0] == '-') {
+                while (str.find('_') < 4) {
+                    str.insert(1, "0");
+                }
+            }
+            else {
+                while (str.find('_') < 3) {
+                    str.insert(0, "0");
+                }
+            }
+
+            // Insert underscores for thousands, millions, etc.
+            int insert_position = str.find('_') - 3;
+            while (insert_position > 0) {
+                str.insert(insert_position, "_");
+                insert_position -= 3;
+            }
+
+            return str;
         }
 
         void anyDisplayProps()

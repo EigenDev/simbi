@@ -240,17 +240,14 @@ namespace simbi {
         //---------------------------------------------------------------------------------------------------------
         //  HELPER-METHODS
         //---------------------------------------------------------------------------------------------------------
-        //----------------Define Methods-------------------------
+        //----------------Define Methods-------------------------------
         /**
-         * @brief Create a step str object
+         * @brief formats a real number to a string in the format 000_000 etc
          *
-         * @param current_time current simulation time
-         * @param max_order_of_mag maximum order of magnitude in the simulation
-         * step
-         * @return the step string for the checkpoint filename
+         * @param value
+         * @return std::string
          */
-        std::string
-        create_step_str(const real current_time, const int max_order_of_mag);
+        std::string format_real(real value);
 
         /**
          * @brief write to the hdf5 file (serial)

@@ -1952,12 +1952,12 @@ void RMHD<dim>::riemann_fluxes()
             const auto yf = idx3(ii, jj + q, kk, xag, nyv, zag);
             const auto zf = idx3(ii, jj, kk + q, xag, yag, nzv);
             // fluxes in i direction
-            pL = prb[idx3(txa + q - 1, ja, ka, sx, sy, 0)];
-            pR = prb[idx3(txa + q + 0, ja, ka, sx, sy, 0)];
+            pL = prb[idx3(txa + q - 1, tya, tza, sx, sy, 0)];
+            pR = prb[idx3(txa + q + 0, tya, tza, sx, sy, 0)];
 
             if (!use_pcm) {
-                pLL = prb[idx3(txa + q - 2, ja, ka, sx, sy, 0)];
-                pRR = prb[idx3(txa + q + 1, ja, ka, sx, sy, 0)];
+                pLL = prb[idx3(txa + q - 2, tya, tza, sx, sy, 0)];
+                pRR = prb[idx3(txa + q + 1, tya, tza, sx, sy, 0)];
 
                 pL = pL + plm_gradient(pL, pLL, pR, plm_theta) * 0.5;
                 pR = pR - plm_gradient(pR, pL, pRR, plm_theta) * 0.5;
@@ -1966,12 +1966,12 @@ void RMHD<dim>::riemann_fluxes()
             fri[xf] = (this->*riemann_solve)(pL, pR, 1, 0);
 
             // fluxes in j direction
-            pL = prb[idx3(ia, tya + q - 1, ka, sx, sy, 0)];
-            pR = prb[idx3(ia, tya + q + 0, ka, sx, sy, 0)];
+            pL = prb[idx3(txa, tya + q - 1, tza, sx, sy, 0)];
+            pR = prb[idx3(txa, tya + q + 0, tza, sx, sy, 0)];
 
             if (!use_pcm) {
-                pLL = prb[idx3(ia, tya + q - 2, ka, sx, sy, 0)];
-                pRR = prb[idx3(ia, tya + q + 1, ka, sx, sy, 0)];
+                pLL = prb[idx3(txa, tya + q - 2, tza, sx, sy, 0)];
+                pRR = prb[idx3(txa, tya + q + 1, tza, sx, sy, 0)];
 
                 pL = pL + plm_gradient(pL, pLL, pR, plm_theta) * 0.5;
                 pR = pR - plm_gradient(pR, pL, pRR, plm_theta) * 0.5;
@@ -1980,12 +1980,12 @@ void RMHD<dim>::riemann_fluxes()
             gri[yf] = (this->*riemann_solve)(pL, pR, 2, 0);
 
             // fluxes in k direction
-            pL = prb[idx3(ia, ja, tza + q - 1, sx, sy, 0)];
-            pR = prb[idx3(ia, ja, tza + q + 0, sx, sy, 0)];
+            pL = prb[idx3(txa, tya, tza + q - 1, sx, sy, 0)];
+            pR = prb[idx3(txa, tya, tza + q + 0, sx, sy, 0)];
 
             if (!use_pcm) {
-                pLL = prb[idx3(ia, ja, tza + q - 2, sx, sy, 0)];
-                pRR = prb[idx3(ia, ja, tza + q + 1, sx, sy, 0)];
+                pLL = prb[idx3(txa, tya, tza + q - 2, sx, sy, 0)];
+                pRR = prb[idx3(txa, tya, tza + q + 1, sx, sy, 0)];
 
                 pL = pL + plm_gradient(pL, pLL, pR, plm_theta) * 0.5;
                 pR = pR - plm_gradient(pR, pL, pRR, plm_theta) * 0.5;
