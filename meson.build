@@ -1,7 +1,11 @@
 project('simbi', 'c', 'cpp', 'cython',
     version : run_command('git', 'describe', '--tag', '--abbrev=0', check: true).stdout().strip(), 
     license : 'MIT',
-    default_options : { 'cpp_std': 'c++20', 'cpp_args': ['-march=native', '-Wall']},
+    default_options : { 
+        'cpp_std': 'c++20', 
+        'cpp_args': ['-march=native'],
+        # 'b_lto': true,
+    },
 )
 
 # silence the deprecated numpy API warnings until the numpy teams
