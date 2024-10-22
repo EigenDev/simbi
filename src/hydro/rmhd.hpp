@@ -36,18 +36,17 @@ namespace simbi {
     struct RMHD : public HydroBase {
 
         // set the primitive and conservative types at compile time
-        using primitive_t     = anyPrimitive<dim, Regime::RMHD>;
-        using conserved_t     = anyConserved<dim, Regime::RMHD>;
-        using primitive_soa_t = rmhd::PrimitiveSOA;
-        using eigenvals_t     = rmhd::Eigenvals;
-        using mag_fourvec_t   = mag_four_vec<dim>;
-        using function_t      = typename std::conditional_t<
-                 dim == 1,
-                 std::function<real(real)>,
-                 std::conditional_t<
-                     dim == 2,
-                     std::function<real(real, real)>,
-                     std::function<real(real, real, real)>>>;
+        using primitive_t   = anyPrimitive<dim, Regime::RMHD>;
+        using conserved_t   = anyConserved<dim, Regime::RMHD>;
+        using eigenvals_t   = rmhd::Eigenvals;
+        using mag_fourvec_t = mag_four_vec<dim>;
+        using function_t    = typename std::conditional_t<
+               dim == 1,
+               std::function<real(real)>,
+               std::conditional_t<
+                   dim == 2,
+                   std::function<real(real, real)>,
+                   std::function<real(real, real, real)>>>;
         template <typename T>
         using RiemannFuncPointer = conserved_t (T::*)(
             const primitive_t&,

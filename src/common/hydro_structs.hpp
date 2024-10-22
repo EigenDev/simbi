@@ -1074,14 +1074,6 @@ struct anyPrimitive : generic_hydro::anyHydro<dim, anyPrimitive<dim, R>, R> {
 //                        NEWTONIAN
 //=======================================================
 namespace hydro1d {
-    struct PrimitiveSOA {
-        PrimitiveSOA() = default;
-
-        ~PrimitiveSOA() = default;
-
-        std::vector<real> rho, v1, p, chi;
-    };
-
     struct Eigenvals {
         real aL, aR, aStar, pStar;
 
@@ -1100,14 +1092,6 @@ namespace hydro1d {
 }   // namespace hydro1d
 
 namespace hydro2d {
-    struct PrimitiveSOA {
-        PrimitiveSOA() = default;
-
-        ~PrimitiveSOA() = default;
-
-        std::vector<real> rho, v1, v2, p, chi;
-    };
-
     struct Eigenvals {
         Eigenvals() = default;
 
@@ -1127,12 +1111,6 @@ namespace hydro2d {
 }   // namespace hydro2d
 
 namespace hydro3d {
-    struct PrimitiveSOA {
-        std::vector<real> rho, v1, v2, v3, p, chi;
-        PrimitiveSOA()  = default;
-        ~PrimitiveSOA() = default;
-    };
-
     struct Eigenvals {
         real aL, aR, csL, csR, aStar, pStar;
         Eigenvals()  = default;
@@ -1154,14 +1132,6 @@ namespace hydro3d {
 //=============================================
 
 namespace sr1d {
-    struct PrimitiveSOA {
-        PrimitiveSOA() = default;
-
-        ~PrimitiveSOA() = default;
-
-        std::vector<real> rho, v1, p, chi;
-    };
-
     struct Eigenvals {
         real aL, aR, csL, csR;
 
@@ -1180,14 +1150,6 @@ namespace sr1d {
 }   // namespace sr1d
 
 namespace sr2d {
-    struct PrimitiveSOA {
-        PrimitiveSOA() = default;
-
-        ~PrimitiveSOA() = default;
-
-        std::vector<real> rho, v1, v2, p, chi;
-    };
-
     struct Eigenvals {
         Eigenvals() = default;
 
@@ -1206,13 +1168,6 @@ namespace sr2d {
 }   // namespace sr2d
 
 namespace sr3d {
-    struct PrimitiveSOA {
-        PrimitiveSOA()  = default;
-        ~PrimitiveSOA() = default;
-
-        std::vector<real> rho, v1, v2, v3, p, chi;
-    };
-
     struct Eigenvals {
         real aL, aR, csL, csR;
         Eigenvals()  = default;
@@ -1232,14 +1187,6 @@ namespace sr3d {
 //               RMHD
 //================================
 namespace rmhd {
-    struct PrimitiveSOA {
-        PrimitiveSOA() = default;
-
-        ~PrimitiveSOA() = default;
-
-        std::vector<real> rho, v1, v2, v3, p, b1, b2, b3, chi;
-    };
-
     struct Eigenvals {
         real afL, afR;
 
