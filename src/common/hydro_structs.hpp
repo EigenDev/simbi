@@ -100,11 +100,14 @@ namespace generic_hydro {
         ~anyHydro() = default;
 
         // Default Constructor
-        anyHydro() = default;
+        // anyHydro() = default;
+
+        // zero-argument constructor
+        anyHydro() : vals{0.0} {}
 
         // Generic Constructor
         template <typename... Args>
-        anyHydro(Args... args) : vals{static_cast<real>(args)...}
+        DUAL anyHydro(Args... args) : vals{static_cast<real>(args)...}
         {
             // if chi not defined, set to zero
             if constexpr (sizeof...(args) == nmem - 1) {
@@ -1068,6 +1071,42 @@ struct anyPrimitive : generic_hydro::anyHydro<dim, anyPrimitive<dim, R>, R> {
             };
         }
     }
+};
+
+template <>
+struct is_1D_primitive<anyPrimitive<1, Regime::NEWTONIAN>> : std::true_type {
+};
+
+template <>
+struct is_1D_primitive<anyPrimitive<1, Regime::SRHD>> : std::true_type {
+};
+
+template <>
+struct is_1D_primitive<anyPrimitive<1, Regime::RMHD>> : std::true_type {
+};
+
+template <>
+struct is_2D_primitive<anyPrimitive<2, Regime::NEWTONIAN>> : std::true_type {
+};
+
+template <>
+struct is_2D_primitive<anyPrimitive<2, Regime::SRHD>> : std::true_type {
+};
+
+template <>
+struct is_2D_primitive<anyPrimitive<2, Regime::RMHD>> : std::true_type {
+};
+
+template <>
+struct is_3D_primitive<anyPrimitive<3, Regime::NEWTONIAN>> : std::true_type {
+};
+
+template <>
+struct is_3D_primitive<anyPrimitive<3, Regime::SRHD>> : std::true_type {
+};
+
+template <>
+struct is_3D_primitive<anyPrimitive<3, Regime::RMHD>> : std::true_type {
 };
 
 //=======================================================
