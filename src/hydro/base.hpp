@@ -21,7 +21,7 @@
 #include "build_options.hpp"   // for real, luint, global::managed_memory, use...
 #include "common/enums.hpp"    // for Cellspacing, BoundaryCondition (...
 #include "common/helpers.hpp"         // for geometry_map, solver_map
-#include "common/hydro_structs.hpp"   // for InitialConditions, DataWriteMembers
+#include "common/hydro_structs.hpp"   // for InitialConditions
 #include "util/managed.hpp"           // for Managed
 #include "util/ndarray.hpp"           // for ndarray
 #include <algorithm>                  // for all_of
