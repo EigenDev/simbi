@@ -18,11 +18,11 @@
 #ifndef HELPERS_HIP_HPP
 #define HELPERS_HIP_HPP
 
-#include "build_options.hpp"   // for real, STATIC, luint, lint
-#include "common/enums.hpp"    // for Geometry, BoundaryCondition, Solver
-#include "common/hydro_structs.hpp"
+#include "build_options.hpp"      // for real, STATIC, luint, lint
+#include "common/enums.hpp"       // for Geometry, BoundaryCondition, Solver
 #include "common/traits.hpp"      // for is_1D_primitive, is_2D_primitive
 #include "util/exec_policy.hpp"   // for ExecutionPolicy
+#include "util/functional.hpp"    // for Function
 #include <cmath>                  // for sqrt, exp, INFINITY
 #include <cstdlib>                // for abs, size_t
 #include <exception>              // for exception
@@ -45,9 +45,6 @@ std::unordered_map<simbi::Cellspacing, std::string> const cell2str = {
   // {"linear-log",Cellspacing},
 };
 
-// forward declaration
-struct PrimData;
-
 // Some useful global constants
 constexpr real QUIRK_THRESHOLD = 1e-4;
 
@@ -57,6 +54,26 @@ extern real gpu_theoretical_bw;   //  = 1875e6 * (192.0 / 8.0) * 2 / 1e9;
 
 namespace simbi {
     namespace helpers {
+        template <int dim>
+        struct real_func {
+            using type = int;
+        };
+
+        template <>
+        struct real_func<1> {
+            using type = std::function<real(real, real)>;
+        };
+
+        template <>
+        struct real_func<2> {
+            using type = std::function<real(real, real, real)>;
+        };
+
+        template <>
+        struct real_func<3> {
+            using type = std::function<real(real, real, real, real)>;
+        };
+
         /**
          * @brief Get the column index of an nd-array
          *

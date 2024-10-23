@@ -94,7 +94,7 @@ namespace simbi {
                 sim_state.activeP,
                 0,
                 1,
-                [&] DEV(const int gid) {
+                [&] DEV(const luint gid) {
                     if (first_order) {
                         switch (boundary_conditions[0]) {
                             case simbi::BoundaryCondition::DYNAMIC:
@@ -218,21 +218,19 @@ namespace simbi {
             const auto geometry            = sim_state.geometry;
             const auto half_sphere         = sim_state.half_sphere;
             auto& cons                     = sim_state.cons;
-            const int sx                   = nx;
-            const int sy                   = ny;
             simbi::parallel_for(
                 sim_state.activeP,
                 sim_state.activeP.nzones,
-                [&] DEV(const int gid) {
-                    const int jj = axid<2, BlkAx::J>(gid, sx, sy);
-                    const int ii = axid<2, BlkAx::I>(gid, sx, sy);
+                [&] DEV(const luint gid) {
+                    const auto jj = axid<2, BlkAx::J>(gid, nx, ny);
+                    const auto ii = axid<2, BlkAx::I>(gid, nx, ny);
 
                     if (first_order) {
                         if (jj < ny - 2) {
-                            const auto ing  = (jj + 1) * sx + 0;
-                            const auto outg = (jj + 1) * sx + (nx - 1);
-                            const auto inr  = (jj + 1) * sx + 1;
-                            const auto outr = (jj + 1) * sx + (nx - 2);
+                            const auto ing  = (jj + 1) * nx + 0;
+                            const auto outg = (jj + 1) * nx + (nx - 1);
+                            const auto inr  = (jj + 1) * nx + 1;
+                            const auto outr = (jj + 1) * nx + (nx - 2);
 
                             switch (boundary_conditions[0]) {
                                 case simbi::BoundaryCondition::REFLECTING:
@@ -296,10 +294,10 @@ namespace simbi {
                             }
                         }
                         if (ii < nx - 2) {
-                            const auto ing  = 0 * sx + (ii + 1);
-                            const auto outg = (ny - 1) * sx + (ii + 1);
-                            const auto inr  = 1 * sx + (ii + 1);
-                            const auto outr = (ny - 2) * sx + (ii + 1);
+                            const auto ing  = 0 * nx + (ii + 1);
+                            const auto outg = (ny - 1) * nx + (ii + 1);
+                            const auto inr  = 1 * nx + (ii + 1);
+                            const auto outr = (ny - 2) * nx + (ii + 1);
 
                             switch (geometry) {
                                 case simbi::Geometry::SPHERICAL:
@@ -387,14 +385,14 @@ namespace simbi {
                     }
                     else {
                         if (jj < ny - 4) {
-                            const auto ing   = (jj + 2) * sx + 0;
-                            const auto ingg  = (jj + 2) * sx + 1;
-                            const auto outg  = (jj + 2) * sx + (nx - 1);
-                            const auto outgg = (jj + 2) * sx + (nx - 2);
-                            const auto inr   = (jj + 2) * sx + 2;
-                            const auto inrr  = (jj + 2) * sx + 3;
-                            const auto outr  = (jj + 2) * sx + (nx - 3);
-                            const auto outrr = (jj + 2) * sx + (nx - 4);
+                            const auto ing   = (jj + 2) * nx + 0;
+                            const auto ingg  = (jj + 2) * nx + 1;
+                            const auto outg  = (jj + 2) * nx + (nx - 1);
+                            const auto outgg = (jj + 2) * nx + (nx - 2);
+                            const auto inr   = (jj + 2) * nx + 2;
+                            const auto inrr  = (jj + 2) * nx + 3;
+                            const auto outr  = (jj + 2) * nx + (nx - 3);
+                            const auto outrr = (jj + 2) * nx + (nx - 4);
 
                             switch (boundary_conditions[0]) {
                                 case simbi::BoundaryCondition::DYNAMIC:
@@ -480,14 +478,14 @@ namespace simbi {
                             }
                         }
                         if (ii < nx - 4) {
-                            const auto ing   = 0 * sx + (ii + 2);
-                            const auto ingg  = 1 * sx + (ii + 2);
-                            const auto outg  = (ny - 1) * sx + (ii + 2);
-                            const auto outgg = (ny - 2) * sx + (ii + 2);
-                            const auto inr   = 2 * sx + (ii + 2);
-                            const auto inrr  = 3 * sx + (ii + 2);
-                            const auto outr  = (ny - 3) * sx + (ii + 2);
-                            const auto outrr = (ny - 4) * sx + (ii + 2);
+                            const auto ing   = 0 * nx + (ii + 2);
+                            const auto ingg  = 1 * nx + (ii + 2);
+                            const auto outg  = (ny - 1) * nx + (ii + 2);
+                            const auto outgg = (ny - 2) * nx + (ii + 2);
+                            const auto inr   = 2 * nx + (ii + 2);
+                            const auto inrr  = 3 * nx + (ii + 2);
+                            const auto outr  = (ny - 3) * nx + (ii + 2);
+                            const auto outrr = (ny - 4) * nx + (ii + 2);
 
                             switch (geometry) {
                                 case simbi::Geometry::SPHERICAL:
@@ -615,20 +613,18 @@ namespace simbi {
             const auto geometry            = sim_state.geometry;
             const auto half_sphere         = sim_state.half_sphere;
             auto& cons                     = sim_state.cons;
-            const int sx                   = nx;
-            const int sy                   = ny;
             simbi::parallel_for(
                 sim_state.activeP,
                 sim_state.activeP.nzones,
-                [&] DEV(const int gid) {
-                    const int kk = axid<3, BlkAx::K>(gid, sx, sy);
-                    const int jj = axid<3, BlkAx::J>(gid, sx, sy, kk);
-                    const int ii = axid<3, BlkAx::I>(gid, sx, sy, kk);
+                [&] DEV(const luint gid) {
+                    const luint kk = axid<3, BlkAx::K>(gid, nx, ny);
+                    const luint jj = axid<3, BlkAx::J>(gid, nx, ny, kk);
+                    const luint ii = axid<3, BlkAx::I>(gid, nx, ny, kk);
 
                     if (first_order) {
                         if (jj < ny - 2 && kk < nz - 2) {
-                            const auto ka   = (kk + 1) * sy * sx;
-                            const auto jk   = ka + (jj + 1) * sx + 0;
+                            const auto ka   = (kk + 1) * ny * nx;
+                            const auto jk   = ka + (jj + 1) * nx + 0;
                             const auto ing  = jk + 0;
                             const auto outg = jk + (nx - 1);
                             const auto inr  = jk + 1;
@@ -681,32 +677,15 @@ namespace simbi {
                                     cons[outg] = cons[outr];
                                     break;
                             }
-
-                            // if located at the corners, set the ghost zones to
-                            // the same as the inner zones const bool kc = kk <
-                            // 1 || kk + 2 >= nz - 2;
-
-                            // if (kc) {
-                            //     // get corner indices in i-k plane
-                            //     const auto kq = kk == 0 ? kk : kk + 2;
-                            //     const auto jk_kci =
-                            //         kq * sy * sx + (jj + 1) * sx + 0;
-                            //     const auto jk_kco = kq * sy * sx + (jj + 1) *
-                            //     sx
-                            //     +
-                            //                         (nx - 1);
-                            //     cons[jk_kci] = cons[ing];
-                            //     cons[jk_kco] = cons[outg];
-                            // }
                         }
                         // Fix the ghost zones at the x2 boundaries
                         if (ii < nx - 2 && kk < nz - 2) {
                             const auto ik =
-                                (kk + 1) * sx * sy + 0 * sx + (ii + 1);
+                                (kk + 1) * nx * ny + 0 * nx + (ii + 1);
                             const auto ing  = ik;
-                            const auto outg = ik + (ny - 1) * sx;
-                            const auto inr  = ik + sx;
-                            const auto outr = ik + (ny - 2) * sx;
+                            const auto outg = ik + (ny - 1) * nx;
+                            const auto inr  = ik + nx;
+                            const auto outr = ik + (ny - 2) * nx;
 
                             switch (geometry) {
                                 case simbi::Geometry::SPHERICAL:
@@ -776,32 +755,16 @@ namespace simbi {
                                     }
                                     break;
                             }
-
-                            // if located at the corners, set the ghost zones to
-                            // the same as the inner zones const bool ic = ii <
-                            // 1 || (ii + 2) >= nx - 2;
-
-                            // if (ic) {
-                            //     // get corner indices in i-j plane
-                            //     const auto iq = ii < 1 ? ii : ii + 2;
-                            //     const auto ik_ici =
-                            //         (kk + 1) * sy * sx + 0 * sx + iq;
-                            //     const auto ik_ico = (kk + 1) * sy * sx +
-                            //                         (ny - 1) * sx +
-                            //                         iq;
-                            //     cons[ik_ici] = cons[ing];
-                            //     cons[ik_ico] = cons[outg];
-                            // }
                         }
 
                         // Fix the ghost zones at the x3 boundaries
                         if (jj < ny - 2 && ii < nx - 2) {
                             const auto ij =
-                                0 * sx * sy + (jj + 1) * sx + (ii + 1);
+                                0 * nx * ny + (jj + 1) * nx + (ii + 1);
                             const auto ing  = ij;
-                            const auto outg = ij + (nz - 1) * sx * sy;
-                            const auto inr  = ij + sx * sy;
-                            const auto outr = ij + (nz - 2) * sx * sy;
+                            const auto outg = ij + (nz - 1) * nx * ny;
+                            const auto inr  = ij + nx * ny;
+                            const auto outr = ij + (nz - 2) * nx * ny;
 
                             switch (geometry) {
                                 case simbi::Geometry::SPHERICAL:
@@ -864,28 +827,12 @@ namespace simbi {
                                     }
                                     break;
                             }
-
-                            // if located at the corners, set the ghost zones to
-                            // the same as the inner zones const bool jc = jj <
-                            // 1 || jj + 2 >= ny - 2;
-
-                            // if (jc) {
-                            //     // get corner indices in j-k plane
-                            //     const auto jq = jj < 1 ? jj : jj + 2;
-                            //     const auto ij_jci =
-                            //         0 * sy * sx + jq * sx + (ii + 1);
-                            //     const auto ij_jco = (nz - 1) * sy *
-                            //     sx +
-                            //                         jq * sx + (ii + 1);
-                            //     cons[ij_jci] = cons[ing];
-                            //     cons[ij_jco] = cons[outg];
-                            // }
                         }
                     }
                     else {
                         if (jj < ny - 4 && kk < nz - 4) {
                             const auto jk =
-                                (kk + 2) * sx * sy + (jj + 2) * sx + 0;
+                                (kk + 2) * nx * ny + (jj + 2) * nx + 0;
                             const auto ing   = jk;
                             const auto ingg  = jk + 1;
                             const auto outg  = jk + (nx - 1);
@@ -966,42 +913,19 @@ namespace simbi {
                                     cons[outgg] = cons[outr];
                                     break;
                             }
-
-                            // const bool kc = kk < 2 || (kk + 4) >= nz
-                            // - 4; if (kc) {
-                            //     // get corner indices in i-k plane
-                            //     const auto kq = kk < 2 ? kk : kk + 4;
-                            //     const auto jk_kci =
-                            //         kq * sy * sx + (jj + 2) * sx + 0;
-                            //     const auto jk_kcii =
-                            //         kq * sy * sx + (jj + 2) * sx + 1;
-                            //     const auto jk_kco = kq * sy * sx + (jj + 2) *
-                            //     sx
-                            //     +
-                            //                         (nx - 1);
-                            //     const auto jk_kcoo = kq * sy * sx + (jj + 2)
-                            //     * sx
-                            //     +
-                            //                          (nx - 2);
-
-                            //     cons[jk_kci]  = cons[ing];
-                            //     cons[jk_kco]  = cons[outg];
-                            //     cons[jk_kcii] = cons[ingg];
-                            //     cons[jk_kcoo] = cons[outgg];
-                            // }
                         }
                         // Fix the ghost zones at the x2 boundaries
                         if (ii < nx - 4 && kk < nz - 4) {
                             const auto ik =
-                                (kk + 2) * sx * sy + 0 * sx + (ii + 2);
+                                (kk + 2) * nx * ny + 0 * nx + (ii + 2);
                             const auto ing   = ik;
-                            const auto ingg  = ik + 1 * sx;
-                            const auto outg  = ik + (ny - 1) * sx;
-                            const auto outgg = ik + (ny - 2) * sx;
-                            const auto inr   = ik + 2 * sx;
-                            const auto inrr  = ik + 3 * sx;
-                            const auto outr  = ik + (ny - 3) * sx;
-                            const auto outrr = ik + (ny - 4) * sx;
+                            const auto ingg  = ik + 1 * nx;
+                            const auto outg  = ik + (ny - 1) * nx;
+                            const auto outgg = ik + (ny - 2) * nx;
+                            const auto inr   = ik + 2 * nx;
+                            const auto inrr  = ik + 3 * nx;
+                            const auto outr  = ik + (ny - 3) * nx;
+                            const auto outrr = ik + (ny - 4) * nx;
 
                             // fill in the two sets ghost zones for the x2
                             // boundaries at the inner edge and outer edge for
@@ -1101,40 +1025,20 @@ namespace simbi {
                                     }
                                     break;
                             }
-
-                            // const bool ic = ii < 2 || ii + 4 >= nx -
-                            // 4; if (ic) {
-                            //     // get corner indices in i-j plane
-                            //     const auto iq = ii < 2 ? ii : ii + 4;
-                            //     const auto ik_ici =
-                            //         (kk + 2) * sy * sx + 0 * sx + iq;
-                            //     const auto ik_icii =
-                            //         (kk + 2) * sy * sx + 1 * sx + iq;
-                            //     const auto ik_ico = (kk + 2) * sy * sx +
-                            //                         (ny - 1) * sx +
-                            //                         iq;
-                            //     const auto ik_icoo = (kk + 2) * sy * sx +
-                            //                          (ny - 2) * sx +
-                            //                          iq;
-                            //     cons[ik_ici]  = cons[ing];
-                            //     cons[ik_ico]  = cons[outg];
-                            //     cons[ik_icii] = cons[ingg];
-                            //     cons[ik_icoo] = cons[outgg];
-                            // }
                         }
 
                         // Fix the ghost zones at the x3 boundaries
                         if (jj < ny - 4 && ii < nx - 4) {
                             const auto ij =
-                                0 * sx * sy + (jj + 2) * sx + (ii + 2);
+                                0 * nx * ny + (jj + 2) * nx + (ii + 2);
                             const auto ing   = ij;
-                            const auto ingg  = ij + 1 * sx * sy;
-                            const auto outg  = ij + (nz - 1) * sx * sy;
-                            const auto outgg = ij + (nz - 2) * sx * sy;
-                            const auto inr   = ij + 2 * sx * sy;
-                            const auto inrr  = ij + 3 * sx * sy;
-                            const auto outr  = ij + (nz - 3) * sx * sy;
-                            const auto outrr = ij + (nz - 4) * sx * sy;
+                            const auto ingg  = ij + 1 * nx * ny;
+                            const auto outg  = ij + (nz - 1) * nx * ny;
+                            const auto outgg = ij + (nz - 2) * nx * ny;
+                            const auto inr   = ij + 2 * nx * ny;
+                            const auto inrr  = ij + 3 * nx * ny;
+                            const auto outr  = ij + (nz - 3) * nx * ny;
+                            const auto outrr = ij + (nz - 4) * nx * ny;
 
                             // fill in the two sets ghost zones for the x3
                             // boundaries at the inner edge and outer edge for
@@ -1224,27 +1128,6 @@ namespace simbi {
                                     }
                                     break;
                             }
-
-                            // const bool jc = jj < 2 || jj + 4 >= ny -
-                            // 4; if (jc) {
-                            //     // get corner indices in j-k plane
-                            //     const auto jq = jj < 2 ? jj : jj + 4;
-                            //     const auto ij_jci =
-                            //         0 * sy * sx + jq * sx + (ii + 2);
-                            //     const auto ij_jcii =
-                            //         1 * sy * sx + jq * sx + (ii + 2);
-                            //     const auto ij_jco = (nz - 1) * sy *
-                            //     sx +
-                            //                         jq * sx + (ii + 2);
-                            //     const auto ij_jcoo = (nz - 2) * sy *
-                            //     sx
-                            //     +
-                            //                          jq * sx + (ii + 2);
-                            //     cons[ij_jci]  = cons[ing];
-                            //     cons[ij_jco]  = cons[outg];
-                            //     cons[ij_jcii] = cons[ingg];
-                            //     cons[ij_jcoo] = cons[outgg];
-                            // }
                         }
                     }
                 }
@@ -3112,6 +2995,8 @@ namespace simbi {
             //==================================================================
             //  PRIMITIVE DATA
             //==================================================================
+            // the regime is a  constexprstring view, so convert to std::string
+            const auto regime = std::string(state.regime);
             // helper lambda for writing the prim data using a for 1D loop
             // and hyperslab selection
             auto write_prims = [&](const std::string& name,
@@ -3142,7 +3027,7 @@ namespace simbi {
                 write_prims("v3", hdataspace, 3);
             }
             write_prims("p", hdataspace, state.dimensions + 1);
-            if (state.regime == "srmhd") {
+            if (regime == "srmhd") {
                 write_prims("b1", hdataspace, state.dimensions + 2);
                 write_prims("b2", hdataspace, state.dimensions + 3);
                 write_prims("b3", hdataspace, state.dimensions + 4);
@@ -3182,14 +3067,14 @@ namespace simbi {
                  {"yactive_zones", &state.yag},
                  {"zactive_zones", &state.zag},
                  {"geometry", state.coord_system.c_str()},
-                 {"regime", std::string(state.regime).c_str()},
+                 {"regime", regime.c_str()},
                  {"dimensions", &state.dimensions},
-                 {"x1_cell_spacing",
-                  cell2str.at(state.x1_cell_spacing).c_str()},
-                 {"x2_cell_spacing",
-                  cell2str.at(state.x2_cell_spacing).c_str()},
-                 {"x3_cell_spacing",
-                  cell2str.at(state.x3_cell_spacing).c_str()}};
+                 {"x1_cell_spacing", cell2str.at(state.x1_cell_spacing).c_str()
+                 },
+                 {"x2_cell_spacing", cell2str.at(state.x2_cell_spacing).c_str()
+                 },
+                 {"x3_cell_spacing", cell2str.at(state.x3_cell_spacing).c_str()}
+                };
 
             for (const auto& [name, value] : attributes) {
                 H5::DataType type;
