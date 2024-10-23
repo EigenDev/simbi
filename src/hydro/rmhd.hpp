@@ -55,9 +55,9 @@ namespace simbi {
             const real
         ) const;
         RiemannFuncPointer<RMHD<dim>> riemann_solve;
-        constexpr static int dimensions     = dim;
-        constexpr static int nvars          = dim + 3;
-        constexpr static std::string regime = "srmhd";
+        constexpr static int dimensions          = dim;
+        constexpr static int nvars               = dim + 3;
+        constexpr static std::string_view regime = "srmhd";
 
         std::vector<function_t> bsources;   // boundary sources
         std::vector<function_t> hsources;   // hydro sources

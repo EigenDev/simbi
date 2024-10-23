@@ -3182,14 +3182,14 @@ namespace simbi {
                  {"yactive_zones", &state.yag},
                  {"zactive_zones", &state.zag},
                  {"geometry", state.coord_system.c_str()},
-                 {"regime", state.regime.c_str()},
+                 {"regime", std::string(state.regime).c_str()},
                  {"dimensions", &state.dimensions},
-                 {"x1_cell_spacing", cell2str.at(state.x1_cell_spacing).c_str()
-                 },
-                 {"x2_cell_spacing", cell2str.at(state.x2_cell_spacing).c_str()
-                 },
-                 {"x3_cell_spacing", cell2str.at(state.x3_cell_spacing).c_str()}
-                };
+                 {"x1_cell_spacing",
+                  cell2str.at(state.x1_cell_spacing).c_str()},
+                 {"x2_cell_spacing",
+                  cell2str.at(state.x2_cell_spacing).c_str()},
+                 {"x3_cell_spacing",
+                  cell2str.at(state.x3_cell_spacing).c_str()}};
 
             for (const auto& [name, value] : attributes) {
                 H5::DataType type;

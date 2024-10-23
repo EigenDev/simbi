@@ -61,9 +61,9 @@ namespace simbi {
         std::vector<function_t> hsources;   // hydro sources
         std::vector<function_t> gsources;   // gravity sources
 
-        constexpr static int dimensions     = dim;
-        constexpr static int nvars          = dim + 3;
-        constexpr static std::string regime = "srhd";
+        constexpr static int dimensions          = dim;
+        constexpr static int nvars               = dim + 3;
+        constexpr static std::string_view regime = "srhd";
 
         /* Shared Data Members */
         ndarray<primitive_t> prims;

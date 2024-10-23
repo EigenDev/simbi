@@ -60,9 +60,9 @@ namespace simbi {
                 std::function<real(real, real, real)>,
                 std::function<real(real, real, real, real)>>>;
 
-        constexpr static int dimensions     = dim;
-        constexpr static int nvars          = dim + 3;
-        constexpr static std::string regime = "euler";
+        constexpr static int dimensions          = dim;
+        constexpr static int nvars               = dim + 3;
+        constexpr static std::string_view regime = "euler";
         // boundary condition functions for mesh motion
         std::vector<function_t> bsources;   // boundary sources
         std::vector<function_t> hsources;   // hydro sources
