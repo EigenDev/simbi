@@ -389,11 +389,28 @@ namespace simbi {
             T result;
             constexpr auto count = T::nmem;
             for (auto qq = 0; qq < count; qq++) {
-                result[qq] = minmod(
-                    (a[qq] - b[qq]) * plm_theta,
-                    (c[qq] - b[qq]) * 0.5,
-                    (c[qq] - a[qq]) * plm_theta
-                );
+                if constexpr (is_relativistic_mhd<T>::value) {
+                    // this is checked at compile time
+                    switch (comp_slope_limiter) {
+                        case LIMITER::VAN_LEER:
+                            result[qq] = vanLeer(c[qq] - a[qq], a[qq] - b[qq]);
+                            break;
+                        default:
+                            result[qq] = minmod(
+                                (a[qq] - b[qq]) * plm_theta,
+                                (c[qq] - b[qq]) * 0.5,
+                                (c[qq] - a[qq]) * plm_theta
+                            );
+                            break;
+                    }
+                }
+                else {
+                    result[qq] = minmod(
+                        (a[qq] - b[qq]) * plm_theta,
+                        (c[qq] - b[qq]) * 0.5,
+                        (c[qq] - a[qq]) * plm_theta
+                    );
+                }
             }
             return result;
         }
