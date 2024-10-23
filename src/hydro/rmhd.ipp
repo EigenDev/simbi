@@ -163,23 +163,6 @@ DUAL real RMHD<dim>::calc_edge_emf(
     const auto nwidx = cidx<P, C, Dir::NW>(ia, ja, ka, sx, sy, sz);
     const auto neidx = cidx<P, C, Dir::NE>(ia, ja, ka, sx, sy, sz);
 
-    // if constexpr (P == Plane::JK) {
-    //     const auto idx = idx3(ia, ja, ka, nx, ny, nz);
-    //     if constexpr (C == Corner::NW) {
-    //         if (ka == radius && prims[idx].rho != 1.e-4) {
-    //             const auto calc = idx3(ia, ja - 1, ka + 1, sx, sy, sz);
-    //             const auto eidx = idx3(ia, ja - 1, ka, sx, sy, sz);
-    //             if (prims[nwidx].rho != prims[eidx].rho) {
-    //                 printf("nwidx: %llu, expected: %llu\n", nwidx, calc);
-    //                 printf("%llu, %llu, %llu\n", ia, ja, ka);
-    //                 printf("prim[CENTRAL]: %f\n", prims[idx].rho);
-    //                 printf("prim[NW]: %f\n", prims[nwidx].rho);
-    //                 printf("prims[W]: %f\n", prims[eidx].rho);
-    //             }
-    //         }
-    //     }
-    // }
-
     // get surrounding primitives
     const auto swp = prims[swidx];
     const auto sep = prims[seidx];
@@ -193,35 +176,6 @@ DUAL real RMHD<dim>::calc_edge_emf(
     const real ene        = nep.ecomponent(nhat);
     const real one_eighth = static_cast<real>(0.125);
     const real eavg       = static_cast<real>(0.25) * (ew + ee + es + en);
-
-    // if constexpr (P == Plane::IJ && C == Corner::NE) {
-    //     const auto cswidx = idx3(ia, ja, ka, sx, sy, sz);
-    //     const auto cnwidx = idx3(ia, ja + 1, ka, sx, sy, sz);
-    //     printf(
-    //         "[NE] swidx: %llu, cswidx: %llu, nwidx: %llu, cnwidx: %llu\n",
-    //         swidx,
-    //         cswidx,
-    //         nwidx,
-    //         cnwidx
-    //     );
-    //     printf("[%llu, %llu, %llu]\n", ka - radius, ja - radius, ia -
-    //     radius); printf("ew: %f, ee: %f, es: %f, en: %f\n", ew, ee, es, en);
-    //     printf("esw: %f, ese: %f, enw: %f, ene: %f\n", esw, ese, enw, ene);
-    // }
-    // if constexpr (P == Plane::IJ && C == Corner::NW) {
-    //     const auto cswidx = idx3(ia - 1, ja, ka, sx, sy, sz);
-    //     const auto cnwidx = idx3(ia - 1, ja + 1, ka, sx, sy, sz);
-    //     printf(
-    //         "[NW] swidx: %llu, cswidx: %llu, nwidx: %llu, cnwidx: %llu\n",
-    //         swidx,
-    //         cswidx,
-    //         nwidx,
-    //         cnwidx
-    //     );
-    //     printf("[%llu, %llu, %llu]\n", ka - radius, ja - radius, ia -
-    //     radius); printf("ew: %f, ee: %f, es: %f, en: %f\n", ew, ee, es, en);
-    //     printf("esw: %f, ese: %f, enw: %f, ene: %f\n", esw, ese, enw, ene);
-    // }
 
     // Decides at compile time which method to use
     switch (comp_ct_type) {
@@ -360,13 +314,6 @@ DUAL real RMHD<dim>::curl_e(
         case Geometry::CARTESIAN:
             {
                 if (nhat == 1) {
-                    // if (!goes_to_zero(ej[IJ::NE] - ej[IJ::NW])) {
-                    //     printf(
-                    //         "ej[IJ::NE]: %f, ej[IJ::NW]: %f\n",
-                    //         ej[IJ::NE],
-                    //         ej[IJ::NW]
-                    //     );
-                    // }
                     if (side == 0) {
                         return invdx2 * (ek[IJ::NW] - ek[IJ::SW]) -
                                invdx3 * (ej[IK::NW] - ej[IK::SW]);
@@ -375,13 +322,6 @@ DUAL real RMHD<dim>::curl_e(
                            invdx3 * (ej[IK::NE] - ej[IK::SE]);
                 }
                 else if (nhat == 2) {
-                    // if (!goes_to_zero(ek[IJ::NW] - ek[IJ::SW])) {
-                    //     printf(
-                    //         "ek[IJ::NW]: %f, ek[IJ::SW]: %f\n",
-                    //         ek[IJ::NW],
-                    //         ek[IJ::SW]
-                    //     );
-                    // }
                     if (side == 0) {
                         return invdx3 * (ek[JK::NW] - ek[JK::SW]) -
                                invdx1 * (ej[IJ::SE] - ej[IJ::SW]);
@@ -1044,7 +984,6 @@ DUAL RMHD<dim>::eigenvals_t RMHD<dim>::calc_eigenvals(
 ) const
 {
     real speeds[4];
-
     // left side
     calc_max_wave_speeds(primsL, nhat, speeds);
     const real lpL = speeds[3];
@@ -2172,19 +2111,19 @@ void RMHD<dim>::advance()
             b3L = b3_data[zlf] - dt * step * curl_e(3, e1, e2, 0);
             b3R = b3_data[zrf] - dt * step * curl_e(3, e1, e2, 1);
 
-            // if constexpr (global::debug_mode) {
-            const auto divb = (b1R - b1L) * invdx1 + (b2R - b2L) * invdx2 +
-                              (b3R - b3L) * invdx3;
+            if constexpr (global::debug_mode) {
+                const auto divb = (b1R - b1L) * invdx1 + (b2R - b2L) * invdx2 +
+                                  (b3R - b3L) * invdx3;
 
-            if (!goes_to_zero(divb)) {
-                if (kk == 0 && jj == 2 && ii == 4) {
-                    printf("========================================\n");
-                    printf("DIV.B: %.2e\n", divb);
-                    printf("========================================\n");
-                    printf("Divergence of B is not zero!\n");
+                if (!goes_to_zero(divb)) {
+                    if (kk == 0 && jj == 2 && ii == 4) {
+                        printf("========================================\n");
+                        printf("DIV.B: %.2e\n", divb);
+                        printf("========================================\n");
+                        printf("Divergence of B is not zero!\n");
+                    }
                 }
             }
-            // }
             b1c = static_cast<real>(0.5) * (b1R + b1L);
             b2c = static_cast<real>(0.5) * (b2R + b2L);
             b3c = static_cast<real>(0.5) * (b3R + b3L);
