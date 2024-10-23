@@ -916,9 +916,9 @@ namespace simbi {
                     helpers::get_real_idx(ii, self->radius, self->xag);
                 if constexpr (is_relativistic<T>::value) {
                     if constexpr (dt_type == TIMESTEP_TYPE::ADAPTIVE) {
-                        const real rho = prim_buffer[ii].rho;
-                        const real p   = prim_buffer[ii].p;
-                        const real v   = prim_buffer[ii].get_v();
+                        const real rho = prim_buffer[ii].rho();
+                        const real p   = prim_buffer[ii].p();
+                        const real v   = prim_buffer[ii].get_v1();
                         real h =
                             1.0 + self->gamma * p / (rho * (self->gamma - 1));
                         real cs = std::sqrt(self->gamma * p / (rho * h));
@@ -931,9 +931,9 @@ namespace simbi {
                     }
                 }
                 else {
-                    const real rho = prim_buffer[ii].rho;
-                    const real p   = prim_buffer[ii].p;
-                    const real v   = prim_buffer[ii].get_v();
+                    const real rho = prim_buffer[ii].rho();
+                    const real p   = prim_buffer[ii].p();
+                    const real v   = prim_buffer[ii].get_v1();
                     const real cs  = std::sqrt(self->gamma * p / rho);
                     vPlus          = std::abs(v + cs);
                     vMinus         = std::abs(v - cs);
@@ -976,8 +976,8 @@ namespace simbi {
                 real plus_v1, plus_v2, minus_v1, minus_v2;
                 if constexpr (is_relativistic<T>::value) {
                     if constexpr (dt_type == TIMESTEP_TYPE::ADAPTIVE) {
-                        const real rho = prim_buffer[gid].rho;
-                        const real p   = prim_buffer[gid].p;
+                        const real rho = prim_buffer[gid].rho();
+                        const real p   = prim_buffer[gid].p();
                         const real v1  = prim_buffer[gid].get_v1();
                         const real v2  = prim_buffer[gid].get_v2();
                         real h =
@@ -996,8 +996,8 @@ namespace simbi {
                     }
                 }
                 else {
-                    const real rho = prim_buffer[gid].rho;
-                    const real p   = prim_buffer[gid].p;
+                    const real rho = prim_buffer[gid].rho();
+                    const real p   = prim_buffer[gid].p();
                     const real v1  = prim_buffer[gid].get_v1();
                     const real v2  = prim_buffer[gid].get_v2();
                     real cs        = std::sqrt(self->gamma * p / rho);
@@ -1144,8 +1144,8 @@ namespace simbi {
 
                 if constexpr (is_relativistic<T>::value) {
                     if constexpr (dt_type == TIMESTEP_TYPE::ADAPTIVE) {
-                        const real rho = prim_buffer[gid].rho;
-                        const real p   = prim_buffer[gid].p;
+                        const real rho = prim_buffer[gid].rho();
+                        const real p   = prim_buffer[gid].p();
                         const real v1  = prim_buffer[gid].get_v1();
                         const real v2  = prim_buffer[gid].get_v2();
                         const real v3  = prim_buffer[gid].get_v3();
@@ -1170,8 +1170,8 @@ namespace simbi {
                     }
                 }
                 else {
-                    const real rho = prim_buffer[gid].rho;
-                    const real p   = prim_buffer[gid].p;
+                    const real rho = prim_buffer[gid].rho();
+                    const real p   = prim_buffer[gid].p();
                     const real v1  = prim_buffer[gid].get_v1();
                     const real v2  = prim_buffer[gid].get_v2();
                     const real v3  = prim_buffer[gid].get_v3();
@@ -1299,8 +1299,8 @@ namespace simbi {
                     }
                 }
                 else {
-                    const real rho = prim_buffer[gid].rho;
-                    const real p   = prim_buffer[gid].p;
+                    const real rho = prim_buffer[gid].rho();
+                    const real p   = prim_buffer[gid].p();
                     const real v   = prim_buffer[gid].get_v1();
                     const real cs  = std::sqrt(self->gamma * p / rho);
                     vPlus          = (v + cs);
@@ -1362,8 +1362,8 @@ namespace simbi {
                     }
                 }
                 else {
-                    const real rho = prim_buffer[gid].rho;
-                    const real p   = prim_buffer[gid].p;
+                    const real rho = prim_buffer[gid].rho();
+                    const real p   = prim_buffer[gid].p();
                     const real v1  = prim_buffer[gid].get_v1();
                     const real v2  = prim_buffer[gid].get_v2();
                     real cs        = std::sqrt(self->gamma * p / rho);
@@ -2717,8 +2717,9 @@ namespace simbi {
             //==================================================================
             // convert the string to a char array
             std::vector<const char*> arr_c_str;
-            for (auto ii = 0; ii < dim_bc[0]; ++ii) {
-                arr_c_str.push_back(state.boundary_conditions[ii].c_str());
+            for (hsize_t ii = 0; ii < dim_bc[0]; ++ii) {
+                arr_c_str.push_back(state.setup.boundary_conditions[ii].c_str()
+                );
             }
 
             // Write the boundary conditions to the file

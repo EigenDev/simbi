@@ -279,7 +279,7 @@ template <int dim>
 void SRHD<dim>::cons2prim()
 {
     const auto* const cons_data = cons.data();
-    simbi::parallel_for(fullP, [cons_data, this] DEV(luint gid) {
+    simbi::parallel_for(fullP, total_zones, [cons_data, this] DEV(luint gid) {
         bool workLeftToDo = true;
         volatile __shared__ bool found_failure;
 

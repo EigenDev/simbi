@@ -546,7 +546,7 @@ template <int dim>
 void RMHD<dim>::cons2prim()
 {
     // const auto gr = gamma / (gamma - 1.0);
-    simbi::parallel_for(fullP, [this] DEV(luint gid) {
+    simbi::parallel_for(fullP, total_zones, [this] DEV(luint gid) {
         bool workLeftToDo = true;
         volatile __shared__ bool found_failure;
 
@@ -1251,9 +1251,10 @@ void RMHD<dim>::adapt_dt()
 //                                            FLUX CALCULATIONS
 //===================================================================================================================
 template <int dim>
-DUAL RMHD<dim>::conserved_t
-RMHD<dim>::prims2flux(const RMHD<dim>::primitive_t& prims, const luint nhat)
-    const
+DUAL RMHD<dim>::conserved_t RMHD<dim>::prims2flux(
+    const RMHD<dim>::primitive_t& prims,
+    const luint nhat
+) const
 {
     const real rho   = prims.rho();
     const real v1    = prims.vcomponent(1);
