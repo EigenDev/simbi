@@ -29,6 +29,7 @@
 #include <map>                    // for map
 #include <string>                 // for string, operator<=>
 #include <type_traits>            // for enable_if
+#include <unordered_map>          // for unordered_map
 
 std::unordered_map<std::string, simbi::Cellspacing> const str2cell = {
   {"log", simbi::Cellspacing::LOGSPACE},
