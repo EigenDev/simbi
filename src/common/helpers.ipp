@@ -74,835 +74,1196 @@ namespace simbi {
             write_hdf5(data_directory, filename, sim_state);
         }
 
-        template <typename T, typename U>
-        void config_ghosts1D(
-            const ExecutionPolicy<> p,
-            T* cons,
-            const int grid_size,
-            const bool first_order,
-            const simbi::BoundaryCondition* boundary_conditions,
-            const U* outer_zones,
-            const U* inflow_zones
-        )
+        template <typename sim_state_t>
+        void config_ghosts1D(sim_state_t& sim_state)
         {
-            simbi::parallel_for(p, 0, 1, [=] DEV(const int gid) {
-                if (first_order) {
-                    switch (boundary_conditions[0]) {
-                        case simbi::BoundaryCondition::INFLOW:
-                            cons[0] = inflow_zones[0];
-                            break;
-                        case simbi::BoundaryCondition::REFLECTING:
-                            cons[0] = cons[1];
-                            cons[0].momentum() *= -1;
-                            break;
-                        case simbi::BoundaryCondition::PERIODIC:
-                            cons[0] = cons[grid_size - 2];
-                        default:
-                            cons[0] = cons[1];
-                            break;
-                    }
+            const auto grid_size           = sim_state.nx;
+            const auto first_order         = sim_state.use_pcm;
+            const auto boundary_conditions = sim_state.bcs;
+            const auto x1max               = sim_state.x1max;
+            const auto x1min               = sim_state.x1min;
+            auto& cons                     = sim_state.cons;
 
-                    switch (boundary_conditions[1]) {
-                        case simbi::BoundaryCondition::INFLOW:
-                            cons[grid_size - 1] = inflow_zones[1];
-                            break;
-                        case simbi::BoundaryCondition::REFLECTING:
-                            cons[grid_size - 1] = cons[grid_size - 2];
-                            cons[grid_size - 1].momentum() *= -1;
-                            break;
-                        case simbi::BoundaryCondition::PERIODIC:
-                            cons[grid_size - 1] = cons[1];
-                        default:
-                            cons[grid_size - 1] = cons[grid_size - 2];
-                            break;
-                    }
+            // beginning and end scalar for boundary conditions
+            const auto es = sim_state.mesh_motion
+                                ? sim_state.get_cell_volume(sim_state.xag - 1)
+                                : 1.0;
+            const auto bs =
+                sim_state.mesh_motion ? sim_state.get_cell_volume(0) : 1.0;
+            simbi::parallel_for(
+                sim_state.activeP,
+                0,
+                1,
+                [&] DEV(const int gid) {
+                    if (first_order) {
+                        switch (boundary_conditions[0]) {
+                            case simbi::BoundaryCondition::DYNAMIC:
+                                for (auto qq = 0; qq < sim_state.nvars; qq++) {
+                                    cons[0][qq] = sim_state.bsources[qq](
+                                                      x1min,
+                                                      sim_state.t
+                                                  ) *
+                                                  bs;
+                                }
+                                break;
+                            case simbi::BoundaryCondition::REFLECTING:
+                                cons[0] = cons[1];
+                                cons[0].momentum() *= -1;
+                                break;
+                            case simbi::BoundaryCondition::PERIODIC:
+                                cons[0] = cons[grid_size - 2];
+                            default:
+                                cons[0] = cons[1];
+                                break;
+                        }
 
-                    if (outer_zones) {
-                        cons[grid_size - 1] = outer_zones[0];
+                        switch (boundary_conditions[1]) {
+                            case simbi::BoundaryCondition::DYNAMIC:
+                                for (auto qq = 0; qq < sim_state.nvars; qq++) {
+                                    cons[grid_size - 1][qq] =
+                                        sim_state.bsources[qq](
+                                            x1max,
+                                            sim_state.t
+                                        ) *
+                                        es;
+                                }
+                                break;
+                            case simbi::BoundaryCondition::REFLECTING:
+                                cons[grid_size - 1] = cons[grid_size - 2];
+                                cons[grid_size - 1].momentum() *= -1;
+                                break;
+                            case simbi::BoundaryCondition::PERIODIC:
+                                cons[grid_size - 1] = cons[1];
+                            default:
+                                cons[grid_size - 1] = cons[grid_size - 2];
+                                break;
+                        }
+                    }
+                    else {
+                        switch (boundary_conditions[0]) {
+                            case simbi::BoundaryCondition::DYNAMIC:
+                                for (auto qq = 0; qq < sim_state.nvars; qq++) {
+                                    cons[0][qq] = sim_state.bsources[qq](
+                                                      x1min,
+                                                      sim_state.t
+                                                  ) *
+                                                  bs;
+                                    cons[1][qq] = sim_state.bsources[qq](
+                                                      x1min,
+                                                      sim_state.t
+                                                  ) *
+                                                  bs;
+                                }
+                                break;
+                            case simbi::BoundaryCondition::REFLECTING:
+                                cons[0] = cons[3];
+                                cons[1] = cons[2];
+                                cons[0].momentum() *= -1;
+                                cons[1].momentum() *= -1;
+                                break;
+                            case simbi::BoundaryCondition::PERIODIC:
+                                cons[0] = cons[grid_size - 4];
+                                cons[1] = cons[grid_size - 3];
+                            default:
+                                cons[0] = cons[2];
+                                cons[1] = cons[2];
+                                break;
+                        }
+
+                        switch (boundary_conditions[1]) {
+                            case simbi::BoundaryCondition::DYNAMIC:
+                                for (auto qq = 0; qq < sim_state.nvars; qq++) {
+                                    cons[grid_size - 1][qq] =
+                                        sim_state.bsources[qq](
+                                            x1max,
+                                            sim_state.t
+                                        ) *
+                                        es;
+                                    cons[grid_size - 2][qq] =
+                                        sim_state.bsources[qq](
+                                            x1max,
+                                            sim_state.t
+                                        ) *
+                                        es;
+                                }
+                                break;
+                            case simbi::BoundaryCondition::REFLECTING:
+                                cons[grid_size - 1] = cons[grid_size - 4];
+                                cons[grid_size - 2] = cons[grid_size - 3];
+                                cons[grid_size - 1].momentum() *= -1;
+                                cons[grid_size - 2].momentum() *= -1;
+                                break;
+                            case simbi::BoundaryCondition::PERIODIC:
+                                cons[grid_size - 1] = cons[3];
+                                cons[grid_size - 2] = cons[2];
+                            default:
+                                cons[grid_size - 1] = cons[grid_size - 3];
+                                cons[grid_size - 2] = cons[grid_size - 3];
+                                break;
+                        }
                     }
                 }
-                else {
-
-                    switch (boundary_conditions[0]) {
-                        case simbi::BoundaryCondition::INFLOW:
-                            cons[0] = inflow_zones[0];
-                            cons[1] = inflow_zones[1];
-                            break;
-                        case simbi::BoundaryCondition::REFLECTING:
-                            cons[0] = cons[3];
-                            cons[1] = cons[2];
-                            cons[0].momentum() *= -1;
-                            cons[1].momentum() *= -1;
-                            break;
-                        case simbi::BoundaryCondition::PERIODIC:
-                            cons[0] = cons[grid_size - 4];
-                            cons[1] = cons[grid_size - 3];
-                        default:
-                            cons[0] = cons[2];
-                            cons[1] = cons[2];
-                            break;
-                    }
-
-                    switch (boundary_conditions[1]) {
-                        case simbi::BoundaryCondition::INFLOW:
-                            cons[grid_size - 1] = inflow_zones[0];
-                            cons[grid_size - 2] = inflow_zones[0];
-                            break;
-                        case simbi::BoundaryCondition::REFLECTING:
-                            cons[grid_size - 1] = cons[grid_size - 4];
-                            cons[grid_size - 2] = cons[grid_size - 3];
-                            cons[grid_size - 1].momentum() *= -1;
-                            cons[grid_size - 2].momentum() *= -1;
-                            break;
-                        case simbi::BoundaryCondition::PERIODIC:
-                            cons[grid_size - 1] = cons[3];
-                            cons[grid_size - 2] = cons[2];
-                        default:
-                            cons[grid_size - 1] = cons[grid_size - 3];
-                            cons[grid_size - 2] = cons[grid_size - 3];
-                            break;
-                    }
-
-                    if (outer_zones) {
-                        cons[grid_size - 1] = outer_zones[0];
-                        cons[grid_size - 2] = outer_zones[0];
-                    }
-                }
-            });
+            );
         };
 
-        template <typename T, typename U>
-        void config_ghosts2D(
-            const ExecutionPolicy<> p,
-            T* cons,
-            const int x1grid_size,
-            const int x2grid_size,
-            const bool first_order,
-            const simbi::Geometry geometry,
-            const simbi::BoundaryCondition* boundary_conditions,
-            const U* outer_zones,
-            const U* inflow_zones,
-            const bool half_sphere
-        )
+        template <typename sim_state_t>
+        void config_ghosts2D(sim_state_t& sim_state)
         {
-            const int extent = p.get_full_extent();
-            const int sx     = x1grid_size;
-            const int sy     = x2grid_size;
-            simbi::parallel_for(p, 0, extent, [=] DEV(const int gid) {
-                const int jj = axid<2, BlkAx::J>(gid, sx, sy);
-                const int ii = axid<2, BlkAx::I>(gid, sx, sy);
+            const auto nxv                 = sim_state.nxv;
+            const auto nyv                 = sim_state.nyv;
+            const auto nx                  = sim_state.nx;
+            const auto ny                  = sim_state.ny;
+            const auto first_order         = sim_state.use_pcm;
+            const auto boundary_conditions = sim_state.bcs;
+            const auto geometry            = sim_state.geometry;
+            const auto half_sphere         = sim_state.half_sphere;
+            auto& cons                     = sim_state.cons;
+            const int sx                   = nx;
+            const int sy                   = ny;
+            simbi::parallel_for(
+                sim_state.activeP,
+                sim_state.activeP.nzones,
+                [&] DEV(const int gid) {
+                    const int jj = axid<2, BlkAx::J>(gid, sx, sy);
+                    const int ii = axid<2, BlkAx::I>(gid, sx, sy);
 
-                if (first_order) {
-                    if (jj < x2grid_size - 2) {
-                        const auto ing  = (jj + 1) * sx + 0;
-                        const auto outg = (jj + 1) * sx + (x1grid_size - 1);
-                        const auto inr  = (jj + 1) * sx + 1;
-                        const auto outr = (jj + 1) * sx + (x1grid_size - 2);
+                    if (first_order) {
+                        if (jj < ny - 2) {
+                            const auto ing  = (jj + 1) * sx + 0;
+                            const auto outg = (jj + 1) * sx + (nx - 1);
+                            const auto inr  = (jj + 1) * sx + 1;
+                            const auto outr = (jj + 1) * sx + (nx - 2);
 
-                        switch (boundary_conditions[0]) {
-                            case simbi::BoundaryCondition::REFLECTING:
-                                cons[ing] = cons[inr];
-                                cons[ing].momentum(1) *= -1;
-                                break;
-                            case simbi::BoundaryCondition::INFLOW:
-                                cons[ing] = inflow_zones[0];
-                                break;
-                            case simbi::BoundaryCondition::PERIODIC:
-                                cons[ing] = cons[outr];
-                                break;
-                            default:
-                                cons[ing] = cons[inr];
-                                break;
+                            switch (boundary_conditions[0]) {
+                                case simbi::BoundaryCondition::REFLECTING:
+                                    cons[ing] = cons[inr];
+                                    cons[ing].momentum(1) *= -1;
+                                    break;
+                                case simbi::BoundaryCondition::DYNAMIC:
+                                    {
+                                        const real dV =
+                                            sim_state.get_cell_volume(0, jj);
+                                        for (auto qq = 0; qq < sim_state.nvars;
+                                             qq++) {
+                                            cons[ing][qq] =
+                                                sim_state.bsources[qq](
+                                                    sim_state.x1min,
+                                                    sim_state.x2[jj],
+                                                    sim_state.t
+                                                ) *
+                                                dV;
+                                        }
+                                        break;
+                                    }
+                                case simbi::BoundaryCondition::PERIODIC:
+                                    cons[ing] = cons[outr];
+                                    break;
+                                default:
+                                    cons[ing] = cons[inr];
+                                    break;
+                            }
+
+                            switch (boundary_conditions[1]) {
+                                case simbi::BoundaryCondition::REFLECTING:
+                                    cons[outg] = cons[outr];
+                                    cons[outg].momentum(1) *= -1;
+                                    break;
+                                case simbi::BoundaryCondition::DYNAMIC:
+                                    {
+                                        const real dV =
+                                            sim_state.get_cell_volume(
+                                                nxv - 1,
+                                                jj
+                                            );
+                                        for (auto qq = 0; qq < sim_state.nvars;
+                                             qq++) {
+                                            cons[outg][qq] =
+                                                sim_state.bsources[qq](
+                                                    sim_state.x1max,
+                                                    sim_state.x2[jj],
+                                                    sim_state.t
+                                                ) *
+                                                dV;
+                                        }
+                                        break;
+                                    }
+                                case simbi::BoundaryCondition::PERIODIC:
+                                    cons[outg] = cons[inr];
+                                    break;
+                                default:
+                                    cons[outg] = cons[outr];
+                                    break;
+                            }
                         }
+                        if (ii < nx - 2) {
+                            const auto ing  = 0 * sx + (ii + 1);
+                            const auto outg = (ny - 1) * sx + (ii + 1);
+                            const auto inr  = 1 * sx + (ii + 1);
+                            const auto outr = (ny - 2) * sx + (ii + 1);
 
-                        switch (boundary_conditions[1]) {
-                            case simbi::BoundaryCondition::REFLECTING:
-                                cons[outg] = cons[outr];
-                                cons[outg].momentum(1) *= -1;
-                                break;
-                            case simbi::BoundaryCondition::INFLOW:
-                                cons[outg] = inflow_zones[1];
-                                break;
-                            case simbi::BoundaryCondition::PERIODIC:
-                                cons[outg] = cons[inr];
-                                break;
-                            default:
-                                cons[outg] = cons[outr];
-                                break;
-                        }
-
-                        // if outer zones, fill them in
-                        if (outer_zones) {
-                            cons[outg] = outer_zones[0];
-                        }
-                    }
-                    if (ii < x1grid_size - 2) {
-                        const auto ing  = 0 * sx + (ii + 1);
-                        const auto outg = (x2grid_size - 1) * sx + (ii + 1);
-                        const auto inr  = 1 * sx + (ii + 1);
-                        const auto outr = (x2grid_size - 2) * sx + (ii + 1);
-
-                        switch (geometry) {
-                            case simbi::Geometry::SPHERICAL:
-                                cons[ing]  = cons[inr];
-                                cons[outg] = cons[outr];
-                                if (half_sphere) {
-                                    cons[outg].momentum(2) *= -1;
-                                }
-                                break;
-                            case simbi::Geometry::CYLINDRICAL:
-                                cons[ing]  = cons[outr];
-                                cons[outg] = cons[inr];
-                                break;
-                            default:
-                                switch (boundary_conditions[2]) {
-                                    case simbi::BoundaryCondition::REFLECTING:
-                                        cons[ing] = cons[inr];
-                                        cons[ing].momentum(2) *= -1;
-                                        break;
-                                    case simbi::BoundaryCondition::INFLOW:
-                                        cons[ing] = inflow_zones[2];
-                                        break;
-                                    case simbi::BoundaryCondition::PERIODIC:
-                                        cons[ing] = cons[outr];
-                                        break;
-                                    default:
-                                        cons[ing] = cons[inr];
-                                        break;
-                                }
-
-                                switch (boundary_conditions[3]) {
-                                    case simbi::BoundaryCondition::REFLECTING:
-                                        cons[outg] = cons[outr];
+                            switch (geometry) {
+                                case simbi::Geometry::SPHERICAL:
+                                    cons[ing]  = cons[inr];
+                                    cons[outg] = cons[outr];
+                                    if (half_sphere) {
                                         cons[outg].momentum(2) *= -1;
-                                        break;
-                                    case simbi::BoundaryCondition::INFLOW:
-                                        cons[outg] = inflow_zones[3];
-                                        break;
-                                    case simbi::BoundaryCondition::PERIODIC:
-                                        cons[outg] = cons[inr];
-                                        break;
-                                    default:
-                                        cons[outg] = cons[outr];
-                                        break;
-                                }
-                                break;
+                                    }
+                                    break;
+                                case simbi::Geometry::CYLINDRICAL:
+                                    cons[ing]  = cons[outr];
+                                    cons[outg] = cons[inr];
+                                    break;
+                                default:
+                                    switch (boundary_conditions[2]) {
+                                        case simbi::BoundaryCondition::
+                                            REFLECTING:
+                                            cons[ing] = cons[inr];
+                                            cons[ing].momentum(2) *= -1;
+                                            break;
+                                        case simbi::BoundaryCondition::DYNAMIC:
+                                            {
+                                                const real dV =
+                                                    sim_state.get_cell_volume(
+                                                        ii,
+                                                        0
+                                                    );
+                                                for (auto qq = 0;
+                                                     qq < sim_state.nvars;
+                                                     qq++) {
+                                                    cons[ing][qq] =
+                                                        sim_state.bsources[qq](
+                                                            sim_state.x1[ii],
+                                                            sim_state.x2min,
+                                                            sim_state.t
+                                                        ) *
+                                                        dV;
+                                                }
+                                                break;
+                                            }
+                                        case simbi::BoundaryCondition::PERIODIC:
+                                            cons[ing] = cons[outr];
+                                            break;
+                                        default:
+                                            cons[ing] = cons[inr];
+                                            break;
+                                    }
+
+                                    switch (boundary_conditions[3]) {
+                                        case simbi::BoundaryCondition::
+                                            REFLECTING:
+                                            cons[outg] = cons[outr];
+                                            cons[outg].momentum(2) *= -1;
+                                            break;
+                                        case simbi::BoundaryCondition::DYNAMIC:
+                                            {
+                                                const real dV =
+                                                    sim_state.get_cell_volume(
+                                                        ii,
+                                                        nyv - 1
+                                                    );
+                                                for (auto qq = 0;
+                                                     qq < sim_state.nvars;
+                                                     qq++) {
+                                                    cons[outg][qq] =
+                                                        sim_state.bsources[qq](
+                                                            sim_state.x1[ii],
+                                                            sim_state.x2max,
+                                                            sim_state.t
+                                                        ) *
+                                                        dV;
+                                                }
+                                                break;
+                                            }
+                                        case simbi::BoundaryCondition::PERIODIC:
+                                            cons[outg] = cons[inr];
+                                            break;
+                                        default:
+                                            cons[outg] = cons[outr];
+                                            break;
+                                    }
+                                    break;
+                            }
                         }
                     }
-                }
-                else {
-                    if (jj < x2grid_size - 4) {
-                        const auto ing   = (jj + 2) * sx + 0;
-                        const auto ingg  = (jj + 2) * sx + 1;
-                        const auto outg  = (jj + 2) * sx + (x1grid_size - 1);
-                        const auto outgg = (jj + 2) * sx + (x1grid_size - 2);
-                        const auto inr   = (jj + 2) * sx + 2;
-                        const auto inrr  = (jj + 2) * sx + 3;
-                        const auto outr  = (jj + 2) * sx + (x1grid_size - 3);
-                        const auto outrr = (jj + 2) * sx + (x1grid_size - 4);
+                    else {
+                        if (jj < ny - 4) {
+                            const auto ing   = (jj + 2) * sx + 0;
+                            const auto ingg  = (jj + 2) * sx + 1;
+                            const auto outg  = (jj + 2) * sx + (nx - 1);
+                            const auto outgg = (jj + 2) * sx + (nx - 2);
+                            const auto inr   = (jj + 2) * sx + 2;
+                            const auto inrr  = (jj + 2) * sx + 3;
+                            const auto outr  = (jj + 2) * sx + (nx - 3);
+                            const auto outrr = (jj + 2) * sx + (nx - 4);
 
-                        switch (boundary_conditions[0]) {
-                            case simbi::BoundaryCondition::INFLOW:
-                                cons[ing]  = inflow_zones[0];
-                                cons[ingg] = inflow_zones[0];
-                                break;
-                            case simbi::BoundaryCondition::REFLECTING:
-                                cons[ing]  = cons[inrr];
-                                cons[ingg] = cons[inr];
-                                cons[ing].momentum(1) *= -1;
-                                cons[ingg].momentum(1) *= -1;
-                                break;
-                            case simbi::BoundaryCondition::PERIODIC:
-                                cons[ing]  = cons[outrr];
-                                cons[ingg] = cons[outr];
-                                break;
-                            default:
-                                cons[ing]  = cons[inr];
-                                cons[ingg] = cons[inr];
-                                break;
+                            switch (boundary_conditions[0]) {
+                                case simbi::BoundaryCondition::DYNAMIC:
+                                    {
+                                        const real dV =
+                                            sim_state.get_cell_volume(0, jj);
+                                        for (auto qq = 0; qq < sim_state.nvars;
+                                             qq++) {
+                                            cons[ing][qq] =
+                                                sim_state.bsources[qq](
+                                                    sim_state.x1min,
+                                                    sim_state.x2[jj],
+                                                    sim_state.t
+                                                ) *
+                                                dV;
+                                            cons[ingg][qq] =
+                                                sim_state.bsources[qq](
+                                                    sim_state.x1min,
+                                                    sim_state.x2[jj],
+                                                    sim_state.t
+                                                ) *
+                                                dV;
+                                        }
+                                        break;
+                                    }
+                                case simbi::BoundaryCondition::REFLECTING:
+                                    cons[ing]  = cons[inrr];
+                                    cons[ingg] = cons[inr];
+                                    cons[ing].momentum(1) *= -1;
+                                    cons[ingg].momentum(1) *= -1;
+                                    break;
+                                case simbi::BoundaryCondition::PERIODIC:
+                                    cons[ing]  = cons[outrr];
+                                    cons[ingg] = cons[outr];
+                                    break;
+                                default:
+                                    cons[ing]  = cons[inr];
+                                    cons[ingg] = cons[inr];
+                                    break;
+                            }
+
+                            switch (boundary_conditions[1]) {
+                                case simbi::BoundaryCondition::DYNAMIC:
+                                    {
+                                        const real dV =
+                                            sim_state.get_cell_volume(
+                                                nxv - 1,
+                                                jj
+                                            );
+                                        for (auto qq = 0; qq < sim_state.nvars;
+                                             qq++) {
+                                            cons[outg][qq] =
+                                                sim_state.bsources[qq](
+                                                    sim_state.x1max,
+                                                    sim_state.x2[jj],
+                                                    sim_state.t
+                                                ) *
+                                                dV;
+                                            cons[outgg][qq] =
+                                                sim_state.bsources[qq](
+                                                    sim_state.x1max,
+                                                    sim_state.x2[jj],
+                                                    sim_state.t
+                                                ) *
+                                                dV;
+                                        }
+                                        break;
+                                    }
+                                case simbi::BoundaryCondition::REFLECTING:
+                                    cons[outg]  = cons[outr];
+                                    cons[outgg] = cons[outrr];
+                                    cons[outg].momentum(1) *= -1;
+                                    cons[outgg].momentum(1) *= -1;
+                                    break;
+                                case simbi::BoundaryCondition::PERIODIC:
+                                    cons[outg]  = cons[inrr];
+                                    cons[outgg] = cons[inr];
+                                    break;
+                                default:
+                                    cons[outg]  = cons[outr];
+                                    cons[outgg] = cons[outr];
+                                    break;
+                            }
                         }
+                        if (ii < nx - 4) {
+                            const auto ing   = 0 * sx + (ii + 2);
+                            const auto ingg  = 1 * sx + (ii + 2);
+                            const auto outg  = (ny - 1) * sx + (ii + 2);
+                            const auto outgg = (ny - 2) * sx + (ii + 2);
+                            const auto inr   = 2 * sx + (ii + 2);
+                            const auto inrr  = 3 * sx + (ii + 2);
+                            const auto outr  = (ny - 3) * sx + (ii + 2);
+                            const auto outrr = (ny - 4) * sx + (ii + 2);
 
-                        switch (boundary_conditions[1]) {
-                            case simbi::BoundaryCondition::INFLOW:
-                                cons[outg]  = inflow_zones[1];
-                                cons[outgg] = inflow_zones[1];
-                                break;
-                            case simbi::BoundaryCondition::REFLECTING:
-                                cons[outg]  = cons[outr];
-                                cons[outgg] = cons[outrr];
-                                cons[outg].momentum(1) *= -1;
-                                cons[outgg].momentum(1) *= -1;
-                                break;
-                            case simbi::BoundaryCondition::PERIODIC:
-                                cons[outg]  = cons[inrr];
-                                cons[outgg] = cons[inr];
-                                break;
-                            default:
-                                cons[outg]  = cons[outr];
-                                cons[outgg] = cons[outr];
-                                break;
-                        }
-
-                        // if outer zones, fill them in
-                        if (outer_zones) {
-                            cons[outg]  = outer_zones[0];
-                            cons[outgg] = outer_zones[0];
-                        }
-                    }
-                    if (ii < x1grid_size - 4) {
-                        const auto ing   = 0 * sx + (ii + 2);
-                        const auto ingg  = 1 * sx + (ii + 2);
-                        const auto outg  = (x2grid_size - 1) * sx + (ii + 2);
-                        const auto outgg = (x2grid_size - 2) * sx + (ii + 2);
-                        const auto inr   = 2 * sx + (ii + 2);
-                        const auto inrr  = 3 * sx + (ii + 2);
-                        const auto outr  = (x2grid_size - 3) * sx + (ii + 2);
-                        const auto outrr = (x2grid_size - 4) * sx + (ii + 2);
-
-                        switch (geometry) {
-                            case simbi::Geometry::SPHERICAL:
-                                cons[ing]   = cons[inrr];
-                                cons[outg]  = cons[outr];
-                                cons[ingg]  = cons[inr];
-                                cons[outgg] = cons[outr];
-                                if (half_sphere) {
-                                    cons[outg].momentum(2) *= -1;
-                                    cons[outgg].momentum(2) *= -1;
-                                }
-                                break;
-                            case simbi::Geometry::CYLINDRICAL:
-                                cons[ing]   = cons[outrr];
-                                cons[outg]  = cons[inr];
-                                cons[ingg]  = cons[outr];
-                                cons[outgg] = cons[inrr];
-                                break;
-                            default:
-                                switch (boundary_conditions[2]) {
-                                    case simbi::BoundaryCondition::REFLECTING:
-                                        cons[ing] = cons[inr];
-                                        cons[ing].momentum(2) *= -1;
-                                        cons[ingg] = cons[inrr];
-                                        cons[ingg].momentum(2) *= -1;
-                                        break;
-                                    case simbi::BoundaryCondition::INFLOW:
-                                        cons[ing]  = inflow_zones[2];
-                                        cons[ingg] = inflow_zones[2];
-                                        break;
-                                    case simbi::BoundaryCondition::PERIODIC:
-                                        cons[ing]  = cons[outrr];
-                                        cons[ingg] = cons[outr];
-                                        break;
-                                    default:
-                                        cons[ing]  = cons[inr];
-                                        cons[ingg] = cons[inr];
-                                        break;
-                                }
-
-                                switch (boundary_conditions[3]) {
-                                    case simbi::BoundaryCondition::REFLECTING:
-                                        cons[outg]  = cons[outr];
-                                        cons[outgg] = cons[outrr];
+                            switch (geometry) {
+                                case simbi::Geometry::SPHERICAL:
+                                    cons[ing]   = cons[inrr];
+                                    cons[outg]  = cons[outr];
+                                    cons[ingg]  = cons[inr];
+                                    cons[outgg] = cons[outr];
+                                    if (half_sphere) {
                                         cons[outg].momentum(2) *= -1;
                                         cons[outgg].momentum(2) *= -1;
-                                        break;
-                                    case simbi::BoundaryCondition::INFLOW:
-                                        cons[outg]  = inflow_zones[3];
-                                        cons[outgg] = inflow_zones[3];
-                                        break;
-                                    case simbi::BoundaryCondition::PERIODIC:
-                                        cons[outg]  = cons[inr];
-                                        cons[outgg] = cons[inrr];
-                                        break;
-                                    default:
-                                        cons[outg]  = cons[outr];
-                                        cons[outgg] = cons[outr];
-                                        break;
-                                }
-                                break;
+                                    }
+                                    break;
+                                case simbi::Geometry::CYLINDRICAL:
+                                    cons[ing]   = cons[outrr];
+                                    cons[outg]  = cons[inr];
+                                    cons[ingg]  = cons[outr];
+                                    cons[outgg] = cons[inrr];
+                                    break;
+                                default:
+                                    switch (boundary_conditions[2]) {
+                                        case simbi::BoundaryCondition::
+                                            REFLECTING:
+                                            cons[ing] = cons[inr];
+                                            cons[ing].momentum(2) *= -1;
+                                            cons[ingg] = cons[inrr];
+                                            cons[ingg].momentum(2) *= -1;
+                                            break;
+                                        case simbi::BoundaryCondition::DYNAMIC:
+                                            {
+                                                const real dV =
+                                                    sim_state.get_cell_volume(
+                                                        ii,
+                                                        0
+                                                    );
+                                                for (auto qq = 0;
+                                                     qq < sim_state.nvars;
+                                                     qq++) {
+                                                    cons[ing][qq] =
+                                                        sim_state.bsources[qq](
+                                                            sim_state.x1[ii],
+                                                            sim_state.x2min,
+                                                            sim_state.t
+                                                        ) *
+                                                        dV;
+                                                    cons[ingg][qq] =
+                                                        sim_state.bsources[qq](
+                                                            sim_state.x1[ii],
+                                                            sim_state.x2min,
+                                                            sim_state.t
+                                                        ) *
+                                                        dV;
+                                                }
+                                                break;
+                                            }
+                                        case simbi::BoundaryCondition::PERIODIC:
+                                            cons[ing]  = cons[outrr];
+                                            cons[ingg] = cons[outr];
+                                            break;
+                                        default:
+                                            cons[ing]  = cons[inr];
+                                            cons[ingg] = cons[inr];
+                                            break;
+                                    }
+
+                                    switch (boundary_conditions[3]) {
+                                        case simbi::BoundaryCondition::
+                                            REFLECTING:
+                                            cons[outg]  = cons[outr];
+                                            cons[outgg] = cons[outrr];
+                                            cons[outg].momentum(2) *= -1;
+                                            cons[outgg].momentum(2) *= -1;
+                                            break;
+                                        case simbi::BoundaryCondition::DYNAMIC:
+                                            {
+                                                const real dV =
+                                                    sim_state.get_cell_volume(
+                                                        ii,
+                                                        nyv - 1
+                                                    );
+                                                for (auto qq = 0;
+                                                     qq < sim_state.nvars;
+                                                     qq++) {
+                                                    cons[outg][qq] =
+                                                        sim_state.bsources[qq](
+                                                            sim_state.x1[ii],
+                                                            sim_state.x2max,
+                                                            sim_state.t
+                                                        ) *
+                                                        dV;
+                                                    cons[outgg][qq] =
+                                                        sim_state.bsources[qq](
+                                                            sim_state.x1[ii],
+                                                            sim_state.x2max,
+                                                            sim_state.t
+                                                        ) *
+                                                        dV;
+                                                }
+                                                break;
+                                            }
+                                        case simbi::BoundaryCondition::PERIODIC:
+                                            cons[outg]  = cons[inr];
+                                            cons[outgg] = cons[inrr];
+                                            break;
+                                        default:
+                                            cons[outg]  = cons[outr];
+                                            cons[outgg] = cons[outr];
+                                            break;
+                                    }
+                                    break;
+                            }
                         }
                     }
                 }
-            });
+            );
         }
 
-        template <typename T, typename U>
-        void config_ghosts3D(
-            const ExecutionPolicy<> p,
-            T* cons,
-            const int x1grid_size,
-            const int x2grid_size,
-            const int x3grid_size,
-            const bool first_order,
-            const simbi::BoundaryCondition* boundary_conditions,
-            const U* inflow_zones,
-            const bool half_sphere,
-            const simbi::Geometry geometry
-        )
+        template <typename sim_state_t>
+        void config_ghosts3D(sim_state_t& sim_state)
         {
-            const int extent = p.get_full_extent();
-            const int sx     = x1grid_size;
-            const int sy     = x2grid_size;
-            simbi::parallel_for(p, 0, extent, [=] DEV(const int gid) {
-                const int kk = axid<3, BlkAx::K>(gid, sx, sy);
-                const int jj = axid<3, BlkAx::J>(gid, sx, sy, kk);
-                const int ii = axid<3, BlkAx::I>(gid, sx, sy, kk);
+            const auto nx                  = sim_state.nx;
+            const auto ny                  = sim_state.ny;
+            const auto nz                  = sim_state.nz;
+            const auto first_order         = sim_state.use_pcm;
+            const auto boundary_conditions = sim_state.bcs;
+            const auto geometry            = sim_state.geometry;
+            const auto half_sphere         = sim_state.half_sphere;
+            auto& cons                     = sim_state.cons;
+            const int sx                   = nx;
+            const int sy                   = ny;
+            simbi::parallel_for(
+                sim_state.activeP,
+                sim_state.activeP.nzones,
+                [&] DEV(const int gid) {
+                    const int kk = axid<3, BlkAx::K>(gid, sx, sy);
+                    const int jj = axid<3, BlkAx::J>(gid, sx, sy, kk);
+                    const int ii = axid<3, BlkAx::I>(gid, sx, sy, kk);
 
-                if (first_order) {
-                    if (jj < x2grid_size - 2 && kk < x3grid_size - 2) {
-                        const auto ka   = (kk + 1) * sy * sx;
-                        const auto jk   = ka + (jj + 1) * sx + 0;
-                        const auto ing  = jk + 0;
-                        const auto outg = jk + (x1grid_size - 1);
-                        const auto inr  = jk + 1;
-                        const auto outr = jk + (x1grid_size - 2);
+                    if (first_order) {
+                        if (jj < ny - 2 && kk < nz - 2) {
+                            const auto ka   = (kk + 1) * sy * sx;
+                            const auto jk   = ka + (jj + 1) * sx + 0;
+                            const auto ing  = jk + 0;
+                            const auto outg = jk + (nx - 1);
+                            const auto inr  = jk + 1;
+                            const auto outr = jk + (nx - 2);
 
-                        switch (boundary_conditions[0]) {
-                            case simbi::BoundaryCondition::REFLECTING:
-                                cons[ing] = cons[inr];
-                                cons[ing].momentum(1) *= -1;
-                                break;
-                            case simbi::BoundaryCondition::INFLOW:
-                                cons[ing] = inflow_zones[0];
-                                break;
-                            case simbi::BoundaryCondition::PERIODIC:
-                                cons[ing] = cons[outr];
-                                break;
-                            default:
-                                cons[ing] = cons[inr];
-                                break;
+                            switch (boundary_conditions[0]) {
+                                case simbi::BoundaryCondition::REFLECTING:
+                                    cons[ing] = cons[inr];
+                                    cons[ing].momentum(1) *= -1;
+                                    break;
+                                case simbi::BoundaryCondition::DYNAMIC:
+                                    for (auto qq = 0; qq < sim_state.nvars;
+                                         qq++) {
+                                        cons[ing][qq] = sim_state.bsources[qq](
+                                            sim_state.x1min,
+                                            sim_state.x2[jj],
+                                            sim_state.x3[kk],
+                                            sim_state.t
+                                        );
+                                    }
+                                    break;
+                                case simbi::BoundaryCondition::PERIODIC:
+                                    cons[ing] = cons[outr];
+                                    break;
+                                default:
+                                    cons[ing] = cons[inr];
+                                    break;
+                            }
+
+                            switch (boundary_conditions[1]) {
+                                case simbi::BoundaryCondition::REFLECTING:
+                                    cons[outg] = cons[outr];
+                                    cons[outg].momentum(1) *= -1;
+                                    break;
+                                case simbi::BoundaryCondition::DYNAMIC:
+                                    for (auto qq = 0; qq < sim_state.nvars;
+                                         qq++) {
+                                        cons[outg][qq] = sim_state.bsources[qq](
+                                            sim_state.x1max,
+                                            sim_state.x2[jj],
+                                            sim_state.x3[kk],
+                                            sim_state.t
+                                        );
+                                    }
+                                    break;
+                                case simbi::BoundaryCondition::PERIODIC:
+                                    cons[outg] = cons[inr];
+                                    break;
+                                default:
+                                    cons[outg] = cons[outr];
+                                    break;
+                            }
+
+                            // if located at the corners, set the ghost zones to
+                            // the same as the inner zones const bool kc = kk <
+                            // 1 || kk + 2 >= nz - 2;
+
+                            // if (kc) {
+                            //     // get corner indices in i-k plane
+                            //     const auto kq = kk == 0 ? kk : kk + 2;
+                            //     const auto jk_kci =
+                            //         kq * sy * sx + (jj + 1) * sx + 0;
+                            //     const auto jk_kco = kq * sy * sx + (jj + 1) *
+                            //     sx
+                            //     +
+                            //                         (nx - 1);
+                            //     cons[jk_kci] = cons[ing];
+                            //     cons[jk_kco] = cons[outg];
+                            // }
                         }
+                        // Fix the ghost zones at the x2 boundaries
+                        if (ii < nx - 2 && kk < nz - 2) {
+                            const auto ik =
+                                (kk + 1) * sx * sy + 0 * sx + (ii + 1);
+                            const auto ing  = ik;
+                            const auto outg = ik + (ny - 1) * sx;
+                            const auto inr  = ik + sx;
+                            const auto outr = ik + (ny - 2) * sx;
 
-                        switch (boundary_conditions[1]) {
-                            case simbi::BoundaryCondition::REFLECTING:
-                                cons[outg] = cons[outr];
-                                cons[outg].momentum(1) *= -1;
-                                break;
-                            case simbi::BoundaryCondition::INFLOW:
-                                cons[outg] = inflow_zones[1];
-                                break;
-                            case simbi::BoundaryCondition::PERIODIC:
-                                cons[outg] = cons[inr];
-                                break;
-                            default:
-                                cons[outg] = cons[outr];
-                                break;
-                        }
-
-                        // if located at the corners, set the ghost zones to the
-                        // same as the inner zones
-                        // const bool kc = kk < 1 || kk + 2 >= x3grid_size - 2;
-
-                        // if (kc) {
-                        //     // get corner indices in i-k plane
-                        //     const auto kq = kk == 0 ? kk : kk + 2;
-                        //     const auto jk_kci =
-                        //         kq * sy * sx + (jj + 1) * sx + 0;
-                        //     const auto jk_kco = kq * sy * sx + (jj + 1) * sx
-                        //     +
-                        //                         (x1grid_size - 1);
-                        //     cons[jk_kci] = cons[ing];
-                        //     cons[jk_kco] = cons[outg];
-                        // }
-                    }
-                    // Fix the ghost zones at the x2 boundaries
-                    if (ii < x1grid_size - 2 && kk < x3grid_size - 2) {
-                        const auto ik  = (kk + 1) * sx * sy + 0 * sx + (ii + 1);
-                        const auto ing = ik;
-                        const auto outg = ik + (x2grid_size - 1) * sx;
-                        const auto inr  = ik + sx;
-                        const auto outr = ik + (x2grid_size - 2) * sx;
-
-                        switch (geometry) {
-                            case simbi::Geometry::SPHERICAL:
-                                cons[ing]  = cons[inr];
-                                cons[outg] = cons[outr];
-                                if (half_sphere) {
-                                    cons[outg].momentum(2) *= -1;
-                                }
-                                break;
-                            case simbi::Geometry::CYLINDRICAL:
-                                cons[ing]  = cons[outr];
-                                cons[outg] = cons[inr];
-                                break;
-                            default:
-                                switch (boundary_conditions[2]) {
-                                    case simbi::BoundaryCondition::REFLECTING:
-                                        cons[ing] = cons[inr];
-                                        cons[ing].momentum(2) *= -1;
-                                        break;
-                                    case simbi::BoundaryCondition::INFLOW:
-                                        cons[ing] = inflow_zones[2];
-                                        break;
-                                    case simbi::BoundaryCondition::PERIODIC:
-                                        cons[ing] = cons[outr];
-                                        break;
-                                    default:
-                                        cons[ing] = cons[inr];
-                                        break;
-                                }
-
-                                switch (boundary_conditions[3]) {
-                                    case simbi::BoundaryCondition::REFLECTING:
-                                        cons[outg] = cons[outr];
+                            switch (geometry) {
+                                case simbi::Geometry::SPHERICAL:
+                                    cons[ing]  = cons[inr];
+                                    cons[outg] = cons[outr];
+                                    if (half_sphere) {
                                         cons[outg].momentum(2) *= -1;
-                                        break;
-                                    case simbi::BoundaryCondition::INFLOW:
-                                        cons[outg] = inflow_zones[3];
-                                        break;
-                                    case simbi::BoundaryCondition::PERIODIC:
-                                        cons[outg] = cons[inr];
-                                        break;
-                                    default:
-                                        cons[outg] = cons[outr];
-                                        break;
-                                }
-                                break;
+                                    }
+                                    break;
+                                case simbi::Geometry::CYLINDRICAL:
+                                    cons[ing]  = cons[outr];
+                                    cons[outg] = cons[inr];
+                                    break;
+                                default:
+                                    switch (boundary_conditions[2]) {
+                                        case simbi::BoundaryCondition::
+                                            REFLECTING:
+                                            cons[ing] = cons[inr];
+                                            cons[ing].momentum(2) *= -1;
+                                            break;
+                                        case simbi::BoundaryCondition::DYNAMIC:
+                                            for (auto qq = 0;
+                                                 qq < sim_state.nvars;
+                                                 qq++) {
+                                                cons[ing][qq] =
+                                                    sim_state.bsources[qq](
+                                                        sim_state.x1[ii],
+                                                        sim_state.x2min,
+                                                        sim_state.x3[kk],
+                                                        sim_state.t
+                                                    );
+                                            }
+                                            break;
+                                        case simbi::BoundaryCondition::PERIODIC:
+                                            cons[ing] = cons[outr];
+                                            break;
+                                        default:
+                                            cons[ing] = cons[inr];
+                                            break;
+                                    }
+
+                                    switch (boundary_conditions[3]) {
+                                        case simbi::BoundaryCondition::
+                                            REFLECTING:
+                                            cons[outg] = cons[outr];
+                                            cons[outg].momentum(2) *= -1;
+                                            break;
+                                        case simbi::BoundaryCondition::DYNAMIC:
+                                            for (auto qq = 0;
+                                                 qq < sim_state.nvars;
+                                                 qq++) {
+                                                cons[outg][qq] =
+                                                    sim_state.bsources[qq](
+                                                        sim_state.x1[ii],
+                                                        sim_state.x2max,
+                                                        sim_state.x3[kk],
+                                                        sim_state.t
+                                                    );
+                                            }
+                                            break;
+                                        case simbi::BoundaryCondition::PERIODIC:
+                                            cons[outg] = cons[inr];
+                                            break;
+                                        default:
+                                            cons[outg] = cons[outr];
+                                            break;
+                                    }
+                                    break;
+                            }
+
+                            // if located at the corners, set the ghost zones to
+                            // the same as the inner zones const bool ic = ii <
+                            // 1 || (ii + 2) >= nx - 2;
+
+                            // if (ic) {
+                            //     // get corner indices in i-j plane
+                            //     const auto iq = ii < 1 ? ii : ii + 2;
+                            //     const auto ik_ici =
+                            //         (kk + 1) * sy * sx + 0 * sx + iq;
+                            //     const auto ik_ico = (kk + 1) * sy * sx +
+                            //                         (ny - 1) * sx +
+                            //                         iq;
+                            //     cons[ik_ici] = cons[ing];
+                            //     cons[ik_ico] = cons[outg];
+                            // }
                         }
 
-                        // if located at the corners, set the ghost zones to the
-                        // same as the inner zones
-                        // const bool ic = ii < 1 || (ii + 2) >= x1grid_size -
-                        // 2;
+                        // Fix the ghost zones at the x3 boundaries
+                        if (jj < ny - 2 && ii < nx - 2) {
+                            const auto ij =
+                                0 * sx * sy + (jj + 1) * sx + (ii + 1);
+                            const auto ing  = ij;
+                            const auto outg = ij + (nz - 1) * sx * sy;
+                            const auto inr  = ij + sx * sy;
+                            const auto outr = ij + (nz - 2) * sx * sy;
 
-                        // if (ic) {
-                        //     // get corner indices in i-j plane
-                        //     const auto iq = ii < 1 ? ii : ii + 2;
-                        //     const auto ik_ici =
-                        //         (kk + 1) * sy * sx + 0 * sx + iq;
-                        //     const auto ik_ico = (kk + 1) * sy * sx +
-                        //                         (x2grid_size - 1) * sx + iq;
-                        //     cons[ik_ici] = cons[ing];
-                        //     cons[ik_ico] = cons[outg];
-                        // }
+                            switch (geometry) {
+                                case simbi::Geometry::SPHERICAL:
+                                    cons[ing]  = cons[outr];
+                                    cons[outg] = cons[inr];
+                                    break;
+                                default:
+                                    switch (boundary_conditions[4]) {
+                                        case simbi::BoundaryCondition::
+                                            REFLECTING:
+                                            cons[ing] = cons[inr];
+                                            cons[ing].momentum(3) *= -1;
+                                            break;
+                                        case simbi::BoundaryCondition::DYNAMIC:
+                                            for (auto qq = 0;
+                                                 qq < sim_state.nvars;
+                                                 qq++) {
+                                                cons[ing][qq] =
+                                                    sim_state.bsources[qq](
+                                                        sim_state.x1[ii],
+                                                        sim_state.x2[jj],
+                                                        sim_state.x3min,
+                                                        sim_state.t
+                                                    );
+                                            }
+                                            break;
+                                        case simbi::BoundaryCondition::PERIODIC:
+                                            cons[ing] = cons[outr];
+                                            break;
+                                        default:
+                                            cons[ing] = cons[inr];
+                                            break;
+                                    }
+
+                                    switch (boundary_conditions[5]) {
+                                        case simbi::BoundaryCondition::
+                                            REFLECTING:
+                                            cons[outg] = cons[outr];
+                                            cons[outg].momentum(3) *= -1;
+                                            break;
+                                        case simbi::BoundaryCondition::DYNAMIC:
+                                            for (auto qq = 0;
+                                                 qq < sim_state.nvars;
+                                                 qq++) {
+                                                cons[outg][qq] =
+                                                    sim_state.bsources[qq](
+                                                        sim_state.x1[ii],
+                                                        sim_state.x2[jj],
+                                                        sim_state.x3max,
+                                                        sim_state.t
+                                                    );
+                                            }
+                                            break;
+                                        case simbi::BoundaryCondition::PERIODIC:
+                                            cons[outg] = cons[inr];
+                                            break;
+                                        default:
+                                            cons[outg] = cons[outr];
+                                            break;
+                                    }
+                                    break;
+                            }
+
+                            // if located at the corners, set the ghost zones to
+                            // the same as the inner zones const bool jc = jj <
+                            // 1 || jj + 2 >= ny - 2;
+
+                            // if (jc) {
+                            //     // get corner indices in j-k plane
+                            //     const auto jq = jj < 1 ? jj : jj + 2;
+                            //     const auto ij_jci =
+                            //         0 * sy * sx + jq * sx + (ii + 1);
+                            //     const auto ij_jco = (nz - 1) * sy *
+                            //     sx +
+                            //                         jq * sx + (ii + 1);
+                            //     cons[ij_jci] = cons[ing];
+                            //     cons[ij_jco] = cons[outg];
+                            // }
+                        }
                     }
+                    else {
+                        if (jj < ny - 4 && kk < nz - 4) {
+                            const auto jk =
+                                (kk + 2) * sx * sy + (jj + 2) * sx + 0;
+                            const auto ing   = jk;
+                            const auto ingg  = jk + 1;
+                            const auto outg  = jk + (nx - 1);
+                            const auto outgg = jk + (nx - 2);
+                            const auto inr   = jk + 2;
+                            const auto inrr  = jk + 3;
+                            const auto outr  = jk + (nx - 3);
+                            const auto outrr = jk + (nx - 4);
 
-                    // Fix the ghost zones at the x3 boundaries
-                    if (jj < x2grid_size - 2 && ii < x1grid_size - 2) {
-                        const auto ij  = 0 * sx * sy + (jj + 1) * sx + (ii + 1);
-                        const auto ing = ij;
-                        const auto outg = ij + (x3grid_size - 1) * sx * sy;
-                        const auto inr  = ij + sx * sy;
-                        const auto outr = ij + (x3grid_size - 2) * sx * sy;
+                            // fill in the two sets ghost zones for the x1
+                            // boundaries at the inner edge and outer edge for
+                            // second order stencil
+                            switch (boundary_conditions[0]) {
+                                case simbi::BoundaryCondition::DYNAMIC:
+                                    for (auto qq = 0; qq < sim_state.nvars;
+                                         qq++) {
+                                        cons[ing][qq] = sim_state.bsources[qq](
+                                            sim_state.x1min,
+                                            sim_state.x2[jj],
+                                            sim_state.x3[kk],
+                                            sim_state.t
+                                        );
+                                        cons[ingg][qq] = sim_state.bsources[qq](
+                                            sim_state.x1min,
+                                            sim_state.x2[jj],
+                                            sim_state.x3[kk],
+                                            sim_state.t
+                                        );
+                                    }
+                                    break;
+                                case simbi::BoundaryCondition::REFLECTING:
+                                    cons[ing]  = cons[inrr];
+                                    cons[ingg] = cons[inr];
+                                    cons[ing].momentum(1) *= -1;
+                                    cons[ingg].momentum(1) *= -1;
+                                    break;
+                                case simbi::BoundaryCondition::PERIODIC:
+                                    cons[ing]  = cons[outrr];
+                                    cons[ingg] = cons[outr];
+                                    break;
+                                default:
+                                    cons[ing]  = cons[inr];
+                                    cons[ingg] = cons[inr];
+                                    break;
+                            }
 
-                        switch (geometry) {
-                            case simbi::Geometry::SPHERICAL:
-                                cons[ing]  = cons[outr];
-                                cons[outg] = cons[inr];
-                                break;
-                            default:
-                                switch (boundary_conditions[4]) {
-                                    case simbi::BoundaryCondition::REFLECTING:
-                                        cons[ing] = cons[inr];
-                                        cons[ing].momentum(3) *= -1;
-                                        break;
-                                    case simbi::BoundaryCondition::INFLOW:
-                                        cons[ing] = inflow_zones[4];
-                                        break;
-                                    case simbi::BoundaryCondition::PERIODIC:
-                                        cons[ing] = cons[outr];
-                                        break;
-                                    default:
-                                        cons[ing] = cons[inr];
-                                        break;
-                                }
+                            switch (boundary_conditions[1]) {
+                                case simbi::BoundaryCondition::DYNAMIC:
+                                    for (auto qq = 0; qq < sim_state.nvars;
+                                         qq++) {
+                                        cons[outg][qq] = sim_state.bsources[qq](
+                                            sim_state.x1max,
+                                            sim_state.x2[jj],
+                                            sim_state.x3[kk],
+                                            sim_state.t
+                                        );
+                                        cons[outgg][qq] =
+                                            sim_state.bsources[qq](
+                                                sim_state.x1max,
+                                                sim_state.x2[jj],
+                                                sim_state.x3[kk],
+                                                sim_state.t
+                                            );
+                                    }
+                                    break;
+                                case simbi::BoundaryCondition::REFLECTING:
+                                    cons[outg]  = cons[outr];
+                                    cons[outgg] = cons[outrr];
+                                    cons[outg].momentum(1) *= -1;
+                                    cons[outgg].momentum(1) *= -1;
+                                    break;
+                                case simbi::BoundaryCondition::PERIODIC:
+                                    cons[outg]  = cons[inrr];
+                                    cons[outgg] = cons[inr];
+                                    break;
+                                default:
+                                    cons[outg]  = cons[outr];
+                                    cons[outgg] = cons[outr];
+                                    break;
+                            }
 
-                                switch (boundary_conditions[5]) {
-                                    case simbi::BoundaryCondition::REFLECTING:
-                                        cons[outg] = cons[outr];
-                                        cons[outg].momentum(3) *= -1;
-                                        break;
-                                    case simbi::BoundaryCondition::INFLOW:
-                                        cons[outg] = inflow_zones[5];
-                                        break;
-                                    case simbi::BoundaryCondition::PERIODIC:
-                                        cons[outg] = cons[inr];
-                                        break;
-                                    default:
-                                        cons[outg] = cons[outr];
-                                        break;
-                                }
-                                break;
+                            // const bool kc = kk < 2 || (kk + 4) >= nz
+                            // - 4; if (kc) {
+                            //     // get corner indices in i-k plane
+                            //     const auto kq = kk < 2 ? kk : kk + 4;
+                            //     const auto jk_kci =
+                            //         kq * sy * sx + (jj + 2) * sx + 0;
+                            //     const auto jk_kcii =
+                            //         kq * sy * sx + (jj + 2) * sx + 1;
+                            //     const auto jk_kco = kq * sy * sx + (jj + 2) *
+                            //     sx
+                            //     +
+                            //                         (nx - 1);
+                            //     const auto jk_kcoo = kq * sy * sx + (jj + 2)
+                            //     * sx
+                            //     +
+                            //                          (nx - 2);
+
+                            //     cons[jk_kci]  = cons[ing];
+                            //     cons[jk_kco]  = cons[outg];
+                            //     cons[jk_kcii] = cons[ingg];
+                            //     cons[jk_kcoo] = cons[outgg];
+                            // }
                         }
+                        // Fix the ghost zones at the x2 boundaries
+                        if (ii < nx - 4 && kk < nz - 4) {
+                            const auto ik =
+                                (kk + 2) * sx * sy + 0 * sx + (ii + 2);
+                            const auto ing   = ik;
+                            const auto ingg  = ik + 1 * sx;
+                            const auto outg  = ik + (ny - 1) * sx;
+                            const auto outgg = ik + (ny - 2) * sx;
+                            const auto inr   = ik + 2 * sx;
+                            const auto inrr  = ik + 3 * sx;
+                            const auto outr  = ik + (ny - 3) * sx;
+                            const auto outrr = ik + (ny - 4) * sx;
 
-                        // if located at the corners, set the ghost zones to the
-                        // same as the inner zones
-                        // const bool jc = jj < 1 || jj + 2 >= x2grid_size - 2;
-
-                        // if (jc) {
-                        //     // get corner indices in j-k plane
-                        //     const auto jq = jj < 1 ? jj : jj + 2;
-                        //     const auto ij_jci =
-                        //         0 * sy * sx + jq * sx + (ii + 1);
-                        //     const auto ij_jco = (x3grid_size - 1) * sy * sx +
-                        //                         jq * sx + (ii + 1);
-                        //     cons[ij_jci] = cons[ing];
-                        //     cons[ij_jco] = cons[outg];
-                        // }
-                    }
-                }
-                else {
-                    if (jj < x2grid_size - 4 && kk < x3grid_size - 4) {
-                        const auto jk  = (kk + 2) * sx * sy + (jj + 2) * sx + 0;
-                        const auto ing = jk;
-                        const auto ingg  = jk + 1;
-                        const auto outg  = jk + (x1grid_size - 1);
-                        const auto outgg = jk + (x1grid_size - 2);
-                        const auto inr   = jk + 2;
-                        const auto inrr  = jk + 3;
-                        const auto outr  = jk + (x1grid_size - 3);
-                        const auto outrr = jk + (x1grid_size - 4);
-
-                        // fill in the two sets ghost zones for the x1
-                        // boundaries at the inner edge and outer edge for
-                        // second order stencil
-                        switch (boundary_conditions[0]) {
-                            case simbi::BoundaryCondition::INFLOW:
-                                cons[ing]  = inflow_zones[0];
-                                cons[ingg] = inflow_zones[0];
-                                break;
-                            case simbi::BoundaryCondition::REFLECTING:
-                                cons[ing]  = cons[inrr];
-                                cons[ingg] = cons[inr];
-                                cons[ing].momentum(1) *= -1;
-                                cons[ingg].momentum(1) *= -1;
-                                break;
-                            case simbi::BoundaryCondition::PERIODIC:
-                                cons[ing]  = cons[outrr];
-                                cons[ingg] = cons[outr];
-                                break;
-                            default:
-                                cons[ing]  = cons[inr];
-                                cons[ingg] = cons[inr];
-                                break;
-                        }
-
-                        switch (boundary_conditions[1]) {
-                            case simbi::BoundaryCondition::INFLOW:
-                                cons[outg]  = inflow_zones[1];
-                                cons[outgg] = inflow_zones[1];
-                                break;
-                            case simbi::BoundaryCondition::REFLECTING:
-                                cons[outg]  = cons[outr];
-                                cons[outgg] = cons[outrr];
-                                cons[outg].momentum(1) *= -1;
-                                cons[outgg].momentum(1) *= -1;
-                                break;
-                            case simbi::BoundaryCondition::PERIODIC:
-                                cons[outg]  = cons[inrr];
-                                cons[outgg] = cons[inr];
-                                break;
-                            default:
-                                cons[outg]  = cons[outr];
-                                cons[outgg] = cons[outr];
-                                break;
-                        }
-
-                        // const bool kc = kk < 2 || (kk + 4) >= x3grid_size -
-                        // 4; if (kc) {
-                        //     // get corner indices in i-k plane
-                        //     const auto kq = kk < 2 ? kk : kk + 4;
-                        //     const auto jk_kci =
-                        //         kq * sy * sx + (jj + 2) * sx + 0;
-                        //     const auto jk_kcii =
-                        //         kq * sy * sx + (jj + 2) * sx + 1;
-                        //     const auto jk_kco = kq * sy * sx + (jj + 2) * sx
-                        //     +
-                        //                         (x1grid_size - 1);
-                        //     const auto jk_kcoo = kq * sy * sx + (jj + 2) * sx
-                        //     +
-                        //                          (x1grid_size - 2);
-
-                        //     cons[jk_kci]  = cons[ing];
-                        //     cons[jk_kco]  = cons[outg];
-                        //     cons[jk_kcii] = cons[ingg];
-                        //     cons[jk_kcoo] = cons[outgg];
-                        // }
-                    }
-                    // Fix the ghost zones at the x2 boundaries
-                    if (ii < x1grid_size - 4 && kk < x3grid_size - 4) {
-                        const auto ik  = (kk + 2) * sx * sy + 0 * sx + (ii + 2);
-                        const auto ing = ik;
-                        const auto ingg  = ik + 1 * sx;
-                        const auto outg  = ik + (x2grid_size - 1) * sx;
-                        const auto outgg = ik + (x2grid_size - 2) * sx;
-                        const auto inr   = ik + 2 * sx;
-                        const auto inrr  = ik + 3 * sx;
-                        const auto outr  = ik + (x2grid_size - 3) * sx;
-                        const auto outrr = ik + (x2grid_size - 4) * sx;
-
-                        // fill in the two sets ghost zones for the x2
-                        // boundaries at the inner edge and outer edge for
-                        // second order stencil
-                        switch (geometry) {
-                            case simbi::Geometry::SPHERICAL:
-                                cons[ing]   = cons[inrr];
-                                cons[outg]  = cons[outr];
-                                cons[ingg]  = cons[inr];
-                                cons[outgg] = cons[outr];
-                                if (half_sphere) {
-                                    cons[outg].momentum(2) *= -1;
-                                    cons[outgg].momentum(2) *= -1;
-                                }
-                                break;
-                            case simbi::Geometry::CYLINDRICAL:
-                                cons[ing]   = cons[outrr];
-                                cons[outg]  = cons[inr];
-                                cons[ingg]  = cons[outr];
-                                cons[outgg] = cons[inrr];
-                                break;
-                            default:
-                                switch (boundary_conditions[2]) {
-                                    case simbi::BoundaryCondition::REFLECTING:
-                                        cons[ing] = cons[inr];
-                                        cons[ing].momentum(2) *= -1;
-                                        cons[ingg] = cons[inrr];
-                                        cons[ingg].momentum(2) *= -1;
-                                        break;
-                                    case simbi::BoundaryCondition::INFLOW:
-                                        cons[ing]  = inflow_zones[2];
-                                        cons[ingg] = inflow_zones[2];
-                                        break;
-                                    case simbi::BoundaryCondition::PERIODIC:
-                                        cons[ing]  = cons[outrr];
-                                        cons[ingg] = cons[outr];
-                                        break;
-                                    default:
-                                        cons[ing]  = cons[inr];
-                                        cons[ingg] = cons[inr];
-                                        break;
-                                }
-
-                                switch (boundary_conditions[3]) {
-                                    case simbi::BoundaryCondition::REFLECTING:
-                                        cons[outg]  = cons[outr];
-                                        cons[outgg] = cons[outrr];
+                            // fill in the two sets ghost zones for the x2
+                            // boundaries at the inner edge and outer edge for
+                            // second order stencil
+                            switch (geometry) {
+                                case simbi::Geometry::SPHERICAL:
+                                    cons[ing]   = cons[inrr];
+                                    cons[outg]  = cons[outr];
+                                    cons[ingg]  = cons[inr];
+                                    cons[outgg] = cons[outr];
+                                    if (half_sphere) {
                                         cons[outg].momentum(2) *= -1;
                                         cons[outgg].momentum(2) *= -1;
-                                        break;
-                                    case simbi::BoundaryCondition::INFLOW:
-                                        cons[outg]  = inflow_zones[3];
-                                        cons[outgg] = inflow_zones[3];
-                                        break;
-                                    case simbi::BoundaryCondition::PERIODIC:
-                                        cons[outg]  = cons[inrr];
-                                        cons[outgg] = cons[inr];
-                                        break;
-                                    default:
-                                        cons[outg]  = cons[outr];
-                                        cons[outgg] = cons[outr];
-                                        break;
-                                }
-                                break;
+                                    }
+                                    break;
+                                case simbi::Geometry::CYLINDRICAL:
+                                    cons[ing]   = cons[outrr];
+                                    cons[outg]  = cons[inr];
+                                    cons[ingg]  = cons[outr];
+                                    cons[outgg] = cons[inrr];
+                                    break;
+                                default:
+                                    switch (boundary_conditions[2]) {
+                                        case simbi::BoundaryCondition::
+                                            REFLECTING:
+                                            cons[ing] = cons[inr];
+                                            cons[ing].momentum(2) *= -1;
+                                            cons[ingg] = cons[inrr];
+                                            cons[ingg].momentum(2) *= -1;
+                                            break;
+                                        case simbi::BoundaryCondition::DYNAMIC:
+                                            for (auto qq = 0;
+                                                 qq < sim_state.nvars;
+                                                 qq++) {
+                                                cons[ing][qq] =
+                                                    sim_state.bsources[qq](
+                                                        sim_state.x1[ii],
+                                                        sim_state.x2min,
+                                                        sim_state.x3[kk],
+                                                        sim_state.t
+                                                    );
+                                                cons[ingg][qq] =
+                                                    sim_state.bsources[qq](
+                                                        sim_state.x1[ii],
+                                                        sim_state.x2min,
+                                                        sim_state.x3[kk],
+                                                        sim_state.t
+                                                    );
+                                            }
+                                            break;
+                                        case simbi::BoundaryCondition::PERIODIC:
+                                            cons[ing]  = cons[outrr];
+                                            cons[ingg] = cons[outr];
+                                            break;
+                                        default:
+                                            cons[ing]  = cons[inr];
+                                            cons[ingg] = cons[inr];
+                                            break;
+                                    }
+
+                                    switch (boundary_conditions[3]) {
+                                        case simbi::BoundaryCondition::
+                                            REFLECTING:
+                                            cons[outg]  = cons[outr];
+                                            cons[outgg] = cons[outrr];
+                                            cons[outg].momentum(2) *= -1;
+                                            cons[outgg].momentum(2) *= -1;
+                                            break;
+                                        case simbi::BoundaryCondition::DYNAMIC:
+                                            for (auto qq = 0;
+                                                 qq < sim_state.nvars;
+                                                 qq++) {
+                                                cons[outg][qq] =
+                                                    sim_state.bsources[qq](
+                                                        sim_state.x1[ii],
+                                                        sim_state.x2max,
+                                                        sim_state.x3[kk],
+                                                        sim_state.t
+                                                    );
+                                                cons[outgg][qq] =
+                                                    sim_state.bsources[qq](
+                                                        sim_state.x1[ii],
+                                                        sim_state.x2max,
+                                                        sim_state.x3[kk],
+                                                        sim_state.t
+                                                    );
+                                            }
+                                            break;
+                                        case simbi::BoundaryCondition::PERIODIC:
+                                            cons[outg]  = cons[inrr];
+                                            cons[outgg] = cons[inr];
+                                            break;
+                                        default:
+                                            cons[outg]  = cons[outr];
+                                            cons[outgg] = cons[outr];
+                                            break;
+                                    }
+                                    break;
+                            }
+
+                            // const bool ic = ii < 2 || ii + 4 >= nx -
+                            // 4; if (ic) {
+                            //     // get corner indices in i-j plane
+                            //     const auto iq = ii < 2 ? ii : ii + 4;
+                            //     const auto ik_ici =
+                            //         (kk + 2) * sy * sx + 0 * sx + iq;
+                            //     const auto ik_icii =
+                            //         (kk + 2) * sy * sx + 1 * sx + iq;
+                            //     const auto ik_ico = (kk + 2) * sy * sx +
+                            //                         (ny - 1) * sx +
+                            //                         iq;
+                            //     const auto ik_icoo = (kk + 2) * sy * sx +
+                            //                          (ny - 2) * sx +
+                            //                          iq;
+                            //     cons[ik_ici]  = cons[ing];
+                            //     cons[ik_ico]  = cons[outg];
+                            //     cons[ik_icii] = cons[ingg];
+                            //     cons[ik_icoo] = cons[outgg];
+                            // }
                         }
 
-                        // const bool ic = ii < 2 || ii + 4 >= x1grid_size - 4;
-                        // if (ic) {
-                        //     // get corner indices in i-j plane
-                        //     const auto iq = ii < 2 ? ii : ii + 4;
-                        //     const auto ik_ici =
-                        //         (kk + 2) * sy * sx + 0 * sx + iq;
-                        //     const auto ik_icii =
-                        //         (kk + 2) * sy * sx + 1 * sx + iq;
-                        //     const auto ik_ico = (kk + 2) * sy * sx +
-                        //                         (x2grid_size - 1) * sx + iq;
-                        //     const auto ik_icoo = (kk + 2) * sy * sx +
-                        //                          (x2grid_size - 2) * sx + iq;
-                        //     cons[ik_ici]  = cons[ing];
-                        //     cons[ik_ico]  = cons[outg];
-                        //     cons[ik_icii] = cons[ingg];
-                        //     cons[ik_icoo] = cons[outgg];
-                        // }
-                    }
+                        // Fix the ghost zones at the x3 boundaries
+                        if (jj < ny - 4 && ii < nx - 4) {
+                            const auto ij =
+                                0 * sx * sy + (jj + 2) * sx + (ii + 2);
+                            const auto ing   = ij;
+                            const auto ingg  = ij + 1 * sx * sy;
+                            const auto outg  = ij + (nz - 1) * sx * sy;
+                            const auto outgg = ij + (nz - 2) * sx * sy;
+                            const auto inr   = ij + 2 * sx * sy;
+                            const auto inrr  = ij + 3 * sx * sy;
+                            const auto outr  = ij + (nz - 3) * sx * sy;
+                            const auto outrr = ij + (nz - 4) * sx * sy;
 
-                    // Fix the ghost zones at the x3 boundaries
-                    if (jj < x2grid_size - 4 && ii < x1grid_size - 4) {
-                        const auto ij  = 0 * sx * sy + (jj + 2) * sx + (ii + 2);
-                        const auto ing = ij;
-                        const auto ingg  = ij + 1 * sx * sy;
-                        const auto outg  = ij + (x3grid_size - 1) * sx * sy;
-                        const auto outgg = ij + (x3grid_size - 2) * sx * sy;
-                        const auto inr   = ij + 2 * sx * sy;
-                        const auto inrr  = ij + 3 * sx * sy;
-                        const auto outr  = ij + (x3grid_size - 3) * sx * sy;
-                        const auto outrr = ij + (x3grid_size - 4) * sx * sy;
+                            // fill in the two sets ghost zones for the x3
+                            // boundaries at the inner edge and outer edge for
+                            // second order stencil
+                            switch (geometry) {
+                                case simbi::Geometry::SPHERICAL:
+                                    cons[ing]   = cons[outrr];
+                                    cons[outg]  = cons[inr];
+                                    cons[ingg]  = cons[outr];
+                                    cons[outgg] = cons[inrr];
+                                    break;
+                                default:
+                                    switch (boundary_conditions[4]) {
+                                        case simbi::BoundaryCondition::
+                                            REFLECTING:
+                                            cons[ing]  = cons[inr];
+                                            cons[ingg] = cons[inrr];
+                                            cons[ing].momentum(3) *= -1;
+                                            cons[ingg].momentum(3) *= -1;
+                                            break;
+                                        case simbi::BoundaryCondition::DYNAMIC:
+                                            for (auto qq = 0;
+                                                 qq < sim_state.nvars;
+                                                 qq++) {
+                                                cons[ing][qq] =
+                                                    sim_state.bsources[qq](
+                                                        sim_state.x1[ii],
+                                                        sim_state.x2[jj],
+                                                        sim_state.x3min,
+                                                        sim_state.t
+                                                    );
+                                                cons[ingg][qq] =
+                                                    sim_state.bsources[qq](
+                                                        sim_state.x1[ii],
+                                                        sim_state.x2[jj],
+                                                        sim_state.x3min,
+                                                        sim_state.t
+                                                    );
+                                            }
+                                            break;
+                                        case simbi::BoundaryCondition::PERIODIC:
+                                            cons[ing]  = cons[outrr];
+                                            cons[ingg] = cons[outr];
+                                            break;
+                                        default:
+                                            cons[ing]  = cons[inr];
+                                            cons[ingg] = cons[inr];
+                                            break;
+                                    }
 
-                        // fill in the two sets ghost zones for the x3
-                        // boundaries at the inner edge and outer edge for
-                        // second order stencil
-                        switch (geometry) {
-                            case simbi::Geometry::SPHERICAL:
-                                cons[ing]   = cons[outrr];
-                                cons[outg]  = cons[inr];
-                                cons[ingg]  = cons[outr];
-                                cons[outgg] = cons[inrr];
-                                break;
-                            default:
-                                switch (boundary_conditions[4]) {
-                                    case simbi::BoundaryCondition::REFLECTING:
-                                        cons[ing]  = cons[inr];
-                                        cons[ingg] = cons[inrr];
-                                        cons[ing].momentum(3) *= -1;
-                                        cons[ingg].momentum(3) *= -1;
-                                        break;
-                                    case simbi::BoundaryCondition::INFLOW:
-                                        cons[ing]  = inflow_zones[4];
-                                        cons[ingg] = inflow_zones[4];
-                                        break;
-                                    case simbi::BoundaryCondition::PERIODIC:
-                                        cons[ing]  = cons[outrr];
-                                        cons[ingg] = cons[outr];
-                                        break;
-                                    default:
-                                        cons[ing]  = cons[inr];
-                                        cons[ingg] = cons[inr];
-                                        break;
-                                }
+                                    switch (boundary_conditions[5]) {
+                                        case simbi::BoundaryCondition::
+                                            REFLECTING:
+                                            cons[outg]  = cons[outr];
+                                            cons[outgg] = cons[outrr];
+                                            cons[outg].momentum(3) *= -1;
+                                            cons[outgg].momentum(3) *= -1;
+                                            break;
+                                        case simbi::BoundaryCondition::DYNAMIC:
+                                            for (auto qq = 0;
+                                                 qq < sim_state.nvars;
+                                                 qq++) {
+                                                cons[outg][qq] =
+                                                    sim_state.bsources[qq](
+                                                        sim_state.x1[ii],
+                                                        sim_state.x2[jj],
+                                                        sim_state.x3max,
+                                                        sim_state.t
+                                                    );
+                                                cons[outgg][qq] =
+                                                    sim_state.bsources[qq](
+                                                        sim_state.x1[ii],
+                                                        sim_state.x2[jj],
+                                                        sim_state.x3max,
+                                                        sim_state.t
+                                                    );
+                                            }
+                                            break;
+                                        case simbi::BoundaryCondition::PERIODIC:
+                                            cons[outg]  = cons[inrr];
+                                            cons[outgg] = cons[inr];
+                                            break;
+                                        default:
+                                            cons[outg]  = cons[outr];
+                                            cons[outgg] = cons[outr];
+                                            break;
+                                    }
+                                    break;
+                            }
 
-                                switch (boundary_conditions[5]) {
-                                    case simbi::BoundaryCondition::REFLECTING:
-                                        cons[outg]  = cons[outr];
-                                        cons[outgg] = cons[outrr];
-                                        cons[outg].momentum(3) *= -1;
-                                        cons[outgg].momentum(3) *= -1;
-                                        break;
-                                    case simbi::BoundaryCondition::INFLOW:
-                                        cons[outg]  = inflow_zones[5];
-                                        cons[outgg] = inflow_zones[5];
-                                        break;
-                                    case simbi::BoundaryCondition::PERIODIC:
-                                        cons[outg]  = cons[inrr];
-                                        cons[outgg] = cons[inr];
-                                        break;
-                                    default:
-                                        cons[outg]  = cons[outr];
-                                        cons[outgg] = cons[outr];
-                                        break;
-                                }
-                                break;
+                            // const bool jc = jj < 2 || jj + 4 >= ny -
+                            // 4; if (jc) {
+                            //     // get corner indices in j-k plane
+                            //     const auto jq = jj < 2 ? jj : jj + 4;
+                            //     const auto ij_jci =
+                            //         0 * sy * sx + jq * sx + (ii + 2);
+                            //     const auto ij_jcii =
+                            //         1 * sy * sx + jq * sx + (ii + 2);
+                            //     const auto ij_jco = (nz - 1) * sy *
+                            //     sx +
+                            //                         jq * sx + (ii + 2);
+                            //     const auto ij_jcoo = (nz - 2) * sy *
+                            //     sx
+                            //     +
+                            //                          jq * sx + (ii + 2);
+                            //     cons[ij_jci]  = cons[ing];
+                            //     cons[ij_jco]  = cons[outg];
+                            //     cons[ij_jcii] = cons[ingg];
+                            //     cons[ij_jcoo] = cons[outgg];
+                            // }
                         }
-
-                        // const bool jc = jj < 2 || jj + 4 >= x2grid_size - 4;
-                        // if (jc) {
-                        //     // get corner indices in j-k plane
-                        //     const auto jq = jj < 2 ? jj : jj + 4;
-                        //     const auto ij_jci =
-                        //         0 * sy * sx + jq * sx + (ii + 2);
-                        //     const auto ij_jcii =
-                        //         1 * sy * sx + jq * sx + (ii + 2);
-                        //     const auto ij_jco = (x3grid_size - 1) * sy * sx +
-                        //                         jq * sx + (ii + 2);
-                        //     const auto ij_jcoo = (x3grid_size - 2) * sy * sx
-                        //     +
-                        //                          jq * sx + (ii + 2);
-                        //     cons[ij_jci]  = cons[ing];
-                        //     cons[ij_jco]  = cons[outg];
-                        //     cons[ij_jcii] = cons[ingg];
-                        //     cons[ij_jcoo] = cons[outgg];
-                        // }
                     }
                 }
-            });
+            );
         };
+
+        template <typename T>
+        void config_ghosts(T& sim_state)
+        {
+            if constexpr (T::dimensions == 1) {
+                config_ghosts1D(sim_state);
+            }
+            else if constexpr (T::dimensions == 2) {
+                config_ghosts2D(sim_state);
+            }
+            else if constexpr (T::dimensions == 3) {
+                config_ghosts3D(sim_state);
+            }
+        }
 
         template <typename T, TIMESTEP_TYPE dt_type, typename U, typename V>
         KERNEL typename std::enable_if<is_1D_primitive<T>::value>::type

@@ -1251,10 +1251,9 @@ void RMHD<dim>::adapt_dt()
 //                                            FLUX CALCULATIONS
 //===================================================================================================================
 template <int dim>
-DUAL RMHD<dim>::conserved_t RMHD<dim>::prims2flux(
-    const RMHD<dim>::primitive_t& prims,
-    const luint nhat
-) const
+DUAL RMHD<dim>::conserved_t
+RMHD<dim>::prims2flux(const RMHD<dim>::primitive_t& prims, const luint nhat)
+    const
 {
     const real rho   = prims.rho();
     const real v1    = prims.vcomponent(1);
@@ -2379,63 +2378,13 @@ void RMHD<dim>::simulate(
     this->mesh_motion  = (hubble_param != 0);
     this->homolog      = mesh_motion && geometry != simbi::Geometry::CARTESIAN;
 
-    if (mesh_motion && all_outer_bounds) {
-        if constexpr (dim == 1) {
-            outer_zones.resize(spatial_order == "pcm" ? 1 : 2);
-            const real dV = get_cell_volume(active_zones - 1);
-            for (int qq = 0; qq < nvars; qq++) {
-                outer_zones[0][qq] = this->bsources[qq](x1max, t) * dV;
-            }
-            outer_zones.copyToGpu();
-        }
-        else if constexpr (dim == 2) {
-            outer_zones.resize(ny);
-            for (luint jj = 0; jj < ny; jj++) {
-                const auto jreal = get_real_idx(jj, radius, yag);
-                const real dV    = get_cell_volume(nxv - 1, jreal);
-                for (int qq = 0; qq < nvars; qq++) {
-                    outer_zones[jj][qq] =
-                        this->bsources[qq](x1max, x2[jreal], t) * dV;
-                }
-            }
-            outer_zones.copyToGpu();
-        }
-        else {
-            outer_zones.resize(ny * nz);
-            for (luint kk = 0; kk < nz; kk++) {
-                const auto kreal = get_real_idx(kk, radius, zag);
-                for (luint jj = 0; jj < ny; jj++) {
-                    const auto jreal = get_real_idx(jj, radius, yag);
-                    const real dV    = get_cell_volume(nxv - 1, jreal, kreal);
-                    for (int qq = 0; qq < nvars; qq++) {
-                        outer_zones[kk * ny + jj][qq] =
-                            this->bsources[qq](x1max, x2[jreal], x3[kreal], t) *
-                            dV;
-                    }
-                }
-            }
-            outer_zones.copyToGpu();
-        }
-    }
-
     if (x2max == 0.5 * M_PI) {
         this->half_sphere = true;
     }
 
-    inflow_zones.resize(dim * 2);
     bcs.resize(dim * 2);
     for (int i = 0; i < 2 * dim; i++) {
         this->bcs[i] = boundary_cond_map.at(boundary_conditions[i]);
-        // this->inflow_zones[i] = conserved_t{
-        //   boundary_sources[i][0],
-        //   boundary_sources[i][1],
-        //   boundary_sources[i][2],
-        //   boundary_sources[i][3],
-        //   boundary_sources[i][4],
-        //   boundary_sources[i][5],
-        //   boundary_sources[i][6],
-        //   boundary_sources[i][7]
-        // };
     }
 
     // allocate space for face-centered magnetic fields
@@ -2482,18 +2431,7 @@ void RMHD<dim>::simulate(
     print_shared_mem();
     set_the_riemann_solver();
 
-    config_ghosts3D(
-        activeP,
-        cons.data(),
-        nx,
-        ny,
-        nz,
-        spatial_order == "pcm",
-        bcs.data(),
-        inflow_zones.data(),
-        half_sphere,
-        geometry
-    );
+    config_ghosts(*this);
     cons2prim();
     adapt_dt<TIMESTEP_TYPE::MINIMUM>();
 
@@ -2507,18 +2445,7 @@ void RMHD<dim>::simulate(
         simbi::detail::logger::with_logger(*this, tend, [&] {
             riemann_fluxes();
             advance();
-            config_ghosts3D(
-                activeP,
-                cons.data(),
-                nx,
-                ny,
-                nz,
-                spatial_order == "pcm",
-                bcs.data(),
-                inflow_zones.data(),
-                half_sphere,
-                geometry
-            );
+            config_ghosts(*this);
             cons2prim();
             adapt_dt();
 

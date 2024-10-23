@@ -1240,77 +1240,13 @@ void Newtonian<dim>::simulate(
     this->mesh_motion  = (hubble_param != 0);
     this->homolog      = mesh_motion && geometry != simbi::Geometry::CARTESIAN;
 
-    if (mesh_motion && all_outer_bounds) {
-        if constexpr (dim == 1) {
-            outer_zones.resize(spatial_order == "pcm" ? 1 : 2);
-            const real dV = get_cell_volume(active_zones - 1);
-            for (int qq = 0; qq < nvars; qq++) {
-                outer_zones[0][qq] = this->bsources[qq](x1max, t) * dV;
-            }
-            outer_zones.copyToGpu();
-        }
-        else if constexpr (dim == 2) {
-            outer_zones.resize(ny);
-            for (luint jj = 0; jj < ny; jj++) {
-                const auto jreal = get_real_idx(jj, radius, yag);
-                const real dV    = get_cell_volume(nxv - 1, jreal);
-                for (int qq = 0; qq < nvars; qq++) {
-                    outer_zones[jj][qq] =
-                        this->bsources[qq](x1max, x2[jreal], t) * dV;
-                }
-            }
-            outer_zones.copyToGpu();
-        }
-        else {
-            outer_zones.resize(ny * nz);
-            for (luint kk = 0; kk < nz; kk++) {
-                const auto kreal = get_real_idx(kk, radius, zag);
-                for (luint jj = 0; jj < ny; jj++) {
-                    const auto jreal = get_real_idx(jj, radius, yag);
-                    const real dV    = get_cell_volume(nxv - 1, jreal, kreal);
-                    for (int qq = 0; qq < nvars; qq++) {
-                        outer_zones[kk * ny + jj][qq] =
-                            this->bsources[qq](x1max, x2[jreal], x3[kreal], t) *
-                            dV;
-                    }
-                }
-            }
-            outer_zones.copyToGpu();
-        }
-    }
-
     if (x2max == 0.5 * M_PI) {
         this->half_sphere = true;
     }
 
-    inflow_zones.resize(dim * 2);
     bcs.resize(dim * 2);
     for (int i = 0; i < 2 * dim; i++) {
         this->bcs[i] = boundary_cond_map.at(boundary_conditions[i]);
-        // if constexpr (dim == 1) {
-        //     this->inflow_zones[i] = conserved_t{
-        //       boundary_sources[i][0],
-        //       boundary_sources[i][1],
-        //       boundary_sources[i][2]
-        //     };
-        // }
-        // else if constexpr (dim == 2) {
-        //     this->inflow_zones[i] = conserved_t{
-        //       boundary_sources[i][0],
-        //       boundary_sources[i][1],
-        //       boundary_sources[i][2],
-        //       boundary_sources[i][3]
-        //     };
-        // }
-        // else {
-        //     this->inflow_zones[i] = conserved_t{
-        //       boundary_sources[i][0],
-        //       boundary_sources[i][1],
-        //       boundary_sources[i][2],
-        //       boundary_sources[i][3],
-        //       boundary_sources[i][4]
-        //     };
-        // }
     }
 
     cons.resize(total_zones);
@@ -1385,92 +1321,15 @@ void Newtonian<dim>::simulate(
     // Save initial condition
     if (t == 0 || init_chkpt_idx == 0) {
         write_to_file(*this);
-        if constexpr (dim == 1) {
-            config_ghosts1D(
-                fullP,
-                cons.data(),
-                nx,
-                spatial_order == "pcm",
-                bcs.data(),
-                outer_zones.data(),
-                inflow_zones.data()
-            );
-        }
-        else if constexpr (dim == 2) {
-            config_ghosts2D(
-                fullP,
-                cons.data(),
-                nx,
-                ny,
-                spatial_order == "pcm",
-                geometry,
-                bcs.data(),
-                outer_zones.data(),
-                inflow_zones.data(),
-                half_sphere
-            );
-        }
-        else {
-            config_ghosts3D(
-                fullP,
-                cons.data(),
-                nx,
-                ny,
-                nz,
-                spatial_order == "pcm",
-                bcs.data(),
-                inflow_zones.data(),
-                half_sphere,
-                geometry
-            );
-        }
+        config_ghosts(*this);
     }
 
     // Simulate :)
     try {
         simbi::detail::logger::with_logger(*this, tend, [&] {
-            // advance();
+            advance();
             cons2prim();
-            // if constexpr (dim == 1) {
-            //     config_ghosts1D(
-            //         fullP,
-            //         cons.data(),
-            //         nx,
-            //         spatial_order == "pcm",
-            //         bcs.data(),
-            //         outer_zones.data(),
-            //         inflow_zones.data()
-            //     );
-            // }
-            // else if constexpr (dim == 2) {
-            //     config_ghosts2D(
-            //         fullP,
-            //         cons.data(),
-            //         nx,
-            //         ny,
-            //         spatial_order == "pcm",
-            //         geometry,
-            //         bcs.data(),
-            //         outer_zones.data(),
-            //         inflow_zones.data(),
-            //         half_sphere
-            //     );
-            // }
-            // else {
-            //     config_ghosts3D(
-            //         fullP,
-            //         cons.data(),
-            //         nx,
-            //         ny,
-            //         nz,
-            //         spatial_order == "pcm",
-            //         bcs.data(),
-            //         inflow_zones.data(),
-            //         half_sphere,
-            //         geometry
-            //     );
-            // }
-
+            config_ghosts(*this);
             if constexpr (global::on_gpu) {
                 adapt_dt(fullP);
             }

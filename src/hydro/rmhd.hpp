@@ -65,7 +65,7 @@ namespace simbi {
 
         /* Shared Data Members */
         ndarray<primitive_t> prims;
-        ndarray<conserved_t> cons, outer_zones, inflow_zones, fri, gri, hri;
+        ndarray<conserved_t> cons, fri, gri, hri;
         ndarray<real> dt_min, bstag1, bstag2, bstag3;
         bool scalar_all_zeros;
         luint nzone_edges;
@@ -214,7 +214,6 @@ namespace simbi {
             prims.copyToGpu();
             dt_min.copyToGpu();
             object_pos.copyToGpu();
-            inflow_zones.copyToGpu();
             bcs.copyToGpu();
             troubled_cells.copyToGpu();
             bstag1.copyToGpu();

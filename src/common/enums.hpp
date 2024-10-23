@@ -65,7 +65,7 @@ namespace simbi {
     enum class BoundaryCondition {
         REFLECTING,
         OUTFLOW,
-        INFLOW,
+        DYNAMIC,
         PERIODIC,
     };
 

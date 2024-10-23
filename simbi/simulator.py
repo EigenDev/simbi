@@ -24,7 +24,7 @@ available_coord_systems = [
     "planar_cylindrical",
     "axis_cylindrical",
 ]
-available_boundary_conditions = ["outflow", "reflecting", "inflow", "periodic"]
+available_boundary_conditions = ["outflow", "reflecting", "dynamic", "periodic"]
 available_cellspacings = [
     "linear",
     "log",
@@ -378,34 +378,35 @@ class Hydro:
         Simulate the Hydro Setup
 
         Parameters:
-            tstart      (flaot):         The start time of the simulation
-            tend        (float):         The desired time to end the simulation
-            dlogt       (float):         The desired logarithmic spacing in checkpoints
-            plm_theta   (float):         The Piecewise Linear Reconstructed slope parameter
-            x1_cell_spacing    (str):     Option for a linear or log-spaced mesh on x1
-            x2_cell_spacing    (str):     Option for a linear or log-spaced mesh on x2
-            x3_cell_spacing    (str):     Option for a linear or log-spaced mesh on x3
-            cfl         (float):         The cfl number for min adaptive timestep
-            sources     (array_like):    The source terms for the simulations
-            passive_scalars  (array_like):    The array of passive passive_scalars
-            solver        (str):         Tells the simulation whether to perform HLLC or HLLE
-            chkpt       (string):        The path to the checkpoint file to read into the simulation
-            chkpt_interval (float):      The interval at which to save the checkpoints
-            data_directory (string):     The directory at which to save the checkpoint files
-            bounday_condition (string):  The outer conditions at the domain x1 boundaries
-            engine_duration (float):     The duration the source terms will last in the simulation
-            compute_mode (string):       The compute mode for simulation execution (cpu or gpu)
-            quirk_smoothing (bool):       The switch that controls the Quirk (1960) shock smoothing method
-            constant_source (bool):      Set to true if wanting the source terms to never die
-            scale_factor              (Callable):   The scalar function for moving mesh. Think cosmology
-            scale_factor_derivative   (Callable):   The first derivative of the scalar function for moving mesh
-            object_positions (boolean array_lie): An optional boolean array that masks the immersed boundary
-            boundary_source (array_like): An array of conserved quantities at the boundaries of the grid
-            spatial_order str: space order of integration [pcm or plm]
-
+            tstart (float): The start time of the simulation.
+            tend (float): The desired time to end the simulation.
+            dlogt (float): The desired logarithmic spacing in checkpoints.
+            plm_theta (float): The Piecewise Linear Reconstructed slope parameter.
+            x1_cell_spacing (str): Option for a linear or log-spaced mesh on x1.
+            x2_cell_spacing (str): Option for a linear or log-spaced mesh on x2.
+            x3_cell_spacing (str): Option for a linear or log-spaced mesh on x3.
+            cfl (float): The CFL number for minimum adaptive timestep.
+            passive_scalars (Optional[Union[NDArray[Any], int]]): The array of passive scalars.
+            solver (str): The solver to use for the simulation (e.g., "hllc", "hlld").
+            chkpt (Optional[str]): The path to the checkpoint file to read into the simulation.
+            chkpt_interval (float): The interval at which to save the checkpoints.
+            data_directory (str): The directory at which to save the checkpoint files.
+            boundary_conditions (Union[Sequence[str], str]): The outer conditions at the domain boundaries.
+            engine_duration (float): The duration the source terms will last in the simulation.
+            compute_mode (str): The compute mode for simulation execution ("cpu" or "gpu").
+            quirk_smoothing (bool): The switch that controls the Quirk (1960) shock smoothing method.
+            constant_sources (bool): Set to true if wanting the source terms to never die.
+            scale_factor (Optional[Callable[[float], float]]): The scalar function for moving mesh (e.g., in cosmology).
+            scale_factor_derivative (Optional[Callable[[float], float]]): The first derivative of the scalar function for moving mesh.
+            bsources (list[CallableOrNone]): List of boundary source terms.
+            hsources (list[CallableOrNone]): List of hydro source terms.
+            gsources (list[CallableOrNone]): List of gravity source terms.
+            object_positions (Optional[Union[Sequence[Any], NDArray[Any]]]): An optional boolean array that masks the immersed boundary.
+            spatial_order (str): Space order of integration ("pcm" or "plm").
+            time_order (str): Time order of integration ("rk1" or "rk2").
 
         Returns:
-            solution (array): The hydro solution containing the primitive variables
+            None
         """
         bsources = helpers.as_list(bsources)
         hsources = helpers.as_list(hsources)
@@ -629,7 +630,13 @@ class Hydro:
                 nterms: int = self.dimensionality + 3 * ((source != gsources) + self.mhd)
                 if ngiven < nterms:
                     if ngiven == nterms - 1:
-                        source += [lambda x,t: 0.0]
+                        if self.dimensionality == 1:
+                            # define null source terms for scalar concentration
+                            source += [lambda x,t: 0.0]
+                        elif self.dimensionality == 2:
+                            source += [lambda x,y,t: 0.0]
+                        else:
+                            source += [lambda x,y,z,t: 0.0]
                     else:
                         raise ValueError(
                             f"Number of {name} terms should be equal to the number {nterms}"

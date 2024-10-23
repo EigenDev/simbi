@@ -67,7 +67,7 @@ namespace simbi {
 
         /* Shared Data Members */
         ndarray<primitive_t> prims;
-        ndarray<conserved_t> cons, outer_zones, inflow_zones;
+        ndarray<conserved_t> cons;
         ndarray<real> pressure_guess, dt_min;
         bool scalar_all_zeros;
 
@@ -143,7 +143,6 @@ namespace simbi {
             if constexpr (dim > 1) {
                 object_pos.copyToGpu();
             }
-            inflow_zones.copyToGpu();
             bcs.copyToGpu();
         }
 

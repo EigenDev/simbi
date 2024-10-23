@@ -201,7 +201,7 @@ namespace simbi {
         // map boundary condition string to simbi::BoundaryCondition enum class
         const std::map<std::string, simbi::BoundaryCondition>
             boundary_cond_map = {
-              {"inflow", simbi::BoundaryCondition::INFLOW},
+              {"dynamic", simbi::BoundaryCondition::DYNAMIC},
               {"outflow", simbi::BoundaryCondition::OUTFLOW},
               {"reflecting", simbi::BoundaryCondition::REFLECTING},
               {"periodic", simbi::BoundaryCondition::PERIODIC}
@@ -728,46 +728,19 @@ namespace simbi {
         DUAL bool in_range(IndexType val, IndexType lower, IndexType upper);
 
         // configure the ghost zones in 1D hydro
-        template <typename T, typename U>
-        void config_ghosts1D(
-            const ExecutionPolicy<> p,
-            T* cons,
-            const int grid_size,
-            const bool first_order,
-            const simbi::BoundaryCondition* boundary_conditions,
-            const U* outer_zones  = nullptr,
-            const U* inflow_zones = nullptr
-        );
+        template <typename sim_state_t>
+        void config_ghosts1D(sim_state_t& sim_state);
 
         // configure the ghost zones in 2D hydro
-        template <typename T, typename U>
-        void config_ghosts2D(
-            const ExecutionPolicy<> p,
-            T* cons,
-            const int x1grid_size,
-            const int x2grid_size,
-            const bool first_order,
-            const simbi::Geometry geometry,
-            const simbi::BoundaryCondition* boundary_conditions,
-            const U* outer_zones,
-            const U* boundary_zones,
-            const bool half_sphere
-        );
+        template <typename sim_state_t>
+        void config_ghosts2D(sim_state_t& sim_state);
 
         // configure the ghost zones in 3D hydro
-        template <typename T, typename U>
-        void config_ghosts3D(
-            const ExecutionPolicy<> p,
-            T* cons,
-            const int x1grid_size,
-            const int x2grid_size,
-            const int x3grid_size,
-            const bool first_order,
-            const simbi::BoundaryCondition* boundary_conditions,
-            const U* inflow_zones,
-            const bool half_sphere,
-            const simbi::Geometry geometry
-        );
+        template <typename sim_state_t>
+        void config_ghosts3D(sim_state_t& sim_state);
+
+        template <typename T>
+        void config_ghosts(T& sim_state);
 
         /**
          * @brief perform the reduction within the warp
