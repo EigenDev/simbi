@@ -28,6 +28,11 @@ __all__ = [
 ]
 generic_numpy_array = NDArray[Any]
 
+def as_list(x: Any) -> list[Any]:
+    if isinstance(x, (Sequence, list, np.ndarray)):
+        return list(x)
+    else:
+        return [x]
 
 def calc_centroid(
     arr: generic_numpy_array, coord_system: str = "spherical"

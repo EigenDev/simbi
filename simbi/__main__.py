@@ -481,19 +481,15 @@ def configure_state(
         kwargs[idx]['x1_cell_spacing'] = config.x1_cell_spacing
         kwargs[idx]['x2_cell_spacing'] = config.x2_cell_spacing
         kwargs[idx]['x3_cell_spacing'] = config.x3_cell_spacing
-        kwargs[idx]['sources'] = config.sources
+        kwargs[idx]['bsources'] = config.boundary_sources
         kwargs[idx]['gsources'] = config.gravity_sources
-        kwargs[idx]['bsources'] = config.magnetic_sources
+        kwargs[idx]['hsources'] = config.hydro_sources
         kwargs[idx]['passive_scalars'] = config.passive_scalars
         kwargs[idx]['scale_factor'] = config.scale_factor
         kwargs[idx]['scale_factor_derivative'] = config.scale_factor_derivative
-        kwargs[idx]['edens_outer'] = config.edens_outer
-        kwargs[idx]['mom_outer'] = config.mom_outer
-        kwargs[idx]['dens_outer'] = config.dens_outer
         kwargs[idx]['quirk_smoothing'] = config.use_quirk_smoothing
         kwargs[idx]['constant_sources'] = config.constant_sources
         kwargs[idx]['object_positions'] = config.object_zones
-        kwargs[idx]['boundary_sources'] = config.boundary_sources
         kwargs[idx]['engine_duration'] = config.engine_duration
         states.append(state)
 

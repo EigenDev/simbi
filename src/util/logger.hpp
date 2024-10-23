@@ -158,32 +158,57 @@ namespace simbi {
 
                 while ((sim_state.t < end_time) && (!sim_state.inFailureState)
                 ) {
-                    if constexpr (is_relativistic<sim_state_t>::value) {
+                    if (sim_state.mesh_motion && sim_state.all_outer_bounds) {
                         if constexpr (sim_state_t::dimensions == 1) {
-                            // Fill outer zones if user-defined conservative
-                            // functions provided
-                            if (sim_state.all_outer_bounds &&
-                                (sim_state.mesh_motion)) {
-                                const real dV = sim_state.get_cell_volume(
-                                    sim_state.active_zones - 1
-                                );
-                                sim_state.outer_zones[0] =
-                                    conserved_t{
-                                      sim_state.dens_outer(sim_state.x1max),
-                                      sim_state.mom1_outer(sim_state.x1max),
-                                      sim_state.enrg_outer(sim_state.x1max)
-                                    } *
+                            sim_state.outer_zones.resize(
+                                sim_state.spatial_order == "pcm" ? 1 : 2
+                            );
+                            const real dV =
+                                sim_state.get_cell_volume(sim_state.xag - 1);
+                            for (int qq = 0; qq < sim_state.nvars; qq++) {
+                                sim_state.outer_zones[0][qq] =
+                                    sim_state.bsources[qq](
+                                        sim_state.x1max,
+                                        sim_state.t
+                                    ) *
                                     dV;
-
-                                sim_state.outer_zones.copyToGpu();
                             }
+                            sim_state.outer_zones.copyToGpu();
                         }
                         else if constexpr (sim_state_t::dimensions == 2) {
-                            // Fill outer zones if user-defined conservative
-                            // functions provided
-                            if (sim_state.all_outer_bounds &&
-                                sim_state.mesh_motion) {
-                                // #pragma omp parallel for
+                            sim_state.outer_zones.resize(sim_state.ny);
+                            for (luint jj = 0; jj < sim_state.ny; jj++) {
+                                const auto jreal = helpers::get_real_idx(
+                                    jj,
+                                    sim_state.radius,
+                                    sim_state.yag
+                                );
+                                const real dV = sim_state.get_cell_volume(
+                                    sim_state.nxv - 1,
+                                    jreal
+                                );
+                                for (int qq = 0; qq < sim_state.nvars; qq++) {
+                                    sim_state.outer_zones[jj][qq] =
+                                        sim_state.bsources[qq](
+                                            sim_state.x1max,
+                                            sim_state.x2[jreal],
+                                            sim_state.t
+                                        ) *
+                                        dV;
+                                }
+                            }
+                            sim_state.outer_zones.copyToGpu();
+                        }
+                        else {
+                            sim_state.outer_zones.resize(
+                                sim_state.nx * sim_state.nz
+                            );
+                            for (luint kk = 0; kk < sim_state.nz; kk++) {
+                                const auto kreal = helpers::get_real_idx(
+                                    kk,
+                                    sim_state.radius,
+                                    sim_state.zag
+                                );
                                 for (luint jj = 0; jj < sim_state.ny; jj++) {
                                     const auto jreal = helpers::get_real_idx(
                                         jj,
@@ -192,89 +217,25 @@ namespace simbi {
                                     );
                                     const real dV = sim_state.get_cell_volume(
                                         sim_state.nxv - 1,
-                                        jreal
+                                        jreal,
+                                        kreal
                                     );
-                                    sim_state.outer_zones[jj] =
-                                        conserved_t{
-                                          sim_state.dens_outer(
-                                              sim_state.x1max,
-                                              sim_state.x2[jreal]
-                                          ),
-                                          sim_state.mom1_outer(
-                                              sim_state.x1max,
-                                              sim_state.x2[jreal]
-                                          ),
-                                          sim_state.mom2_outer(
-                                              sim_state.x1max,
-                                              sim_state.x2[jreal]
-                                          ),
-                                          sim_state.enrg_outer(
-                                              sim_state.x1max,
-                                              sim_state.x2[jreal]
-                                          )
-                                        } *
-                                        dV;
-                                }
-                                sim_state.outer_zones.copyToGpu();
-                            }
-                        }
-                        else {
-                            if (sim_state.all_outer_bounds &&
-                                sim_state.mesh_motion) {
-                                for (luint kk = 0; kk < sim_state.nz; kk++) {
-                                    const auto kreal = helpers::get_real_idx(
-                                        kk,
-                                        sim_state.radius,
-                                        sim_state.zag
-                                    );
-                                    for (luint jj = 0; jj < sim_state.ny;
-                                         jj++) {
-                                        const auto jreal =
-                                            helpers::get_real_idx(
-                                                jj,
-                                                sim_state.radius,
-                                                sim_state.yag
-                                            );
-                                        const real dV =
-                                            sim_state.get_cell_volume(
-                                                sim_state.nxv - 1,
-                                                jreal,
-                                                kreal
-                                            );
-                                        sim_state.outer_zones
-                                            [kk * sim_state.ny + jj] =
-                                            conserved_t{
-                                              sim_state.dens_outer(
-                                                  sim_state.x1max,
-                                                  sim_state.x2[jreal],
-                                                  sim_state.x3[kreal]
-                                              ),
-                                              sim_state.mom1_outer(
-                                                  sim_state.x1max,
-                                                  sim_state.x2[jreal],
-                                                  sim_state.x3[kreal]
-                                              ),
-                                              sim_state.mom2_outer(
-                                                  sim_state.x1max,
-                                                  sim_state.x2[jreal],
-                                                  sim_state.x3[kreal]
-                                              ),
-                                              sim_state.mom3_outer(
-                                                  sim_state.x1max,
-                                                  sim_state.x2[jreal],
-                                                  sim_state.x3[kreal]
-                                              ),
-                                              sim_state.enrg_outer(
-                                                  sim_state.x1max,
-                                                  sim_state.x2[jreal],
-                                                  sim_state.x3[kreal]
-                                              )
-                                            } *
+                                    for (int qq = 0; qq < sim_state.nvars;
+                                         qq++) {
+                                        sim_state
+                                            .outer_zones[kk * sim_state.ny + jj]
+                                                        [qq] =
+                                            sim_state.bsources[qq](
+                                                sim_state.x1max,
+                                                sim_state.x2[jreal],
+                                                sim_state.x3[kreal],
+                                                sim_state.t
+                                            ) *
                                             dV;
                                     }
-                                    sim_state.outer_zones.copyToGpu();
                                 }
                             }
+                            sim_state.outer_zones.copyToGpu();
                         }
                     }
                     try {

@@ -84,21 +84,6 @@ class {setup_name}(BaseConfig):
     def scale_factor_derivative(cls) -> Optional[Callable[[float], float]]:
         return None
 
-    @simbi_classproperty
-    def edens_outer(cls) -> Optional[Union[Callable[[float], float], Callable[[
-            float, float], float], Callable[[float, float, float], float]]]:
-        return None
-
-    @simbi_classproperty
-    def mom_outer(cls) -> Optional[Union[Callable[[float], float], Sequence[Union[Callable[[
-            float, float], float], Callable[[float, float, float], float]]]]]:
-        return None
-
-    @simbi_classproperty
-    def dens_outer(cls) -> Optional[Union[Callable[[float], float], Callable[[
-            float, float], float], Callable[[float, float, float], float]]]:
-        return None
-
     @simbi_property
     def default_start_time(self) -> Union[DynamicArg, float]:
         return 0.0
@@ -150,10 +135,6 @@ class {setup_name}(BaseConfig):
 
     @simbi_property
     def object_zones(self) -> Optional[Union[NDArray[Any], Sequence[Any]]]:
-        return None
-
-    @simbi_property
-    def boundary_sources(self) -> Optional[Union[NDArray[Any], Sequence[Any]]]:
         return None
 
     @simbi_property

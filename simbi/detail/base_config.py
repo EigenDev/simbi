@@ -3,7 +3,7 @@ import abc
 import logging
 from .dynarg import DynamicArg
 from ..key_types import *
-from . import get_subparser, bcolors
+from . import get_subparser
 from typing import ParamSpec, TypeVar, Generic
 
 __all__ = ["BaseConfig", "simbi_property", "simbi_classproperty"]
@@ -186,12 +186,6 @@ class BaseConfig(metaclass=abc.ABCMeta):
         return "linear"
 
     @simbi_property
-    def sources(
-        self,
-    ) -> Optional[Union[Sequence[NDArray[numpy_float]], NDArray[numpy_float]]]:
-        return None
-
-    @simbi_property
     def passive_scalars(self) -> Optional[Union[Sequence[float], NDArray[numpy_float]]]:
         return None
 
@@ -202,46 +196,18 @@ class BaseConfig(metaclass=abc.ABCMeta):
     @simbi_classproperty
     def scale_factor_derivative(cls) -> Optional[Callable[[float], float]]:
         return None
+    
+    @simbi_classproperty
+    def gravity_sources(clas) -> list[Optional[Callable[[*Tuple[float,...]], float]]]:
+        return [None]
 
     @simbi_classproperty
-    def edens_outer(
-        cls,
-    ) -> Optional[
-        Union[
-            Callable[[float], float],
-            Callable[[float, float], float],
-            Callable[[float, float, float], float],
-        ]
-    ]:
-        return None
-
+    def hydro_sources(clas) -> list[Optional[Callable[[*Tuple[float,...]], float]]]:
+        return [None]
+    
     @simbi_classproperty
-    def mom_outer(
-        cls,
-    ) -> Optional[
-        Union[
-            Callable[[float], float],
-            Sequence[
-                Union[
-                    Callable[[float, float], float],
-                    Callable[[float, float, float], float],
-                ]
-            ],
-        ]
-    ]:
-        return None
-
-    @simbi_classproperty
-    def dens_outer(
-        cls,
-    ) -> Optional[
-        Union[
-            Callable[[float], float],
-            Callable[[float, float], float],
-            Callable[[float, float, float], float],
-        ]
-    ]:
-        return None
+    def boundary_sources(clas) -> list[Optional[Callable[[*Tuple[float,...]], float]]]:
+        return [None]
 
     @simbi_property
     def default_start_time(self) -> Union[DynamicArg, float]:
@@ -296,10 +262,6 @@ class BaseConfig(metaclass=abc.ABCMeta):
         return None
 
     @simbi_property
-    def boundary_sources(self) -> Optional[Union[NDArray[Any], Sequence[Any]]]:
-        return None
-
-    @simbi_property
     def cfl_number(self) -> float:
         return 0.1
 
@@ -322,14 +284,6 @@ class BaseConfig(metaclass=abc.ABCMeta):
     @simbi_property
     def engine_duration(self) -> float:
         return 0.0
-
-    @simbi_property
-    def gravity_sources(self) -> Optional[Sequence[NDArray[numpy_float]]]:
-        return None
-
-    @simbi_property
-    def magnetic_sources(self) -> Optional[Sequence[NDArray[numpy_float]]]:
-        return None
 
     @classmethod
     def _find_dynamic_args(cls) -> None:

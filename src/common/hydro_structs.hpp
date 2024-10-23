@@ -43,45 +43,17 @@ struct PrimData {
     std::vector<real> rho, v1, v2, v3, p, b1, b2, b3, chi;
 };
 
-struct DataWriteMembers {
-    int nx, ny, nz;
-    int xactive_zones, yactive_zones, zactive_zones;
-    int chkpt_idx, dimensions;
-    bool using_fourvelocity, mesh_motion;
-    real t, ad_gamma;
-    real x1min, x1max, x2min, x2max, x3min, x3max, dt;
-    std::string coord_system, regime;
-    std::string x1_cell_spacing, x2_cell_spacing, x3_cell_spacing;
-    std::string spatial_order, time_order;
-    std::vector<real> x1, x2, x3;
-    std::vector<std::string> boundary_conditions;
-
-    DataWriteMembers()
-        : nx(1),
-          ny(1),
-          nz(1),
-          x1min(0.0),
-          x1max(0.0),
-          x2min(0.0),
-          x2max(0.0),
-          x3min(0.0),
-          x3max(0.0)
-    {
-    }
-};
-
 struct InitialConditions {
     real tstart, chkpt_interval, dlogt;
     real plm_theta, engine_duration, gamma, cfl, tend;
     luint nx, ny, nz, chkpt_idx;
     bool quirk_smoothing, constant_sources;
-    std::vector<std::vector<real>> sources, gsources, bsources, bfield;
+    std::vector<std::vector<real>> sources, gsources, osources, bfield;
     std::vector<bool> object_cells;
     std::string data_directory, coord_system, solver;
     std::string x1_cell_spacing, x2_cell_spacing, x3_cell_spacing, regime;
     std::string spatial_order, time_order;
     std::vector<std::string> boundary_conditions;
-    std::vector<std::vector<real>> boundary_sources;
     std::vector<real> x1, x2, x3;
 };
 
@@ -1130,7 +1102,6 @@ namespace hydro3d {
 //=============================================
 //                SRHD
 //=============================================
-
 namespace sr1d {
     struct Eigenvals {
         real aL, aR, csL, csR;

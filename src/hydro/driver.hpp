@@ -37,11 +37,9 @@ namespace simbi {
             const InitialConditions& init_cond,
             std::function<real(real)> const& scale_factor,
             std::function<real(real)> const& scale_factor_derivative,
-            Func const& density_lambda = nullptr,
-            Func const& mom1_lambda    = nullptr,
-            Func const& mom2_lambda    = nullptr,
-            Func const& mom3_lambda    = nullptr,
-            Func const& enrg_lambda    = nullptr);
+            Func const& bsources,
+            Func const& hsources,
+            Func const& gsources);
     };
 
 }   // namespace simbi

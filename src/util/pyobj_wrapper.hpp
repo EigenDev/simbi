@@ -53,28 +53,37 @@ class PyObjWrapper
         return *this;
     }
 
-    double operator()(double x) const
+    double operator()(double t) const
     {
         if (held) {   // nullptr check
-            const auto res = call_obj(held, x);
+            const auto res = call_obj(held, t);
             return res;
         }
         return 0;
     }
 
-    double operator()(double x, double y) const
+    double operator()(double x, double t) const
     {
         if (held) {   // nullptr check
-            const auto res = call_obj2(held, x, y);
+            const auto res = call_obj2(held, x, t);
             return res;
         }
         return 0;
     }
 
-    double operator()(double x, double y, double z) const
+    double operator()(double x, double y, double t) const
     {
         if (held) {   // nullptr check
-            const auto res = call_obj3(held, x, y, z);
+            const auto res = call_obj3(held, x, y, t);
+            return res;
+        }
+        return 0;
+    }
+
+    double operator()(double x, double y, double z, double t) const
+    {
+        if (held) {   // nullptr check
+            const auto res = call_obj4(held, x, y, z, t);
             return res;
         }
         return 0;

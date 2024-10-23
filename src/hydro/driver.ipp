@@ -2,6 +2,7 @@
 #include <optional>
 
 using namespace simbi;
+using namespace simbi::hydrostate;
 
 template <typename F>
 std::optional<F> optional_wrapper(F func)
@@ -10,6 +11,17 @@ std::optional<F> optional_wrapper(F func)
         return func;
     }
     return {};
+}
+
+template <int dim, typename F>
+auto optional_vec(std::vector<F> const& vfunc)
+{
+    // vector of optional functions
+    std::vector<fopt<dim>> res;
+    for (auto&& i : vfunc) {
+        res.push_back(optional_wrapper(i));
+    }
+    return res;
 }
 
 Driver::Driver() = default;
@@ -24,11 +36,9 @@ void Driver::run(
     const InitialConditions& init_cond,
     std::function<real(real)> const& scale_factor,
     std::function<real(real)> const& scale_factor_derivative,
-    Func const& density_lambda,
-    Func const& mom1_lambda,
-    Func const& mom2_lambda,
-    Func const& mom3_lambda,
-    Func const& enrg_lambda
+    Func const& bsources,
+    Func const& hsources,
+    Func const& gsources
 )
 {
     if (dim == 1) {
@@ -38,11 +48,9 @@ void Driver::run(
             regime,
             scale_factor,
             scale_factor_derivative,
-            optional_wrapper(density_lambda),
-            optional_wrapper(mom1_lambda),
-            std::nullopt,
-            std::nullopt,
-            optional_wrapper(enrg_lambda)
+            optional_vec<1>(bsources),
+            optional_vec<1>(hsources),
+            optional_vec<1>(gsources)
         );
     }
     else if (dim == 2) {
@@ -52,11 +60,9 @@ void Driver::run(
             regime,
             scale_factor,
             scale_factor_derivative,
-            optional_wrapper(density_lambda),
-            optional_wrapper(mom1_lambda),
-            optional_wrapper(mom2_lambda),
-            std::nullopt,
-            optional_wrapper(enrg_lambda)
+            optional_vec<2>(bsources),
+            optional_vec<2>(hsources),
+            optional_vec<2>(gsources)
         );
     }
     else {
@@ -66,11 +72,9 @@ void Driver::run(
             regime,
             scale_factor,
             scale_factor_derivative,
-            optional_wrapper(density_lambda),
-            optional_wrapper(mom1_lambda),
-            optional_wrapper(mom2_lambda),
-            optional_wrapper(mom3_lambda),
-            optional_wrapper(enrg_lambda)
+            optional_vec<3>(bsources),
+            optional_vec<3>(hsources),
+            optional_vec<3>(gsources)
         );
     }
 }

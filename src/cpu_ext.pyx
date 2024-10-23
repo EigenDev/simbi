@@ -34,11 +34,9 @@ cdef class SimState:
         dict sim_info,
         a,
         adot,
-        dens_lambda = None,
-        mom1_lambda = None,
-        mom2_lambda = None,
-        mom3_lambda = None,
-        enrg_lambda = None,
+        boundary_sources = [None],
+        hydro_sources = [None],
+        gravity_sources = [None],
     ):
         cdef InitialConditions sim_cond 
         sim_cond.tend             = sim_info['tend']
@@ -56,20 +54,21 @@ cdef class SimState:
         sim_cond.x2_cell_spacing  = sim_info['x2_cell_spacing']
         sim_cond.x3_cell_spacing  = sim_info['x3_cell_spacing']
         sim_cond.object_cells     = sim_info['object_cells']
-        sim_cond.sources          = sim_info['sources']
-        sim_cond.gsources         = sim_info['gsource']
         sim_cond.data_directory   = sim_info['data_directory']
         sim_cond.coord_system     = sim_info['coord_system']
         sim_cond.solver           = sim_info['solver']
         sim_cond.gamma            = sim_info['gamma']
         sim_cond.x1               = sim_info['x1']
-        sim_cond.boundary_sources = sim_info['boundary_sources']
         sim_cond.cfl              = sim_info['cfl']
         sim_cond.boundary_conditions = sim_info['boundary_conditions']
         sim_cond.chkpt_idx           = sim_info['chkpt_idx']
         sim_cond.constant_sources    = sim_info['constant_sources']
         sim_cond.quirk_smoothing     = sim_info['quirk_smoothing']
         sim_cond.bfield              = sim_info["bfield"]
+        mhd: bool = False 
+        if sim_info["bfield"] is not None:
+            mhd = True
+            nvar = 9
 
         if dim > 1:
             sim_cond.x2 = sim_info['x2']
@@ -79,11 +78,20 @@ cdef class SimState:
         # convert python lambdas to cpp lambdas
         cdef PyObjWrapper a_cpp    = PyObjWrapper(a)
         cdef PyObjWrapper adot_cpp = PyObjWrapper(adot)
-        cdef PyObjWrapper d_cpp    = PyObjWrapper(dens_lambda) if dens_lambda else PyObjWrapper()
-        cdef PyObjWrapper m1_cpp   = PyObjWrapper(mom1_lambda) if mom1_lambda else PyObjWrapper()
-        cdef PyObjWrapper m2_cpp   = PyObjWrapper(mom2_lambda) if mom2_lambda else PyObjWrapper()
-        cdef PyObjWrapper m3_cpp   = PyObjWrapper(mom3_lambda) if mom3_lambda else PyObjWrapper()
-        cdef PyObjWrapper e_cpp    = PyObjWrapper(enrg_lambda) if enrg_lambda else PyObjWrapper()
+
+        # push the vector of lambdas into a c++ compliant vector of functors
+        cdef vector[PyObjWrapper] bsource_vec 
+        cdef vector[PyObjWrapper] hsource_vec
+        cdef vector[PyObjWrapper] gsource_vec
+
+        for qq in boundary_sources:
+            bsource_vec.push_back(PyObjWrapper(qq) if qq else PyObjWrapper())
+        
+        for qq in boundary_sources:
+            hsource_vec.push_back(PyObjWrapper(qq) if qq else PyObjWrapper())
+        
+        for qq in gravity_sources:
+            gsource_vec.push_back(PyObjWrapper(qq) if qq else PyObjWrapper())
 
         self.driver_state.run(
             state, 
@@ -92,9 +100,7 @@ cdef class SimState:
             sim_cond,
             a_cpp,
             adot_cpp,
-            d_cpp,
-            m1_cpp,
-            m2_cpp,
-            m3_cpp,
-            e_cpp
+            bsource_vec,
+            hsource_vec,
+            gsource_vec
         )

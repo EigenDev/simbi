@@ -858,6 +858,7 @@ void Newtonian<dim>::advance()
         const real x1r    = get_x1face(ii, 1);
         const real vfaceL = (homolog) ? x1l * hubble_param : hubble_param;
         const real vfaceR = (homolog) ? x1r * hubble_param : hubble_param;
+        const real vfs[2] = {vfaceL, vfaceR};
 
         const auto il = get_real_idx(ii - 1, 0, xag);
         const auto ir = get_real_idx(ii + 1, 0, xag);
@@ -898,7 +899,7 @@ void Newtonian<dim>::advance()
                 pR = pR - plm_gradient(pR, pL, pRR, plm_theta) * 0.5;
             }
             ib_modify<dim>(pR, pL, object_x[q], 1);
-            fri[q] = (this->*riemann_solve)(pL, pR, 1, 0);
+            fri[q] = (this->*riemann_solve)(pL, pR, 1, vfs[q]);
             if constexpr (dim > 1) {
                 // fluxes in j direction
                 pL = prb[idx3(txa, tya + q - 1, tza, sx, sy, 0)];
@@ -1208,36 +1209,31 @@ template <int dim>
 void Newtonian<dim>::simulate(
     std::function<real(real)> const& a,
     std::function<real(real)> const& adot,
-    std::optional<Newtonian<dim>::function_t> const& d_outer,
-    std::optional<Newtonian<dim>::function_t> const& m1_outer,
-    std::optional<Newtonian<dim>::function_t> const& m2_outer,
-    std::optional<Newtonian<dim>::function_t> const& m3_outer,
-    std::optional<Newtonian<dim>::function_t> const& e_outer
+    const std::vector<std::optional<Newtonian<dim>::function_t>>& bsources,
+    const std::vector<std::optional<Newtonian<dim>::function_t>>& hsources,
+    const std::vector<std::optional<Newtonian<dim>::function_t>>& gsources
 )
 {
     anyDisplayProps();
-    // set the primitive functionals
-    this->dens_outer = d_outer.value_or(nullptr);
-    this->mom1_outer = m1_outer.value_or(nullptr);
-    this->mom2_outer = m2_outer.value_or(nullptr);
-    this->mom3_outer = m3_outer.value_or(nullptr);
-    this->enrg_outer = e_outer.value_or(nullptr);
+    // set the boundary, hydro, and gracity sources terms
+    // respectively
+    for (auto&& q : bsources) {
+        this->bsources.push_back(q.value_or(nullptr));
+    }
+    for (auto&& q : hsources) {
+        this->hsources.push_back(q.value_or(nullptr));
+    }
+    for (auto&& q : gsources) {
+        this->gsources.push_back(q.value_or(nullptr));
+    }
 
-    if constexpr (dim == 1) {
-        this->all_outer_bounds =
-            (d_outer.has_value() && m1_outer.has_value() && enrg_outer);
-    }
-    else if constexpr (dim == 2) {
-        this->all_outer_bounds =
-            (d_outer.has_value() && m1_outer.has_value() &&
-             m2_outer.has_value() && e_outer.has_value());
-    }
-    else {
-        this->all_outer_bounds =
-            (d_outer.has_value() && m1_outer.has_value() &&
-             m2_outer.has_value() && m3_outer.has_value() &&
-             e_outer.has_value());
-    }
+    // check if ~all~ boundary sources have been set.
+    // if the user forgot one, the code will run with
+    // and outflow outer boundary condition
+    this->all_outer_bounds =
+        std::all_of(bsources.begin(), bsources.end(), [](auto q) {
+            return q != nullptr;
+        });
 
     // Stuff for moving mesh
     this->hubble_param = adot(t) / a(t);
@@ -1248,13 +1244,9 @@ void Newtonian<dim>::simulate(
         if constexpr (dim == 1) {
             outer_zones.resize(spatial_order == "pcm" ? 1 : 2);
             const real dV = get_cell_volume(active_zones - 1);
-            outer_zones[0] =
-                conserved_t{
-                  dens_outer(x1max),
-                  mom1_outer(x1max),
-                  enrg_outer(x1max)
-                } *
-                dV;
+            for (int qq = 0; qq < nvars; qq++) {
+                outer_zones[0][qq] = this->bsources[qq](x1max, t) * dV;
+            }
             outer_zones.copyToGpu();
         }
         else if constexpr (dim == 2) {
@@ -1262,14 +1254,10 @@ void Newtonian<dim>::simulate(
             for (luint jj = 0; jj < ny; jj++) {
                 const auto jreal = get_real_idx(jj, radius, yag);
                 const real dV    = get_cell_volume(nxv - 1, jreal);
-                outer_zones[jj] =
-                    conserved_t{
-                      dens_outer(x1max, x2[jreal]),
-                      mom1_outer(x1max, x2[jreal]),
-                      mom2_outer(x1max, x2[jreal]),
-                      enrg_outer(x1max, x2[jreal])
-                    } *
-                    dV;
+                for (int qq = 0; qq < nvars; qq++) {
+                    outer_zones[jj][qq] =
+                        this->bsources[qq](x1max, x2[jreal], t) * dV;
+                }
             }
             outer_zones.copyToGpu();
         }
@@ -1280,15 +1268,11 @@ void Newtonian<dim>::simulate(
                 for (luint jj = 0; jj < ny; jj++) {
                     const auto jreal = get_real_idx(jj, radius, yag);
                     const real dV    = get_cell_volume(nxv - 1, jreal, kreal);
-                    outer_zones[kk * ny + jj] =
-                        conserved_t{
-                          dens_outer(x1max, x2[jreal], x3[kreal]),
-                          mom1_outer(x1max, x2[jreal], x3[kreal]),
-                          mom2_outer(x1max, x2[jreal], x3[kreal]),
-                          mom3_outer(x1max, x2[jreal], x3[kreal]),
-                          enrg_outer(x1max, x2[jreal], x3[kreal])
-                        } *
-                        dV;
+                    for (int qq = 0; qq < nvars; qq++) {
+                        outer_zones[kk * ny + jj][qq] =
+                            this->bsources[qq](x1max, x2[jreal], x3[kreal], t) *
+                            dV;
+                    }
                 }
             }
             outer_zones.copyToGpu();
@@ -1303,30 +1287,30 @@ void Newtonian<dim>::simulate(
     bcs.resize(dim * 2);
     for (int i = 0; i < 2 * dim; i++) {
         this->bcs[i] = boundary_cond_map.at(boundary_conditions[i]);
-        if constexpr (dim == 1) {
-            this->inflow_zones[i] = conserved_t{
-              boundary_sources[i][0],
-              boundary_sources[i][1],
-              boundary_sources[i][2]
-            };
-        }
-        else if constexpr (dim == 2) {
-            this->inflow_zones[i] = conserved_t{
-              boundary_sources[i][0],
-              boundary_sources[i][1],
-              boundary_sources[i][2],
-              boundary_sources[i][3]
-            };
-        }
-        else {
-            this->inflow_zones[i] = conserved_t{
-              boundary_sources[i][0],
-              boundary_sources[i][1],
-              boundary_sources[i][2],
-              boundary_sources[i][3],
-              boundary_sources[i][4]
-            };
-        }
+        // if constexpr (dim == 1) {
+        //     this->inflow_zones[i] = conserved_t{
+        //       boundary_sources[i][0],
+        //       boundary_sources[i][1],
+        //       boundary_sources[i][2]
+        //     };
+        // }
+        // else if constexpr (dim == 2) {
+        //     this->inflow_zones[i] = conserved_t{
+        //       boundary_sources[i][0],
+        //       boundary_sources[i][1],
+        //       boundary_sources[i][2],
+        //       boundary_sources[i][3]
+        //     };
+        // }
+        // else {
+        //     this->inflow_zones[i] = conserved_t{
+        //       boundary_sources[i][0],
+        //       boundary_sources[i][1],
+        //       boundary_sources[i][2],
+        //       boundary_sources[i][3],
+        //       boundary_sources[i][4]
+        //     };
+        // }
     }
 
     cons.resize(total_zones);
@@ -1384,7 +1368,6 @@ void Newtonian<dim>::simulate(
         }
     }
     // Deallocate duplicate memory and setup the system
-    set_output_params(dim, "euler");
     deallocate_state();
     offload();
     compute_bytes_and_strides<primitive_t>(dim);
@@ -1399,9 +1382,6 @@ void Newtonian<dim>::simulate(
         adapt_dt();
     }
 
-    // Using a sigmoid decay function to represent when the source terms turn
-    // off.
-    time_constant = sigmoid(t, engine_duration, step * dt, constant_sources);
     // Save initial condition
     if (t == 0 || init_chkpt_idx == 0) {
         write_to_file(*this);
@@ -1497,8 +1477,7 @@ void Newtonian<dim>::simulate(
             else {
                 adapt_dt();
             }
-            time_constant =
-                sigmoid(t, engine_duration, step * dt, constant_sources);
+
             t += step * dt;
             if (mesh_motion) {
                 // update x1 endpoints

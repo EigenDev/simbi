@@ -10,6 +10,7 @@
 #include "srhd.hpp"   // for SRHD
 #include <memory>     // for make_unique, unique_ptr
 #include <variant>    // for visit, variant
+#include <vector>
 
 namespace simbi {
     namespace hydrostate {
@@ -17,14 +18,12 @@ namespace simbi {
         void simulate<1>(
             std::vector<std::vector<real>>& state,
             const InitialConditions& init_cond,
-            const std::string regime,
+            const std::string& regime,
             std::function<real(real)> const& scale_factor,
             std::function<real(real)> const& scale_factor_derivative,
-            std::optional<typename func_type<1>::type> const& density_lambda,
-            std::optional<typename func_type<1>::type> const& mom1_lambda,
-            std::optional<typename func_type<1>::type> const& mom2_lambda,
-            std::optional<typename func_type<1>::type> const& mom3_lambda,
-            std::optional<typename func_type<1>::type> const& enrg_lambda
+            std::vector<fopt<1>> const& bsources,
+            std::vector<fopt<1>> const& hsources,
+            std::vector<fopt<1>> const& gsources
         )
         {
             using sr_rm_or_nt = std::variant<
@@ -48,11 +47,9 @@ namespace simbi {
                     arg->simulate(
                         scale_factor,
                         scale_factor_derivative,
-                        density_lambda,
-                        mom1_lambda,
-                        nullptr,
-                        nullptr,
-                        enrg_lambda
+                        bsources,
+                        hsources,
+                        gsources
                     );
                 },
                 self
@@ -63,14 +60,12 @@ namespace simbi {
         void simulate<2>(
             std::vector<std::vector<real>>& state,
             const InitialConditions& init_cond,
-            const std::string regime,
+            const std::string& regime,
             std::function<real(real)> const& scale_factor,
             std::function<real(real)> const& scale_factor_derivative,
-            std::optional<typename func_type<2>::type> const& density_lambda,
-            std::optional<typename func_type<2>::type> const& mom1_lambda,
-            std::optional<typename func_type<2>::type> const& mom2_lambda,
-            std::optional<typename func_type<2>::type> const& mom3_lambda,
-            std::optional<typename func_type<2>::type> const& enrg_lambda
+            std::vector<fopt<2>> const& bsources,
+            std::vector<fopt<2>> const& hsources,
+            std::vector<fopt<2>> const& gsources
         )
         {
             using sr_rm_or_nt = std::variant<
@@ -93,11 +88,9 @@ namespace simbi {
                     arg->simulate(
                         scale_factor,
                         scale_factor_derivative,
-                        density_lambda,
-                        mom1_lambda,
-                        mom2_lambda,
-                        mom3_lambda,
-                        enrg_lambda
+                        bsources,
+                        hsources,
+                        gsources
                     );
                 },
                 self
@@ -108,14 +101,12 @@ namespace simbi {
         void simulate<3>(
             std::vector<std::vector<real>>& state,
             const InitialConditions& init_cond,
-            const std::string regime,
+            const std::string& regime,
             std::function<real(real)> const& scale_factor,
             std::function<real(real)> const& scale_factor_derivative,
-            std::optional<typename func_type<3>::type> const& density_lambda,
-            std::optional<typename func_type<3>::type> const& mom1_lambda,
-            std::optional<typename func_type<3>::type> const& mom2_lambda,
-            std::optional<typename func_type<3>::type> const& mom3_lambda,
-            std::optional<typename func_type<3>::type> const& enrg_lambda
+            std::vector<fopt<3>> const& bsources,
+            std::vector<fopt<3>> const& hsources,
+            std::vector<fopt<3>> const& gsources
         )
         {
             using sr_rm_or_nt = std::variant<
@@ -139,11 +130,9 @@ namespace simbi {
                     arg->simulate(
                         scale_factor,
                         scale_factor_derivative,
-                        density_lambda,
-                        mom1_lambda,
-                        mom2_lambda,
-                        mom3_lambda,
-                        enrg_lambda
+                        bsources,
+                        hsources,
+                        gsources
                     );
                 },
                 self

@@ -37,17 +37,16 @@ class Hydro:
     x1_cell_spacing: StrOrNone = None
     x2_cell_spacing: StrOrNone = None
     x3_cell_spacing: StrOrNone = None
-    sources: SequenceOrNone = None
     passive_scalars: SequenceOrNone = None
     scale_factor: CallableOrNone = None
     scale_factor_derivative: CallableOrNone = None
     discontinuity: bool = False
-    dens_outer: CallableOrNone = None
-    edens_outer: CallableOrNone = None
+    bsources: list[CallableOrNone] = [None]
+    hsources: list[CallableOrNone] = [None]
+    gsources: list[CallableOrNone] = [None]
     x1: Any = []
     x2: Any = []
     x3: Any = []
-    mom_outer: Optional[Union[Sequence[Callable[..., Any]], Callable[..., Any]]] = None
     boundary_conditions: list[str]
     coord_system: str
     regime: str
@@ -222,10 +221,12 @@ class Hydro:
             if key != "self":
                 if isinstance(param, (float, np.float64)):
                     val_str: Any = f"{param:.3f}"
-                elif key == "sources" and param is not None:
-                    val_str = f"user-defined sources terms"
-                elif key == "gsources" and param is not None:
+                elif key == "bsources" and not all(item is None for item in param):
+                    val_str = f"user-defined boundary sources terms"
+                elif key == "gsources" and not all(item is None for item in param):
                     val_str = f"user-defined gravity sources"
+                elif key == "hsources" and not all(item is None for item in param):
+                    val_str = f"user-defined hydro sources"
                 elif callable(param):
                     val_str = f"user-defined {key} function"
                 elif isinstance(param, tuple):
@@ -275,73 +276,29 @@ class Hydro:
             logger.info(f"{my_str} {val_str}")
         logger.info("=" * 80)
 
-    def _place_boundary_sources(
-        self, boundary_sources: Union[Sequence[Any], NDArray[Any]], spatial_order: str
-    ) -> NDArray[Any]:
-        boundary_sources = [np.array([val]).flat for val in boundary_sources]
-        max_len = np.max([len(a) for a in boundary_sources])
-        boundary_sources = np.asanyarray(
-            [
-                np.pad(a, (0, max_len - len(a)), "constant", constant_values=0)
-                for a in boundary_sources
-            ]
-        )
-        edges = [0, -1] if spatial_order == "pcm" else [0, 1, -1, -2]
-        view = self.u[: self.dimensionality + 2]
-
-        slices: list[Any]
-        if view.ndim == 1:
-            slices = [(..., i) for i in edges]
-        elif view.ndim == 2:
-            slices = [np.s_[:, i, :] for i in edges] + [np.s_[..., i] for i in edges]
-        else:
-            slices = (
-                [np.s_[..., i] for i in edges]
-                + [np.s_[..., i, :] for i in edges]
-                + [np.s_[:, i, ...] for i in edges]
-            )
-
-        order = 1 if spatial_order == "pcm" else 2
-        if self.dimensionality == 3:
-            source_transform: Any = np.s_[:, None, None]
-        elif self.dimensionality == 2:
-            source_transform = np.s_[:, None]
-        else:
-            source_transform = np.s_[:]
-
-        for boundary in range(self.dimensionality * len(edges)):
-            source = boundary_sources[boundary // order]
-            if any(val != 0 for val in source):
-                view[slices[boundary]] = source[source_transform]
-        return boundary_sources
-
     def _generate_the_grid(
         self, x1_cell_spacing: str, x2_cell_spacing: str, x3_cell_spacing: str
     ) -> None:
         dim = self.dimensionality
         vfunc: dict[str, Callable[..., Any]] = {
-            'log': np.geomspace,
-            'linear': np.linspace
+            "log": np.geomspace,
+            "linear": np.linspace,
         }
-        
-        csp = [
-            x1_cell_spacing,
-            x2_cell_spacing,
-            x3_cell_spacing
-        ]
-        verts = [   
+
+        csp = [x1_cell_spacing, x2_cell_spacing, x3_cell_spacing]
+        verts = [
             self.resolution[0] + 1,
             2 if dim < 2 else self.resolution[1] + 1,
-            2 if dim < 3 else self.resolution[2] + 1
+            2 if dim < 3 else self.resolution[2] + 1,
         ]
-        
+
         cgeom = list(self.geometry)
-        
+
         # ensure geometry is a tuple of tuples
         # for 1D runs
         if not helpers.tuple_of_tuples(cgeom):
             cgeom = [cgeom]
-        
+
         # if there is a breakpoint in the geometry
         # ignore it for now
         for idx, val in enumerate(cgeom):
@@ -349,13 +306,15 @@ class Hydro:
                 cgeom[idx] = val[:2]
             elif len(val) == 3:
                 cgeom[idx] = val[:2]
-                
+
         for didx, dir in zip(range(self.dimensionality), [self.x1, self.x2, self.x3]):
             if len(dir) == 0:
                 dir[:] = vfunc[csp[didx]](*cgeom[didx], verts[didx])
             elif dir.shape[0] != verts[didx]:
-                raise ValueError(f"x{didx+1} vertices does not match the x{didx+1}-resolution + 1")
-            
+                raise ValueError(
+                    f"x{didx+1} vertices does not match the x{didx+1}-resolution + 1"
+                )
+
         self.x1 = np.asanyarray(self.x1)
         self.x2 = np.asanyarray(self.x2)
         self.x3 = np.asanyarray(self.x3)
@@ -396,9 +355,6 @@ class Hydro:
         x2_cell_spacing: str = "linear",
         x3_cell_spacing: str = "linear",
         cfl: float = 0.4,
-        sources: Optional[NDArray[Any]] = None,
-        gsources: Optional[NDArray[Any]] = None,
-        bsources: Optional[NDArray[Any]] = None,
         passive_scalars: Optional[Union[NDArray[Any], int]] = None,
         solver: str = "hllc",
         chkpt: Optional[str] = None,
@@ -411,13 +367,10 @@ class Hydro:
         constant_sources: bool = False,
         scale_factor: Optional[Callable[[float], float]] = None,
         scale_factor_derivative: Optional[Callable[[float], float]] = None,
-        dens_outer: Optional[Callable[..., float]] = None,
-        mom_outer: Optional[
-            Union[Callable[..., float], Sequence[Callable[..., float]]]
-        ] = None,
-        edens_outer: Optional[Callable[..., float]] = None,
+        bsources: list[CallableOrNone] = [None],
+        hsources: list[CallableOrNone] = [None],
+        gsources: list[CallableOrNone] = [None],
         object_positions: Optional[Union[Sequence[Any], NDArray[Any]]] = None,
-        boundary_sources: Optional[Union[Sequence[Any], NDArray[Any]]] = None,
         spatial_order: str = "plm",
         time_order: str = "rk2",
     ) -> None:
@@ -446,9 +399,6 @@ class Hydro:
             constant_source (bool):      Set to true if wanting the source terms to never die
             scale_factor              (Callable):   The scalar function for moving mesh. Think cosmology
             scale_factor_derivative   (Callable):   The first derivative of the scalar function for moving mesh
-            dens_outer     (Callable):   The density to be fed into outer zones if moving mesh
-            mom_outer      (Callables):  idem but for momentum density
-            edens_outer    (Callable):   idem but for energy density
             object_positions (boolean array_lie): An optional boolean array that masks the immersed boundary
             boundary_source (array_like): An array of conserved quantities at the boundaries of the grid
             spatial_order str: space order of integration [pcm or plm]
@@ -457,6 +407,10 @@ class Hydro:
         Returns:
             solution (array): The hydro solution containing the primitive variables
         """
+        bsources = helpers.as_list(bsources)
+        hsources = helpers.as_list(hsources)
+        gsources = helpers.as_list(gsources)
+        
         if spatial_order not in ["pcm", "plm"]:
             raise ValueError(f"Space order can only be one of {['pcm', 'plm']}")
         if time_order not in ["rk1", "rk2"]:
@@ -513,28 +467,12 @@ class Hydro:
 
         self.start_time = self.start_time or tstart
 
-        #######################################################################
-        # Check if boundary source terms given. If given as a jagged array,
-        # pad the missing members with zeros
-        #######################################################################
-        if boundary_sources is None:
-            boundary_sources = np.zeros((2 * self.dimensionality, len(self.u[:, 0])))
-        else:
-            boundary_sources = self._place_boundary_sources(
-                boundary_sources=boundary_sources, spatial_order=spatial_order
+        if solver == "hlld" and not self.mhd:
+            logger.info(
+                "HLLD solver not available for non-MHD runs. Switching to HLLC solver"
             )
+            solver = "hllc"
 
-        for idx, bc in enumerate(self.boundary_conditions):
-            if bc == "inflow" and 0 in [
-                boundary_sources[idx][0],
-                boundary_sources[idx][-1],
-            ]:
-                self.boundary_conditions[idx] = str("outflow")
-
-        if solver == 'hlld' and not self.mhd:
-            logger.info("HLLD solver not available for non-MHD runs. Switching to HLLC solver")
-            solver = 'hllc'
-            
         # Convert strings to byte arrays
         cython_data_directory = os.path.join(data_directory, "").encode("utf-8")
         cython_coordinates = self.coord_system.encode("utf-8")
@@ -594,18 +532,6 @@ class Hydro:
             f"Computing solution using {spatial_order.upper()} in space, {time_order.upper()} in time..."
         )
 
-        sources = (
-            np.zeros(self.dimensionality + 2)
-            if sources is None
-            else np.asanyarray(sources)
-        )
-
-        sources = sources.reshape(sources.shape[0], -1)
-        gsources = np.zeros(3) if gsources is None else np.asanyarray(gsources)
-        gsources = gsources.reshape(gsources.shape[0], -1)
-        bsources = np.zeros(3) if bsources is None else np.asanyarray(bsources)
-        bsources = bsources.reshape(bsources.shape[0], -1)
-
         if compute_mode == "gpu":
             if self.dimensionality == 1:
                 if "GPUXBLOCK_SIZE" not in os.environ:
@@ -636,7 +562,6 @@ class Hydro:
 
         init_conditions = {
             "gamma": self.gamma,
-            "sources": sources,
             "tstart": self.start_time,
             "tend": tend,
             "cfl": cfl,
@@ -654,13 +579,11 @@ class Hydro:
             "x3_cell_spacing": x3_cell_spacing.encode("utf-8"),
             "solver": cython_solver,
             "constant_sources": constant_sources,
-            "boundary_sources": boundary_sources,
             "coord_system": cython_coordinates,
             "quirk_smoothing": quirk_smoothing,
             "x1": self.x1,
             "x2": self.x2,
             "x3": self.x3,
-            "gsource": gsources,
             "nx": self.nx,
             "ny": self.ny,
             "nz": self.nz,
@@ -672,12 +595,11 @@ class Hydro:
         }
 
         if self.mhd:
-            init_conditions["bsources"] = bsources
             if self.discontinuity:
                 b1 = np.zeros(shape=(nzp, nyp, init_conditions["nxv"]))
                 b2 = np.zeros(shape=(nzp, init_conditions["nyv"], nxp))
                 b3 = np.zeros(shape=(init_conditions["nzv"], nyp, nxp))
-                
+
                 region_one = self.x1 < self.geometry[0][2]
                 region_two = np.logical_not(region_one)
                 xc = helpers.calc_centroid(self.x1, coord_system=self.coord_system)
@@ -694,25 +616,24 @@ class Hydro:
                 b2 = self.initial_state[6]
                 b3 = self.initial_state[7]
             init_conditions["bfield"] = [b1.flat, b2.flat, b3.flat]
-        lambdas: dict[str, Optional[Callable[..., float]]] = {
-            "dens_lambda": None,
-            "mom1_lambda": None,
-            "mom2_lambda": None,
-            "mom3_lambda": None,
-            "enrg_lambda": None,
+
+
+        lambdas: dict[str, list[Optional[Callable[..., float]]]] = {
+            "boundary_sources": bsources,
+            "hydro_sources": hsources,
+            "gravity_sources": gsources,
         }
-        if mesh_motion and dens_outer and mom_outer and edens_outer:
-            momentum_components = cast(Sequence[Callable[..., float]], mom_outer)
-            lambdas["dens_lambda"] = dens_outer
-            lambdas["enrg_lambda"] = edens_outer
-            if self.dimensionality == 1:
-                mom_outer = cast(Callable[..., float], mom_outer)
-                lambdas["mom1_lambda"] = mom_outer
-            else:
-                lambdas["mom1_lambda"] = momentum_components[0]
-                lambdas["mom2_lambda"] = momentum_components[1]
-                if self.dimensionality == 3:
-                    lambdas["mom3_lambda"] = momentum_components[2]
+        for name, source in lambdas.items():
+            ngiven = len(source)
+            if not all(item is None for item in source):
+                nterms: int = self.dimensionality + 3 * ((source != gsources) + self.mhd)
+                if ngiven < nterms:
+                    if ngiven == nterms - 1:
+                        source += [lambda x,t: 0.0]
+                    else:
+                        raise ValueError(
+                            f"Number of {name} terms should be equal to the number {nterms}"
+                        )
 
         lib_mode = "cpu" if compute_mode in ["cpu", "omp"] else "gpu"
         sim_state = getattr(
@@ -729,7 +650,7 @@ class Hydro:
             helpers.print_progress()
 
         state_contig = self.u.reshape(self.u.shape[0], -1)
-        
+
         sim_state().run(
             state=state_contig,
             dim=self.dimensionality,

@@ -51,19 +51,19 @@ namespace simbi {
 
         using function_t = typename std::conditional_t<
             dim == 1,
-            std::function<real(real)>,
+            std::function<real(real, real)>,
             std::conditional_t<
                 dim == 2,
-                std::function<real(real, real)>,
-                std::function<real(real, real, real)>>>;
+                std::function<real(real, real, real)>,
+                std::function<real(real, real, real, real)>>>;
 
-        function_t dens_outer;
-        function_t mom1_outer;
-        function_t mom2_outer;
-        function_t mom3_outer;
-        function_t enrg_outer;
+        std::vector<function_t> bsources;   // boundary sources
+        std::vector<function_t> hsources;   // hydro sources
+        std::vector<function_t> gsources;   // gravity sources
 
-        const static int dimensions = dim;
+        constexpr static int dimensions     = dim;
+        constexpr static int nvars          = dim + 3;
+        constexpr static std::string regime = "srhd";
 
         /* Shared Data Members */
         ndarray<primitive_t> prims;
@@ -129,11 +129,9 @@ namespace simbi {
         void simulate(
             std::function<real(real)> const& a,
             std::function<real(real)> const& adot,
-            std::optional<function_t> const& d_outer  = nullptr,
-            std::optional<function_t> const& s1_outer = nullptr,
-            std::optional<function_t> const& s2_outer = nullptr,
-            std::optional<function_t> const& s3_outer = nullptr,
-            std::optional<function_t> const& e_outer  = nullptr
+            const std::vector<std::optional<function_t>>& boundary_sources,
+            const std::vector<std::optional<function_t>>& hydro_sources,
+            const std::vector<std::optional<function_t>>& gravity_sources
         );
 
         void offload()
@@ -142,28 +140,11 @@ namespace simbi {
             prims.copyToGpu();
             pressure_guess.copyToGpu();
             dt_min.copyToGpu();
-            density_source.copyToGpu();
-            m1_source.copyToGpu();
-            if constexpr (dim > 1) {
-                m2_source.copyToGpu();
-            }
-            if constexpr (dim > 2) {
-                m3_source.copyToGpu();
-            }
             if constexpr (dim > 1) {
                 object_pos.copyToGpu();
             }
-            energy_source.copyToGpu();
             inflow_zones.copyToGpu();
             bcs.copyToGpu();
-            troubled_cells.copyToGpu();
-            sourceG1.copyToGpu();
-            if constexpr (dim > 1) {
-                sourceG2.copyToGpu();
-            }
-            if constexpr (dim > 2) {
-                sourceG3.copyToGpu();
-            }
         }
 
         DUAL constexpr real get_x1face(const lint ii, const int side) const;

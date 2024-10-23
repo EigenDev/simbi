@@ -30,6 +30,20 @@
 #include <string>                 // for string, operator<=>
 #include <type_traits>            // for enable_if
 
+std::unordered_map<std::string, simbi::Cellspacing> const str2cell = {
+  {"log", simbi::Cellspacing::LOGSPACE},
+  {"linear", simbi::Cellspacing::LINSPACE}
+  // {"log-linear",Cellspacing},
+  // {"linear-log",Cellspacing},
+};
+
+std::unordered_map<simbi::Cellspacing, std::string> const cell2str = {
+  {simbi::Cellspacing::LOGSPACE, "log"},
+  {simbi::Cellspacing::LINSPACE, "linear"}
+  // {"log-linear",Cellspacing},
+  // {"linear-log",Cellspacing},
+};
+
 // forward declaration
 struct PrimData;
 
@@ -383,27 +397,6 @@ namespace simbi {
                 return active_zones - 1;
             }
             return (idx - offset > 0) * (idx - offset);
-        }
-
-        /**
-         * @brief  Evaluate the sigmoid function at a time t
-         * @param t current time
-         * @param tduration drop-off location of function
-         * @param time_step time step
-         * @param constant_sources flag to check if the source terms are
-         * constant
-         */
-        inline real sigmoid(
-            const real t,
-            const real tduration,
-            const real time_step,
-            const bool constant_sources
-        )
-        {
-            if (constant_sources) {
-                return 1.0 / time_step;
-            }
-            return 1.0 / (1.0 + std::exp(10.0 * (t - tduration)));
         }
 
         /**

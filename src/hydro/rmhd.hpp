@@ -42,11 +42,11 @@ namespace simbi {
         using mag_fourvec_t = mag_four_vec<dim>;
         using function_t    = typename std::conditional_t<
                dim == 1,
-               std::function<real(real)>,
+               std::function<real(real, real)>,
                std::conditional_t<
                    dim == 2,
-                   std::function<real(real, real)>,
-                   std::function<real(real, real, real)>>>;
+                   std::function<real(real, real, real)>,
+                   std::function<real(real, real, real, real)>>>;
         template <typename T>
         using RiemannFuncPointer = conserved_t (T::*)(
             const primitive_t&,
@@ -55,17 +55,13 @@ namespace simbi {
             const real
         ) const;
         RiemannFuncPointer<RMHD<dim>> riemann_solve;
+        constexpr static int dimensions     = dim;
+        constexpr static int nvars          = dim + 3;
+        constexpr static std::string regime = "srmhd";
 
-        function_t dens_outer;
-        function_t mom1_outer;
-        function_t mom2_outer;
-        function_t mom3_outer;
-        function_t enrg_outer;
-        function_t mag1_outer;
-        function_t mag2_outer;
-        function_t mag3_outer;
-
-        const static int dimensions = dim;
+        std::vector<function_t> bsources;   // boundary sources
+        std::vector<function_t> hsources;   // hydro sources
+        std::vector<function_t> gsources;   // gravity sources
 
         /* Shared Data Members */
         ndarray<primitive_t> prims;
@@ -160,11 +156,9 @@ namespace simbi {
         void simulate(
             std::function<real(real)> const& a,
             std::function<real(real)> const& adot,
-            std::optional<function_t> const& d_outer  = nullptr,
-            std::optional<function_t> const& s1_outer = nullptr,
-            std::optional<function_t> const& s2_outer = nullptr,
-            std::optional<function_t> const& s3_outer = nullptr,
-            std::optional<function_t> const& e_outer  = nullptr
+            const std::vector<std::optional<function_t>>& boundary_sources,
+            const std::vector<std::optional<function_t>>& hydro_sources,
+            const std::vector<std::optional<function_t>>& gravity_sources
         );
 
         DUAL constexpr real get_x1face(const lint ii, const int side) const;
@@ -219,21 +213,10 @@ namespace simbi {
             cons.copyToGpu();
             prims.copyToGpu();
             dt_min.copyToGpu();
-            density_source.copyToGpu();
-            m1_source.copyToGpu();
-            m2_source.copyToGpu();
-            m3_source.copyToGpu();
             object_pos.copyToGpu();
-            energy_source.copyToGpu();
             inflow_zones.copyToGpu();
             bcs.copyToGpu();
             troubled_cells.copyToGpu();
-            sourceG1.copyToGpu();
-            sourceG2.copyToGpu();
-            sourceG3.copyToGpu();
-            sourceB1.copyToGpu();
-            sourceB2.copyToGpu();
-            sourceB3.copyToGpu();
             bstag1.copyToGpu();
             bstag2.copyToGpu();
             bstag3.copyToGpu();

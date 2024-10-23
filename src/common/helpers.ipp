@@ -68,11 +68,8 @@ namespace simbi {
                 "%d.chkpt." + tnow + ".h5",
                 sim_state.checkpoint_zones
             );
-
-            sim_state.setup.t         = sim_state.t;
-            sim_state.setup.dt        = sim_state.t - tbefore;
-            sim_state.setup.chkpt_idx = step;
-            tbefore                   = sim_state.t;
+            sim_state.chkpt_idx = step;
+            tbefore             = sim_state.t;
             step++;
             write_hdf5(data_directory, filename, sim_state);
         }
@@ -2683,7 +2680,7 @@ namespace simbi {
             hsize_t dimx[1]   = {state.x1.size()};
             hsize_t dimy[1]   = {state.x2.size()};
             hsize_t dimz[1]   = {state.x3.size()};
-            hsize_t dim_bc[1] = {state.setup.boundary_conditions.size()};
+            hsize_t dim_bc[1] = {state.boundary_conditions.size()};
 
             H5::DataSpace hdataspace(1, dims);
             H5::DataSpace hdataspace_x1(1, dimx);
@@ -2721,8 +2718,7 @@ namespace simbi {
             // convert the string to a char array
             std::vector<const char*> arr_c_str;
             for (auto ii = 0; ii < dim_bc[0]; ++ii) {
-                arr_c_str.push_back(state.setup.boundary_conditions[ii].c_str()
-                );
+                arr_c_str.push_back(state.boundary_conditions[ii].c_str());
             }
 
             // Write the boundary conditions to the file
@@ -2785,7 +2781,7 @@ namespace simbi {
                 write_prims("v3", hdataspace, 3);
             }
             write_prims("p", hdataspace, state.dimensions + 1);
-            if (state.setup.regime == "srmhd") {
+            if (state.regime == "srmhd") {
                 write_prims("b1", hdataspace, state.dimensions + 2);
                 write_prims("b2", hdataspace, state.dimensions + 3);
                 write_prims("b3", hdataspace, state.dimensions + 4);
@@ -2803,34 +2799,36 @@ namespace simbi {
 
             // write simulation information in attributes and then close the
             // file
-            const auto& setup = state.setup;
             const std::vector<std::pair<std::string, const void*>> attributes =
-                {{"current_time", &setup.t},
-                 {"time_step", &setup.dt},
-                 {"spatial_order", setup.spatial_order.c_str()},
-                 {"time_order", setup.time_order.c_str()},
-                 {"using_gamma_beta", &setup.using_fourvelocity},
-                 {"mesh_motion", &setup.mesh_motion},
-                 {"x1max", &setup.x1max},
-                 {"x1min", &setup.x1min},
-                 {"x2max", &setup.x2max},
-                 {"x2min", &setup.x2min},
-                 {"x3max", &setup.x3max},
-                 {"x3min", &setup.x3min},
-                 {"adiabatic_gamma", &setup.ad_gamma},
-                 {"nx", &setup.nx},
-                 {"ny", &setup.ny},
-                 {"nz", &setup.nz},
-                 {"chkpt_idx", &setup.chkpt_idx},
-                 {"xactive_zones", &setup.xactive_zones},
-                 {"yactive_zones", &setup.yactive_zones},
-                 {"zactive_zones", &setup.zactive_zones},
-                 {"geometry", setup.coord_system.c_str()},
-                 {"regime", setup.regime.c_str()},
-                 {"dimensions", &setup.dimensions},
-                 {"x1_cell_spacing", setup.x1_cell_spacing.c_str()},
-                 {"x2_cell_spacing", setup.x2_cell_spacing.c_str()},
-                 {"x3_cell_spacing", setup.x3_cell_spacing.c_str()}};
+                {{"current_time", &state.t},
+                 {"time_step", &state.dt},
+                 {"spatial_order", state.spatial_order.c_str()},
+                 {"time_order", state.time_order.c_str()},
+                 {"using_gamma_beta", &state.using_fourvelocity},
+                 {"mesh_motion", &state.mesh_motion},
+                 {"x1max", &state.x1max},
+                 {"x1min", &state.x1min},
+                 {"x2max", &state.x2max},
+                 {"x2min", &state.x2min},
+                 {"x3max", &state.x3max},
+                 {"x3min", &state.x3min},
+                 {"adiabatic_gamma", &state.gamma},
+                 {"nx", &state.nx},
+                 {"ny", &state.ny},
+                 {"nz", &state.nz},
+                 {"chkpt_idx", &state.chkpt_idx},
+                 {"xactive_zones", &state.xag},
+                 {"yactive_zones", &state.yag},
+                 {"zactive_zones", &state.zag},
+                 {"geometry", state.coord_system.c_str()},
+                 {"regime", state.regime.c_str()},
+                 {"dimensions", &state.dimensions},
+                 {"x1_cell_spacing", cell2str.at(state.x1_cell_spacing).c_str()
+                 },
+                 {"x2_cell_spacing", cell2str.at(state.x2_cell_spacing).c_str()
+                 },
+                 {"x3_cell_spacing", cell2str.at(state.x3_cell_spacing).c_str()}
+                };
 
             for (const auto& [name, value] : attributes) {
                 H5::DataType type;
