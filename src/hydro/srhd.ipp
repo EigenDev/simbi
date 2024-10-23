@@ -713,8 +713,8 @@ DUAL SRHD<dim>::conserved_t SRHD<dim>::calc_hlle_flux(
     const auto fR     = prR.to_flux(gamma, nhat);
     const auto lambda = calc_eigenvals(prL, prR, nhat);
     // Grab the necessary wave speeds
-    const real aL  = lambda.aL;
-    const real aR  = lambda.aR;
+    const real aL  = lambda.aL();
+    const real aR  = lambda.aR();
     const real aLm = aL < 0.0 ? aL : 0.0;
     const real aRp = aR > 0.0 ? aR : 0.0;
 
@@ -758,8 +758,8 @@ DUAL SRHD<dim>::conserved_t SRHD<dim>::calc_hllc_flux(
     const auto fL     = prL.to_flux(gamma, nhat);
     const auto fR     = prR.to_flux(gamma, nhat);
     const auto lambda = calc_eigenvals(prL, prR, nhat);
-    const real aL     = lambda.aL;
-    const real aR     = lambda.aR;
+    const real aL     = lambda.aL();
+    const real aR     = lambda.aR();
     const real aLm    = aL < 0 ? aL : 0;
     const real aRp    = aR > 0 ? aR : 0;
 
@@ -862,8 +862,8 @@ DUAL SRHD<dim>::conserved_t SRHD<dim>::calc_hllc_flux(
                     // Apply the low-Mach HLLC fix found in Fleischmann et al
                     // 2020:
                     // https://www.sciencedirect.com/science/article/pii/S0021999120305362
-                    const real csL        = lambda.csL;
-                    const real csR        = lambda.csR;
+                    const real csL        = lambda.csL();
+                    const real csR        = lambda.csR();
                     constexpr real ma_lim = 5.0;
 
                     // --------------Compute the L Star State----------

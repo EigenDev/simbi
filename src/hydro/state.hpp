@@ -27,45 +27,13 @@
 #include <string>              // for string
 #include <vector>              // for vector
 
+using namespace simbi::helpers;
 struct InitialConditions;
 
 namespace simbi {
     namespace hydrostate {
         template <int dim>
-        struct func_type {
-            using type = int;
-        };
-
-        template <int dim>
-        using fopt = std::optional<typename func_type<dim>::type>;
-
-        template <>
-        struct func_type<1> {
-            using type = std::function<real(real, real)>;
-        };
-
-        template <>
-        struct func_type<2> {
-            using type = std::function<real(real, real, real)>;
-        };
-
-        template <>
-        struct func_type<3> {
-            using type = std::function<real(real, real, real, real)>;
-        };
-
-        // Make use of the default template a compilation error
-        // template <int dim, typename F>
-        // void simulate(
-        //     std::vector<std::vector<real>>& state,
-        //     const InitialConditions& init_cond,
-        //     const std::string regime,
-        //     std::function<real(real)> const& scale_factor,
-        //     std::function<real(real)> const& scale_factor_derivative,
-        //     const std::vector<F>& bsources,
-        //     const std::vector<F>& hsources,
-        //     const std::vector<F>& gsources
-        // );
+        using fopt = std::optional<typename real_func<dim>::type>;
 
         template <int D>
         void simulate(

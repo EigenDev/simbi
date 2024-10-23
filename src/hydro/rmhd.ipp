@@ -602,13 +602,12 @@ void RMHD<dim>::cons2prim()
             const real rp2 = (rdb / beesq) * h2;
             const real rp3 = (rdb / beesq) * h3;
             // r-perpendicular, Eq. (25.b)
-            const real rperp1 = r1 - rp1;
-            const real rperp2 = r2 - rp2;
-            const real rperp3 = r3 - rp3;
+            const real rq1 = r1 - rp1;
+            const real rq2 = r2 - rp2;
+            const real rq3 = r3 - rp3;
 
             const real rparr = std::sqrt(rp1 * rp1 + rp2 * rp2 + rp3 * rp3);
-            const real rperp =
-                std::sqrt(rperp1 * rperp1 + rperp2 * rperp2 + rperp3 * rperp3);
+            const real rq    = std::sqrt(rq1 * rq1 + rq2 * rq2 + rq3 * rq3);
 
             // We use the false position method to solve for the roots
             real y1 = 0.0;
@@ -660,22 +659,12 @@ void RMHD<dim>::cons2prim()
             y2 = yy;
 
             // Evaluate the master function (Eq. 44) at the roots
-            f1   = kkc_fmu44(y1, rmag, rparr, rperp, beesq, rdbsq, q, d, gamma);
-            f2   = kkc_fmu44(y2, rmag, rparr, rperp, beesq, rdbsq, q, d, gamma);
+            f1   = kkc_fmu44(y1, rmag, rparr, rq, beesq, rdbsq, q, d, gamma);
+            f2   = kkc_fmu44(y2, rmag, rparr, rq, beesq, rdbsq, q, d, gamma);
             iter = 0.0;
             do {
                 yy = (y1 * f2 - y2 * f1) / (f2 - f1);
-                f  = kkc_fmu44(
-                    yy,
-                    rmag,
-                    rparr,
-                    rperp,
-                    beesq,
-                    rdbsq,
-                    q,
-                    d,
-                    gamma
-                );
+                f  = kkc_fmu44(yy, rmag, rparr, rq, beesq, rdbsq, q, d, gamma);
                 if (f * f2 < 0.0) {
                     y1 = y2;
                     f1 = f2;
@@ -708,7 +697,7 @@ void RMHD<dim>::cons2prim()
 
             // Equation (39)
             const real qbar =
-                q - 0.5 * (beesq + yy * yy * x * x * beesq * rperp * rperp);
+                q - 0.5 * (beesq + yy * yy * x * x * beesq * rq * rq);
 
             // Equation (32) inverted and squared
             const real vsq  = yy * yy * rbar_sq;
@@ -797,13 +786,12 @@ RMHD<dim>::cons2prim(const RMHD<dim>::conserved_t& cons) const
     const real rp2 = (rdb / beesq) * h2;
     const real rp3 = (rdb / beesq) * h3;
     // r-perpendicular
-    const real rperp1 = r1 - rp1;
-    const real rperp2 = r2 - rp2;
-    const real rperp3 = r3 - rp3;
+    const real rq1 = r1 - rp1;
+    const real rq2 = r2 - rp2;
+    const real rq3 = r3 - rp3;
 
     const real rparr = std::sqrt(rp1 * rp1 + rp2 * rp2 + rp3 * rp3);
-    const real rperp =
-        std::sqrt(rperp1 * rperp1 + rperp2 * rperp2 + rperp3 * rperp3);
+    const real rq    = std::sqrt(rq1 * rq1 + rq2 * rq2 + rq3 * rq3);
 
     // We use the false position method to solve for the roots
     real y1 = 0.0;
@@ -851,12 +839,12 @@ RMHD<dim>::cons2prim(const RMHD<dim>::conserved_t& cons) const
     y2 = yy;
 
     // Evaluate the master function (Eq. 44) at the roots
-    f1   = kkc_fmu44(y1, rmag, rparr, rperp, beesq, rdbsq, q, d, gamma);
-    f2   = kkc_fmu44(y2, rmag, rparr, rperp, beesq, rdbsq, q, d, gamma);
+    f1   = kkc_fmu44(y1, rmag, rparr, rq, beesq, rdbsq, q, d, gamma);
+    f2   = kkc_fmu44(y2, rmag, rparr, rq, beesq, rdbsq, q, d, gamma);
     iter = 0.0;
     do {
         yy = (y1 * f2 - y2 * f1) / (f2 - f1);
-        f  = kkc_fmu44(yy, rmag, rparr, rperp, beesq, rdbsq, q, d, gamma);
+        f  = kkc_fmu44(yy, rmag, rparr, rq, beesq, rdbsq, q, d, gamma);
         if (f * f2 < 0.0) {
             y1 = y2;
             f1 = f2;
@@ -884,8 +872,7 @@ RMHD<dim>::cons2prim(const RMHD<dim>::conserved_t& cons) const
     const real rbar_sq = rsq * x * x + yy * x * (1.0 + x) * rdbsq;
 
     // Equation (39)
-    const real qbar =
-        q - 0.5 * (beesq + yy * yy * x * x * beesq * rperp * rperp);
+    const real qbar = q - 0.5 * (beesq + yy * yy * x * x * beesq * rq * rq);
 
     // Equation (32) inverted and squared
     const real vsq  = yy * yy * rbar_sq;
@@ -1308,8 +1295,8 @@ DUAL RMHD<dim>::conserved_t RMHD<dim>::calc_hlle_flux(
     const auto fR     = prims2flux(prR, nhat);
     const auto lambda = calc_eigenvals(prL, prR, nhat);
     // Grab the fastest wave speeds
-    const real aL  = lambda.afL;
-    const real aR  = lambda.afR;
+    const real aL  = lambda.afL();
+    const real aR  = lambda.afR();
     const real aLm = aL < 0.0 ? aL : 0.0;
     const real aRp = aR > 0.0 ? aR : 0.0;
 
@@ -1354,8 +1341,8 @@ DUAL RMHD<dim>::conserved_t RMHD<dim>::calc_hllc_flux(
     const auto fR = prims2flux(prR, nhat);
 
     const auto lambda = calc_eigenvals(prL, prR, nhat);
-    const real aL     = lambda.afL;
-    const real aR     = lambda.afR;
+    const real aL     = lambda.afL();
+    const real aR     = lambda.afR();
     const real aLm    = aL < 0.0 ? aL : 0.0;
     const real aRp    = aR > 0.0 ? aR : 0.0;
     auto net_flux     = [&]() {
@@ -1674,8 +1661,8 @@ DUAL RMHD<dim>::conserved_t RMHD<dim>::calc_hlld_flux(
     const auto fR = prims2flux(prR, nhat);
 
     const auto lambda = calc_eigenvals(prL, prR, nhat);
-    const real aL     = lambda.afL;
-    const real aR     = lambda.afR;
+    const real aL     = lambda.afL();
+    const real aR     = lambda.afR();
     const real aLm    = aL < 0.0 ? aL : 0.0;
     const real aRp    = aR > 0.0 ? aR : 0.0;
 

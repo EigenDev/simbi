@@ -24,6 +24,7 @@
 #include "common/helpers.hpp"         // for my_min, my_max, ...
 #include "common/hydro_structs.hpp"   // for Conserved, Primitive
 #include "util/exec_policy.hpp"       // for ExecutionPolicy
+#include "util/functional.hpp"        // for Function
 #include "util/ndarray.hpp"           // for ndarray
 #include <functional>                 // for function
 #include <optional>                   // for optional
@@ -33,9 +34,14 @@
 namespace simbi {
     template <int dim>
     struct Newtonian : public HydroBase {
+        constexpr static int dimensions          = dim;
+        constexpr static int nvars               = dim + 3;
+        constexpr static std::string_view regime = "euler";
         // set the primitive and conservative types at compile time
         using primitive_t = anyPrimitive<dim, Regime::NEWTONIAN>;
         using conserved_t = anyConserved<dim, Regime::NEWTONIAN>;
+        using eigenvals_t = Eigenvals<dim, Regime::NEWTONIAN>;
+        using function_t  = typename helpers::real_func<dim>::type;
         template <typename T>
         using RiemannFuncPointer = conserved_t (T::*)(
             const primitive_t&,
@@ -44,25 +50,7 @@ namespace simbi {
             const real
         ) const;
         RiemannFuncPointer<Newtonian<dim>> riemann_solve;
-        using eigenvals_t = typename std::conditional_t<
-            dim == 1,
-            hydro1d::Eigenvals,
-            std::conditional_t<
-                dim == 2,
-                hydro2d::Eigenvals,
-                hydro3d::Eigenvals>>;
 
-        using function_t = typename std::conditional_t<
-            dim == 1,
-            std::function<real(real, real)>,
-            std::conditional_t<
-                dim == 2,
-                std::function<real(real, real, real)>,
-                std::function<real(real, real, real, real)>>>;
-
-        constexpr static int dimensions          = dim;
-        constexpr static int nvars               = dim + 3;
-        constexpr static std::string_view regime = "euler";
         // boundary condition functions for mesh motion
         std::vector<function_t> bsources;   // boundary sources
         std::vector<function_t> hsources;   // hydro sources

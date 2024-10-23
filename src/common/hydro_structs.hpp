@@ -1084,132 +1084,51 @@ struct is_3D_primitive<anyPrimitive<3, Regime::RMHD>> : std::true_type {
 //=======================================================
 //                        NEWTONIAN
 //=======================================================
-namespace hydro1d {
-    struct Eigenvals {
-        real aL, aR, aStar, pStar;
+template <int dim, Regime R>
+struct Eigenvals {
+    constexpr static int nvals = 4 + 2 * (R == Regime::NEWTONIAN && dim > 1);
+    real vals[nvals];
 
-        Eigenvals() = default;
+    Eigenvals()  = default;
+    ~Eigenvals() = default;
 
-        ~Eigenvals() = default;
+    // Generic Constructor
+    template <typename... Args>
+    DUAL Eigenvals(Args... args) : vals{static_cast<real>(args)...}
+    {
+    }
 
-        DUAL Eigenvals(real aL, real aR) : aL(aL), aR(aR) {}
+    // Define accessors for the wave speeds
+    DUAL constexpr real aL() const { return this->vals[0]; }
 
-        DUAL Eigenvals(real aL, real aR, real aStar, real pStar)
-            : aL(aL), aR(aR), aStar(aStar), pStar(pStar)
-        {
+    DUAL constexpr real aR() const { return this->vals[1]; }
+
+    DUAL constexpr real afL() const { return this->vals[0]; }
+
+    DUAL constexpr real afR() const { return this->vals[1]; }
+
+    DUAL constexpr real asL() const { return this->vals[2]; }
+
+    DUAL constexpr real asR() const { return this->vals[3]; }
+
+    DUAL constexpr real csL() const { return this->vals[2]; }
+
+    DUAL constexpr real csR() const { return this->vals[3]; }
+
+    DUAL constexpr real pStar() const
+    {
+        if constexpr (nvals >= 5) {
+            return this->vals[4];
         }
-    };
+        return static_cast<real>(0.0);
+    }
 
-}   // namespace hydro1d
-
-namespace hydro2d {
-    struct Eigenvals {
-        Eigenvals() = default;
-
-        ~Eigenvals() = default;
-
-        real aL, aR, csL, csR, aStar, pStar;
-
-        DUAL Eigenvals(real aL, real aR) : aL(aL), aR(aR) {}
-
-        DUAL
-        Eigenvals(real aL, real aR, real csL, real csR, real aStar, real pStar)
-            : aL(aL), aR(aR), csL(csL), csR(csR), aStar(aStar), pStar(pStar)
-        {
+    DUAL constexpr real aStar() const
+    {
+        if constexpr (nvals >= 5) {
+            return this->vals[5];
         }
-    };
-
-}   // namespace hydro2d
-
-namespace hydro3d {
-    struct Eigenvals {
-        real aL, aR, csL, csR, aStar, pStar;
-        Eigenvals()  = default;
-        ~Eigenvals() = default;
-
-        DUAL Eigenvals(real aL, real aR) : aL(aL), aR(aR) {}
-
-        DUAL
-        Eigenvals(real aL, real aR, real csL, real csR, real aStar, real pStar)
-            : aL(aL), aR(aR), csL(csL), csR(csR), aStar(aStar), pStar(pStar)
-        {
-        }
-    };
-
-}   // namespace hydro3d
-
-//=============================================
-//                SRHD
-//=============================================
-namespace sr1d {
-    struct Eigenvals {
-        real aL, aR, csL, csR;
-
-        Eigenvals() = default;
-
-        ~Eigenvals() = default;
-
-        DUAL Eigenvals(real aL, real aR) : aL(aL), aR(aR), csL(0.0), csR(0.0) {}
-
-        DUAL Eigenvals(real aL, real aR, real csL, real csR)
-            : aL(aL), aR(aR), csL(csL), csR(csR)
-        {
-        }
-    };
-
-}   // namespace sr1d
-
-namespace sr2d {
-    struct Eigenvals {
-        Eigenvals() = default;
-
-        ~Eigenvals() = default;
-
-        real aL, aR, csL, csR;
-
-        DUAL Eigenvals(real aL, real aR) : aL(aL), aR(aR) {}
-
-        DUAL Eigenvals(real aL, real aR, real csL, real csR)
-            : aL(aL), aR(aR), csL(csL), csR(csR)
-        {
-        }
-    };
-
-}   // namespace sr2d
-
-namespace sr3d {
-    struct Eigenvals {
-        real aL, aR, csL, csR;
-        Eigenvals()  = default;
-        ~Eigenvals() = default;
-
-        DUAL Eigenvals(real aL, real aR) : aL(aL), aR(aR), csL(0.0), csR(0.0) {}
-
-        DUAL Eigenvals(real aL, real aR, real csL, real csR)
-            : aL(aL), aR(aR), csL(csL), csR(csR)
-        {
-        }
-    };
-
-}   // namespace sr3d
-
-//================================
-//               RMHD
-//================================
-namespace rmhd {
-    struct Eigenvals {
-        real afL, afR;
-
-        Eigenvals() = default;
-
-        ~Eigenvals() = default;
-
-        DUAL Eigenvals(real afL, real afR) : afL(afL), afR(afR) {}
-
-        // DUAL Eigenvals(real afL, real afR,
-        // real asL, real asR, real csL, real csR) : afL(afL),
-        // afR(afR), asL(asL), asR(asR), csL(csL), csR(csR) {}
-    };
-}   // namespace rmhd
-
+        return static_cast<real>(0.0);
+    }
+};
 #endif

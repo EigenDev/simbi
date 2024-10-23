@@ -595,8 +595,8 @@ DUAL Newtonian<dim>::conserved_t Newtonian<dim>::calc_hlle_flux(
 ) const
 {
     const auto lambda = calc_eigenvals(prL, prR, nhat);
-    const real aL     = lambda.aL;
-    const real aR     = lambda.aR;
+    const real aL     = lambda.aL();
+    const real aR     = lambda.aR();
     const auto uL     = prL.to_conserved(gamma);
     const auto uR     = prR.to_conserved(gamma);
     const auto fL     = prL.to_flux(gamma, nhat);
@@ -638,8 +638,8 @@ DUAL Newtonian<dim>::conserved_t Newtonian<dim>::calc_hllc_flux(
 ) const
 {
     const auto lambda = calc_eigenvals(prL, prR, nhat);
-    const real aL     = lambda.aL;
-    const real aR     = lambda.aR;
+    const real aL     = lambda.aL();
+    const real aR     = lambda.aR();
     const auto uL     = prL.to_conserved(gamma);
     const auto uR     = prR.to_conserved(gamma);
     const auto fL     = prL.to_flux(gamma, nhat);
@@ -654,8 +654,8 @@ DUAL Newtonian<dim>::conserved_t Newtonian<dim>::calc_hllc_flux(
     }
 
     if constexpr (dim == 1) {
-        const real aStar = lambda.aStar;
-        const real pStar = lambda.pStar;
+        const real aStar = lambda.aStar();
+        const real pStar = lambda.pStar();
         if (vface <= aStar) {
             real pressure = prL.p();
             real v        = prL.v1();
@@ -694,10 +694,10 @@ DUAL Newtonian<dim>::conserved_t Newtonian<dim>::calc_hllc_flux(
         }
     }
     else {
-        const real cL    = lambda.csL;
-        const real cR    = lambda.csR;
-        const real aStar = lambda.aStar;
-        const real pStar = lambda.pStar;
+        const real cL    = lambda.csL();
+        const real cR    = lambda.csR();
+        const real aStar = lambda.aStar();
+        const real pStar = lambda.pStar();
         // Apply the low-Mach HLLC fix found in Fleischmann et al 2020:
         // https://www.sciencedirect.com/science/article/pii/S0021999120305362
         constexpr real ma_lim = 0.10;

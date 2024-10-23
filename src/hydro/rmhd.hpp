@@ -34,19 +34,17 @@
 namespace simbi {
     template <int dim>
     struct RMHD : public HydroBase {
+        constexpr static int dimensions          = dim;
+        constexpr static int nvars               = dim + 3;
+        constexpr static std::string_view regime = "srmhd";
 
         // set the primitive and conservative types at compile time
         using primitive_t   = anyPrimitive<dim, Regime::RMHD>;
         using conserved_t   = anyConserved<dim, Regime::RMHD>;
-        using eigenvals_t   = rmhd::Eigenvals;
+        using eigenvals_t   = Eigenvals<dim, Regime::RMHD>;
         using mag_fourvec_t = mag_four_vec<dim>;
-        using function_t    = typename std::conditional_t<
-               dim == 1,
-               std::function<real(real, real)>,
-               std::conditional_t<
-                   dim == 2,
-                   std::function<real(real, real, real)>,
-                   std::function<real(real, real, real, real)>>>;
+        using function_t    = typename helpers::real_func<dim>::type;
+
         template <typename T>
         using RiemannFuncPointer = conserved_t (T::*)(
             const primitive_t&,
@@ -55,9 +53,6 @@ namespace simbi {
             const real
         ) const;
         RiemannFuncPointer<RMHD<dim>> riemann_solve;
-        constexpr static int dimensions          = dim;
-        constexpr static int nvars               = dim + 3;
-        constexpr static std::string_view regime = "srmhd";
 
         std::vector<function_t> bsources;   // boundary sources
         std::vector<function_t> hsources;   // hydro sources
