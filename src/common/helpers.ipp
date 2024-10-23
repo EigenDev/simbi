@@ -2718,8 +2718,7 @@ namespace simbi {
             // convert the string to a char array
             std::vector<const char*> arr_c_str;
             for (hsize_t ii = 0; ii < dim_bc[0]; ++ii) {
-                arr_c_str.push_back(state.setup.boundary_conditions[ii].c_str()
-                );
+                arr_c_str.push_back(state.boundary_conditions[ii].c_str());
             }
 
             // Write the boundary conditions to the file
