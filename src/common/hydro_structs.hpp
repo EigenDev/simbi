@@ -1131,4 +1131,43 @@ struct Eigenvals {
         return static_cast<real>(0.0);
     }
 };
+
+//=======================================================
+// TYPE TRAITS
+//=======================================================
+template <Regime R>
+struct is_1D_primitive<anyPrimitive<1, R>> : std::true_type {
+};
+
+template <Regime R>
+struct is_2D_primitive<anyPrimitive<2, R>> : std::true_type {
+};
+
+template <Regime R>
+struct is_3D_primitive<anyPrimitive<3, R>> : std::true_type {
+};
+
+template <>
+struct is_1D_mhd_primitive<anyPrimitive<1, Regime::RMHD>> : std::true_type {
+};
+
+template <>
+struct is_2D_mhd_primitive<anyPrimitive<2, Regime::RMHD>> : std::true_type {
+};
+
+template <>
+struct is_3D_mhd_primitive<anyPrimitive<3, Regime::RMHD>> : std::true_type {
+};
+
+template <int dim>
+struct is_relativistic_mhd<anyPrimitive<dim, Regime::RMHD>> : std::true_type {
+};
+
+template <int dim>
+struct is_relativistic<anyPrimitive<dim, Regime::SRHD>> : std::true_type {
+};
+
+template <int dim>
+struct is_relativistic<anyConserved<dim, Regime::RMHD>> : std::true_type {
+};
 #endif
