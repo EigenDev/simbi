@@ -36,7 +36,7 @@ namespace simbi {
     struct Newtonian : public HydroBase {
         constexpr static int dimensions          = dim;
         constexpr static int nvars               = dim + 3;
-        constexpr static std::string_view regime = "euler";
+        constexpr static std::string_view regime = "classical";
         // set the primitive and conservative types at compile time
         using primitive_t = anyPrimitive<dim, Regime::NEWTONIAN>;
         using conserved_t = anyConserved<dim, Regime::NEWTONIAN>;
