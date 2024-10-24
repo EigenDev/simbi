@@ -32,28 +32,26 @@ template <int dim>
 DUAL constexpr real RMHD<dim>::get_x1face(const lint ii, const int side) const
 {
     switch (x1_cell_spacing) {
-        case simbi::Cellspacing::LINSPACE:
-            {
-                const real x1l = my_max<real>(x1min + (ii - 0.5) * dx1, x1min);
-                if (side == 0) {
-                    return x1l;
-                }
-                return my_min<real>(x1l + dx1 * (ii == 0 ? 0.5 : 1.0), x1max);
+        case simbi::Cellspacing::LINSPACE: {
+            const real x1l = my_max<real>(x1min + (ii - 0.5) * dx1, x1min);
+            if (side == 0) {
+                return x1l;
             }
-        default:
-            {
-                const real x1l = my_max<real>(
-                    x1min * std::pow(10.0, (ii - 0.5) * dlogx1),
-                    x1min
-                );
-                if (side == 0) {
-                    return x1l;
-                }
-                return my_min<real>(
-                    x1l * std::pow(10.0, dlogx1 * (ii == 0 ? 0.5 : 1.0)),
-                    x1max
-                );
+            return my_min<real>(x1l + dx1 * (ii == 0 ? 0.5 : 1.0), x1max);
+        }
+        default: {
+            const real x1l = my_max<real>(
+                x1min * std::pow(10.0, (ii - 0.5) * dlogx1),
+                x1min
+            );
+            if (side == 0) {
+                return x1l;
             }
+            return my_min<real>(
+                x1l * std::pow(10.0, dlogx1 * (ii == 0 ? 0.5 : 1.0)),
+                x1max
+            );
+        }
     }
 }
 
@@ -61,28 +59,26 @@ template <int dim>
 DUAL constexpr real RMHD<dim>::get_x2face(const lint ii, const int side) const
 {
     switch (x2_cell_spacing) {
-        case simbi::Cellspacing::LINSPACE:
-            {
-                const real x2l = my_max<real>(x2min + (ii - 0.5) * dx2, x2min);
-                if (side == 0) {
-                    return x2l;
-                }
-                return my_min<real>(x2l + dx2 * (ii == 0 ? 0.5 : 1.0), x2max);
+        case simbi::Cellspacing::LINSPACE: {
+            const real x2l = my_max<real>(x2min + (ii - 0.5) * dx2, x2min);
+            if (side == 0) {
+                return x2l;
             }
-        default:
-            {
-                const real x2l = my_max<real>(
-                    x2min * std::pow(10.0, (ii - 0.5) * dlogx2),
-                    x2min
-                );
-                if (side == 0) {
-                    return x2l;
-                }
-                return my_min<real>(
-                    x2l * std::pow(10.0, dlogx2 * (ii == 0 ? 0.5 : 1.0)),
-                    x2max
-                );
+            return my_min<real>(x2l + dx2 * (ii == 0 ? 0.5 : 1.0), x2max);
+        }
+        default: {
+            const real x2l = my_max<real>(
+                x2min * std::pow(10.0, (ii - 0.5) * dlogx2),
+                x2min
+            );
+            if (side == 0) {
+                return x2l;
             }
+            return my_min<real>(
+                x2l * std::pow(10.0, dlogx2 * (ii == 0 ? 0.5 : 1.0)),
+                x2max
+            );
+        }
     }
 }
 
@@ -90,28 +86,26 @@ template <int dim>
 DUAL constexpr real RMHD<dim>::get_x3face(const lint ii, const int side) const
 {
     switch (x3_cell_spacing) {
-        case simbi::Cellspacing::LINSPACE:
-            {
-                const real x3l = my_max<real>(x3min + (ii - 0.5) * dx3, x3min);
-                if (side == 0) {
-                    return x3l;
-                }
-                return my_min<real>(x3l + dx3 * (ii == 0 ? 0.5 : 1.0), x3max);
+        case simbi::Cellspacing::LINSPACE: {
+            const real x3l = my_max<real>(x3min + (ii - 0.5) * dx3, x3min);
+            if (side == 0) {
+                return x3l;
             }
-        default:
-            {
-                const real x3l = my_max<real>(
-                    x3min * std::pow(10.0, (ii - 0.5) * dlogx3),
-                    x3min
-                );
-                if (side == 0) {
-                    return x3l;
-                }
-                return my_min<real>(
-                    x3l * std::pow(10.0, dlogx3 * (ii == 0 ? 0.5 : 1.0)),
-                    x3max
-                );
+            return my_min<real>(x3l + dx3 * (ii == 0 ? 0.5 : 1.0), x3max);
+        }
+        default: {
+            const real x3l = my_max<real>(
+                x3min * std::pow(10.0, (ii - 0.5) * dlogx3),
+                x3min
+            );
+            if (side == 0) {
+                return x3l;
             }
+            return my_min<real>(
+                x3l * std::pow(10.0, dlogx3 * (ii == 0 ? 0.5 : 1.0)),
+                x3max
+            );
+        }
     }
 }
 
@@ -180,125 +174,125 @@ DUAL real RMHD<dim>::calc_edge_emf(
     // Decides at compile time which method to use
     switch (comp_ct_type) {
         case CTTYPE::ZERO:   // Eq. (40)
-            {
-                return (
-                    static_cast<real>(0.5) * (es + en + ew + ee) -
-                    static_cast<real>(0.25) * (esw + enw + ese + ene)
-                );
-            }
+        {
+            return (
+                static_cast<real>(0.5) * (es + en + ew + ee) -
+                static_cast<real>(0.25) * (esw + enw + ese + ene)
+            );
+        }
         case CTTYPE::CONTACT:   // Eq. (51)
-            {
-                // j + 1/4
-                const real de_dqjL = [&] {
-                    if (fw.dens() > 0.0) {
-                        return static_cast<real>(2.0) * (es - esw);
-                    }
-                    else if (fw.dens() < 0.0) {
-                        return static_cast<real>(2.0) * (en - enw);
-                    }
-                    return es - esw + en - enw;
-                }();
+        {
+            // j + 1/4
+            const real de_dqjL = [&] {
+                if (fw.dens() > 0.0) {
+                    return static_cast<real>(2.0) * (es - esw);
+                }
+                else if (fw.dens() < 0.0) {
+                    return static_cast<real>(2.0) * (en - enw);
+                }
+                return es - esw + en - enw;
+            }();
 
-                // j + 3/4
-                const real de_dqjR = [&] {
-                    if (fe.dens() > 0.0) {
-                        return static_cast<real>(2.0) * (ese - es);
-                    }
-                    else if (fe.dens() < 0.0) {
-                        return static_cast<real>(2.0) * (ene - en);
-                    }
-                    return ese - es + ene - en;
-                }();
+            // j + 3/4
+            const real de_dqjR = [&] {
+                if (fe.dens() > 0.0) {
+                    return static_cast<real>(2.0) * (ese - es);
+                }
+                else if (fe.dens() < 0.0) {
+                    return static_cast<real>(2.0) * (ene - en);
+                }
+                return ese - es + ene - en;
+            }();
 
-                // k + 1/4
-                const real de_dqkL = [&] {
-                    if (fs.dens() > 0.0) {
-                        return static_cast<real>(2.0) * (ew - esw);
-                    }
-                    else if (fs.dens() < 0.0) {
-                        return static_cast<real>(2.0) * (ee - ese);
-                    }
-                    return ew - esw + ee - ese;
-                }();
+            // k + 1/4
+            const real de_dqkL = [&] {
+                if (fs.dens() > 0.0) {
+                    return static_cast<real>(2.0) * (ew - esw);
+                }
+                else if (fs.dens() < 0.0) {
+                    return static_cast<real>(2.0) * (ee - ese);
+                }
+                return ew - esw + ee - ese;
+            }();
 
-                // k + 3/4
-                const real de_dqkR = [&] {
-                    if (fn.dens() > 0.0) {
-                        return static_cast<real>(2.0) * (enw - ew);
-                    }
-                    else if (fn.dens() < 0.0) {
-                        return static_cast<real>(2.0) * (ene - ee);
-                    }
-                    return enw - ew + ene - ee;
-                }();
+            // k + 3/4
+            const real de_dqkR = [&] {
+                if (fn.dens() > 0.0) {
+                    return static_cast<real>(2.0) * (enw - ew);
+                }
+                else if (fn.dens() < 0.0) {
+                    return static_cast<real>(2.0) * (ene - ee);
+                }
+                return enw - ew + ene - ee;
+            }();
 
-                return (
-                    eavg + one_eighth * (de_dqjL - de_dqjR + de_dqkL - de_dqkR)
-                );
-            }
+            return (
+                eavg + one_eighth * (de_dqjL - de_dqjR + de_dqkL - de_dqkR)
+            );
+        }
         default:   // ALPHA, Eq. (49)
-            {
-                return 0.0;
-                // constexpr real alpha = 0.1;
-                // // compute permutation indices
-                // const auto np1 = (P == Plane::JK) ? 2 : 1;
-                // const auto np2 = (P == Plane::IJ) ? 2 : 3;
+        {
+            return 0.0;
+            // constexpr real alpha = 0.1;
+            // // compute permutation indices
+            // const auto np1 = (P == Plane::JK) ? 2 : 1;
+            // const auto np2 = (P == Plane::IJ) ? 2 : 3;
 
-                // // face-center magnetic field indices
-                // const auto [nx1, ny1, nz1] = [&] {
-                //     if constexpr (P == Plane::JK) {
-                //         return std::make_tuple(xag + 2, nyv, zag + 2);   //
-                //         B2
-                //     }
-                //     return std::make_tuple(nxv, yag + 2, zag + 2);   // B1
-                // }();
-                // const auto sidx = cidx<P, C, Dir::S>(ii, jj, kk, nx1, ny1,
-                // nz1); const auto nidx = cidx<P, C, Dir::N>(ii, jj, kk, nx1,
-                // ny1, nz1);
+            // // face-center magnetic field indices
+            // const auto [nx1, ny1, nz1] = [&] {
+            //     if constexpr (P == Plane::JK) {
+            //         return std::make_tuple(xag + 2, nyv, zag + 2);   //
+            //         B2
+            //     }
+            //     return std::make_tuple(nxv, yag + 2, zag + 2);   // B1
+            // }();
+            // const auto sidx = cidx<P, C, Dir::S>(ii, jj, kk, nx1, ny1,
+            // nz1); const auto nidx = cidx<P, C, Dir::N>(ii, jj, kk, nx1,
+            // ny1, nz1);
 
-                // const auto [nx2, ny2, nz2] = [&] {
-                //     if constexpr (P == Plane::IJ) {   // B2
-                //         return std::make_tuple(xag + 2, nyv, zag + 2);
-                //     }
-                //     return std::make_tuple(xag + 2, yag + 2, nzv);   // B3
-                // }();
-                // const auto eidx = cidx<P, C, Dir::E>(ii, jj, kk, nx2, ny2,
-                // nz2); const auto widx = cidx<P, C, Dir::W>(ii, jj, kk, nx2,
-                // ny2, nz2);
+            // const auto [nx2, ny2, nz2] = [&] {
+            //     if constexpr (P == Plane::IJ) {   // B2
+            //         return std::make_tuple(xag + 2, nyv, zag + 2);
+            //     }
+            //     return std::make_tuple(xag + 2, yag + 2, nzv);   // B3
+            // }();
+            // const auto eidx = cidx<P, C, Dir::E>(ii, jj, kk, nx2, ny2,
+            // nz2); const auto widx = cidx<P, C, Dir::W>(ii, jj, kk, nx2,
+            // ny2, nz2);
 
-                // // perpendicular mean field 1
-                // const auto bp1sw = swp.bcomponent(np1);
-                // const auto bp1nw = nwp.bcomponent(np1);
-                // const auto bp1se = sep.bcomponent(np1);
-                // const auto bp1ne = nep.bcomponent(np1);
+            // // perpendicular mean field 1
+            // const auto bp1sw = swp.bcomponent(np1);
+            // const auto bp1nw = nwp.bcomponent(np1);
+            // const auto bp1se = sep.bcomponent(np1);
+            // const auto bp1ne = nep.bcomponent(np1);
 
-                // // perpendicular mean field 2
-                // const auto bp2sw = swp.bcomponent(np2);
-                // const auto bp2nw = nwp.bcomponent(np2);
-                // const auto bp2se = sep.bcomponent(np2);
-                // const auto bp2ne = nep.bcomponent(np2);
+            // // perpendicular mean field 2
+            // const auto bp2sw = swp.bcomponent(np2);
+            // const auto bp2nw = nwp.bcomponent(np2);
+            // const auto bp2se = sep.bcomponent(np2);
+            // const auto bp2ne = nep.bcomponent(np2);
 
-                // // perpendicular staggered field 1
-                // const auto bp1s = bstagp1[sidx];
-                // const auto bp1n = bstagp1[nidx];
-                // // perpendicular staggered field 2
-                // const auto bp2e = bstagp2[eidx];
-                // const auto bp2w = bstagp2[widx];
+            // // perpendicular staggered field 1
+            // const auto bp1s = bstagp1[sidx];
+            // const auto bp1n = bstagp1[nidx];
+            // // perpendicular staggered field 2
+            // const auto bp2e = bstagp2[eidx];
+            // const auto bp2w = bstagp2[widx];
 
-                // const real de_dq2L = (ew - esw + ee - ese) +
-                //                      alpha * (bp2e - bp2se - bp2w + bp2sw);
-                // const real de_dq2R = (enw - ew + ene - ee) +
-                //                      alpha * (bp2ne - bp2e - bp2nw + bp2w);
-                // const real de_dq1L = (es - esw + en - enw) +
-                //                      alpha * (bp1s - bp1sw - bp1n + bp1nw);
-                // const real de_dq1R = (ese - es + ene - en) +
-                //                      alpha * (bp1se - bp1s - bp1ne + bp1n);
+            // const real de_dq2L = (ew - esw + ee - ese) +
+            //                      alpha * (bp2e - bp2se - bp2w + bp2sw);
+            // const real de_dq2R = (enw - ew + ene - ee) +
+            //                      alpha * (bp2ne - bp2e - bp2nw + bp2w);
+            // const real de_dq1L = (es - esw + en - enw) +
+            //                      alpha * (bp1s - bp1sw - bp1n + bp1nw);
+            // const real de_dq1R = (ese - es + ene - en) +
+            //                      alpha * (bp1se - bp1s - bp1ne + bp1n);
 
-                // return (
-                //     eavg + one_eighth * (de_dq2L - de_dq2R + de_dq1L -
-                //     de_dq1R)
-                // );
-            }
+            // return (
+            //     eavg + one_eighth * (de_dq2L - de_dq2R + de_dq1L -
+            //     de_dq1R)
+            // );
+        }
     }
 };
 
@@ -311,33 +305,32 @@ DUAL real RMHD<dim>::curl_e(
 ) const
 {
     switch (geometry) {
-        case Geometry::CARTESIAN:
-            {
-                if (nhat == 1) {
-                    if (side == 0) {
-                        return invdx2 * (ek[IJ::NW] - ek[IJ::SW]) -
-                               invdx3 * (ej[IK::NW] - ej[IK::SW]);
-                    }
-                    return invdx2 * (ek[IJ::NE] - ek[IJ::SE]) -
-                           invdx3 * (ej[IK::NE] - ej[IK::SE]);
+        case Geometry::CARTESIAN: {
+            if (nhat == 1) {
+                if (side == 0) {
+                    return invdx2 * (ek[IJ::NW] - ek[IJ::SW]) -
+                           invdx3 * (ej[IK::NW] - ej[IK::SW]);
                 }
-                else if (nhat == 2) {
-                    if (side == 0) {
-                        return invdx3 * (ek[JK::NW] - ek[JK::SW]) -
-                               invdx1 * (ej[IJ::SE] - ej[IJ::SW]);
-                    }
-                    return invdx3 * (ek[JK::NE] - ek[JK::SE]) -
-                           invdx1 * (ej[IJ::NE] - ej[IJ::NW]);
-                }
-                else {
-                    if (side == 0) {
-                        return invdx1 * (ek[IK::SE] - ek[IK::SW]) -
-                               invdx2 * (ej[JK::SE] - ej[JK::SW]);
-                    }
-                    return invdx1 * (ek[IK::NE] - ek[IK::NW]) -
-                           invdx2 * (ej[JK::NE] - ej[JK::NW]);
-                }
+                return invdx2 * (ek[IJ::NE] - ek[IJ::SE]) -
+                       invdx3 * (ej[IK::NE] - ej[IK::SE]);
             }
+            else if (nhat == 2) {
+                if (side == 0) {
+                    return invdx3 * (ek[JK::NW] - ek[JK::SW]) -
+                           invdx1 * (ej[IJ::SE] - ej[IJ::SW]);
+                }
+                return invdx3 * (ek[JK::NE] - ek[JK::SE]) -
+                       invdx1 * (ej[IJ::NE] - ej[IJ::NW]);
+            }
+            else {
+                if (side == 0) {
+                    return invdx1 * (ek[IK::SE] - ek[IK::SW]) -
+                           invdx2 * (ej[JK::SE] - ej[JK::SW]);
+                }
+                return invdx1 * (ek[IK::NE] - ek[IK::NW]) -
+                       invdx2 * (ej[JK::NE] - ej[JK::NW]);
+            }
+        }
         default:
             return 0.0;
     }
@@ -370,17 +363,15 @@ DUAL constexpr real RMHD<dim>::get_x2_differential(const lint ii) const
     }
     else {
         switch (geometry) {
-            case Geometry::SPHERICAL:
-                {
-                    const real x2l  = get_x2face(ii, 0);
-                    const real x2r  = get_x2face(ii, 1);
-                    const real dcos = std::cos(x2l) - std::cos(x2r);
-                    return dcos;
-                }
-            default:
-                {
-                    return dx2;
-                }
+            case Geometry::SPHERICAL: {
+                const real x2l  = get_x2face(ii, 0);
+                const real x2r  = get_x2face(ii, 1);
+                const real dcos = std::cos(x2l) - std::cos(x2r);
+                return dcos;
+            }
+            default: {
+                return dx2;
+            }
         }
     }
 }
@@ -1110,62 +1101,56 @@ void RMHD<dim>::adapt_dt()
         }
 
         switch (geometry) {
-            case simbi::Geometry::CARTESIAN:
-                {
-                    const real x1l = get_x1face(ii, 0);
-                    const real x1r = get_x1face(ii, 1);
-                    const real dx1 = x1r - x1l;
+            case simbi::Geometry::CARTESIAN: {
+                const real x1l = get_x1face(ii, 0);
+                const real x1r = get_x1face(ii, 1);
+                const real dx1 = x1r - x1l;
 
-                    const real x2l = get_x1face(jj, 0);
-                    const real x2r = get_x1face(jj, 1);
-                    const real dx2 = x2r - x2l;
+                const real x2l = get_x1face(jj, 0);
+                const real x2r = get_x1face(jj, 1);
+                const real dx2 = x2r - x2l;
 
-                    cfl_dt = std ::min(
-                        {dx1 / (std::max(v1p, v1m)),
-                         dx2 / (std::max(v2p, v2m)),
-                         dx3 / (std::max(v3p, v3m))}
-                    );
+                cfl_dt = std ::min(
+                    {dx1 / (std::max(v1p, v1m)),
+                     dx2 / (std::max(v2p, v2m)),
+                     dx3 / (std::max(v3p, v3m))}
+                );
 
-                    break;
-                }
+                break;
+            }
 
-            case simbi::Geometry::SPHERICAL:
-                {
-                    const real x1l = get_x1face(ii, 0);
-                    const real x1r = get_x1face(ii, 1);
-                    const real dx1 = x1r - x1l;
+            case simbi::Geometry::SPHERICAL: {
+                const real x1l = get_x1face(ii, 0);
+                const real x1r = get_x1face(ii, 1);
+                const real dx1 = x1r - x1l;
 
-                    const real x2l = get_x2face(jj, 0);
-                    const real x2r = get_x2face(jj, 1);
-                    const real rmean =
-                        get_cell_centroid(x1r, x1l, simbi::Geometry::SPHERICAL);
-                    const real th    = 0.5 * (x2r + x2l);
-                    const real rproj = rmean * std::sin(th);
-                    cfl_dt           = std::min(
-                        {dx1 / (std::max(v1p, v1m)),
-                                   rmean * dx2 / (std::max(v2p, v2m)),
-                                   rproj * dx3 / (std::max(v3p, v3m))}
-                    );
-                    break;
-                }
-            default:
-                {
-                    const real x1l = get_x1face(ii, 0);
-                    const real x1r = get_x1face(ii, 1);
-                    const real dx1 = x1r - x1l;
+                const real x2l = get_x2face(jj, 0);
+                const real x2r = get_x2face(jj, 1);
+                const real rmean =
+                    get_cell_centroid(x1r, x1l, simbi::Geometry::SPHERICAL);
+                const real th    = 0.5 * (x2r + x2l);
+                const real rproj = rmean * std::sin(th);
+                cfl_dt           = std::min(
+                    {dx1 / (std::max(v1p, v1m)),
+                               rmean * dx2 / (std::max(v2p, v2m)),
+                               rproj * dx3 / (std::max(v3p, v3m))}
+                );
+                break;
+            }
+            default: {
+                const real x1l = get_x1face(ii, 0);
+                const real x1r = get_x1face(ii, 1);
+                const real dx1 = x1r - x1l;
 
-                    const real rmean = get_cell_centroid(
-                        x1r,
-                        x1l,
-                        simbi::Geometry::CYLINDRICAL
-                    );
-                    cfl_dt = std::min(
-                        {dx1 / (std::max(v1p, v1m)),
-                         rmean * dx2 / (std::max(v2p, v2m)),
-                         dx3 / (std::max(v3p, v3m))}
-                    );
-                    break;
-                }
+                const real rmean =
+                    get_cell_centroid(x1r, x1l, simbi::Geometry::CYLINDRICAL);
+                cfl_dt = std::min(
+                    {dx1 / (std::max(v1p, v1m)),
+                     rmean * dx2 / (std::max(v2p, v2m)),
+                     dx3 / (std::max(v3p, v3m))}
+                );
+                break;
+            }
         }
         pooling::update_minimum(min_dt, cfl_dt);
     });
@@ -1883,12 +1868,12 @@ void RMHD<dim>::riemann_fluxes()
             const auto yf = idx3(ii, jj + q, kk, xag, nyv, zag);
             const auto zf = idx3(ii, jj, kk + q, xag, yag, nzv);
             // fluxes in i direction
-            pL = prb[idx3(txa + q - 1, tya, tza, sx, sy, 0)];
-            pR = prb[idx3(txa + q + 0, tya, tza, sx, sy, 0)];
+            pL = prb[idx3(txa + q - 1, tya, tza, sx, sy, sz)];
+            pR = prb[idx3(txa + q + 0, tya, tza, sx, sy, sz)];
 
             if (!use_pcm) {
-                pLL = prb[idx3(txa + q - 2, tya, tza, sx, sy, 0)];
-                pRR = prb[idx3(txa + q + 1, tya, tza, sx, sy, 0)];
+                pLL = prb[idx3(txa + q - 2, tya, tza, sx, sy, sz)];
+                pRR = prb[idx3(txa + q + 1, tya, tza, sx, sy, sz)];
 
                 pL = pL + plm_gradient(pL, pLL, pR, plm_theta) * 0.5;
                 pR = pR - plm_gradient(pR, pL, pRR, plm_theta) * 0.5;
@@ -1897,12 +1882,12 @@ void RMHD<dim>::riemann_fluxes()
             fri[xf] = (this->*riemann_solve)(pL, pR, 1, vfs[q]);
 
             // fluxes in j direction
-            pL = prb[idx3(txa, tya + q - 1, tza, sx, sy, 0)];
-            pR = prb[idx3(txa, tya + q + 0, tza, sx, sy, 0)];
+            pL = prb[idx3(txa, tya + q - 1, tza, sx, sy, sz)];
+            pR = prb[idx3(txa, tya + q + 0, tza, sx, sy, sz)];
 
             if (!use_pcm) {
-                pLL = prb[idx3(txa, tya + q - 2, tza, sx, sy, 0)];
-                pRR = prb[idx3(txa, tya + q + 1, tza, sx, sy, 0)];
+                pLL = prb[idx3(txa, tya + q - 2, tza, sx, sy, sz)];
+                pRR = prb[idx3(txa, tya + q + 1, tza, sx, sy, sz)];
 
                 pL = pL + plm_gradient(pL, pLL, pR, plm_theta) * 0.5;
                 pR = pR - plm_gradient(pR, pL, pRR, plm_theta) * 0.5;
@@ -1911,12 +1896,12 @@ void RMHD<dim>::riemann_fluxes()
             gri[yf] = (this->*riemann_solve)(pL, pR, 2, 0);
 
             // fluxes in k direction
-            pL = prb[idx3(txa, tya, tza + q - 1, sx, sy, 0)];
-            pR = prb[idx3(txa, tya, tza + q + 0, sx, sy, 0)];
+            pL = prb[idx3(txa, tya, tza + q - 1, sx, sy, sz)];
+            pR = prb[idx3(txa, tya, tza + q + 0, sx, sy, sz)];
 
             if (!use_pcm) {
-                pLL = prb[idx3(txa, tya, tza + q - 2, sx, sy, 0)];
-                pRR = prb[idx3(txa, tya, tza + q + 1, sx, sy, 0)];
+                pLL = prb[idx3(txa, tya, tza + q - 2, sx, sy, sz)];
+                pRR = prb[idx3(txa, tya, tza + q + 1, sx, sy, sz)];
 
                 pL = pL + plm_gradient(pL, pLL, pR, plm_theta) * 0.5;
                 pR = pR - plm_gradient(pR, pL, pRR, plm_theta) * 0.5;
@@ -2022,6 +2007,14 @@ void RMHD<dim>::advance()
                     auto qe    = my_min<lint>(ii + east, xag - 1);
                     auto qw    = my_max<lint>(ii - west, 0);
 
+                    // printf(
+                    //     "I-J --- qn: %lld, qs: %lld, qe: %lld, qw: %lld\n",
+                    //     qn,
+                    //     qs,
+                    //     qe,
+                    //     qw
+                    // );
+
                     auto nidx = idx3(ii + east, qn, kk, nxv, yag, zag);
                     auto sidx = idx3(ii + east, qs, kk, nxv, yag, zag);
                     auto eidx = idx3(qe, jj + north, kk, xag, nyv, zag);
@@ -2043,14 +2036,22 @@ void RMHD<dim>::advance()
                     );
 
                     // calc directional indices for i-k plane
-                    qn    = my_min<lint>(kk + north, zag - 1);
-                    qs    = my_max<lint>(kk - south, 0);
-                    qe    = my_min<lint>(ii + east, xag - 1);
-                    qw    = my_max<lint>(ii - west, 0);
-                    nidx  = idx3(ii + east, jj, qn, nxv, yag, zag);
-                    sidx  = idx3(ii + east, jj, qs, nxv, yag, zag);
-                    eidx  = idx3(qe, jj, kk + north, xag, yag, nzv);
-                    widx  = idx3(qw, jj, kk + north, xag, yag, nzv);
+                    qn   = my_min<lint>(kk + north, zag - 1);
+                    qs   = my_max<lint>(kk - south, 0);
+                    qe   = my_min<lint>(ii + east, xag - 1);
+                    qw   = my_max<lint>(ii - west, 0);
+                    nidx = idx3(ii + east, jj, qn, nxv, yag, zag);
+                    sidx = idx3(ii + east, jj, qs, nxv, yag, zag);
+                    eidx = idx3(qe, jj, kk + north, xag, yag, nzv);
+                    widx = idx3(qw, jj, kk + north, xag, yag, nzv);
+
+                    // printf(
+                    //     "I-K --- qn: %lld, qs: %lld, qe: %lld, qw: %lld\n",
+                    //     qn,
+                    //     qs,
+                    //     qe,
+                    //     qw
+                    // );
                     e2[q] = calc_edge_emf<Plane::IK, corner>(
                         hri[widx],
                         hri[eidx],
@@ -2067,14 +2068,22 @@ void RMHD<dim>::advance()
                     );
 
                     // calc directional indices for j-k plane
-                    qn    = my_min<lint>(kk + north, zag - 1);
-                    qs    = my_max<lint>(kk - south, 0);
-                    qe    = my_min<lint>(jj + east, yag - 1);
-                    qw    = my_max<lint>(jj - west, 0);
-                    nidx  = idx3(ii, jj + east, qn, xag, nyv, zag);
-                    sidx  = idx3(ii, jj + east, qs, xag, nyv, zag);
-                    eidx  = idx3(ii, qe, kk + north, xag, yag, nzv);
-                    widx  = idx3(ii, qe, kk + north, xag, yag, nzv);
+                    qn   = my_min<lint>(kk + north, zag - 1);
+                    qs   = my_max<lint>(kk - south, 0);
+                    qe   = my_min<lint>(jj + east, yag - 1);
+                    qw   = my_max<lint>(jj - west, 0);
+                    nidx = idx3(ii, jj + east, qn, xag, nyv, zag);
+                    sidx = idx3(ii, jj + east, qs, xag, nyv, zag);
+                    eidx = idx3(ii, qe, kk + north, xag, yag, nzv);
+                    widx = idx3(ii, qe, kk + north, xag, yag, nzv);
+
+                    // printf(
+                    //     "J-K --- qn: %lld, qs: %lld, qe: %lld, qw: %lld\n",
+                    //     qn,
+                    //     qs,
+                    //     qe,
+                    //     qw
+                    // );
                     e1[q] = calc_edge_emf<Plane::JK, corner>(
                         hri[widx],
                         hri[eidx],
@@ -2091,6 +2100,7 @@ void RMHD<dim>::advance()
                     );
                 }
             );
+            // std::cin.get();
 
             auto& b1L = bstag1[xlf];
             auto& b1R = bstag1[xrf];
@@ -2135,132 +2145,121 @@ void RMHD<dim>::advance()
 
             // Advance depending on geometry
             switch (geometry) {
-                case simbi::Geometry::CARTESIAN:
-                    {
-                        cons[aid] -= ((fri[xrf] - fri[xlf]) * invdx1 +
-                                      (gri[yrf] - gri[ylf]) * invdx2 +
-                                      (hri[zrf] - hri[zlf]) * invdx3 -
-                                      source_terms - gravity) *
-                                     dt * step;
-                        break;
-                    }
-                case simbi::Geometry::SPHERICAL:
-                    {
-                        const real rl    = x1l + vfaceL * step * dt;
-                        const real rr    = x1r + vfaceR * step * dt;
-                        const real tl    = get_x2face(jj, 0);
-                        const real tr    = get_x2face(jj, 1);
-                        const real ql    = get_x3face(kk, 0);
-                        const real qr    = get_x3face(kk, 1);
-                        const real rmean = get_cell_centroid(
-                            rr,
-                            rl,
-                            simbi::Geometry::SPHERICAL
-                        );
-                        const real s1R    = rr * rr;
-                        const real s1L    = rl * rl;
-                        const real s2R    = std::sin(tr);
-                        const real s2L    = std::sin(tl);
-                        const real thmean = 0.5 * (tl + tr);
-                        const real sint   = std::sin(thmean);
-                        const real dV1    = rmean * rmean * (rr - rl);
-                        const real dV2    = rmean * sint * (tr - tl);
-                        const real dV3    = rmean * sint * (qr - ql);
-                        const real cot    = std::cos(thmean) / sint;
+                case simbi::Geometry::CARTESIAN: {
+                    cons[aid] -= ((fri[xrf] - fri[xlf]) * invdx1 +
+                                  (gri[yrf] - gri[ylf]) * invdx2 +
+                                  (hri[zrf] - hri[zlf]) * invdx3 -
+                                  source_terms - gravity) *
+                                 dt * step;
+                    break;
+                }
+                case simbi::Geometry::SPHERICAL: {
+                    const real rl = x1l + vfaceL * step * dt;
+                    const real rr = x1r + vfaceR * step * dt;
+                    const real tl = get_x2face(jj, 0);
+                    const real tr = get_x2face(jj, 1);
+                    const real ql = get_x3face(kk, 0);
+                    const real qr = get_x3face(kk, 1);
+                    const real rmean =
+                        get_cell_centroid(rr, rl, simbi::Geometry::SPHERICAL);
+                    const real s1R    = rr * rr;
+                    const real s1L    = rl * rl;
+                    const real s2R    = std::sin(tr);
+                    const real s2L    = std::sin(tl);
+                    const real thmean = 0.5 * (tl + tr);
+                    const real sint   = std::sin(thmean);
+                    const real dV1    = rmean * rmean * (rr - rl);
+                    const real dV2    = rmean * sint * (tr - tl);
+                    const real dV3    = rmean * sint * (qr - ql);
+                    const real cot    = std::cos(thmean) / sint;
 
-                        // Grab central primitives
-                        const real rhoc = prb[tid].rho();
-                        const real uc   = prb[tid].get_v1();
-                        const real vc   = prb[tid].get_v2();
-                        const real wc   = prb[tid].get_v3();
-                        const real pc   = prb[tid].total_pressure();
-                        const auto bmuc = mag_fourvec_t(prb[tid]);
+                    // Grab central primitives
+                    const real rhoc = prb[tid].rho();
+                    const real uc   = prb[tid].get_v1();
+                    const real vc   = prb[tid].get_v2();
+                    const real wc   = prb[tid].get_v3();
+                    const real pc   = prb[tid].total_pressure();
+                    const auto bmuc = mag_fourvec_t(prb[tid]);
 
-                        const real hc   = prb[tid].enthalpy(gamma);
-                        const real gam2 = prb[tid].lorentz_factor_squared();
+                    const real hc   = prb[tid].enthalpy(gamma);
+                    const real gam2 = prb[tid].lorentz_factor_squared();
 
-                        const auto geom_source = conserved_t{
-                          0.0,
-                          (rhoc * hc * gam2 * (vc * vc + wc * wc) -
-                           bmuc.two * bmuc.two - bmuc.three * bmuc.three) /
-                                  rmean +
-                              pc * (s1R - s1L) / dV1,
-                          (rhoc * hc * gam2 * (wc * wc * cot - uc * vc) -
-                           bmuc.three * bmuc.three * cot + bmuc.one * bmuc.two
-                          ) / rmean +
-                              pc * (s2R - s2L) / dV2,
-                          -(rhoc * hc * gam2 * wc * (uc + vc * cot) -
-                            bmuc.three * bmuc.one - bmuc.three * bmuc.two * cot
-                          ) / rmean,
-                          0.0,
-                          0.0,
-                          0.0,
-                          0.0
-                        };
-                        cons[aid] -= ((fri[xrf] * s1R - fri[xlf] * s1L) / dV1 +
-                                      (gri[yrf] * s2R - gri[ylf] * s2L) / dV2 +
-                                      (hri[zrf] - hri[zlf]) / dV3 -
-                                      geom_source - source_terms - gravity) *
-                                     dt * step;
-                        break;
-                    }
-                default:
-                    {
-                        const real rl    = x1l + vfaceL * step * dt;
-                        const real rr    = x1r + vfaceR * step * dt;
-                        const real ql    = get_x2face(jj, 0);
-                        const real qr    = get_x2face(jj, 1);
-                        const real zl    = get_x3face(kk, 0);
-                        const real zr    = get_x3face(kk, 1);
-                        const real rmean = get_cell_centroid(
-                            rr,
-                            rl,
-                            simbi::Geometry::CYLINDRICAL
-                        );
-                        const real s1R = rr * (zr - zl) * (qr - ql);
-                        const real s1L = rl * (zr - zl) * (qr - ql);
-                        const real s2R = (rr - rl) * (zr - zl);
-                        const real s2L = (rr - rl) * (zr - zl);
-                        const real s3L = rmean * (rr - rl) * (zr - zl);
-                        const real s3R = s3L;
-                        // const real thmean = 0.5 * (tl + tr);
-                        const real dV =
-                            rmean * (rr - rl) * (zr - zl) * (qr - ql);
-                        const real invdV = 1.0 / dV;
+                    const auto geom_source = conserved_t{
+                      0.0,
+                      (rhoc * hc * gam2 * (vc * vc + wc * wc) -
+                       bmuc.two * bmuc.two - bmuc.three * bmuc.three) /
+                              rmean +
+                          pc * (s1R - s1L) / dV1,
+                      (rhoc * hc * gam2 * (wc * wc * cot - uc * vc) -
+                       bmuc.three * bmuc.three * cot + bmuc.one * bmuc.two) /
+                              rmean +
+                          pc * (s2R - s2L) / dV2,
+                      -(rhoc * hc * gam2 * wc * (uc + vc * cot) -
+                        bmuc.three * bmuc.one - bmuc.three * bmuc.two * cot) /
+                          rmean,
+                      0.0,
+                      0.0,
+                      0.0,
+                      0.0
+                    };
+                    cons[aid] -= ((fri[xrf] * s1R - fri[xlf] * s1L) / dV1 +
+                                  (gri[yrf] * s2R - gri[ylf] * s2L) / dV2 +
+                                  (hri[zrf] - hri[zlf]) / dV3 - geom_source -
+                                  source_terms - gravity) *
+                                 dt * step;
+                    break;
+                }
+                default: {
+                    const real rl = x1l + vfaceL * step * dt;
+                    const real rr = x1r + vfaceR * step * dt;
+                    const real ql = get_x2face(jj, 0);
+                    const real qr = get_x2face(jj, 1);
+                    const real zl = get_x3face(kk, 0);
+                    const real zr = get_x3face(kk, 1);
+                    const real rmean =
+                        get_cell_centroid(rr, rl, simbi::Geometry::CYLINDRICAL);
+                    const real s1R = rr * (zr - zl) * (qr - ql);
+                    const real s1L = rl * (zr - zl) * (qr - ql);
+                    const real s2R = (rr - rl) * (zr - zl);
+                    const real s2L = (rr - rl) * (zr - zl);
+                    const real s3L = rmean * (rr - rl) * (zr - zl);
+                    const real s3R = s3L;
+                    // const real thmean = 0.5 * (tl + tr);
+                    const real dV = rmean * (rr - rl) * (zr - zl) * (qr - ql);
+                    const real invdV = 1.0 / dV;
 
-                        // Grab central primitives
-                        const real rhoc = prb[tid].rho();
-                        const real uc   = prb[tid].get_v1();
-                        const real vc   = prb[tid].get_v2();
-                        // const real wc   = prb[tid].get_v3();
-                        const real pc   = prb[tid].total_pressure();
-                        const auto bmuc = mag_fourvec_t(prb[tid]);
+                    // Grab central primitives
+                    const real rhoc = prb[tid].rho();
+                    const real uc   = prb[tid].get_v1();
+                    const real vc   = prb[tid].get_v2();
+                    // const real wc   = prb[tid].get_v3();
+                    const real pc   = prb[tid].total_pressure();
+                    const auto bmuc = mag_fourvec_t(prb[tid]);
 
-                        const real hc   = prb[tid].enthalpy(gamma);
-                        const real gam2 = prb[tid].lorentz_factor_squared();
+                    const real hc   = prb[tid].enthalpy(gamma);
+                    const real gam2 = prb[tid].lorentz_factor_squared();
 
-                        const auto geom_source = conserved_t{
-                          0.0,
-                          (rhoc * hc * gam2 * (vc * vc) - bmuc.two * bmuc.two -
-                           bmuc.three * bmuc.three) /
-                                  rmean +
-                              pc * (s1R - s1L) * invdV,
-                          -(rhoc * hc * gam2 * uc * vc - bmuc.one * bmuc.two) /
-                              rmean,
-                          0.0,
-                          0.0,
-                          0.0,
-                          0.0,
-                          0.0
-                        };
-                        cons[aid] -=
-                            ((fri[xrf] * s1R - fri[xlf] * s1L) * invdV +
-                             (gri[yrf] * s2R - gri[ylf] * s2L) * invdV +
-                             (hri[zrf] * s3R - hri[zlf] * s3L) * invdV -
-                             geom_source - source_terms) *
-                            dt * step;
-                        break;
-                    }
+                    const auto geom_source = conserved_t{
+                      0.0,
+                      (rhoc * hc * gam2 * (vc * vc) - bmuc.two * bmuc.two -
+                       bmuc.three * bmuc.three) /
+                              rmean +
+                          pc * (s1R - s1L) * invdV,
+                      -(rhoc * hc * gam2 * uc * vc - bmuc.one * bmuc.two) /
+                          rmean,
+                      0.0,
+                      0.0,
+                      0.0,
+                      0.0,
+                      0.0
+                    };
+                    cons[aid] -= ((fri[xrf] * s1R - fri[xlf] * s1L) * invdV +
+                                  (gri[yrf] * s2R - gri[ylf] * s2L) * invdV +
+                                  (hri[zrf] * s3R - hri[zlf] * s3L) * invdV -
+                                  geom_source - source_terms) *
+                                 dt * step;
+                    break;
+                }
             }   // end switch
         }
     );
