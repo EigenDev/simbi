@@ -286,6 +286,16 @@ namespace simbi {
                                         idx2(ir, 2 * hr - rs, nx, ny);
                                     const auto outr =
                                         idx2(ir, ny - 2 * hr + rr, nx, ny);
+                                    // printf(
+                                    //     "jng: %llu, jnr: %d, jnog: %llu, jno:
+                                    //     "
+                                    //     "%d\n",
+                                    //     rr,
+                                    //     2 * hr - rs,
+                                    //     ny - rs,
+                                    //     ny - 2 * hr + rr
+                                    // );
+                                    // std::cin.get();
                                     cons[ing]  = cons[inr];
                                     cons[outg] = cons[outr];
                                     if (half_sphere) {
@@ -2593,6 +2603,7 @@ namespace simbi {
             const T& state
         )
         {
+            constexpr auto reg       = T::regime;
             const auto full_filename = data_directory + filename;
             std::cout << "\n[Writing File...: " << full_filename << "]\n";
             // Create a new file using the default property list.
@@ -2600,6 +2611,9 @@ namespace simbi {
 
             // Create the data space for the dataset.
             hsize_t dims[1]   = {state.nx * state.ny * state.nz};
+            hsize_t dimxv[1]  = {state.nxv * state.yag * state.zag};
+            hsize_t dimyv[1]  = {state.xag * state.nyv * state.zag};
+            hsize_t dimzv[1]  = {state.xag * state.yag * state.nzv};
             hsize_t dimx[1]   = {state.x1.size()};
             hsize_t dimy[1]   = {state.x2.size()};
             hsize_t dimz[1]   = {state.x3.size()};
@@ -2610,6 +2624,9 @@ namespace simbi {
             H5::DataSpace hdataspace_x2(1, dimy);
             H5::DataSpace hdataspace_x3(1, dimz);
             H5::DataSpace hdataspace_bc(1, dim_bc);
+            H5::DataSpace b1dataspace(1, dimxv);
+            H5::DataSpace b2dataspace(1, dimyv);
+            H5::DataSpace b3dataspace(1, dimzv);
 
             // Create empty dataspace for attributes
             H5::DataSpace attr_dataspace(H5S_NULL);
@@ -2697,6 +2714,63 @@ namespace simbi {
                 }
                 dataset.close();
             };
+
+            auto write_fields = [&](const std::string& name,
+                                    const auto& dataspace,
+                                    const auto member) {
+                if constexpr (reg == "srmhd") {
+                    // Write the data using a for loop
+                    dataset = file.createDataSet(name, real_type, dataspace);
+                    if (member == 1) {
+                        for (hsize_t i = 0; i < state.bstag1.size(); ++i) {
+                            hsize_t offset[1] = {i};
+                            hsize_t count[1]  = {1};
+                            H5::DataSpace memspace(1, count);
+                            dataspace
+                                .selectHyperslab(H5S_SELECT_SET, count, offset);
+                            dataset.write(
+                                &const_cast<T&>(state).bstag1[i],
+                                real_type,
+                                memspace,
+                                dataspace
+                            );
+                        }
+                    }
+                    else if (member == 2) {
+                        for (hsize_t i = 0; i < state.bstag2.size(); ++i) {
+                            hsize_t offset[1] = {i};
+                            hsize_t count[1]  = {1};
+                            H5::DataSpace memspace(1, count);
+                            dataspace
+                                .selectHyperslab(H5S_SELECT_SET, count, offset);
+
+                            dataset.write(
+                                &const_cast<T&>(state).bstag2[i],
+                                real_type,
+                                memspace,
+                                dataspace
+                            );
+                        }
+                    }
+                    else {
+                        for (hsize_t i = 0; i < state.bstag3.size(); ++i) {
+                            hsize_t offset[1] = {i};
+                            hsize_t count[1]  = {1};
+                            H5::DataSpace memspace(1, count);
+                            dataspace
+                                .selectHyperslab(H5S_SELECT_SET, count, offset);
+
+                            dataset.write(
+                                &const_cast<T&>(state).bstag3[i],
+                                real_type,
+                                memspace,
+                                dataspace
+                            );
+                        }
+                    }
+                    dataset.close();
+                }
+            };
             write_prims("rho", hdataspace, 0);
             write_prims("v1", hdataspace, 1);
             if (state.dimensions > 1) {
@@ -2706,10 +2780,10 @@ namespace simbi {
                 write_prims("v3", hdataspace, 3);
             }
             write_prims("p", hdataspace, state.dimensions + 1);
-            if (regime == "srmhd") {
-                write_prims("b1", hdataspace, state.dimensions + 2);
-                write_prims("b2", hdataspace, state.dimensions + 3);
-                write_prims("b3", hdataspace, state.dimensions + 4);
+            if constexpr (reg == "srmhd") {
+                write_fields("b1", b1dataspace, 1);
+                write_fields("b2", b2dataspace, 2);
+                write_fields("b3", b3dataspace, 3);
                 write_prims("chi", hdataspace, state.dimensions + 5);
             }
             else {

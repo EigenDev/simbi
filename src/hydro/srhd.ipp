@@ -39,8 +39,10 @@ DUAL constexpr real SRHD<dim>::get_x1face(const lint ii, const int side) const
             return my_min<real>(x1l + dx1 * (ii == 0 ? 0.5 : 1.0), x1max);
         }
         default: {
-            const real x1l = my_max<
-                real>(x1min * std::pow(10.0, (ii - 0.5) * dlogx1), x1min);
+            const real x1l = my_max<real>(
+                x1min * std::pow(10.0, (ii - 0.5) * dlogx1),
+                x1min
+            );
             if (side == 0) {
                 return x1l;
             }
@@ -64,8 +66,10 @@ DUAL constexpr real SRHD<dim>::get_x2face(const lint ii, const int side) const
             return my_min<real>(x2l + dx2 * (ii == 0 ? 0.5 : 1.0), x2max);
         }
         default: {
-            const real x2l = my_max<
-                real>(x2min * std::pow(10.0, (ii - 0.5) * dlogx2), x2min);
+            const real x2l = my_max<real>(
+                x2min * std::pow(10.0, (ii - 0.5) * dlogx2),
+                x2min
+            );
             if (side == 0) {
                 return x2l;
             }
@@ -89,8 +93,10 @@ DUAL constexpr real SRHD<dim>::get_x3face(const lint ii, const int side) const
             return my_min<real>(x3l + dx3 * (ii == 0 ? 0.5 : 1.0), x3max);
         }
         default: {
-            const real x3l = my_max<
-                real>(x3min * std::pow(10.0, (ii - 0.5) * dlogx3), x3min);
+            const real x3l = my_max<real>(
+                x3min * std::pow(10.0, (ii - 0.5) * dlogx3),
+                x3min
+            );
             if (side == 0) {
                 return x3l;
             }
@@ -651,9 +657,12 @@ void SRHD<dim>::adapt_dt(const ExecutionPolicy<>& p)
         // LAUNCH_ASYNC((compute_dt<primitive_t,dt_type>),
         // p.gridSize, p.blockSize, this, prims.data(), dt_min.data(),
         // geometry);
-        compute_dt<primitive_t, dt_type>
-            <<<p.gridSize,
-               p.blockSize>>>(this, prims.data(), dt_min.data(), geometry);
+        compute_dt<primitive_t, dt_type><<<p.gridSize, p.blockSize>>>(
+            this,
+            prims.data(),
+            dt_min.data(),
+            geometry
+        );
     }
     // LAUNCH_ASYNC((deviceReduceWarpAtomicKernel<dim>), p.gridSize,
     // p.blockSize, this, dt_min.data(), active_zones);
@@ -1154,19 +1163,22 @@ void SRHD<dim>::advance()
         const auto kr = get_real_idx(kk + 1, 0, zag);
 
         // object to left or right? (x1-direction)
-        const bool object_x[2] =
-            {ib_check<dim>(object_pos, il, jj, kk, xag, yag, 1),
-             ib_check<dim>(object_pos, ir, jj, kk, xag, yag, 1)};
+        const bool object_x[2] = {
+          ib_check<dim>(object_pos, il, jj, kk, xag, yag, 1),
+          ib_check<dim>(object_pos, ir, jj, kk, xag, yag, 1)
+        };
 
         // object in front or behind? (x2-direction)
-        const bool object_y[2] =
-            {ib_check<dim>(object_pos, ii, jl, kk, xag, yag, 2),
-             ib_check<dim>(object_pos, ii, jr, kk, xag, yag, 2)};
+        const bool object_y[2] = {
+          ib_check<dim>(object_pos, ii, jl, kk, xag, yag, 2),
+          ib_check<dim>(object_pos, ii, jr, kk, xag, yag, 2)
+        };
 
         // object above or below? (x3-direction)
-        const bool object_z[2] =
-            {ib_check<dim>(object_pos, ii, jj, kl, xag, yag, 3),
-             ib_check<dim>(object_pos, ii, jj, kr, xag, yag, 3)};
+        const bool object_z[2] = {
+          ib_check<dim>(object_pos, ii, jj, kl, xag, yag, 3),
+          ib_check<dim>(object_pos, ii, jj, kr, xag, yag, 3)
+        };
 
         // Calc Rimeann Flux at all interfaces
         for (int q = 0; q < 2; q++) {
@@ -1183,6 +1195,7 @@ void SRHD<dim>::advance()
             }
             ib_modify<dim>(pR, pL, object_x[q], 1);
             fri[q] = (this->*riemann_solve)(pL, pR, 1, vfs[q]);
+
             if constexpr (dim > 1) {
                 // fluxes in j direction
                 pL = prb[idx3(txa, tya + q - 1, tza, sx, sy, sz)];
@@ -1280,7 +1293,6 @@ void SRHD<dim>::advance()
                         2.0 * M_PI * 0.5 * (rr * rr - rl * rl) * std::sin(tl);
                     const real factor = (mesh_motion) ? dV : 1;
 
-                    // Grab central primitives
                     const real rhoc = prb[tid].rho();
                     const real uc   = prb[tid].get_v1();
                     const real vc   = prb[tid].get_v2();
@@ -1288,13 +1300,14 @@ void SRHD<dim>::advance()
                     const real hc   = prb[tid].enthalpy(gamma);
                     const real gam2 = prb[tid].lorentz_factor_squared();
 
-                    const conserved_t geom_source =
-                        {0.0,
-                         (rhoc * hc * gam2 * vc * vc) / rmean +
-                             pc * (s1R - s1L) * invdV,
-                         -(rhoc * hc * gam2 * uc * vc) / rmean +
-                             pc * (s2R - s2L) * invdV,
-                         0.0};
+                    const conserved_t geom_source = {
+                      0.0,
+                      (rhoc * hc * gam2 * vc * vc) / rmean +
+                          pc * (s1R - s1L) * invdV,
+                      -(rhoc * hc * gam2 * uc * vc) / rmean +
+                          pc * (s2R - s2L) * invdV,
+                      0.0
+                    };
 
                     cons[aid] -= ((fri[RF] * s1R - fri[LF] * s1L) * invdV +
                                   (gri[RF] * s2R - gri[LF] * s2L) * invdV -
@@ -1330,12 +1343,13 @@ void SRHD<dim>::advance()
                     const real hc   = prb[tid].enthalpy(gamma);
                     const real gam2 = prb[tid].lorentz_factor_squared();
 
-                    const conserved_t geom_source =
-                        {0.0,
-                         (rhoc * hc * gam2 * vc * vc) / rmean +
-                             pc * (s1R - s1L) * invdV,
-                         -(rhoc * hc * gam2 * uc * vc) / rmean,
-                         0.0};
+                    const conserved_t geom_source = {
+                      0.0,
+                      (rhoc * hc * gam2 * vc * vc) / rmean +
+                          pc * (s1R - s1L) * invdV,
+                      -(rhoc * hc * gam2 * uc * vc) / rmean,
+                      0.0
+                    };
                     cons[aid] -= ((fri[RF] * s1R - fri[LF] * s1L) * invdV +
                                   (gri[RF] * s2R - gri[LF] * s2L) * invdV -
                                   geom_source - source_terms - gravity) *
@@ -1573,6 +1587,7 @@ void SRHD<dim>::simulate(
     print_shared_mem();
     set_riemann_solver();
 
+    config_ghosts(*this);
     cons2prim();
     if constexpr (global::on_gpu) {
         adapt_dt<TIMESTEP_TYPE::MINIMUM>(fullP);
@@ -1583,15 +1598,14 @@ void SRHD<dim>::simulate(
     // Save initial condition
     if (t == 0 || init_chkpt_idx == 0) {
         write_to_file(*this);
-        config_ghosts(*this);
     }
 
     // Simulate :)
     try {
         simbi::detail::logger::with_logger(*this, tend, [&] {
             advance();
-            cons2prim();
             config_ghosts(*this);
+            cons2prim();
 
             if constexpr (global::on_gpu) {
                 adapt_dt(fullP);
