@@ -18,6 +18,7 @@ from ..detail.helpers import (
     calc_cell_volume3D,
     calc_domega,
     find_nearest,
+    calc_any_mean
 )
 from ..detail import get_subparser
 
@@ -26,7 +27,6 @@ try:
 except ImportError:
     pass
 
- 
 
 derived = [
     "D",
@@ -91,7 +91,7 @@ class Visualizer:
         self.ndim = ndim
         self.refs = []
         self.oned_slice = False
-        self.coords = {"x2": "0.0", "x3": "0.0"}
+        self.coords = {"x2v": "0.0", "x3v": "0.0"}
         if self.ndim != 1:
             plot_parser = get_subparser(parser, 1)
             plot_parser.add_argument(
@@ -193,7 +193,7 @@ class Visualizer:
                 help="coordinates of fixed vars for (n-m)d projection",
                 action=ParseKVAction,
                 nargs="+",
-                default={"x2": "0.0", "x3": "0.0"},
+                default={"x2v": "0.0", "x3v": "0.0"},
             )
             plot_parser.add_argument(
                 "--projection",
@@ -246,11 +246,11 @@ class Visualizer:
                     self.color_map += [plt.get_cmap(cmap)]
 
             if isinstance(self.flist, dict):
-                self.cartesian = util.read_file(self, self.flist[0][0], self.ndim)[1][
+                self.cartesian = util.read_file(self.flist[0][0])[1][
                     "is_cartesian"
                 ]
             else:
-                self.cartesian = util.read_file(self, self.flist[0], self.ndim)[1][
+                self.cartesian = util.read_file(self.flist[0])[1][
                     "is_cartesian"
                 ]
 
@@ -272,10 +272,10 @@ class Visualizer:
         ):
             self.square_plot = True
 
-        if "x2" not in self.coords:
-            self.coords["x2"] = "0.0"
-        if "x3" not in self.coords:
-            self.coords["x3"] = "0.0"
+        if "x2v" not in self.coords:
+            self.coords["x2v"] = "0.0"
+        if "x3v" not in self.coords:
+            self.coords["x3v"] = "0.0"
 
         self.create_figure()
 
@@ -295,7 +295,7 @@ class Visualizer:
             ax_iter := get_iterable(self.axs, func=list if self.nplots == 1 else iter)
         ):
             for fidx, file in enumerate(get_iterable(self.flist[self.current_frame])):
-                fields, setup, mesh = util.read_file(self, file, ndim=self.ndim)
+                fields, setup, mesh = util.read_file(file)
                 for idx, field in enumerate(get_iterable(self.fields)):
                     if field in derived:
                         var = util.prims2var(fields, field)
@@ -324,20 +324,23 @@ class Visualizer:
                         label = f"{self.labels[fidx]}"
 
                     if self.oned_slice:
-                        x = mesh[self.oned_slice]
-                        for x3coord in map(float, self.coords["x3"].split(",")):
-                            for x2coord in map(float, self.coords["x2"].split(",")):
-                                coord_label = label or '' + f", $x_2={x2coord:.1f}$"
+                        x = calc_any_mean(
+                            mesh[f"{self.oned_slice}v"],
+                            setup[f"{self.oned_slice}_cell_spacing"],
+                        )   
+                        for x3coord in map(float, self.coords["x3v"].split(",")):
+                            for x2coord in map(float, self.coords["x2v"].split(",")):
+                                coord_label = label or "" + f", $x_2={x2coord:.1f}$"
                                 if not self.cartesian:
                                     x2coord = np.deg2rad(x2coord)
-                                yidx = find_nearest(mesh["x2"], x2coord)[0]
+                                yidx = find_nearest(mesh["x2v"], x2coord)[0]
                                 if self.ndim == 2:
                                     yvar = var[yidx]
                                 else:
                                     coord_label += f", $x_3={x3coord:.1f}$"
                                     if not self.cartesian:
                                         x3coord = np.deg2rad(x3coord)
-                                    zidx = find_nearest(mesh["x3"], x3coord)[0]
+                                    zidx = find_nearest(mesh["x3v"], x3coord)[0]
                                     yvar = var[zidx, yidx]
                                 if self.shock_coord:
                                     shock_location = np.argmax(yvar)
@@ -345,81 +348,22 @@ class Visualizer:
                                     scale = yvar[shock_location]
                                 else:
                                     xvar = x
-                                # s = ["0.1", "1", "10"]
-                                # if idx == 0:
-                                #     # d = rf"$v_{{\rm wind}} = {s[fidx]}$, $z={x2coord:.0f}$"
-                                #     d = rf"$z={x2coord:.0f}$"
-                                # else:
-                                #     d = None
-
-                                # gamma = 5.0 / 3.0
-                                # beta = 0.5
-                                # rprime = beta * abs(x2coord) ** (beta - 1.0)
-                                # uxi_max = 2 / (gamma + 1.0)
-                                # uxi_min = 1 / gamma
-                                # uxi = np.linspace(uxi_min, uxi_max, xvar.size)
-                                # xi = np.sqrt(
-                                #     (4.0 / (gamma**2 - 1.0))
-                                #     * ((gamma - 1.0) / (gamma * (gamma + 1.0)))
-                                #     ** (1 / gamma)
-                                #     * ((uxi - 1 / gamma) ** (1.0 - 1 / gamma))
-                                #     / (uxi * (2 / gamma - uxi))
-                                # )
-                                # gxi = (
-                                #     (gamma + 1.0)
-                                #     / (gamma - 1.0)
-                                #     * (gamma * (gamma + 1.0) / (gamma - 1.0))
-                                #     ** (1 / gamma)
-                                #     * (gamma * (gamma - 1.0) / 2.0) ** (2 / (2 - gamma))
-                                #     * (uxi - 1 / gamma) ** (1 / gamma)
-                                #     * (((2 / gamma) - uxi) / (1 - uxi))
-                                #     ** (2 / (2 - gamma))
-                                # )
-                                # cxi = np.sqrt(
-                                #     (gamma - 1.0)
-                                #     * 0.5
-                                #     * (uxi**2 * (1.0 - uxi))
-                                #     / (uxi - 1.0 / gamma)
-                                # )
-                                # cs = rprime * xi * cxi
-                                # pxi = gxi * cs**2 / gamma
-                                # pxi = pxi[1:]
-                                # us = rprime * uxi * xi
-                                
-                                # if field == "rho" and fidx == 0:
-                                #     ax.plot(
-                                #         xi,
-                                #         gxi / gxi.max(),
-                                #         label="Analytic",
-                                #         color="black",
-                                #         linestyle="-.",
-                                #     )
-                                # if field == "p" and fidx == 1:
-                                #     ax.plot(
-                                #         xi[1:],
-                                #         pxi / pxi.max(),
-                                #         color="black",
-                                #         linestyle="-.",
-                                #     )
-                                # if field == "v1" and fidx == 2:
-                                #     ax.plot(
-                                #         xi, us / us.max(), color="black", linestyle="-."
-                                #     )
-                                (line,) = ax.plot(
-                                    xvar, yvar / scale, label=label
-                                )
+                                (line,) = ax.plot(xvar, yvar / scale, label=label)
 
                                 if self.nplots != 1:
                                     ax.set_ylabel(label)
                     else:
-                        x = mesh["x1"]
-                        (line,) = ax.plot(mesh["x1"], var / scale, label=label)
-                        
+                        x = calc_any_mean(
+                            mesh["x1v"],
+                            setup["x1_cell_spacing"],
+                        )   
+                        (line,) = ax.plot(x, var / scale, label=label)
+
                     self.frames += [line]
                     # BMK REF
                     if self.pictorial and refcount == 0:
-                        x = mesh["x1"][var.argmax() :]
-                        x = np.linspace(mesh["x1"][var.argmax()], 1, 1000)
+                        x = calc_any_mean(mesh["x1v"], setup["x1_cell_spacing"])[var.argmax() :]
+                        x = np.linspace(mesh["x1v"][var.argmax()], 1, 1000)
                         (ref,) = ax.plot(
                             x,
                             var.max() * (x / x[0]) ** (-3 / 2),
@@ -468,7 +412,7 @@ class Visualizer:
         if any(self.xlims):
             ax.set_xlim(*self.xlims)
         else:
-            ax.set_xlim(mesh["x1"][0], mesh["x1"][-1])
+            ax.set_xlim(mesh["x1v"][0], mesh["x1v"][-1])
 
         if any(self.ylims):
             ax.set_ylim(*self.ylims)
@@ -485,7 +429,7 @@ class Visualizer:
         patches = len(self.fields)
 
         theta_cycle = cycle([0, -np.pi * 0.5, -np.pi, np.pi * 0.5])
-        
+
         patches += patches == 1
         if self.bipolar and patches == 2:
             patches *= 2
@@ -499,7 +443,7 @@ class Visualizer:
 
         for ax in get_iterable(self.axs):
             for file in get_iterable(self.flist[self.current_frame]):
-                fields, setup, mesh = util.read_file(self, file, ndim=self.ndim)
+                fields, setup, mesh = util.read_file(file)
                 for idx in range(patches):
                     field = next(the_fields)
                     if field in derived:
@@ -530,12 +474,16 @@ class Visualizer:
                             var *= util.rho_scale.value
 
                     xx = (
-                        mesh["x1"] if self.ndim == 2 else mesh[f"x{self.projection[0]}"]
+                        mesh["x1v"]
+                        if self.ndim == 2
+                        else mesh[f"x{self.projection[0]}v"]
                     )
                     yy = (
-                        mesh["x2"] if self.ndim == 2 else mesh[f"x{self.projection[1]}"]
+                        mesh["x2v"]
+                        if self.ndim == 2
+                        else mesh[f"x{self.projection[1]}v"]
                     )
-                    
+
                     if setup["coord_system"] == "axis_cylindrical" and idx == 1:
                         xx *= -1
 
@@ -546,17 +494,17 @@ class Visualizer:
                                 box_depth = np.deg2rad(
                                     self.box_depth
                                 )  # + np.pi * (idx > 0)
-                            coord_idx = find_nearest(mesh["x3"], box_depth)[0]
+                            coord_idx = find_nearest(mesh["x3v"], box_depth)[0]
                             var = var[coord_idx]
                         elif self.projection[2] == 2:
                             if not self.cartesian:
                                 box_depth = np.deg2rad(
                                     self.box_depth
                                 )  # + np.pi * (idx > 0)
-                            coord_idx = find_nearest(mesh["x2"], box_depth)[0]
+                            coord_idx = find_nearest(mesh["x2v"], box_depth)[0]
                             var = var[:, coord_idx, :]
                         else:
-                            coord_idx = find_nearest(mesh["x1"], box_depth)[0]
+                            coord_idx = find_nearest(mesh["x1v"], box_depth)[0]
                             var = var[:, :, coord_idx]
 
                     if not self.cartesian:
@@ -573,10 +521,10 @@ class Visualizer:
                                 + (patches - 1) * dtheta * (not self.bipolar)
                             )
                             low_wing = util.find_nearest(
-                                mesh["x2"], np.deg2rad(self.xlims[0])
+                                mesh["x2v"], np.deg2rad(self.xlims[0])
                             )[0]
                             hi_wing = util.find_nearest(
-                                mesh["x2"], np.deg2rad(self.xlims[1])
+                                mesh["x2v"], np.deg2rad(self.xlims[1])
                             )[0]
                             xx = xx[low_wing:hi_wing] + idx * np.deg2rad(dtheta)
                             yy = yy[low_wing:hi_wing]
@@ -598,7 +546,7 @@ class Visualizer:
                                 self.axs.set_thetamin(-180)
                                 self.axs.set_thetamax(+180)
                             xx = xx[:: theta_sign(idx)] + next(theta_cycle)
-                            if idx in [2,3]:
+                            if idx in [2, 3]:
                                 xx = xx[::-1]
                         elif (
                             max_angle > 0.5 * np.pi and max_angle < 2.0 * np.pi
@@ -639,7 +587,7 @@ class Visualizer:
                                 vmax=color_range[1],
                             )
                         }
-                    
+
                     self.frames += [
                         ax.pcolormesh(
                             xx,
@@ -751,7 +699,9 @@ class Visualizer:
                 if any(self.xlims):
                     angs = np.linspace(xextent[0], xextent[1], 1000)
                 else:
-                    angs = np.linspace(mesh["x2"][0], mesh["x2"][-1], mesh["x2"].size)
+                    angs = np.linspace(
+                        mesh["x2v"][0], mesh["x2v"][-1], mesh["x2v"].size
+                    )
                 if "eps" in self.extra_args:
                     eps = float(self.extra_args["eps"])
                     a = self.extra_args["radius"] * (1 - eps) ** (-1 / 3)
@@ -787,7 +737,7 @@ class Visualizer:
                 else:
                     # speciifc to publication figure
                     kwargs = {
-                        "y": 0.8 if mesh["x2"].max() == 0.5 * np.pi else 1.03,
+                        "y": 0.8 if mesh["x2v"].max() == 0.5 * np.pi else 1.03,
                         # -------------------- Text for ring wedges
                         # 'y': 0.30,
                         # 'x': 0.80,
@@ -815,7 +765,7 @@ class Visualizer:
                         xlabel = "$x_2$"
                     else:
                         xlabel = "$x_3$"
-                    
+
                     if self.projection[1] == 1:
                         ylabel = "$x_1$"
                     elif self.projection[1] == 2:
@@ -851,16 +801,18 @@ class Visualizer:
                         axidx += 1
                         annotation_placed = False
 
-                fields, setup, mesh = util.read_file(self, file, dims[idx])
+                fields, setup, mesh = util.read_file(file)
                 time = setup["time"] * util.time_scale
                 if fields["rho"].ndim == 1:
-                    dV = calc_cell_volume1D(x1=mesh["x1"])
+                    dV = calc_cell_volume1D(x1=mesh["x1v"])
                 elif fields["rho"].ndim == 2:
-                    dV = calc_cell_volume2D(x1=mesh["x1"], x2=mesh["x2"])
-                    if mesh["x2"][-1] == 0.5 * np.pi:
+                    dV = calc_cell_volume2D(x1=mesh["x1v"], x2=mesh["x2v"])
+                    if mesh["x2v"][-1] == 0.5 * np.pi:
                         dV *= 2.0
                 else:
-                    dV = calc_cell_volume3D(x1=mesh["x1"], x2=mesh["x2"], x3=mesh["x3"])
+                    dV = calc_cell_volume3D(
+                        x1=mesh["x1v"], x2=mesh["x2v"], x3=mesh["x3v"]
+                    )
 
                 if self.kinetic:
                     mass = dV * fields["W"] * fields["rho"]
@@ -986,7 +938,7 @@ class Visualizer:
             times = []
             label = self.labels[key] if self.labels else None
             for idx, file in enumerate(self.flist[key]):
-                fields, setup, mesh = util.read_file(self, file, self.ndim)
+                fields, setup, mesh = util.read_file(file)
                 if self.fields[0] in derived:
                     var = util.prims2var(fields, self.fields[0])
                 else:
@@ -996,12 +948,12 @@ class Visualizer:
                     weights = util.prims2var(fields, self.weight)
 
                     if self.ndim == 1:
-                        dV = calc_cell_volume1D(x1=mesh["x1"])
+                        dV = calc_cell_volume1D(x1=mesh["x1v"])
                     elif self.ndim == 2:
-                        dV = calc_cell_volume2D(x1=mesh["x1"], x2=mesh["x2"])
+                        dV = calc_cell_volume2D(x1=mesh["x1v"], x2=mesh["x2v"])
                     else:
                         dV = calc_cell_volume3D(
-                            x1=mesh["x1"], x2=mesh["x2"], x3=mesh["x3"]
+                            x1=mesh["x1v"], x2=mesh["x2v"], x3=mesh["x3v"]
                         )
                     weighted = np.sum(weights * var * dV) / np.sum(weights * dV)
                 else:
@@ -1068,7 +1020,7 @@ class Visualizer:
             ax_iter := get_iterable(self.axs, func=list if self.nplots == 1 else iter)
         ):
             for idx, file in enumerate(get_iterable(self.flist[self.current_frame])):
-                fields, setup, mesh = util.read_file(self, file, self.ndim)
+                fields, setup, mesh = util.read_file(file)
                 gb = fields["gamma_beta"]
                 time = setup["time"] * util.time_scale
 
@@ -1079,11 +1031,13 @@ class Visualizer:
                         annotation_placed = False
 
                 if self.ndim == 2:
-                    dV = calc_cell_volume2D(x1=mesh["x1"], x2=mesh["x2"])
-                    domega = calc_domega(x2=mesh["x2"])
+                    dV = calc_cell_volume2D(x1=mesh["x1v"], x2=mesh["x2v"])
+                    domega = calc_domega(x2=mesh["x2v"])
                 else:
-                    dV = calc_cell_volume3D(x1=mesh["x1"], x2=mesh["x2"], x3=mesh["x3"])
-                    domega = calc_domega(x2=mesh["x2"], x3=mesh["x3"])
+                    dV = calc_cell_volume3D(
+                        x1=mesh["x1v"], x2=mesh["x2v"], x3=mesh["x3v"]
+                    )
+                    domega = calc_domega(x2=mesh["x2v"], x3=mesh["x3v"])
 
                 if self.kinetic:
                     mass = dV * fields["W"] * fields["rho"]
@@ -1102,15 +1056,15 @@ class Visualizer:
                     edens_total = util.prims2var(fields, "energy")
                     var = edens_total * dV * util.e_scale.value
 
-                theta = np.rad2deg(mesh["x2"])
+                theta = np.rad2deg(mesh["x2v"])
                 for cidx, cutoff in enumerate(self.cutoffs):
                     deg_per_bin = 0.0001  # degrees in bin
-                    num_bins = int((mesh["x2"][-1] - mesh["x2"][0]) / deg_per_bin)
+                    num_bins = int((mesh["x2v"][-1] - mesh["x2v"][0]) / deg_per_bin)
                     if num_bins > theta.size:
                         num_bins = theta.size
-                    tbins = np.linspace(mesh["x2"][0], mesh["x2"][-1], num_bins)
+                    tbins = np.linspace(mesh["x2v"][0], mesh["x2v"][-1], num_bins)
                     tbin_edges = np.linspace(
-                        mesh["x2"][0], mesh["x2"][-1], num_bins + 1
+                        mesh["x2v"][0], mesh["x2v"][-1], num_bins + 1
                     )
                     domega_bins = (
                         2.0
@@ -1139,8 +1093,8 @@ class Visualizer:
                     cdf = np.array(
                         [x[gb[idx] > cutoff].sum() for idx, x in enumerate(var)]
                     )
-                    dx, _ = np.histogram(mesh["x2"], weights=cdf, bins=tbin_edges)
-                    dw, _ = np.histogram(mesh["x2"], weights=domega, bins=tbin_edges)
+                    dx, _ = np.histogram(mesh["x2v"], weights=cdf, bins=tbin_edges)
+                    dw, _ = np.histogram(mesh["x2v"], weights=domega, bins=tbin_edges)
                     dx_domega = dx / dw
                     iso_var = 4.0 * np.pi * dx_domega
 
@@ -1329,7 +1283,7 @@ class Visualizer:
                 len(self.fields),
                 len(self.files),
                 len(self.cutoffs),
-                len(self.coords["x2"].split(",")) * len(self.coords["x3"].split(",")),
+                len(self.coords["x2v"].split(",")) * len(self.coords["x3v"].split(",")),
             )
         else:
             nind_curves = self.nplots // len(self.files)
@@ -1377,7 +1331,7 @@ class Visualizer:
 
     def update_frame(self, frame: int):
         self.current_frame = frame
-        fields, setups, mesh = util.read_file(self, self.flist[frame], ndim=self.ndim)
+        fields, setups, mesh = util.read_file(self.flist[frame])
         time = setups["time"] * (util.time_scale if self.units else 1.0)
         if self.setup:
             title = rf"{self.setup} at t = {time:.1f}"
@@ -1386,7 +1340,7 @@ class Visualizer:
             else:
                 # speciifc to publication figure
                 kwargs = {
-                    "y": 0.95 if mesh["x2"].max() == np.pi else 0.8,
+                    "y": 0.95 if mesh["x2v"].max() == np.pi else 0.8,
                     # -------------------- Text for ring wedges
                     # 'y': 0.30,
                     # 'x': 0.80,
@@ -1415,24 +1369,28 @@ class Visualizer:
 
             if self.ndim == 1 or self.oned_slice:
                 yvar = var
-                self.axs.set_xlim(mesh["x1"][0], mesh["x1"][-1])
+                self.axs.set_xlim(mesh["x1v"][0], mesh["x1v"][-1])
+                x = calc_any_mean(mesh["x1v"], setups["x1_cell_spacing"])
                 if self.oned_slice:
-                    x = mesh[self.oned_slice]
-                    for x3coord in map(float, self.coords["x3"].split(",")):
-                        for x2coord in map(float, self.coords["x2"].split(",")):
+                    x = calc_any_mean(
+                        mesh[f"{self.oned_slice}v"],
+                        setups[f"{self.oned_slice}_cell_spacing"],
+                    )  
+                    for x3coord in map(float, self.coords["x3v"].split(",")):
+                        for x2coord in map(float, self.coords["x2v"].split(",")):
                             # coord_label =label + f", $x_2={x2coord:.1f}$"
                             if not self.cartesian:
                                 x2coord = np.deg2rad(x2coord)
-                            yidx = find_nearest(mesh["x2"], x2coord)[0]
+                            yidx = find_nearest(mesh["x2v"], x2coord)[0]
                             if self.ndim == 2:
                                 yvar = var[yidx]
                             else:
                                 # coord_label += f', $x_3={x3coord:.1f}$'
                                 if not self.cartesian:
                                     x3coord = np.deg2rad(x3coord)
-                                zidx = find_nearest(mesh["x3"], x3coord)[0]
+                                zidx = find_nearest(mesh["x3v"], x3coord)[0]
                                 yvar = var[zidx, yidx]
-                self.frames[idx].set_data(mesh["x1"], yvar / next(scale_cycle))
+                self.frames[idx].set_data(x, yvar / next(scale_cycle))
                 # if self.refs:
                 # x = mesh['x1']
                 # self.refs[idx].set_data(x, self.refy * (x / self.refx) ** (-3/2))
@@ -1451,10 +1409,10 @@ class Visualizer:
 
                 if not self.square_plot:
                     if not self.xmax and not any(self.ylims):
-                        self.axs.set_ylim(mesh["x1"][0], mesh["x1"][-1])
+                        self.axs.set_ylim(mesh["x1v"][0], mesh["x1v"][-1])
                     elif self.pan_speed:
-                        max_extent = self.extent or mesh["x1"][-1]
-                        min_extent = self.xmax or 1.5 * mesh["x1"][0]
+                        max_extent = self.extent or mesh["x1v"][-1]
+                        min_extent = self.xmax or 1.5 * mesh["x1v"][0]
                         self.axs.set_rmax(
                             min_extent
                             + max_extent * self.pan_speed * (frame / len(self.flist))

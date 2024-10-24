@@ -159,9 +159,7 @@ def get_dimensionality(files: Union[list[str], dict[int, list[str]]]) -> int:
     return ndim
 
 
-def read_file(
-    args: argparse.Namespace, filename: str, ndim: int
-) -> tuple[dict[str, Any], dict[str, Any], dict[str, Any]]:
+def read_file(filename: str) -> tuple[dict[str, Any], dict[str, Any], dict[str, Any]]:
     rho: Any
     v: Any
     p: Any
@@ -169,6 +167,7 @@ def read_file(
 
     with h5py.File(filename, "r") as hf:
         ds = dict(hf.get("sim_info").attrs)
+        ndim: int = ds["dimensions"]
         ds.update({k: v.decode("utf-8") for k, v in ds.items() if type(v) == np.bytes_})
         rho = hf.get("rho")[:]
         v = [(hf.get(f"v{dim}") or hf.get(f"v"))[:] for dim in range(1, ndim + 1)]
@@ -194,8 +193,12 @@ def read_file(
         fields["rho"] = rho
         fields["p"] = p
         fields["chi"] = chi
-        fields["ad_gamma"] = ds["adiabatic_gamma"]
-
+        ds["ad_gamma"] = ds.pop("adiabatic_gamma")
+        fields["ad_gamma"] = ds["ad_gamma"]
+        
+        fields["b1"] = []
+        fields["b2"] = []
+        fields["b3"] = []
         vsqr = np.sum(vel * vel for vel in v)  # type: ignore
         if ds["regime"] in ["srhd", "srmhd"]:
             if ds["using_gamma_beta"]:
@@ -206,21 +209,16 @@ def read_file(
                 W = (1 - vsqr) ** (-0.5)
 
             if ds["regime"] == "srmhd":
-                b1 = flatten_fully(
-                    hf.get("b1")[:].reshape(ds["nz"], ds["ny"], ds["ny"])
-                )
-                b2 = flatten_fully(
-                    hf.get("b2")[:].reshape(ds["nz"], ds["ny"], ds["ny"])
-                )
-                b3 = flatten_fully(
-                    hf.get("b3")[:].reshape(ds["nz"], ds["ny"], ds["ny"])
-                )
-                b1 = unpad(b1, npad)
-                b2 = unpad(b2, npad)
-                b3 = unpad(b3, npad)
-                fields["b1"] = b1
-                fields["b2"] = b2
-                fields["b3"] = b3
+                xag = ds["xactive_zones"]
+                yag = ds["yactive_zones"]
+                zag = ds["zactive_zones"]
+                b1 = hf.get("b1")[:].reshape(zag, yag, xag + 1)
+                b2 = hf.get("b2")[:].reshape(zag, yag + 1, xag)
+                b3 = hf.get("b3")[:].reshape(zag + 1, yag, xag)
+                
+                fields["b1"] = 0.5 * (b1[...,1:] + b1[...,:-1])
+                fields["b2"] = 0.5 * (b2[:,1:,:] + b2[:,:-1,:])
+                fields["b3"] = 0.5 * (b3[1:,:,:] + b3[:-1,:,:]) 
                 if "v2" not in fields:
                     v2 = flatten_fully(
                         hf.get("v2")[:].reshape(ds["nz"], ds["ny"], ds["ny"])
@@ -253,19 +251,14 @@ def read_file(
                     funcs += [np.linspace if ds["linspace"] else np.geomspace]
                 else:
                     funcs += [np.linspace]
-        mesh = {f"x{i+1}": hf[f"x{i+1}"][:] for i in range(ndim)}
+        mesh = {f"x{i+1}v": hf[f"x{i+1}"][:] for i in range(ndim)}
 
         ds["is_cartesian"] = ds["geometry"] in logically_cartesian
         ds["coord_system"] = ds.pop("geometry")
         ds["time"] = ds.pop("current_time")
-        # if loading in vertices, convert to cell if 1D
-        if ds["dimensions"] == 1:
-            for key in mesh.keys():
-                if len(mesh[key]) > ds[f"{key}active"]:
-                    mesh[key] = calc_centroid(mesh[key], coord_system=ds["coord_system"])
 
-        if ds["x1max"] > mesh["x1"][-1]:
-            mesh["x1"] = funcs[0](ds["x1min"], ds["x1max"], ds["x1active"])
+        if ds["x1max"] > mesh["x1v"][-1]:
+            mesh["x1v"] = funcs[0](ds["x1min"], ds["x1max"], ds["x1active"] + 1)
 
     return fields, ds, mesh
 

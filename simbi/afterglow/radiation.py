@@ -309,7 +309,7 @@ def run(parser: argparse.ArgumentParser,
         }
 
         for idx, file in enumerate(files):
-            fields, setup, mesh = util.read_file(args, file, dim)
+            fields, setup, mesh = util.read_file(file)
             # Generate a pseudo mesh if computing off-axis afterglows
             generate_pseudo_mesh(
                 args,

@@ -161,8 +161,8 @@ def get_tbin_edges(
     """
     at_pole = abs(np.cos(args.theta_obs)) == 1
     ndim    = get_dimensionality(files)
-    setup_init, mesh_init   = read_file(args, files[+0], ndim)[1:]
-    setup_final, mesh_final = read_file(args, files[-1], ndim)[1:]
+    setup_init, mesh_init   = read_file(files[+0])[1:]
+    setup_final, mesh_final = read_file(files[-1])[1:]
 
     t_beg = setup_init['time']  * time_scale
     t_end = setup_final['time'] * time_scale

@@ -33,7 +33,13 @@ def as_list(x: Any) -> list[Any]:
         return list(x)
     else:
         return [x]
-
+    
+def calc_any_mean(arr: generic_numpy_array, cellspacing: str) -> Any:
+    if cellspacing == "linear":
+        return 0.5 * (arr[1:] + arr[:-1])
+    else:
+        return np.sqrt(arr[1:] * arr[:-1])
+    
 def calc_centroid(
     arr: generic_numpy_array, coord_system: str = "spherical"
 ) -> generic_numpy_array:

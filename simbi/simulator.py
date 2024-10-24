@@ -459,7 +459,7 @@ class Hydro:
                 self, spatial_order == "pcm", volume_factor, passive_scalars
             )
         else:
-            simbi_ic.load_checkpoint(self, chkpt, self.dimensionality, mesh_motion)
+            simbi_ic.load_checkpoint(self, chkpt)
         if self.dimensionality == 1 and self.coord_system in [
             "planar_cylindrical",
             "axis_cylindrical",
