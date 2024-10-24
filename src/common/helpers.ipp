@@ -90,509 +90,280 @@ namespace simbi {
                                 : 1.0;
             const auto bs =
                 sim_state.mesh_motion ? sim_state.get_cell_volume(0) : 1.0;
-            simbi::parallel_for(
-                sim_state.activeP,
-                0,
-                1,
-                [&] DEV(const luint gid) {
-                    if (first_order) {
-                        switch (boundary_conditions[0]) {
-                            case simbi::BoundaryCondition::DYNAMIC:
-                                for (auto qq = 0; qq < sim_state.nvars; qq++) {
-                                    cons[0][qq] = sim_state.bsources[qq](
-                                                      x1min,
-                                                      sim_state.t
-                                                  ) *
-                                                  bs;
-                                }
-                                break;
-                            case simbi::BoundaryCondition::REFLECTING:
-                                cons[0] = cons[1];
-                                cons[0].momentum() *= -1;
-                                break;
-                            case simbi::BoundaryCondition::PERIODIC:
-                                cons[0] = cons[grid_size - 2];
-                            default:
-                                cons[0] = cons[1];
-                                break;
-                        }
-
-                        switch (boundary_conditions[1]) {
-                            case simbi::BoundaryCondition::DYNAMIC:
-                                for (auto qq = 0; qq < sim_state.nvars; qq++) {
-                                    cons[grid_size - 1][qq] =
-                                        sim_state.bsources[qq](
-                                            x1max,
-                                            sim_state.t
-                                        ) *
-                                        es;
-                                }
-                                break;
-                            case simbi::BoundaryCondition::REFLECTING:
-                                cons[grid_size - 1] = cons[grid_size - 2];
-                                cons[grid_size - 1].momentum() *= -1;
-                                break;
-                            case simbi::BoundaryCondition::PERIODIC:
-                                cons[grid_size - 1] = cons[1];
-                            default:
-                                cons[grid_size - 1] = cons[grid_size - 2];
-                                break;
-                        }
+            parallel_for(sim_state.activeP, 0, 1, [&] DEV(const luint gid) {
+                if (first_order) {
+                    switch (boundary_conditions[0]) {
+                        case BoundaryCondition::DYNAMIC:
+                            for (auto qq = 0; qq < sim_state.nvars; qq++) {
+                                cons[0][qq] =
+                                    sim_state.bsources[qq](x1min, sim_state.t) *
+                                    bs;
+                            }
+                            break;
+                        case BoundaryCondition::REFLECTING:
+                            cons[0] = cons[1];
+                            cons[0].momentum() *= -1;
+                            break;
+                        case BoundaryCondition::PERIODIC:
+                            cons[0] = cons[grid_size - 2];
+                        default:
+                            cons[0] = cons[1];
+                            break;
                     }
-                    else {
-                        switch (boundary_conditions[0]) {
-                            case simbi::BoundaryCondition::DYNAMIC:
-                                for (auto qq = 0; qq < sim_state.nvars; qq++) {
-                                    cons[0][qq] = sim_state.bsources[qq](
-                                                      x1min,
-                                                      sim_state.t
-                                                  ) *
-                                                  bs;
-                                    cons[1][qq] = sim_state.bsources[qq](
-                                                      x1min,
-                                                      sim_state.t
-                                                  ) *
-                                                  bs;
-                                }
-                                break;
-                            case simbi::BoundaryCondition::REFLECTING:
-                                cons[0] = cons[3];
-                                cons[1] = cons[2];
-                                cons[0].momentum() *= -1;
-                                cons[1].momentum() *= -1;
-                                break;
-                            case simbi::BoundaryCondition::PERIODIC:
-                                cons[0] = cons[grid_size - 4];
-                                cons[1] = cons[grid_size - 3];
-                            default:
-                                cons[0] = cons[2];
-                                cons[1] = cons[2];
-                                break;
-                        }
 
-                        switch (boundary_conditions[1]) {
-                            case simbi::BoundaryCondition::DYNAMIC:
-                                for (auto qq = 0; qq < sim_state.nvars; qq++) {
-                                    cons[grid_size - 1][qq] =
-                                        sim_state.bsources[qq](
-                                            x1max,
-                                            sim_state.t
-                                        ) *
-                                        es;
-                                    cons[grid_size - 2][qq] =
-                                        sim_state.bsources[qq](
-                                            x1max,
-                                            sim_state.t
-                                        ) *
-                                        es;
-                                }
-                                break;
-                            case simbi::BoundaryCondition::REFLECTING:
-                                cons[grid_size - 1] = cons[grid_size - 4];
-                                cons[grid_size - 2] = cons[grid_size - 3];
-                                cons[grid_size - 1].momentum() *= -1;
-                                cons[grid_size - 2].momentum() *= -1;
-                                break;
-                            case simbi::BoundaryCondition::PERIODIC:
-                                cons[grid_size - 1] = cons[3];
-                                cons[grid_size - 2] = cons[2];
-                            default:
-                                cons[grid_size - 1] = cons[grid_size - 3];
-                                cons[grid_size - 2] = cons[grid_size - 3];
-                                break;
-                        }
+                    switch (boundary_conditions[1]) {
+                        case BoundaryCondition::DYNAMIC:
+                            for (auto qq = 0; qq < sim_state.nvars; qq++) {
+                                cons[grid_size - 1][qq] =
+                                    sim_state.bsources[qq](x1max, sim_state.t) *
+                                    es;
+                            }
+                            break;
+                        case BoundaryCondition::REFLECTING:
+                            cons[grid_size - 1] = cons[grid_size - 2];
+                            cons[grid_size - 1].momentum() *= -1;
+                            break;
+                        case BoundaryCondition::PERIODIC:
+                            cons[grid_size - 1] = cons[1];
+                        default:
+                            cons[grid_size - 1] = cons[grid_size - 2];
+                            break;
                     }
                 }
-            );
+                else {
+                    switch (boundary_conditions[0]) {
+                        case BoundaryCondition::DYNAMIC:
+                            for (auto qq = 0; qq < sim_state.nvars; qq++) {
+                                cons[0][qq] =
+                                    sim_state.bsources[qq](x1min, sim_state.t) *
+                                    bs;
+                                cons[1][qq] =
+                                    sim_state.bsources[qq](x1min, sim_state.t) *
+                                    bs;
+                            }
+                            break;
+                        case BoundaryCondition::REFLECTING:
+                            cons[0] = cons[3];
+                            cons[1] = cons[2];
+                            cons[0].momentum() *= -1;
+                            cons[1].momentum() *= -1;
+                            break;
+                        case BoundaryCondition::PERIODIC:
+                            cons[0] = cons[grid_size - 4];
+                            cons[1] = cons[grid_size - 3];
+                        default:
+                            cons[0] = cons[2];
+                            cons[1] = cons[2];
+                            break;
+                    }
+
+                    switch (boundary_conditions[1]) {
+                        case BoundaryCondition::DYNAMIC:
+                            for (auto qq = 0; qq < sim_state.nvars; qq++) {
+                                cons[grid_size - 1][qq] =
+                                    sim_state.bsources[qq](x1max, sim_state.t) *
+                                    es;
+                                cons[grid_size - 2][qq] =
+                                    sim_state.bsources[qq](x1max, sim_state.t) *
+                                    es;
+                            }
+                            break;
+                        case BoundaryCondition::REFLECTING:
+                            cons[grid_size - 1] = cons[grid_size - 4];
+                            cons[grid_size - 2] = cons[grid_size - 3];
+                            cons[grid_size - 1].momentum() *= -1;
+                            cons[grid_size - 2].momentum() *= -1;
+                            break;
+                        case BoundaryCondition::PERIODIC:
+                            cons[grid_size - 1] = cons[3];
+                            cons[grid_size - 2] = cons[2];
+                        default:
+                            cons[grid_size - 1] = cons[grid_size - 3];
+                            cons[grid_size - 2] = cons[grid_size - 3];
+                            break;
+                    }
+                }
+            });
         };
 
         template <typename sim_state_t>
         void config_ghosts2D(sim_state_t& sim_state)
         {
-            const auto nxv                 = sim_state.nxv;
-            const auto nyv                 = sim_state.nyv;
+            const auto nvars               = sim_state.nvars;
             const auto nx                  = sim_state.nx;
             const auto ny                  = sim_state.ny;
-            const auto first_order         = sim_state.use_pcm;
             const auto boundary_conditions = sim_state.bcs;
             const auto geometry            = sim_state.geometry;
             const auto half_sphere         = sim_state.half_sphere;
+            const auto hr                  = sim_state.radius;   // halo radius
             auto& cons                     = sim_state.cons;
-            simbi::parallel_for(
+            parallel_for(
                 sim_state.activeP,
                 sim_state.activeP.nzones,
                 [&] DEV(const luint gid) {
-                    const auto jj = axid<2, BlkAx::J>(gid, nx, ny);
-                    const auto ii = axid<2, BlkAx::I>(gid, nx, ny);
+                    const luint jj = axid<2, BlkAx::J>(gid, nx, ny);
+                    const luint ii = axid<2, BlkAx::I>(gid, nx, ny);
 
-                    if (first_order) {
-                        if (jj < ny - 2) {
-                            const auto ing  = (jj + 1) * nx + 0;
-                            const auto outg = (jj + 1) * nx + (nx - 1);
-                            const auto inr  = (jj + 1) * nx + 1;
-                            const auto outr = (jj + 1) * nx + (nx - 2);
+                    const auto ir = ii + hr;
+                    const auto jr = jj + hr;
+                    for (int rr = 0; rr < hr; rr++) {
+                        const auto rs = rr + 1;
+                        // Fill ghost zones at x1 boundaries
+                        if (jj < ny - 2 * hr) {
+                            auto ing  = idx2(rr, jr, nx, ny);
+                            auto outg = idx2(nx - rs, jr, nx, ny);
 
                             switch (boundary_conditions[0]) {
-                                case simbi::BoundaryCondition::REFLECTING:
+                                case BoundaryCondition::REFLECTING: {
+                                    const auto inr =
+                                        idx2(2 * hr - rs, jr, nx, ny);
                                     cons[ing] = cons[inr];
                                     cons[ing].momentum(1) *= -1;
                                     break;
-                                case simbi::BoundaryCondition::DYNAMIC:
-                                    {
-                                        const real dV =
-                                            sim_state.get_cell_volume(0, jj);
-                                        for (auto qq = 0; qq < sim_state.nvars;
-                                             qq++) {
-                                            cons[ing][qq] =
-                                                sim_state.bsources[qq](
-                                                    sim_state.x1min,
-                                                    sim_state.x2[jj],
-                                                    sim_state.t
-                                                ) *
-                                                dV;
-                                        }
-                                        break;
+                                }
+                                case BoundaryCondition::DYNAMIC:
+                                    for (int qq = 0; qq < nvars; qq++) {
+                                        cons[ing][qq] = sim_state.bsources[qq](
+                                            sim_state.x1min,
+                                            sim_state.x2[jj],
+                                            sim_state.t
+                                        );
                                     }
-                                case simbi::BoundaryCondition::PERIODIC:
+                                    break;
+                                case BoundaryCondition::PERIODIC: {
+                                    const auto outr =
+                                        idx2(nx - 2 * hr + rr, jr, nx, ny);
                                     cons[ing] = cons[outr];
                                     break;
-                                default:
-                                    cons[ing] = cons[inr];
+                                }
+                                default: {
+                                    const auto inr = idx2(hr, jr, nx, ny);
+                                    cons[ing]      = cons[inr];
                                     break;
+                                }
                             }
 
                             switch (boundary_conditions[1]) {
-                                case simbi::BoundaryCondition::REFLECTING:
+                                case BoundaryCondition::REFLECTING: {
+                                    const auto outr =
+                                        idx2(nx - 2 * hr + rr, jr, nx, ny);
                                     cons[outg] = cons[outr];
                                     cons[outg].momentum(1) *= -1;
                                     break;
-                                case simbi::BoundaryCondition::DYNAMIC:
-                                    {
-                                        const real dV =
-                                            sim_state.get_cell_volume(
-                                                nxv - 1,
-                                                jj
-                                            );
-                                        for (auto qq = 0; qq < sim_state.nvars;
-                                             qq++) {
-                                            cons[outg][qq] =
-                                                sim_state.bsources[qq](
-                                                    sim_state.x1max,
-                                                    sim_state.x2[jj],
-                                                    sim_state.t
-                                                ) *
-                                                dV;
-                                        }
-                                        break;
+                                }
+                                case BoundaryCondition::DYNAMIC:
+                                    for (int qq = 0; qq < nvars; qq++) {
+                                        cons[outg][qq] = sim_state.bsources[qq](
+                                            sim_state.x1max,
+                                            sim_state.x2[jj],
+                                            sim_state.t
+                                        );
                                     }
-                                case simbi::BoundaryCondition::PERIODIC:
+                                    break;
+                                case BoundaryCondition::PERIODIC: {
+                                    const auto inr =
+                                        idx2(2 * hr - rs, jr, nx, ny);
                                     cons[outg] = cons[inr];
                                     break;
-                                default:
+                                }
+                                default: {
+                                    const auto outr =
+                                        idx2(nx - (hr + 1), jr, nx, ny);
                                     cons[outg] = cons[outr];
                                     break;
+                                }
                             }
                         }
-                        if (ii < nx - 2) {
-                            const auto ing  = 0 * nx + (ii + 1);
-                            const auto outg = (ny - 1) * nx + (ii + 1);
-                            const auto inr  = 1 * nx + (ii + 1);
-                            const auto outr = (ny - 2) * nx + (ii + 1);
+
+                        // Fill ghost zones at x2 boundaries
+                        if (ii < nx - 2 * hr) {
+                            auto ing  = idx2(ir, rr, nx, ny);
+                            auto outg = idx2(ir, ny - rs, nx, ny);
 
                             switch (geometry) {
-                                case simbi::Geometry::SPHERICAL:
+                                case Geometry::SPHERICAL: {
+                                    const auto inr =
+                                        idx2(ir, 2 * hr - rs, nx, ny);
+                                    const auto outr =
+                                        idx2(ir, ny - 2 * hr + rr, nx, ny);
                                     cons[ing]  = cons[inr];
                                     cons[outg] = cons[outr];
                                     if (half_sphere) {
                                         cons[outg].momentum(2) *= -1;
                                     }
                                     break;
-                                case simbi::Geometry::CYLINDRICAL:
-                                    cons[ing]  = cons[outr];
-                                    cons[outg] = cons[inr];
-                                    break;
+                                }
                                 default:
                                     switch (boundary_conditions[2]) {
-                                        case simbi::BoundaryCondition::
-                                            REFLECTING:
+                                        case BoundaryCondition::REFLECTING: {
+                                            const auto inr =
+                                                idx2(ir, 2 * hr - rs, nx, ny);
                                             cons[ing] = cons[inr];
                                             cons[ing].momentum(2) *= -1;
                                             break;
-                                        case simbi::BoundaryCondition::DYNAMIC:
-                                            {
-                                                const real dV =
-                                                    sim_state.get_cell_volume(
-                                                        ii,
-                                                        0
+                                        }
+                                        case BoundaryCondition::DYNAMIC:
+                                            for (int qq = 0; qq < nvars; qq++) {
+                                                cons[ing][qq] =
+                                                    sim_state.bsources[qq](
+                                                        sim_state.x1[ii],
+                                                        sim_state.x2min,
+                                                        sim_state.t
                                                     );
-                                                for (auto qq = 0;
-                                                     qq < sim_state.nvars;
-                                                     qq++) {
-                                                    cons[ing][qq] =
-                                                        sim_state.bsources[qq](
-                                                            sim_state.x1[ii],
-                                                            sim_state.x2min,
-                                                            sim_state.t
-                                                        ) *
-                                                        dV;
-                                                }
-                                                break;
                                             }
-                                        case simbi::BoundaryCondition::PERIODIC:
+                                            break;
+                                        case BoundaryCondition::PERIODIC: {
+                                            const auto outr = idx2(
+                                                ir,
+                                                ny - 2 * hr + rr,
+                                                nx,
+                                                ny
+                                            );
                                             cons[ing] = cons[outr];
                                             break;
-                                        default:
+                                        }
+                                        default: {
+                                            const auto inr =
+                                                idx2(ir, hr, nx, ny);
                                             cons[ing] = cons[inr];
                                             break;
+                                        }
                                     }
 
                                     switch (boundary_conditions[3]) {
-                                        case simbi::BoundaryCondition::
-                                            REFLECTING:
+                                        case BoundaryCondition::REFLECTING: {
+                                            const auto outr = idx2(
+                                                ir,
+                                                ny - 2 * hr + rr,
+                                                nx,
+                                                ny
+                                            );
                                             cons[outg] = cons[outr];
                                             cons[outg].momentum(2) *= -1;
                                             break;
-                                        case simbi::BoundaryCondition::DYNAMIC:
-                                            {
-                                                const real dV =
-                                                    sim_state.get_cell_volume(
-                                                        ii,
-                                                        nyv - 1
+                                        }
+                                        case BoundaryCondition::DYNAMIC:
+                                            for (int qq = 0; qq < nvars; qq++) {
+                                                cons[outg][qq] =
+                                                    sim_state.bsources[qq](
+                                                        sim_state.x1[ii],
+                                                        sim_state.x2max,
+                                                        sim_state.t
                                                     );
-                                                for (auto qq = 0;
-                                                     qq < sim_state.nvars;
-                                                     qq++) {
-                                                    cons[outg][qq] =
-                                                        sim_state.bsources[qq](
-                                                            sim_state.x1[ii],
-                                                            sim_state.x2max,
-                                                            sim_state.t
-                                                        ) *
-                                                        dV;
-                                                }
-                                                break;
                                             }
-                                        case simbi::BoundaryCondition::PERIODIC:
+                                            break;
+                                        case BoundaryCondition::PERIODIC: {
+                                            const auto inr =
+                                                idx2(ir, 2 * hr - rs, nx, ny);
                                             cons[outg] = cons[inr];
                                             break;
-                                        default:
+                                        }
+                                        default: {
+                                            const auto outr =
+                                                idx2(ir, ny - (hr + 1), nx, ny);
                                             cons[outg] = cons[outr];
                                             break;
-                                    }
-                                    break;
-                            }
-                        }
-                    }
-                    else {
-                        if (jj < ny - 4) {
-                            const auto ing   = (jj + 2) * nx + 0;
-                            const auto ingg  = (jj + 2) * nx + 1;
-                            const auto outg  = (jj + 2) * nx + (nx - 1);
-                            const auto outgg = (jj + 2) * nx + (nx - 2);
-                            const auto inr   = (jj + 2) * nx + 2;
-                            const auto inrr  = (jj + 2) * nx + 3;
-                            const auto outr  = (jj + 2) * nx + (nx - 3);
-                            const auto outrr = (jj + 2) * nx + (nx - 4);
-
-                            switch (boundary_conditions[0]) {
-                                case simbi::BoundaryCondition::DYNAMIC:
-                                    {
-                                        const real dV =
-                                            sim_state.get_cell_volume(0, jj);
-                                        for (auto qq = 0; qq < sim_state.nvars;
-                                             qq++) {
-                                            cons[ing][qq] =
-                                                sim_state.bsources[qq](
-                                                    sim_state.x1min,
-                                                    sim_state.x2[jj],
-                                                    sim_state.t
-                                                ) *
-                                                dV;
-                                            cons[ingg][qq] =
-                                                sim_state.bsources[qq](
-                                                    sim_state.x1min,
-                                                    sim_state.x2[jj],
-                                                    sim_state.t
-                                                ) *
-                                                dV;
                                         }
-                                        break;
-                                    }
-                                case simbi::BoundaryCondition::REFLECTING:
-                                    cons[ing]  = cons[inrr];
-                                    cons[ingg] = cons[inr];
-                                    cons[ing].momentum(1) *= -1;
-                                    cons[ingg].momentum(1) *= -1;
-                                    break;
-                                case simbi::BoundaryCondition::PERIODIC:
-                                    cons[ing]  = cons[outrr];
-                                    cons[ingg] = cons[outr];
-                                    break;
-                                default:
-                                    cons[ing]  = cons[inr];
-                                    cons[ingg] = cons[inr];
-                                    break;
-                            }
-
-                            switch (boundary_conditions[1]) {
-                                case simbi::BoundaryCondition::DYNAMIC:
-                                    {
-                                        const real dV =
-                                            sim_state.get_cell_volume(
-                                                nxv - 1,
-                                                jj
-                                            );
-                                        for (auto qq = 0; qq < sim_state.nvars;
-                                             qq++) {
-                                            cons[outg][qq] =
-                                                sim_state.bsources[qq](
-                                                    sim_state.x1max,
-                                                    sim_state.x2[jj],
-                                                    sim_state.t
-                                                ) *
-                                                dV;
-                                            cons[outgg][qq] =
-                                                sim_state.bsources[qq](
-                                                    sim_state.x1max,
-                                                    sim_state.x2[jj],
-                                                    sim_state.t
-                                                ) *
-                                                dV;
-                                        }
-                                        break;
-                                    }
-                                case simbi::BoundaryCondition::REFLECTING:
-                                    cons[outg]  = cons[outr];
-                                    cons[outgg] = cons[outrr];
-                                    cons[outg].momentum(1) *= -1;
-                                    cons[outgg].momentum(1) *= -1;
-                                    break;
-                                case simbi::BoundaryCondition::PERIODIC:
-                                    cons[outg]  = cons[inrr];
-                                    cons[outgg] = cons[inr];
-                                    break;
-                                default:
-                                    cons[outg]  = cons[outr];
-                                    cons[outgg] = cons[outr];
-                                    break;
-                            }
-                        }
-                        if (ii < nx - 4) {
-                            const auto ing   = 0 * nx + (ii + 2);
-                            const auto ingg  = 1 * nx + (ii + 2);
-                            const auto outg  = (ny - 1) * nx + (ii + 2);
-                            const auto outgg = (ny - 2) * nx + (ii + 2);
-                            const auto inr   = 2 * nx + (ii + 2);
-                            const auto inrr  = 3 * nx + (ii + 2);
-                            const auto outr  = (ny - 3) * nx + (ii + 2);
-                            const auto outrr = (ny - 4) * nx + (ii + 2);
-
-                            switch (geometry) {
-                                case simbi::Geometry::SPHERICAL:
-                                    cons[ing]   = cons[inrr];
-                                    cons[outg]  = cons[outr];
-                                    cons[ingg]  = cons[inr];
-                                    cons[outgg] = cons[outr];
-                                    if (half_sphere) {
-                                        cons[outg].momentum(2) *= -1;
-                                        cons[outgg].momentum(2) *= -1;
-                                    }
-                                    break;
-                                case simbi::Geometry::CYLINDRICAL:
-                                    cons[ing]   = cons[outrr];
-                                    cons[outg]  = cons[inr];
-                                    cons[ingg]  = cons[outr];
-                                    cons[outgg] = cons[inrr];
-                                    break;
-                                default:
-                                    switch (boundary_conditions[2]) {
-                                        case simbi::BoundaryCondition::
-                                            REFLECTING:
-                                            cons[ing] = cons[inr];
-                                            cons[ing].momentum(2) *= -1;
-                                            cons[ingg] = cons[inrr];
-                                            cons[ingg].momentum(2) *= -1;
-                                            break;
-                                        case simbi::BoundaryCondition::DYNAMIC:
-                                            {
-                                                const real dV =
-                                                    sim_state.get_cell_volume(
-                                                        ii,
-                                                        0
-                                                    );
-                                                for (auto qq = 0;
-                                                     qq < sim_state.nvars;
-                                                     qq++) {
-                                                    cons[ing][qq] =
-                                                        sim_state.bsources[qq](
-                                                            sim_state.x1[ii],
-                                                            sim_state.x2min,
-                                                            sim_state.t
-                                                        ) *
-                                                        dV;
-                                                    cons[ingg][qq] =
-                                                        sim_state.bsources[qq](
-                                                            sim_state.x1[ii],
-                                                            sim_state.x2min,
-                                                            sim_state.t
-                                                        ) *
-                                                        dV;
-                                                }
-                                                break;
-                                            }
-                                        case simbi::BoundaryCondition::PERIODIC:
-                                            cons[ing]  = cons[outrr];
-                                            cons[ingg] = cons[outr];
-                                            break;
-                                        default:
-                                            cons[ing]  = cons[inr];
-                                            cons[ingg] = cons[inr];
-                                            break;
-                                    }
-
-                                    switch (boundary_conditions[3]) {
-                                        case simbi::BoundaryCondition::
-                                            REFLECTING:
-                                            cons[outg]  = cons[outr];
-                                            cons[outgg] = cons[outrr];
-                                            cons[outg].momentum(2) *= -1;
-                                            cons[outgg].momentum(2) *= -1;
-                                            break;
-                                        case simbi::BoundaryCondition::DYNAMIC:
-                                            {
-                                                const real dV =
-                                                    sim_state.get_cell_volume(
-                                                        ii,
-                                                        nyv - 1
-                                                    );
-                                                for (auto qq = 0;
-                                                     qq < sim_state.nvars;
-                                                     qq++) {
-                                                    cons[outg][qq] =
-                                                        sim_state.bsources[qq](
-                                                            sim_state.x1[ii],
-                                                            sim_state.x2max,
-                                                            sim_state.t
-                                                        ) *
-                                                        dV;
-                                                    cons[outgg][qq] =
-                                                        sim_state.bsources[qq](
-                                                            sim_state.x1[ii],
-                                                            sim_state.x2max,
-                                                            sim_state.t
-                                                        ) *
-                                                        dV;
-                                                }
-                                                break;
-                                            }
-                                        case simbi::BoundaryCondition::PERIODIC:
-                                            cons[outg]  = cons[inr];
-                                            cons[outgg] = cons[inrr];
-                                            break;
-                                        default:
-                                            cons[outg]  = cons[outr];
-                                            cons[outgg] = cons[outr];
-                                            break;
                                     }
                                     break;
                             }
@@ -605,15 +376,16 @@ namespace simbi {
         template <typename sim_state_t>
         void config_ghosts3D(sim_state_t& sim_state)
         {
+            const auto nvars               = sim_state.nvars;
             const auto nx                  = sim_state.nx;
             const auto ny                  = sim_state.ny;
             const auto nz                  = sim_state.nz;
-            const auto first_order         = sim_state.use_pcm;
             const auto boundary_conditions = sim_state.bcs;
             const auto geometry            = sim_state.geometry;
             const auto half_sphere         = sim_state.half_sphere;
+            const auto hr                  = sim_state.radius;   // halo radius
             auto& cons                     = sim_state.cons;
-            simbi::parallel_for(
+            parallel_for(
                 sim_state.activeP,
                 sim_state.activeP.nzones,
                 [&] DEV(const luint gid) {
@@ -621,512 +393,489 @@ namespace simbi {
                     const luint jj = axid<3, BlkAx::J>(gid, nx, ny, kk);
                     const luint ii = axid<3, BlkAx::I>(gid, nx, ny, kk);
 
-                    if (first_order) {
-                        if (jj < ny - 2 && kk < nz - 2) {
-                            const auto ka   = (kk + 1) * ny * nx;
-                            const auto jk   = ka + (jj + 1) * nx + 0;
-                            const auto ing  = jk + 0;
-                            const auto outg = jk + (nx - 1);
-                            const auto inr  = jk + 1;
-                            const auto outr = jk + (nx - 2);
+                    const auto ir = ii + hr;
+                    const auto jr = jj + hr;
+                    const auto kr = kk + hr;
+                    for (int rr = 0; rr < hr; rr++) {
+                        const auto rs = rr + 1;
+                        if (jj < ny - 2 * hr) {
+                            // Fill ghost zones at i-k corners
+                            auto iknw = idx3(rr, jr, rr, nx, ny, nz);
+                            auto ikne = idx3(nx - rs, jr, rr, nx, ny, nz);
+                            auto ikse = idx3(nx - rs, jr, nz - rs, nx, ny, nz);
+                            auto iksw = idx3(rr, jr, nz - rs, nx, ny, nz);
 
-                            switch (boundary_conditions[0]) {
-                                case simbi::BoundaryCondition::REFLECTING:
-                                    cons[ing] = cons[inr];
-                                    cons[ing].momentum(1) *= -1;
-                                    break;
-                                case simbi::BoundaryCondition::DYNAMIC:
-                                    for (auto qq = 0; qq < sim_state.nvars;
-                                         qq++) {
-                                        cons[ing][qq] = sim_state.bsources[qq](
-                                            sim_state.x1min,
-                                            sim_state.x2[jj],
-                                            sim_state.x3[kk],
-                                            sim_state.t
+                            // the corner ghosts are set equal to the real zones
+                            // nearest those corners
+                            cons[iknw] = cons[idx3(hr, jr, hr, nx, ny, nz)];
+                            cons[ikne] =
+                                cons[idx3(nx - (hr + 1), jr, hr, nx, ny, nz)];
+                            cons[ikse] = cons[idx3(
+                                nx - (hr + 1),
+                                jr,
+                                nz - (hr + 1),
+                                nx,
+                                ny,
+                                nz
+                            )];
+                            cons[iksw] =
+                                cons[idx3(hr, jr, nz - (hr + 1), nx, ny, nz)];
+
+                            //================================================================
+                            // Fill ghosts zones at x1 boundaries
+                            if (kk < nz - 2 * hr) {
+                                // Fill ghost zones at i-j corners
+                                auto ijnw = idx3(rr, rr, kr, nx, ny, nz);
+                                auto ijne = idx3(nx - rs, rr, kr, nx, ny, nz);
+                                auto ijse =
+                                    idx3(nx - rs, ny - rs, kr, nx, ny, nz);
+                                auto ijsw = idx3(rr, ny - rs, kr, nx, ny, nz);
+                                // the corner ghosts are set equal to the
+                                // real zones nearest those corners
+                                cons[ijnw] = cons[idx3(hr, hr, kr, nx, ny, nz)];
+                                cons[ijne] = cons
+                                    [idx3(nx - (hr + 1), hr, kr, nx, ny, nz)];
+                                cons[ijse] = cons[idx3(
+                                    nx - (hr + 1),
+                                    ny - (hr + 1),
+                                    kr,
+                                    nx,
+                                    ny,
+                                    nz
+                                )];
+                                cons[ijsw] = cons
+                                    [idx3(hr, ny - (hr + 1), kr, nx, ny, nz)];
+
+                                //================================================================
+                                auto ing  = idx3(rr, jr, kr, nx, ny, nz);
+                                auto outg = idx3(nx - rs, jr, kr, nx, ny, nz);
+
+                                switch (boundary_conditions[0]) {
+                                    case BoundaryCondition::REFLECTING: {
+                                        const auto inr = idx3(
+                                            2 * hr - rs,
+                                            jr,
+                                            kr,
+                                            nx,
+                                            ny,
+                                            nz
                                         );
+                                        cons[ing] = cons[inr];
+                                        cons[ing].momentum(1) *= -1;
+                                        break;
                                     }
-                                    break;
-                                case simbi::BoundaryCondition::PERIODIC:
-                                    cons[ing] = cons[outr];
-                                    break;
-                                default:
-                                    cons[ing] = cons[inr];
-                                    break;
+                                    case BoundaryCondition::DYNAMIC:
+                                        for (int qq = 0; qq < nvars; qq++) {
+                                            cons[ing][qq] =
+                                                sim_state.bsources[qq](
+                                                    sim_state.x1min,
+                                                    sim_state.x2[jj],
+                                                    sim_state.x3[kk],
+                                                    sim_state.t
+                                                );
+                                        }
+                                        break;
+                                    case BoundaryCondition::PERIODIC: {
+                                        const auto outr = idx3(
+                                            nx - 2 * hr + rr,
+                                            jr,
+                                            kr,
+                                            nx,
+                                            ny,
+                                            nz
+                                        );
+                                        cons[ing] = cons[outr];
+                                        break;
+                                    }
+                                    default: {
+                                        const auto inr =
+                                            idx3(hr, jr, kr, nx, ny, nz);
+                                        cons[ing] = cons[inr];
+                                        break;
+                                    }
+                                }
+
+                                switch (boundary_conditions[1]) {
+                                    case BoundaryCondition::REFLECTING: {
+                                        const auto outr = idx3(
+                                            nx - 2 * hr + rr,
+                                            jr,
+                                            kr,
+                                            nx,
+                                            ny,
+                                            nz
+                                        );
+                                        cons[outg] = cons[outr];
+                                        cons[outg].momentum(1) *= -1;
+                                        break;
+                                    }
+                                    case BoundaryCondition::DYNAMIC:
+                                        for (int qq = 0; qq < nvars; qq++) {
+                                            cons[outg][qq] =
+                                                sim_state.bsources[qq](
+                                                    sim_state.x1max,
+                                                    sim_state.x2[jj],
+                                                    sim_state.x3[kk],
+                                                    sim_state.t
+                                                );
+                                        }
+                                        break;
+                                    case BoundaryCondition::PERIODIC: {
+                                        const auto inr = idx3(
+                                            2 * hr - rs,
+                                            jr,
+                                            kr,
+                                            nx,
+                                            ny,
+                                            nz
+                                        );
+                                        cons[outg] = cons[inr];
+                                        break;
+                                    }
+                                    default: {
+                                        const auto outr = idx3(
+                                            nx - (hr + 1),
+                                            jr,
+                                            kr,
+                                            nx,
+                                            ny,
+                                            nz
+                                        );
+                                        cons[outg] = cons[outr];
+                                        break;
+                                    }
+                                }
                             }
 
-                            switch (boundary_conditions[1]) {
-                                case simbi::BoundaryCondition::REFLECTING:
-                                    cons[outg] = cons[outr];
-                                    cons[outg].momentum(1) *= -1;
-                                    break;
-                                case simbi::BoundaryCondition::DYNAMIC:
-                                    for (auto qq = 0; qq < sim_state.nvars;
-                                         qq++) {
-                                        cons[outg][qq] = sim_state.bsources[qq](
-                                            sim_state.x1max,
-                                            sim_state.x2[jj],
-                                            sim_state.x3[kk],
-                                            sim_state.t
+                            // Fill ghost zones at x3 boundaries
+                            if (ii < nx - 2 * hr) {
+                                // Fill ghost zones at j-k corners
+                                auto jknw = idx3(ir, rr, rr, nx, ny, nz);
+                                auto jkne = idx3(ir, ny - rs, rr, nx, ny, nz);
+                                auto jkse =
+                                    idx3(ir, ny - rs, nz - rs, nx, ny, nz);
+                                auto jksw = idx3(ir, rr, nz - rs, nx, ny, nz);
+                                // the corner ghosts are set equal to the
+                                // real zones nearest those corners
+                                cons[jknw] = cons[idx3(ir, hr, kr, nx, ny, nz)];
+                                cons[jkne] = cons
+                                    [idx3(ir, ny - (hr + 1), kr, nx, ny, nz)];
+                                cons[jkse] = cons[idx3(
+                                    ir,
+                                    ny - (hr + 1),
+                                    nz - (hr + 1),
+                                    nx,
+                                    ny,
+                                    nz
+                                )];
+                                cons[jksw] = cons
+                                    [idx3(ir, hr, nz - (hr + 1), nx, ny, nz)];
+
+                                //================================================================
+                                auto ing  = idx3(ir, jr, rr, nx, ny, nz);
+                                auto outg = idx3(ir, jr, nz - rs, nx, ny, nz);
+
+                                switch (geometry) {
+                                    case Geometry::SPHERICAL: {
+                                        // the x3 direction is periodic in phi
+                                        const auto inr = idx3(
+                                            ir,
+                                            jr,
+                                            2 * hr - rs,
+                                            nx,
+                                            ny,
+                                            nz
                                         );
+                                        const auto outr = idx3(
+                                            ir,
+                                            jr,
+                                            nz - 2 * hr + rr,
+                                            nx,
+                                            ny,
+                                            nz
+                                        );
+                                        cons[ing]  = cons[outr];
+                                        cons[outg] = cons[inr];
+                                        break;
                                     }
-                                    break;
-                                case simbi::BoundaryCondition::PERIODIC:
-                                    cons[outg] = cons[inr];
-                                    break;
-                                default:
-                                    cons[outg] = cons[outr];
-                                    break;
+                                    default:
+                                        switch (boundary_conditions[4]) {
+                                            case BoundaryCondition::
+                                                REFLECTING: {
+                                                const auto inr = idx3(
+                                                    ir,
+                                                    jr,
+                                                    2 * hr - rs,
+                                                    nx,
+                                                    ny,
+                                                    nz
+                                                );
+                                                cons[ing] = cons[inr];
+                                                cons[ing].momentum(3) *= -1;
+                                                break;
+                                            }
+                                            case BoundaryCondition::DYNAMIC:
+                                                for (auto qq = 0;
+                                                     qq < sim_state.nvars;
+                                                     qq++) {
+                                                    cons[ing][qq] =
+                                                        sim_state.bsources[qq](
+                                                            sim_state.x1[ii],
+                                                            sim_state.x2[jj],
+                                                            sim_state.x3min,
+                                                            sim_state.t
+                                                        );
+                                                }
+                                                break;
+                                            case BoundaryCondition::PERIODIC: {
+                                                const auto outr = idx3(
+                                                    ir,
+                                                    jr,
+                                                    nz - 2 * hr + rr,
+                                                    nx,
+                                                    ny,
+                                                    nz
+                                                );
+                                                cons[ing] = cons[outr];
+                                                break;
+                                            }
+                                            default: {
+                                                const auto inr = idx3(
+                                                    ir,
+                                                    jr,
+                                                    hr,
+                                                    nx,
+                                                    ny,
+                                                    nz
+                                                );
+                                                cons[ing] = cons[inr];
+                                                break;
+                                            }
+                                        }
+
+                                        switch (boundary_conditions[5]) {
+                                            case BoundaryCondition::
+                                                REFLECTING: {
+                                                const auto outr = idx3(
+                                                    ir,
+                                                    jr,
+                                                    nz - 2 * hr + rr,
+                                                    nx,
+                                                    ny,
+                                                    nz
+                                                );
+                                                cons[outg] = cons[outr];
+                                                cons[outg].momentum(3) *= -1;
+                                                break;
+                                            }
+                                            case BoundaryCondition::DYNAMIC:
+                                                for (auto qq = 0;
+                                                     qq < sim_state.nvars;
+                                                     qq++) {
+                                                    cons[outg][qq] =
+                                                        sim_state.bsources[qq](
+                                                            sim_state.x1[ii],
+                                                            sim_state.x2[jj],
+                                                            sim_state.x3max,
+                                                            sim_state.t
+                                                        );
+                                                }
+                                                break;
+                                            case BoundaryCondition::PERIODIC: {
+                                                const auto inr = idx3(
+                                                    ir,
+                                                    jr,
+                                                    2 * hr - rs,
+                                                    nx,
+                                                    ny,
+                                                    nz
+                                                );
+                                                cons[outg] = cons[inr];
+                                                break;
+                                            }
+                                            default: {
+                                                const auto outr = idx3(
+                                                    ir,
+                                                    jr,
+                                                    nz - (hr + 1),
+                                                    nx,
+                                                    ny,
+                                                    nz
+                                                );
+                                                cons[outg] = cons[outr];
+                                                break;
+                                            }
+                                        }
+                                        break;
+                                }
                             }
                         }
-                        // Fix the ghost zones at the x2 boundaries
-                        if (ii < nx - 2 && kk < nz - 2) {
-                            const auto ik =
-                                (kk + 1) * nx * ny + 0 * nx + (ii + 1);
-                            const auto ing  = ik;
-                            const auto outg = ik + (ny - 1) * nx;
-                            const auto inr  = ik + nx;
-                            const auto outr = ik + (ny - 2) * nx;
 
-                            switch (geometry) {
-                                case simbi::Geometry::SPHERICAL:
-                                    cons[ing]  = cons[inr];
-                                    cons[outg] = cons[outr];
-                                    if (half_sphere) {
-                                        cons[outg].momentum(2) *= -1;
-                                    }
-                                    break;
-                                case simbi::Geometry::CYLINDRICAL:
-                                    cons[ing]  = cons[outr];
-                                    cons[outg] = cons[inr];
-                                    break;
-                                default:
-                                    switch (boundary_conditions[2]) {
-                                        case simbi::BoundaryCondition::
-                                            REFLECTING:
-                                            cons[ing] = cons[inr];
-                                            cons[ing].momentum(2) *= -1;
-                                            break;
-                                        case simbi::BoundaryCondition::DYNAMIC:
-                                            for (auto qq = 0;
-                                                 qq < sim_state.nvars;
-                                                 qq++) {
-                                                cons[ing][qq] =
-                                                    sim_state.bsources[qq](
-                                                        sim_state.x1[ii],
-                                                        sim_state.x2min,
-                                                        sim_state.x3[kk],
-                                                        sim_state.t
-                                                    );
-                                            }
-                                            break;
-                                        case simbi::BoundaryCondition::PERIODIC:
-                                            cons[ing] = cons[outr];
-                                            break;
-                                        default:
-                                            cons[ing] = cons[inr];
-                                            break;
-                                    }
+                        if (ii < nx - 2 * hr) {
+                            // Fill the ghost zones at the x2 boundaries
+                            if (kk < nz - 2 * hr) {
+                                auto ing  = idx3(ir, rr, kr, nx, ny, nz);
+                                auto outg = idx3(ir, ny - rs, kr, nx, ny, nz);
 
-                                    switch (boundary_conditions[3]) {
-                                        case simbi::BoundaryCondition::
-                                            REFLECTING:
-                                            cons[outg] = cons[outr];
+                                switch (geometry) {
+                                    case Geometry::SPHERICAL: {
+                                        // theta boundaries are reflecting
+                                        const auto inr = idx3(
+                                            ir,
+                                            2 * hr - rs,
+                                            kr,
+                                            nx,
+                                            ny,
+                                            nz
+                                        );
+                                        const auto outr = idx3(
+                                            ir,
+                                            nz - 2 * hr + rr,
+                                            kr,
+                                            nx,
+                                            ny,
+                                            nz
+                                        );
+                                        cons[ing]  = cons[inr];
+                                        cons[outg] = cons[outr];
+                                        if (half_sphere) {
                                             cons[outg].momentum(2) *= -1;
-                                            break;
-                                        case simbi::BoundaryCondition::DYNAMIC:
-                                            for (auto qq = 0;
-                                                 qq < sim_state.nvars;
-                                                 qq++) {
-                                                cons[outg][qq] =
-                                                    sim_state.bsources[qq](
-                                                        sim_state.x1[ii],
-                                                        sim_state.x2max,
-                                                        sim_state.x3[kk],
-                                                        sim_state.t
-                                                    );
-                                            }
-                                            break;
-                                        case simbi::BoundaryCondition::PERIODIC:
-                                            cons[outg] = cons[inr];
-                                            break;
-                                        default:
-                                            cons[outg] = cons[outr];
-                                            break;
-                                    }
-                                    break;
-                            }
-                        }
-
-                        // Fix the ghost zones at the x3 boundaries
-                        if (jj < ny - 2 && ii < nx - 2) {
-                            const auto ij =
-                                0 * nx * ny + (jj + 1) * nx + (ii + 1);
-                            const auto ing  = ij;
-                            const auto outg = ij + (nz - 1) * nx * ny;
-                            const auto inr  = ij + nx * ny;
-                            const auto outr = ij + (nz - 2) * nx * ny;
-
-                            switch (geometry) {
-                                case simbi::Geometry::SPHERICAL:
-                                    cons[ing]  = cons[outr];
-                                    cons[outg] = cons[inr];
-                                    break;
-                                default:
-                                    switch (boundary_conditions[4]) {
-                                        case simbi::BoundaryCondition::
-                                            REFLECTING:
-                                            cons[ing] = cons[inr];
-                                            cons[ing].momentum(3) *= -1;
-                                            break;
-                                        case simbi::BoundaryCondition::DYNAMIC:
-                                            for (auto qq = 0;
-                                                 qq < sim_state.nvars;
-                                                 qq++) {
-                                                cons[ing][qq] =
-                                                    sim_state.bsources[qq](
-                                                        sim_state.x1[ii],
-                                                        sim_state.x2[jj],
-                                                        sim_state.x3min,
-                                                        sim_state.t
-                                                    );
-                                            }
-                                            break;
-                                        case simbi::BoundaryCondition::PERIODIC:
-                                            cons[ing] = cons[outr];
-                                            break;
-                                        default:
-                                            cons[ing] = cons[inr];
-                                            break;
+                                        }
+                                        break;
                                     }
 
-                                    switch (boundary_conditions[5]) {
-                                        case simbi::BoundaryCondition::
-                                            REFLECTING:
-                                            cons[outg] = cons[outr];
-                                            cons[outg].momentum(3) *= -1;
-                                            break;
-                                        case simbi::BoundaryCondition::DYNAMIC:
-                                            for (auto qq = 0;
-                                                 qq < sim_state.nvars;
-                                                 qq++) {
-                                                cons[outg][qq] =
-                                                    sim_state.bsources[qq](
-                                                        sim_state.x1[ii],
-                                                        sim_state.x2[jj],
-                                                        sim_state.x3max,
-                                                        sim_state.t
-                                                    );
-                                            }
-                                            break;
-                                        case simbi::BoundaryCondition::PERIODIC:
-                                            cons[outg] = cons[inr];
-                                            break;
-                                        default:
-                                            cons[outg] = cons[outr];
-                                            break;
-                                    }
-                                    break;
-                            }
-                        }
-                    }
-                    else {
-                        if (jj < ny - 4 && kk < nz - 4) {
-                            const auto jk =
-                                (kk + 2) * nx * ny + (jj + 2) * nx + 0;
-                            const auto ing   = jk;
-                            const auto ingg  = jk + 1;
-                            const auto outg  = jk + (nx - 1);
-                            const auto outgg = jk + (nx - 2);
-                            const auto inr   = jk + 2;
-                            const auto inrr  = jk + 3;
-                            const auto outr  = jk + (nx - 3);
-                            const auto outrr = jk + (nx - 4);
-
-                            // fill in the two sets ghost zones for the x1
-                            // boundaries at the inner edge and outer edge for
-                            // second order stencil
-                            switch (boundary_conditions[0]) {
-                                case simbi::BoundaryCondition::DYNAMIC:
-                                    for (auto qq = 0; qq < sim_state.nvars;
-                                         qq++) {
-                                        cons[ing][qq] = sim_state.bsources[qq](
-                                            sim_state.x1min,
-                                            sim_state.x2[jj],
-                                            sim_state.x3[kk],
-                                            sim_state.t
+                                    case Geometry::CYLINDRICAL: {
+                                        // phi boundaries are periodic
+                                        const auto inr = idx3(
+                                            ir,
+                                            2 * hr - rs,
+                                            kr,
+                                            nx,
+                                            ny,
+                                            nz
                                         );
-                                        cons[ingg][qq] = sim_state.bsources[qq](
-                                            sim_state.x1min,
-                                            sim_state.x2[jj],
-                                            sim_state.x3[kk],
-                                            sim_state.t
+                                        const auto outr = idx3(
+                                            ir,
+                                            ny - 2 * hr + rr,
+                                            kr,
+                                            nx,
+                                            ny,
+                                            nz
                                         );
+                                        cons[ing]  = cons[outr];
+                                        cons[outg] = cons[inr];
+                                        break;
                                     }
-                                    break;
-                                case simbi::BoundaryCondition::REFLECTING:
-                                    cons[ing]  = cons[inrr];
-                                    cons[ingg] = cons[inr];
-                                    cons[ing].momentum(1) *= -1;
-                                    cons[ingg].momentum(1) *= -1;
-                                    break;
-                                case simbi::BoundaryCondition::PERIODIC:
-                                    cons[ing]  = cons[outrr];
-                                    cons[ingg] = cons[outr];
-                                    break;
-                                default:
-                                    cons[ing]  = cons[inr];
-                                    cons[ingg] = cons[inr];
-                                    break;
-                            }
-
-                            switch (boundary_conditions[1]) {
-                                case simbi::BoundaryCondition::DYNAMIC:
-                                    for (auto qq = 0; qq < sim_state.nvars;
-                                         qq++) {
-                                        cons[outg][qq] = sim_state.bsources[qq](
-                                            sim_state.x1max,
-                                            sim_state.x2[jj],
-                                            sim_state.x3[kk],
-                                            sim_state.t
-                                        );
-                                        cons[outgg][qq] =
-                                            sim_state.bsources[qq](
-                                                sim_state.x1max,
-                                                sim_state.x2[jj],
-                                                sim_state.x3[kk],
-                                                sim_state.t
-                                            );
-                                    }
-                                    break;
-                                case simbi::BoundaryCondition::REFLECTING:
-                                    cons[outg]  = cons[outr];
-                                    cons[outgg] = cons[outrr];
-                                    cons[outg].momentum(1) *= -1;
-                                    cons[outgg].momentum(1) *= -1;
-                                    break;
-                                case simbi::BoundaryCondition::PERIODIC:
-                                    cons[outg]  = cons[inrr];
-                                    cons[outgg] = cons[inr];
-                                    break;
-                                default:
-                                    cons[outg]  = cons[outr];
-                                    cons[outgg] = cons[outr];
-                                    break;
-                            }
-                        }
-                        // Fix the ghost zones at the x2 boundaries
-                        if (ii < nx - 4 && kk < nz - 4) {
-                            const auto ik =
-                                (kk + 2) * nx * ny + 0 * nx + (ii + 2);
-                            const auto ing   = ik;
-                            const auto ingg  = ik + 1 * nx;
-                            const auto outg  = ik + (ny - 1) * nx;
-                            const auto outgg = ik + (ny - 2) * nx;
-                            const auto inr   = ik + 2 * nx;
-                            const auto inrr  = ik + 3 * nx;
-                            const auto outr  = ik + (ny - 3) * nx;
-                            const auto outrr = ik + (ny - 4) * nx;
-
-                            // fill in the two sets ghost zones for the x2
-                            // boundaries at the inner edge and outer edge for
-                            // second order stencil
-                            switch (geometry) {
-                                case simbi::Geometry::SPHERICAL:
-                                    cons[ing]   = cons[inrr];
-                                    cons[outg]  = cons[outr];
-                                    cons[ingg]  = cons[inr];
-                                    cons[outgg] = cons[outr];
-                                    if (half_sphere) {
-                                        cons[outg].momentum(2) *= -1;
-                                        cons[outgg].momentum(2) *= -1;
-                                    }
-                                    break;
-                                case simbi::Geometry::CYLINDRICAL:
-                                    cons[ing]   = cons[outrr];
-                                    cons[outg]  = cons[inr];
-                                    cons[ingg]  = cons[outr];
-                                    cons[outgg] = cons[inrr];
-                                    break;
-                                default:
-                                    switch (boundary_conditions[2]) {
-                                        case simbi::BoundaryCondition::
-                                            REFLECTING:
-                                            cons[ing] = cons[inr];
-                                            cons[ing].momentum(2) *= -1;
-                                            cons[ingg] = cons[inrr];
-                                            cons[ingg].momentum(2) *= -1;
-                                            break;
-                                        case simbi::BoundaryCondition::DYNAMIC:
-                                            for (auto qq = 0;
-                                                 qq < sim_state.nvars;
-                                                 qq++) {
-                                                cons[ing][qq] =
-                                                    sim_state.bsources[qq](
-                                                        sim_state.x1[ii],
-                                                        sim_state.x2min,
-                                                        sim_state.x3[kk],
-                                                        sim_state.t
-                                                    );
-                                                cons[ingg][qq] =
-                                                    sim_state.bsources[qq](
-                                                        sim_state.x1[ii],
-                                                        sim_state.x2min,
-                                                        sim_state.x3[kk],
-                                                        sim_state.t
-                                                    );
+                                    default:
+                                        switch (boundary_conditions[2]) {
+                                            case BoundaryCondition::
+                                                REFLECTING: {
+                                                auto inr = idx3(
+                                                    ir,
+                                                    2 * hr - rs,
+                                                    kr,
+                                                    nx,
+                                                    ny,
+                                                    nz
+                                                );
+                                                cons[ing] = cons[inr];
+                                                cons[ing].momentum(2) *= -1;
+                                                break;
                                             }
-                                            break;
-                                        case simbi::BoundaryCondition::PERIODIC:
-                                            cons[ing]  = cons[outrr];
-                                            cons[ingg] = cons[outr];
-                                            break;
-                                        default:
-                                            cons[ing]  = cons[inr];
-                                            cons[ingg] = cons[inr];
-                                            break;
-                                    }
-
-                                    switch (boundary_conditions[3]) {
-                                        case simbi::BoundaryCondition::
-                                            REFLECTING:
-                                            cons[outg]  = cons[outr];
-                                            cons[outgg] = cons[outrr];
-                                            cons[outg].momentum(2) *= -1;
-                                            cons[outgg].momentum(2) *= -1;
-                                            break;
-                                        case simbi::BoundaryCondition::DYNAMIC:
-                                            for (auto qq = 0;
-                                                 qq < sim_state.nvars;
-                                                 qq++) {
-                                                cons[outg][qq] =
-                                                    sim_state.bsources[qq](
-                                                        sim_state.x1[ii],
-                                                        sim_state.x2max,
-                                                        sim_state.x3[kk],
-                                                        sim_state.t
-                                                    );
-                                                cons[outgg][qq] =
-                                                    sim_state.bsources[qq](
-                                                        sim_state.x1[ii],
-                                                        sim_state.x2max,
-                                                        sim_state.x3[kk],
-                                                        sim_state.t
-                                                    );
+                                            case BoundaryCondition::DYNAMIC:
+                                                for (auto qq = 0;
+                                                     qq < sim_state.nvars;
+                                                     qq++) {
+                                                    cons[ing][qq] =
+                                                        sim_state.bsources[qq](
+                                                            sim_state.x1[ii],
+                                                            sim_state.x2min,
+                                                            sim_state.x3[kk],
+                                                            sim_state.t
+                                                        );
+                                                }
+                                                break;
+                                            case BoundaryCondition::PERIODIC: {
+                                                auto outr = idx3(
+                                                    ir,
+                                                    ny - 2 * hr + rr,
+                                                    kr,
+                                                    nx,
+                                                    ny,
+                                                    nz
+                                                );
+                                                cons[ing] = cons[outr];
+                                                break;
                                             }
-                                            break;
-                                        case simbi::BoundaryCondition::PERIODIC:
-                                            cons[outg]  = cons[inrr];
-                                            cons[outgg] = cons[inr];
-                                            break;
-                                        default:
-                                            cons[outg]  = cons[outr];
-                                            cons[outgg] = cons[outr];
-                                            break;
-                                    }
-                                    break;
-                            }
-                        }
-
-                        // Fix the ghost zones at the x3 boundaries
-                        if (jj < ny - 4 && ii < nx - 4) {
-                            const auto ij =
-                                0 * nx * ny + (jj + 2) * nx + (ii + 2);
-                            const auto ing   = ij;
-                            const auto ingg  = ij + 1 * nx * ny;
-                            const auto outg  = ij + (nz - 1) * nx * ny;
-                            const auto outgg = ij + (nz - 2) * nx * ny;
-                            const auto inr   = ij + 2 * nx * ny;
-                            const auto inrr  = ij + 3 * nx * ny;
-                            const auto outr  = ij + (nz - 3) * nx * ny;
-                            const auto outrr = ij + (nz - 4) * nx * ny;
-
-                            // fill in the two sets ghost zones for the x3
-                            // boundaries at the inner edge and outer edge for
-                            // second order stencil
-                            switch (geometry) {
-                                case simbi::Geometry::SPHERICAL:
-                                    cons[ing]   = cons[outrr];
-                                    cons[outg]  = cons[inr];
-                                    cons[ingg]  = cons[outr];
-                                    cons[outgg] = cons[inrr];
-                                    break;
-                                default:
-                                    switch (boundary_conditions[4]) {
-                                        case simbi::BoundaryCondition::
-                                            REFLECTING:
-                                            cons[ing]  = cons[inr];
-                                            cons[ingg] = cons[inrr];
-                                            cons[ing].momentum(3) *= -1;
-                                            cons[ingg].momentum(3) *= -1;
-                                            break;
-                                        case simbi::BoundaryCondition::DYNAMIC:
-                                            for (auto qq = 0;
-                                                 qq < sim_state.nvars;
-                                                 qq++) {
-                                                cons[ing][qq] =
-                                                    sim_state.bsources[qq](
-                                                        sim_state.x1[ii],
-                                                        sim_state.x2[jj],
-                                                        sim_state.x3min,
-                                                        sim_state.t
-                                                    );
-                                                cons[ingg][qq] =
-                                                    sim_state.bsources[qq](
-                                                        sim_state.x1[ii],
-                                                        sim_state.x2[jj],
-                                                        sim_state.x3min,
-                                                        sim_state.t
-                                                    );
+                                            default: {
+                                                auto inr = idx3(
+                                                    ir,
+                                                    hr,
+                                                    kr,
+                                                    nx,
+                                                    ny,
+                                                    nz
+                                                );
+                                                cons[ing] = cons[inr];
+                                                break;
                                             }
-                                            break;
-                                        case simbi::BoundaryCondition::PERIODIC:
-                                            cons[ing]  = cons[outrr];
-                                            cons[ingg] = cons[outr];
-                                            break;
-                                        default:
-                                            cons[ing]  = cons[inr];
-                                            cons[ingg] = cons[inr];
-                                            break;
-                                    }
+                                        }
 
-                                    switch (boundary_conditions[5]) {
-                                        case simbi::BoundaryCondition::
-                                            REFLECTING:
-                                            cons[outg]  = cons[outr];
-                                            cons[outgg] = cons[outrr];
-                                            cons[outg].momentum(3) *= -1;
-                                            cons[outgg].momentum(3) *= -1;
-                                            break;
-                                        case simbi::BoundaryCondition::DYNAMIC:
-                                            for (auto qq = 0;
-                                                 qq < sim_state.nvars;
-                                                 qq++) {
-                                                cons[outg][qq] =
-                                                    sim_state.bsources[qq](
-                                                        sim_state.x1[ii],
-                                                        sim_state.x2[jj],
-                                                        sim_state.x3max,
-                                                        sim_state.t
-                                                    );
-                                                cons[outgg][qq] =
-                                                    sim_state.bsources[qq](
-                                                        sim_state.x1[ii],
-                                                        sim_state.x2[jj],
-                                                        sim_state.x3max,
-                                                        sim_state.t
-                                                    );
+                                        switch (boundary_conditions[3]) {
+                                            case BoundaryCondition::
+                                                REFLECTING: {
+                                                auto outr = idx3(
+                                                    ir,
+                                                    ny - 2 * hr + rr,
+                                                    kr,
+                                                    nx,
+                                                    ny,
+                                                    nz
+                                                );
+                                                cons[outg] = cons[outr];
+                                                cons[outg].momentum(2) *= -1;
+                                                break;
                                             }
-                                            break;
-                                        case simbi::BoundaryCondition::PERIODIC:
-                                            cons[outg]  = cons[inrr];
-                                            cons[outgg] = cons[inr];
-                                            break;
-                                        default:
-                                            cons[outg]  = cons[outr];
-                                            cons[outgg] = cons[outr];
-                                            break;
-                                    }
-                                    break;
+                                            case BoundaryCondition::DYNAMIC:
+                                                for (auto qq = 0;
+                                                     qq < sim_state.nvars;
+                                                     qq++) {
+                                                    cons[outg][qq] =
+                                                        sim_state.bsources[qq](
+                                                            sim_state.x1[ii],
+                                                            sim_state.x2max,
+                                                            sim_state.x3[kk],
+                                                            sim_state.t
+                                                        );
+                                                }
+                                                break;
+                                            case BoundaryCondition::PERIODIC: {
+                                                auto inr = idx3(
+                                                    ir,
+                                                    2 * hr - rs,
+                                                    kr,
+                                                    nx,
+                                                    ny,
+                                                    nz
+                                                );
+                                                cons[outg] = cons[inr];
+                                                break;
+                                            }
+                                            default: {
+                                                auto outr = idx3(
+                                                    ir,
+                                                    ny - (hr + 1),
+                                                    kr,
+                                                    nx,
+                                                    ny,
+                                                    nz
+                                                );
+                                                cons[outg] = cons[outr];
+                                                break;
+                                            }
+                                        }
+                                        break;
+                                }
                             }
                         }
                     }
@@ -1182,17 +931,15 @@ namespace simbi {
                     vPlus          = std::abs(v + cs);
                     vMinus         = std::abs(v - cs);
                 }
-                const real x1l = self->get_x1face(ireal, 0);
-                const real x1r = self->get_x1face(ireal, 1);
-                const real dx1 = x1r - x1l;
-                const real vfaceL =
-                    (self->geometry == simbi::Geometry::CARTESIAN)
-                        ? self->hubble_param
-                        : x1l * self->hubble_param;
-                const real vfaceR =
-                    (self->geometry == simbi::Geometry::CARTESIAN)
-                        ? self->hubble_param
-                        : x1r * self->hubble_param;
+                const real x1l    = self->get_x1face(ireal, 0);
+                const real x1r    = self->get_x1face(ireal, 1);
+                const real dx1    = x1r - x1l;
+                const real vfaceL = (self->geometry == Geometry::CARTESIAN)
+                                        ? self->hubble_param
+                                        : x1l * self->hubble_param;
+                const real vfaceR = (self->geometry == Geometry::CARTESIAN)
+                                        ? self->hubble_param
+                                        : x1r * self->hubble_param;
                 const real cfl_dt = dx1 / (helpers::my_max(
                                               std::abs(vPlus + vfaceR),
                                               std::abs(vMinus + vfaceL)
@@ -1208,7 +955,7 @@ namespace simbi {
             U* self,
             const V* prim_buffer,
             real* dt_min,
-            const simbi::Geometry geometry
+            const Geometry geometry
         )
         {
 #if GPU_CODE
@@ -1256,111 +1003,90 @@ namespace simbi {
                 v2p = std::abs(plus_v2);
                 v2m = std::abs(minus_v2);
                 switch (geometry) {
-                    case simbi::Geometry::CARTESIAN:
+                    case Geometry::CARTESIAN:
                         cfl_dt = helpers::my_min(
                             self->dx1 / (helpers::my_max(v1p, v1m)),
                             self->dx2 / (helpers::my_max(v2m, v2m))
                         );
                         break;
 
-                    case simbi::Geometry::SPHERICAL:
-                        {
-                            const auto ireal = helpers::get_real_idx(
-                                ii,
-                                self->radius,
-                                self->xag
-                            );
-                            const auto jreal = helpers::get_real_idx(
-                                jj,
-                                self->radius,
-                                self->yag
-                            );
-                            // Compute avg spherical distance 3/4 *(rf^4 -
-                            // ri^4)/(rf^3 - ri^3)
-                            const real rl = self->get_x1face(ireal, 0);
-                            const real rr = self->get_x1face(ireal, 1);
-                            const real tl = self->get_x2face(jreal, 0);
-                            const real tr = self->get_x2face(jreal, 1);
-                            if (self->mesh_motion) {
-                                const real vfaceL = rl * self->hubble_param;
-                                const real vfaceR = rr * self->hubble_param;
-                                v1p               = std::abs(plus_v1 - vfaceR);
-                                v1m               = std::abs(minus_v1 - vfaceL);
-                            }
-                            const real rmean =
-                                0.75 * (rr * rr * rr * rr - rl * rl * rl * rl) /
-                                (rr * rr * rr - rl * rl * rl);
-                            cfl_dt = helpers::my_min(
-                                (rr - rl) / (helpers::my_max(v1p, v1m)),
-                                rmean * (tr - tl) / (helpers::my_max(v2p, v2m))
-                            );
-                            break;
+                    case Geometry::SPHERICAL: {
+                        const auto ireal =
+                            helpers::get_real_idx(ii, self->radius, self->xag);
+                        const auto jreal =
+                            helpers::get_real_idx(jj, self->radius, self->yag);
+                        // Compute avg spherical distance 3/4 *(rf^4 -
+                        // ri^4)/(rf^3 - ri^3)
+                        const real rl = self->get_x1face(ireal, 0);
+                        const real rr = self->get_x1face(ireal, 1);
+                        const real tl = self->get_x2face(jreal, 0);
+                        const real tr = self->get_x2face(jreal, 1);
+                        if (self->mesh_motion) {
+                            const real vfaceL = rl * self->hubble_param;
+                            const real vfaceR = rr * self->hubble_param;
+                            v1p               = std::abs(plus_v1 - vfaceR);
+                            v1m               = std::abs(minus_v1 - vfaceL);
                         }
-                    case simbi::Geometry::PLANAR_CYLINDRICAL:
-                        {
-                            // Compute avg spherical distance 3/4 *(rf^4 -
-                            // ri^4)/(rf^3 - ri^3)
-                            const auto ireal = helpers::get_real_idx(
-                                ii,
-                                self->radius,
-                                self->xag
-                            );
-                            const auto jreal = helpers::get_real_idx(
-                                jj,
-                                self->radius,
-                                self->yag
-                            );
-                            // Compute avg spherical distance 3/4 *(rf^4 -
-                            // ri^4)/(rf^3 - ri^3)
-                            const real rl = self->get_x1face(ireal, 0);
-                            const real rr = self->get_x1face(ireal, 1);
-                            const real tl = self->get_x2face(jreal, 0);
-                            const real tr = self->get_x2face(jreal, 1);
-                            if (self->mesh_motion) {
-                                const real vfaceL = rl * self->hubble_param;
-                                const real vfaceR = rr * self->hubble_param;
-                                v1p               = std::abs(plus_v1 - vfaceR);
-                                v1m               = std::abs(minus_v1 - vfaceL);
-                            }
-                            const real rmean = (2.0 / 3.0) *
-                                               (rr * rr * rr - rl * rl * rl) /
-                                               (rr * rr - rl * rl);
-                            cfl_dt = helpers::my_min(
-                                (rr - rl) / (helpers::my_max(v1p, v1m)),
-                                rmean * (tr - tl) / (helpers::my_max(v2p, v2m))
-                            );
-                            break;
+                        const real rmean =
+                            0.75 * (rr * rr * rr * rr - rl * rl * rl * rl) /
+                            (rr * rr * rr - rl * rl * rl);
+                        cfl_dt = helpers::my_min(
+                            (rr - rl) / (helpers::my_max(v1p, v1m)),
+                            rmean * (tr - tl) / (helpers::my_max(v2p, v2m))
+                        );
+                        break;
+                    }
+                    case Geometry::PLANAR_CYLINDRICAL: {
+                        // Compute avg spherical distance 3/4 *(rf^4 -
+                        // ri^4)/(rf^3 - ri^3)
+                        const auto ireal =
+                            helpers::get_real_idx(ii, self->radius, self->xag);
+                        const auto jreal =
+                            helpers::get_real_idx(jj, self->radius, self->yag);
+                        // Compute avg spherical distance 3/4 *(rf^4 -
+                        // ri^4)/(rf^3 - ri^3)
+                        const real rl = self->get_x1face(ireal, 0);
+                        const real rr = self->get_x1face(ireal, 1);
+                        const real tl = self->get_x2face(jreal, 0);
+                        const real tr = self->get_x2face(jreal, 1);
+                        if (self->mesh_motion) {
+                            const real vfaceL = rl * self->hubble_param;
+                            const real vfaceR = rr * self->hubble_param;
+                            v1p               = std::abs(plus_v1 - vfaceR);
+                            v1m               = std::abs(minus_v1 - vfaceL);
                         }
-                    case simbi::Geometry::AXIS_CYLINDRICAL:
-                        {
-                            const auto ireal = helpers::get_real_idx(
-                                ii,
-                                self->radius,
-                                self->xag
-                            );
-                            const auto jreal = helpers::get_real_idx(
-                                jj,
-                                self->radius,
-                                self->yag
-                            );
-                            // Compute avg spherical distance 3/4 *(rf^4 -
-                            // ri^4)/(rf^3 - ri^3)
-                            const real rl = self->get_x1face(ireal, 0);
-                            const real rr = self->get_x1face(ireal, 1);
-                            const real zl = self->get_x2face(jreal, 0);
-                            const real zr = self->get_x2face(jreal, 1);
-                            if (self->mesh_motion) {
-                                const real vfaceL = rl * self->hubble_param;
-                                const real vfaceR = rr * self->hubble_param;
-                                v1p               = std::abs(plus_v1 - vfaceR);
-                                v1m               = std::abs(minus_v1 - vfaceL);
-                            }
-                            cfl_dt = helpers::my_min(
-                                (rr - rl) / (helpers::my_max(v1p, v1m)),
-                                (zr - zl) / (helpers::my_max(v2p, v2m))
-                            );
-                            break;
+                        const real rmean = (2.0 / 3.0) *
+                                           (rr * rr * rr - rl * rl * rl) /
+                                           (rr * rr - rl * rl);
+                        cfl_dt = helpers::my_min(
+                            (rr - rl) / (helpers::my_max(v1p, v1m)),
+                            rmean * (tr - tl) / (helpers::my_max(v2p, v2m))
+                        );
+                        break;
+                    }
+                    case Geometry::AXIS_CYLINDRICAL: {
+                        const auto ireal =
+                            helpers::get_real_idx(ii, self->radius, self->xag);
+                        const auto jreal =
+                            helpers::get_real_idx(jj, self->radius, self->yag);
+                        // Compute avg spherical distance 3/4 *(rf^4 -
+                        // ri^4)/(rf^3 - ri^3)
+                        const real rl = self->get_x1face(ireal, 0);
+                        const real rr = self->get_x1face(ireal, 1);
+                        const real zl = self->get_x2face(jreal, 0);
+                        const real zr = self->get_x2face(jreal, 1);
+                        if (self->mesh_motion) {
+                            const real vfaceL = rl * self->hubble_param;
+                            const real vfaceR = rr * self->hubble_param;
+                            v1p               = std::abs(plus_v1 - vfaceR);
+                            v1m               = std::abs(minus_v1 - vfaceL);
                         }
+                        cfl_dt = helpers::my_min(
+                            (rr - rl) / (helpers::my_max(v1p, v1m)),
+                            (zr - zl) / (helpers::my_max(v2p, v2m))
+                        );
+                        break;
+                    }
                         // TODO: Implement
                 }   // end switch
                 dt_min[gid] = self->cfl * cfl_dt;
@@ -1374,7 +1100,7 @@ namespace simbi {
             U* self,
             const V* prim_buffer,
             real* dt_min,
-            const simbi::Geometry geometry
+            const Geometry geometry
         )
         {
 #if GPU_CODE
@@ -1445,75 +1171,69 @@ namespace simbi {
                 const auto x3r = self->get_x3face(kreal, 1);
                 const auto dx3 = x3r - x3l;
                 switch (geometry) {
-                    case simbi::Geometry::CARTESIAN:
-                        {
-
-                            cfl_dt = helpers::my_min3(
-                                dx1 / (helpers::my_max(
-                                          std::abs(plus_v1),
-                                          std::abs(minus_v1)
-                                      )),
-                                dx2 / (helpers::my_max(
-                                          std::abs(plus_v2),
-                                          std::abs(minus_v2)
-                                      )),
-                                dx3 / (helpers::my_max(
-                                          std::abs(plus_v3),
-                                          std::abs(minus_v3)
-                                      ))
-                            );
-                            break;
-                        }
-                    case simbi::Geometry::SPHERICAL:
-                        {
-                            const real rmean =
-                                0.75 *
-                                (x1r * x1r * x1r * x1r - x1l * x1l * x1l * x1l
-                                ) /
-                                (x1r * x1r * x1r - x1l * x1l * x1l);
-                            const real th = 0.5 * (x2l + x2r);
-                            cfl_dt        = helpers::my_min3(
-                                dx1 / (helpers::my_max(
-                                          std::abs(plus_v1),
-                                          std::abs(minus_v1)
-                                      )),
-                                rmean * dx2 /
-                                    (helpers::my_max(
-                                        std::abs(plus_v2),
-                                        std::abs(minus_v2)
-                                    )),
-                                rmean * std::sin(th) * dx3 /
-                                    (helpers::my_max(
-                                        std::abs(plus_v3),
-                                        std::abs(minus_v3)
-                                    ))
-                            );
-                            break;
-                        }
-                    case simbi::Geometry::CYLINDRICAL:
-                        {
-                            const real rmean =
-                                (2.0 / 3.0) *
-                                (x1r * x1r * x1r - x1l * x1l * x1l) /
-                                (x1r * x1r - x1l * x1l);
-                            const real th = 0.5 * (x2l + x2r);
-                            cfl_dt        = helpers::my_min3(
-                                dx1 / (helpers::my_max(
-                                          std::abs(plus_v1),
-                                          std::abs(minus_v1)
-                                      )),
-                                rmean * dx2 /
-                                    (helpers::my_max(
-                                        std::abs(plus_v2),
-                                        std::abs(minus_v2)
-                                    )),
-                                dx3 / (helpers::my_max(
-                                          std::abs(plus_v3),
-                                          std::abs(minus_v3)
-                                      ))
-                            );
-                            break;
-                        }
+                    case Geometry::CARTESIAN: {
+                        cfl_dt = helpers::my_min3(
+                            dx1 / (helpers::my_max(
+                                      std::abs(plus_v1),
+                                      std::abs(minus_v1)
+                                  )),
+                            dx2 / (helpers::my_max(
+                                      std::abs(plus_v2),
+                                      std::abs(minus_v2)
+                                  )),
+                            dx3 / (helpers::my_max(
+                                      std::abs(plus_v3),
+                                      std::abs(minus_v3)
+                                  ))
+                        );
+                        break;
+                    }
+                    case Geometry::SPHERICAL: {
+                        const real rmean =
+                            0.75 *
+                            (x1r * x1r * x1r * x1r - x1l * x1l * x1l * x1l) /
+                            (x1r * x1r * x1r - x1l * x1l * x1l);
+                        const real th = 0.5 * (x2l + x2r);
+                        cfl_dt        = helpers::my_min3(
+                            dx1 / (helpers::my_max(
+                                      std::abs(plus_v1),
+                                      std::abs(minus_v1)
+                                  )),
+                            rmean * dx2 /
+                                (helpers::my_max(
+                                    std::abs(plus_v2),
+                                    std::abs(minus_v2)
+                                )),
+                            rmean * std::sin(th) * dx3 /
+                                (helpers::my_max(
+                                    std::abs(plus_v3),
+                                    std::abs(minus_v3)
+                                ))
+                        );
+                        break;
+                    }
+                    case Geometry::CYLINDRICAL: {
+                        const real rmean = (2.0 / 3.0) *
+                                           (x1r * x1r * x1r - x1l * x1l * x1l) /
+                                           (x1r * x1r - x1l * x1l);
+                        const real th = 0.5 * (x2l + x2r);
+                        cfl_dt        = helpers::my_min3(
+                            dx1 / (helpers::my_max(
+                                      std::abs(plus_v1),
+                                      std::abs(minus_v1)
+                                  )),
+                            rmean * dx2 /
+                                (helpers::my_max(
+                                    std::abs(plus_v2),
+                                    std::abs(minus_v2)
+                                )),
+                            dx3 / (helpers::my_max(
+                                      std::abs(plus_v3),
+                                      std::abs(minus_v3)
+                                  ))
+                        );
+                        break;
+                    }
                 }   // end switch
 
                 dt_min[gid] = self->cfl * cfl_dt;
@@ -1552,17 +1272,15 @@ namespace simbi {
                 }
                 const auto ireal =
                     helpers::get_real_idx(ii, self->radius, self->xag);
-                const real x1l = self->get_x1face(ireal, 0);
-                const real x1r = self->get_x1face(ireal, 1);
-                const real dx1 = x1r - x1l;
-                const real vfaceL =
-                    (self->geometry == simbi::Geometry::CARTESIAN)
-                        ? self->hubble_param
-                        : x1l * self->hubble_param;
-                const real vfaceR =
-                    (self->geometry == simbi::Geometry::CARTESIAN)
-                        ? self->hubble_param
-                        : x1r * self->hubble_param;
+                const real x1l    = self->get_x1face(ireal, 0);
+                const real x1r    = self->get_x1face(ireal, 1);
+                const real dx1    = x1r - x1l;
+                const real vfaceL = (self->geometry == Geometry::CARTESIAN)
+                                        ? self->hubble_param
+                                        : x1l * self->hubble_param;
+                const real vfaceR = (self->geometry == Geometry::CARTESIAN)
+                                        ? self->hubble_param
+                                        : x1r * self->hubble_param;
                 const real cfl_dt = dx1 / (helpers::my_max(
                                               std::abs(vPlus + vfaceR),
                                               std::abs(vMinus + vfaceL)
@@ -1578,7 +1296,7 @@ namespace simbi {
             U* self,
             const V* prim_buffer,
             real* dt_min,
-            const simbi::Geometry geometry
+            const Geometry geometry
         )
         {
 #if GPU_CODE
@@ -1622,107 +1340,86 @@ namespace simbi {
                 v2p = std::abs(plus_v2);
                 v2m = std::abs(minus_v2);
                 switch (geometry) {
-                    case simbi::Geometry::CARTESIAN:
+                    case Geometry::CARTESIAN:
                         cfl_dt = helpers::my_min(
                             self->dx1 / (helpers::my_max(v1p, v1m)),
                             self->dx2 / (helpers::my_max(v2m, v2m))
                         );
                         break;
 
-                    case simbi::Geometry::SPHERICAL:
-                        {
-                            // Compute avg spherical distance 3/4 *(rf^4 -
-                            // ri^4)/(rf^3 - ri^3)
-                            const auto ireal = helpers::get_real_idx(
-                                ii,
-                                self->radius,
-                                self->xag
-                            );
-                            const auto jreal = helpers::get_real_idx(
-                                jj,
-                                self->radius,
-                                self->yag
-                            );
-                            const real rl = self->get_x1face(ireal, 0);
-                            const real rr = self->get_x1face(ireal, 1);
-                            const real tl = self->get_x2face(jreal, 0);
-                            const real tr = self->get_x2face(jreal, 1);
-                            if (self->mesh_motion) {
-                                const real vfaceL = rl * self->hubble_param;
-                                const real vfaceR = rr * self->hubble_param;
-                                v1p               = std::abs(plus_v1 - vfaceR);
-                                v1m               = std::abs(minus_v1 - vfaceL);
-                            }
-                            const real rmean =
-                                0.75 * (rr * rr * rr * rr - rl * rl * rl * rl) /
-                                (rr * rr * rr - rl * rl * rl);
-                            cfl_dt = helpers::my_min(
-                                (rr - rl) / (helpers::my_max(v1p, v1m)),
-                                rmean * (tr - tl) / (helpers::my_max(v2p, v2m))
-                            );
-                            break;
+                    case Geometry::SPHERICAL: {
+                        // Compute avg spherical distance 3/4 *(rf^4 -
+                        // ri^4)/(rf^3 - ri^3)
+                        const auto ireal =
+                            helpers::get_real_idx(ii, self->radius, self->xag);
+                        const auto jreal =
+                            helpers::get_real_idx(jj, self->radius, self->yag);
+                        const real rl = self->get_x1face(ireal, 0);
+                        const real rr = self->get_x1face(ireal, 1);
+                        const real tl = self->get_x2face(jreal, 0);
+                        const real tr = self->get_x2face(jreal, 1);
+                        if (self->mesh_motion) {
+                            const real vfaceL = rl * self->hubble_param;
+                            const real vfaceR = rr * self->hubble_param;
+                            v1p               = std::abs(plus_v1 - vfaceR);
+                            v1m               = std::abs(minus_v1 - vfaceL);
                         }
-                    case simbi::Geometry::PLANAR_CYLINDRICAL:
-                        {
-                            // Compute avg spherical distance 3/4 *(rf^4 -
-                            // ri^4)/(rf^3 - ri^3)
-                            const auto ireal = helpers::get_real_idx(
-                                ii,
-                                self->radius,
-                                self->xag
-                            );
-                            const auto jreal = helpers::get_real_idx(
-                                jj,
-                                self->radius,
-                                self->yag
-                            );
-                            const real rl = self->get_x1face(ireal, 0);
-                            const real rr = self->get_x1face(ireal, 1);
-                            const real tl = self->get_x2face(jreal, 0);
-                            const real tr = self->get_x2face(jreal, 1);
-                            if (self->mesh_motion) {
-                                const real vfaceL = rl * self->hubble_param;
-                                const real vfaceR = rr * self->hubble_param;
-                                v1p               = std::abs(plus_v1 - vfaceR);
-                                v1m               = std::abs(minus_v1 - vfaceL);
-                            }
-                            const real rmean = (2.0 / 3.0) *
-                                               (rr * rr * rr - rl * rl * rl) /
-                                               (rr * rr - rl * rl);
-                            cfl_dt = helpers::my_min(
-                                (rr - rl) / (helpers::my_max(v1p, v1m)),
-                                rmean * (tr - tl) / (helpers::my_max(v2p, v2m))
-                            );
-                            break;
+                        const real rmean =
+                            0.75 * (rr * rr * rr * rr - rl * rl * rl * rl) /
+                            (rr * rr * rr - rl * rl * rl);
+                        cfl_dt = helpers::my_min(
+                            (rr - rl) / (helpers::my_max(v1p, v1m)),
+                            rmean * (tr - tl) / (helpers::my_max(v2p, v2m))
+                        );
+                        break;
+                    }
+                    case Geometry::PLANAR_CYLINDRICAL: {
+                        // Compute avg spherical distance 3/4 *(rf^4 -
+                        // ri^4)/(rf^3 - ri^3)
+                        const auto ireal =
+                            helpers::get_real_idx(ii, self->radius, self->xag);
+                        const auto jreal =
+                            helpers::get_real_idx(jj, self->radius, self->yag);
+                        const real rl = self->get_x1face(ireal, 0);
+                        const real rr = self->get_x1face(ireal, 1);
+                        const real tl = self->get_x2face(jreal, 0);
+                        const real tr = self->get_x2face(jreal, 1);
+                        if (self->mesh_motion) {
+                            const real vfaceL = rl * self->hubble_param;
+                            const real vfaceR = rr * self->hubble_param;
+                            v1p               = std::abs(plus_v1 - vfaceR);
+                            v1m               = std::abs(minus_v1 - vfaceL);
                         }
-                    case simbi::Geometry::AXIS_CYLINDRICAL:
-                        {
-                            const auto ireal = helpers::get_real_idx(
-                                ii,
-                                self->radius,
-                                self->xag
-                            );
-                            const auto jreal = helpers::get_real_idx(
-                                jj,
-                                self->radius,
-                                self->yag
-                            );
-                            const real rl = self->get_x1face(ireal, 0);
-                            const real rr = self->get_x1face(ireal, 1);
-                            const real zl = self->get_x2face(jreal, 0);
-                            const real zr = self->get_x2face(jreal, 1);
-                            if (self->mesh_motion) {
-                                const real vfaceL = rl * self->hubble_param;
-                                const real vfaceR = rr * self->hubble_param;
-                                v1p               = std::abs(plus_v1 - vfaceR);
-                                v1m               = std::abs(minus_v1 - vfaceL);
-                            }
-                            cfl_dt = helpers::my_min(
-                                (rr - rl) / (helpers::my_max(v1p, v1m)),
-                                (zr - zl) / (helpers::my_max(v2p, v2m))
-                            );
-                            break;
+                        const real rmean = (2.0 / 3.0) *
+                                           (rr * rr * rr - rl * rl * rl) /
+                                           (rr * rr - rl * rl);
+                        cfl_dt = helpers::my_min(
+                            (rr - rl) / (helpers::my_max(v1p, v1m)),
+                            rmean * (tr - tl) / (helpers::my_max(v2p, v2m))
+                        );
+                        break;
+                    }
+                    case Geometry::AXIS_CYLINDRICAL: {
+                        const auto ireal =
+                            helpers::get_real_idx(ii, self->radius, self->xag);
+                        const auto jreal =
+                            helpers::get_real_idx(jj, self->radius, self->yag);
+                        const real rl = self->get_x1face(ireal, 0);
+                        const real rr = self->get_x1face(ireal, 1);
+                        const real zl = self->get_x2face(jreal, 0);
+                        const real zr = self->get_x2face(jreal, 1);
+                        if (self->mesh_motion) {
+                            const real vfaceL = rl * self->hubble_param;
+                            const real vfaceR = rr * self->hubble_param;
+                            v1p               = std::abs(plus_v1 - vfaceR);
+                            v1m               = std::abs(minus_v1 - vfaceL);
                         }
+                        cfl_dt = helpers::my_min(
+                            (rr - rl) / (helpers::my_max(v1p, v1m)),
+                            (zr - zl) / (helpers::my_max(v2p, v2m))
+                        );
+                        break;
+                    }
                         // TODO: Implement
                 }   // end switch
                 dt_min[gid] = self->cfl * cfl_dt;
@@ -1736,7 +1433,7 @@ namespace simbi {
             U* self,
             const V* prim_buffer,
             real* dt_min,
-            const simbi::Geometry geometry
+            const Geometry geometry
         )
         {
 #if GPU_CODE
@@ -1775,7 +1472,7 @@ namespace simbi {
                 }
 
                 switch (geometry) {
-                    case simbi::Geometry::CARTESIAN:
+                    case Geometry::CARTESIAN:
                         cfl_dt = std ::min(
                             {self->dx1 / (my_max(v1p, v1m)),
                              self->dx2 / (my_max(v2p, v2m)),
@@ -1783,62 +1480,45 @@ namespace simbi {
                         );
 
                         break;
-                    case simbi::Geometry::SPHERICAL:
-                        {
-                            const auto ireal = helpers::get_real_idx(
-                                ii,
-                                self->radius,
-                                self->nxv
-                            );
-                            const auto jreal = helpers::get_real_idx(
-                                jj,
-                                self->radius,
-                                self->nyv
-                            );
+                    case Geometry::SPHERICAL: {
+                        const auto ireal =
+                            helpers::get_real_idx(ii, self->radius, self->nxv);
+                        const auto jreal =
+                            helpers::get_real_idx(jj, self->radius, self->nyv);
 
-                            const real x1l = self->get_x1face(ireal, 0);
-                            const real x1r = self->get_x1face(ireal, 1);
-                            const real dx1 = x1r - x1l;
+                        const real x1l = self->get_x1face(ireal, 0);
+                        const real x1r = self->get_x1face(ireal, 1);
+                        const real dx1 = x1r - x1l;
 
-                            const real x2l   = self->get_x2face(jreal, 0);
-                            const real x2r   = self->get_x2face(jreal, 1);
-                            const real rmean = get_cell_centroid(
-                                x1r,
-                                x1l,
-                                simbi::Geometry::SPHERICAL
-                            );
-                            const real th    = 0.5 * (x2r + x2l);
-                            const real rproj = rmean * std::sin(th);
-                            cfl_dt           = std::min(
-                                {dx1 / (my_max(v1p, v1m)),
-                                           rmean * self->dx2 / (my_max(v2p, v2m)),
-                                           rproj * self->dx3 / (my_max(v3p, v3m))}
-                            );
-                            break;
-                        }
-                    default:
-                        {
-                            const auto ireal = helpers::get_real_idx(
-                                ii,
-                                self->radius,
-                                self->nxv
-                            );
-                            const real x1l = self->get_x1face(ireal, 0);
-                            const real x1r = self->get_x1face(ireal, 1);
-                            const real dx1 = x1r - x1l;
+                        const real x2l = self->get_x2face(jreal, 0);
+                        const real x2r = self->get_x2face(jreal, 1);
+                        const real rmean =
+                            get_cell_centroid(x1r, x1l, Geometry::SPHERICAL);
+                        const real th    = 0.5 * (x2r + x2l);
+                        const real rproj = rmean * std::sin(th);
+                        cfl_dt           = std::min(
+                            {dx1 / (my_max(v1p, v1m)),
+                                       rmean * self->dx2 / (my_max(v2p, v2m)),
+                                       rproj * self->dx3 / (my_max(v3p, v3m))}
+                        );
+                        break;
+                    }
+                    default: {
+                        const auto ireal =
+                            helpers::get_real_idx(ii, self->radius, self->nxv);
+                        const real x1l = self->get_x1face(ireal, 0);
+                        const real x1r = self->get_x1face(ireal, 1);
+                        const real dx1 = x1r - x1l;
 
-                            const real rmean = get_cell_centroid(
-                                x1r,
-                                x1l,
-                                simbi::Geometry::CYLINDRICAL
-                            );
-                            cfl_dt = std::min(
-                                {dx1 / (my_max(v1p, v1m)),
-                                 rmean * self->dx2 / (my_max(v2p, v2m)),
-                                 self->dx3 / (my_max(v3p, v3m))}
-                            );
-                            break;
-                        }
+                        const real rmean =
+                            get_cell_centroid(x1r, x1l, Geometry::CYLINDRICAL);
+                        cfl_dt = std::min(
+                            {dx1 / (my_max(v1p, v1m)),
+                             rmean * self->dx2 / (my_max(v2p, v2m)),
+                             self->dx3 / (my_max(v3p, v3m))}
+                        );
+                        break;
+                    }
                 }
 
                 dt_min[gid] = self->cfl * cfl_dt;
@@ -2364,7 +2044,7 @@ namespace simbi {
             const float delta_t
         )
         {
-            // the advance step does one write plus 1.0 + dim * 2 * radius reads
+            // the advance step does one write plus 1.0 + dim * 2 * hr reads
             const float advance_contr =
                 real_zones * sizeof(T) * (1.0 + (1.0 + dim * 2 * radius));
             const float cons2prim_contr = total_zones * sizeof(U);
@@ -2396,7 +2076,6 @@ namespace simbi {
             const V radius
         )
         {
-
             const V aid = idx3(ia, ja, ka, ni, nj, nk);
             if constexpr (dim == 1) {
                 V txl = p.blockSize.x;
