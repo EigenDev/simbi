@@ -611,7 +611,6 @@ class Visualizer:
                                 hemisphere = np.s_[: xx.shape[0] // 2]
                             else:
                                 hemisphere = np.s_[xx.shape[0] // 2 :]
-
                             xx = theta_sign(idx) * xx[hemisphere]
                             yy = yy[hemisphere]
                             var = var[hemisphere]
