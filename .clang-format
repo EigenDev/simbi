@@ -30,7 +30,7 @@ FixNamespaceComments: true
 AllowShortEnumsOnASingleLine: false 
 # IndentAccessModifiers: true         
 AlignOperands: true
-IndentCaseBlocks: true
+# IndentCaseBlocks: true
 IndentCaseLabels: true
 SortIncludes: true
 SeparateDefinitionBlocks: Always
@@ -56,4 +56,5 @@ BraceWrapping:
   BeforeCatch:     true
   BeforeElse:      true
   IndentBraces:    false
+  AfterCaseLabel:  false
 BreakBeforeBraces: Custom
