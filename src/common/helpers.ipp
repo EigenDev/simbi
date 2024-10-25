@@ -190,6 +190,8 @@ namespace simbi {
         void config_ghosts2D(sim_state_t& sim_state)
         {
             const auto nvars               = sim_state.nvars;
+            const auto xag                 = sim_state.xag;
+            const auto yag                 = sim_state.yag;
             const auto nx                  = sim_state.nx;
             const auto ny                  = sim_state.ny;
             const auto boundary_conditions = sim_state.bcs;
@@ -198,11 +200,11 @@ namespace simbi {
             const auto hr                  = sim_state.radius;   // halo radius
             auto& cons                     = sim_state.cons;
             parallel_for(
-                sim_state.fullP,
-                sim_state.fullP.nzones,
+                sim_state.activeP,
+                sim_state.activeP.nzones,
                 [&] DEV(const luint gid) {
-                    const luint jj = axid<2, BlkAx::J>(gid, nx, ny);
-                    const luint ii = axid<2, BlkAx::I>(gid, nx, ny);
+                    const luint jj = axid<2, BlkAx::J>(gid, xag, yag);
+                    const luint ii = axid<2, BlkAx::I>(gid, xag, yag);
 
                     const auto ir = ii + hr;
                     const auto jr = jj + hr;
@@ -286,16 +288,6 @@ namespace simbi {
                                         idx2(ir, 2 * hr - rs, nx, ny);
                                     const auto outr =
                                         idx2(ir, ny - 2 * hr + rr, nx, ny);
-                                    // printf(
-                                    //     "jng: %llu, jnr: %d, jnog: %llu, jno:
-                                    //     "
-                                    //     "%d\n",
-                                    //     rr,
-                                    //     2 * hr - rs,
-                                    //     ny - rs,
-                                    //     ny - 2 * hr + rr
-                                    // );
-                                    // std::cin.get();
                                     cons[ing]  = cons[inr];
                                     cons[outg] = cons[outr];
                                     if (half_sphere) {
@@ -387,6 +379,8 @@ namespace simbi {
         void config_ghosts3D(sim_state_t& sim_state)
         {
             const auto nvars               = sim_state.nvars;
+            const auto xag                 = sim_state.xag;
+            const auto yag                 = sim_state.yag;
             const auto nx                  = sim_state.nx;
             const auto ny                  = sim_state.ny;
             const auto nz                  = sim_state.nz;
@@ -396,12 +390,12 @@ namespace simbi {
             const auto hr                  = sim_state.radius;   // halo radius
             auto& cons                     = sim_state.cons;
             parallel_for(
-                sim_state.fullP,
-                sim_state.fullP.nzones,
+                sim_state.activeP,
+                sim_state.activeP.nzones,
                 [&] DEV(const luint gid) {
-                    const luint kk = axid<3, BlkAx::K>(gid, nx, ny);
-                    const luint jj = axid<3, BlkAx::J>(gid, nx, ny, kk);
-                    const luint ii = axid<3, BlkAx::I>(gid, nx, ny, kk);
+                    const luint kk = axid<3, BlkAx::K>(gid, xag, yag);
+                    const luint jj = axid<3, BlkAx::J>(gid, xag, yag, kk);
+                    const luint ii = axid<3, BlkAx::I>(gid, xag, yag, kk);
 
                     const auto ir = ii + hr;
                     const auto jr = jj + hr;
