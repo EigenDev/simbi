@@ -198,8 +198,8 @@ namespace simbi {
             const auto hr                  = sim_state.radius;   // halo radius
             auto& cons                     = sim_state.cons;
             parallel_for(
-                sim_state.activeP,
-                sim_state.activeP.nzones,
+                sim_state.fullP,
+                sim_state.fullP.nzones,
                 [&] DEV(const luint gid) {
                     const luint jj = axid<2, BlkAx::J>(gid, nx, ny);
                     const luint ii = axid<2, BlkAx::I>(gid, nx, ny);
@@ -396,8 +396,8 @@ namespace simbi {
             const auto hr                  = sim_state.radius;   // halo radius
             auto& cons                     = sim_state.cons;
             parallel_for(
-                sim_state.activeP,
-                sim_state.activeP.nzones,
+                sim_state.fullP,
+                sim_state.fullP.nzones,
                 [&] DEV(const luint gid) {
                     const luint kk = axid<3, BlkAx::K>(gid, nx, ny);
                     const luint jj = axid<3, BlkAx::J>(gid, nx, ny, kk);
