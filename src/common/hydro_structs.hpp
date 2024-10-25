@@ -1115,17 +1115,17 @@ struct Eigenvals {
 
     DUAL constexpr real csR() const { return this->vals[3]; }
 
-    DUAL constexpr real pStar() const
+    DUAL constexpr real aStar() const
     {
-        if constexpr (nvals >= 5) {
+        if constexpr (nvals > 4) {
             return this->vals[4];
         }
         return static_cast<real>(0.0);
     }
 
-    DUAL constexpr real aStar() const
+    DUAL constexpr real pStar() const
     {
-        if constexpr (nvals >= 5) {
+        if constexpr (nvals > 4) {
             return this->vals[5];
         }
         return static_cast<real>(0.0);
