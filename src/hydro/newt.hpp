@@ -24,7 +24,6 @@
 #include "common/helpers.hpp"         // for my_min, my_max, ...
 #include "common/hydro_structs.hpp"   // for Conserved, Primitive
 #include "util/exec_policy.hpp"       // for ExecutionPolicy
-#include "util/functional.hpp"        // for Function
 #include "util/ndarray.hpp"           // for ndarray
 #include <functional>                 // for function
 #include <optional>                   // for optional

@@ -1184,7 +1184,7 @@ void Newtonian<dim>::simulate(
     // if the user forgot one, the code will run with
     // and outflow outer boundary condition
     this->all_outer_bounds =
-        std::all_of(bsources.begin(), bsources.end(), [](auto q) {
+        std::all_of(this->bsources.begin(), this->bsources.end(), [](auto q) {
             return q != nullptr;
         });
 
