@@ -2601,7 +2601,6 @@ namespace simbi {
             const T& state
         )
         {
-            constexpr auto reg       = T::regime;
             const auto full_filename = data_directory + filename;
             std::cout << "\n[Writing File...: " << full_filename << "]\n";
             // Create a new file using the default property list.
@@ -2719,7 +2718,7 @@ namespace simbi {
             auto write_fields = [&](const std::string& name,
                                     const auto& dataspace,
                                     const auto member) {
-                if constexpr (reg == "srmhd") {
+                if constexpr (T::regime == "srmhd") {
                     // Write the data using a for loop
                     dataset = file.createDataSet(name, real_type, dataspace);
                     if (member == 1) {
@@ -2781,7 +2780,7 @@ namespace simbi {
                 write_prims("v3", hdataspace, 3);
             }
             write_prims("p", hdataspace, state.dimensions + 1);
-            if constexpr (reg == "srmhd") {
+            if constexpr (T::regime == "srmhd") {
                 write_fields("b1", b1dataspace, 1);
                 write_fields("b2", b2dataspace, 2);
                 write_fields("b3", b3dataspace, 3);
