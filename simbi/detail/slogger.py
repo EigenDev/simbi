@@ -16,7 +16,7 @@ class SimbiFormatter(logging.Formatter):
 
     FORMATS = {
         TRACE_LEVEL_NUM:                      bcolors.LIGHT_CYAN + inf_fmt + bcolors.ENDC,
-        VERBOSE_LEVEL_NUM:                    bcolors.LIGHT_CYAN + inf_fmt + bcolors.ENDC,
+        VERBOSE_LEVEL_NUM:                    bcolors.OKBLUE + inf_fmt + bcolors.ENDC,
         logging.INFO:                         non_fmt,
         logging.DEBUG:    bcolors.LIGHT_CYAN + inf_fmt + bcolors.ENDC,
         logging.WARNING:  bcolors.WARNING    + gen_fmt + bcolors.ENDC,
