@@ -152,7 +152,9 @@ class DynamicArg:
     def sqrt(self) -> float:
         return math.sqrt(self.value)
     
-    def __array_function__(self, func, types, args, kwargs):
+    def __array_function__(
+        self, func: Callable[..., Any], types: list[type], args: tuple[Any], kwargs: dict[str, Any]
+    ) -> Any:
         sanitized_args = []
         for arg in args:
             if isinstance(arg, DynamicArg):
