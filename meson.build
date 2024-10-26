@@ -247,9 +247,14 @@ if get_option('gpu_compilation').enabled()
     if hip.found() or cuda.found()
         gpu_cc = hip.found() ? 'hipcc' : 'nvcc'
         gpu_compiler = find_program(gpu_cc)
-        gpu_includes = ['-I' + meson.current_source_dir() + '/src', '-I.', '-I' + meson.current_build_dir()]
-        gpu_includes += ['-I' + get_option('gpu_include_dir'), '-I' + get_option('hdf5_include_dir')]
         gpu_objs = []
+        gpu_includes = [
+            '-I' + meson.current_source_dir() + '/src',
+            '-I.',
+            '-I' + meson.current_build_dir(),
+            '-I' + get_option('gpu_include_dir'),
+            '-I' + get_option('hdf5_include_dir')
+        ]
         foreach source : sources
             gpu_trg = custom_target(
                 fs.name(source) + '_target',
@@ -272,9 +277,16 @@ if get_option('gpu_compilation').enabled()
             gpu_objs += [gpu_trg]
         endforeach
 
+        gpu_lib = static_library(
+            'simbi_gpu',
+            gpu_objs,
+            build_by_default: true,
+        )
+
         gpu_ext = py3.extension_module(
             'gpu_ext',
-            ['src/gpu_ext.pyx', 'src/call_obj.pyx'] + gpu_objs,
+            ['src/gpu_ext.pyx', 'src/call_obj.pyx'],
+            link_with: gpu_lib,
             include_directories: all_inc,
             dependencies: depends + gpu_depends,
             cpp_args: ['-DMANAGED_MEMORY'],
