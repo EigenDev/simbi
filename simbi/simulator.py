@@ -458,9 +458,9 @@ class Hydro:
 
         if compute_mode in ["cpu", "omp"]:
             if "USE_OMP" in os.environ:
-                logger.debug("Using OpenMP multithreading")
+                logger.verbose("Using OpenMP multithreading")
             else:
-                logger.debug("Using STL std::thread multithreading")
+                logger.verbose("Using STL std::thread multithreading")
         else:
             dim3 = [1, 1, 1]
             for idx, coord in enumerate(["X", "Y", "Z"]):
@@ -474,7 +474,7 @@ class Hydro:
                         dim3[idx] = 16
                     elif self.dimensionality == 3 and coord in ["X", "Y", "Z"]:
                         dim3[idx] = 4
-            logger.debug(f"In GPU mode, GPU block dims are: {tuple(dim3)}")
+            logger.verbose(f"In GPU mode, GPU block dims are: {tuple(dim3)}")
 
         logger.info("")
         # Loading bar to have chance to check params
