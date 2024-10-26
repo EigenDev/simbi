@@ -764,18 +764,18 @@ namespace simbi {
 
         // configure the ghost zones in 1D hydro
         template <typename sim_state_t>
-        void config_ghosts1D(sim_state_t& sim_state);
+        void config_ghosts1D(sim_state_t* sim_state);
 
         // configure the ghost zones in 2D hydro
         template <typename sim_state_t>
-        void config_ghosts2D(sim_state_t& sim_state);
+        void config_ghosts2D(sim_state_t* sim_state);
 
         // configure the ghost zones in 3D hydro
         template <typename sim_state_t>
-        void config_ghosts3D(sim_state_t& sim_state);
+        void config_ghosts3D(sim_state_t* sim_state);
 
         template <typename T>
-        void config_ghosts(T& sim_state);
+        void config_ghosts(T* sim_state);
 
         /**
          * @brief perform the reduction within the warp

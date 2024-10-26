@@ -1162,9 +1162,10 @@ void RMHD<dim>::adapt_dt()
 //                                            FLUX CALCULATIONS
 //===================================================================================================================
 template <int dim>
-DUAL RMHD<dim>::conserved_t
-RMHD<dim>::prims2flux(const RMHD<dim>::primitive_t& prims, const luint nhat)
-    const
+DUAL RMHD<dim>::conserved_t RMHD<dim>::prims2flux(
+    const RMHD<dim>::primitive_t& prims,
+    const luint nhat
+) const
 {
     const real rho   = prims.rho();
     const real v1    = prims.vcomponent(1);
@@ -2356,7 +2357,7 @@ void RMHD<dim>::simulate(
     print_shared_mem();
     set_the_riemann_solver();
 
-    config_ghosts(*this);
+    config_ghosts(this);
     cons2prim();
     adapt_dt<TIMESTEP_TYPE::MINIMUM>();
 
@@ -2370,7 +2371,7 @@ void RMHD<dim>::simulate(
         simbi::detail::logger::with_logger(*this, tend, [&] {
             riemann_fluxes();
             advance();
-            config_ghosts(*this);
+            config_ghosts(this);
             cons2prim();
             adapt_dt();
 

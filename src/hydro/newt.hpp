@@ -33,9 +33,9 @@
 namespace simbi {
     template <int dim>
     struct Newtonian : public HydroBase {
-        constexpr static int dimensions          = dim;
-        constexpr static int nvars               = dim + 3;
-        constexpr static std::string_view regime = "classical";
+        constexpr static int dimensions = dim;
+        constexpr static int nvars      = dim + 3;
+        constexpr static char regime[]  = "classical";
         // set the primitive and conservative types at compile time
         using primitive_t = anyPrimitive<dim, Regime::NEWTONIAN>;
         using conserved_t = anyConserved<dim, Regime::NEWTONIAN>;
@@ -51,9 +51,9 @@ namespace simbi {
         RiemannFuncPointer<Newtonian<dim>> riemann_solve;
 
         // boundary condition functions for mesh motion
-        std::vector<function_t> bsources;   // boundary sources
-        std::vector<function_t> hsources;   // hydro sources
-        std::vector<function_t> gsources;   // gravity sources
+        ndarray<function_t> bsources;   // boundary sources
+        ndarray<function_t> hsources;   // hydro sources
+        ndarray<function_t> gsources;   // gravity sources
 
         /* Shared Data Members */
         ndarray<primitive_t> prims;
@@ -61,14 +61,19 @@ namespace simbi {
         ndarray<real> dt_min;
         bool scalar_all_zeros;
 
-        /* Methods */
+        // Constructors
         Newtonian();
+
+        // Overloaded Constructor
         Newtonian(
             std::vector<std::vector<real>>& state,
             const InitialConditions& init_conditions
         );
+
+        // Destructor
         ~Newtonian();
 
+        /* Methods */
         void cons2prim();
         void advance();
 

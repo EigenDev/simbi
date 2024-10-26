@@ -39,10 +39,6 @@ constexpr unsigned int kdelta(luint i, luint j) { return (i == j); }
 //---------------------------------------------------------------------------------------------------------
 //  HELPER-GLOBAL-STRUCTS
 //---------------------------------------------------------------------------------------------------------
-struct PrimData {
-    std::vector<real> rho, v1, v2, v3, p, b1, b2, b3, chi;
-};
-
 struct InitialConditions {
     real tstart, chkpt_interval, dlogt;
     real plm_theta, engine_duration, gamma, cfl, tend;
@@ -1045,42 +1041,6 @@ struct anyPrimitive : generic_hydro::anyHydro<dim, anyPrimitive<dim, R>, R> {
     }
 };
 
-template <>
-struct is_1D_primitive<anyPrimitive<1, Regime::NEWTONIAN>> : std::true_type {
-};
-
-template <>
-struct is_1D_primitive<anyPrimitive<1, Regime::SRHD>> : std::true_type {
-};
-
-template <>
-struct is_1D_primitive<anyPrimitive<1, Regime::RMHD>> : std::true_type {
-};
-
-template <>
-struct is_2D_primitive<anyPrimitive<2, Regime::NEWTONIAN>> : std::true_type {
-};
-
-template <>
-struct is_2D_primitive<anyPrimitive<2, Regime::SRHD>> : std::true_type {
-};
-
-template <>
-struct is_2D_primitive<anyPrimitive<2, Regime::RMHD>> : std::true_type {
-};
-
-template <>
-struct is_3D_primitive<anyPrimitive<3, Regime::NEWTONIAN>> : std::true_type {
-};
-
-template <>
-struct is_3D_primitive<anyPrimitive<3, Regime::SRHD>> : std::true_type {
-};
-
-template <>
-struct is_3D_primitive<anyPrimitive<3, Regime::RMHD>> : std::true_type {
-};
-
 //=======================================================
 //                        NEWTONIAN
 //=======================================================
@@ -1135,18 +1095,6 @@ struct Eigenvals {
 //=======================================================
 // TYPE TRAITS
 //=======================================================
-template <Regime R>
-struct is_1D_primitive<anyPrimitive<1, R>> : std::true_type {
-};
-
-template <Regime R>
-struct is_2D_primitive<anyPrimitive<2, R>> : std::true_type {
-};
-
-template <Regime R>
-struct is_3D_primitive<anyPrimitive<3, R>> : std::true_type {
-};
-
 template <>
 struct is_1D_mhd_primitive<anyPrimitive<1, Regime::RMHD>> : std::true_type {
 };
@@ -1169,5 +1117,29 @@ struct is_relativistic<anyPrimitive<dim, Regime::SRHD>> : std::true_type {
 
 template <int dim>
 struct is_relativistic<anyConserved<dim, Regime::RMHD>> : std::true_type {
+};
+
+template <>
+struct is_1D_primitive<anyPrimitive<1, Regime::NEWTONIAN>> : std::true_type {
+};
+
+template <>
+struct is_1D_primitive<anyPrimitive<1, Regime::SRHD>> : std::true_type {
+};
+
+template <>
+struct is_2D_primitive<anyPrimitive<2, Regime::NEWTONIAN>> : std::true_type {
+};
+
+template <>
+struct is_2D_primitive<anyPrimitive<2, Regime::SRHD>> : std::true_type {
+};
+
+template <>
+struct is_3D_primitive<anyPrimitive<3, Regime::NEWTONIAN>> : std::true_type {
+};
+
+template <>
+struct is_3D_primitive<anyPrimitive<3, Regime::SRHD>> : std::true_type {
 };
 #endif

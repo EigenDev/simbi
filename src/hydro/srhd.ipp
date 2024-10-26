@@ -1588,7 +1588,7 @@ void SRHD<dim>::simulate(
     print_shared_mem();
     set_riemann_solver();
 
-    config_ghosts(*this);
+    config_ghosts(this);
     cons2prim();
     if constexpr (global::on_gpu) {
         adapt_dt<TIMESTEP_TYPE::MINIMUM>(fullP);
@@ -1605,7 +1605,7 @@ void SRHD<dim>::simulate(
     try {
         simbi::detail::logger::with_logger(*this, tend, [&] {
             advance();
-            config_ghosts(*this);
+            config_ghosts(this);
             cons2prim();
 
             if constexpr (global::on_gpu) {

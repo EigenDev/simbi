@@ -28,7 +28,6 @@ namespace simbi {
             sim_state.cons.copyFromGpu();
             static auto data_directory      = sim_state.data_directory;
             static auto step                = sim_state.init_chkpt_idx;
-            static auto tbefore             = sim_state.tstart;
             static lint tchunk_order_of_mag = 2;
             const auto t_interval           = [&] {
                 if (sim_state.t == 0) {
@@ -69,35 +68,35 @@ namespace simbi {
                 sim_state.checkpoint_zones
             );
             sim_state.chkpt_idx = step;
-            tbefore             = sim_state.t;
             step++;
             write_hdf5(data_directory, filename, sim_state);
         }
 
         template <typename sim_state_t>
-        void config_ghosts1D(sim_state_t& sim_state)
+        void config_ghosts1D(sim_state_t* sim_state)
         {
-            const auto grid_size           = sim_state.nx;
-            const auto first_order         = sim_state.use_pcm;
-            const auto boundary_conditions = sim_state.bcs;
-            const auto x1max               = sim_state.x1max;
-            const auto x1min               = sim_state.x1min;
-            auto& cons                     = sim_state.cons;
+            const auto grid_size           = sim_state->nx;
+            const auto first_order         = sim_state->use_pcm;
+            const auto boundary_conditions = sim_state->bcs;
+            const auto x1max               = sim_state->x1max;
+            const auto x1min               = sim_state->x1min;
+            const auto nvars               = sim_state->nvars;
+            const auto bsources            = sim_state->bsources;
+            const auto mesh_motion         = sim_state->mesh_motion;
+            auto* cons                     = sim_state->cons.data();
 
-            // beginning and end scalar for boundary conditions
-            const auto es = sim_state.mesh_motion
-                                ? sim_state.get_cell_volume(sim_state.xag - 1)
+            const auto es = mesh_motion
+                                ? sim_state->get_cell_volume(sim_state->xag - 1)
                                 : 1.0;
-            const auto bs =
-                sim_state.mesh_motion ? sim_state.get_cell_volume(0) : 1.0;
-            parallel_for(sim_state.activeP, 0, 1, [&] DEV(const luint gid) {
+            const auto bs = mesh_motion ? sim_state->get_cell_volume(0) : 1.0;
+
+            parallel_for(sim_state->activeP, 0, 1, [=] DEV(const luint gid) {
                 if (first_order) {
                     switch (boundary_conditions[0]) {
                         case BoundaryCondition::DYNAMIC:
-                            for (auto qq = 0; qq < sim_state.nvars; qq++) {
+                            for (auto qq = 0; qq < nvars; qq++) {
                                 cons[0][qq] =
-                                    sim_state.bsources[qq](x1min, sim_state.t) *
-                                    bs;
+                                    bsources[qq](x1min, sim_state->t) * bs;
                             }
                             break;
                         case BoundaryCondition::REFLECTING:
@@ -106,6 +105,7 @@ namespace simbi {
                             break;
                         case BoundaryCondition::PERIODIC:
                             cons[0] = cons[grid_size - 2];
+                            break;
                         default:
                             cons[0] = cons[1];
                             break;
@@ -113,10 +113,9 @@ namespace simbi {
 
                     switch (boundary_conditions[1]) {
                         case BoundaryCondition::DYNAMIC:
-                            for (auto qq = 0; qq < sim_state.nvars; qq++) {
+                            for (auto qq = 0; qq < nvars; qq++) {
                                 cons[grid_size - 1][qq] =
-                                    sim_state.bsources[qq](x1max, sim_state.t) *
-                                    es;
+                                    bsources[qq](x1max, sim_state->t) * es;
                             }
                             break;
                         case BoundaryCondition::REFLECTING:
@@ -125,6 +124,7 @@ namespace simbi {
                             break;
                         case BoundaryCondition::PERIODIC:
                             cons[grid_size - 1] = cons[1];
+                            break;
                         default:
                             cons[grid_size - 1] = cons[grid_size - 2];
                             break;
@@ -133,13 +133,11 @@ namespace simbi {
                 else {
                     switch (boundary_conditions[0]) {
                         case BoundaryCondition::DYNAMIC:
-                            for (auto qq = 0; qq < sim_state.nvars; qq++) {
+                            for (auto qq = 0; qq < nvars; qq++) {
                                 cons[0][qq] =
-                                    sim_state.bsources[qq](x1min, sim_state.t) *
-                                    bs;
+                                    bsources[qq](x1min, sim_state->t) * bs;
                                 cons[1][qq] =
-                                    sim_state.bsources[qq](x1min, sim_state.t) *
-                                    bs;
+                                    bsources[qq](x1min, sim_state->t) * bs;
                             }
                             break;
                         case BoundaryCondition::REFLECTING:
@@ -151,6 +149,7 @@ namespace simbi {
                         case BoundaryCondition::PERIODIC:
                             cons[0] = cons[grid_size - 4];
                             cons[1] = cons[grid_size - 3];
+                            break;
                         default:
                             cons[0] = cons[2];
                             cons[1] = cons[2];
@@ -159,13 +158,11 @@ namespace simbi {
 
                     switch (boundary_conditions[1]) {
                         case BoundaryCondition::DYNAMIC:
-                            for (auto qq = 0; qq < sim_state.nvars; qq++) {
+                            for (auto qq = 0; qq < nvars; qq++) {
                                 cons[grid_size - 1][qq] =
-                                    sim_state.bsources[qq](x1max, sim_state.t) *
-                                    es;
+                                    bsources[qq](x1max, sim_state->t) * es;
                                 cons[grid_size - 2][qq] =
-                                    sim_state.bsources[qq](x1max, sim_state.t) *
-                                    es;
+                                    bsources[qq](x1max, sim_state->t) * es;
                             }
                             break;
                         case BoundaryCondition::REFLECTING:
@@ -177,6 +174,7 @@ namespace simbi {
                         case BoundaryCondition::PERIODIC:
                             cons[grid_size - 1] = cons[3];
                             cons[grid_size - 2] = cons[2];
+                            break;
                         default:
                             cons[grid_size - 1] = cons[grid_size - 3];
                             cons[grid_size - 2] = cons[grid_size - 3];
@@ -184,31 +182,31 @@ namespace simbi {
                     }
                 }
             });
-        };
+        }
 
         template <typename sim_state_t>
-        void config_ghosts2D(sim_state_t& sim_state)
+        void config_ghosts2D(sim_state_t* sim_state)
         {
-            const auto nvars               = sim_state.nvars;
-            const auto xag                 = sim_state.xag;
-            const auto yag                 = sim_state.yag;
-            const auto nx                  = sim_state.nx;
-            const auto ny                  = sim_state.ny;
-            const auto boundary_conditions = sim_state.bcs;
-            const auto geometry            = sim_state.geometry;
-            const auto half_sphere         = sim_state.half_sphere;
-            const auto hr                  = sim_state.radius;   // halo radius
-            auto& cons                     = sim_state.cons;
+            const auto nvars               = sim_state->nvars;
+            const auto xag                 = sim_state->xag;
+            const auto yag                 = sim_state->yag;
+            const auto nx                  = sim_state->nx;
+            const auto ny                  = sim_state->ny;
+            const auto boundary_conditions = sim_state->bcs;
+            const auto geometry            = sim_state->geometry;
+            const auto half_sphere         = sim_state->half_sphere;
+            const auto hr                  = sim_state->radius;   // halo radius
+            auto* cons                     = sim_state->cons.data();
             parallel_for(
-                sim_state.activeP,
-                sim_state.activeP.nzones,
-                [&] DEV(const luint gid) {
+                sim_state->activeP,
+                sim_state->activeP.nzones,
+                [=] DEV(const luint gid) {
                     const luint jj = axid<2, BlkAx::J>(gid, xag, yag);
                     const luint ii = axid<2, BlkAx::I>(gid, xag, yag);
 
                     const auto ir = ii + hr;
                     const auto jr = jj + hr;
-                    for (int rr = 0; rr < hr; rr++) {
+                    for (luint rr = 0; rr < hr; rr++) {
                         const auto rs = rr + 1;
                         // Fill ghost zones at x1 boundaries
                         if (jj < ny - 2 * hr) {
@@ -225,10 +223,10 @@ namespace simbi {
                                 }
                                 case BoundaryCondition::DYNAMIC:
                                     for (int qq = 0; qq < nvars; qq++) {
-                                        cons[ing][qq] = sim_state.bsources[qq](
-                                            sim_state.x1min,
-                                            sim_state.x2[jj],
-                                            sim_state.t
+                                        cons[ing][qq] = sim_state->bsources[qq](
+                                            sim_state->x1min,
+                                            sim_state->x2[jj],
+                                            sim_state->t
                                         );
                                     }
                                     break;
@@ -255,11 +253,12 @@ namespace simbi {
                                 }
                                 case BoundaryCondition::DYNAMIC:
                                     for (int qq = 0; qq < nvars; qq++) {
-                                        cons[outg][qq] = sim_state.bsources[qq](
-                                            sim_state.x1max,
-                                            sim_state.x2[jj],
-                                            sim_state.t
-                                        );
+                                        cons[outg][qq] =
+                                            sim_state->bsources[qq](
+                                                sim_state->x1max,
+                                                sim_state->x2[jj],
+                                                sim_state->t
+                                            );
                                     }
                                     break;
                                 case BoundaryCondition::PERIODIC: {
@@ -307,10 +306,10 @@ namespace simbi {
                                         case BoundaryCondition::DYNAMIC:
                                             for (int qq = 0; qq < nvars; qq++) {
                                                 cons[ing][qq] =
-                                                    sim_state.bsources[qq](
-                                                        sim_state.x1[ii],
-                                                        sim_state.x2min,
-                                                        sim_state.t
+                                                    sim_state->bsources[qq](
+                                                        sim_state->x1[ii],
+                                                        sim_state->x2min,
+                                                        sim_state->t
                                                     );
                                             }
                                             break;
@@ -347,10 +346,10 @@ namespace simbi {
                                         case BoundaryCondition::DYNAMIC:
                                             for (int qq = 0; qq < nvars; qq++) {
                                                 cons[outg][qq] =
-                                                    sim_state.bsources[qq](
-                                                        sim_state.x1[ii],
-                                                        sim_state.x2max,
-                                                        sim_state.t
+                                                    sim_state->bsources[qq](
+                                                        sim_state->x1[ii],
+                                                        sim_state->x2max,
+                                                        sim_state->t
                                                     );
                                             }
                                             break;
@@ -376,23 +375,23 @@ namespace simbi {
         }
 
         template <typename sim_state_t>
-        void config_ghosts3D(sim_state_t& sim_state)
+        void config_ghosts3D(sim_state_t* sim_state)
         {
-            const auto nvars               = sim_state.nvars;
-            const auto xag                 = sim_state.xag;
-            const auto yag                 = sim_state.yag;
-            const auto nx                  = sim_state.nx;
-            const auto ny                  = sim_state.ny;
-            const auto nz                  = sim_state.nz;
-            const auto boundary_conditions = sim_state.bcs;
-            const auto geometry            = sim_state.geometry;
-            const auto half_sphere         = sim_state.half_sphere;
-            const auto hr                  = sim_state.radius;   // halo radius
-            auto& cons                     = sim_state.cons;
+            const auto nvars               = sim_state->nvars;
+            const auto xag                 = sim_state->xag;
+            const auto yag                 = sim_state->yag;
+            const auto nx                  = sim_state->nx;
+            const auto ny                  = sim_state->ny;
+            const auto nz                  = sim_state->nz;
+            const auto boundary_conditions = sim_state->bcs;
+            const auto geometry            = sim_state->geometry;
+            const auto half_sphere         = sim_state->half_sphere;
+            const auto hr                  = sim_state->radius;   // halo radius
+            auto& cons                     = sim_state->cons;
             parallel_for(
-                sim_state.activeP,
-                sim_state.activeP.nzones,
-                [&] DEV(const luint gid) {
+                sim_state->activeP,
+                sim_state->activeP.nzones,
+                [=] DEV(const luint gid) {
                     const luint kk = axid<3, BlkAx::K>(gid, xag, yag);
                     const luint jj = axid<3, BlkAx::J>(gid, xag, yag, kk);
                     const luint ii = axid<3, BlkAx::I>(gid, xag, yag, kk);
@@ -400,7 +399,7 @@ namespace simbi {
                     const auto ir = ii + hr;
                     const auto jr = jj + hr;
                     const auto kr = kk + hr;
-                    for (int rr = 0; rr < hr; rr++) {
+                    for (luint rr = 0; rr < hr; rr++) {
                         const auto rs = rr + 1;
                         if (jj < ny - 2 * hr) {
                             // Fill ghost zones at i-k corners
@@ -409,8 +408,8 @@ namespace simbi {
                             auto ikse = idx3(nx - rs, jr, nz - rs, nx, ny, nz);
                             auto iksw = idx3(rr, jr, nz - rs, nx, ny, nz);
 
-                            // the corner ghosts are set equal to the real zones
-                            // nearest those corners
+                            // the corner ghosts are set equal to the real
+                            // zones nearest those corners
                             cons[iknw] = cons[idx3(hr, jr, hr, nx, ny, nz)];
                             cons[ikne] =
                                 cons[idx3(nx - (hr + 1), jr, hr, nx, ny, nz)];
@@ -471,11 +470,11 @@ namespace simbi {
                                     case BoundaryCondition::DYNAMIC:
                                         for (int qq = 0; qq < nvars; qq++) {
                                             cons[ing][qq] =
-                                                sim_state.bsources[qq](
-                                                    sim_state.x1min,
-                                                    sim_state.x2[jj],
-                                                    sim_state.x3[kk],
-                                                    sim_state.t
+                                                sim_state->bsources[qq](
+                                                    sim_state->x1min,
+                                                    sim_state->x2[jj],
+                                                    sim_state->x3[kk],
+                                                    sim_state->t
                                                 );
                                         }
                                         break;
@@ -516,11 +515,11 @@ namespace simbi {
                                     case BoundaryCondition::DYNAMIC:
                                         for (int qq = 0; qq < nvars; qq++) {
                                             cons[outg][qq] =
-                                                sim_state.bsources[qq](
-                                                    sim_state.x1max,
-                                                    sim_state.x2[jj],
-                                                    sim_state.x3[kk],
-                                                    sim_state.t
+                                                sim_state->bsources[qq](
+                                                    sim_state->x1max,
+                                                    sim_state->x2[jj],
+                                                    sim_state->x3[kk],
+                                                    sim_state->t
                                                 );
                                         }
                                         break;
@@ -581,7 +580,8 @@ namespace simbi {
 
                                 switch (geometry) {
                                     case Geometry::SPHERICAL: {
-                                        // the x3 direction is periodic in phi
+                                        // the x3 direction is periodic in
+                                        // phi
                                         const auto inr = idx3(
                                             ir,
                                             jr,
@@ -620,14 +620,14 @@ namespace simbi {
                                             }
                                             case BoundaryCondition::DYNAMIC:
                                                 for (auto qq = 0;
-                                                     qq < sim_state.nvars;
+                                                     qq < sim_state->nvars;
                                                      qq++) {
                                                     cons[ing][qq] =
-                                                        sim_state.bsources[qq](
-                                                            sim_state.x1[ii],
-                                                            sim_state.x2[jj],
-                                                            sim_state.x3min,
-                                                            sim_state.t
+                                                        sim_state->bsources[qq](
+                                                            sim_state->x1[ii],
+                                                            sim_state->x2[jj],
+                                                            sim_state->x3min,
+                                                            sim_state->t
                                                         );
                                                 }
                                                 break;
@@ -674,14 +674,14 @@ namespace simbi {
                                             }
                                             case BoundaryCondition::DYNAMIC:
                                                 for (auto qq = 0;
-                                                     qq < sim_state.nvars;
+                                                     qq < sim_state->nvars;
                                                      qq++) {
                                                     cons[outg][qq] =
-                                                        sim_state.bsources[qq](
-                                                            sim_state.x1[ii],
-                                                            sim_state.x2[jj],
-                                                            sim_state.x3max,
-                                                            sim_state.t
+                                                        sim_state->bsources[qq](
+                                                            sim_state->x1[ii],
+                                                            sim_state->x2[jj],
+                                                            sim_state->x3max,
+                                                            sim_state->t
                                                         );
                                                 }
                                                 break;
@@ -788,14 +788,14 @@ namespace simbi {
                                             }
                                             case BoundaryCondition::DYNAMIC:
                                                 for (auto qq = 0;
-                                                     qq < sim_state.nvars;
+                                                     qq < sim_state->nvars;
                                                      qq++) {
                                                     cons[ing][qq] =
-                                                        sim_state.bsources[qq](
-                                                            sim_state.x1[ii],
-                                                            sim_state.x2min,
-                                                            sim_state.x3[kk],
-                                                            sim_state.t
+                                                        sim_state->bsources[qq](
+                                                            sim_state->x1[ii],
+                                                            sim_state->x2min,
+                                                            sim_state->x3[kk],
+                                                            sim_state->t
                                                         );
                                                 }
                                                 break;
@@ -842,14 +842,14 @@ namespace simbi {
                                             }
                                             case BoundaryCondition::DYNAMIC:
                                                 for (auto qq = 0;
-                                                     qq < sim_state.nvars;
+                                                     qq < sim_state->nvars;
                                                      qq++) {
                                                     cons[outg][qq] =
-                                                        sim_state.bsources[qq](
-                                                            sim_state.x1[ii],
-                                                            sim_state.x2max,
-                                                            sim_state.x3[kk],
-                                                            sim_state.t
+                                                        sim_state->bsources[qq](
+                                                            sim_state->x1[ii],
+                                                            sim_state->x2max,
+                                                            sim_state->x3[kk],
+                                                            sim_state->t
                                                         );
                                                 }
                                                 break;
@@ -888,7 +888,7 @@ namespace simbi {
         };
 
         template <typename T>
-        void config_ghosts(T& sim_state)
+        void config_ghosts(T* sim_state)
         {
             if constexpr (T::dimensions == 1) {
                 config_ghosts1D(sim_state);
@@ -1575,8 +1575,8 @@ namespace simbi {
             const luint ii  = blockIdx.x * blockDim.x + threadIdx.x;
             const luint tid = threadIdx.z * blockDim.x * blockDim.y +
                               threadIdx.y * blockDim.x + threadIdx.x;
-            // luint bid  = blockIdx.z * gridDim.x * gridDim.y + blockIdx.y *
-            // gridDim.x + blockIdx.x;
+            // luint bid  = blockIdx.z * gridDim.x * gridDim.y + blockIdx.y
+            // * gridDim.x + blockIdx.x;
             const luint nt = blockDim.x * blockDim.y * blockDim.z * gridDim.x *
                              gridDim.y * gridDim.z;
             const luint gid = [&] {
@@ -1746,7 +1746,8 @@ namespace simbi {
         //         ---------------------------------------------- */
 
         //     Q = b2 * one_3 -
-        //         c * (1.0 - 1.e-16); /* = 3*Q, with Q given by Eq. [5.6.10] */
+        //         c * (1.0 - 1.e-16); /* = 3*Q, with Q given by Eq.
+        //         [5.6.10] */
         //     R = b * (2.0 * b2 - 9.0 * c) * one_27 +
         //         d; /* = 2*R, with R given by Eq. [5.6.10] */
 
@@ -1778,7 +1779,8 @@ namespace simbi {
         //     arg = my_min(1.0, arg);
 
         //     theta = std::acos(arg) *
-        //             one_3; /* Eq. [5.6.11], note that  pi/3 < theta < 0 */
+        //             one_3; /* Eq. [5.6.11], note that  pi/3 < theta < 0
+        //             */
 
         //     cs = std::cos(theta);         /*   > 0   */
         //     sn = sqrt3 * std::sin(theta); /*   > 0   */
@@ -1795,14 +1797,14 @@ namespace simbi {
         //         print
         //       ("===========================================================\n");
         //         print ("> Resolvent cubic:\n");
-        //         print ("  g(x)  = %18.12e + x*(%18.12e + x*(%18.12e + x))\n",
-        //         d,
+        //         print ("  g(x)  = %18.12e + x*(%18.12e + x*(%18.12e +
+        //         x))\n", d,
         //       c, b); print ("  Q     = %8.3e\n",Q); print ("  arg-1 =
         //       %8.3e\n", -1.5*R/(Q*sQ)-1.0);
 
         //         print ("> Cubic roots = %8.3e  %8.3e
-        //         %8.3e\n",z[0],z[1],z[2]); for (l = 0; l < 3; l++){  // check
-        //         accuracy of solution
+        //         %8.3e\n",z[0],z[1],z[2]); for (l = 0; l < 3; l++){  //
+        //         check accuracy of solution
 
         //           x = z[l];
         //           f = d + x*(c + x*(b + x));
@@ -1829,7 +1831,8 @@ namespace simbi {
 
         //     b2 = b * b;
 
-        //     /* --------------------------------------------------------------
+        //     /*
+        //     --------------------------------------------------------------
         //        1) Compute cubic coefficients using the method outlined in
         //           http://eqworld.ipmnet.ru/En/solutions/ae/ae0108.pdf
         //        --------------------------------------------------------------
@@ -1865,7 +1868,8 @@ namespace simbi {
         //     res[1] = -0.25 * b + sz1 - sz2 - sz3;
         //     res[2] = -0.25 * b - sz1 + sz2 - sz3;
         //     res[3] = -0.25 * b - sz1 - sz2 + sz3;
-        //     if constexpr (global::BuildPlatform == global::Platform::GPU) {
+        //     if constexpr (global::BuildPlatform == global::Platform::GPU)
+        //     {
         //         iterativeQuickSort(res, 0, 3);
         //     }
         //     else {
@@ -2685,7 +2689,8 @@ namespace simbi {
             //==================================================================
             //  PRIMITIVE DATA
             //==================================================================
-            // the regime is a  constexprstring view, so convert to std::string
+            // the regime is a  constexprstring view, so convert to
+            // std::string
             const auto regime = std::string(state.regime);
             // helper lambda for writing the prim data using a for 1D loop
             // and hyperslab selection
@@ -2708,6 +2713,8 @@ namespace simbi {
                 }
                 dataset.close();
             };
+
+            printf("Writing prims\n");
 
             auto write_fields = [&](const std::string& name,
                                     const auto& dataspace,
@@ -2783,9 +2790,11 @@ namespace simbi {
             else {
                 write_prims("chi", hdataspace, state.dimensions + 2);
             }
+            printf("Writing prims done\n");
             //==================================================================
             //  ATTRIBUTE DATA
             //==================================================================
+            printf("Writing attributes\n");
             // create dataset for simulation information
             H5::DataSet sim_info =
                 file.createDataSet("sim_info", attr_type, attr_dataspace);
@@ -2816,12 +2825,12 @@ namespace simbi {
                  {"geometry", state.coord_system.c_str()},
                  {"regime", regime.c_str()},
                  {"dimensions", &state.dimensions},
-                 {"x1_cell_spacing", cell2str.at(state.x1_cell_spacing).c_str()
-                 },
-                 {"x2_cell_spacing", cell2str.at(state.x2_cell_spacing).c_str()
-                 },
-                 {"x3_cell_spacing", cell2str.at(state.x3_cell_spacing).c_str()}
-                };
+                 {"x1_cell_spacing",
+                  cell2str.at(state.x1_cell_spacing).c_str()},
+                 {"x2_cell_spacing",
+                  cell2str.at(state.x2_cell_spacing).c_str()},
+                 {"x3_cell_spacing",
+                  cell2str.at(state.x3_cell_spacing).c_str()}};
 
             for (const auto& [name, value] : attributes) {
                 H5::DataType type;
@@ -2852,6 +2861,7 @@ namespace simbi {
                 att.close();
             }
             sim_info.close();
+            printf("Writing attributes done\n");
         }
     }   // namespace helpers
 }   // namespace simbi

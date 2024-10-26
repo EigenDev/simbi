@@ -4,7 +4,7 @@ project('simbi', 'c', 'cpp', 'cython',
     default_options : { 
         'cpp_std': 'c++20', 
         'cpp_args': ['-march=native'],
-        # 'b_lto': true,
+        'b_lto': true,
     },
 )
 
@@ -246,11 +246,10 @@ cpu_ext = py3.extension_module(
 if get_option('gpu_compilation').enabled()
     if hip.found() or cuda.found()
         gpu_cc = hip.found() ? 'hipcc' : 'nvcc'
-        gpu_compiler = find_program(f'@gpu_cc@')
-        gpu_objs = []
-        gpu_includes = ['-I'+meson.current_source_dir()+'/src', '-I.', '-I'+meson.current_build_dir()]
+        gpu_compiler = find_program(gpu_cc)
+        gpu_includes = ['-I' + meson.current_source_dir() + '/src', '-I.', '-I' + meson.current_build_dir()]
         gpu_includes += ['-I' + get_option('gpu_include_dir'), '-I' + get_option('hdf5_include_dir')]
-        gpu_link_trgs = []
+        gpu_objs = []
         foreach source : sources
             gpu_trg = custom_target(
                 fs.name(source) + '_target',
@@ -273,29 +272,16 @@ if get_option('gpu_compilation').enabled()
             gpu_objs += [gpu_trg]
         endforeach
 
-        gpu_lib = custom_target(
-            'gpu_library',
-            command: [
-                'ar',
-                'rcs',
-                '@OUTPUT@',
-                '@INPUT@',
-            ],
-            input: gpu_objs,
-            output: 'libsimbi_gpu.a',
-            install: false, 
-            build_by_default: true,
-        )
         gpu_ext = py3.extension_module(
             'gpu_ext',
-            ['src/gpu_ext.pyx', 'src/call_obj.pyx'],
-            link_with: [gpu_lib],
+            ['src/gpu_ext.pyx', 'src/call_obj.pyx'] + gpu_objs,
             include_directories: all_inc,
             dependencies: depends + gpu_depends,
             cpp_args: ['-DMANAGED_MEMORY'],
             override_options: ['cython_language=cpp'],
             install: true,
             install_dir: meson.current_source_dir() + '/simbi/libs',
+            # link_args: ['-Wl,--incremental']  # Enable incremental linking
         )
     endif
 endif

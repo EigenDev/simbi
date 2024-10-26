@@ -146,7 +146,7 @@ namespace simbi {
                 }
             }
 
-            Show template <typename sim_state_t, typename F>
+            template <typename sim_state_t, typename F>
             void with_logger(sim_state_t& sim_state, real end_time, F&& f)
             {
                 auto timer        = Timer();
