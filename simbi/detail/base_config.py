@@ -417,4 +417,8 @@ class BaseConfig(metaclass=abc.ABCMeta):
         """
         Print problem params on class destruction
         """
-        self._print_problem_params()
+        try:
+            self._print_problem_params()
+        except Exception as e:
+            ...
+            # logging.error(f"An error occurred while printing problem parameters: {e}")
