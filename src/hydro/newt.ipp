@@ -808,7 +808,7 @@ void Newtonian<dim>::advance()
         const luint tya = dim < 2 ? 0 : (global::on_sm) ? ty + radius : ja;
         const luint tza = dim < 3 ? 0 : (global::on_sm) ? tz + radius : ka;
         const luint aid = idx3(ia, ja, ka, nx, ny, nz);
-        const luint tid = idx3(tza, tya, tza, sx, sy, sz);
+        const luint tid = idx3(txa, tya, tza, sx, sy, sz);
 
         if constexpr (global::on_sm) {
             load_shared_buffer<dim>(
