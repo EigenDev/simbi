@@ -9,7 +9,6 @@ import importlib
 import tracemalloc
 import simbi.detail as detail
 from pathlib import Path
-from itertools import chain, repeat
 from .detail import initial_condition as simbi_ic
 from .detail import helpers
 from .detail.slogger import logger
@@ -24,7 +23,11 @@ available_coord_systems = [
     "planar_cylindrical",
     "axis_cylindrical",
 ]
-available_boundary_conditions = ["outflow", "reflecting", "dynamic", "periodic"]
+available_boundary_conditions = [
+    "outflow",
+    "reflecting",
+    "dynamic",
+    "periodic"]
 available_cellspacings = [
     "linear",
     "log",
@@ -92,16 +95,6 @@ class Hydro:
         Return:
             None
         """
-        if coord_system not in available_coord_systems:
-            raise ValueError(
-                f"Invalid coordinate system. Expected one of: {available_coord_systems}. Instead got: {coord_system}"
-            )
-
-        if regime not in available_regimes:
-            raise ValueError(
-                f"Invalid simulation regime. Expected one of: {available_regimes}. Instead got {regime}"
-            )
-
         # Update any static vars with attributes obtained from some setup
         # configuration
         clean_attributes = [x for x in extras.keys() if not x.startswith("__")]
@@ -119,48 +112,22 @@ class Hydro:
         self.gamma = gamma
         self.mhd = self.regime in ["srmhd", "mhd"]
         self.initial_state = initial_state
+        
+        self._validate_params()
 
         if helpers.tuple_of_tuples(initial_state):
-            # check if given simple nested sequence to split across the grid
-            if all(len(v) == 3 for v in initial_state):
-                if self.mhd:
-                    raise ValueError(
-                        "Not enough variables across discontinuity for mhd run"
-                    )
-                self.dimensionality = 1
+            lengths = {len(v) for v in initial_state}
+            if len(lengths) != 1:
+                raise ValueError("State arrays across discontinuity need to have equal length")
+            length = lengths.pop()
+            if length in {3, 4, 5, 6} and not self.mhd:
+                self.dimensionality = 1 if length in {3, 4} else 2 if length == 6 else 3
                 self.discontinuity = True
-            elif all(len(v) == 4 for v in initial_state):
-                if self.mhd:
-                    raise ValueError(
-                        "Not enough variables across discontinuity for mhd run"
-                    )
-                self.dimensionality = 1
-                self.discontinuity = True
-            elif all(len(v) == 5 for v in initial_state):
-                if self.mhd:
-                    raise ValueError(
-                        "Not enough variables across discontinuity for mhd run"
-                    )
-                self.dimensionality = 3
-                self.discontinuity = True
-            elif all(len(v) == 6 for v in initial_state):
-                if self.mhd:
-                    raise ValueError(
-                        "Not enough variables across discontinuity for mhd run"
-                    )
-                self.dimensionality = 2
-                self.discontinuity = True
-            elif all(len(v) == 8 for v in initial_state):
-                if not self.mhd:
-                    raise ValueError(
-                        "Too many variables across discontinuity for non-mhd run"
-                    )
+            elif length == 8 and self.mhd:
                 self.dimensionality = 3
                 self.discontinuity = True
             else:
-                raise ValueError(
-                    "State arrays across discontinuity need to have equal length"
-                )
+                raise ValueError("Invalid number of variables for the given regime")
         else:
             if all(isinstance(x, (float, int)) for x in initial_state):
                 initial_state = tuple(
@@ -176,13 +143,13 @@ class Hydro:
 
         if ngeom != self.dimensionality:
             raise ValueError(
-                f"Detecting a {self.dimensionality}D run, but only {ngeom} geometry tuple(s)"
-            )
+                f"Detecting a {
+                    self.dimensionality}D run, but only {ngeom} geometry tuple(s)")
 
         if len(self.resolution) != self.dimensionality:
             raise ValueError(
-                f"Detecting a {self.dimensionality}D run, but only {nres} resolution args"
-            )
+                f"Detecting a {
+                    self.dimensionality}D run, but only {nres} resolution args")
 
         initial_state = np.asanyarray(initial_state, dtype=object)
         size = len(initial_state[0])
@@ -193,7 +160,8 @@ class Hydro:
         max_discont = 2**self.dimensionality
         self.number_of_non_em_terms = 2 + self.dimensionality if not self.mhd else 5
         max_prims = self.number_of_non_em_terms + 3 * self.mhd
-        if nstates <= max_prims or (nstates < max_discont and self.discontinuity):
+        if nstates <= max_prims or (
+                nstates < max_discont and self.discontinuity):
             detail.initial_condition.construct_the_state(
                 self, initial_state=initial_state
             )
@@ -210,46 +178,60 @@ class Hydro:
 
     @classmethod
     def gen_from_setup(cls, setup: Any) -> Any:
-        return cls(**{str(param): getattr(setup, param) for param in dir(setup)})
+        return cls(**{str(param): getattr(setup, param)
+                   for param in dir(setup)})
 
+    def _validate_params(self) -> None:
+        if self.coord_system not in available_coord_systems:
+            raise ValueError(
+                f"Invalid coordinate system. Expected one of: {available_coord_systems}.\
+                    Instead got: {self.coord_system}")
+
+        if self.regime not in available_regimes:
+            raise ValueError(
+                f"Invalid simulation regime. Expected one of: {available_regimes}.\
+                    Instead got {self.regime}")
+            
     def _print_params(self, frame: Any) -> None:
+        """
+        Print the parameters of the simulation.
+
+        Parameters:
+            frame (Any): The current frame from which to extract the parameters.
+
+        Returns:
+            None
+        """
         params = inspect.getargvalues(frame)
         logger.info("=" * 80)
         logger.info("Simulation Parameters")
         logger.info("=" * 80)
+
+        def format_param(param: Any) -> str:
+            """
+            Format the parameter for logging.
+
+            Parameters:
+                param (Any): The parameter to format.
+
+            Returns:
+                str: The formatted parameter as a string.
+            """
+            if isinstance(param, (float, np.float64)):
+                return f"{param:.3f}"
+            elif callable(param):
+                return f"user-defined {param.__name__} function"
+            elif isinstance(param, (list, np.ndarray)):
+                if len(param) > 6:
+                    return f"user-defined {param.__class__.__name__} terms"
+                return [format_param(p) for p in param]  # type: ignore
+            return str(param)
+
         for key, param in params.locals.items():
             if key != "self":
-                if isinstance(param, (float, np.float64)):
-                    val_str: Any = f"{param:.3f}"
-                elif key == "bsources" and not all(item is None for item in param):
-                    val_str = f"user-defined boundary sources terms"
-                elif key == "gsources" and not all(item is None for item in param):
-                    val_str = f"user-defined gravity sources"
-                elif key == "hsources" and not all(item is None for item in param):
-                    val_str = f"user-defined hydro sources"
-                elif callable(param):
-                    val_str = f"user-defined {key} function"
-                elif isinstance(param, tuple):
-                    if any(callable(p) for p in param):
-                        val_str = f"user-defined {key} function(s)"
-                elif isinstance(param, (list, np.ndarray)):
-                    if len(param) > 6:
-                        val_str = f"user-defined {key} terms"
-                    else:
-                        if any(isinstance(val, (float, int)) for val in param):
-                            val_str = []
-                            for val in param:
-                                if isinstance(val, list):
-                                    val_str += [[float(f"{item:.3f}") for item in val]]
-                                else:
-                                    val_str += [val]
-                        else:
-                            val_str = f"{param}"
-                else:
-                    val_str = str(param)
+                val_str = format_param(param)
+                logger.info(f"{key.ljust(30, '.')} {val_str}")
 
-                my_str = str(key).ljust(30, ".")
-                logger.info(f"{my_str} {val_str}")
         system_dict = {
             "adiabatic_gamma": self.gamma,
             "resolution": self.resolution,
@@ -259,28 +241,16 @@ class Hydro:
         }
 
         for key, val in system_dict.items():
-            my_str = str(key).ljust(30, ".")
-            if isinstance(val, float):
-                val_str = f"{val:.2f}"
-            elif isinstance(val, tuple):
-                val_str = str(val)
-                if isinstance(val[0], tuple):
-                    val_str = ""
-                    for elem in val:
-                        val_str += (
-                            "(" + ", ".join("{0:.3f}".format(t) for t in elem) + ")"
-                        )
-            else:
-                val_str = str(val)
+            val_str = format_param(val)
+            logger.info(f"{key.ljust(30, '.')} {val_str}")
 
-            logger.info(f"{my_str} {val_str}")
         logger.info("=" * 80)
 
     def _generate_the_grid(
         self, x1_cell_spacing: str, x2_cell_spacing: str, x3_cell_spacing: str
     ) -> None:
         dim = self.dimensionality
-        vfunc: dict[str, Callable[..., Any]] = {
+        vfunc = {
             "log": np.geomspace,
             "linear": np.linspace,
         }
@@ -292,56 +262,44 @@ class Hydro:
             2 if dim < 3 else self.resolution[2] + 1,
         ]
 
-        cgeom = list(self.geometry)
-
-        # ensure geometry is a tuple of tuples
-        # for 1D runs
+        cgeom = [tuple(g[:2]) if isinstance(g, (list, tuple))
+                 else g for g in self.geometry]
         if not helpers.tuple_of_tuples(cgeom):
-            cgeom = [cgeom]
+            cgeom = [cgeom] * dim
 
-        # if there is a breakpoint in the geometry
-        # ignore it for now
-        for idx, val in enumerate(cgeom):
-            if isinstance(val, tuple):
-                cgeom[idx] = val[:2]
-            elif len(val) == 3:
-                cgeom[idx] = val[:2]
-
-        for didx, dir in zip(range(self.dimensionality), [self.x1, self.x2, self.x3]):
-            if len(dir) == 0:
-                dir[:] = vfunc[csp[didx]](*cgeom[didx], verts[didx])
-            elif dir.shape[0] != verts[didx]:
+        for didx, dir in zip(range(dim), [self.x1, self.x2, self.x3]):
+            if not any(dir):
+                dir[:] = vfunc[csp[didx]](
+                    *cgeom[didx][:2], verts[didx])  # type: ignore
+            elif len(dir) != verts[didx]:
                 raise ValueError(
-                    f"x{didx+1} vertices does not match the x{didx+1}-resolution + 1"
+                    f"x{didx + 1} vertices do not match the x{didx + 1}-resolution + 1"
                 )
 
-        self.x1 = np.asanyarray(self.x1)
-        self.x2 = np.asanyarray(self.x2)
-        self.x3 = np.asanyarray(self.x3)
+        self.x1, self.x2, self.x3 = map(
+            np.asanyarray, [self.x1, self.x2, self.x3])
 
     def _check_boundary_conditions(
         self, boundary_conditions: Union[Sequence[str], str, NDArray[numpy_string]]
     ) -> None:
         boundary_conditions = list(helpers.get_iterable(boundary_conditions))
-        for bc in boundary_conditions:
-            if bc not in available_boundary_conditions:
-                raise ValueError(
-                    f"Invalid boundary condition. Expected one of: {available_boundary_conditions}. Instead got: {bc}"
-                )
+        invalid_bcs = [
+            bc for bc in boundary_conditions if bc not in available_boundary_conditions]
+        if invalid_bcs:
+            raise ValueError(
+                f"Invalid boundary condition(s): {invalid_bcs}. Expected one of: {available_boundary_conditions}.")
 
         number_of_given_bcs = len(boundary_conditions)
         if number_of_given_bcs != 2 * self.dimensionality:
             if number_of_given_bcs == 1:
-                boundary_conditions = (
-                    list(boundary_conditions) * 2 * self.dimensionality
-                )
-            elif number_of_given_bcs == (self.dimensionality * 2) // 2:
-                boundary_conditions = list(
-                    chain.from_iterable(repeat(x, 2) for x in boundary_conditions)
-                )
+                boundary_conditions *= 2 * self.dimensionality
+            elif number_of_given_bcs == self.dimensionality:
+                boundary_conditions = [
+                    bc for bc in boundary_conditions for _ in range(2)
+                ]
             else:
                 raise ValueError(
-                    "Please include at a number of boundary conditions equal to at least half the number of cell faces"
+                    "Please include a number of boundary conditions equal to at least half the number of cell faces"
                 )
         self.boundary_conditions = boundary_conditions
 
@@ -411,34 +369,36 @@ class Hydro:
         bsources = helpers.as_list(bsources)
         hsources = helpers.as_list(hsources)
         gsources = helpers.as_list(gsources)
-        
+
         if spatial_order not in ["pcm", "plm"]:
-            raise ValueError(f"Space order can only be one of {['pcm', 'plm']}")
+            raise ValueError(
+                f"Space order can only be one of {['pcm', 'plm']}")
         if time_order not in ["rk1", "rk2"]:
             raise ValueError(f"Time order can only be one of {['rk1', 'rk2']}")
 
         self._print_params(inspect.currentframe())
         if x1_cell_spacing not in available_cellspacings:
             raise ValueError(
-                f"cell spacing for x1 should be one of: {available_cellspacings}"
-            )
+                f"cell spacing for x1 should be one of: {available_cellspacings}")
 
         if x2_cell_spacing not in available_cellspacings:
             raise ValueError(
-                f"cell spacing for x2 should be one of: {available_cellspacings}"
-            )
+                f"cell spacing for x2 should be one of: {available_cellspacings}")
 
         if x3_cell_spacing not in available_cellspacings:
             raise ValueError(
-                f"cell spacing for x3 should be one of: {available_cellspacings}"
-            )
+                f"cell spacing for x3 should be one of: {available_cellspacings}")
 
         self.start_time: float = 0.0
         self.chkpt_idx: int = 0
         scale_factor = scale_factor or (lambda t: 1.0)
         scale_factor_derivative = scale_factor_derivative or (lambda t: 0.0)
-        self._generate_the_grid(x1_cell_spacing, x2_cell_spacing, x3_cell_spacing)
-        mesh_motion = scale_factor_derivative(tstart) / scale_factor(tstart) != 0
+        self._generate_the_grid(
+            x1_cell_spacing,
+            x2_cell_spacing,
+            x3_cell_spacing)
+        mesh_motion = scale_factor_derivative(
+            tstart) / scale_factor(tstart) != 0
         volume_factor: Union[float, NDArray[Any]] = 1.0
         if mesh_motion and self.coord_system != "cartesian":
             if self.dimensionality == 1:
@@ -456,7 +416,7 @@ class Hydro:
         self._check_boundary_conditions(boundary_conditions)
         if not chkpt:
             simbi_ic.initializeModel(
-                self, spatial_order == "pcm", volume_factor, passive_scalars
+                self, spatial_order, volume_factor, passive_scalars
             )
         else:
             simbi_ic.load_checkpoint(self, chkpt)
@@ -475,7 +435,8 @@ class Hydro:
             solver = "hllc"
 
         # Convert strings to byte arrays
-        cython_data_directory = os.path.join(data_directory, "").encode("utf-8")
+        cython_data_directory = os.path.join(
+            data_directory, "").encode("utf-8")
         cython_coordinates = self.coord_system.encode("utf-8")
         cython_solver = solver.encode("utf-8")
         cython_boundary_conditions: NDArray[numpy_string] = np.array(
@@ -493,8 +454,7 @@ class Hydro:
             # Create a new directory because it does not exist
             Path.mkdir(data_path, parents=True)
             logger.info(
-                f"The data directory provided does not exist. Creating the {data_path} directory now!"
-            )
+                f"The data directory provided does not exist. Creating the {data_path} directory now!")
 
         if compute_mode in ["cpu", "omp"]:
             if "USE_OMP" in os.environ:
@@ -530,8 +490,9 @@ class Hydro:
 
         print("=" * 80)
         logger.info(
-            f"Computing solution using {spatial_order.upper()} in space, {time_order.upper()} in time..."
-        )
+            f"Computing solution using {
+                spatial_order.upper()} in space, {
+                time_order.upper()} in time...")
 
         if compute_mode == "gpu":
             if self.dimensionality == 1:
@@ -603,7 +564,8 @@ class Hydro:
 
                 region_one = self.x1 < self.geometry[0][2]
                 region_two = np.logical_not(region_one)
-                xc = helpers.calc_centroid(self.x1, coord_system=self.coord_system)
+                xc = helpers.calc_centroid(
+                    self.x1, coord_system=self.coord_system)
                 a = xc < self.geometry[0][2]
                 b = np.logical_not(a)
                 b1[..., region_one] = self.initial_state[0][5]
@@ -618,7 +580,6 @@ class Hydro:
                 b3 = self.initial_state[7]
             init_conditions["bfield"] = [b1.flat, b2.flat, b3.flat]
 
-
         lambdas: dict[str, list[Optional[Callable[..., float]]]] = {
             "boundary_sources": bsources,
             "hydro_sources": hsources,
@@ -627,20 +588,21 @@ class Hydro:
         for name, source in lambdas.items():
             ngiven = len(source)
             if not all(item is None for item in source):
-                nterms: int = self.dimensionality + 3 * ((source != gsources) + self.mhd)
+                nterms: int = self.dimensionality + 3 * (
+                    (source != gsources) + self.mhd
+                )
                 if ngiven < nterms:
                     if ngiven == nterms - 1:
                         if self.dimensionality == 1:
                             # define null source terms for scalar concentration
-                            source += [lambda x,t: 0.0]
+                            source += [lambda x, t: 0.0]
                         elif self.dimensionality == 2:
-                            source += [lambda x,y,t: 0.0]
+                            source += [lambda x, y, t: 0.0]
                         else:
-                            source += [lambda x,y,z,t: 0.0]
+                            source += [lambda x, y, z, t: 0.0]
                     else:
                         raise ValueError(
-                            f"Number of {name} terms should be equal to the number {nterms}"
-                        )
+                            f"Number of {name} terms should be equal to the number {nterms}")
 
         lib_mode = "cpu" if compute_mode in ["cpu", "omp"] else "gpu"
         sim_state = getattr(
