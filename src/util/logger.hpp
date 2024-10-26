@@ -127,7 +127,11 @@ namespace simbi {
                       speed(0),
                       zu_avg(0),
                       delta_t(0) {};
-                ~Logger() = default;
+
+                ~Logger()
+                {   // Show the cursor
+                    std::cout << "\033[?25h";
+                };
             };
 
             inline void print_avg_speed(Logger& logger)
@@ -142,7 +146,7 @@ namespace simbi {
                 }
             }
 
-            template <typename sim_state_t, typename F>
+            Show template <typename sim_state_t, typename F>
             void with_logger(sim_state_t& sim_state, real end_time, F&& f)
             {
                 auto timer        = Timer();
