@@ -34,9 +34,9 @@
 namespace simbi {
     template <int dim>
     struct RMHD : public HydroBase {
-        constexpr static int dimensions          = dim;
-        constexpr static int nvars               = dim + 3;
-        constexpr static std::string_view regime = "srmhd";
+        constexpr static int dimensions = dim;
+        constexpr static int nvars      = dim + 3;
+        constexpr static char regime[]  = "srmhd";
 
         // set the primitive and conservative types at compile time
         using primitive_t   = anyPrimitive<dim, Regime::RMHD>;
@@ -54,9 +54,9 @@ namespace simbi {
         ) const;
         RiemannFuncPointer<RMHD<dim>> riemann_solve;
 
-        std::vector<function_t> bsources;   // boundary sources
-        std::vector<function_t> hsources;   // hydro sources
-        std::vector<function_t> gsources;   // gravity sources
+        ndarray<function_t> bsources;   // boundary sources
+        ndarray<function_t> hsources;   // hydro sources
+        ndarray<function_t> gsources;   // gravity sources
 
         /* Shared Data Members */
         ndarray<primitive_t> prims;
@@ -65,24 +65,16 @@ namespace simbi {
         bool scalar_all_zeros;
         luint nzone_edges;
 
-        /* Methods */
         RMHD();
         RMHD(
             std::vector<std::vector<real>>& state,
             const InitialConditions& init_conditions
         );
+
         ~RMHD();
 
+        /* Methods */
         void cons2prim();
-
-        /**
-         * Return the primitive
-         * variables density , three-velocity, pressure
-         *
-         * @param  con conserved array at index
-         * @param gid  current global index
-         * @return none
-         */
         DUAL primitive_t cons2prim(const conserved_t& cons) const;
         void riemann_fluxes();
         void advance();

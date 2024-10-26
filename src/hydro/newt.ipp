@@ -1168,7 +1168,7 @@ void Newtonian<dim>::simulate(
 )
 {
     anyDisplayProps();
-    // set the boundary, hydro, and gracity sources terms
+    // set the boundary, hydro, and gravity sources terms
     // respectively
     for (auto&& q : bsources) {
         this->bsources.push_back(q.value_or(nullptr));
@@ -1263,7 +1263,7 @@ void Newtonian<dim>::simulate(
     print_shared_mem();
     set_the_riemann_solver();
 
-    config_ghosts(*this);
+    config_ghosts(this);
     cons2prim();
     if constexpr (global::on_gpu) {
         adapt_dt(fullP);
@@ -1281,7 +1281,7 @@ void Newtonian<dim>::simulate(
     try {
         simbi::detail::logger::with_logger(*this, tend, [&] {
             advance();
-            config_ghosts(*this);
+            config_ghosts(this);
             cons2prim();
 
             if constexpr (global::on_gpu) {
