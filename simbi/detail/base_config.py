@@ -2,9 +2,24 @@ import argparse
 import abc
 import logging
 from .dynarg import DynamicArg
-from ..key_types import *
 from . import get_subparser
-from typing import ParamSpec, TypeVar, Generic
+from typing import (
+    ParamSpec,
+    TypeVar,
+    Generic,
+    Callable,
+    Optional,
+    Any,
+    Union,
+    Sequence,
+    cast,
+    Tuple,
+    final
+)
+from numpy.typing import NDArray
+from numpy import float64 as numpy_float
+from numpy import int32 as numpy_int
+from numpy import str_ as numpy_string
 
 __all__ = ["BaseConfig", "simbi_property", "simbi_classproperty"]
 
@@ -20,7 +35,7 @@ class simbi_classproperty:
         if self.fget:
             simbi_classproperty.registry[self.fget.__name__] = self.fget
 
-    def __get__(self, owner_self: Any, owner_cls: Optional[Any] = ..., /) -> Any:
+    def __get__(self, owner_self: Any, owner_cls: Optional[Any] = None) -> Any:
         if not self.fget:
             return self
         return self.fget(owner_cls)
@@ -33,18 +48,18 @@ class simbi_property(Generic[T]):
         self._name = ""
         self.fget = fget
         self.__doc__ = fget.__doc__
-        simbi_property.registry[self.fget.__name__] = "singelton"
+        simbi_property.registry[self.fget.__name__] = "singleton"
 
     def __set_name__(self, owner: Any, name: str) -> None:
         self._name = name
 
     def __get__(
-        self, obj: Any, objtype: Optional[Any], /
+        self, obj: Any, objtype: Optional[Any] = None
     ) -> Union[T, "simbi_property[Any]"]:
         if obj is None:
             return self
         if self.fget is None:
-            raise ValueError("Property has not getter")
+            raise ValueError("Property has no getter")
         return cast(T, self.type_converter(self.fget(obj)))
 
     @staticmethod
@@ -53,29 +68,22 @@ class simbi_property(Generic[T]):
             return input_obj
         if isinstance(input_obj, DynamicArg):
             return input_obj.var_type(input_obj.value)
-        else:
-            try:
-                if any(isinstance(x, str) for x in input_obj):
-                    return input_obj
-
-                if any(isinstance(a, Sequence) for a in input_obj):
-                    transform = (
-                        lambda x: x.var_type(x.value)
-                        if isinstance(x, DynamicArg)
-                        else x
-                    )
-                    return cast(T, tuple(tuple(map(transform, i)) for i in input_obj))
-                elif any(isinstance(x, DynamicArg) for x in input_obj):
-                    return tuple(
-                        res
-                        if not isinstance(res, DynamicArg)
-                        else res.var_type(res.value)
-                        for res in input_obj
-                    )
-                else:
-                    return input_obj
-            except TypeError:
+        try:
+            if any(isinstance(x, str) for x in input_obj):
                 return input_obj
+            if any(isinstance(a, Sequence) for a in input_obj):
+                transform = lambda x: (
+                    x.var_type(x.value) if isinstance(x, DynamicArg) else x
+                )
+                return cast(T, tuple(tuple(map(transform, i)) for i in input_obj))
+            if any(isinstance(x, DynamicArg) for x in input_obj):
+                return tuple(
+                    res if not isinstance(res, DynamicArg) else res.var_type(res.value)
+                    for res in input_obj
+                )
+            return input_obj
+        except TypeError:
+            return input_obj
 
 
 def err_message(name: str) -> str:
@@ -87,7 +95,7 @@ def class_register(cls: Any) -> Any:
         if prop in list(simbi_property.registry.keys()) + list(
             simbi_classproperty.registry.keys()
         ):
-            cls.base_properties.update({prop: "singelton"})
+            cls.base_properties.update({prop: "singleton"})
     return cls
 
 
@@ -100,23 +108,10 @@ class BaseConfig(metaclass=abc.ABCMeta):
     trace_memory: bool = False
 
     def __init_subclass__(cls: Any, *args: Any, **kwargs: Any) -> None:
-        """Check Child Behavior
-        To save from defining do-nothing properties, raise an error when a user
-        tries to define a read-only property in their subclass which does not
-        exist already in the base configuration.
-
-        Args:
-            cls (Any): The subclasses instance
-
-        Raises:
-            TypeError: Error if Child tries to create a @property or @simbi_property getter
-            that is not predefined in the base configuration.
-        """
         super().__init_subclass__(*args, **kwargs)
         for prop in dir(cls):
             if prop.startswith("_"):
                 continue
-
             if isinstance(getattr(cls.__mro__[0], prop), simbi_property):
                 if prop not in BaseConfig.base_properties.keys():
                     bullet_list = "".join(
@@ -196,17 +191,17 @@ class BaseConfig(metaclass=abc.ABCMeta):
     @simbi_classproperty
     def scale_factor_derivative(cls) -> Optional[Callable[[float], float]]:
         return None
-    
+
     @simbi_classproperty
-    def gravity_sources(clas) -> list[Optional[Callable[[*Tuple[float,...]], float]]]:
+    def gravity_sources(cls) -> list[Optional[Callable[[*Tuple[float, ...]], float]]]:
         return [None]
 
     @simbi_classproperty
-    def hydro_sources(clas) -> list[Optional[Callable[[*Tuple[float,...]], float]]]:
+    def hydro_sources(cls) -> list[Optional[Callable[[*Tuple[float, ...]], float]]]:
         return [None]
-    
+
     @simbi_classproperty
-    def boundary_sources(clas) -> list[Optional[Callable[[*Tuple[float,...]], float]]]:
+    def boundary_sources(cls) -> list[Optional[Callable[[*Tuple[float, ...]], float]]]:
         return [None]
 
     @simbi_property
@@ -246,15 +241,15 @@ class BaseConfig(metaclass=abc.ABCMeta):
         return False
 
     @simbi_property
-    def x1(self) -> list[Any] | NDArray[Any]:
+    def x1(self) -> Union[list[Any], NDArray[Any]]:
         return []
 
     @simbi_property
-    def x2(self) -> list[Any] | NDArray[Any]:
+    def x2(self) -> Union[list[Any], NDArray[Any]]:
         return []
 
     @simbi_property
-    def x3(self) -> list[Any] | NDArray[Any]:
+    def x3(self) -> Union[list[Any], NDArray[Any]]:
         return []
 
     @simbi_property
@@ -266,13 +261,13 @@ class BaseConfig(metaclass=abc.ABCMeta):
         return 0.1
 
     @simbi_property
-    def order_of_integration(self) -> str | None:
+    def order_of_integration(self) -> Optional[str]:
         return None
-    
+
     @simbi_property
     def spatial_order(self) -> str:
         return "plm"
-    
+
     @simbi_property
     def time_order(self) -> str:
         return "rk2"
@@ -287,9 +282,6 @@ class BaseConfig(metaclass=abc.ABCMeta):
 
     @classmethod
     def _find_dynamic_args(cls) -> None:
-        """
-        Find all derived class member's members defined as DynamicArg class instances
-        """
         members = [
             attr
             for attr in dir(cls)
@@ -315,9 +307,6 @@ class BaseConfig(metaclass=abc.ABCMeta):
     @final
     @classmethod
     def _parse_args(cls, parser: argparse.ArgumentParser) -> None:
-        """
-        Parse extra problem-specific args from command line
-        """
         if not cls.dynamic_args:
             cls._find_dynamic_args()
 
@@ -343,14 +332,11 @@ class BaseConfig(metaclass=abc.ABCMeta):
                         choices=member.choices,
                         default=member.value,
                     )
-
-            except argparse.ArgumentError as e:
-                # ignore duplicate arguments if inheriting from another problem setup
+            except argparse.ArgumentError:
                 pass
 
         args = parser.parse_args()
 
-        # Update dynamic var attributes to reflect new values passed from cli
         for var in cls.dynamic_args:
             var.name = var.name.replace("-", "_")
             if var.name in vars(args):
@@ -372,10 +358,6 @@ class BaseConfig(metaclass=abc.ABCMeta):
     @classmethod
     def _print_problem_params(cls) -> None:
         from .slogger import logger, SimbiFormatter
-
-        """
-        Read from problem params and print to stdout
-        """
         import math
 
         def order_of_mag(val: float) -> int:
@@ -414,11 +396,7 @@ class BaseConfig(metaclass=abc.ABCMeta):
 
     @final
     def __del__(self) -> None:
-        """
-        Print problem params on class destruction
-        """
         try:
             self._print_problem_params()
-        except Exception as e:
-            ...
-            # logging.error(f"An error occurred while printing problem parameters: {e}")
+        except Exception:
+            pass
