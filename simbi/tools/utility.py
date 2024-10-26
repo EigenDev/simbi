@@ -64,8 +64,8 @@ def get_field_str(args: argparse.Namespace) -> Union[str, list[str]]:
         "u2": r"$\Gamma \beta_2$",
         "gamma_beta_3": r"$\Gamma \beta_3$",
         "u3": r"$\Gamma \beta_3$",
-        "energy": r"$\tau$",
-        "p": r"$p$",
+        "energy": r"\tau",
+        "p": r"p",
         "energy_rst": r"$E$",
         "chi": r"$\chi$",
         "chi_dens": r"$\rho \cdot \chi$",
@@ -91,7 +91,7 @@ def get_field_str(args: argparse.Namespace) -> Union[str, list[str]]:
             var = field_map[field]
             if field in ["rho", "D"]:
                 if args.units:
-                    field_str_list.append(r"${}$ [{}]$]".format(var, density_unit))
+                    field_str_list.append(r"${} [{}]$]".format(var, density_unit))
                 else:
                     field_str_list.append(r"${}/{}_0$".format(var, var))
             elif field in ["energy", "p"]:
