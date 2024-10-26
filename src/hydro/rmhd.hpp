@@ -34,9 +34,9 @@
 namespace simbi {
     template <int dim>
     struct RMHD : public HydroBase {
-        constexpr static int dimensions = dim;
-        constexpr static int nvars      = dim + 3;
-        constexpr static char regime[]  = "srmhd";
+        constexpr static int dimensions          = dim;
+        constexpr static int nvars               = dim + 3;
+        constexpr static std::string_view regime = "srmhd";
 
         // set the primitive and conservative types at compile time
         using primitive_t   = anyPrimitive<dim, Regime::RMHD>;
