@@ -6,10 +6,10 @@ import astropy.units as units
 import numpy as np
 import argparse
 import matplotlib.pyplot as plt
-from typing import Union, Any, Callable, Optional
+from typing import Union, Any, Callable, Optional, no_type_check
 from numpy.typing import NDArray
 from numpy import float64 as numpy_float
-from ..detail.helpers import find_nearest, calc_centroid
+from ..detail.helpers import find_nearest
 
 # FONT SIZES
 SMALL_SIZE = 6
@@ -53,65 +53,63 @@ def calc_beta(fields: dict[str, NDArray[numpy_float]]) -> Any:
 
 
 def get_field_str(args: argparse.Namespace) -> Union[str, list[str]]:
+    field_map = {
+        "rho": r"\rho",
+        "D": "D",
+        "gamma_beta": r"$\Gamma \beta$",
+        "u": r"$\Gamma \beta$",
+        "gamma_beta_1": r"$\Gamma \beta_1$",
+        "u1": r"$\Gamma \beta_1$",
+        "gamma_beta_2": r"$\Gamma \beta_2$",
+        "u2": r"$\Gamma \beta_2$",
+        "gamma_beta_3": r"$\Gamma \beta_3$",
+        "u3": r"$\Gamma \beta_3$",
+        "energy": r"$\tau$",
+        "p": r"$p$",
+        "energy_rst": r"$E$",
+        "chi": r"$\chi$",
+        "chi_dens": r"$\rho \cdot \chi$",
+        "T_eV": "T [eV]",
+        "temperature": "T",
+        "mach": "M",
+        "v1": r"$v_1 / v_0$",
+        "v": r"$v_1 / v_0$",
+        "v2": r"$v_2 / v_0$",
+        "v3": r"$v_3 / v_0$",
+        "tau-s": r"$\tau_s$",
+        "pmag": r"$p_{\rm mag}$",
+        "ptot": r"$p_{\rm tot}$",
+        "sigma": r"$\sigma$",
+    }
+
+    energy_unit = r"\rm erg \ cm^{-3}"
+    density_unit = r"\rm g \ cm^{-3}"
+
     field_str_list = []
     for field in args.fields:
-        if field == "rho" or field == "D":
-            var = r"\rho" if field == "rho" else "D"
-            if args.units:
-                field_str_list.append(r"${}$ [g cm$^{{-3}}$]".format(var))
-            else:
-                field_str_list.append(r"${}/{}_0$".format(var, var))
-
-        elif field in ["gamma_beta", "u"]:
-            field_str_list.append(r"$\Gamma \beta$")
-        elif field in ["gamma_beta_1", "u1"]:
-            field_str_list.append(r"$\Gamma \beta_1$")
-        elif field in ["gamma_beta_2", "u2"]:
-            field_str_list.append(r"$\Gamma \beta_2$")
-        elif field in ["gamma_beta_3", "u3"]:
-            field_str_list.append(r"$\Gamma \beta_3$")
-        elif field in ["energy", "p"]:
-            if args.units:
-                if field == "energy":
-                    field_str_list.append(r"$\tau [\rm erg \ cm^{{-3}}]$")
+        if field in field_map:
+            var = field_map[field]
+            if field in ["rho", "D"]:
+                if args.units:
+                    field_str_list.append(r"${}$ [{}]$]".format(var, density_unit))
                 else:
-                    field_str_list.append(r"$p [\rm erg \ cm^{{-3}}]$")
-            else:
-                if field == "energy":
-                    field_str_list.append(r"$\tau/\tau_0$")
+                    field_str_list.append(r"${}/{}_0$".format(var, var))
+            elif field in ["energy", "p"]:
+                if args.units:
+                    field_str_list.append(r"${} [{}]$".format(var, energy_unit))
                 else:
-                    field_str_list.append(r"$p/p_0$")
-        elif field == "energy_rst":
-            if args.units:
-                field_str_list.append(r"$E \  [\rm erg \ cm^{-3}]$")
+                    field_str_list.append(r"${}/{}_0$".format(var, var))
+            elif field == "energy_rst":
+                if args.units:
+                    field_str_list.append(r"${} \  [{}]$".format(var, energy_unit))
+                else:
+                    field_str_list.append(r"${} / {}_0$".format(var, var))
+            elif field == "temperature":
+                field_str_list.append("T [K]" if args.units else "T")
             else:
-                field_str_list.append(r"$E / E_0$")
-        elif field == "chi":
-            field_str_list.append(r"$\chi$")
-        elif field == "chi_dens":
-            field_str_list.append(r"$\rho \cdot \chi$")
-        elif field == "T_eV":
-            field_str_list.append("T [eV]")
-        elif field == "temperature":
-            field_str_list.append("T [K]" if args.units else "T")
-        elif field == "mach":
-            field_str_list.append("M")
-        elif field == "v1" or field == "v":
-            field_str_list.append(r"$v_1 / v_0$")
-        elif field == "v2":
-            field_str_list.append(r"$v_2 / v_0$")
-        elif field == "v3":
-            field_str_list.append(r"$v_3 / v_0$")
-        elif field == "tau-s":
-            field_str_list.append(r"$\tau_s$")
+                field_str_list.append(var)
         elif field in ["b1", "b2", "b3"]:
             field_str_list.append(rf"$B_{field[1]}$")
-        elif field == "pmag":
-            field_str_list.append(r"$p_{\rm mag}$")
-        elif field == "ptot":
-            field_str_list.append(r"$p_{\rm tot}$")
-        elif field == "sigma":
-            field_str_list.append(r"$\sigma$")
         else:
             field_str_list.append(rf"${field}$")
 
@@ -126,7 +124,7 @@ def unpad(arr: NDArray[numpy_float], pad_width: tuple[tuple[Any, ...], ...]) -> 
     return arr[tuple(slices)]
 
 
-def flatten_fully(x: NDArray[numpy_float]) -> Any:
+def flatten_fully(x: NDArray[numpy_float]) -> NDArray[numpy_float] | Any:
     if any(dim == 1 for dim in x.shape):
         x = np.vstack(x)  # type: ignore
         if len(x.shape) == 2 and x.shape[0] == 1:
@@ -158,107 +156,101 @@ def get_dimensionality(files: Union[list[str], dict[int, list[str]]]) -> int:
 
     return ndim
 
-
+@no_type_check
 def read_file(filename: str) -> tuple[dict[str, Any], dict[str, Any], dict[str, Any]]:
-    rho: Any
-    v: Any
-    p: Any
-    chi: Any
-
     with h5py.File(filename, "r") as hf:
         ds = dict(hf.get("sim_info").attrs)
         ndim: int = ds["dimensions"]
-        ds.update({k: v.decode("utf-8") for k, v in ds.items() if type(v) == np.bytes_})
-        rho = hf.get("rho")[:]
-        v = [(hf.get(f"v{dim}") or hf.get(f"v"))[:] for dim in range(1, ndim + 1)]
-        p = hf.get("p")[:]
-        chi = hf.get("chi")[:]
+        ds.update(
+            {k: v.decode("utf-8") for k, v in ds.items() if isinstance(v, np.bytes_)}
+        )
 
-        rho = flatten_fully(rho.reshape(ds["nz"], ds["ny"], ds["nx"]))
-        v = [flatten_fully(vel.reshape(ds["nz"], ds["ny"], ds["nx"])) for vel in v]
-        p = flatten_fully(p.reshape(ds["nz"], ds["ny"], ds["nx"]))
-        chi = flatten_fully(chi.reshape(ds["nz"], ds["ny"], ds["nx"]))
+        def read_and_flatten(name: str) -> NDArray[numpy_float]:
+            return flatten_fully(hf.get(name)[:].reshape(ds["nz"], ds["ny"], ds["nx"]))
+
+        rho = read_and_flatten("rho")
+        p = read_and_flatten("p")
+        chi = read_and_flatten("chi")
+        v = [read_and_flatten(f"v{dim}") for dim in range(1, ndim + 1)]
 
         padwidth = (ds["spatial_order"] != "pcm") + 1
-        npad = tuple(tuple(val) for val in [[padwidth, padwidth]] * ndim)
-        rho = unpad(rho, npad)
-        v = np.asanyarray([unpad(vel, npad) for vel in v])
-        p = unpad(p, npad)
-        chi = unpad(chi, npad)
+        npad = tuple((padwidth, padwidth) for _ in range(ndim))
 
-        # -------------------------------
-        # Load Fields
-        # -------------------------------
+        def unpad_all(arrays: list[NDArray[numpy_float]]) -> list[NDArray[numpy_float]]:
+            return [unpad(arr, npad) for arr in arrays]
+
+        rho, p, chi = unpad_all([rho, p, chi])
+        v = np.array(unpad_all(v))
+
         fields = {f"v{i+1}": v[i] for i in range(len(v))}
-        fields["rho"] = rho
-        fields["p"] = p
-        fields["chi"] = chi
-        ds["ad_gamma"] = ds.pop("adiabatic_gamma")
-        fields["ad_gamma"] = ds["ad_gamma"]
-        
-        fields["b1"] = []
-        fields["b2"] = []
-        fields["b3"] = []
-        vsqr = np.sum(vel * vel for vel in v)  # type: ignore
+        fields.update(
+            {"rho": rho, "p": p, "chi": chi, "ad_gamma": ds.pop("adiabatic_gamma")}
+        )
+
         if ds["regime"] in ["srhd", "srmhd"]:
+            vsqr = np.sum(v**2, axis=0)
+            W = (1 + vsqr) ** 0.5 if ds["using_gamma_beta"] else (1 - vsqr) ** (-0.5)
             if ds["using_gamma_beta"]:
-                W = (1 + vsqr) ** 0.5
                 fields.update({f"v{i+1}": v[i] / W for i in range(len(v))})
                 vsqr /= W**2
-            else:
-                W = (1 - vsqr) ** (-0.5)
 
             if ds["regime"] == "srmhd":
-                xag = ds["xactive_zones"]
-                yag = ds["yactive_zones"]
-                zag = ds["zactive_zones"]
-                b1 = hf.get("b1")[:].reshape(zag, yag, xag + 1)
-                b2 = hf.get("b2")[:].reshape(zag, yag + 1, xag)
-                b3 = hf.get("b3")[:].reshape(zag + 1, yag, xag)
-                
-                fields["b1"] = 0.5 * (b1[...,1:] + b1[...,:-1])
-                fields["b2"] = 0.5 * (b2[:,1:,:] + b2[:,:-1,:])
-                fields["b3"] = 0.5 * (b3[1:,:,:] + b3[:-1,:,:]) 
-                if "v2" not in fields:
-                    v2 = flatten_fully(
-                        hf.get("v2")[:].reshape(ds["nz"], ds["ny"], ds["ny"])
-                    )
-                    v2 = unpad(v2, npad)
-                    fields["v2"] = v2
 
-                if "v3" not in fields:
-                    v3 = flatten_fully(
-                        hf.get("v3")[:].reshape(ds["nz"], ds["ny"], ds["ny"])
-                    )
-                    v3 = unpad(v3, npad)
-                    fields["v3"] = v3
+                def read_bfield(
+                    name: str, shape: tuple[int, ...]
+                ) -> NDArray[numpy_float]:
+                    return hf.get(name)[:].reshape(shape)
+
+                b1 = read_bfield(
+                    "b1",
+                    (ds["zactive_zones"], ds["yactive_zones"], ds["xactive_zones"] + 1),
+                )
+                b2 = read_bfield(
+                    "b2",
+                    (ds["zactive_zones"], ds["yactive_zones"] + 1, ds["xactive_zones"]),
+                )
+                b3 = read_bfield(
+                    "b3",
+                    (ds["zactive_zones"] + 1, ds["yactive_zones"], ds["xactive_zones"]),
+                )
+
+                fields.update(
+                    {
+                        "b1": 0.5 * (b1[..., 1:] + b1[..., :-1]),
+                        "b2": 0.5 * (b2[:, 1:, :] + b2[:, :-1, :]),
+                        "b3": 0.5 * (b3[1:, :, :] + b3[:-1, :, :]),
+                    }
+                )
+
+                for dim in range(2, ndim + 1):
+                    if f"v{dim}" not in fields:
+                        fields[f"v{dim}"] = unpad(read_and_flatten(f"v{dim}"), npad)
         else:
             W = 1
+
         fields["gamma_beta"] = np.sqrt(vsqr) * W
         fields["W"] = W
 
-        # ------------------------
-        # Generate Mesh
-        # ------------------------
-        funcs: list[Any] = []
-        for x in ["x1", "x2", "x3"]:
-            if f"{x}_cell_spacing" in ds:
-                funcs += [
-                    np.linspace if ds[f"{x}_cell_spacing"] == "linear" else np.geomspace
-                ]
-            else:
-                if x == "x1":
-                    funcs += [np.linspace if ds["linspace"] else np.geomspace]
-                else:
-                    funcs += [np.linspace]
+        funcs = [
+            (
+                np.linspace
+                if ds.get(f"{x}_cell_spacing", "linear") == "linear"
+                else np.geomspace
+            )
+            for x in ["x1", "x2", "x3"]
+        ]
         mesh = {f"x{i+1}v": hf[f"x{i+1}"][:] for i in range(ndim)}
 
-        ds["is_cartesian"] = ds["geometry"] in logically_cartesian
-        ds["coord_system"] = ds.pop("geometry")
-        ds["time"] = ds.pop("current_time")
+        ds.update(
+            {
+                "is_cartesian": ds["geometry"] in logically_cartesian,
+                "coord_system": ds.pop("geometry"),
+                "time": ds.pop("current_time"),
+            }
+        )
 
         if ds["x1max"] > mesh["x1v"][-1]:
-            mesh["x1v"] = funcs[0](ds["x1min"], ds["x1max"], ds["x1active"] + 1)
+            mesh["x1v"] = funcs[0](ds["x1min"], ds["x1max"], ds["xactive_zones"] + 1)
 
     return fields, ds, mesh
 
