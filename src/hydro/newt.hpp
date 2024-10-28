@@ -156,6 +156,16 @@ namespace simbi {
             bcs.copyToGpu();
             troubled_cells.copyToGpu();
         }
+
+        DUAL conserved_t
+        hydro_sources(const luint ii, const luint jj, const luint kk) const;
+
+        DUAL conserved_t gravity_sources(
+            const primitive_t& prims,
+            const luint ii,
+            const luint jj,
+            const luint kk
+        ) const;
     };
 }   // namespace simbi
 

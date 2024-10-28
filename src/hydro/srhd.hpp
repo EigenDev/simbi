@@ -153,6 +153,16 @@ namespace simbi {
             const lint kk = 0
         ) const;
 
+        DUAL conserved_t
+        hydro_sources(const luint ii, const luint jj, const luint kk) const;
+
+        DUAL conserved_t gravity_sources(
+            const primitive_t& prims,
+            const luint ii,
+            const luint jj,
+            const luint kk
+        ) const;
+
         void emit_troubled_cells() const;
     };
 }   // namespace simbi

@@ -221,6 +221,16 @@ namespace simbi {
             primitive_t& praR,
             primitive_t& prC
         ) const;
+
+        DUAL conserved_t
+        hydro_sources(const luint ii, const luint jj, const luint kk) const;
+
+        DUAL conserved_t gravity_sources(
+            const primitive_t& prims,
+            const luint ii,
+            const luint jj,
+            const luint kk
+        ) const;
     };
 
 }   // namespace simbi

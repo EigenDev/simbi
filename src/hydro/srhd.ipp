@@ -1078,6 +1078,97 @@ DUAL SRHD<dim>::conserved_t SRHD<dim>::calc_hllc_flux(
 };
 
 //===================================================================================================================
+//                                           SOURCE TERMS
+//===================================================================================================================
+template <int dim>
+DUAL SRHD<dim>::conserved_t
+SRHD<dim>::hydro_sources(const luint ii, const luint jj, const luint kk) const
+{
+    if (null_sources) {
+        return conserved_t{};
+    }
+    const auto x1L = get_x1face(ii, 0);
+    const auto x1R = get_x1face(ii, 1);
+    const auto x2L = get_x2face(jj, 0);
+    const auto x2R = get_x2face(jj, 1);
+    const auto x3L = get_x3face(kk, 0);
+    const auto x3R = get_x3face(kk, 1);
+
+    const auto x1c = get_cell_centroid(x1R, x1L, geometry);
+    const auto x2c = calc_any_mean(x2R, x2L, x2_cell_spacing);
+    const auto x3c = calc_any_mean(x3R, x3L, x3_cell_spacing);
+
+    conserved_t res;
+    if constexpr (dim == 1) {
+        for (int q = 0; q < conserved_t::nmem; q++) {
+            res[q] = hsources[q](x1c, t);
+        }
+    }
+    else if constexpr (dim == 2) {
+        for (int q = 0; q < conserved_t::nmem; q++) {
+            res[q] = hsources[q](x1c, x2c, t);
+        }
+    }
+    else {
+        for (int q = 0; q < conserved_t::nmem; q++) {
+            res[q] = hsources[q](x1c, x2c, x3c, t);
+        }
+    }
+
+    return res;
+}
+
+template <int dim>
+DUAL SRHD<dim>::conserved_t SRHD<dim>::gravity_sources(
+    const SRHD<dim>::primitive_t& prims,
+    const luint ii,
+    const luint jj,
+    const luint kk
+) const
+{
+    if (null_gravity) {
+        return conserved_t{};
+    }
+    const auto x1L = get_x1face(ii, 0);
+    const auto x1R = get_x1face(ii, 1);
+    const auto x1c = get_cell_centroid(x1R, x1L, geometry);
+
+    conserved_t res;
+    // gravity only changes the momentum and energy
+    if constexpr (dim > 1) {
+        const auto x2L = get_x2face(jj, 0);
+        const auto x2R = get_x2face(jj, 1);
+        const auto x2c = calc_any_mean(x2R, x2L, x2_cell_spacing);
+        if constexpr (dim > 2) {
+            const auto x3L = get_x3face(kk, 0);
+            const auto x3R = get_x3face(kk, 1);
+            const auto x3c = calc_any_mean(x3R, x3L, x3_cell_spacing);
+            for (int q = 1; q < dimensions + 1; q++) {
+                res[q] = gsources[q](x1c, x2c, x3c, t);
+            }
+            res[dimensions + 1] = gsources[1](x1c, x2c, x3c, t) * prims[1] +
+                                  gsources[2](x1c, x2c, x3c, t) * prims[2] +
+                                  gsources[3](x1c, x2c, x3c, t) * prims[3];
+        }
+        else {
+            for (int q = 1; q < dimensions + 1; q++) {
+                res[q] = gsources[q](x1c, x2c, t);
+            }
+            res[dimensions + 1] = gsources[1](x1c, x2c, t) * prims[1] +
+                                  gsources[2](x1c, x2c, t) * prims[2];
+        }
+    }
+    else {
+        for (int q = 1; q < dimensions + 1; q++) {
+            res[q] = gsources[q](x1c, t);
+        }
+        res[dimensions + 1] = gsources[1](x1c, t) * prims[1];
+    }
+
+    return res;
+}
+
+//===================================================================================================================
 //                                            UDOT CALCULATIONS
 //===================================================================================================================
 template <int dim>
@@ -1231,9 +1322,9 @@ void SRHD<dim>::advance()
 
         // TODO: Implement source and gravity terms
         // source terms
-        const auto source_terms = conserved_t{};
+        const auto source_terms = hydro_sources(ii, jj, kk);
         // Gravity
-        const auto gravity = conserved_t{};
+        const auto gravity = gravity_sources(prb[tid], ii, jj, kk);
 
         if constexpr (dim == 1) {
             switch (geometry) {
@@ -1521,6 +1612,15 @@ void SRHD<dim>::simulate(
             return q != nullptr;
         });
 
+    this->null_sources =
+        std::all_of(this->hsources.begin(), this->hsources.end(), [](auto q) {
+            return q == nullptr;
+        });
+
+    this->null_gravity =
+        std::all_of(this->gsources.begin(), this->gsources.end(), [](auto q) {
+            return q == nullptr;
+        });
     // Stuff for moving mesh
     this->hubble_param = adot(t) / a(t);
     this->mesh_motion  = (hubble_param != 0);
