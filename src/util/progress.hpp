@@ -72,12 +72,11 @@ namespace simbi {
             // Hide the cursor
             std::cout << "\033[?25l";
 
-            int availableWidth = termWidth - cursorX;
+            int availableWidth = termWidth / 2 - cursorX;
             std::cout << "\033[K";   // Clear from cursor to end of line
             std::cout << "[";
-            int barWidth = availableWidth -
-                           10;   // Adjust for percentage display and brackets
-            int pos = barWidth * percentage;
+            int barWidth = availableWidth;
+            int pos      = barWidth * percentage;
             for (int i = 0; i < barWidth; ++i) {
                 if (i < pos) {
                     std::cout << "=";

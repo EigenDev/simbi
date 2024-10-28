@@ -160,6 +160,8 @@ namespace simbi {
                 auto& zu_avg      = logger.zu_avg;
                 auto& delta_t     = logger.delta_t;
 
+                auto start_time = std::chrono::steady_clock::now();
+
                 while ((sim_state.t < end_time) && (!sim_state.inFailureState)
                 ) {
                     try {
@@ -192,6 +194,9 @@ namespace simbi {
                                         sim_state.active_zones,
                                         delta_t
                                     );
+                                std::cout << "\033[s";   // Save cursor position
+                                std::cout
+                                    << "\033[2A";   // Move cursor up two lines
                                 util::writefl<Color::LIGHT_MAGENTA>(
                                     "iteration:{:>06}  dt: {:>08.2e}  time: "
                                     "{:>08.2e}  zones/sec: {:>08.2e}  ebw(%): "
@@ -203,8 +208,16 @@ namespace simbi {
                                     100.0 * gpu_emperical_bw /
                                         gpu_theoretical_bw
                                 );
+                                std::cout
+                                    << "\033[K\r";   // Clear the line and move
+                                                     // to the beginning
+                                std::cout
+                                    << "\033[u";   // Restore cursor position
                             }
                             else {
+                                std::cout << "\033[s";   // Save cursor position
+                                std::cout
+                                    << "\033[2A";   // Move cursor up two lines
                                 util::writefl<Color::LIGHT_MAGENTA>(
                                     "iteration:{:>06}    dt: {:>08.2e}    "
                                     "time: {:>08.2e}    zones/sec: {:>08.2e} ",
@@ -213,12 +226,11 @@ namespace simbi {
                                     sim_state.t,
                                     speed
                                 );
-                            }
-                            if constexpr (global::progress_bar_enabled) {
-                                helpers::progress_bar(sim_state.t / end_time);
-                            }
-                            else {
-                                std::cout << "\r";
+                                std::cout
+                                    << "\033[K\r";   // Clear the line and move
+                                                     // to the beginning
+                                std::cout
+                                    << "\033[u";   // Restore cursor position
                             }
                         }
 
@@ -233,6 +245,50 @@ namespace simbi {
                             else {
                                 sim_state.t_interval +=
                                     sim_state.chkpt_interval;
+                            }
+                        }
+
+                        if (n % nfold == 0) {
+                            if constexpr (global::progress_bar_enabled) {
+                                std::cout << "\033[s";   // Save cursor position
+                                std::cout << "\033[2B";   // Move cursor down
+                                                          // two lines
+                                // helpers::progress_bar(sim_state.t /
+                                // end_time);
+                                std::cout
+                                    << "\033[u";   // Restore cursor position
+
+                                // Estimate remaining real-time
+                                auto current_time =
+                                    std::chrono::steady_clock::now();
+                                std::chrono::duration<double> elapsed_seconds =
+                                    current_time - start_time;
+                                double elapsed_time = elapsed_seconds.count();
+                                double progress     = sim_state.t / end_time;
+                                double estimated_total_time =
+                                    elapsed_time / progress;
+                                double estimated_time_left =
+                                    estimated_total_time - elapsed_time;
+
+                                // Print estimated time left
+                                int hours =
+                                    static_cast<int>(estimated_time_left) /
+                                    3600;
+                                int minutes =
+                                    (static_cast<int>(estimated_time_left) %
+                                     3600) /
+                                    60;
+                                int seconds =
+                                    static_cast<int>(estimated_time_left) % 60;
+
+                                std::cout << "\033[s";   // Save cursor position
+                                std::cout << "\033[3B";   // Move cursor down
+                                                          // three lines
+                                std::cout << "Estimated time left: " << hours
+                                          << "h " << minutes << "m " << seconds
+                                          << "s\r";
+                                std::cout
+                                    << "\033[u";   // Restore cursor position
                             }
                         }
 
