@@ -1477,10 +1477,10 @@ namespace simbi {
 
                 switch (geometry) {
                     case Geometry::CARTESIAN:
-                        cfl_dt = std ::min(
-                            {self->dx1 / (my_max(v1p, v1m)),
-                             self->dx2 / (my_max(v2p, v2m)),
-                             self->dx3 / (my_max(v3p, v3m))}
+                        cfl_dt = my_min3(
+                            self->dx1 / (my_max(v1p, v1m)),
+                            self->dx2 / (my_max(v2p, v2m)),
+                            self->dx3 / (my_max(v3p, v3m))
                         );
 
                         break;
@@ -1500,10 +1500,10 @@ namespace simbi {
                             get_cell_centroid(x1r, x1l, Geometry::SPHERICAL);
                         const real th    = 0.5 * (x2r + x2l);
                         const real rproj = rmean * std::sin(th);
-                        cfl_dt           = std::min(
-                            {dx1 / (my_max(v1p, v1m)),
-                                       rmean * self->dx2 / (my_max(v2p, v2m)),
-                                       rproj * self->dx3 / (my_max(v3p, v3m))}
+                        cfl_dt           = my_min3(
+                            dx1 / (my_max(v1p, v1m)),
+                            rmean * self->dx2 / (my_max(v2p, v2m)),
+                            rproj * self->dx3 / (my_max(v3p, v3m))
                         );
                         break;
                     }
@@ -1516,10 +1516,10 @@ namespace simbi {
 
                         const real rmean =
                             get_cell_centroid(x1r, x1l, Geometry::CYLINDRICAL);
-                        cfl_dt = std::min(
-                            {dx1 / (my_max(v1p, v1m)),
-                             rmean * self->dx2 / (my_max(v2p, v2m)),
-                             self->dx3 / (my_max(v3p, v3m))}
+                        cfl_dt = my_min3(
+                            dx1 / (my_max(v1p, v1m)),
+                            rmean * self->dx2 / (my_max(v2p, v2m)),
+                            self->dx3 / (my_max(v3p, v3m))
                         );
                         break;
                     }
@@ -2802,32 +2802,32 @@ namespace simbi {
             // file
             const std::vector<std::pair<std::string, const void*>> attributes =
                 {{"current_time", &state.t},
-                 {"time_step", &state.dt},
-                 {"spatial_order", state.spatial_order.c_str()},
-                 {"time_order", state.time_order.c_str()},
-                 {"using_gamma_beta", &state.using_fourvelocity},
-                 {"mesh_motion", &state.mesh_motion},
-                 {"x1max", &state.x1max},
-                 {"x1min", &state.x1min},
-                 {"x2max", &state.x2max},
-                 {"x2min", &state.x2min},
-                 {"x3max", &state.x3max},
-                 {"x3min", &state.x3min},
-                 {"adiabatic_gamma", &state.gamma},
-                 {"nx", &state.nx},
-                 {"ny", &state.ny},
-                 {"nz", &state.nz},
-                 {"chkpt_idx", &state.chkpt_idx},
-                 {"xactive_zones", &state.xag},
-                 {"yactive_zones", &state.yag},
-                 {"zactive_zones", &state.zag},
-                 {"geometry", state.coord_system.c_str()},
-                 {"regime", regime.c_str()},
-                 {"dimensions", &state.dimensions},
-                 {"x1_cell_spacing",
-                  cell2str.at(state.x1_cell_spacing).c_str()},
-                 {"x2_cell_spacing",
-                  cell2str.at(state.x2_cell_spacing).c_str()},
+                 //  {"time_step", &state.dt},
+                 //  {"spatial_order", state.spatial_order.c_str()},
+                 //  {"time_order", state.time_order.c_str()},
+                 //  {"using_gamma_beta", &state.using_fourvelocity},
+                 //  {"mesh_motion", &state.mesh_motion},
+                 //  {"x1max", &state.x1max},
+                 //  {"x1min", &state.x1min},
+                 //  {"x2max", &state.x2max},
+                 //  {"x2min", &state.x2min},
+                 //  {"x3max", &state.x3max},
+                 //  {"x3min", &state.x3min},
+                 //  {"adiabatic_gamma", &state.gamma},
+                 //  {"nx", &state.nx},
+                 //  {"ny", &state.ny},
+                 //  {"nz", &state.nz},
+                 //  {"chkpt_idx", &state.chkpt_idx},
+                 //  {"xactive_zones", &state.xag},
+                 //  {"yactive_zones", &state.yag},
+                 //  {"zactive_zones", &state.zag},
+                 //  {"geometry", state.coord_system.c_str()},
+                 //  {"regime", regime.c_str()},
+                 //  {"dimensions", &state.dimensions},
+                 //  {"x1_cell_spacing",
+                 //   cell2str.at(state.x1_cell_spacing).c_str()},
+                 //  {"x2_cell_spacing",
+                 //   cell2str.at(state.x2_cell_spacing).c_str()},
                  {"x3_cell_spacing",
                   cell2str.at(state.x3_cell_spacing).c_str()}};
 
