@@ -1,12 +1,19 @@
 /**
- * @file functional.hpp
- * @author your name (you@domain.com)
- * @brief
- * @version 0.1
- * @date 2024-10-26
+ * ***********************(C) COPYRIGHT 2024 Marcus DuPont**********************
+ * @file       functional.hpp
+ * @brief      a custom std::function-like case that can be used on the GPU
  *
- * @copyright Copyright (c) 2024
+ * @note
+ * @history:
+ *   Version   Date            Author          Modification    Email
+ *   V0.8.0    Oct-27-2024     Marcus DuPont                   md4469@nyu.edu
  *
+ * @verbatim
+ * ==============================================================================
+ *
+ * ==============================================================================
+ * @endverbatim
+ * ***********************(C) COPYRIGHT 2024 Marcus DuPont**********************
  */
 #ifndef FUNCTIONAL_HPP
 #define FUNCTIONAL_HPP
