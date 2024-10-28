@@ -2602,7 +2602,8 @@ namespace simbi {
         )
         {
             const auto full_filename = data_directory + filename;
-            std::cout << "\n[Writing File...: " << full_filename << "]\n";
+            display_message(full_filename);
+
             // Create a new file using the default property list.
             H5::H5File file(full_filename, H5F_ACC_TRUNC);
 
@@ -2821,12 +2822,12 @@ namespace simbi {
                  {"geometry", state.coord_system.c_str()},
                  {"regime", regime.c_str()},
                  {"dimensions", &state.dimensions},
-                 {"x1_cell_spacing",
-                  cell2str.at(state.x1_cell_spacing).c_str()},
-                 {"x2_cell_spacing",
-                  cell2str.at(state.x2_cell_spacing).c_str()},
-                 {"x3_cell_spacing",
-                  cell2str.at(state.x3_cell_spacing).c_str()}};
+                 {"x1_cell_spacing", cell2str.at(state.x1_cell_spacing).c_str()
+                 },
+                 {"x2_cell_spacing", cell2str.at(state.x2_cell_spacing).c_str()
+                 },
+                 {"x3_cell_spacing", cell2str.at(state.x3_cell_spacing).c_str()}
+                };
 
             for (const auto& [name, value] : attributes) {
                 H5::DataType type;

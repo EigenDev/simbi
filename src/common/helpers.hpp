@@ -54,6 +54,8 @@ extern real gpu_theoretical_bw;   //  = 1875e6 * (192.0 / 8.0) * 2 / 1e9;
 
 namespace simbi {
     namespace helpers {
+        void display_message(const std::string& full_filename);
+
         template <int dim>
         struct real_func {
             using type = int;

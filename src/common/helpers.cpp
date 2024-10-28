@@ -139,8 +139,34 @@ namespace simbi {
             const auto processor_count = std::thread::hardware_concurrency();
             std::cout << std::string(80, '=') << "\n";
             std::cout << "CPU Compute Thread(s): " << processor_count
+                      << std::endl
+                      << std::endl
+                      << std::endl
+                      << std::endl
+                      << std::endl
                       << std::endl;
+
 #endif
+        }
+
+        void display_message(const std::string& full_filename)
+        {
+            // Save cursor position
+            std::cout << "\033[s";
+
+            // Move to a dedicated line (e.g., the bottom of the screen)
+            std::cout << "\033[999B";   // Move cursor to bottom of the screen
+            std::cout << "\033[3A";     // Move cursor up three lines]"
+            // std::cout << "\033[2K";   // Clear the line
+
+            // Display the message
+            std::cout << "[Writing File: " << full_filename << "]" << std::endl;
+
+            // Clear the message
+            // std::cout << "\033[2K";   // Clear the line
+
+            // Restore cursor position
+            std::cout << "\033[u";
         }
     }   // namespace helpers
 }   // namespace simbi

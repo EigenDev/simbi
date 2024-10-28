@@ -68,12 +68,7 @@ namespace simbi {
 
             tcsetattr(STDIN_FILENO, TCSANOW, &oldTerm);
 #endif
-
-            // Hide the cursor
-            std::cout << "\033[?25l";
-
             int availableWidth = termWidth / 2 - cursorX;
-            std::cout << "\033[K";   // Clear from cursor to end of line
             std::cout << "[";
             int barWidth = availableWidth;
             int pos      = barWidth * percentage;
