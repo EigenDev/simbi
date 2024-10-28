@@ -346,6 +346,16 @@ def get_iterable(x: Any, func: Callable[..., Sequence[Any]] = list) -> Sequence[
 def display_top(
     snapshot: tracemalloc.Snapshot, key_type: str = "lineno", limit: int = 3
 ) -> None:
+    def format_size(size: float) -> str:
+        if size >= 1e9:
+            return f"{size / 1e9:.2f} GB"
+        elif size >= 1e6:
+            return f"{size / 1e6:.2f} MB"
+        elif size >= 1e3:
+            return f"{size / 1e3:.2f} KB"
+        else:
+            return f"{size:.2f} B"
+        
     snapshot = snapshot.filter_traces(
         (
             tracemalloc.Filter(False, "<frozen importlib._bootstrap>"),
@@ -360,7 +370,7 @@ def display_top(
         # replace "/path/to/module/file.py" with "module/file.py"
         filename = os.sep.join(frame.filename.split(os.sep)[-2:])
         logger.info(
-            f"#{index}: {filename}:{frame.lineno}: {stat.size/1.024e9:.2f} GB"
+            f"#{index}: {filename}:{frame.lineno}: {format_size(stat.size)}"
         )
         line = linecache.getline(frame.filename, frame.lineno).strip()
         if line:
@@ -369,9 +379,20 @@ def display_top(
     other = top_stats[limit:]
     if other:
         size = sum(stat.size for stat in other)
-        logger.info(f"{len(other)} other: {size/1.024e9:.2f} GB")
+        logger.info(f"{len(other)} other: {format_size(size)}")
     total = sum(stat.size for stat in top_stats)
-    logger.info(f"Total allocated size: {total/1.024e9:.2f} GB")
+    logger.info(f"Total allocated size: {format_size(total)}")
 
 def tuple_of_tuples(x: Any) -> bool:
     return all(isinstance(a, tuple) for a in x)
+
+
+def print_midway(char: str = "=") -> None:
+        """prints a character til the middle of the terminal
+
+        Args:
+            char (str, optional): _description_. Defaults to "=".
+        """
+        import os 
+        columns = os.get_terminal_size().columns
+        print(char*(columns // 2))

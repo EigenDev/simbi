@@ -302,7 +302,7 @@ class Hydro:
                     "Please include a number of boundary conditions equal to at least half the number of cell faces"
                 )
         self.boundary_conditions = boundary_conditions
-
+        
     def simulate(
         self,
         tstart: float = 0.0,
@@ -488,7 +488,7 @@ class Hydro:
             else np.asanyarray(object_positions, dtype=bool)
         )
 
-        print("=" * 80)
+        helpers.print_midway('=')
         logger.info(
             f"Computing solution using {
                 spatial_order.upper()} in space, {
@@ -611,11 +611,11 @@ class Hydro:
         )
 
         if self.trace_memory:
-            print(r"-*" * 40)
+            helpers.print_midway('*')
             snapshot = tracemalloc.take_snapshot()
             helpers.display_top(snapshot)
             tracemalloc.stop()
-            print(r"-*" * 40)
+            helpers.print_midway('*')
             helpers.print_progress()
 
         state_contig = self.u.reshape(self.u.shape[0], -1)
