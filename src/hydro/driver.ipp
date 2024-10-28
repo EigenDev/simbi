@@ -42,39 +42,108 @@ void Driver::run(
 )
 {
     if (dim == 1) {
-        hydrostate::simulate<1>(
-            state,
-            init_cond,
-            regime,
-            scale_factor,
-            scale_factor_derivative,
-            optional_vec<1>(bsources),
-            optional_vec<1>(hsources),
-            optional_vec<1>(gsources)
-        );
+        if (regime == "classical") {
+            hydrostate::simulate<1, HydroRegime::Newtonian>(
+                state,
+                init_cond,
+                scale_factor,
+                scale_factor_derivative,
+                optional_vec<1>(bsources),
+                optional_vec<1>(hsources),
+                optional_vec<1>(gsources)
+            );
+        }
+        else if (regime == "srhd") {
+            hydrostate::simulate<1, HydroRegime::SRHD>(
+                state,
+                init_cond,
+                scale_factor,
+                scale_factor_derivative,
+                optional_vec<1>(bsources),
+                optional_vec<1>(hsources),
+                optional_vec<1>(gsources)
+            );
+        }
+        else {
+            hydrostate::simulate<1, HydroRegime::RMHD>(
+                state,
+                init_cond,
+                scale_factor,
+                scale_factor_derivative,
+                optional_vec<1>(bsources),
+                optional_vec<1>(hsources),
+                optional_vec<1>(gsources)
+            );
+        }
     }
     else if (dim == 2) {
-        hydrostate::simulate<2>(
-            state,
-            init_cond,
-            regime,
-            scale_factor,
-            scale_factor_derivative,
-            optional_vec<2>(bsources),
-            optional_vec<2>(hsources),
-            optional_vec<2>(gsources)
-        );
+        if (regime == "classical") {
+            hydrostate::simulate<2, HydroRegime::Newtonian>(
+                state,
+                init_cond,
+                scale_factor,
+                scale_factor_derivative,
+                optional_vec<2>(bsources),
+                optional_vec<2>(hsources),
+                optional_vec<2>(gsources)
+            );
+        }
+        else if (regime == "srhd") {
+            hydrostate::simulate<2, HydroRegime::SRHD>(
+                state,
+                init_cond,
+                scale_factor,
+                scale_factor_derivative,
+                optional_vec<2>(bsources),
+                optional_vec<2>(hsources),
+                optional_vec<2>(gsources)
+            );
+        }
+        else {
+            hydrostate::simulate<2, HydroRegime::RMHD>(
+                state,
+                init_cond,
+                scale_factor,
+                scale_factor_derivative,
+                optional_vec<2>(bsources),
+                optional_vec<2>(hsources),
+                optional_vec<2>(gsources)
+            );
+        }
     }
     else {
-        hydrostate::simulate<3>(
-            state,
-            init_cond,
-            regime,
-            scale_factor,
-            scale_factor_derivative,
-            optional_vec<3>(bsources),
-            optional_vec<3>(hsources),
-            optional_vec<3>(gsources)
-        );
+        if (regime == "classical") {
+            hydrostate::simulate<3, HydroRegime::Newtonian>(
+                state,
+                init_cond,
+                scale_factor,
+                scale_factor_derivative,
+                optional_vec<3>(bsources),
+                optional_vec<3>(hsources),
+                optional_vec<3>(gsources)
+            );
+        }
+        else if (regime == "srhd") {
+            hydrostate::simulate<3, HydroRegime::SRHD>(
+                state,
+                init_cond,
+                scale_factor,
+                scale_factor_derivative,
+                optional_vec<3>(bsources),
+                optional_vec<3>(hsources),
+                optional_vec<3>(gsources)
+            );
+        }
+        else {
+            hydrostate::simulate<3, HydroRegime::RMHD>(
+                state,
+                init_cond,
+                scale_factor,
+                scale_factor_derivative,
+                optional_vec<3>(bsources),
+                optional_vec<3>(hsources),
+                optional_vec<3>(gsources)
+            );
+        }
     }
 }

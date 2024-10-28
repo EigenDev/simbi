@@ -5,12 +5,21 @@
  * is forced to use the host compiler there
  */
 #include "state.hpp"
-#include "newt.hpp"   // for Newtonian
-#include "rmhd.hpp"   // for RMHD
-#include "srhd.hpp"   // for SRHD
-#include <memory>     // for make_unique, unique_ptr
-#include <variant>    // for visit, variant
+#include <memory>    // for make_unique, unique_ptr
+#include <variant>   // for visit, variant
 #include <vector>
+
+// Forward declarations
+namespace simbi {
+    template <int D>
+    class Newtonian;
+
+    template <int D>
+    class SRHD;
+
+    template <int D>
+    class RMHD;
+}   // namespace simbi
 
 namespace simbi {
     namespace hydrostate {

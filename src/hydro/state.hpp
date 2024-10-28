@@ -18,28 +18,50 @@
 #ifndef STATE_HPP
 #define STATE_HPP
 
-#include "build_options.hpp"   // for real
-#include "newt.hpp"            // for Newtonian
-#include "rmhd.hpp"            // for RMHD
-#include "srhd.hpp"            // for SRHD
-#include <functional>          // for function
-#include <optional>            // for optional
-#include <string>              // for string
-#include <vector>              // for vector
+#include "build_options.hpp"     // for real, DUAL, lint, luint
+#include "util/functional.hpp"   // for simbi::function
+#include <functional>            // for std::function
+#include <optional>              // for optional
+#include <string>                // for string
+#include <vector>                // for vector
 
-using namespace simbi::helpers;
 struct InitialConditions;
 
 namespace simbi {
     namespace hydrostate {
         template <int dim>
-        using fopt = std::optional<typename real_func<dim>::type>;
+        struct func_t {
+            using type = int;
+        };
 
-        template <int D>
+        template <>
+        struct func_t<1> {
+            using type = simbi::function<real(real, real)>;
+        };
+
+        template <>
+        struct func_t<2> {
+            using type = simbi::function<real(real, real, real)>;
+        };
+
+        template <>
+        struct func_t<3> {
+            using type = simbi::function<real(real, real, real, real)>;
+        };
+
+        template <int dim>
+        using fopt = std::optional<typename func_t<dim>::type>;
+
+        enum class HydroRegime {
+            Newtonian,
+            SRHD,
+            RMHD
+        };
+
+        template <int D, HydroRegime R>
         void simulate(
             std::vector<std::vector<real>>& state,
             const InitialConditions& init_cond,
-            const std::string& regime,
             std::function<real(real)> const& scale_factor,
             std::function<real(real)> const& scale_factor_derivative,
             std::vector<fopt<D>> const& bsources,
@@ -48,10 +70,9 @@ namespace simbi {
         ) = delete;
 
         template <>
-        void simulate<1>(
+        void simulate<1, HydroRegime::Newtonian>(
             std::vector<std::vector<real>>& state,
             const InitialConditions& init_cond,
-            const std::string& regime,
             std::function<real(real)> const& scale_factor,
             std::function<real(real)> const& scale_factor_derivative,
             std::vector<fopt<1>> const& bsources,
@@ -60,10 +81,31 @@ namespace simbi {
         );
 
         template <>
-        void simulate<2>(
+        void simulate<1, HydroRegime::SRHD>(
             std::vector<std::vector<real>>& state,
             const InitialConditions& init_cond,
-            const std::string& regime,
+            std::function<real(real)> const& scale_factor,
+            std::function<real(real)> const& scale_factor_derivative,
+            std::vector<fopt<1>> const& bsources,
+            std::vector<fopt<1>> const& hsources,
+            std::vector<fopt<1>> const& gsources
+        );
+
+        template <>
+        void simulate<1, HydroRegime::RMHD>(
+            std::vector<std::vector<real>>& state,
+            const InitialConditions& init_cond,
+            std::function<real(real)> const& scale_factor,
+            std::function<real(real)> const& scale_factor_derivative,
+            std::vector<fopt<1>> const& bsources,
+            std::vector<fopt<1>> const& hsources,
+            std::vector<fopt<1>> const& gsources
+        );
+
+        template <>
+        void simulate<2, HydroRegime::Newtonian>(
+            std::vector<std::vector<real>>& state,
+            const InitialConditions& init_cond,
             std::function<real(real)> const& scale_factor,
             std::function<real(real)> const& scale_factor_derivative,
             std::vector<fopt<2>> const& bsources,
@@ -72,10 +114,53 @@ namespace simbi {
         );
 
         template <>
-        void simulate<3>(
+        void simulate<2, HydroRegime::SRHD>(
             std::vector<std::vector<real>>& state,
             const InitialConditions& init_cond,
-            const std::string& regime,
+            std::function<real(real)> const& scale_factor,
+            std::function<real(real)> const& scale_factor_derivative,
+            std::vector<fopt<2>> const& bsources,
+            std::vector<fopt<2>> const& hsources,
+            std::vector<fopt<2>> const& gsources
+        );
+
+        template <>
+        void simulate<2, HydroRegime::RMHD>(
+            std::vector<std::vector<real>>& state,
+            const InitialConditions& init_cond,
+            std::function<real(real)> const& scale_factor,
+            std::function<real(real)> const& scale_factor_derivative,
+            std::vector<fopt<2>> const& bsources,
+            std::vector<fopt<2>> const& hsources,
+            std::vector<fopt<2>> const& gsources
+        );
+
+        template <>
+        void simulate<3, HydroRegime::Newtonian>(
+            std::vector<std::vector<real>>& state,
+            const InitialConditions& init_cond,
+            std::function<real(real)> const& scale_factor,
+            std::function<real(real)> const& scale_factor_derivative,
+            std::vector<fopt<3>> const& bsources,
+            std::vector<fopt<3>> const& hsources,
+            std::vector<fopt<3>> const& gsources
+        );
+
+        template <>
+        void simulate<3, HydroRegime::SRHD>(
+            std::vector<std::vector<real>>& state,
+            const InitialConditions& init_cond,
+            std::function<real(real)> const& scale_factor,
+            std::function<real(real)> const& scale_factor_derivative,
+            std::vector<fopt<3>> const& bsources,
+            std::vector<fopt<3>> const& hsources,
+            std::vector<fopt<3>> const& gsources
+        );
+
+        template <>
+        void simulate<3, HydroRegime::RMHD>(
+            std::vector<std::vector<real>>& state,
+            const InitialConditions& init_cond,
             std::function<real(real)> const& scale_factor,
             std::function<real(real)> const& scale_factor_derivative,
             std::vector<fopt<3>> const& bsources,

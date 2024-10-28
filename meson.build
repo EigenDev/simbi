@@ -191,7 +191,9 @@ sources = [
     #######################
     #### GPU / CPU IMPLEMENTATIONS
     #######################
-    'src/hydro/state.cpp',
+    'src/hydro/rmhd.cpp',
+    'src/hydro/srhd.cpp',
+    'src/hydro/newt.cpp',
     
     #######################
     #### UTIL IMPLEMENTATIONS
