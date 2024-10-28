@@ -2713,8 +2713,6 @@ namespace simbi {
                 dataset.close();
             };
 
-            printf("Writing prims\n");
-
             auto write_fields = [&](const std::string& name,
                                     const auto& dataspace,
                                     const auto member) {
@@ -2789,11 +2787,10 @@ namespace simbi {
             else {
                 write_prims("chi", hdataspace, state.dimensions + 2);
             }
-            printf("Writing prims done\n");
+
             //==================================================================
             //  ATTRIBUTE DATA
             //==================================================================
-            printf("Writing attributes\n");
             // create dataset for simulation information
             H5::DataSet sim_info =
                 file.createDataSet("sim_info", attr_type, attr_dataspace);
@@ -2802,32 +2799,32 @@ namespace simbi {
             // file
             const std::vector<std::pair<std::string, const void*>> attributes =
                 {{"current_time", &state.t},
-                 //  {"time_step", &state.dt},
-                 //  {"spatial_order", state.spatial_order.c_str()},
-                 //  {"time_order", state.time_order.c_str()},
-                 //  {"using_gamma_beta", &state.using_fourvelocity},
-                 //  {"mesh_motion", &state.mesh_motion},
-                 //  {"x1max", &state.x1max},
-                 //  {"x1min", &state.x1min},
-                 //  {"x2max", &state.x2max},
-                 //  {"x2min", &state.x2min},
-                 //  {"x3max", &state.x3max},
-                 //  {"x3min", &state.x3min},
-                 //  {"adiabatic_gamma", &state.gamma},
-                 //  {"nx", &state.nx},
-                 //  {"ny", &state.ny},
-                 //  {"nz", &state.nz},
-                 //  {"chkpt_idx", &state.chkpt_idx},
-                 //  {"xactive_zones", &state.xag},
-                 //  {"yactive_zones", &state.yag},
-                 //  {"zactive_zones", &state.zag},
-                 //  {"geometry", state.coord_system.c_str()},
-                 //  {"regime", regime.c_str()},
-                 //  {"dimensions", &state.dimensions},
-                 //  {"x1_cell_spacing",
-                 //   cell2str.at(state.x1_cell_spacing).c_str()},
-                 //  {"x2_cell_spacing",
-                 //   cell2str.at(state.x2_cell_spacing).c_str()},
+                 {"time_step", &state.dt},
+                 {"spatial_order", state.spatial_order.c_str()},
+                 {"time_order", state.time_order.c_str()},
+                 {"using_gamma_beta", &state.using_fourvelocity},
+                 {"mesh_motion", &state.mesh_motion},
+                 {"x1max", &state.x1max},
+                 {"x1min", &state.x1min},
+                 {"x2max", &state.x2max},
+                 {"x2min", &state.x2min},
+                 {"x3max", &state.x3max},
+                 {"x3min", &state.x3min},
+                 {"adiabatic_gamma", &state.gamma},
+                 {"nx", &state.nx},
+                 {"ny", &state.ny},
+                 {"nz", &state.nz},
+                 {"chkpt_idx", &state.chkpt_idx},
+                 {"xactive_zones", &state.xag},
+                 {"yactive_zones", &state.yag},
+                 {"zactive_zones", &state.zag},
+                 {"geometry", state.coord_system.c_str()},
+                 {"regime", regime.c_str()},
+                 {"dimensions", &state.dimensions},
+                 {"x1_cell_spacing",
+                  cell2str.at(state.x1_cell_spacing).c_str()},
+                 {"x2_cell_spacing",
+                  cell2str.at(state.x2_cell_spacing).c_str()},
                  {"x3_cell_spacing",
                   cell2str.at(state.x3_cell_spacing).c_str()}};
 
@@ -2836,10 +2833,8 @@ namespace simbi {
                 if (name == "spatial_order" || name == "time_order" ||
                     name == "geometry" || name == "regime" ||
                     name.find("cell_spacing") != std::string::npos) {
-                    // convert the value to a string
-                    std::string copy = *static_cast<const std::string*>(value);
-                    auto st = H5::StrType(H5::PredType::C_S1, copy.size() + 1);
-                    type    = st;
+
+                    type = H5::StrType(H5::PredType::C_S1, 256);
                 }
                 else if (name == "using_gamma_beta" || name == "mesh_motion") {
                     type = bool_type;
@@ -2860,7 +2855,6 @@ namespace simbi {
                 att.close();
             }
             sim_info.close();
-            printf("Writing attributes done\n");
         }
     }   // namespace helpers
 }   // namespace simbi
