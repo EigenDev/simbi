@@ -1,7 +1,7 @@
 /**
  * ***********************(C) COPYRIGHT 2024 Marcus DuPont**********************
  * @file       thread_pool.hpp
- * @brief      implements a custom thread pool using STL
+ * @brief      Implements a custom thread pool using STL
  *
  * @note
  * @history:
@@ -33,6 +33,7 @@
 
 namespace simbi {
     namespace pooling {
+
 #if __cplusplus >= 202002L && !defined(__clang__)
         constexpr bool need_join = false;
         using std_thread         = std::jthread;
@@ -40,7 +41,10 @@ namespace simbi {
         constexpr bool need_join = true;
         using std_thread         = std::thread;
 #endif
+
         /**
+         * @brief A custom thread pool implementation.
+         *
          * Practicing ThreadPooling based on these resources:
          * https://stackoverflow.com/a/32593825/13874039
          * https://www.cnblogs.com/sinkinben/p/16064857.html
@@ -74,27 +78,27 @@ namespace simbi {
             {
                 if (global::use_omp) {
 #pragma omp parallel for schedule(static)
-                    for (auto idx = start; idx < stop; idx++) {
+                    for (index_type idx = start; idx < stop; idx++) {
                         func(idx);
                     }
                     return;
                 }
-                static auto batch_size =
-                    ((stop - start + nthreads - 1) / nthreads);
-                int block_start = start - batch_size;
-                int block_end   = start;
+                auto batch_size = static_cast<index_type>(
+                    (stop - start + nthreads - 1) / nthreads
+                );
+                index_type block_start = start - batch_size;
+                index_type block_end   = start;
 
                 auto step = [&] {
                     block_start += batch_size;
                     block_end += batch_size;
-                    block_end =
-                        ((index_type) block_end > stop) ? stop : block_end;
+                    block_end = (block_end > stop) ? stop : block_end;
                 };
                 step();
 
                 for ([[gnu::unused]] auto& worker : threads) {
                     queueUp([block_start, block_end, func] {
-                        for (auto q = block_start; q < block_end; q++) {
+                        for (index_type q = block_start; q < block_end; q++) {
                             func(q);
                         }
                     });
@@ -107,48 +111,14 @@ namespace simbi {
             template <typename index_type, typename F>
             void parallel_for(const index_type stop, const F& func)
             {
-                if (global::use_omp) {
-                    // clang-format off
-                    #pragma omp parallel for schedule(static)
-                    // clang-format on
-                    for (index_type idx = 0; idx < stop; idx++) {
-                        func(idx);
-                    }
-                    return;
-                }
-                static auto batch_size = ((stop - 0 + nthreads - 1) / nthreads);
-                int block_start        = 0 - batch_size;
-                int block_end          = 0;
-
-                auto step = [&] {
-                    block_start += batch_size;
-                    block_end += batch_size;
-                    block_end =
-                        ((index_type) block_end > stop) ? stop : block_end;
-                };
-                step();
-
-                for ([[gnu::unused]] auto& worker : threads) {
-                    queueUp([block_start, block_end, func] {
-                        for (auto q = block_start; q < block_end; q++) {
-                            func(q);
-                        }
-                    });
-                    step();
-                }
-
-                waitUntilFinished();
+                parallel_for(static_cast<index_type>(0), stop, func);
             }
 
             bool poolBusy()
             {
-                bool poolbusy;
-                {
-                    std::unique_lock<std::mutex> lock(queue_mutex);
-                    poolbusy = !(jobs.empty() && busy == 0);
-                }
-                return poolbusy;
-            };
+                std::unique_lock<std::mutex> lock(queue_mutex);
+                return !(jobs.empty() && busy == 0);
+            }
 
           private:
             ThreadPool(const ThreadPool&)            = delete;
@@ -158,7 +128,7 @@ namespace simbi {
                 : nthreads(nthreads), should_terminate(false), busy(0)
             {
                 threads.reserve(nthreads);
-                for (unsigned i = 0; i < nthreads; i++) {
+                for (unsigned int i = 0; i < nthreads; i++) {
                     threads.emplace_back(
                         std_thread(&ThreadPool::spawn_thread_proc, this)
                     );
@@ -167,8 +137,6 @@ namespace simbi {
 
             ~ThreadPool()
             {
-                // Stop the thread pool and notify all threads ot finish the
-                // remaining tasks
                 {
                     std::unique_lock<std::mutex> lock(queue_mutex);
                     should_terminate = true;
@@ -186,34 +154,6 @@ namespace simbi {
             {
                 while (true) {
                     std::function<void()> job;
-                    std::unique_lock<std::mutex> latch(queue_mutex);
-                    cv_task.wait(latch, [this] {
-                        return !jobs.empty() || should_terminate;
-                    });
-                    // pop a job from queue and execute it
-                    {
-                        if (should_terminate) {
-                            return;
-                        }
-
-                        // got work. set busy.
-                        ++busy;
-                        job = std::move(jobs.front());
-                        jobs.pop();
-                    }
-                    latch.unlock();
-                    job();
-                    latch.lock();
-                    --busy;
-                    cv_finished.notify_one();
-                }
-            }
-
-            void spawn_thread()
-            {
-                while (true) {
-                    std::function<void()> job;
-                    // pop a job from queue and execute it
                     {
                         std::unique_lock<std::mutex> latch(queue_mutex);
                         cv_task.wait(latch, [this] {
@@ -222,15 +162,19 @@ namespace simbi {
                         if (should_terminate) {
                             return;
                         }
-
                         job = std::move(jobs.front());
                         jobs.pop();
+                        ++busy;
                     }
                     job();
+                    {
+                        std::unique_lock<std::mutex> latch(queue_mutex);
+                        --busy;
+                        cv_finished.notify_one();
+                    }
                 }
             }
 
-            // waits until the queue is empty.
             void waitUntilFinished()
             {
                 std::unique_lock<std::mutex> latch(queue_mutex);
@@ -240,17 +184,16 @@ namespace simbi {
             }
 
             unsigned int nthreads;
-            bool should_terminate;    // Tells threads to stop looking for jobs
-            std::mutex queue_mutex;   // Prevents data races to the job queue
-            std::condition_variable
-                cv_task;   // Allows threads to wait on new jobs or termination
+            bool should_terminate;
+            std::mutex queue_mutex;
+            std::condition_variable cv_task;
             std::condition_variable cv_finished;
             std::vector<std_thread> threads;
             std::queue<std::function<void()>> jobs;
             unsigned int busy;
         };
 
-        inline auto get_nthreads = ([] {
+        inline auto get_nthreads = [] {
             if (const char* thread_env = std::getenv("NTHREADS")) {
                 return static_cast<unsigned int>(
                     std::stoul(std::string(thread_env))
@@ -264,7 +207,7 @@ namespace simbi {
             }
 
             return std_thread::hardware_concurrency();
-        });
+        };
 
         template <typename T>
         T fetch_minimum(std::atomic<T>& a, T val)
@@ -284,4 +227,5 @@ namespace simbi {
         }
     }   // namespace pooling
 }   // namespace simbi
-#endif
+
+#endif   // THREAD_POOL_HPP
