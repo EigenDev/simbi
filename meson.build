@@ -4,7 +4,7 @@ project('simbi', 'c', 'cpp', 'cython',
     default_options : { 
         'cpp_std': 'c++20', 
         'cpp_args': ['-march=native'],
-        'b_lto': true,
+        # 'b_lto': true,
     },
 )
 
