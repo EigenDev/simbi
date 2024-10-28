@@ -6,7 +6,7 @@ build-backend = "setuptools.build_meta"
 name = "simbi"
 authors = [
     {name = "Marcus DuPont"},
-    {email = "md4469@nyu.edu"}
+    {email = "marcus.dupont@princeton.edu"}
 ]
 description = "Python module to solve hydrodynamic equations using a hip/cuda/c++ backend"
 requires-python = ">=3.10"

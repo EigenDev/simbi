@@ -7,7 +7,7 @@
  * @note
  * @history:
  *   Version   Date            Author          Modification    Email
- *   V0.8.0    Dec-03-2023     Marcus DuPont                   md4469@nyu.edu
+ *   V0.8.0    Dec-03-2023     Marcus DuPont marcus.dupont@princeton.edu
  *
  * @verbatim
  * ==============================================================================

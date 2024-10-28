@@ -7,7 +7,7 @@
  * https://www.experts-exchange.com/articles/1959/C-Smart-pointers.html
  * @history:
  *   Version   Date            Author          Modification    Email
- *   V0.8.0    Jun-26-2024     Marcus DuPont                   md4469@nyu.edu
+ *   V0.8.0    Jun-26-2024     Marcus DuPont marcus.dupont@princeton.edu
  *
  * @verbatim
  * ==============================================================================
@@ -201,7 +201,7 @@ namespace simbi {
             //=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=
             // A dummy member function used to represent a logically true
             // boolean value, used by the conversion to bool operator.
-            void true_eval(){};
+            void true_eval() {};
 
           private:
             //=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=
@@ -347,7 +347,7 @@ namespace simbi {
             //=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=
             // A dummy member function used to represent a logically true
             // boolean value, used by the conversion to bool operator.
-            void true_eval(){};
+            void true_eval() {};
 
           private:
             //=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=
