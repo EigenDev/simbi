@@ -61,7 +61,7 @@ namespace simbi {
         real dt, t_interval, time_constant, hubble_param;
         real x1min, x1max, x2min, x2max, x3min, x3max, step;
         real dlogx1, dx1, dlogx2, dx2, dlogx3, dx3, invdx1, invdx2, invdx3;
-        bool linspace, mesh_motion;
+        bool linspace, mesh_motion, null_gravity, null_sources;
         bool half_sphere, all_outer_bounds;
         bool homolog, hasCrashed, wasInterrupted, using_fourvelocity;
         luint active_zones, idx_active, radius;
@@ -221,8 +221,7 @@ namespace simbi {
               quirk_smoothing(init_conditions.quirk_smoothing),
               constant_sources(init_conditions.constant_sources),
               total_zones(nx * ny * nz),
-              boundary_conditions(
-                  std::move(init_conditions.boundary_conditions)
+              boundary_conditions(std::move(init_conditions.boundary_conditions)
               ),
               sim_solver(helpers::solver_map.at(init_conditions.solver)),
               geometry(helpers::geometry_map.at(init_conditions.coord_system)),
