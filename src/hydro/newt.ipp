@@ -1269,32 +1269,30 @@ void Newtonian<dim>::simulate(
         this->hsources.push_back(q.value_or(nullptr));
     }
     for (auto&& q : gsources) {
-        std::cout << q.has_value() << '\n';
-        std::cin.get();
         this->gsources.push_back(q.value_or(nullptr));
     }
 
     // check if ~all~ boundary sources have been set.
     // if the user forgot one, the code will run with
     // and outflow outer boundary condition
-    this->all_outer_bounds =
-        std::all_of(this->bsources.begin(), this->bsources.end(), [](auto q) {
-            return q != nullptr;
-        });
+    this->all_outer_bounds = std::all_of(
+        this->bsources.begin(),
+        this->bsources.end(),
+        [](const auto& q) { return q != nullptr; }
+    );
 
-    this->null_gravity =
-        std::all_of(this->gsources.begin(), this->gsources.end(), [](auto q) {
-            return q == nullptr;
-        });
+    this->null_gravity = std::all_of(
+        this->gsources.begin(),
+        this->gsources.end(),
+        [](const auto& q) { return q == nullptr; }
+    );
 
-    this->null_sources =
-        std::all_of(this->hsources.begin(), this->hsources.end(), [](auto q) {
-            return q == nullptr;
-        });
+    this->null_sources = std::all_of(
+        this->hsources.begin(),
+        this->hsources.end(),
+        [](const auto& q) { return q == nullptr; }
+    );
 
-    std::cout << "null gravity: " << null_gravity << '\n';
-    std::cout << "null sources: " << null_sources << '\n';
-    std::cin.get();
     // Stuff for moving mesh
     this->hubble_param = adot(t) / a(t);
     this->mesh_motion  = (hubble_param != 0);
