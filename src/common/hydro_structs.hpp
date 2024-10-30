@@ -1080,6 +1080,9 @@ struct Eigenvals {
         if constexpr (nvals > 4) {
             return this->vals[4];
         }
+        else if constexpr (R == Regime::NEWTONIAN && dim == 1) {
+            return this->vals[2];
+        }
         return static_cast<real>(0.0);
     }
 
@@ -1087,6 +1090,9 @@ struct Eigenvals {
     {
         if constexpr (nvals > 4) {
             return this->vals[5];
+        }
+        else if constexpr (R == Regime::NEWTONIAN && dim == 1) {
+            return this->vals[3];
         }
         return static_cast<real>(0.0);
     }
