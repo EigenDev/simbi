@@ -4,13 +4,13 @@
 using namespace simbi;
 using namespace simbi::hydrostate;
 
-template <typename F>
-std::optional<F> optional_wrapper(F func)
+template <int dim, typename F>
+fopt<dim> optional_wrapper(F func)
 {
     if (func) {
-        return func;
+        return fopt<dim>(func);
     }
-    return {};
+    return std::nullopt;
 }
 
 template <int dim, typename F>
@@ -19,7 +19,7 @@ auto optional_vec(std::vector<F> const& vfunc)
     // vector of optional functions
     std::vector<fopt<dim>> res;
     for (auto&& i : vfunc) {
-        res.push_back(optional_wrapper(i));
+        res.push_back(optional_wrapper<dim>(i));
     }
     return res;
 }
