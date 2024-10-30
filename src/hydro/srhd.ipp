@@ -1320,11 +1320,10 @@ void SRHD<dim>::advance()
             }
         }
 
-        // TODO: Implement source and gravity terms
-        // source terms
-        const auto source_terms = hydro_sources(ii, jj, kk);
+        // TODO: Implement functional source terms
+        auto source_terms = hydro_sources(ii, jj, kk);
         // Gravity
-        const auto gravity = gravity_sources(prb[tid], ii, jj, kk);
+        auto gravity = gravity_sources(prb[tid], ii, jj, kk);
 
         if constexpr (dim == 1) {
             switch (geometry) {
@@ -1621,6 +1620,7 @@ void SRHD<dim>::simulate(
         std::all_of(this->gsources.begin(), this->gsources.end(), [](auto q) {
             return q == nullptr;
         });
+
     // Stuff for moving mesh
     this->hubble_param = adot(t) / a(t);
     this->mesh_motion  = (hubble_param != 0);
