@@ -30,8 +30,7 @@
 using size_type = std::size_t;
 
 namespace simbi {
-    // Template class to create array of
-    // different data_type
+    // Template class to create array of different data_type
     template <typename DT, global::Platform build_mode = global::BuildPlatform>
     class ndarray
     {
@@ -39,19 +38,13 @@ namespace simbi {
         using unique_p = util::smart_ptr<DT[], Deleter>;
 
       private:
-        // Variable to store the size of the
-        // array
-        size_type sz;
+        size_type sz;            // Variable to store the size of the array
+        size_type nd_capacity;   // Variable to store the current capacity of
+                                 // the array
+        size_type dimensions;    // Number of dimensions
+        util::smart_ptr<DT[]> arr;   // Host-side array
 
-        // Variable to store the current capacity
-        // of the array
-        size_type nd_capacity;
-
-        size_type dimensions;
-
-        util::smart_ptr<DT[]> arr;
-
-        // Device-side array
+        // Device-side array allocation
         void* myGpuMalloc(size_type size)
         {
             if constexpr (build_mode == global::Platform::GPU) {
@@ -60,9 +53,9 @@ namespace simbi {
                 return ptr;
             }
             return nullptr;
-        };
+        }
 
-        // Device-side array
+        // Device-side managed array allocation
         void* myGpuMallocManaged(size_type size)
         {
             if constexpr (build_mode == global::Platform::GPU) {
@@ -70,7 +63,8 @@ namespace simbi {
                 gpu::api::gpuMallocManaged(&ptr, size);
                 return ptr;
             }
-        };
+            return nullptr;
+        }
 
         struct gpuDeleter {
             void operator()(DT* ptr)
@@ -81,44 +75,38 @@ namespace simbi {
             }
         };
 
-        unique_p<gpuDeleter> dev_arr;
+        unique_p<gpuDeleter> dev_arr;   // Device-side array
 
       public:
         ndarray();
         ~ndarray();
-        // Assignment operator
-        ndarray& operator=(ndarray rhs);
-        // Initializer list constructor
-        DUAL ndarray(std::initializer_list<DT> list);
+        ndarray& operator=(ndarray rhs);   // Assignment operator
+        DUAL ndarray(std::initializer_list<DT> list
+        );   // Initializer list constructor
+        DUAL ndarray(size_type size
+        );   // Zero-initialize the array with defined size
+        DUAL ndarray(
+            size_type size,
+            const DT val
+        );   // Fill-initialize the array with defined size
+        DUAL ndarray(const ndarray& rhs);       // Copy-constructor for array
+        ndarray(const std::vector<DT>& rhs);    // Copy-constructor for vector
+        DUAL ndarray(ndarray&& rhs) noexcept;   // Move-constructor for array
+        DUAL ndarray(std::vector<DT>&& rhs);    // Move-constructor for vector
+        void swap(ndarray& rhs);                // Swap function
 
-        // Zero-initialize the array with defined size
-        DUAL ndarray(size_type size);
-
-        // Fill-initialize the array with defined size
-        DUAL ndarray(size_type size, const DT val);
-
-        // Copy-constructor for array
-        DUAL ndarray(const ndarray& rhs);
-        ndarray(const std::vector<DT>& rhs);
-
-        // Move-constructor for vector
-        DUAL ndarray(std::vector<DT>&& rhs);
-        void swap(ndarray& rhs);
-
-        // Function that returns the number of
-        // elements in array after pushing the data
+        // Function that returns the number of elements in array after pushing
+        // the data
         constexpr void push_back(const DT&);
 
-        // function that returns the popped element
+        // Function that returns the popped element
         constexpr void pop_back();
 
-        // function to resize ndarray
+        // Function to resize ndarray
         constexpr void resize(size_type new_size);
-
-        // function to resize ndarray
         constexpr void resize(size_type new_size, const DT new_value);
 
-        // Function that return the size of array
+        // Function that returns the size of array
         constexpr size_type size() const;
         constexpr size_type capacity() const;
         constexpr size_type ndim() const;
@@ -141,7 +129,7 @@ namespace simbi {
         // Check if ndarray is empty
         bool empty() const;
 
-        // get pointers to underlying data ambiguously, on host, or on gpu
+        // Get pointers to underlying data ambiguously, on host, or on gpu
         DUAL DT* data();
         DT* host_data();
         DUAL DT* dev_data();
@@ -154,16 +142,14 @@ namespace simbi {
         class iterator
         {
           private:
-            // Dynamic array using pointers
-            DT* ptr;
+            DT* ptr;   // Dynamic array using pointers
 
           public:
             using iterator_category = std::forward_iterator_tag;
-
-            using value_type      = DT;
-            using difference_type = void;
-            using pointer         = void;
-            using reference       = void;
+            using value_type        = DT;
+            using difference_type   = void;
+            using pointer           = void;
+            using reference         = void;
 
             DUAL explicit iterator() : ptr(nullptr) {}
 
@@ -201,7 +187,7 @@ namespace simbi {
         // End iterator
         iterator end() const;
 
-        // back of container
+        // Back of container
         DT back() const;
         DT& back();
         DT front() const;
@@ -212,7 +198,11 @@ namespace simbi {
         void copyFromGpu();
         void copyBetweenGpu(const ndarray& rhs);
 
-    };   // end ndarray class declaration
+        // Additional utility methods
+        void clear();
+        void shrink_to_fit();
+        void reserve(size_type new_capacity);
+    };
 
 }   // namespace simbi
 
