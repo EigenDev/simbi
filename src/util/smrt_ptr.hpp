@@ -1,3 +1,4 @@
+
 /**
  * ***********************(C) COPYRIGHT 2024 Marcus DuPont**********************
  * @file       smrt_ptr.hpp
@@ -18,50 +19,37 @@
  */
 #ifndef SMRT_PTR_HPP
 #define SMRT_PTR_HPP
+
 #include "build_options.hpp"
 #include <atomic>
+#include <exception>
+#include <memory>
+#include <utility>
 
 namespace simbi {
     namespace util {
+
         struct refcnt {
             std::atomic<int> count;
 
-            refcnt() : count(0) {}
+            refcnt() : count(1) {}
 
-            refcnt(int c) : count(c) {}
+            void inc() { count.fetch_add(1, std::memory_order_relaxed); }
 
-            refcnt(const refcnt& o) : count(o.count.load()) {}
-
-            refcnt& operator=(const refcnt& o)
+            int release()
             {
-                count.store(o.count.load());
-                return *this;
+                return count.fetch_sub(1, std::memory_order_acq_rel) - 1;
             }
 
-            ~refcnt() { count.store(0); }
+            int get() const { return count.load(std::memory_order_relaxed); }
 
-            int get() const { return count.load(); }
-
-            void inc() { count.fetch_add(1); }
-
-            void dec() { count.fetch_sub(1); }
-
-            int release() { return count.fetch_sub(1) - 1; }
-
-            bool is_zero() const { return count.load() == 0; }
+            bool is_zero() const { return get() == 0; }
         };
 
         // Default deleter for scalar types
         template <typename ptrT>
         struct default_delete {
-            default_delete() = default;
-
-            template <typename U>
-            DUAL default_delete(const default_delete<U>&)
-            {
-            }
-
-            void operator()(ptrT* ptr) const { delete ptr; }
+            DUAL void operator()(ptrT* ptr) const { delete ptr; }
         };
 
         // Default deleter for array types
@@ -70,296 +58,310 @@ namespace simbi {
             DUAL void operator()(ptrT* ptr) const { delete[] ptr; }
         };
 
-        // =-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=
-        // This is the smart pointer template, which takes pointer type and
-        // a destruct policy, which it uses to destruct object(s) pointed to
-        // when the reference counter for the object becomes zero.
-
         template <typename ptrT, typename delete_policy = default_delete<ptrT>>
         class smart_ptr
         {
           private:
-            using deleter_t   = delete_policy;
-            using safe_bool_t = void (smart_ptr::*)();
-            using refcnt_t    = refcnt;
+            using deleter_t = delete_policy;
+            using refcnt_t  = refcnt;
+
+            ptrT* pData;
+            refcnt_t* pRef;
+
+            void release()
+            {
+                if (pRef && pRef->release() == 0) {
+                    deleter_t()(pData);
+                    delete pRef;
+                }
+            }
 
           public:
-            //=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=
-            // Make a nice typedef for the pointer type
             using ptr_t = ptrT;
 
-            //=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=
-            // dc_tor, c_tor and cc_tor
-            DUAL smart_ptr() : pData(0), pRef(0)
+            // Default constructor
+            DUAL smart_ptr() : pData(nullptr), pRef(nullptr) {}
+
+            // Constructor from raw pointer
+            explicit smart_ptr(ptr_t* pData) : pData(pData), pRef(new refcnt())
             {
-                // create new reference
-                pRef = new refcnt();
-                // increment the reference count
-                pRef->inc();
             }
 
-            explicit smart_ptr(ptr_t* pData) : pData(pData), pRef(0)
+            // Constructor from nullptr
+            smart_ptr(std::nullptr_t) noexcept : pData(nullptr), pRef(nullptr)
             {
-                // create new reference
-                pRef = new refcnt();
-                // increment the reference count
-                pRef->inc();
             }
 
-            // copy constructor
-            smart_ptr(smart_ptr const& oPtr)
-                : pData(oPtr.pData), pRef(oPtr.pRef)
+            // Copy Constructor
+            smart_ptr(const smart_ptr& other) noexcept
+                : pData(other.pData), pRef(other.pRef)
             {
-                pRef->inc();
-            }
-
-            //=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=
-            // d_tor, deletes the pointer using the destruct policy when the
-            // reference counter for the object reaches zero
-            ~smart_ptr()
-            {
-                try {
-                    if (pRef && pRef->release() == 0) {
-                        deleter_t()(pData);
-                        delete pRef;
-                    }
-                }
-                catch (...) {
-                    // Ignored. Prevent percolation during stack unwinding.
-                }
-            }
-
-            //=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=
-            // Assignment operator copies an existing pointer smart_ptr, but
-            // in doing so will 'reset' the current pointer
-            smart_ptr& operator=(smart_ptr const& sp)
-            {
-                if (&sp != this && pData != sp.pData) {
-                    reset(sp.pData);
-                    pRef = sp.pRef;
+                if (pRef) {
                     pRef->inc();
                 }
+            }
 
+            // Move Constructor
+            smart_ptr(smart_ptr&& other) noexcept
+                : pData(other.pData), pRef(other.pRef)
+            {
+                other.pData = nullptr;
+                other.pRef  = nullptr;
+            }
+
+            ~smart_ptr() { release(); }
+
+            // Copy Assignment
+            smart_ptr& operator=(const smart_ptr& other)
+            {
+                if (this != &other) {
+                    release();
+                    pData = other.pData;
+                    pRef  = other.pRef;
+                    if (pRef) {
+                        pRef->inc();
+                    }
+                }
                 return *this;
             }
 
-            //=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=
-            // Performs a safe swap of two smart pointer.
-            void swap(smart_ptr& sp)
+            // Move assignment operator
+            smart_ptr& operator=(smart_ptr&& other) noexcept
             {
-                refcnt_t* pr = pRef;
-                ptr_t* pd    = pData;
-
-                pRef  = sp.pRef;
-                pData = sp.pData;
-
-                sp.pRef  = pr;
-                sp.pData = pd;
+                if (this != &other) {
+                    release();
+                    pData       = other.pData;
+                    pRef        = other.pRef;
+                    other.pData = nullptr;
+                    other.pRef  = nullptr;
+                }
+                return *this;
             }
 
-            //=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=
-            // Resets the current smart pointer. If a new pointer is provided
-            // The reference counter will be set to one and the pointer will
-            // be stored, if no pointer is provided the reference counter and
-            // pointer wil be set to 0, setting this as a null pointer.
-            void reset(ptr_t* ptr = 0)
+            // Assignment operator from nullptr
+            smart_ptr& operator=(std::nullptr_t) noexcept
             {
-                smart_ptr sp(ptr);
-                swap(sp);
+                release();
+                pData = nullptr;
+                pRef  = nullptr;
+                return *this;
             }
 
-            //=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=
-            // Returns a reference to the object pointed to
-            DUAL ptr_t& operator*() const { return *pData; }
+            void reset(ptr_t* ptr = nullptr)
+            {
+                smart_ptr temp(ptr);
+                swap(temp);
+            }
 
-            //=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=
-            // Invokes the -> operator on the pointer pointed too
-            // NB. When you call the -> operator, the compiler  automatically
-            //     calls the -> on the entity returned. This is a special,
-            //     case, done to preserve normal indirection semantics.
-            DUAL ptr_t* operator->() const { return pData; }
+            void swap(smart_ptr& other) noexcept
+            {
+                if constexpr (global::BuildPlatform == global::Platform::GPU) {
+                    refcnt_t* pr = pRef;
+                    ptr_t* pd    = pData;
 
-            //=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=
-            // Get the pointer being managed
+                    pRef  = other.pRef;
+                    pData = other.pData;
+
+                    other.pRef  = pr;
+                    other.pData = pd;
+                }
+                else {
+                    std::swap(pData, other.pData);
+                    std::swap(pRef, other.pRef);
+                }
+            }
+
+            // Dereference operator
+            DUAL ptr_t& operator*() const
+            {
+                if (!pData) {
+                    error_out();
+                }
+                return *pData;
+            }
+
+            // Arrow operator
+            DUAL ptr_t* operator->() const
+            {
+                if (!pData) {
+                    error_out();
+                }
+                return pData;
+            }
+
+            // Get raw pointer
             DUAL ptr_t* get() const { return pData; }
 
-            //=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=
-            // Conversion to bool operator to facilitate logical pointer tests.
-            // Returns a value that will logically be true if get != 0 else
-            // and value that is logically false. We don't return a real
-            // bool to prevent un-wanted automatic implicit conversion for
-            // instances where it would make no semantic sense, rather we
-            // return a pointer to a member function as this will always
-            // implicitly convert to true or false when used in a boolean
-            // context but will not convert, for example, to an int type.
-            operator safe_bool_t() const
+            // Check if the smart pointer is valid
+            explicit operator bool() const noexcept { return pData != nullptr; }
+
+            // comparison with nullptr
+            bool operator==(std::nullptr_t) const noexcept
             {
-                return pData ? &smart_ptr::true_eval : 0;
+                return pData == nullptr;
             }
 
-          private:
-            //=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=
-            // A dummy member function used to represent a logically true
-            // boolean value, used by the conversion to bool operator.
-            void true_eval() {};
+            // comparison with nullptr
+            bool operator!=(std::nullptr_t) const noexcept
+            {
+                return pData != nullptr;
+            }
 
-          private:
-            //=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=
-            // Poiners to the object being managed and the reference counter
-            ptr_t* pData;
-            refcnt_t* pRef;
-
-            //=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=
+            void error_out() const
+            {
+                if constexpr (global::BuildPlatform == global::Platform::GPU) {
+                    printf("[GPU ERROR]: DEFERENCING NULL POINTER");
+                }
+                else {
+                    throw std::runtime_error("Dereferencing null pointer");
+                }
+            }
         };
 
-        // Specialize for runtime array lengths
+        // Specialization for array types
         template <typename ptrT, typename deleter>
         class smart_ptr<ptrT[], deleter>
         {
           private:
-            using deleter_t   = deleter;
-            using safe_bool_t = void (smart_ptr::*)();
-            using refcnt_t    = refcnt;
+            using deleter_t = deleter;
+            using refcnt_t  = refcnt;
+
+            ptrT* pData;
+            refcnt_t* pRef;
+
+            void release()
+            {
+                if (pRef && pRef->release() == 0) {
+                    deleter_t()(pData);
+                    delete pRef;
+                }
+            }
 
           public:
-            //=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=
-            // Make a nice typedef for the pointer type
             using ptr_t = ptrT;
 
-            //=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=
-            // dc_tor, c_tor and cc_tor
-            smart_ptr() : pData(0), pRef(0)
+            smart_ptr() : pData(nullptr), pRef(nullptr) {}
+
+            explicit smart_ptr(ptr_t* pData) : pData(pData), pRef(new refcnt())
             {
-                // create new reference
-                pRef = new refcnt();
-                // increment the reference count
-                pRef->inc();
             }
 
-            explicit smart_ptr(ptr_t* pData) : pData(pData), pRef(0)
+            smart_ptr(const smart_ptr& other)
+                : pData(other.pData), pRef(other.pRef)
             {
-                // create new reference
-                pRef = new refcnt();
-                // increment the reference count
-                pRef->inc();
-            }
-
-            // copy constructor
-            smart_ptr(smart_ptr const& oPtr)
-                : pData(oPtr.pData), pRef(oPtr.pRef)
-            {
-                pRef->inc();
-            }
-
-            //=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=
-            // d_tor, deletes the pointer using the destruct policy when the
-            // reference counter for the object reaches zero
-            ~smart_ptr()
-            {
-                try {
-                    if (pRef && pRef->release() == 0) {
-                        deleter_t()(pData);
-                        delete pRef;
-                    }
-                }
-                catch (...) {
-                    // Ignored. Prevent percolation during stack unwinding.
-                }
-            }
-
-            //=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=
-            // Assignment operator copies an existing pointer smart_ptr, but
-            // in doing so will 'reset' the current pointer
-            smart_ptr& operator=(smart_ptr const& sp)
-            {
-                if (&sp != this && pData != sp.pData) {
-                    reset(sp.pData);
-                    pRef = sp.pRef;
+                if (pRef) {
                     pRef->inc();
                 }
+            }
 
+            smart_ptr(smart_ptr&& other) noexcept
+                : pData(other.pData), pRef(other.pRef)
+            {
+                other.pData = nullptr;
+                other.pRef  = nullptr;
+            }
+
+            ~smart_ptr() { release(); }
+
+            smart_ptr& operator=(const smart_ptr& other)
+            {
+                if (this != &other) {
+                    release();
+                    pData = other.pData;
+                    pRef  = other.pRef;
+                    if (pRef) {
+                        pRef->inc();
+                    }
+                }
                 return *this;
             }
 
-            //=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=
-            // Performs a safe swap of two smart pointer.
-            void swap(smart_ptr& sp)
+            smart_ptr& operator=(smart_ptr&& other) noexcept
             {
-                refcnt_t* pr = pRef;
-                ptr_t* pd    = pData;
-
-                pRef  = sp.pRef;
-                pData = sp.pData;
-
-                sp.pRef  = pr;
-                sp.pData = pd;
+                if (this != &other) {
+                    release();
+                    pData       = other.pData;
+                    pRef        = other.pRef;
+                    other.pData = nullptr;
+                    other.pRef  = nullptr;
+                }
+                return *this;
             }
 
-            //=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=
-            // Resets the current smart pointer. If a new pointer is provided
-            // The reference counter will be set to one and the pointer will
-            // be stored, if no pointer is provided the reference counter and
-            // pointer wil be set to 0, setting this as a null pointer.
-            void reset(ptr_t* ptr = 0)
+            void reset(ptr_t* ptr = nullptr)
             {
-                smart_ptr sp(ptr);
-                swap(sp);
+                smart_ptr temp(ptr);
+                swap(temp);
             }
 
-            //=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=
-            // Returns a reference to the object pointed to
-            DUAL ptr_t& operator*() const { return *pData; }
+            void swap(smart_ptr& other) noexcept
+            {
+                if constexpr (global::BuildPlatform == global::Platform::GPU) {
+                    refcnt_t* pr = pRef;
+                    ptr_t* pd    = pData;
 
-            //=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=
-            // Invokes the -> operator on the pointer pointed too
-            // NB. When you call the -> operator, the compiler  automatically
-            //     calls the -> on the entity returned. This is a special,
-            //     case, done to preserve normal indirection semantics.
-            DUAL ptr_t* operator->() const { return pData; }
+                    pRef  = other.pRef;
+                    pData = other.pData;
 
-            //=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=
-            // Get the pointer being managed
+                    other.pRef  = pr;
+                    other.pData = pd;
+                }
+                else {
+                    std::swap(pData, other.pData);
+                    std::swap(pRef, other.pRef);
+                }
+            }
+
+            DUAL ptr_t& operator*() const
+            {
+                if (!pData) {
+                    error_out();
+                }
+                return *pData;
+            }
+
+            DUAL ptr_t* operator->() const
+            {
+                if (!pData) {
+                    error_out();
+                }
+                return pData;
+            }
+
             DUAL ptr_t* get() const { return pData; }
 
-            // Accessors.
-            DUAL ptrT& operator[](const std::size_t ii) { return get()[ii]; }
-
-            DUAL ptrT operator[](const std::size_t ii) const
+            template <typename IndexType>
+            DUAL ptrT& operator[](IndexType index)
             {
-                return get()[ii];
+                if (!pData) {
+                    error_out();
+                }
+                return pData[index];
             }
 
-            //=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=
-            // Conversion to bool operator to facilitate logical pointer tests.
-            // Returns a value that will logically be true if get != 0 else
-            // and value that is logically false. We don't return a real
-            // bool to prevent un-wanted automatic implicit conversion for
-            // instances where it would make no semantic sense, rather we
-            // return a pointer to a member function as this will always
-            // implicitly convert to true or false when used in a boolean
-            // context but will not convert, for example, to an int type.
-            operator safe_bool_t() const
+            template <typename IndexType>
+            DUAL const ptrT& operator[](IndexType index) const
             {
-                return pData ? &smart_ptr::true_eval : 0;
+                if (!pData) {
+                    error_out();
+                }
+                return pData[index];
             }
 
-          private:
-            //=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=
-            // A dummy member function used to represent a logically true
-            // boolean value, used by the conversion to bool operator.
-            void true_eval() {};
+            void error_out() const
+            {
+                if constexpr (global::BuildPlatform == global::Platform::GPU) {
+                    printf("[GPU ERROR]: DEFERENCING NULL POINTER");
+                }
+                else {
+                    throw std::runtime_error("Dereferencing null pointer");
+                }
+            }
 
-          private:
-            //=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=
-            // Poiners to the object being managed and the reference counter
-            ptr_t* pData;
-            refcnt_t* pRef;
-
-            //=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=
+            explicit operator bool() const noexcept { return pData != nullptr; }
         };
 
     }   // namespace util
-
 }   // namespace simbi
 
-#endif
+#endif   // SMRT_PTR_HPP
