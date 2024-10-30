@@ -87,7 +87,7 @@ cdef class SimState:
         for qq in boundary_sources:
             bsource_vec.push_back(PyObjWrapper(qq) if qq else PyObjWrapper())
         
-        for qq in boundary_sources:
+        for qq in hydro_sources:
             hsource_vec.push_back(PyObjWrapper(qq) if qq else PyObjWrapper())
         
         for qq in gravity_sources:
