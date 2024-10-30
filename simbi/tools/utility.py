@@ -187,8 +187,8 @@ def read_file(filename: str) -> tuple[dict[str, Any], dict[str, Any], dict[str, 
             {"rho": rho, "p": p, "chi": chi, "ad_gamma": ds.pop("adiabatic_gamma")}
         )
 
+        vsqr = np.sum(v**2, axis=0)
         if ds["regime"] in ["srhd", "srmhd"]:
-            vsqr = np.sum(v**2, axis=0)
             W = (1 + vsqr) ** 0.5 if ds["using_gamma_beta"] else (1 - vsqr) ** (-0.5)
             if ds["using_gamma_beta"]:
                 fields.update({f"v{i+1}": v[i] / W for i in range(len(v))})
