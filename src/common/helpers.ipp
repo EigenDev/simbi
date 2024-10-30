@@ -387,7 +387,7 @@ namespace simbi {
             const auto geometry            = sim_state->geometry;
             const auto half_sphere         = sim_state->half_sphere;
             const auto hr                  = sim_state->radius;   // halo radius
-            auto& cons                     = sim_state->cons;
+            auto* cons                     = sim_state->cons.data();
             parallel_for(
                 sim_state->activeP,
                 sim_state->activeP.nzones,
@@ -408,8 +408,8 @@ namespace simbi {
                             auto ikse = idx3(nx - rs, jr, nz - rs, nx, ny, nz);
                             auto iksw = idx3(rr, jr, nz - rs, nx, ny, nz);
 
-                            // the corner ghosts are set equal to the real
-                            // zones nearest those corners
+                            // the corner ghosts are set equal to the real zones
+                            // nearest those corners
                             cons[iknw] = cons[idx3(hr, jr, hr, nx, ny, nz)];
                             cons[ikne] =
                                 cons[idx3(nx - (hr + 1), jr, hr, nx, ny, nz)];
@@ -580,8 +580,7 @@ namespace simbi {
 
                                 switch (geometry) {
                                     case Geometry::SPHERICAL: {
-                                        // the x3 direction is periodic in
-                                        // phi
+                                        // the x3 direction is periodic in phi
                                         const auto inr = idx3(
                                             ir,
                                             jr,
