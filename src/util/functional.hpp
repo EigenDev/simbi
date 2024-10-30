@@ -18,214 +18,138 @@
 #ifndef FUNCTIONAL_HPP
 #define FUNCTIONAL_HPP
 
-#include "common/traits.hpp"   // for is_same_v
-#include <exception>           // for bad_function_call
-#include <optional>            // for optional
-#include <utility>             // for forward
+#include "smrt_ptr.hpp"
+#include <exception>
+#include <functional>
+#include <memory>
+#include <type_traits>
+#include <utility>
 
 namespace simbi {
-    // Exception class for bad function calls
-    class bad_function_call : public std::exception
-    {
-      public:
-        // Override the what() function to return a custom error message
-        const char* what() const noexcept override
-        {
-            return "bad function call";
-        }
-    };
 
-    // Forward declaration of the function template
     template <typename>
     class function;
 
-    // Specialization of the function template for callable objects
     template <typename R, typename... Args>
     class function<R(Args...)>
     {
-        // Base class for callable objects
-        struct callable_base {
-            virtual ~callable_base()                  = default;
-            virtual DUAL R invoke(Args... args)       = 0;
-            virtual callable_base* DUAL clone() const = 0;
-        };
-
-        // Derived class template for specific callable objects
-        template <typename F>
-        struct callable : callable_base {
-            F f;
-            // error code
-            int error_code;
-
-            // Constructor that takes an std::optional
-            template <typename T>
-            callable(std::optional<T> opt) : f(std::move(opt)), error_code(0)
-            {
-            }
-
-            // Constructor that forwards the callable object
-            callable(F&& f) : f(std::forward<F>(f)), error_code(0)
-            {
-                if constexpr (std::is_same_v<F, std::nullptr_t>) {
-                    if constexpr (global::BuildPlatform ==
-                                  global::Platform::GPU) {
-                        error_code = 1;
-                    }
-                    else {
-                        throw bad_function_call();
-                    }
-                }
-            }
-
-            // Override the invoke function to call the stored callable object
-            DUAL R invoke(Args... args) override
-            {
-                if constexpr (std::is_same_v<F, std::nullptr_t>) {
-                    if constexpr (global::BuildPlatform ==
-                                  global::Platform::GPU) {
-                        return R();
-                    }
-                    else {
-                        throw bad_function_call();
-                    }
-                }
-                else if constexpr (is_optional<std::optional<F>>::value) {
-                    if (!f.has_value()) {
-                        if constexpr (global::BuildPlatform ==
-                                      global::Platform::GPU) {
-
-                            return R();
-                        }
-                        else {
-                            throw bad_function_call();
-                        }
-                    }
-                    return (*f)(std::forward<Args>(args)...);
-                }
-                else {
-                    return f(std::forward<Args>(args)...);
-                }
-            }
-
-            // Override the clone function to create a copy of the callable
-            // object
-            DUAL callable_base* clone() const override
-            {
-                if constexpr (std::is_same_v<F, std::nullptr_t>) {
-                    return nullptr;
-                }
-                else {
-                    return new callable(f);
-                }
-            }
-        };
-
-        // Pointer to the base class of the callable object
-        callable_base* callable_ptr;
-
       public:
-        // Default constructor
-        DUAL function() : callable_ptr(nullptr) {}
+        function() noexcept : callable(nullptr) {}
 
-        // Constructor that takes a callable object
+        function(std::nullptr_t) noexcept : callable(nullptr) {}
+
+        function(const function& other)
+        {
+            if (other.callable) {
+                callable =
+                    util::smart_ptr<callable_base>(other.callable->clone());
+            }
+            else {
+                callable = nullptr;
+            }
+        }
+
+        function(function&& other) noexcept
+            : callable(std::move(other.callable))
+        {
+            other.callable = nullptr;
+        }
+
         template <typename F>
-        DUAL function(F f) : callable_ptr(new callable<F>(std::forward<F>(f)))
+        function(const F& f) : callable(new callable_impl<std::decay_t<F>>(f))
         {
         }
 
-        // Copy constructor
-        DUAL function(const function& other)
-            : callable_ptr(
-                  other.callable_ptr ? other.callable_ptr->clone() : nullptr
+        template <typename F>
+        function(F&& f)
+            : callable(
+                  f ? new callable_impl<std::decay_t<F>>(std::forward<F>(f))
+                    : nullptr
               )
         {
         }
 
-        // Move constructor
-        DUAL function(function&& other) noexcept
-            : callable_ptr(other.callable_ptr)
-        {
-            other.callable_ptr = nullptr;
-        }
+        ~function() = default;
 
-        // Copy assignment operator
-        DUAL function& operator=(const function& other)
+        function& operator=(const function& other)
         {
             if (this != &other) {
-                delete callable_ptr;
-                callable_ptr =
-                    other.callable_ptr ? other.callable_ptr->clone() : nullptr;
+                callable.reset(
+                    other.callable ? other.callable->clone() : nullptr
+                );
             }
             return *this;
         }
 
-        // Move assignment operator
-        DUAL function& operator=(function&& other) noexcept
+        function& operator=(function&& other) noexcept
         {
             if (this != &other) {
-                delete callable_ptr;
-                callable_ptr       = other.callable_ptr;
-                other.callable_ptr = nullptr;
+                callable       = std::move(other.callable);
+                other.callable = nullptr;
             }
             return *this;
         }
 
-        // Destructor
-        DUAL ~function() { delete callable_ptr; }
-
-        // Function call operator
-        DUAL R operator()(Args... args) const
+        function& operator=(std::nullptr_t) noexcept
         {
-            if (!callable_ptr) {
-                if constexpr (global::BuildPlatform == global::Platform::GPU) {
-                    return R();
-                }
-                else {
-                    throw bad_function_call();
-                }
+            callable.reset();
+            return *this;
+        }
+
+        R operator()(Args... args) const
+        {
+            if (!callable) {
+                throw std::bad_function_call();
             }
-            return callable_ptr->invoke(std::forward<Args>(args)...);
+            return callable->invoke(std::forward<Args>(args)...);
         }
 
-        // Conversion operator to bool
-        DUAL explicit operator bool() const noexcept
+        explicit operator bool() const noexcept { return callable != nullptr; }
+
+        bool operator==(std::nullptr_t) const noexcept
         {
-            return callable_ptr != nullptr;
+            return callable == nullptr;
         }
 
-        // Equality operator
-        DUAL bool operator==(const function& other) const noexcept
+        bool operator!=(std::nullptr_t) const noexcept
         {
-            return callable_ptr == other.callable_ptr;
+            return callable != nullptr;
         }
 
-        // Inequality operator
-        DUAL bool operator!=(const function& other) const noexcept
+        void swap(function& other) noexcept
         {
-            return !(*this == other);
+            std::swap(callable, other.callable);
         }
 
-        // Equality operator for nullptr
-        DUAL bool operator==(std::nullptr_t) const
-        {
-            return callable_ptr == nullptr;
-        }
+      private:
+        struct callable_base {
+            virtual ~callable_base()             = default;
+            virtual R invoke(Args... args) const = 0;
+            virtual callable_base* clone() const = 0;
+        };
 
-        // Inequality operator for nullptr
-        DUAL bool operator!=(std::nullptr_t) const
-        {
-            return callable_ptr != nullptr;
-        }
+        template <typename F, typename DecayType = std::decay_t<F>>
+        struct callable_impl : callable_base {
+            DecayType f;
 
-        // Support for std::optional
-        DUAL bool has_value() const noexcept { return callable_ptr != nullptr; }
+            callable_impl(DecayType&& f) : f(std::forward<DecayType>(f)) {}
 
-        DUAL void reset() noexcept
-        {
-            delete callable_ptr;
-            callable_ptr = nullptr;
-        }
+            callable_impl(const DecayType& f) : f(f) {}
+
+            R invoke(Args... args) const override
+            {
+                return f(std::forward<Args>(args)...);
+            }
+
+            callable_base* clone() const override
+            {
+                return new callable_impl<DecayType>(f);
+            }
+        };
+
+        util::smart_ptr<callable_base> callable;
     };
+
 }   // namespace simbi
 
-#endif
+#endif   // FUNCTIONAL_HPP
