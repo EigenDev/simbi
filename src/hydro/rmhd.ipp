@@ -219,6 +219,7 @@ DUAL real RMHD<dim>::curl_e(
     const luint nhat,
     const real ej[4],
     const real ek[4],
+    const auto& cell,
     const int side
 ) const
 {
@@ -226,31 +227,119 @@ DUAL real RMHD<dim>::curl_e(
         case Geometry::CARTESIAN: {
             if (nhat == 1) {
                 if (side == 0) {
-                    return invdx2 * (ek[IJ::NW] - ek[IJ::SW]) -
-                           invdx3 * (ej[IK::NW] - ej[IK::SW]);
+                    return cell.idx2() * (ek[IJ::NW] - ek[IJ::SW]) -
+                           cell.idx3() * (ej[IK::NW] - ej[IK::SW]);
                 }
-                return invdx2 * (ek[IJ::NE] - ek[IJ::SE]) -
-                       invdx3 * (ej[IK::NE] - ej[IK::SE]);
+                return cell.idx2() * (ek[IJ::NE] - ek[IJ::SE]) -
+                       cell.idx3() * (ej[IK::NE] - ej[IK::SE]);
             }
             else if (nhat == 2) {
                 if (side == 0) {
-                    return invdx3 * (ek[JK::NW] - ek[JK::SW]) -
-                           invdx1 * (ej[IJ::SE] - ej[IJ::SW]);
+                    return cell.idx3() * (ek[JK::NW] - ek[JK::SW]) -
+                           cell.idx1() * (ej[IJ::SE] - ej[IJ::SW]);
                 }
-                return invdx3 * (ek[JK::NE] - ek[JK::SE]) -
-                       invdx1 * (ej[IJ::NE] - ej[IJ::NW]);
+                return cell.idx3() * (ek[JK::NE] - ek[JK::SE]) -
+                       cell.idx1() * (ej[IJ::NE] - ej[IJ::NW]);
             }
             else {
                 if (side == 0) {
-                    return invdx1 * (ek[IK::SE] - ek[IK::SW]) -
-                           invdx2 * (ej[JK::SE] - ej[JK::SW]);
+                    return cell.idx1() * (ek[IK::SE] - ek[IK::SW]) -
+                           cell.idx2() * (ej[JK::SE] - ej[JK::SW]);
                 }
-                return invdx1 * (ek[IK::NE] - ek[IK::NW]) -
-                       invdx2 * (ej[JK::NE] - ej[JK::NW]);
+                return cell.idx1() * (ek[IK::NE] - ek[IK::NW]) -
+                       cell.idx2() * (ej[JK::NE] - ej[JK::NW]);
             }
         }
-        default:
-            return 0.0;
+        case Geometry::SPHERICAL: {
+            if (nhat == 1) {
+                // compute the curl in the radial direction
+                const real tr  = cell.x2R();
+                const real tl  = cell.x2L();
+                const real dth = tr - tl;
+                const real dph = cell.x3R() - cell.x3L();
+                if (side == 0) {
+                    return ((ek[IJ::NW] * std::sin(tr) -
+                             ek[IJ::SW] * std::sin(tr)) /
+                                dth -
+                            (ej[IK::NW] - ej[IK::SW]) / dph) /
+                           (cell.x1mean * std::sin(cell.x2mean));
+                }
+                return ((ek[IJ::NE] * std::sin(tr) - ek[IJ::SE] * std::sin(tr)
+                        ) / dth -
+                        (ej[IK::NE] - ej[IK::SE]) / dph) /
+                       (cell.x1mean * std::sin(cell.x2mean));
+            }
+            else if (nhat == 2) {
+                // compute the curl in the theta-hat direction
+                const real dr  = cell.x1R() - cell.x1L();
+                const real dph = cell.x3R() - cell.x3L();
+                if (side == 0) {
+                    return (-(ek[JK::NW] * cell.x1R() - ek[JK::SW] * cell.x1L()
+                            ) / dr +
+                            (ej[IJ::SE] - ej[IJ::SW]) /
+                                (std::sin(cell.x2mean) * dph)) /
+                           cell.x1mean;
+                }
+                return (-(ek[JK::NE] * cell.x1R() - ek[JK::SE] * cell.x1L()) /
+                            dr +
+                        (ej[IJ::NE] - ej[IJ::NW]) /
+                            (std::sin(cell.x2mean) * dph)) /
+                       cell.x1mean;
+            }
+            else {
+                // compute the curl in the phi-hat direction
+                const real dr  = cell.x1R() - cell.x1L();
+                const real dth = cell.x2R() - cell.x2L();
+                if (side == 0) {
+                    return ((ek[IK::SE] * cell.x1R() - ek[IK::SW] * cell.x1L()
+                            ) / dr -
+                            (ej[JK::SE] - ej[JK::SW]) / dth) /
+                           cell.x1mean;
+                }
+                return ((ek[IK::NE] * cell.x1R() - ek[IK::NW] * cell.x1L()) /
+                            dr -
+                        (ej[JK::NE] - ej[JK::NW]) / dth) /
+                       cell.x1mean;
+            }
+        }
+        default:   // cylindrical
+            if (nhat == 1) {
+                // curl in the radial direction
+                const real dph = cell.x2R() - cell.x2L();
+                const real dz  = cell.x3R() - cell.x3L();
+                if (side == 0) {
+                    return (ek[IJ::NW] - ek[IJ::SW]) / (dph * cell.x1mean) -
+                           (ej[IK::NW] - ej[IK::SW]) / dz;
+                }
+                return (ek[IJ::NE] - ek[IJ::SE]) / (dph * cell.x1mean) -
+                       (ej[IK::NE] - ej[IK::SE]) / dz;
+            }
+            else if (nhat == 2) {
+                // curl in the phi-hat direction
+                const real dr = cell.x1R() - cell.x1L();
+                const real dz = cell.x3R() - cell.x3L();
+                if (side == 0) {
+                    return (ek[JK::NW] - ek[JK::SW]) / dz -
+                           (ej[IJ::SE] - ej[IJ::SW]) / dr;
+                }
+                return (ek[JK::NE] - ek[JK::SE]) / dz -
+                       (ej[IJ::NE] - ej[IJ::NW]) / dr;
+            }
+            else {
+                // curl in the z-hat direction
+                const real dr  = cell.x1R() - cell.x1L();
+                const real dph = cell.x2R() - cell.x2L();
+                if (side == 0) {
+                    return ((ek[IK::SE] * cell.x1R() - ek[IK::SW] * cell.x1L()
+                            ) / dr -
+                            (ej[JK::SE] - ej[JK::SW]) / dph) /
+                           cell.x1mean;
+                }
+                return ((ek[IK::NE] * cell.x1R() - ek[IK::NW] * cell.x1L()) /
+                            dr -
+                        (ej[JK::NE] - ej[JK::NW]) / dph) /
+                       cell.x1mean;
+            }
     }
 }
 
@@ -2048,14 +2137,14 @@ void RMHD<dim>::advance()
             auto& b2c = cons[aid].b2();
             auto& b3c = cons[aid].b3();
 
-            b1L = b1_data[xlf] - dt * step * curl_e(1, e2, e3, 0);
-            b1R = b1_data[xrf] - dt * step * curl_e(1, e2, e3, 1);
+            b1L = b1_data[xlf] - dt * step * curl_e(1, e2, e3, cell, 0);
+            b1R = b1_data[xrf] - dt * step * curl_e(1, e2, e3, cell, 1);
 
-            b2L = b2_data[ylf] - dt * step * curl_e(2, e3, e1, 0);
-            b2R = b2_data[yrf] - dt * step * curl_e(2, e3, e1, 1);
+            b2L = b2_data[ylf] - dt * step * curl_e(2, e3, e1, cell, 0);
+            b2R = b2_data[yrf] - dt * step * curl_e(2, e3, e1, cell, 1);
 
-            b3L = b3_data[zlf] - dt * step * curl_e(3, e1, e2, 0);
-            b3R = b3_data[zrf] - dt * step * curl_e(3, e1, e2, 1);
+            b3L = b3_data[zlf] - dt * step * curl_e(3, e1, e2, cell, 0);
+            b3R = b3_data[zrf] - dt * step * curl_e(3, e1, e2, cell, 1);
 
             if constexpr (global::debug_mode) {
                 const auto divb = (b1R - b1L) * invdx1 + (b2R - b2L) * invdx2 +

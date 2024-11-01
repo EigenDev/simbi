@@ -151,6 +151,7 @@ namespace simbi {
             const luint nhat,
             const real ej[4],
             const real ek[4],
+            const auto& cell,
             const int side
         ) const;
 
