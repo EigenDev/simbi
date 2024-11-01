@@ -26,164 +26,6 @@ SRHD<dim>::SRHD(
 template <int dim>
 SRHD<dim>::~SRHD() = default;
 
-// Helpers
-template <int dim>
-DUAL constexpr real SRHD<dim>::get_x1face(const lint ii, const int side) const
-{
-    switch (x1_cell_spacing) {
-        case simbi::Cellspacing::LINSPACE: {
-            const real x1l = my_max<real>(x1min + (ii - 0.5) * dx1, x1min);
-            if (side == 0) {
-                return x1l;
-            }
-            return my_min<real>(x1l + dx1 * (ii == 0 ? 0.5 : 1.0), x1max);
-        }
-        default: {
-            const real x1l = my_max<real>(
-                x1min * std::pow(10.0, (ii - 0.5) * dlogx1),
-                x1min
-            );
-            if (side == 0) {
-                return x1l;
-            }
-            return my_min<real>(
-                x1l * std::pow(10.0, dlogx1 * (ii == 0 ? 0.5 : 1.0)),
-                x1max
-            );
-        }
-    }
-}
-
-template <int dim>
-DUAL constexpr real SRHD<dim>::get_x2face(const lint ii, const int side) const
-{
-    switch (x2_cell_spacing) {
-        case simbi::Cellspacing::LINSPACE: {
-            const real x2l = my_max<real>(x2min + (ii - 0.5) * dx2, x2min);
-            if (side == 0) {
-                return x2l;
-            }
-            return my_min<real>(x2l + dx2 * (ii == 0 ? 0.5 : 1.0), x2max);
-        }
-        default: {
-            const real x2l = my_max<real>(
-                x2min * std::pow(10.0, (ii - 0.5) * dlogx2),
-                x2min
-            );
-            if (side == 0) {
-                return x2l;
-            }
-            return my_min<real>(
-                x2l * std::pow(10.0, dlogx2 * (ii == 0 ? 0.5 : 1.0)),
-                x2max
-            );
-        }
-    }
-}
-
-template <int dim>
-DUAL constexpr real SRHD<dim>::get_x3face(const lint ii, const int side) const
-{
-    switch (x3_cell_spacing) {
-        case simbi::Cellspacing::LINSPACE: {
-            const real x3l = my_max<real>(x3min + (ii - 0.5) * dx3, x3min);
-            if (side == 0) {
-                return x3l;
-            }
-            return my_min<real>(x3l + dx3 * (ii == 0 ? 0.5 : 1.0), x3max);
-        }
-        default: {
-            const real x3l = my_max<real>(
-                x3min * std::pow(10.0, (ii - 0.5) * dlogx3),
-                x3min
-            );
-            if (side == 0) {
-                return x3l;
-            }
-            return my_min<real>(
-                x3l * std::pow(10.0, dlogx3 * (ii == 0 ? 0.5 : 1.0)),
-                x3max
-            );
-        }
-    }
-}
-
-template <int dim>
-DUAL constexpr real SRHD<dim>::get_x1_differential(const lint ii) const
-{
-    const real x1l   = get_x1face(ii, 0);
-    const real x1r   = get_x1face(ii, 1);
-    const real xmean = get_cell_centroid(x1r, x1l, geometry);
-    switch (geometry) {
-        case Geometry::SPHERICAL:
-            return xmean * xmean * (x1r - x1l);
-        default:
-            return xmean * (x1r - x1l);
-    }
-}
-
-template <int dim>
-DUAL constexpr real SRHD<dim>::get_x2_differential(const lint ii) const
-{
-    if constexpr (dim == 1) {
-        switch (geometry) {
-            case Geometry::SPHERICAL:
-                return 2.0;
-            default:
-                return 2.0 * M_PI;
-        }
-    }
-    else {
-        switch (geometry) {
-            case Geometry::SPHERICAL: {
-                const real x2l  = get_x2face(ii, 0);
-                const real x2r  = get_x2face(ii, 1);
-                const real dcos = std::cos(x2l) - std::cos(x2r);
-                return dcos;
-            }
-            default: {
-                return dx2;
-            }
-        }
-    }
-}
-
-template <int dim>
-DUAL constexpr real SRHD<dim>::get_x3_differential(const lint ii) const
-{
-    if constexpr (dim == 1) {
-        switch (geometry) {
-            case Geometry::SPHERICAL:
-                return 2.0 * M_PI;
-            default:
-                return 1.0;
-        }
-    }
-    else if constexpr (dim == 2) {
-        switch (geometry) {
-            case Geometry::PLANAR_CYLINDRICAL:
-                return 1.0;
-            default:
-                return 2.0 * M_PI;
-        }
-    }
-    else {
-        return dx3;
-    }
-}
-
-template <int dim>
-DUAL real
-SRHD<dim>::get_cell_volume(const lint ii, const lint jj, const lint kk) const
-{
-    // the volume in cartesian coordinates is only nominal
-    if (geometry == Geometry::CARTESIAN) {
-        return 1.0;
-    }
-    return get_x1_differential(ii) * get_x2_differential(jj) *
-           get_x3_differential(kk);
-}
-
 template <int dim>
 void SRHD<dim>::emit_troubled_cells() const
 {
@@ -195,15 +37,16 @@ void SRHD<dim>::emit_troubled_cells() const
             const lint ireal  = get_real_idx(ii, radius, xag);
             const lint jreal  = get_real_idx(jj, radius, yag);
             const lint kreal  = get_real_idx(kk, radius, zag);
-            const real x1l    = get_x1face(ireal, 0);
-            const real x1r    = get_x1face(ireal, 1);
-            const real x2l    = get_x2face(jreal, 0);
-            const real x2r    = get_x2face(jreal, 1);
-            const real x3l    = get_x3face(kreal, 0);
-            const real x3r    = get_x3face(kreal, 1);
-            const real x1mean = calc_any_mean(x1l, x1r, x1_cell_spacing);
-            const real x2mean = calc_any_mean(x2l, x2r, x2_cell_spacing);
-            const real x3mean = calc_any_mean(x3l, x3r, x3_cell_spacing);
+            const auto cell   = this->compute_mesh_factors(ireal, jreal, kreal);
+            const real x1l    = cell.x1L();
+            const real x1r    = cell.x1R();
+            const real x2l    = cell.x2L();
+            const real x2r    = cell.x2R();
+            const real x3l    = cell.x3L();
+            const real x3r    = cell.x3R();
+            const real x1mean = cell.calc_any_mean(x1l, x1r, x1_cell_spacing);
+            const real x2mean = cell.calc_any_mean(x2l, x2r, x2_cell_spacing);
+            const real x3mean = cell.calc_any_mean(x3l, x3r, x3_cell_spacing);
             const real s1     = cons[gid].momentum(1);
             const real s2     = cons[gid].momentum(2);
             const real s3     = cons[gid].momentum(3);
@@ -286,7 +129,8 @@ void SRHD<dim>::cons2prim()
             if (homolog) {
                 if constexpr (dim == 1) {
                     const auto ireal = get_real_idx(gid, radius, active_zones);
-                    const real dV    = get_cell_volume(ireal);
+                    const auto cell  = this->compute_mesh_factors(ireal);
+                    const real dV    = cell.get_cell_volume(ireal);
                     invdV            = 1.0 / dV;
                 }
                 else if constexpr (dim == 2) {
@@ -294,7 +138,8 @@ void SRHD<dim>::cons2prim()
                     const luint jj   = gid / nx;
                     const auto ireal = get_real_idx(ii, radius, xag);
                     const auto jreal = get_real_idx(jj, radius, yag);
-                    const real dV    = get_cell_volume(ireal, jreal);
+                    const auto cell  = this->compute_mesh_factors(ireal, jreal);
+                    const real dV    = cell.get_cell_volume(ireal, jreal);
                     invdV            = 1.0 / dV;
                 }
                 else {
@@ -304,8 +149,10 @@ void SRHD<dim>::cons2prim()
                     const auto ireal = get_real_idx(ii, radius, xag);
                     const auto jreal = get_real_idx(jj, radius, yag);
                     const auto kreal = get_real_idx(kk, radius, zag);
-                    const real dV    = get_cell_volume(ireal, jreal, kreal);
-                    invdV            = 1.0 / dV;
+                    const auto cell =
+                        this->compute_mesh_factors(ireal, jreal, kreal);
+                    const real dV = cell.get_cell_volume(ireal, jreal, kreal);
+                    invdV         = 1.0 / dV;
                 }
             }
 
@@ -512,6 +359,8 @@ void SRHD<dim>::adapt_dt()
         const luint jj    = axid<dim, BlkAx::J>(gid, nx, ny, kk);
         const luint ii    = axid<dim, BlkAx::I>(gid, nx, ny, kk);
         const luint ireal = get_real_idx(ii, radius, xag);
+        const luint jreal = get_real_idx(jj, radius, yag);
+        const luint kreal = get_real_idx(kk, radius, zag);
         // Left/Right wave speeds
         if constexpr (dt_type == TIMESTEP_TYPE::ADAPTIVE) {
             const real rho = prims[gid].rho();
@@ -545,9 +394,10 @@ void SRHD<dim>::adapt_dt()
             }
         }
 
-        const real x1l = get_x1face(ireal, 0);
-        const real x1r = get_x1face(ireal, 1);
-        const real dx1 = x1r - x1l;
+        const auto cell = this->compute_mesh_factors(ireal, jreal, kreal);
+        const real x1l  = cell.x1L();
+        const real x1r  = cell.x1R();
+        const real dx1  = x1r - x1l;
         switch (geometry) {
             case simbi::Geometry::CARTESIAN:
                 if constexpr (dim == 1) {
@@ -572,18 +422,16 @@ void SRHD<dim>::adapt_dt()
                     cfl_dt = std::min({dx1 / (std::max(v1p, v1m))});
                 }
                 else if constexpr (dim == 2) {
-                    const real rmean =
-                        get_cell_centroid(x1r, x1l, simbi::Geometry::SPHERICAL);
-                    cfl_dt = std::min(
+                    const real rmean = cell.x1mean;
+                    cfl_dt           = std::min(
                         {dx1 / (std::max(v1p, v1m)),
-                         rmean * dx2 / (std::max(v2p, v2m))}
+                                   rmean * dx2 / (std::max(v2p, v2m))}
                     );
                 }
                 else {
-                    const real x2l = get_x2face(jj, 0);
-                    const real x2r = get_x2face(jj, 1);
-                    const real rmean =
-                        get_cell_centroid(x1r, x1l, simbi::Geometry::SPHERICAL);
+                    const real x2l   = cell.x2L();
+                    const real x2r   = cell.x2R();
+                    const real rmean = cell.x1mean;
                     const real th    = 0.5 * (x2r + x2l);
                     const real rproj = rmean * std::sin(th);
                     cfl_dt           = std::min(
@@ -609,29 +457,21 @@ void SRHD<dim>::adapt_dt()
                         }
 
                         default: {
-                            const real rmean = get_cell_centroid(
-                                x1r,
-                                x1l,
-                                simbi::Geometry::CYLINDRICAL
-                            );
-                            cfl_dt = std::min(
+                            const real rmean = cell.x1mean;
+                            cfl_dt           = std::min(
                                 {dx1 / (std::max(v1p, v1m)),
-                                 rmean * dx2 / (std::max(v2p, v2m))}
+                                           rmean * dx2 / (std::max(v2p, v2m))}
                             );
                             break;
                         }
                     }
                 }
                 else {
-                    const real rmean = get_cell_centroid(
-                        x1r,
-                        x1l,
-                        simbi::Geometry::CYLINDRICAL
-                    );
-                    cfl_dt = std::min(
+                    const real rmean = cell.x1mean;
+                    cfl_dt           = std::min(
                         {dx1 / (std::max(v1p, v1m)),
-                         rmean * dx2 / (std::max(v2p, v2m)),
-                         dx3 / (std::max(v3p, v3m))}
+                                   rmean * dx2 / (std::max(v2p, v2m)),
+                                   dx3 / (std::max(v3p, v3m))}
                     );
                 }
                 break;
@@ -1081,22 +921,21 @@ DUAL SRHD<dim>::conserved_t SRHD<dim>::calc_hllc_flux(
 //                                           SOURCE TERMS
 //===================================================================================================================
 template <int dim>
-DUAL SRHD<dim>::conserved_t
-SRHD<dim>::hydro_sources(const luint ii, const luint jj, const luint kk) const
+DUAL SRHD<dim>::conserved_t SRHD<dim>::hydro_sources(const auto& cell) const
 {
     if (null_sources) {
         return conserved_t{};
     }
-    const auto x1L = get_x1face(ii, 0);
-    const auto x1R = get_x1face(ii, 1);
-    const auto x2L = get_x2face(jj, 0);
-    const auto x2R = get_x2face(jj, 1);
-    const auto x3L = get_x3face(kk, 0);
-    const auto x3R = get_x3face(kk, 1);
+    const auto x1L = cell.x1L();
+    const auto x1R = cell.x1R();
+    const auto x2L = cell.x2L();
+    const auto x2R = cell.x2R();
+    const auto x3L = cell.x3L();
+    const auto x3R = cell.x3R();
 
-    const auto x1c = get_cell_centroid(x1R, x1L, geometry);
-    const auto x2c = calc_any_mean(x2R, x2L, x2_cell_spacing);
-    const auto x3c = calc_any_mean(x3R, x3L, x3_cell_spacing);
+    const auto x1c = cell.get_cell_centroid(x1R, x1L);
+    const auto x2c = cell.calc_any_mean(x2R, x2L, x2_cell_spacing);
+    const auto x3c = cell.calc_any_mean(x3R, x3L, x3_cell_spacing);
 
     conserved_t res;
     if constexpr (dim == 1) {
@@ -1121,28 +960,26 @@ SRHD<dim>::hydro_sources(const luint ii, const luint jj, const luint kk) const
 template <int dim>
 DUAL SRHD<dim>::conserved_t SRHD<dim>::gravity_sources(
     const SRHD<dim>::primitive_t& prims,
-    const luint ii,
-    const luint jj,
-    const luint kk
+    const auto& cell
 ) const
 {
     if (null_gravity) {
         return conserved_t{};
     }
-    const auto x1L = get_x1face(ii, 0);
-    const auto x1R = get_x1face(ii, 1);
-    const auto x1c = get_cell_centroid(x1R, x1L, geometry);
+    const auto x1L = cell.x1L();
+    const auto x1R = cell.x1R();
+    const auto x1c = cell.get_cell_centroid(x1R, x1L);
 
     conserved_t res;
     // gravity only changes the momentum and energy
     if constexpr (dim > 1) {
-        const auto x2L = get_x2face(jj, 0);
-        const auto x2R = get_x2face(jj, 1);
-        const auto x2c = calc_any_mean(x2R, x2L, x2_cell_spacing);
+        const auto x2L = cell.x2L();
+        const auto x2R = cell.x2R();
+        const auto x2c = cell.calc_any_mean(x2R, x2L, x2_cell_spacing);
         if constexpr (dim > 2) {
-            const auto x3L = get_x3face(kk, 0);
-            const auto x3R = get_x3face(kk, 1);
-            const auto x3c = calc_any_mean(x3R, x3L, x3_cell_spacing);
+            const auto x3L = cell.x3L();
+            const auto x3R = cell.x3R();
+            const auto x3c = cell.calc_any_mean(x3R, x3L, x3_cell_spacing);
             for (int q = 1; q < dimensions + 1; q++) {
                 res[q] = gsources[q](x1c, x2c, x3c, t);
             }
@@ -1240,8 +1077,9 @@ void SRHD<dim>::advance()
             );
         }
 
-        const real x1l    = get_x1face(ii, 0);
-        const real x1r    = get_x1face(ii, 1);
+        const auto cell   = this->compute_mesh_factors(ii, jj, kk);
+        const real x1l    = cell.x1L();
+        const real x1r    = cell.x1R();
         const real vfaceL = (homolog) ? x1l * hubble_param : hubble_param;
         const real vfaceR = (homolog) ? x1r * hubble_param : hubble_param;
         const real vfs[2] = {vfaceL, vfaceR};
@@ -1320,260 +1158,34 @@ void SRHD<dim>::advance()
             }
         }
 
-        // TODO: Implement functional source terms
-        auto source_terms = hydro_sources(ii, jj, kk);
+        // TODO: implement functional source and gravity
+        const auto source_terms = hydro_sources(cell);
         // Gravity
-        auto gravity = gravity_sources(prb[tid], ii, jj, kk);
+        const auto gravity = gravity_sources(prb[tid], cell);
+
+        // geometric source terms
+        const auto geom_source = cell.geom_sources(prb[tid], ii, jj, kk);
 
         if constexpr (dim == 1) {
-            switch (geometry) {
-                case simbi::Geometry::CARTESIAN: {
-                    cons[ia] -= ((fri[RF] - fri[LF]) * invdx1 - source_terms -
-                                 gravity) *
-                                dt * step;
-                    break;
-                }
-                default: {
-                    const real rlf   = x1l + vfaceL * step * dt;
-                    const real rrf   = x1r + vfaceR * step * dt;
-                    const real rmean = get_cell_centroid(rrf, rlf, geometry);
-                    const real sR    = 4.0 * M_PI * rrf * rrf;
-                    const real sL    = 4.0 * M_PI * rlf * rlf;
-                    const real dV    = 4.0 * M_PI * rmean * rmean * (rrf - rlf);
-                    const real factor = (mesh_motion) ? dV : 1;
-                    const real pc     = prb[txa].p();
-                    const real invdV  = 1.0 / dV;
-                    const auto geom_sources =
-                        conserved_t{0.0, pc * (sR - sL) * invdV, 0.0};
-
-                    cons[ia] -= ((fri[RF] * sR - fri[LF] * sL) * invdV -
-                                 geom_sources - source_terms - gravity) *
-                                step * dt * factor;
-                    break;
-                }
-            }   // end switch
+            cons[aid] -=
+                ((fri[RF] * cell.a1R() - fri[LF] * cell.a1L()) * cell.idV1() -
+                 source_terms - gravity - geom_source) *
+                dt * step;
         }
         else if constexpr (dim == 2) {
-            switch (geometry) {
-                case simbi::Geometry::CARTESIAN: {
-                    cons[aid] -= ((fri[RF] - fri[LF]) * invdx1 +
-                                  (gri[RF] - gri[LF]) * invdx2 - source_terms -
-                                  gravity) *
-                                 step * dt;
-                    break;
-                }
-
-                case simbi::Geometry::SPHERICAL: {
-                    const real rl    = x1l + vfaceL * step * dt;
-                    const real rr    = x1r + vfaceR * step * dt;
-                    const real rmean = get_cell_centroid(rr, rl, geometry);
-                    const real tl =
-                        my_max<real>(x2min + (jj - 0.5) * dx2, x2min);
-                    const real tr =
-                        my_min<real>(tl + dx2 * (jj == 0 ? 0.5 : 1.0), x2max);
-                    const real dcos = std::cos(tl) - std::cos(tr);
-                    const real dV   = 2.0 * M_PI * (1.0 / 3.0) *
-                                    (rr * rr * rr - rl * rl * rl) * dcos;
-                    const real invdV = 1.0 / dV;
-                    const real s1R   = 2.0 * M_PI * rr * rr * dcos;
-                    const real s1L   = 2.0 * M_PI * rl * rl * dcos;
-                    const real s2R =
-                        2.0 * M_PI * 0.5 * (rr * rr - rl * rl) * std::sin(tr);
-                    const real s2L =
-                        2.0 * M_PI * 0.5 * (rr * rr - rl * rl) * std::sin(tl);
-                    const real factor = (mesh_motion) ? dV : 1;
-
-                    const real rhoc = prb[tid].rho();
-                    const real uc   = prb[tid].get_v1();
-                    const real vc   = prb[tid].get_v2();
-                    const real pc   = prb[tid].p();
-                    const real hc   = prb[tid].enthalpy(gamma);
-                    const real gam2 = prb[tid].lorentz_factor_squared();
-
-                    const conserved_t geom_source = {
-                      0.0,
-                      (rhoc * hc * gam2 * vc * vc) / rmean +
-                          pc * (s1R - s1L) * invdV,
-                      -(rhoc * hc * gam2 * uc * vc) / rmean +
-                          pc * (s2R - s2L) * invdV,
-                      0.0
-                    };
-
-                    cons[aid] -= ((fri[RF] * s1R - fri[LF] * s1L) * invdV +
-                                  (gri[RF] * s2R - gri[LF] * s2L) * invdV -
-                                  geom_source - source_terms - gravity) *
-                                 dt * step * factor;
-                    break;
-                }
-                case simbi::Geometry::PLANAR_CYLINDRICAL: {
-                    const real rl    = x1l + vfaceL * step * dt;
-                    const real rr    = x1r + vfaceR * step * dt;
-                    const real rmean = get_cell_centroid(
-                        rr,
-                        rl,
-                        simbi::Geometry::PLANAR_CYLINDRICAL
-                    );
-                    // const real tl           = my_max(x2min +
-                    // (jj - 0.5) * dx2 , x2min); const real tr =
-                    // my_min(tl + dx2 * (jj == 0 ? 0.5 : 1.0),
-                    // x2max);
-                    const real dV    = rmean * (rr - rl) * dx2;
-                    const real invdV = 1.0 / dV;
-                    const real s1R   = rr * dx2;
-                    const real s1L   = rl * dx2;
-                    const real s2R   = (rr - rl);
-                    const real s2L   = (rr - rl);
-
-                    // Grab central primitives
-                    const real rhoc = prb[tid].rho();
-                    const real uc   = prb[tid].get_v1();
-                    const real vc   = prb[tid].get_v2();
-                    const real pc   = prb[tid].p();
-
-                    const real hc   = prb[tid].enthalpy(gamma);
-                    const real gam2 = prb[tid].lorentz_factor_squared();
-
-                    const conserved_t geom_source = {
-                      0.0,
-                      (rhoc * hc * gam2 * vc * vc) / rmean +
-                          pc * (s1R - s1L) * invdV,
-                      -(rhoc * hc * gam2 * uc * vc) / rmean,
-                      0.0
-                    };
-                    cons[aid] -= ((fri[RF] * s1R - fri[LF] * s1L) * invdV +
-                                  (gri[RF] * s2R - gri[LF] * s2L) * invdV -
-                                  geom_source - source_terms - gravity) *
-                                 dt * step;
-                    break;
-                }
-                default: {
-                    const real rl    = x1l + vfaceL * step * dt;
-                    const real rr    = x1r + vfaceR * step * dt;
-                    const real rmean = get_cell_centroid(
-                        rl,
-                        rr,
-                        simbi::Geometry::AXIS_CYLINDRICAL
-                    );
-                    const real dV    = rmean * (rr - rl) * dx2;
-                    const real invdV = 1.0 / dV;
-                    const real s1R   = rr * dx2;
-                    const real s1L   = rl * dx2;
-                    const real s2R   = rmean * (rr - rl);
-                    const real s2L   = rmean * (rr - rl);
-
-                    // Grab central primitives
-                    const real pc = prb[tid].p();
-                    const auto geom_source =
-                        conserved_t{0.0, pc * (s1R - s1L) * invdV, 0.0, 0.0};
-                    cons[aid] -= ((fri[RF] * s1R - fri[LF] * s1L) * invdV +
-                                  (gri[RF] * s2R - gri[LF] * s2L) * invdV -
-                                  geom_source - source_terms - gravity) *
-                                 dt * step;
-                    break;
-                }
-            }   // end switch
+            cons[aid] -=
+                ((fri[RF] * cell.a1R() - fri[LF] * cell.a1L()) * cell.idV1() +
+                 (gri[RF] * cell.a2R() - gri[LF] * cell.a2L()) * cell.idV2() -
+                 source_terms - gravity - geom_source) *
+                dt * step;
         }
         else {
-            switch (geometry) {
-                case simbi::Geometry::CARTESIAN: {
-                    cons[aid] -= ((fri[RF] - fri[LF]) * invdx1 +
-                                  (gri[RF] - gri[LF]) * invdx2 +
-                                  (hri[RF] - hri[LF]) * invdx3 - source_terms -
-                                  gravity) *
-                                 dt * step;
-                    break;
-                }
-                case simbi::Geometry::SPHERICAL: {
-                    const real rl = x1l + vfaceL * step * dt;
-                    const real rr = x1r + vfaceR * step * dt;
-                    const real tl = get_x2face(jj, 0);
-                    const real tr = get_x2face(jj, 1);
-                    const real ql = get_x3face(kk, 0);
-                    const real qr = get_x3face(kk, 1);
-                    const real rmean =
-                        get_cell_centroid(rr, rl, simbi::Geometry::SPHERICAL);
-                    const real s1R    = rr * rr;
-                    const real s1L    = rl * rl;
-                    const real s2R    = std::sin(tr);
-                    const real s2L    = std::sin(tl);
-                    const real thmean = 0.5 * (tl + tr);
-                    const real sint   = std::sin(thmean);
-                    const real dV1    = rmean * rmean * (rr - rl);
-                    const real dV2    = rmean * sint * (tr - tl);
-                    const real dV3    = rmean * sint * (qr - ql);
-                    const real cot    = std::cos(thmean) / sint;
-
-                    // Grab central primitives
-                    const real rhoc = prb[tid].rho();
-                    const real uc   = prb[tid].get_v1();
-                    const real vc   = prb[tid].get_v2();
-                    const real wc   = prb[tid].get_v3();
-                    const real pc   = prb[tid].p();
-
-                    const real hc   = prb[tid].enthalpy(gamma);
-                    const real gam2 = prb[tid].lorentz_factor_squared();
-
-                    const auto geom_source = conserved_t{
-                      0.0,
-                      (rhoc * hc * gam2 * (vc * vc + wc * wc)) / rmean +
-                          pc * (s1R - s1L) / dV1,
-                      rhoc * hc * gam2 * (wc * wc * cot - uc * vc) / rmean +
-                          pc * (s2R - s2L) / dV2,
-                      -rhoc * hc * gam2 * wc * (uc + vc * cot) / rmean,
-                      0.0
-                    };
-                    cons[aid] -= ((fri[RF] * s1R - fri[LF] * s1L) / dV1 +
-                                  (gri[RF] * s2R - gri[LF] * s2L) / dV2 +
-                                  (hri[RF] - hri[LF]) / dV3 - geom_source -
-                                  source_terms - gravity) *
-                                 dt * step;
-                    break;
-                }
-                default: {
-                    const real rl = x1l + vfaceL * step * dt;
-                    const real rr = x1r + vfaceR * step * dt;
-                    const real ql = get_x2face(jj, 0);
-                    const real qr = get_x2face(jj, 1);
-                    const real zl = get_x3face(kk, 0);
-                    const real zr = get_x3face(kk, 1);
-                    const real rmean =
-                        get_cell_centroid(rr, rl, simbi::Geometry::CYLINDRICAL);
-                    const real s1R = rr * (zr - zl) * (qr - ql);
-                    const real s1L = rl * (zr - zl) * (qr - ql);
-                    const real s2R = (rr - rl) * (zr - zl);
-                    const real s2L = (rr - rl) * (zr - zl);
-                    const real s3L = rmean * (rr - rl) * (zr - zl);
-                    const real s3R = s3L;
-                    // const real thmean = 0.5 * (tl + tr);
-                    const real dV = rmean * (rr - rl) * (zr - zl) * (qr - ql);
-                    const real invdV = 1.0 / dV;
-
-                    // Grab central primitives
-                    const real rhoc = prb[tid].rho();
-                    const real uc   = prb[tid].get_v1();
-                    const real vc   = prb[tid].get_v2();
-                    // const real wc   = prb[tid].get_v3();
-                    const real pc = prb[tid].p();
-
-                    const real hc   = prb[tid].enthalpy(gamma);
-                    const real gam2 = prb[tid].lorentz_factor_squared();
-
-                    const auto geom_source = conserved_t{
-                      0.0,
-                      (rhoc * hc * gam2 * (vc * vc)) / rmean +
-                          pc * (s1R - s1L) * invdV,
-                      -(rhoc * hc * gam2 * uc * vc) / rmean,
-                      0.0,
-                      0.0
-                    };
-                    cons[aid] -= ((fri[RF] * s1R - fri[LF] * s1L) * invdV +
-                                  (gri[RF] * s2R - gri[LF] * s2L) * invdV +
-                                  (hri[RF] * s3R - hri[LF] * s3L) * invdV -
-                                  geom_source - source_terms) *
-                                 dt * step;
-                    break;
-                }
-            }   // end switch
+            cons[aid] -=
+                ((fri[RF] * cell.a1R() - fri[LF] * cell.a1L()) * cell.idV1() +
+                 (gri[RF] * cell.a2R() - gri[LF] * cell.a2L()) * cell.idV2() +
+                 (hri[RF] * cell.a3R() - hri[LF] * cell.a3L()) * cell.idV3() -
+                 source_terms - gravity - geom_source) *
+                dt * step;
         }
     });
 }

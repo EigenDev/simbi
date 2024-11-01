@@ -771,14 +771,28 @@ struct anyPrimitive : generic_hydro::anyHydro<dim, anyPrimitive<dim, R>, R> {
         }
     }
 
+    DUAL constexpr real bpressure() const
+    {
+        return bsquared() / lorentz_factor_squared() + vdotb() * vdotb();
+    }
+
     DUAL constexpr real total_pressure() const
     {
         if constexpr (R == Regime::RMHD) {
-            return p() + 0.5 * (bsquared() / lorentz_factor_squared() +
-                                vdotb() * vdotb());
+            return p() + 0.5 * bpressure();
         }
         else {
             return p();
+        }
+    }
+
+    DUAL constexpr real enthalpy_density(const real gamma) const
+    {
+        if constexpr (R == Regime::RMHD) {
+            return rho() * enthalpy(gamma) + bpressure();
+        }
+        else {
+            return rho() * enthalpy(gamma);
         }
     }
 

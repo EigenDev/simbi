@@ -314,6 +314,20 @@ namespace simbi {
             hydro_class->set_riemann_solver();
         }
 
+        /**
+         * @brief set the face area function pointer on
+         * the device or the host depending on the platform
+         *
+         * @tparam T
+         * @param hydro_class
+         * @return void
+         */
+        template <typename T, typename U>
+        KERNEL void hybrid_set_mesh_funcs(const U& parent)
+        {
+            T::initialize_function_pointers(parent);
+        }
+
         //-------------------Inline for Speed -------------------------
         /**
          * @brief compute the minmod slope limiter
@@ -356,32 +370,6 @@ namespace simbi {
             }
             return static_cast<real>(0.0);
         };
-
-        /**
-         * @brief calculate the mean between any two values based on cell
-         * spacing
-         *
-         * @param a
-         * @param b
-         * @param cellspacing
-         * @return arithmetic or geometric mean between a and b
-         */
-        STATIC
-        real calc_any_mean(
-            const real a,
-            const real b,
-            const simbi::Cellspacing cellspacing
-        )
-        {
-            switch (cellspacing) {
-                case simbi::Cellspacing::LOGSPACE:
-                    return std::sqrt(a * b);
-                case simbi::Cellspacing::LINSPACE:
-                    return 0.5 * (a + b);
-                default:
-                    return INFINITY;
-            }
-        }
 
         // the plm gradient for generic hydro
         template <typename T>
@@ -697,32 +685,6 @@ namespace simbi {
                 return ii * nk * ny + jj * nk + kk;
             }
             return kk * nx * ny + jj * nx + ii;
-        }
-
-        /**
-         * @brief Get the geometric cell centroid for spherical or cylindrical
-         * mesh
-         *
-         * @param xr left coordinates
-         * @param xl right coordinate
-         * @param geometry geometry of state
-         * @return cell centroid
-         */
-        STATIC
-        auto get_cell_centroid(
-            const real xr,
-            const real xl,
-            const simbi::Geometry geometry
-        )
-        {
-            switch (geometry) {
-                case Geometry::SPHERICAL:
-                    return 0.75 * (xr * xr * xr * xr - xl * xl * xl * xl) /
-                           (xr * xr * xr - xl * xl * xl);
-                default:
-                    return (2.0 / 3.0) * (xr * xr * xr - xl * xl * xl) /
-                           (xr * xr - xl * xl);
-            }
         }
 
         /**

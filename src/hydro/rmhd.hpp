@@ -24,6 +24,7 @@
 #include "common/enums.hpp"           // for TIMESTEP_TYPE
 #include "common/helpers.hpp"         // for my_min, my_max, ...
 #include "common/hydro_structs.hpp"   // for Conserved, Primitive
+#include "common/mesh.hpp"            // for Mesh
 #include "util/exec_policy.hpp"       // for ExecutionPolicy
 #include "util/ndarray.hpp"           // for ndarray
 #include <functional>                 // for function
@@ -33,10 +34,10 @@
 
 namespace simbi {
     template <int dim>
-    struct RMHD : public HydroBase {
-        constexpr static int dimensions          = dim;
-        constexpr static int nvars               = dim + 3;
-        constexpr static std::string_view regime = "srmhd";
+    struct RMHD : public HydroBase, public Mesh<RMHD<dim>, dim> {
+        static constexpr int dimensions          = dim;
+        static constexpr int nvars               = dim + 3;
+        static constexpr std::string_view regime = "srmhd";
 
         // set the primitive and conservative types at compile time
         using primitive_t   = anyPrimitive<dim, Regime::RMHD>;
@@ -62,8 +63,6 @@ namespace simbi {
         ndarray<primitive_t> prims;
         ndarray<conserved_t> cons, fri, gri, hri;
         ndarray<real> dt_min, bstag1, bstag2, bstag3;
-        bool scalar_all_zeros;
-        luint nzone_edges;
 
         RMHD();
         RMHD(
@@ -148,24 +147,6 @@ namespace simbi {
             const std::vector<std::optional<function_t>>& gravity_sources
         );
 
-        DUAL constexpr real get_x1face(const lint ii, const int side) const;
-
-        DUAL constexpr real get_x2face(const lint ii, const int side) const;
-
-        DUAL constexpr real get_x3face(const lint ii, const int side) const;
-
-        DUAL constexpr real get_x1_differential(const lint ii) const;
-
-        DUAL constexpr real get_x2_differential(const lint ii) const;
-
-        DUAL constexpr real get_x3_differential(const lint ii) const;
-
-        DUAL real get_cell_volume(
-            const lint ii,
-            const lint jj = 0,
-            const lint kk = 0
-        ) const;
-
         DUAL real curl_e(
             const luint nhat,
             const real ej[4],
@@ -222,15 +203,10 @@ namespace simbi {
             primitive_t& prC
         ) const;
 
-        DUAL conserved_t
-        hydro_sources(const luint ii, const luint jj, const luint kk) const;
+        DUAL conserved_t hydro_sources(const auto& cell) const;
 
-        DUAL conserved_t gravity_sources(
-            const primitive_t& prims,
-            const luint ii,
-            const luint jj,
-            const luint kk
-        ) const;
+        DUAL conserved_t
+        gravity_sources(const primitive_t& prims, const auto& cell) const;
     };
 
 }   // namespace simbi

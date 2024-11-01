@@ -23,6 +23,7 @@
 #include "build_options.hpp"          // for real, DUAL, lint, luint
 #include "common/helpers.hpp"         // for my_min, my_max, ...
 #include "common/hydro_structs.hpp"   // for Conserved, Primitive
+#include "common/mesh.hpp"            // for Mesh
 #include "util/exec_policy.hpp"       // for ExecutionPolicy
 #include "util/ndarray.hpp"           // for ndarray
 #include <functional>                 // for function
@@ -32,10 +33,10 @@
 
 namespace simbi {
     template <int dim>
-    struct Newtonian : public HydroBase {
-        constexpr static int dimensions          = dim;
-        constexpr static int nvars               = dim + 3;
-        constexpr static std::string_view regime = "classical";
+    struct Newtonian : public HydroBase, public Mesh<Newtonian<dim>, dim> {
+        static constexpr int dimensions          = dim;
+        static constexpr int nvars               = dim + 3;
+        static constexpr std::string_view regime = "classical";
         // set the primitive and conservative types at compile time
         using primitive_t = anyPrimitive<dim, Regime::NEWTONIAN>;
         using conserved_t = anyConserved<dim, Regime::NEWTONIAN>;
@@ -59,7 +60,6 @@ namespace simbi {
         ndarray<primitive_t> prims;
         ndarray<conserved_t> cons;
         ndarray<real> dt_min;
-        bool scalar_all_zeros;
 
         // Constructors
         Newtonian();
@@ -125,24 +125,6 @@ namespace simbi {
             const std::vector<std::optional<function_t>>& gravity_sources
         );
 
-        DUAL constexpr real get_x1face(const lint ii, const int side) const;
-
-        DUAL constexpr real get_x2face(const lint ii, const int side) const;
-
-        DUAL constexpr real get_x3face(const lint ii, const int side) const;
-
-        DUAL constexpr real get_x1_differential(const lint ii) const;
-
-        DUAL constexpr real get_x2_differential(const lint ii) const;
-
-        DUAL constexpr real get_x3_differential(const lint ii) const;
-
-        DUAL real get_cell_volume(
-            const lint ii,
-            const lint jj = 0,
-            const lint kk = 0
-        ) const;
-
         void emit_troubled_cells() const;
 
         void offload()
@@ -157,15 +139,10 @@ namespace simbi {
             troubled_cells.copyToGpu();
         }
 
-        DUAL conserved_t
-        hydro_sources(const luint ii, const luint jj, const luint kk) const;
+        DUAL conserved_t hydro_sources(const auto& cell) const;
 
-        DUAL conserved_t gravity_sources(
-            const primitive_t& prims,
-            const luint ii,
-            const luint jj,
-            const luint kk
-        ) const;
+        DUAL conserved_t
+        gravity_sources(const primitive_t& prims, const auto& cell) const;
     };
 }   // namespace simbi
 
