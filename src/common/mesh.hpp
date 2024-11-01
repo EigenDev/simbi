@@ -524,23 +524,20 @@ struct Mesh {
             const luint kk
         ) const
         {
-
-            const real sint = std::sin(x2mean);
-            const real cot  = std::cos(x2mean) / sint;
-
             // Grab central primitives
-            const real v1    = prb.get_v1();
-            const real v2    = prb.get_v2();
-            const real v3    = prb.get_v3();
             const real pt    = prb.p();
             const real wt    = prb.enthalpy_density(parent.derived().gamma);
             const real gam2  = prb.lorentz_factor_squared();
             const real wgam2 = wt * gam2;
 
-            const auto rsource = pt * (a1R() - a1L()) / dV +
-                                 (wgam2 * (v2 * v2 + v3 * v3)) / x1mean;
-
             if constexpr (Derived::dimensions == 3) {
+                const real sint    = std::sin(x2mean);
+                const real cot     = std::cos(x2mean) / sint;
+                const real v1      = prb.get_v1();
+                const real v2      = prb.get_v2();
+                const real v3      = prb.get_v3();
+                const auto rsource = pt * (a1R() - a1L()) / dV +
+                                     (wgam2 * (v2 * v2 + v3 * v3)) / x1mean;
                 const auto tsource =
                     pt * (a2R() - a2L()) / dV +
                     (wgam2 * (cot * v3 * v3 - v1 * v2)) / x1mean;
@@ -554,8 +551,12 @@ struct Mesh {
                 };
             }
             else if constexpr (Derived::dimensions == 2) {
+                const real v1 = prb.get_v1();
+                const real v2 = prb.get_v2();
+                const auto rsource =
+                    pt * (a1R() - a1L()) / dV + (wgam2 * v2 * v2) / x1mean;
                 const auto tsource =
-                    pt * (a2R() - a2L()) / dV - (wgam2 * v1 * v2) / x1mean;
+                    pt * (a2R() - a2L()) / dV - (wgam2 * (v1 * v2)) / x1mean;
                 return typename Derived::conserved_t{
                   0.0,
                   rsource,
@@ -564,6 +565,7 @@ struct Mesh {
                 };
             }
             else {
+                const auto rsource = pt * (a1R() - a1L()) / dV;
                 return typename Derived::conserved_t{0.0, rsource, 0.0};
             }
         }
@@ -894,7 +896,11 @@ struct Mesh {
         const luint kk = 0
     ) const
     {
-        initialize_cell_params();
+        static bool initialized = false;
+        if (!initialized) {
+            initialize_cell_params();
+            initialized = true;
+        }
         CellParams cell(*this);
         cell.calculate_normals(ii, jj, kk);
         cell.calculate_areas(ii, jj, kk);
