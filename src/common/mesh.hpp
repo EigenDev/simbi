@@ -890,11 +890,8 @@ struct Mesh {
 
     void initialize_cell_params() const { CellParams::set_mesh_funcs(*this); }
 
-    DUAL CellParams compute_mesh_factors(
-        const luint ii,
-        const luint jj = 0,
-        const luint kk = 0
-    ) const
+    DUAL CellParams
+    cell_factors(const luint ii, const luint jj = 0, const luint kk = 0) const
     {
         static bool initialized = false;
         if (!initialized) {

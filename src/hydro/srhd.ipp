@@ -37,7 +37,7 @@ void SRHD<dim>::emit_troubled_cells() const
             const lint ireal  = get_real_idx(ii, radius, xag);
             const lint jreal  = get_real_idx(jj, radius, yag);
             const lint kreal  = get_real_idx(kk, radius, zag);
-            const auto cell   = this->compute_mesh_factors(ireal, jreal, kreal);
+            const auto cell   = this->cell_factors(ireal, jreal, kreal);
             const real x1l    = cell.x1L();
             const real x1r    = cell.x1R();
             const real x2l    = cell.x2L();
@@ -129,8 +129,8 @@ void SRHD<dim>::cons2prim()
             if (homolog) {
                 if constexpr (dim == 1) {
                     const auto ireal = get_real_idx(gid, radius, active_zones);
-                    const auto cell  = this->compute_mesh_factors(ireal);
-                    const real dV    = cell.get_cell_volume(ireal);
+                    const auto cell  = this->cell_factors(ireal);
+                    const real dV    = cell.dV;
                     invdV            = 1.0 / dV;
                 }
                 else if constexpr (dim == 2) {
@@ -138,8 +138,8 @@ void SRHD<dim>::cons2prim()
                     const luint jj   = gid / nx;
                     const auto ireal = get_real_idx(ii, radius, xag);
                     const auto jreal = get_real_idx(jj, radius, yag);
-                    const auto cell  = this->compute_mesh_factors(ireal, jreal);
-                    const real dV    = cell.get_cell_volume(ireal, jreal);
+                    const auto cell  = this->cell_factors(ireal, jreal);
+                    const real dV    = cell.dV;
                     invdV            = 1.0 / dV;
                 }
                 else {
@@ -149,10 +149,9 @@ void SRHD<dim>::cons2prim()
                     const auto ireal = get_real_idx(ii, radius, xag);
                     const auto jreal = get_real_idx(jj, radius, yag);
                     const auto kreal = get_real_idx(kk, radius, zag);
-                    const auto cell =
-                        this->compute_mesh_factors(ireal, jreal, kreal);
-                    const real dV = cell.get_cell_volume(ireal, jreal, kreal);
-                    invdV         = 1.0 / dV;
+                    const auto cell  = this->cell_factors(ireal, jreal, kreal);
+                    const real dV    = cell.dV;
+                    invdV            = 1.0 / dV;
                 }
             }
 
@@ -394,7 +393,7 @@ void SRHD<dim>::adapt_dt()
             }
         }
 
-        const auto cell = this->compute_mesh_factors(ireal, jreal, kreal);
+        const auto cell = this->cell_factors(ireal, jreal, kreal);
         const real x1l  = cell.x1L();
         const real x1r  = cell.x1R();
         const real dx1  = x1r - x1l;
@@ -1077,7 +1076,7 @@ void SRHD<dim>::advance()
             );
         }
 
-        const auto cell   = this->compute_mesh_factors(ii, jj, kk);
+        const auto cell   = this->cell_factors(ii, jj, kk);
         const real x1l    = cell.x1L();
         const real x1r    = cell.x1R();
         const real vfaceL = (homolog) ? x1l * hubble_param : hubble_param;

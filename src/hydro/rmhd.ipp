@@ -265,7 +265,7 @@ void RMHD<dim>::emit_troubled_cells() const
             const lint ireal  = get_real_idx(ii, radius, xag);
             const lint jreal  = get_real_idx(jj, radius, yag);
             const lint kreal  = get_real_idx(kk, radius, zag);
-            const auto cell   = this->compute_mesh_factors(ireal, jreal, kreal);
+            const auto cell   = this->cell_factors(ireal, jreal, kreal);
             const real x1l    = cell.x1L();
             const real x1r    = cell.x1R();
             const real x2l    = cell.x2L();
@@ -339,10 +339,9 @@ void RMHD<dim>::cons2prim()
                 const auto ireal = get_real_idx(ii, radius, xag);
                 const auto jreal = get_real_idx(jj, radius, yag);
                 const auto kreal = get_real_idx(kk, radius, zag);
-                const auto cell =
-                    this->compute_mesh_factors(ireal, jreal, kreal);
-                const real dV = cell.get_cell_volume(ireal, jreal, kreal);
-                invdV         = 1.0 / dV;
+                const auto cell  = this->cell_factors(ireal, jreal, kreal);
+                const real dV    = cell.dV;
+                invdV            = 1.0 / dV;
             }
             const real d    = cons[gid].dens() * invdV;
             const real m1   = cons[gid].momentum(1) * invdV;
@@ -945,7 +944,7 @@ void RMHD<dim>::adapt_dt()
             v3m = 1.0;
         }
 
-        const auto cell = this->compute_mesh_factors(ii, jj, kk);
+        const auto cell = this->cell_factors(ii, jj, kk);
         switch (geometry) {
             case simbi::Geometry::CARTESIAN: {
                 const real x1l = cell.x1L();
@@ -1701,7 +1700,7 @@ void RMHD<dim>::riemann_fluxes()
           ib_check<dim>(object_pos, ii, jj, kr, xag, yag, 3)
         };
 
-        const auto cell = this->compute_mesh_factors(ii, jj, kk);
+        const auto cell = this->cell_factors(ii, jj, kk);
 
         const real x1l    = cell.x1L();
         const real x1r    = cell.x1R();
@@ -1913,7 +1912,7 @@ void RMHD<dim>::advance()
             }
 
             // mesh factors
-            const auto cell = this->compute_mesh_factors(ii, jj, kk);
+            const auto cell = this->cell_factors(ii, jj, kk);
 
             const real x1l    = cell.x1L();
             const real x1r    = cell.x1R();

@@ -85,11 +85,11 @@ namespace simbi {
             const auto mesh_motion         = sim_state->mesh_motion;
             auto* cons                     = sim_state->cons.data();
             parallel_for(sim_state->activeP, 0, 1, [=] DEV(const luint gid) {
-                const auto cell = sim_state->compute_mesh_factors(gid);
-                const auto es   = mesh_motion
-                                      ? cell.get_cell_volume(sim_state->xag - 1)
-                                      : 1.0;
-                const auto bs   = mesh_motion ? cell.get_cell_volume(0) : 1.0;
+                const auto cell_end =
+                    sim_state->cell_factors(sim_state->xag - 1);
+                const auto cell_beg = sim_state->cell_factors(0);
+                const auto es       = mesh_motion ? cell_end.dV : 1.0;
+                const auto bs       = mesh_motion ? cell_beg.dV : 1.0;
                 if (first_order) {
                     switch (boundary_conditions[0]) {
                         case BoundaryCondition::DYNAMIC:
