@@ -153,7 +153,8 @@ namespace simbi {
     enum class CTTYPE {
         ZERO,
         CONTACT,
-        ALPHA
+        ALPHA,
+        MdZ,
     };
 
     enum class LIMITER {
