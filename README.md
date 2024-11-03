@@ -29,7 +29,8 @@ https://github.com/EigenDev/simbi/assets/29236993/818d930d-d993-4e5d-8ed4-47a9ba
     [ninja](https://github.com/ninja-build/ninja/wiki/Pre-built-Ninja-packages)
 5)  HDF5 libraries
 6)  [mypy](https://mypy-lang.org/), a static type checker
-7)  Python >= 3.10
+7)  [cogapp](https://www.python.org/about/success/cog/), a code generation tool written in python
+8)  Python >= 3.10
 
 ## For GPU capability
 
