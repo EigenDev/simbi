@@ -123,10 +123,10 @@ if get_option('gpu_compilation').enabled()
             gpu_linkers += ['-lcudart']
             gpu_comp_args = [
                 '-DGPU_PLATFORM_NVIDIA=1',
-                '-std=c++17',
+                '-std=c++20',
                 f'-arch=sm_@gpu_arch@',
                 f'-ccbin=@cc_var@',
-                '--ptxas-options=-v', 
+                # '--ptxas-options=-v', 
                 '--extended-lambda',
                 '--expt-relaxed-constexpr',
                 '--compiler-options', 
@@ -138,7 +138,7 @@ if get_option('gpu_compilation').enabled()
             gpu_linkers += ['-lamdhip64']
             gpu_comp_args = [
                 '-DGPU_PLATFORM_AMD=1',
-                '-std=c++17',
+                '-std=c++20',
                 '-fPIC',
                 f'@max_errors@', 
                 '-O3', 
@@ -165,11 +165,11 @@ if get_option('gpu_compilation').enabled()
         gpu_linkers += ['-lcudart']
         gpu_arch = get_option('gpu_arch')
         gpu_comp_args = [
-                '-std=c++17',
+                '-std=c++20',
                 '-DGPU_PLATFORM_NVIDIA=1',
                 f'-arch=sm_@gpu_arch@', 
                 f'-ccbin=@cc_var@',
-                '--ptxas-options=-v', 
+                # '--ptxas-options=-v', 
                 '--extended-lambda',
                 '--expt-relaxed-constexpr',
                 '--compiler-options', 
