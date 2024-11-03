@@ -148,6 +148,14 @@ DUAL real RMHD<dim>::calc_edge_emf(
                 eavg + one_eighth * (de_dqjL - de_dqjR + de_dqkL - de_dqkR)
             );
         }
+        case CTTYPE::MdZ: {
+            return 0.0;
+            // const auto term1 = -(ajw * vjw * bkw) - (aje * vje * bke);
+            // const auto term2 = +(akn * vkn * bjn) + (aks * vks * bjs);
+            // const auto term3 = +(dje * bke) - (djw * bkw);
+            // const auto term4 = -(dks * bjs) + (dkn * bjn);
+            // return term1 + term2 + term3 + term4;
+        }
         default:   // ALPHA, Eq. (49)
         {
             return 0.0;
@@ -274,15 +282,15 @@ DUAL real RMHD<dim>::curl_e(
                 const real dr  = cell.x1R() - cell.x1L();
                 const real dph = cell.x3R() - cell.x3L();
                 if (side == 0) {
-                    return (-(ek[JK::NW] * cell.x1R() - ek[JK::SW] * cell.x1L()
+                    return (-(ej[IJ::SE] * cell.x1R() - ek[IJ::SW] * cell.x1L()
                             ) / dr +
-                            (ej[IJ::SE] - ej[IJ::SW]) /
+                            (ek[JK::NW] - ek[JK::SW]) /
                                 (std::sin(cell.x2mean) * dph)) /
                            cell.x1mean;
                 }
-                return (-(ek[JK::NE] * cell.x1R() - ek[JK::SE] * cell.x1L()) /
+                return (-(ej[IJ::NE] * cell.x1R() - ek[IJ::NW] * cell.x1L()) /
                             dr +
-                        (ej[IJ::NE] - ej[IJ::NW]) /
+                        (ek[JK::NE] - ek[JK::SE]) /
                             (std::sin(cell.x2mean) * dph)) /
                        cell.x1mean;
             }
@@ -1165,10 +1173,38 @@ DUAL RMHD<dim>::conserved_t RMHD<dim>::calc_hlle_flux(
             return fR - uR * vface;
         }
         else {
-            const auto f_hll =
-                (fL * aRp - fR * aLm + (uR - uL) * aLm * aRp) / (aRp - aLm);
-            const auto u_hll = (uR * aRp - uL * aLm - fR + fL) / (aRp - aLm);
-            return f_hll - u_hll * vface;
+            if constexpr (comp_ct_type == CTTYPE::MdZ) {
+                const luint nps[] = {next_perm(nhat, 1), next_perm(nhat, 2)};
+                conserved_t f_hll;
+                // fill in the gas varibales
+                for (int i = 0; i < 5; i++) {
+                    f_hll[i] = (fL[i] * aRp - fR[i] * aLm +
+                                (uR[i] - uL[i]) * aLm * aRp) /
+                               (aRp - aLm);
+                }
+
+                const auto alpL = aRp / (aRp - aLm);
+                const auto alpR = aLm / (aRp - aLm);
+                const auto dL   = -aRp * aLm / (aRp - aLm);
+                const auto dR   = dL;
+
+                // for loop over the tangential fields using np1, np2
+                for (auto&& i : nps) {
+                    f_hll[i] =
+                        alpL * fL[i] + alpR * fR[i] + dL * uL[i] - dR * uR[i];
+                }
+
+                const auto u_hll =
+                    (uR * aRp - uL * aLm - fR + fL) / (aRp - aLm);
+                return f_hll - u_hll * vface;
+            }
+            else {
+                const auto f_hll =
+                    (fL * aRp - fR * aLm + (uR - uL) * aLm * aRp) / (aRp - aLm);
+                const auto u_hll =
+                    (uR * aRp - uL * aLm - fR + fL) / (aRp - aLm);
+                return f_hll - u_hll * vface;
+            }
         }
     }();
 
