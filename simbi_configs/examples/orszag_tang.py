@@ -1,5 +1,5 @@
 import numpy as np
-from simbi import BaseConfig, simbi_property, DynamicArg, compute_num_polar_zones
+from simbi import BaseConfig, simbi_property, DynamicArg
 from simbi.key_types import *
 
 XMIN = 0.0
@@ -84,7 +84,7 @@ class OrszagTang(BaseConfig):
 
     @simbi_property
     def default_end_time(self) -> float:
-        return np.pi
+        return 0.5 * XMAX
 
     @simbi_property
     def solver(self) -> str:
