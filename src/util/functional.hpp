@@ -49,7 +49,7 @@ namespace simbi {
             }
         }
 
-        function(function&& other) noexcept
+        DUAL function(function&& other) noexcept
             : callable(std::move(other.callable))
         {
             other.callable = nullptr;
@@ -96,22 +96,31 @@ namespace simbi {
             return *this;
         }
 
-        R operator()(Args... args) const
+        DUAL R operator()(Args... args) const
         {
+
             if (!callable) {
-                throw std::bad_function_call();
+                if constexpr (global::BuildPlatform == global::Platform::GPU) {
+                    printf("Error: function is not callable on the GPU");
+                }
+                else {
+                    throw std::bad_function_call();
+                }
             }
             return callable->invoke(std::forward<Args>(args)...);
         }
 
-        explicit operator bool() const noexcept { return callable != nullptr; }
+        DUAL explicit operator bool() const noexcept
+        {
+            return callable != nullptr;
+        }
 
-        bool operator==(std::nullptr_t) const noexcept
+        DUAL bool operator==(std::nullptr_t) const noexcept
         {
             return callable == nullptr;
         }
 
-        bool operator!=(std::nullptr_t) const noexcept
+        DUAL bool operator!=(std::nullptr_t) const noexcept
         {
             return callable != nullptr;
         }
@@ -123,9 +132,9 @@ namespace simbi {
 
       private:
         struct callable_base {
-            virtual ~callable_base()             = default;
-            virtual R invoke(Args... args) const = 0;
-            virtual callable_base* clone() const = 0;
+            virtual ~callable_base()                  = default;
+            DUAL virtual R invoke(Args... args) const = 0;
+            virtual callable_base* clone() const      = 0;
         };
 
         template <typename F, typename DecayType = std::decay_t<F>>
@@ -136,7 +145,7 @@ namespace simbi {
 
             callable_impl(const DecayType& f) : f(f) {}
 
-            R invoke(Args... args) const override
+            DUAL R invoke(Args... args) const override
             {
                 return f(std::forward<Args>(args)...);
             }

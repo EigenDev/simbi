@@ -8,11 +8,6 @@ DUAL simbi::ndarray<DT, build_mode>::ndarray(std::initializer_list<DT> list)
     std::copy(std::begin(list), std::end(list), arr.get());
 };
 
-template <typename DT, global::Platform build_mode>
-simbi::ndarray<DT, build_mode>::ndarray() : sz(0), nd_capacity(0), dimensions(1)
-{
-}
-
 // Zero-initialize the array with defined size
 template <typename DT, global::Platform build_mode>
 DUAL simbi::ndarray<DT, build_mode>::ndarray(size_type size)
@@ -39,7 +34,7 @@ DUAL simbi::ndarray<DT, build_mode>::ndarray(size_type size, const DT val)
 
 // Copy-constructor for array
 template <typename DT, global::Platform build_mode>
-DUAL simbi::ndarray<DT, build_mode>::ndarray(const ndarray& rhs)
+simbi::ndarray<DT, build_mode>::ndarray(const ndarray& rhs)
     : sz(rhs.sz), dimensions(rhs.dimensions), arr(new DT[rhs.sz])
 {
     // Copy from GPU if data exists there
@@ -203,7 +198,7 @@ DUAL constexpr DT& simbi::ndarray<DT, build_mode>::operator[](IndexType index)
             (luint) sz
         );
     }
-// else return value at that index
+    // else return value at that index
 #ifdef __CUDA_ARCH__
     return dev_arr[index];
 #else
@@ -314,11 +309,6 @@ template <typename DT, global::Platform build_mode>
 DT simbi::ndarray<DT, build_mode>::front() const
 {
     return (*(begin()));
-}
-
-template <typename DT, global::Platform build_mode>
-simbi::ndarray<DT, build_mode>::~ndarray()
-{
 }
 
 template <typename DT, global::Platform build_mode>

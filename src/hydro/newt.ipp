@@ -38,15 +38,9 @@ void Newtonian<dim>::emit_troubled_cells() const
             const lint jreal  = get_real_idx(jj, radius, yag);
             const lint kreal  = get_real_idx(kk, radius, zag);
             const auto cell   = this->cell_factors(ireal, jreal, kreal);
-            const real x1l    = cell.x1L();
-            const real x1r    = cell.x1R();
-            const real x2l    = cell.x2L();
-            const real x2r    = cell.x2R();
-            const real x3l    = cell.x3L();
-            const real x3r    = cell.x3R();
-            const real x1mean = cell.calc_any_mean(x1l, x1r, x1_cell_spacing);
-            const real x2mean = cell.calc_any_mean(x2l, x2r, x2_cell_spacing);
-            const real x3mean = cell.calc_any_mean(x3l, x3r, x3_cell_spacing);
+            const real x1mean = cell.x1mean;
+            const real x2mean = cell.x2mean;
+            const real x3mean = cell.x3mean;
             const real rho    = cons[gid].dens();
             const real v1     = cons[gid].momentum(1) / rho;
             const real v2     = (dim < 2) ? cons[gid].momentum(2) / rho : 0.0;
@@ -598,22 +592,15 @@ DUAL Newtonian<dim>::conserved_t Newtonian<dim>::calc_hllc_flux(
 //                                           SOURCE TERMS
 //===================================================================================================================
 template <int dim>
-DUAL Newtonian<dim>::conserved_t Newtonian<dim>::hydro_sources(const auto& cell
-) const
+DUAL Newtonian<dim>::conserved_t
+Newtonian<dim>::hydro_sources(const auto& cell) const
 {
     if (null_sources) {
         return conserved_t{};
     }
-    const auto x1L = cell.x1L();
-    const auto x1R = cell.x1R();
-    const auto x2L = cell.x2L();
-    const auto x2R = cell.x2R();
-    const auto x3L = cell.x3L();
-    const auto x3R = cell.x3R();
-
-    const auto x1c = cell.get_cell_centroid(x1R, x1L);
-    const auto x2c = cell.calc_any_mean(x2R, x2L, x2_cell_spacing);
-    const auto x3c = cell.calc_any_mean(x3R, x3L, x3_cell_spacing);
+    const auto x1c = cell.x1mean;
+    const auto x2c = cell.x2mean;
+    const auto x3c = cell.x3mean;
 
     conserved_t res;
     if constexpr (dim == 1) {
@@ -644,20 +631,14 @@ DUAL Newtonian<dim>::conserved_t Newtonian<dim>::gravity_sources(
     if (null_gravity) {
         return conserved_t{};
     }
-    const auto x1L = cell.x1L();
-    const auto x1R = cell.x1R();
-    const auto x1c = cell.get_cell_centroid(x1R, x1L);
+    const auto x1c = cell.x1mean;
 
     conserved_t res;
     // gravity only changes the momentum and energy
     if constexpr (dim > 1) {
-        const auto x2L = cell.x2L();
-        const auto x2R = cell.x2R();
-        const auto x2c = cell.calc_any_mean(x2R, x2L, x2_cell_spacing);
+        const auto x2c = cell.x2mean;
         if constexpr (dim > 2) {
-            const auto x3L = cell.x3L();
-            const auto x3R = cell.x3R();
-            const auto x3c = cell.calc_any_mean(x3R, x3L, x3_cell_spacing);
+            const auto x3c = cell.x3mean;
             for (int q = 1; q < dimensions + 1; q++) {
                 res[q] = gsources[q](x1c, x2c, x3c, t);
             }
@@ -756,11 +737,7 @@ void Newtonian<dim>::advance()
         }
 
         const auto cell   = this->cell_factors(ii, jj, kk);
-        const real x1l    = cell.x1L();
-        const real x1r    = cell.x1R();
-        const real vfaceL = (homolog) ? x1l * hubble_param : hubble_param;
-        const real vfaceR = (homolog) ? x1r * hubble_param : hubble_param;
-        const real vfs[2] = {vfaceL, vfaceR};
+        const real vfs[2] = {cell.v1fL(), cell.v1fR()};
 
         const auto il = get_real_idx(ii - 1, 0, xag);
         const auto ir = get_real_idx(ii + 1, 0, xag);
@@ -842,7 +819,7 @@ void Newtonian<dim>::advance()
         const auto gravity = gravity_sources(prb[tid], cell);
 
         // geometric source terms
-        const auto geom_source = cell.geom_sources(prb[tid], ii, jj, kk);
+        const auto geom_source = cell.geom_sources(prb[tid]);
 
         if constexpr (dim == 1) {
             cons[aid] -=
@@ -988,6 +965,7 @@ void Newtonian<dim>::simulate(
     compute_bytes_and_strides<primitive_t>(dim);
     print_shared_mem();
     set_the_riemann_solver();
+    this->set_mesh_funcs();
 
     config_ghosts(this);
     cons2prim();

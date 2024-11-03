@@ -131,7 +131,14 @@ namespace simbi {
                           << 2.0 * props.memoryClockRate *
                                  (props.memoryBusWidth / 8) / 1.0e6
                           << std::endl;
-                std::cout << std::endl;
+                std::cout << std::endl
+                          << std::endl
+                          << std::endl
+                          << std::endl
+                          << std::endl
+                          << std::endl
+                          << std::endl;
+                ;
                 gpu_theoretical_bw = 2.0 * props.memoryClockRate *
                                      (props.memoryBusWidth / 8) / 1.0e6;
             }

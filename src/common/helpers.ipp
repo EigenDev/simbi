@@ -75,15 +75,13 @@ namespace simbi {
         template <typename sim_state_t>
         void config_ghosts1D(sim_state_t* sim_state)
         {
-            const auto grid_size           = sim_state->nx;
-            const auto first_order         = sim_state->use_pcm;
-            const auto boundary_conditions = sim_state->bcs;
-            const auto x1max               = sim_state->x1max;
-            const auto x1min               = sim_state->x1min;
-            const auto nvars               = sim_state->nvars;
-            const auto bsources            = sim_state->bsources;
-            const auto mesh_motion         = sim_state->mesh_motion;
-            auto* cons                     = sim_state->cons.data();
+            const auto grid_size   = sim_state->nx;
+            const auto first_order = sim_state->use_pcm;
+            const auto x1max       = sim_state->x1max;
+            const auto x1min       = sim_state->x1min;
+            const auto nvars       = sim_state->nvars;
+            const auto mesh_motion = sim_state->mesh_motion;
+            auto* cons             = sim_state->cons.data();
             parallel_for(sim_state->activeP, 0, 1, [=] DEV(const luint gid) {
                 const auto cell_end =
                     sim_state->cell_factors(sim_state->xag - 1);
@@ -91,11 +89,14 @@ namespace simbi {
                 const auto es       = mesh_motion ? cell_end.dV : 1.0;
                 const auto bs       = mesh_motion ? cell_beg.dV : 1.0;
                 if (first_order) {
-                    switch (boundary_conditions[0]) {
+                    switch (sim_state->bcs[0]) {
                         case BoundaryCondition::DYNAMIC:
                             for (auto qq = 0; qq < nvars; qq++) {
-                                cons[0][qq] =
-                                    bsources[qq](x1min, sim_state->t) * bs;
+                                cons[0][qq] = sim_state->bsources[qq](
+                                                  x1min,
+                                                  sim_state->t
+                                              ) *
+                                              bs;
                             }
                             break;
                         case BoundaryCondition::REFLECTING:
@@ -110,11 +111,15 @@ namespace simbi {
                             break;
                     }
 
-                    switch (boundary_conditions[1]) {
+                    switch (sim_state->bcs[1]) {
                         case BoundaryCondition::DYNAMIC:
                             for (auto qq = 0; qq < nvars; qq++) {
                                 cons[grid_size - 1][qq] =
-                                    bsources[qq](x1max, sim_state->t) * es;
+                                    sim_state->bsources[qq](
+                                        x1max,
+                                        sim_state->t
+                                    ) *
+                                    es;
                             }
                             break;
                         case BoundaryCondition::REFLECTING:
@@ -130,13 +135,19 @@ namespace simbi {
                     }
                 }
                 else {
-                    switch (boundary_conditions[0]) {
+                    switch (sim_state->bcs[0]) {
                         case BoundaryCondition::DYNAMIC:
                             for (auto qq = 0; qq < nvars; qq++) {
-                                cons[0][qq] =
-                                    bsources[qq](x1min, sim_state->t) * bs;
-                                cons[1][qq] =
-                                    bsources[qq](x1min, sim_state->t) * bs;
+                                cons[0][qq] = sim_state->bsources[qq](
+                                                  x1min,
+                                                  sim_state->t
+                                              ) *
+                                              bs;
+                                cons[1][qq] = sim_state->bsources[qq](
+                                                  x1min,
+                                                  sim_state->t
+                                              ) *
+                                              bs;
                             }
                             break;
                         case BoundaryCondition::REFLECTING:
@@ -155,13 +166,21 @@ namespace simbi {
                             break;
                     }
 
-                    switch (boundary_conditions[1]) {
+                    switch (sim_state->bcs[1]) {
                         case BoundaryCondition::DYNAMIC:
                             for (auto qq = 0; qq < nvars; qq++) {
                                 cons[grid_size - 1][qq] =
-                                    bsources[qq](x1max, sim_state->t) * es;
+                                    sim_state->bsources[qq](
+                                        x1max,
+                                        sim_state->t
+                                    ) *
+                                    es;
                                 cons[grid_size - 2][qq] =
-                                    bsources[qq](x1max, sim_state->t) * es;
+                                    sim_state->bsources[qq](
+                                        x1max,
+                                        sim_state->t
+                                    ) *
+                                    es;
                             }
                             break;
                         case BoundaryCondition::REFLECTING:
@@ -186,16 +205,15 @@ namespace simbi {
         template <typename sim_state_t>
         void config_ghosts2D(sim_state_t* sim_state)
         {
-            const auto nvars               = sim_state->nvars;
-            const auto xag                 = sim_state->xag;
-            const auto yag                 = sim_state->yag;
-            const auto nx                  = sim_state->nx;
-            const auto ny                  = sim_state->ny;
-            const auto boundary_conditions = sim_state->bcs;
-            const auto geometry            = sim_state->geometry;
-            const auto half_sphere         = sim_state->half_sphere;
-            const auto hr                  = sim_state->radius;   // halo radius
-            auto* cons                     = sim_state->cons.data();
+            const auto nvars       = sim_state->nvars;
+            const auto xag         = sim_state->xag;
+            const auto yag         = sim_state->yag;
+            const auto nx          = sim_state->nx;
+            const auto ny          = sim_state->ny;
+            const auto geometry    = sim_state->geometry;
+            const auto half_sphere = sim_state->half_sphere;
+            const auto hr          = sim_state->radius;   // halo radius
+            auto* cons             = sim_state->cons.data();
             parallel_for(
                 sim_state->activeP,
                 sim_state->activeP.nzones,
@@ -212,7 +230,7 @@ namespace simbi {
                             auto ing  = idx2(rr, jr, nx, ny);
                             auto outg = idx2(nx - rs, jr, nx, ny);
 
-                            switch (boundary_conditions[0]) {
+                            switch (sim_state->bcs[0]) {
                                 case BoundaryCondition::REFLECTING: {
                                     const auto inr =
                                         idx2(2 * hr - rs, jr, nx, ny);
@@ -242,7 +260,7 @@ namespace simbi {
                                 }
                             }
 
-                            switch (boundary_conditions[1]) {
+                            switch (sim_state->bcs[1]) {
                                 case BoundaryCondition::REFLECTING: {
                                     const auto outr =
                                         idx2(nx - 2 * hr + rr, jr, nx, ny);
@@ -294,7 +312,7 @@ namespace simbi {
                                     break;
                                 }
                                 default:
-                                    switch (boundary_conditions[2]) {
+                                    switch (sim_state->bcs[2]) {
                                         case BoundaryCondition::REFLECTING: {
                                             const auto inr =
                                                 idx2(ir, 2 * hr - rs, nx, ny);
@@ -330,7 +348,7 @@ namespace simbi {
                                         }
                                     }
 
-                                    switch (boundary_conditions[3]) {
+                                    switch (sim_state->bcs[3]) {
                                         case BoundaryCondition::REFLECTING: {
                                             const auto outr = idx2(
                                                 ir,
@@ -376,17 +394,16 @@ namespace simbi {
         template <typename sim_state_t>
         void config_ghosts3D(sim_state_t* sim_state)
         {
-            const auto nvars               = sim_state->nvars;
-            const auto xag                 = sim_state->xag;
-            const auto yag                 = sim_state->yag;
-            const auto nx                  = sim_state->nx;
-            const auto ny                  = sim_state->ny;
-            const auto nz                  = sim_state->nz;
-            const auto boundary_conditions = sim_state->bcs;
-            const auto geometry            = sim_state->geometry;
-            const auto half_sphere         = sim_state->half_sphere;
-            const auto hr                  = sim_state->radius;   // halo radius
-            auto* cons                     = sim_state->cons.data();
+            const auto nvars       = sim_state->nvars;
+            const auto xag         = sim_state->xag;
+            const auto yag         = sim_state->yag;
+            const auto nx          = sim_state->nx;
+            const auto ny          = sim_state->ny;
+            const auto nz          = sim_state->nz;
+            const auto geometry    = sim_state->geometry;
+            const auto half_sphere = sim_state->half_sphere;
+            const auto hr          = sim_state->radius;   // halo radius
+            auto* cons             = sim_state->cons.data();
 
             const auto bcxb = boundary_conditions[0];
             const auto bcxe = boundary_conditions[1];
@@ -1098,7 +1115,7 @@ namespace simbi {
                                 auto ing  = idx3(rr, jr, kr, nx, ny, nz);
                                 auto outg = idx3(nx - rs, jr, kr, nx, ny, nz);
 
-                                switch (boundary_conditions[0]) {
+                                switch (sim_state->bcs[0]) {
                                     case BoundaryCondition::REFLECTING: {
                                         const auto inr = idx3(
                                             2 * hr - rs,
@@ -1143,7 +1160,7 @@ namespace simbi {
                                     }
                                 }
 
-                                switch (boundary_conditions[1]) {
+                                switch (sim_state->bcs[1]) {
                                     case BoundaryCondition::REFLECTING: {
                                         const auto outr = idx3(
                                             nx - 2 * hr + rr,
@@ -1630,7 +1647,7 @@ namespace simbi {
                                         break;
                                     }
                                     default:
-                                        switch (boundary_conditions[4]) {
+                                        switch (sim_state->bcs[4]) {
                                             case BoundaryCondition::
                                                 REFLECTING: {
                                                 const auto inr = idx3(
@@ -1684,7 +1701,7 @@ namespace simbi {
                                             }
                                         }
 
-                                        switch (boundary_conditions[5]) {
+                                        switch (sim_state->bcs[5]) {
                                             case BoundaryCondition::
                                                 REFLECTING: {
                                                 const auto outr = idx3(
@@ -1798,7 +1815,7 @@ namespace simbi {
                                         break;
                                     }
                                     default:
-                                        switch (boundary_conditions[2]) {
+                                        switch (sim_state->bcs[2]) {
                                             case BoundaryCondition::
                                                 REFLECTING: {
                                                 auto inr = idx3(
@@ -1852,7 +1869,7 @@ namespace simbi {
                                             }
                                         }
 
-                                        switch (boundary_conditions[3]) {
+                                        switch (sim_state->bcs[3]) {
                                             case BoundaryCondition::
                                                 REFLECTING: {
                                                 auto outr = idx3(
@@ -1936,8 +1953,7 @@ namespace simbi {
             real vPlus, vMinus;
             int ii = blockDim.x * blockIdx.x + threadIdx.x;
             if (ii < self->total_zones) {
-                const auto ireal =
-                    helpers::get_real_idx(ii, self->radius, self->xag);
+                const auto ireal = get_real_idx(ii, self->radius, self->xag);
                 if constexpr (is_relativistic<T>::value) {
                     if constexpr (dt_type == TIMESTEP_TYPE::ADAPTIVE) {
                         const real rho = prim_buffer[ii].rho();
@@ -1962,8 +1978,9 @@ namespace simbi {
                     vPlus          = std::abs(v + cs);
                     vMinus         = std::abs(v - cs);
                 }
-                const real x1l    = self->get_x1face(ireal, 0);
-                const real x1r    = self->get_x1face(ireal, 1);
+                const auto cell   = self->cell_factors(ireal);
+                const real x1l    = cell.x1L();
+                const real x1r    = cell.x1R();
                 const real dx1    = x1r - x1l;
                 const real vfaceL = (self->geometry == Geometry::CARTESIAN)
                                         ? self->hubble_param
@@ -1971,11 +1988,11 @@ namespace simbi {
                 const real vfaceR = (self->geometry == Geometry::CARTESIAN)
                                         ? self->hubble_param
                                         : x1r * self->hubble_param;
-                const real cfl_dt = dx1 / (helpers::my_max(
-                                              std::abs(vPlus + vfaceR),
-                                              std::abs(vMinus + vfaceL)
-                                          ));
-                dt_min[ii]        = self->cfl * cfl_dt;
+                const real cfl_dt =
+                    dx1 /
+                    (my_max(std::abs(vPlus + vfaceR), std::abs(vMinus + vfaceL))
+                    );
+                dt_min[ii] = self->cfl * cfl_dt;
             }
 #endif
         }
@@ -2028,42 +2045,40 @@ namespace simbi {
                     minus_v1       = (v1 - cs);
                     minus_v2       = (v2 - cs);
                 }
-
-                v1p = std::abs(plus_v1);
-                v1m = std::abs(minus_v1);
-                v2p = std::abs(plus_v2);
-                v2m = std::abs(minus_v2);
+                const auto cell = self->cell_factors(ii, jj);
+                v1p             = std::abs(plus_v1);
+                v1m             = std::abs(minus_v1);
+                v2p             = std::abs(plus_v2);
+                v2m             = std::abs(minus_v2);
                 switch (geometry) {
                     case Geometry::CARTESIAN:
-                        cfl_dt = helpers::my_min(
-                            self->dx1 / (helpers::my_max(v1p, v1m)),
-                            self->dx2 / (helpers::my_max(v2m, v2m))
+                        cfl_dt = my_min(
+                            self->dx1 / (my_max(v1p, v1m)),
+                            self->dx2 / (my_max(v2m, v2m))
                         );
                         break;
 
                     case Geometry::SPHERICAL: {
                         const auto ireal =
-                            helpers::get_real_idx(ii, self->radius, self->xag);
+                            get_real_idx(ii, self->radius, self->xag);
                         const auto jreal =
-                            helpers::get_real_idx(jj, self->radius, self->yag);
+                            get_real_idx(jj, self->radius, self->yag);
                         // Compute avg spherical distance 3/4 *(rf^4 -
                         // ri^4)/(rf^3 - ri^3)
-                        const real rl = self->get_x1face(ireal, 0);
-                        const real rr = self->get_x1face(ireal, 1);
-                        const real tl = self->get_x2face(jreal, 0);
-                        const real tr = self->get_x2face(jreal, 1);
+                        const real rl = cell.x1L();
+                        const real rr = cell.x1R();
+                        const real tl = cell.x2L();
+                        const real tr = cell.x1R();
                         if (self->mesh_motion) {
                             const real vfaceL = rl * self->hubble_param;
                             const real vfaceR = rr * self->hubble_param;
                             v1p               = std::abs(plus_v1 - vfaceR);
                             v1m               = std::abs(minus_v1 - vfaceL);
                         }
-                        const real rmean =
-                            0.75 * (rr * rr * rr * rr - rl * rl * rl * rl) /
-                            (rr * rr * rr - rl * rl * rl);
-                        cfl_dt = helpers::my_min(
-                            (rr - rl) / (helpers::my_max(v1p, v1m)),
-                            rmean * (tr - tl) / (helpers::my_max(v2p, v2m))
+                        const real rmean = cell.x1mean;
+                        cfl_dt           = my_min(
+                            (rr - rl) / (my_max(v1p, v1m)),
+                            rmean * (tr - tl) / (my_max(v2p, v2m))
                         );
                         break;
                     }
@@ -2071,50 +2086,48 @@ namespace simbi {
                         // Compute avg spherical distance 3/4 *(rf^4 -
                         // ri^4)/(rf^3 - ri^3)
                         const auto ireal =
-                            helpers::get_real_idx(ii, self->radius, self->xag);
+                            get_real_idx(ii, self->radius, self->xag);
                         const auto jreal =
-                            helpers::get_real_idx(jj, self->radius, self->yag);
+                            get_real_idx(jj, self->radius, self->yag);
                         // Compute avg spherical distance 3/4 *(rf^4 -
                         // ri^4)/(rf^3 - ri^3)
-                        const real rl = self->get_x1face(ireal, 0);
-                        const real rr = self->get_x1face(ireal, 1);
-                        const real tl = self->get_x2face(jreal, 0);
-                        const real tr = self->get_x2face(jreal, 1);
+                        const real rl = cell.x1L();
+                        const real rr = cell.x1R();
+                        const real tl = cell.x2L();
+                        const real tr = cell.x2R();
                         if (self->mesh_motion) {
                             const real vfaceL = rl * self->hubble_param;
                             const real vfaceR = rr * self->hubble_param;
                             v1p               = std::abs(plus_v1 - vfaceR);
                             v1m               = std::abs(minus_v1 - vfaceL);
                         }
-                        const real rmean = (2.0 / 3.0) *
-                                           (rr * rr * rr - rl * rl * rl) /
-                                           (rr * rr - rl * rl);
-                        cfl_dt = helpers::my_min(
-                            (rr - rl) / (helpers::my_max(v1p, v1m)),
-                            rmean * (tr - tl) / (helpers::my_max(v2p, v2m))
+                        const real rmean = cell.x1mean;
+                        cfl_dt           = my_min(
+                            (rr - rl) / (my_max(v1p, v1m)),
+                            rmean * (tr - tl) / (my_max(v2p, v2m))
                         );
                         break;
                     }
                     case Geometry::AXIS_CYLINDRICAL: {
                         const auto ireal =
-                            helpers::get_real_idx(ii, self->radius, self->xag);
+                            get_real_idx(ii, self->radius, self->xag);
                         const auto jreal =
-                            helpers::get_real_idx(jj, self->radius, self->yag);
+                            get_real_idx(jj, self->radius, self->yag);
                         // Compute avg spherical distance 3/4 *(rf^4 -
                         // ri^4)/(rf^3 - ri^3)
-                        const real rl = self->get_x1face(ireal, 0);
-                        const real rr = self->get_x1face(ireal, 1);
-                        const real zl = self->get_x2face(jreal, 0);
-                        const real zr = self->get_x2face(jreal, 1);
+                        const real rl = cell.x1L();
+                        const real rr = cell.x1R();
+                        const real zl = cell.x2L();
+                        const real zr = cell.x2R();
                         if (self->mesh_motion) {
                             const real vfaceL = rl * self->hubble_param;
                             const real vfaceR = rr * self->hubble_param;
                             v1p               = std::abs(plus_v1 - vfaceR);
                             v1m               = std::abs(minus_v1 - vfaceL);
                         }
-                        cfl_dt = helpers::my_min(
-                            (rr - rl) / (helpers::my_max(v1p, v1m)),
-                            (zr - zl) / (helpers::my_max(v2p, v2m))
+                        cfl_dt = my_min(
+                            (rr - rl) / (my_max(v1p, v1m)),
+                            (zr - zl) / (my_max(v2p, v2m))
                         );
                         break;
                     }
@@ -2186,82 +2199,53 @@ namespace simbi {
                     minus_v3 = (v3 - cs);
                 }
 
-                const auto ireal =
-                    helpers::get_real_idx(ii, self->radius, self->xag);
-                const auto jreal =
-                    helpers::get_real_idx(jj, self->radius, self->yag);
-                const auto kreal =
-                    helpers::get_real_idx(kk, self->radius, self->zag);
-                const auto x1l = self->get_x1face(ireal, 0);
-                const auto x1r = self->get_x1face(ireal, 1);
-                const auto dx1 = x1r - x1l;
-                const auto x2l = self->get_x2face(jreal, 0);
-                const auto x2r = self->get_x2face(jreal, 1);
-                const auto dx2 = x2r - x2l;
-                const auto x3l = self->get_x3face(kreal, 0);
-                const auto x3r = self->get_x3face(kreal, 1);
-                const auto dx3 = x3r - x3l;
+                const auto ireal = get_real_idx(ii, self->radius, self->xag);
+                const auto jreal = get_real_idx(jj, self->radius, self->yag);
+                const auto kreal = get_real_idx(kk, self->radius, self->zag);
+                const auto cell  = self->cell_factors(ireal, jreal, kreal);
+                const auto x1l   = cell.x1L();
+                const auto x1r   = cell.x1R();
+                const auto dx1   = x1r - x1l;
+                const auto x2l   = cell.x2L();
+                const auto x2r   = cell.x2R();
+                const auto dx2   = x2r - x2l;
+                const auto x3l   = cell.x3L();
+                const auto x3r   = cell.x3R();
+                const auto dx3   = x3r - x3l;
                 switch (geometry) {
                     case Geometry::CARTESIAN: {
-                        cfl_dt = helpers::my_min3(
-                            dx1 / (helpers::my_max(
-                                      std::abs(plus_v1),
-                                      std::abs(minus_v1)
-                                  )),
-                            dx2 / (helpers::my_max(
-                                      std::abs(plus_v2),
-                                      std::abs(minus_v2)
-                                  )),
-                            dx3 / (helpers::my_max(
-                                      std::abs(plus_v3),
-                                      std::abs(minus_v3)
-                                  ))
+                        cfl_dt = my_min3<real>(
+                            dx1 /
+                                (my_max(std::abs(plus_v1), std::abs(minus_v1))),
+                            dx2 /
+                                (my_max(std::abs(plus_v2), std::abs(minus_v2))),
+                            dx3 /
+                                (my_max(std::abs(plus_v3), std::abs(minus_v3)))
                         );
                         break;
                     }
                     case Geometry::SPHERICAL: {
-                        const real rmean =
-                            0.75 *
-                            (x1r * x1r * x1r * x1r - x1l * x1l * x1l * x1l) /
-                            (x1r * x1r * x1r - x1l * x1l * x1l);
-                        const real th = 0.5 * (x2l + x2r);
-                        cfl_dt        = helpers::my_min3(
-                            dx1 / (helpers::my_max(
-                                      std::abs(plus_v1),
-                                      std::abs(minus_v1)
-                                  )),
+                        const real rmean = cell.x1mean;
+                        cfl_dt           = my_min3<real>(
+                            dx1 /
+                                (my_max(std::abs(plus_v1), std::abs(minus_v1))),
                             rmean * dx2 /
-                                (helpers::my_max(
-                                    std::abs(plus_v2),
-                                    std::abs(minus_v2)
-                                )),
-                            rmean * std::sin(th) * dx3 /
-                                (helpers::my_max(
-                                    std::abs(plus_v3),
-                                    std::abs(minus_v3)
-                                ))
+                                (my_max(std::abs(plus_v2), std::abs(minus_v2))),
+                            rmean * std::sin(cell.x2mean) * dx3 /
+                                (my_max(std::abs(plus_v3), std::abs(minus_v3)))
                         );
                         break;
                     }
                     case Geometry::CYLINDRICAL: {
-                        const real rmean = (2.0 / 3.0) *
-                                           (x1r * x1r * x1r - x1l * x1l * x1l) /
-                                           (x1r * x1r - x1l * x1l);
-                        const real th = 0.5 * (x2l + x2r);
-                        cfl_dt        = helpers::my_min3(
-                            dx1 / (helpers::my_max(
-                                      std::abs(plus_v1),
-                                      std::abs(minus_v1)
-                                  )),
+                        const real rmean = cell.x1mean;
+                        const real th    = 0.5 * (x2l + x2r);
+                        cfl_dt           = my_min3<real>(
+                            dx1 /
+                                (my_max(std::abs(plus_v1), std::abs(minus_v1))),
                             rmean * dx2 /
-                                (helpers::my_max(
-                                    std::abs(plus_v2),
-                                    std::abs(minus_v2)
-                                )),
-                            dx3 / (helpers::my_max(
-                                      std::abs(plus_v3),
-                                      std::abs(minus_v3)
-                                  ))
+                                (my_max(std::abs(plus_v2), std::abs(minus_v2))),
+                            dx3 /
+                                (my_max(std::abs(plus_v3), std::abs(minus_v3)))
                         );
                         break;
                     }
@@ -2301,10 +2285,11 @@ namespace simbi {
                     vPlus          = (v + cs);
                     vMinus         = (v - cs);
                 }
-                const auto ireal =
-                    helpers::get_real_idx(ii, self->radius, self->xag);
-                const real x1l    = self->get_x1face(ireal, 0);
-                const real x1r    = self->get_x1face(ireal, 1);
+                const auto ireal = get_real_idx(ii, self->radius, self->xag);
+                const auto cell  = self->cell_factors(ii);
+
+                const real x1l    = cell.x1L();
+                const real x1r    = cell.x1R();
                 const real dx1    = x1r - x1l;
                 const real vfaceL = (self->geometry == Geometry::CARTESIAN)
                                         ? self->hubble_param
@@ -2312,11 +2297,11 @@ namespace simbi {
                 const real vfaceR = (self->geometry == Geometry::CARTESIAN)
                                         ? self->hubble_param
                                         : x1r * self->hubble_param;
-                const real cfl_dt = dx1 / (helpers::my_max(
-                                              std::abs(vPlus + vfaceR),
-                                              std::abs(vMinus + vfaceL)
-                                          ));
-                dt_min[ii]        = self->cfl * cfl_dt;
+                const real cfl_dt =
+                    dx1 /
+                    (my_max(std::abs(vPlus + vfaceR), std::abs(vMinus + vfaceL))
+                    );
+                dt_min[ii] = self->cfl * cfl_dt;
             }
 #endif
         }
@@ -2366,15 +2351,16 @@ namespace simbi {
                     minus_v2       = (v2 - cs);
                 }
 
-                v1p = std::abs(plus_v1);
-                v1m = std::abs(minus_v1);
-                v2p = std::abs(plus_v2);
-                v2m = std::abs(minus_v2);
+                const auto cell = self->cell_factors(ii, jj);
+                v1p             = std::abs(plus_v1);
+                v1m             = std::abs(minus_v1);
+                v2p             = std::abs(plus_v2);
+                v2m             = std::abs(minus_v2);
                 switch (geometry) {
                     case Geometry::CARTESIAN:
-                        cfl_dt = helpers::my_min(
-                            self->dx1 / (helpers::my_max(v1p, v1m)),
-                            self->dx2 / (helpers::my_max(v2m, v2m))
+                        cfl_dt = my_min(
+                            self->dx1 / (my_max(v1p, v1m)),
+                            self->dx2 / (my_max(v2m, v2m))
                         );
                         break;
 
@@ -2382,25 +2368,23 @@ namespace simbi {
                         // Compute avg spherical distance 3/4 *(rf^4 -
                         // ri^4)/(rf^3 - ri^3)
                         const auto ireal =
-                            helpers::get_real_idx(ii, self->radius, self->xag);
+                            get_real_idx(ii, self->radius, self->xag);
                         const auto jreal =
-                            helpers::get_real_idx(jj, self->radius, self->yag);
-                        const real rl = self->get_x1face(ireal, 0);
-                        const real rr = self->get_x1face(ireal, 1);
-                        const real tl = self->get_x2face(jreal, 0);
-                        const real tr = self->get_x2face(jreal, 1);
+                            get_real_idx(jj, self->radius, self->yag);
+                        const real rl = cell.x1L();
+                        const real rr = cell.x1R();
+                        const real tl = cell.x2L();
+                        const real tr = cell.x2R();
                         if (self->mesh_motion) {
                             const real vfaceL = rl * self->hubble_param;
                             const real vfaceR = rr * self->hubble_param;
                             v1p               = std::abs(plus_v1 - vfaceR);
                             v1m               = std::abs(minus_v1 - vfaceL);
                         }
-                        const real rmean =
-                            0.75 * (rr * rr * rr * rr - rl * rl * rl * rl) /
-                            (rr * rr * rr - rl * rl * rl);
-                        cfl_dt = helpers::my_min(
-                            (rr - rl) / (helpers::my_max(v1p, v1m)),
-                            rmean * (tr - tl) / (helpers::my_max(v2p, v2m))
+                        const real rmean = cell.x1mean;
+                        cfl_dt           = my_min(
+                            (rr - rl) / (my_max(v1p, v1m)),
+                            rmean * (tr - tl) / (my_max(v2p, v2m))
                         );
                         break;
                     }
@@ -2408,46 +2392,44 @@ namespace simbi {
                         // Compute avg spherical distance 3/4 *(rf^4 -
                         // ri^4)/(rf^3 - ri^3)
                         const auto ireal =
-                            helpers::get_real_idx(ii, self->radius, self->xag);
+                            get_real_idx(ii, self->radius, self->xag);
                         const auto jreal =
-                            helpers::get_real_idx(jj, self->radius, self->yag);
-                        const real rl = self->get_x1face(ireal, 0);
-                        const real rr = self->get_x1face(ireal, 1);
-                        const real tl = self->get_x2face(jreal, 0);
-                        const real tr = self->get_x2face(jreal, 1);
+                            get_real_idx(jj, self->radius, self->yag);
+                        const real rl = cell.x1L();
+                        const real rr = cell.x1R();
+                        const real tl = cell.x2L();
+                        const real tr = cell.x2R();
                         if (self->mesh_motion) {
                             const real vfaceL = rl * self->hubble_param;
                             const real vfaceR = rr * self->hubble_param;
                             v1p               = std::abs(plus_v1 - vfaceR);
                             v1m               = std::abs(minus_v1 - vfaceL);
                         }
-                        const real rmean = (2.0 / 3.0) *
-                                           (rr * rr * rr - rl * rl * rl) /
-                                           (rr * rr - rl * rl);
-                        cfl_dt = helpers::my_min(
-                            (rr - rl) / (helpers::my_max(v1p, v1m)),
-                            rmean * (tr - tl) / (helpers::my_max(v2p, v2m))
+                        const real rmean = cell.x1mean;
+                        cfl_dt           = my_min(
+                            (rr - rl) / (my_max(v1p, v1m)),
+                            rmean * (tr - tl) / (my_max(v2p, v2m))
                         );
                         break;
                     }
                     case Geometry::AXIS_CYLINDRICAL: {
                         const auto ireal =
-                            helpers::get_real_idx(ii, self->radius, self->xag);
+                            get_real_idx(ii, self->radius, self->xag);
                         const auto jreal =
-                            helpers::get_real_idx(jj, self->radius, self->yag);
-                        const real rl = self->get_x1face(ireal, 0);
-                        const real rr = self->get_x1face(ireal, 1);
-                        const real zl = self->get_x2face(jreal, 0);
-                        const real zr = self->get_x2face(jreal, 1);
+                            get_real_idx(jj, self->radius, self->yag);
+                        const real rl = cell.x1L();
+                        const real rr = cell.x1R();
+                        const real zl = cell.x2L();
+                        const real zr = cell.x2R();
                         if (self->mesh_motion) {
                             const real vfaceL = rl * self->hubble_param;
                             const real vfaceR = rr * self->hubble_param;
                             v1p               = std::abs(plus_v1 - vfaceR);
                             v1m               = std::abs(minus_v1 - vfaceL);
                         }
-                        cfl_dt = helpers::my_min(
-                            (rr - rl) / (helpers::my_max(v1p, v1m)),
-                            (zr - zl) / (helpers::my_max(v2p, v2m))
+                        cfl_dt = my_min(
+                            (rr - rl) / (my_max(v1p, v1m)),
+                            (zr - zl) / (my_max(v2p, v2m))
                         );
                         break;
                     }
@@ -2502,9 +2484,11 @@ namespace simbi {
                     v3m = 1.0;
                 }
 
+                const auto cell = self->cell_factors(ii, jj, kk);
+
                 switch (geometry) {
                     case Geometry::CARTESIAN:
-                        cfl_dt = my_min3(
+                        cfl_dt = my_min3<real>(
                             self->dx1 / (my_max(v1p, v1m)),
                             self->dx2 / (my_max(v2p, v2m)),
                             self->dx3 / (my_max(v3p, v3m))
@@ -2513,21 +2497,20 @@ namespace simbi {
                         break;
                     case Geometry::SPHERICAL: {
                         const auto ireal =
-                            helpers::get_real_idx(ii, self->radius, self->nxv);
+                            get_real_idx(ii, self->radius, self->nxv);
                         const auto jreal =
-                            helpers::get_real_idx(jj, self->radius, self->nyv);
+                            get_real_idx(jj, self->radius, self->nyv);
 
-                        const real x1l = self->get_x1face(ireal, 0);
-                        const real x1r = self->get_x1face(ireal, 1);
+                        const real x1l = cell.x1L();
+                        const real x1r = cell.x1R();
                         const real dx1 = x1r - x1l;
 
-                        const real x2l = self->get_x2face(jreal, 0);
-                        const real x2r = self->get_x2face(jreal, 1);
-                        const real rmean =
-                            get_cell_centroid(x1r, x1l, Geometry::SPHERICAL);
+                        const real x2l   = cell.x2L();
+                        const real x2r   = cell.x2R();
+                        const real rmean = cell.x1mean;
                         const real th    = 0.5 * (x2r + x2l);
                         const real rproj = rmean * std::sin(th);
-                        cfl_dt           = my_min3(
+                        cfl_dt           = my_min3<real>(
                             dx1 / (my_max(v1p, v1m)),
                             rmean * self->dx2 / (my_max(v2p, v2m)),
                             rproj * self->dx3 / (my_max(v3p, v3m))
@@ -2536,14 +2519,13 @@ namespace simbi {
                     }
                     default: {
                         const auto ireal =
-                            helpers::get_real_idx(ii, self->radius, self->nxv);
-                        const real x1l = self->get_x1face(ireal, 0);
-                        const real x1r = self->get_x1face(ireal, 1);
+                            get_real_idx(ii, self->radius, self->nxv);
+                        const real x1l = cell.x1L();
+                        const real x1r = cell.x1R();
                         const real dx1 = x1r - x1l;
 
-                        const real rmean =
-                            get_cell_centroid(x1r, x1l, Geometry::CYLINDRICAL);
-                        cfl_dt = my_min3(
+                        const real rmean = cell.x1mean;
+                        cfl_dt           = my_min3<real>(
                             dx1 / (my_max(v1p, v1m)),
                             rmean * self->dx2 / (my_max(v2p, v2m)),
                             self->dx3 / (my_max(v3p, v3m))
@@ -2583,7 +2565,7 @@ namespace simbi {
             }
             // reduce multiple elements per thread
             for (luint i = gid; i < nmax; i += nt) {
-                min = helpers::my_min(dt_min[i], min);
+                min = my_min(dt_min[i], min);
             }
             min = blockReduceMin(min);
             if (tid == 0) {
@@ -2622,7 +2604,7 @@ namespace simbi {
             }();
             // reduce multiple elements per thread
             for (auto i = gid; i < nmax; i += nt) {
-                min = helpers::my_min(dt_min[i], min);
+                min = my_min(dt_min[i], min);
             }
 
             min = blockReduceMin(min);
@@ -3704,7 +3686,7 @@ namespace simbi {
                                      const auto& data,
                                      const auto& dataspace) {
                 dataset = file.createDataSet(name, real_type, dataspace);
-                dataset.write(data.data(), real_type);
+                dataset.write(data.host_data(), real_type);
                 dataset.close();
             };
 

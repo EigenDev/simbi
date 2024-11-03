@@ -1,0 +1,48 @@
+using sig_bool = std::atomic<bool>;
+#define SINGLE(kernel_name, ...)                    kernel_name(__VA_ARGS__);
+#define CALL(kernel_name, gridsize, blocksize, ...) kernel_name(__VA_ARGS__);
+
+namespace global {
+    constexpr auto BuildPlatform = Platform::CPU;
+    constexpr int WARP_SIZE      = 32;
+    // shorthand flag for using gpu shared memory
+    constexpr bool on_sm = false;
+}   // namespace global
+
+#define CUDA_CODE 0
+#define HIP_CODE  0
+
+#define DEV
+#define STATIC inline
+#define KERNEL
+#define DUAL
+#define SHARED     const
+#define __shared__ static
+#define EXTERN     static
+
+// Alias data types on host
+namespace simbi {
+    struct dim3 {
+        ~dim3() = default;
+        dim3()  = default;
+        uint32_t x;
+        uint32_t y;
+        uint32_t z;
+
+        dim3(uint32_t x, uint32_t y, uint32_t z) : x(x), y(y), z(z) {}
+
+        dim3(uint32_t x, uint32_t y) : x(x), y(y), z(1) {}
+
+        dim3(uint32_t x) : x(x), y(1), z(1) {}
+    };
+
+    using simbiStream_t = int;
+    using devError_t    = int;
+    using devProp_t     = int;
+    using devEvent_t    = std::chrono::high_resolution_clock::time_point;
+
+    inline dim3 blockIdx(1, 1, 1);
+    inline dim3 blockDim(1, 1, 1);
+    inline dim3 gridDim(1, 1, 1);
+    inline dim3 threadIdx(1, 1, 1);
+}   // namespace simbi
