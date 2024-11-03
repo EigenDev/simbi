@@ -155,8 +155,8 @@ namespace simbi {
             )
             {
                 const real gpu_emperical_bw = helpers::getFlops<
-                    sim_state_t::conserved_t,
-                    sim_state_t::primitive_t>(
+                    typename sim_state_t::conserved_t,
+                    typename sim_state_t::primitive_t>(
                     sim_state_t::dimensions,
                     sim_state.radius,
                     sim_state.total_zones,

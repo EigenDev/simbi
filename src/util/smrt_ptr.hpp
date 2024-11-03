@@ -193,24 +193,27 @@ namespace simbi {
             DUAL ptr_t* get() const { return pData; }
 
             // Check if the smart pointer is valid
-            explicit operator bool() const noexcept { return pData != nullptr; }
+            DUAL explicit operator bool() const noexcept
+            {
+                return pData != nullptr;
+            }
 
             // comparison with nullptr
-            bool operator==(std::nullptr_t) const noexcept
+            DUAL bool operator==(std::nullptr_t) const noexcept
             {
                 return pData == nullptr;
             }
 
             // comparison with nullptr
-            bool operator!=(std::nullptr_t) const noexcept
+            DUAL bool operator!=(std::nullptr_t) const noexcept
             {
                 return pData != nullptr;
             }
 
-            void error_out() const
+            DUAL void error_out() const
             {
                 if constexpr (global::BuildPlatform == global::Platform::GPU) {
-                    printf("[GPU ERROR]: DEFERENCING NULL POINTER");
+                    printf("[GPU ERROR]: DEREFERENCING NULL POINTER\n");
                 }
                 else {
                     throw std::runtime_error("Dereferencing null pointer");
@@ -348,10 +351,10 @@ namespace simbi {
                 return pData[index];
             }
 
-            void error_out() const
+            DUAL void error_out() const
             {
                 if constexpr (global::BuildPlatform == global::Platform::GPU) {
-                    printf("[GPU ERROR]: DEFERENCING NULL POINTER");
+                    printf("[GPU ERROR]: DEFERENCING NULL POINTER\n");
                 }
                 else {
                     throw std::runtime_error("Dereferencing null pointer");

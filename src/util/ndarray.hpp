@@ -78,18 +78,20 @@ namespace simbi {
         unique_p<gpuDeleter> dev_arr;   // Device-side array
 
       public:
-        ndarray();
-        ~ndarray();
+        ndarray()  = default;
+        ~ndarray() = default;
         ndarray& operator=(ndarray rhs);   // Assignment operator
-        DUAL ndarray(std::initializer_list<DT> list
+        DUAL ndarray(
+            std::initializer_list<DT> list
         );   // Initializer list constructor
-        DUAL ndarray(size_type size
+        DUAL ndarray(
+            size_type size
         );   // Zero-initialize the array with defined size
         DUAL ndarray(
             size_type size,
             const DT val
         );   // Fill-initialize the array with defined size
-        DUAL ndarray(const ndarray& rhs);       // Copy-constructor for array
+        ndarray(const ndarray& rhs);            // Copy-constructor for array
         ndarray(const std::vector<DT>& rhs);    // Copy-constructor for vector
         DUAL ndarray(ndarray&& rhs) noexcept;   // Move-constructor for array
         DUAL ndarray(std::vector<DT>&& rhs);    // Move-constructor for vector
@@ -165,7 +167,7 @@ namespace simbi {
                 return !(*this == rhs);
             }
 
-            DUAL DT operator*() const { return *ptr; }
+            DT operator*() const { return *ptr; }
 
             DUAL iterator& operator++()
             {

@@ -221,7 +221,8 @@ namespace simbi {
               quirk_smoothing(init_conditions.quirk_smoothing),
               constant_sources(init_conditions.constant_sources),
               total_zones(nx * ny * nz),
-              boundary_conditions(std::move(init_conditions.boundary_conditions)
+              boundary_conditions(
+                  std::move(init_conditions.boundary_conditions)
               ),
               sim_solver(helpers::solver_map.at(init_conditions.solver)),
               geometry(helpers::geometry_map.at(init_conditions.coord_system)),

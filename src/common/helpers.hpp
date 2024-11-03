@@ -322,10 +322,10 @@ namespace simbi {
          * @param hydro_class
          * @return void
          */
-        template <typename T, typename U>
-        KERNEL void hybrid_set_mesh_funcs(const U& parent)
+        template <typename T>
+        KERNEL void hybrid_set_mesh_funcs(T geom_class)
         {
-            T::initialize_function_pointers(parent);
+            geom_class->initialize_function_pointers();
         }
 
         //-------------------Inline for Speed -------------------------

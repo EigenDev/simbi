@@ -71,7 +71,7 @@ namespace generic_hydro {
         // anyHydro() = default;
 
         // zero-argument constructor
-        anyHydro() : vals{0.0} {}
+        DUAL anyHydro() : vals{0.0} {}
 
         // Generic Constructor
         template <typename... Args>
