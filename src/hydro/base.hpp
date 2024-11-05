@@ -142,7 +142,7 @@ namespace simbi {
             xblockdim = xag > gpu_block_dimx ? gpu_block_dimx : xag;
             yblockdim = yag > gpu_block_dimy ? gpu_block_dimy : yag;
             zblockdim = zag > gpu_block_dimz ? gpu_block_dimz : zag;
-            if constexpr (global::BuildPlatform == global::Platform::GPU) {
+            if constexpr (global::on_gpu) {
                 if (xblockdim * yblockdim * zblockdim < global::WARP_SIZE) {
                     if (nz > 1) {
                         xblockdim = 4;
@@ -221,8 +221,7 @@ namespace simbi {
               quirk_smoothing(init_conditions.quirk_smoothing),
               constant_sources(init_conditions.constant_sources),
               total_zones(nx * ny * nz),
-              boundary_conditions(
-                  std::move(init_conditions.boundary_conditions)
+              boundary_conditions(std::move(init_conditions.boundary_conditions)
               ),
               sim_solver(helpers::solver_map.at(init_conditions.solver)),
               geometry(helpers::geometry_map.at(init_conditions.coord_system)),
