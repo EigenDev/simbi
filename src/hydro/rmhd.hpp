@@ -34,7 +34,12 @@
 
 namespace simbi {
     template <int dim>
-    struct RMHD : public HydroBase, public Mesh<RMHD<dim>, dim> {
+    struct RMHD : public HydroBase,
+                  public Mesh<
+                      RMHD<dim>,
+                      dim,
+                      anyConserved<dim, Regime::RMHD>,
+                      anyPrimitive<dim, Regime::RMHD>> {
         static constexpr int dimensions          = dim;
         static constexpr int nvars               = dim + 3;
         static constexpr std::string_view regime = "srmhd";

@@ -677,8 +677,7 @@ void Newtonian<dim>::advance()
 
         // primitive buffer that returns dynamic shared array
         // if working with shared memory on GPU, identity otherwise
-        // const auto prb = sm_or_identity(prim_dat);
-        const auto prb = sm_proxy<primitive_t>(prim_dat);
+        const auto prb = sm_or_identity(prim_dat);
 
         const luint kk = axid<dim, BlkAx::K>(idx, xag, yag);
         const luint jj = axid<dim, BlkAx::J>(idx, xag, yag, kk);

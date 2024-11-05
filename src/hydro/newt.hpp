@@ -33,7 +33,12 @@
 
 namespace simbi {
     template <int dim>
-    struct Newtonian : public HydroBase, public Mesh<Newtonian<dim>, dim> {
+    struct Newtonian : public HydroBase,
+                       public Mesh<
+                           Newtonian<dim>,
+                           dim,
+                           anyConserved<dim, Regime::NEWTONIAN>,
+                           anyPrimitive<dim, Regime::NEWTONIAN>> {
         static constexpr int dimensions          = dim;
         static constexpr int nvars               = dim + 3;
         static constexpr std::string_view regime = "classical";

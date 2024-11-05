@@ -2131,7 +2131,6 @@ void RMHD<dim>::advance()
                     );
                 }
             );
-            // std::cin.get();
 
             auto& b1L = bstag1[xlf];
             auto& b1R = bstag1[xrf];

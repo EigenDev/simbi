@@ -2,6 +2,26 @@
 #include "state.hpp"
 #include <memory>   // for make_unique, unique_ptr
 
+// Explicit instantiation of Mesh class
+template struct Mesh<
+    simbi::SRHD<1>,
+    1,
+    anyConserved<1, simbi::Regime::SRHD>,
+    anyPrimitive<1, simbi::Regime::SRHD>>;
+
+template struct Mesh<
+    simbi::SRHD<2>,
+    2,
+    anyConserved<2, simbi::Regime::SRHD>,
+    anyPrimitive<2, simbi::Regime::SRHD>>;
+
+template struct Mesh<
+    simbi::SRHD<3>,
+    3,
+    anyConserved<3, simbi::Regime::SRHD>,
+    anyPrimitive<3, simbi::Regime::SRHD>>;
+
+// Explicit instantiation of SRHD class
 namespace simbi {
     namespace hydrostate {
         template <>
