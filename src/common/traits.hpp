@@ -18,9 +18,6 @@
 #ifndef TRAITS_HPP
 #define TRAITS_HPP
 
-#include <optional>
-#include <type_traits>
-
 //==========================================================================
 //                  PRIMITIVE TYPE TRAITS
 //==========================================================================
@@ -62,13 +59,5 @@ struct is_2D_mhd_primitive {
 template <typename T>
 struct is_3D_mhd_primitive {
     static const bool value = false;
-};
-
-template <typename T>
-struct is_optional : std::false_type {
-};
-
-template <typename T>
-struct is_optional<std::optional<T>> : std::true_type {
 };
 #endif
