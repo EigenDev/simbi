@@ -155,7 +155,7 @@ namespace simbi {
 
             void swap(smart_ptr& other) noexcept
             {
-                if constexpr (global::BuildPlatform == global::Platform::GPU) {
+                if constexpr (global::on_gpu) {
                     refcnt_t* pr = pRef;
                     ptr_t* pd    = pData;
 
@@ -212,7 +212,7 @@ namespace simbi {
 
             DUAL void error_out() const
             {
-                if constexpr (global::BuildPlatform == global::Platform::GPU) {
+                if constexpr (global::on_gpu) {
                     printf("[GPU ERROR]: DEREFERENCING NULL POINTER\n");
                 }
                 else {
@@ -299,7 +299,7 @@ namespace simbi {
 
             void swap(smart_ptr& other) noexcept
             {
-                if constexpr (global::BuildPlatform == global::Platform::GPU) {
+                if constexpr (global::on_gpu) {
                     refcnt_t* pr = pRef;
                     ptr_t* pd    = pData;
 
@@ -353,7 +353,7 @@ namespace simbi {
 
             DUAL void error_out() const
             {
-                if constexpr (global::BuildPlatform == global::Platform::GPU) {
+                if constexpr (global::on_gpu) {
                     printf("[GPU ERROR]: DEFERENCING NULL POINTER\n");
                 }
                 else {

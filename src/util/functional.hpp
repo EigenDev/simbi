@@ -100,7 +100,7 @@ namespace simbi {
         {
 
             if (!callable) {
-                if constexpr (global::BuildPlatform == global::Platform::GPU) {
+                if constexpr (global::on_gpu) {
                     printf("Error: function is not callable on the GPU");
                 }
                 else {

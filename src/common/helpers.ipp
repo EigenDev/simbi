@@ -761,7 +761,8 @@ namespace simbi {
                             // Apply boundary conditions at southeast corner
                             if (bcxe == BoundaryCondition::PERIODIC &&
                                 bcyb == BoundaryCondition::PERIODIC) {
-                                cons[ijse] = cons[idx3(hr, hr, kr, nx, ny, nz)];
+                                cons[ijse] = cons
+                                    [idx3(hr, ny - (hr + 1), kr, nx, ny, nz)];
                             }
                             else if (bcxe == BoundaryCondition::PERIODIC &&
                                      bcyb == BoundaryCondition::OUTFLOW) {
@@ -2367,7 +2368,7 @@ namespace simbi {
             //     res[2],
             //     res[3]
             // );
-            if constexpr (global::BuildPlatform == global::Platform::GPU) {
+            if constexpr (global::on_gpu) {
                 iterativeQuickSort(res, 0, 3);
             }
             else {
@@ -3473,12 +3474,12 @@ namespace simbi {
                  {"geometry", state.coord_system.c_str()},
                  {"regime", regime.c_str()},
                  {"dimensions", &state.dimensions},
-                 {"x1_cell_spacing",
-                  cell2str.at(state.x1_cell_spacing).c_str()},
-                 {"x2_cell_spacing",
-                  cell2str.at(state.x2_cell_spacing).c_str()},
-                 {"x3_cell_spacing",
-                  cell2str.at(state.x3_cell_spacing).c_str()}};
+                 {"x1_cell_spacing", cell2str.at(state.x1_cell_spacing).c_str()
+                 },
+                 {"x2_cell_spacing", cell2str.at(state.x2_cell_spacing).c_str()
+                 },
+                 {"x3_cell_spacing", cell2str.at(state.x3_cell_spacing).c_str()}
+                };
 
             for (const auto& [name, value] : attributes) {
                 H5::DataType type;
