@@ -37,18 +37,18 @@ class MartiMuller(BaseConfig):
         return "srhd"
     
     #-------------------- Uncomment if one wants the mesh to move
-    @simbi_property
-    def boundary_conditions(self) -> Sequence[str]:
-        return ["outflow", "dynamic"]
-    @simbi_classproperty
-    def scale_factor(cls) -> Callable[[float], float]:
-        return lambda t: 1 
+    # @simbi_property
+    # def boundary_conditions(self) -> Sequence[str]:
+    #     return ["outflow", "dynamic"]
+    # @simbi_classproperty
+    # def scale_factor(cls) -> Callable[[float], float]:
+    #     return lambda t: 1 
     
-    @simbi_classproperty
-    def scale_factor_derivative(cls) -> Callable[[float], float]:
-        return lambda t: 0.5
+    # @simbi_classproperty
+    # def scale_factor_derivative(cls) -> Callable[[float], float]:
+    #     return lambda t: 0.5
     
-    @simbi_classproperty
-    def boundary_sources(cls) -> list[Callable[[float, float], float]]:
-        return [lambda x,t: 0.1 , lambda x,t: 0.0, lambda x,t: 3e-10]
+    # @simbi_classproperty
+    # def boundary_sources(cls) -> list[Callable[[float, float], float]]:
+    #     return [lambda x,t: 0.1 , lambda x,t: 0.0, lambda x,t: 3e-10]
     
