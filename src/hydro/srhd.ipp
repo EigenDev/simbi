@@ -499,12 +499,8 @@ void SRHD<dim>::adapt_dt(const ExecutionPolicy<>& p)
     }
     // LAUNCH_ASYNC((deviceReduceWarpAtomicKernel<dim>), p.gridSize,
     // p.blockSize, this, dt_min.data(), active_zones);
-    gpu::api::deviceSynch();
-    printf("done with compute_dt\n");
     deviceReduceWarpAtomicKernel<dim>
         <<<p.gridSize, p.blockSize>>>(this, dt_min.data(), total_zones);
-    gpu::api::deviceSynch();
-    printf("done with deviceReduceWarpAtomicKernel\n");
 #endif
 }
 
@@ -520,13 +516,12 @@ DUAL SRHD<dim>::conserved_t SRHD<dim>::calc_hlle_flux(
     const real vface
 ) const
 {
-    printf("in calc_hlle_flux\n");
     const auto uL     = prL.to_conserved(gamma);
     const auto uR     = prR.to_conserved(gamma);
     const auto fL     = prL.to_flux(gamma, nhat);
     const auto fR     = prR.to_flux(gamma, nhat);
     const auto lambda = calc_eigenvals(prL, prR, nhat);
-    printf("aL: %f, aR: %f\n", lambda.aL(), lambda.aR());
+
     // Grab the necessary wave speeds
     const real aL  = lambda.aL();
     const real aR  = lambda.aR();
@@ -548,14 +543,6 @@ DUAL SRHD<dim>::conserved_t SRHD<dim>::calc_hlle_flux(
             return f_hll - u_hll * vface;
         }
     }();
-    printf(
-        "net_flux: %f, %f, %f, %f, %f, %f, %f, %f\n",
-        net_flux.dens(),
-        net_flux.momentum(1),
-        net_flux.momentum(2),
-        net_flux.momentum(3),
-        net_flux.nrg()
-    );
     // Upwind the scalar concentration
     if (net_flux.dens() < 0.0) {
         net_flux.chi() = prR.chi() * net_flux.dens();
@@ -1112,7 +1099,6 @@ void SRHD<dim>::advance()
             }
             ib_modify<dim>(pR, pL, object_x[q], 1);
             fri[q] = (this->*riemann_solve)(pL, pR, 1, vfs[q]);
-            printf("done computing fluxes\n");
 
             if constexpr (dim > 1) {
                 // fluxes in j direction
@@ -1145,48 +1131,37 @@ void SRHD<dim>::advance()
                     hri[q] = (this->*riemann_solve)(pL, pR, 3, 0);
                 }
             }
-            printf(
-                "fri[%d]: %f, %f, %f\n",
-                q,
-                fri[q].dens(),
-                fri[q].momentum(1),
-                fri[q].nrg()
-            );
         }
 
         // TODO: implement functional source and gravity
-        // const auto source_terms = hydro_sources(cell);
-        // // Gravity
-        // const auto gravity = gravity_sources(prb[tid], cell);
+        const auto source_terms = hydro_sources(cell);
+        // Gravity
+        const auto gravity = gravity_sources(prb[tid], cell);
 
-        // // geometric source terms
-        // const auto geom_source = cell.geom_sources(prb[tid]);
+        // geometric source terms
+        const auto geom_source = cell.geom_sources(prb[tid]);
 
-        // if constexpr (dim == 1) {
-        //     cons[aid] -=
-        //         ((fri[RF] * cell.a1R() - fri[LF] * cell.a1L()) * cell.idV1()
-        //         -
-        //          source_terms - gravity - geom_source) *
-        //         dt * step;
-        // }
-        // else if constexpr (dim == 2) {
-        //     cons[aid] -=
-        //         ((fri[RF] * cell.a1R() - fri[LF] * cell.a1L()) * cell.idV1()
-        //         +
-        //          (gri[RF] * cell.a2R() - gri[LF] * cell.a2L()) * cell.idV2()
-        //          - source_terms - gravity - geom_source) *
-        //         dt * step;
-        // }
-        // else {
-        //     cons[aid] -=
-        //         ((fri[RF] * cell.a1R() - fri[LF] * cell.a1L()) * cell.idV1()
-        //         +
-        //          (gri[RF] * cell.a2R() - gri[LF] * cell.a2L()) * cell.idV2()
-        //          + (hri[RF] * cell.a3R() - hri[LF] * cell.a3L()) *
-        //          cell.idV3() - source_terms - gravity - geom_source) *
-        //         dt * step;
-        // }
-        printf("ii: %ld, jj: %ld, kk: %ld\n", ii, jj, kk);
+        if constexpr (dim == 1) {
+            cons[aid] -=
+                ((fri[RF] * cell.a1R() - fri[LF] * cell.a1L()) * cell.idV1() -
+                 source_terms - gravity - geom_source) *
+                dt * step;
+        }
+        else if constexpr (dim == 2) {
+            cons[aid] -=
+                ((fri[RF] * cell.a1R() - fri[LF] * cell.a1L()) * cell.idV1() +
+                 (gri[RF] * cell.a2R() - gri[LF] * cell.a2L()) * cell.idV2() -
+                 source_terms - gravity - geom_source) *
+                dt * step;
+        }
+        else {
+            cons[aid] -=
+                ((fri[RF] * cell.a1R() - fri[LF] * cell.a1L()) * cell.idV1() +
+                 (gri[RF] * cell.a2R() - gri[LF] * cell.a2L()) * cell.idV2() +
+                 (hri[RF] * cell.a3R() - hri[LF] * cell.a3L()) * cell.idV3() -
+                 source_terms - gravity - geom_source) *
+                dt * step;
+        }
     });
 }
 
@@ -1298,7 +1273,7 @@ void SRHD<dim>::simulate(
     offload();
     compute_bytes_and_strides<primitive_t>(dim);
     print_shared_mem();
-    set_riemann_solver();
+    init_riemann_solver();
     this->set_mesh_funcs();
 
     config_ghosts(this);
@@ -1318,17 +1293,8 @@ void SRHD<dim>::simulate(
     try {
         simbi::detail::logger::with_logger(*this, tend, [&] {
             advance();
-            gpu::api::deviceSynch();
-            printf("done advance\n");
-            std::cin.get();
             config_ghosts(this);
-            gpu::api::deviceSynch();
-            printf("done config ghosts\n");
-            std::cin.get();
             cons2prim();
-            gpu::api::deviceSynch();
-            printf("done cons2prim\n");
-            std::cin.get();
 
             if constexpr (global::on_gpu) {
                 adapt_dt(fullP);
@@ -1336,7 +1302,7 @@ void SRHD<dim>::simulate(
             else {
                 adapt_dt();
             }
-            printf("done adapt dt\n");
+
             t += step * dt;
             if (mesh_motion) {
                 // update x1 endpoints

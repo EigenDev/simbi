@@ -1094,10 +1094,9 @@ void RMHD<dim>::adapt_dt()
 //                                            FLUX CALCULATIONS
 //===================================================================================================================
 template <int dim>
-DUAL RMHD<dim>::conserved_t RMHD<dim>::prims2flux(
-    const RMHD<dim>::primitive_t& prims,
-    const luint nhat
-) const
+DUAL RMHD<dim>::conserved_t
+RMHD<dim>::prims2flux(const RMHD<dim>::primitive_t& prims, const luint nhat)
+    const
 {
     const real rho   = prims.rho();
     const real v1    = prims.vcomponent(1);
@@ -2260,7 +2259,7 @@ void RMHD<dim>::simulate(
     cons.resize(total_zones);
     prims.resize(total_zones);
     troubled_cells.resize(total_zones, 0);
-    if constexpr (global::BuildPlatform == global::Platform::GPU) {
+    if constexpr (global::on_gpu) {
         dt_min.resize(active_zones);
     }
 
@@ -2285,10 +2284,11 @@ void RMHD<dim>::simulate(
     offload();
     compute_bytes_and_strides<primitive_t>(dim);
     print_shared_mem();
-    set_the_riemann_solver();
+    init_riemann_solver();
     this->set_mesh_funcs();
 
     config_ghosts(this);
+    // std::cin.get();
     cons2prim();
     adapt_dt<TIMESTEP_TYPE::MINIMUM>();
 

@@ -592,8 +592,8 @@ DUAL Newtonian<dim>::conserved_t Newtonian<dim>::calc_hllc_flux(
 //                                           SOURCE TERMS
 //===================================================================================================================
 template <int dim>
-DUAL Newtonian<dim>::conserved_t
-Newtonian<dim>::hydro_sources(const auto& cell) const
+DUAL Newtonian<dim>::conserved_t Newtonian<dim>::hydro_sources(const auto& cell
+) const
 {
     if (null_sources) {
         return conserved_t{};
@@ -963,7 +963,7 @@ void Newtonian<dim>::simulate(
     offload();
     compute_bytes_and_strides<primitive_t>(dim);
     print_shared_mem();
-    set_the_riemann_solver();
+    init_riemann_solver();
     this->set_mesh_funcs();
 
     config_ghosts(this);

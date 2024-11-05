@@ -109,7 +109,7 @@ namespace simbi {
             }
         }
 
-        void set_the_riemann_solver()
+        void init_riemann_solver()
         {
             SINGLE(helpers::hybrid_set_riemann_solver, this);
         }
