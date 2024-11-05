@@ -26,6 +26,11 @@ namespace simbi {
         {
             sim_state.prims.copyFromGpu();
             sim_state.cons.copyFromGpu();
+            if constexpr (Sim_type::regime == "srmhd") {
+                sim_state.bstag1.copyFromGpu();
+                sim_state.bstag2.copyFromGpu();
+                sim_state.bstag3.copyFromGpu();
+            }
             static auto data_directory      = sim_state.data_directory;
             static auto step                = sim_state.init_chkpt_idx;
             static lint tchunk_order_of_mag = 2;
@@ -214,181 +219,170 @@ namespace simbi {
             const auto half_sphere = sim_state->half_sphere;
             const auto hr          = sim_state->radius;   // halo radius
             auto* cons             = sim_state->cons.data();
-            parallel_for(
-                sim_state->activeP,
-                sim_state->activeP.nzones,
-                [=] DEV(const luint gid) {
-                    const luint jj = axid<2, BlkAx::J>(gid, xag, yag);
-                    const luint ii = axid<2, BlkAx::I>(gid, xag, yag);
+            parallel_for(sim_state->activeP, [=] DEV(const luint gid) {
+                const luint jj = axid<2, BlkAx::J>(gid, xag, yag);
+                const luint ii = axid<2, BlkAx::I>(gid, xag, yag);
 
-                    const auto ir = ii + hr;
-                    const auto jr = jj + hr;
-                    for (luint rr = 0; rr < hr; rr++) {
-                        const auto rs = rr + 1;
-                        // Fill ghost zones at x1 boundaries
-                        if (jj < ny - 2 * hr) {
-                            auto ing  = idx2(rr, jr, nx, ny);
-                            auto outg = idx2(nx - rs, jr, nx, ny);
+                if constexpr (global::on_gpu) {
+                    if ((ii >= xag) || (jj >= yag)) {
+                        return;
+                    }
+                }
 
-                            switch (sim_state->bcs[0]) {
-                                case BoundaryCondition::REFLECTING: {
-                                    const auto inr =
-                                        idx2(2 * hr - rs, jr, nx, ny);
-                                    cons[ing] = cons[inr];
-                                    cons[ing].momentum(1) *= -1;
-                                    break;
-                                }
-                                case BoundaryCondition::DYNAMIC:
-                                    for (int qq = 0; qq < nvars; qq++) {
-                                        cons[ing][qq] = sim_state->bsources[qq](
-                                            sim_state->x1min,
-                                            sim_state->x2[jj],
-                                            sim_state->t
-                                        );
-                                    }
-                                    break;
-                                case BoundaryCondition::PERIODIC: {
-                                    const auto outr =
-                                        idx2(nx - 2 * hr + rr, jr, nx, ny);
-                                    cons[ing] = cons[outr];
-                                    break;
-                                }
-                                default: {
-                                    const auto inr = idx2(hr, jr, nx, ny);
-                                    cons[ing]      = cons[inr];
-                                    break;
-                                }
+                const auto ir = ii + hr;
+                const auto jr = jj + hr;
+                for (luint rr = 0; rr < hr; rr++) {
+                    const auto rs = rr + 1;
+                    // Fill ghost zones at x1 boundaries
+                    if (jj < ny - 2 * hr) {
+                        auto ing  = idx2(rr, jr, nx, ny);
+                        auto outg = idx2(nx - rs, jr, nx, ny);
+
+                        switch (sim_state->bcs[0]) {
+                            case BoundaryCondition::REFLECTING: {
+                                const auto inr = idx2(2 * hr - rs, jr, nx, ny);
+                                cons[ing]      = cons[inr];
+                                cons[ing].momentum(1) *= -1;
+                                break;
                             }
-
-                            switch (sim_state->bcs[1]) {
-                                case BoundaryCondition::REFLECTING: {
-                                    const auto outr =
-                                        idx2(nx - 2 * hr + rr, jr, nx, ny);
-                                    cons[outg] = cons[outr];
-                                    cons[outg].momentum(1) *= -1;
-                                    break;
+                            case BoundaryCondition::DYNAMIC:
+                                for (int qq = 0; qq < nvars; qq++) {
+                                    cons[ing][qq] = sim_state->bsources[qq](
+                                        sim_state->x1min,
+                                        sim_state->x2[jj],
+                                        sim_state->t
+                                    );
                                 }
-                                case BoundaryCondition::DYNAMIC:
-                                    for (int qq = 0; qq < nvars; qq++) {
-                                        cons[outg][qq] =
-                                            sim_state->bsources[qq](
-                                                sim_state->x1max,
-                                                sim_state->x2[jj],
-                                                sim_state->t
-                                            );
-                                    }
-                                    break;
-                                case BoundaryCondition::PERIODIC: {
-                                    const auto inr =
-                                        idx2(2 * hr - rs, jr, nx, ny);
-                                    cons[outg] = cons[inr];
-                                    break;
-                                }
-                                default: {
-                                    const auto outr =
-                                        idx2(nx - (hr + 1), jr, nx, ny);
-                                    cons[outg] = cons[outr];
-                                    break;
-                                }
+                                break;
+                            case BoundaryCondition::PERIODIC: {
+                                const auto outr =
+                                    idx2(nx - 2 * hr + rr, jr, nx, ny);
+                                cons[ing] = cons[outr];
+                                break;
+                            }
+                            default: {
+                                const auto inr = idx2(hr, jr, nx, ny);
+                                cons[ing]      = cons[inr];
+                                break;
                             }
                         }
 
-                        // Fill ghost zones at x2 boundaries
-                        if (ii < nx - 2 * hr) {
-                            auto ing  = idx2(ir, rr, nx, ny);
-                            auto outg = idx2(ir, ny - rs, nx, ny);
-
-                            switch (geometry) {
-                                case Geometry::SPHERICAL: {
-                                    const auto inr =
-                                        idx2(ir, 2 * hr - rs, nx, ny);
-                                    const auto outr =
-                                        idx2(ir, ny - 2 * hr + rr, nx, ny);
-                                    cons[ing]  = cons[inr];
-                                    cons[outg] = cons[outr];
-                                    if (half_sphere) {
-                                        cons[outg].momentum(2) *= -1;
-                                    }
-                                    break;
+                        switch (sim_state->bcs[1]) {
+                            case BoundaryCondition::REFLECTING: {
+                                const auto outr =
+                                    idx2(nx - 2 * hr + rr, jr, nx, ny);
+                                cons[outg] = cons[outr];
+                                cons[outg].momentum(1) *= -1;
+                                break;
+                            }
+                            case BoundaryCondition::DYNAMIC:
+                                for (int qq = 0; qq < nvars; qq++) {
+                                    cons[outg][qq] = sim_state->bsources[qq](
+                                        sim_state->x1max,
+                                        sim_state->x2[jj],
+                                        sim_state->t
+                                    );
                                 }
-                                default:
-                                    switch (sim_state->bcs[2]) {
-                                        case BoundaryCondition::REFLECTING: {
-                                            const auto inr =
-                                                idx2(ir, 2 * hr - rs, nx, ny);
-                                            cons[ing] = cons[inr];
-                                            cons[ing].momentum(2) *= -1;
-                                            break;
-                                        }
-                                        case BoundaryCondition::DYNAMIC:
-                                            for (int qq = 0; qq < nvars; qq++) {
-                                                cons[ing][qq] =
-                                                    sim_state->bsources[qq](
-                                                        sim_state->x1[ii],
-                                                        sim_state->x2min,
-                                                        sim_state->t
-                                                    );
-                                            }
-                                            break;
-                                        case BoundaryCondition::PERIODIC: {
-                                            const auto outr = idx2(
-                                                ir,
-                                                ny - 2 * hr + rr,
-                                                nx,
-                                                ny
-                                            );
-                                            cons[ing] = cons[outr];
-                                            break;
-                                        }
-                                        default: {
-                                            const auto inr =
-                                                idx2(ir, hr, nx, ny);
-                                            cons[ing] = cons[inr];
-                                            break;
-                                        }
-                                    }
-
-                                    switch (sim_state->bcs[3]) {
-                                        case BoundaryCondition::REFLECTING: {
-                                            const auto outr = idx2(
-                                                ir,
-                                                ny - 2 * hr + rr,
-                                                nx,
-                                                ny
-                                            );
-                                            cons[outg] = cons[outr];
-                                            cons[outg].momentum(2) *= -1;
-                                            break;
-                                        }
-                                        case BoundaryCondition::DYNAMIC:
-                                            for (int qq = 0; qq < nvars; qq++) {
-                                                cons[outg][qq] =
-                                                    sim_state->bsources[qq](
-                                                        sim_state->x1[ii],
-                                                        sim_state->x2max,
-                                                        sim_state->t
-                                                    );
-                                            }
-                                            break;
-                                        case BoundaryCondition::PERIODIC: {
-                                            const auto inr =
-                                                idx2(ir, 2 * hr - rs, nx, ny);
-                                            cons[outg] = cons[inr];
-                                            break;
-                                        }
-                                        default: {
-                                            const auto outr =
-                                                idx2(ir, ny - (hr + 1), nx, ny);
-                                            cons[outg] = cons[outr];
-                                            break;
-                                        }
-                                    }
-                                    break;
+                                break;
+                            case BoundaryCondition::PERIODIC: {
+                                const auto inr = idx2(2 * hr - rs, jr, nx, ny);
+                                cons[outg]     = cons[inr];
+                                break;
+                            }
+                            default: {
+                                const auto outr =
+                                    idx2(nx - (hr + 1), jr, nx, ny);
+                                cons[outg] = cons[outr];
+                                break;
                             }
                         }
                     }
+
+                    // Fill ghost zones at x2 boundaries
+                    if (ii < nx - 2 * hr) {
+                        auto ing  = idx2(ir, rr, nx, ny);
+                        auto outg = idx2(ir, ny - rs, nx, ny);
+
+                        switch (geometry) {
+                            case Geometry::SPHERICAL: {
+                                const auto inr = idx2(ir, 2 * hr - rs, nx, ny);
+                                const auto outr =
+                                    idx2(ir, ny - 2 * hr + rr, nx, ny);
+                                cons[ing]  = cons[inr];
+                                cons[outg] = cons[outr];
+                                if (half_sphere) {
+                                    cons[outg].momentum(2) *= -1;
+                                }
+                                break;
+                            }
+                            default:
+                                switch (sim_state->bcs[2]) {
+                                    case BoundaryCondition::REFLECTING: {
+                                        const auto inr =
+                                            idx2(ir, 2 * hr - rs, nx, ny);
+                                        cons[ing] = cons[inr];
+                                        cons[ing].momentum(2) *= -1;
+                                        break;
+                                    }
+                                    case BoundaryCondition::DYNAMIC:
+                                        for (int qq = 0; qq < nvars; qq++) {
+                                            cons[ing][qq] =
+                                                sim_state->bsources[qq](
+                                                    sim_state->x1[ii],
+                                                    sim_state->x2min,
+                                                    sim_state->t
+                                                );
+                                        }
+                                        break;
+                                    case BoundaryCondition::PERIODIC: {
+                                        const auto outr =
+                                            idx2(ir, ny - 2 * hr + rr, nx, ny);
+                                        cons[ing] = cons[outr];
+                                        break;
+                                    }
+                                    default: {
+                                        const auto inr = idx2(ir, hr, nx, ny);
+                                        cons[ing]      = cons[inr];
+                                        break;
+                                    }
+                                }
+
+                                switch (sim_state->bcs[3]) {
+                                    case BoundaryCondition::REFLECTING: {
+                                        const auto outr =
+                                            idx2(ir, ny - 2 * hr + rr, nx, ny);
+                                        cons[outg] = cons[outr];
+                                        cons[outg].momentum(2) *= -1;
+                                        break;
+                                    }
+                                    case BoundaryCondition::DYNAMIC:
+                                        for (int qq = 0; qq < nvars; qq++) {
+                                            cons[outg][qq] =
+                                                sim_state->bsources[qq](
+                                                    sim_state->x1[ii],
+                                                    sim_state->x2max,
+                                                    sim_state->t
+                                                );
+                                        }
+                                        break;
+                                    case BoundaryCondition::PERIODIC: {
+                                        const auto inr =
+                                            idx2(ir, 2 * hr - rs, nx, ny);
+                                        cons[outg] = cons[inr];
+                                        break;
+                                    }
+                                    default: {
+                                        const auto outr =
+                                            idx2(ir, ny - (hr + 1), nx, ny);
+                                        cons[outg] = cons[outr];
+                                        break;
+                                    }
+                                }
+                                break;
+                        }
+                    }
                 }
-            );
+            });
         }
 
         template <typename sim_state_t>
@@ -405,1530 +399,1202 @@ namespace simbi {
             const auto hr          = sim_state->radius;   // halo radius
             auto* cons             = sim_state->cons.data();
 
-            const auto bcxb = boundary_conditions[0];
-            const auto bcxe = boundary_conditions[1];
-            const auto bcyb = boundary_conditions[2];
-            const auto bcye = boundary_conditions[3];
-            const auto bczb = boundary_conditions[4];
-            const auto bcze = boundary_conditions[5];
-            parallel_for(
-                sim_state->activeP,
-                sim_state->activeP.nzones,
-                [=] DEV(const luint gid) {
-                    const luint kk = axid<3, BlkAx::K>(gid, xag, yag);
-                    const luint jj = axid<3, BlkAx::J>(gid, xag, yag, kk);
-                    const luint ii = axid<3, BlkAx::I>(gid, xag, yag, kk);
+            const auto bcxb = sim_state->bcs[0];
+            const auto bcxe = sim_state->bcs[1];
+            const auto bcyb = sim_state->bcs[2];
+            const auto bcye = sim_state->bcs[3];
+            const auto bczb = sim_state->bcs[4];
+            const auto bcze = sim_state->bcs[5];
+            parallel_for(sim_state->activeP, [=] DEV(const luint gid) {
+                const luint kk = axid<3, BlkAx::K>(gid, xag, yag);
+                const luint jj = axid<3, BlkAx::J>(gid, xag, yag, kk);
+                const luint ii = axid<3, BlkAx::I>(gid, xag, yag, kk);
 
-                    const auto ir = ii + hr;
-                    const auto jr = jj + hr;
-                    const auto kr = kk + hr;
-                    for (luint rr = 0; rr < hr; rr++) {
-                        const auto rs = rr + 1;
-                        if (jj < ny - 2 * hr) {
-                            // Fill ghost zones at i-k corners
-                            auto iksw = idx3(rr, jr, rr, nx, ny, nz);
-                            auto ikse = idx3(nx - rs, jr, rr, nx, ny, nz);
-                            auto ikne = idx3(nx - rs, jr, nz - rs, nx, ny, nz);
-                            auto iknw = idx3(rr, jr, nz - rs, nx, ny, nz);
+                if (global::on_gpu) {
+                    if ((ii >= xag) || (jj >= yag) || (kk >= sim_state->zag)) {
+                        return;
+                    }
+                }
+
+                const auto ir = ii + hr;
+                const auto jr = jj + hr;
+                const auto kr = kk + hr;
+                for (luint rr = 0; rr < hr; rr++) {
+                    const auto rs = rr + 1;
+                    if (jj < ny - 2 * hr) {
+                        // Fill ghost zones at i-k corners
+                        auto iksw = idx3(rr, jr, rr, nx, ny, nz);
+                        auto ikse = idx3(nx - rs, jr, rr, nx, ny, nz);
+                        auto ikne = idx3(nx - rs, jr, nz - rs, nx, ny, nz);
+                        auto iknw = idx3(rr, jr, nz - rs, nx, ny, nz);
+
+                        // Apply boundary conditions at southwest corner
+                        if (bcxb == BoundaryCondition::PERIODIC &&
+                            bczb == BoundaryCondition::PERIODIC) {
+                            // the sw corner is set the the real ne corner
+                            cons[iksw] = cons[idx3(
+                                nx - (hr + 1),
+                                jr,
+                                nz - (hr + 1),
+                                nx,
+                                ny,
+                                nz
+                            )];
+                        }
+                        else if (bcxb == BoundaryCondition::PERIODIC &&
+                                 bczb == BoundaryCondition::OUTFLOW) {
+                            cons[iksw] =
+                                cons[idx3(nx - (hr + 1), jr, hr, nx, ny, nz)];
+                        }
+                        else if (bcxb == BoundaryCondition::PERIODIC &&
+                                 bczb == BoundaryCondition::REFLECTING) {
+                            cons[iksw] =
+                                cons[idx3(nx - (hr + 1), jr, hr, nx, ny, nz)];
+                            cons[iksw].momentum(3) *= -1;
+                        }
+                        else if (bcxb == BoundaryCondition::OUTFLOW &&
+                                 bczb == BoundaryCondition::PERIODIC) {
+                            cons[iksw] =
+                                cons[idx3(hr, jr, nz - (hr + 1), nx, ny, nz)];
+                        }
+                        else if (bcxb == BoundaryCondition::OUTFLOW &&
+                                 bczb == BoundaryCondition::OUTFLOW) {
+                            cons[iksw] = cons[idx3(hr, jr, hr, nx, ny, nz)];
+                        }
+                        else if (bcxb == BoundaryCondition::OUTFLOW &&
+                                 bczb == BoundaryCondition::REFLECTING) {
+                            cons[iksw] = cons[idx3(hr, jr, hr, nx, ny, nz)];
+                            cons[iksw].momentum(3) *= -1;
+                        }
+                        else if (bcxb == BoundaryCondition::REFLECTING &&
+                                 bczb == BoundaryCondition::PERIODIC) {
+                            cons[iksw] =
+                                cons[idx3(hr, jr, nz - (hr + 1), nx, ny, nz)];
+                            cons[iksw].momentum(1) *= -1;
+                        }
+                        else if (bcxb == BoundaryCondition::REFLECTING &&
+                                 bczb == BoundaryCondition::OUTFLOW) {
+                            cons[iksw] = cons[idx3(hr, jr, hr, nx, ny, nz)];
+                            cons[iksw].momentum(1) *= -1;
+                        }
+                        else if (bcxb == BoundaryCondition::REFLECTING &&
+                                 bczb == BoundaryCondition::REFLECTING) {
+                            cons[iksw] = cons[idx3(hr, jr, hr, nx, ny, nz)];
+                            cons[iksw].momentum(1) *= -1;
+                            cons[iksw].momentum(3) *= -1;
+                        }
+
+                        // Fill ghost zones at northwest corner
+                        if (bcxb == BoundaryCondition::PERIODIC &&
+                            bcze == BoundaryCondition::PERIODIC) {
+                            cons[iknw] =
+                                cons[idx3(nx - (hr + 1), jr, hr, nx, ny, nz)];
+                        }
+                        else if (bcxb == BoundaryCondition::PERIODIC &&
+                                 bcze == BoundaryCondition::OUTFLOW) {
+                            cons[iknw] = cons[idx3(
+                                nx - (hr + 1),
+                                jr,
+                                nz - (hr + 1),
+                                nx,
+                                ny,
+                                nz
+                            )];
+                        }
+                        else if (bcxb == BoundaryCondition::PERIODIC &&
+                                 bcze == BoundaryCondition::REFLECTING) {
+                            cons[iknw] = cons[idx3(
+                                nx - (hr + 1),
+                                jr,
+                                nz - (hr + 1),
+                                nx,
+                                ny,
+                                nz
+                            )];
+                            cons[iknw].momentum(3) *= -1;
+                        }
+                        else if (bcxb == BoundaryCondition::OUTFLOW &&
+                                 bcze == BoundaryCondition::PERIODIC) {
+                            cons[iknw] = cons[idx3(hr, jr, hr, nx, ny, nz)];
+                        }
+                        else if (bcxb == BoundaryCondition::OUTFLOW &&
+                                 bcze == BoundaryCondition::OUTFLOW) {
+                            cons[iknw] =
+                                cons[idx3(hr, jr, nz - (hr + 1), nx, ny, nz)];
+                        }
+                        else if (bcxb == BoundaryCondition::OUTFLOW &&
+                                 bcze == BoundaryCondition::REFLECTING) {
+                            cons[iknw] =
+                                cons[idx3(hr, jr, nz - (hr + 1), nx, ny, nz)];
+                            cons[iknw].momentum(3) *= -1;
+                        }
+                        else if (bcxb == BoundaryCondition::REFLECTING &&
+                                 bcze == BoundaryCondition::PERIODIC) {
+                            cons[iknw] = cons[idx3(hr, jr, hr, nx, ny, nz)];
+                            cons[iknw].momentum(1) *= -1;
+                        }
+                        else if (bcxb == BoundaryCondition::REFLECTING &&
+                                 bcze == BoundaryCondition::OUTFLOW) {
+                            cons[iknw] =
+                                cons[idx3(hr, jr, nz - (hr + 1), nx, ny, nz)];
+                            cons[iknw].momentum(1) *= -1;
+                        }
+                        else if (bcxb == BoundaryCondition::REFLECTING &&
+                                 bcze == BoundaryCondition::REFLECTING) {
+                            cons[iknw] =
+                                cons[idx3(hr, jr, nz - (hr + 1), nx, ny, nz)];
+                            cons[iknw].momentum(1) *= -1;
+                            cons[iknw].momentum(3) *= -1;
+                        }
+
+                        // Fill ghost zones at northeast corner
+                        if (bcxe == BoundaryCondition::PERIODIC &&
+                            bcze == BoundaryCondition::PERIODIC) {
+                            cons[ikne] = cons[idx3(hr, jr, hr, nx, ny, nz)];
+                        }
+                        else if (bcxe == BoundaryCondition::PERIODIC &&
+                                 bcze == BoundaryCondition::OUTFLOW) {
+                            cons[ikne] =
+                                cons[idx3(hr, jr, nz - (hr + 1), nx, ny, nz)];
+                        }
+                        else if (bcxe == BoundaryCondition::PERIODIC &&
+                                 bcze == BoundaryCondition::REFLECTING) {
+                            cons[ikne] =
+                                cons[idx3(hr, jr, nz - (hr + 1), nx, ny, nz)];
+                            cons[ikne].momentum(3) *= -1;
+                        }
+                        else if (bcxe == BoundaryCondition::OUTFLOW &&
+                                 bcze == BoundaryCondition::PERIODIC) {
+                            cons[ikne] =
+                                cons[idx3(nx - (hr + 1), jr, hr, nx, ny, nz)];
+                        }
+                        else if (bcxe == BoundaryCondition::OUTFLOW &&
+                                 bcze == BoundaryCondition::OUTFLOW) {
+                            cons[ikne] = cons[idx3(
+                                nx - (hr + 1),
+                                jr,
+                                nz - (hr + 1),
+                                nx,
+                                ny,
+                                nz
+                            )];
+                        }
+                        else if (bcxe == BoundaryCondition::OUTFLOW &&
+                                 bcze == BoundaryCondition::REFLECTING) {
+                            cons[ikne] = cons[idx3(
+                                nx - (hr + 1),
+                                jr,
+                                nz - (hr + 1),
+                                nx,
+                                ny,
+                                nz
+                            )];
+                            cons[ikne].momentum(3) *= -1;
+                        }
+                        else if (bcxe == BoundaryCondition::REFLECTING &&
+                                 bcze == BoundaryCondition::PERIODIC) {
+                            cons[ikne] = cons[idx3(
+                                nx - (hr + 1),
+                                jr,
+                                nz - (hr + 1),
+                                nx,
+                                ny,
+                                nz
+                            )];
+                            cons[ikne].momentum(1) *= -1;
+                        }
+                        else if (bcxe == BoundaryCondition::REFLECTING &&
+                                 bcze == BoundaryCondition::OUTFLOW) {
+                            cons[ikne] = cons[idx3(
+                                nx - (hr + 1),
+                                jr,
+                                ny - (hr + 1),
+                                nx,
+                                ny,
+                                nz
+                            )];
+                            cons[ikne].momentum(1) *= -1;
+                        }
+                        else if (bcxe == BoundaryCondition::REFLECTING &&
+                                 bcze == BoundaryCondition::REFLECTING) {
+                            cons[ikne] = cons[idx3(
+                                nx - (hr + 1),
+                                jr,
+                                nz - (hr + 1),
+                                nx,
+                                ny,
+                                nz
+                            )];
+                            cons[ikne].momentum(1) *= -1;
+                            cons[ikne].momentum(3) *= -1;
+                        }
+
+                        // Fill ghost zones at southeast corner
+                        if (bcxe == BoundaryCondition::PERIODIC &&
+                            bczb == BoundaryCondition::PERIODIC) {
+                            cons[ikse] =
+                                cons[idx3(hr, jr, nz - (hr + 1), nx, ny, nz)];
+                        }
+                        else if (bcxe == BoundaryCondition::PERIODIC &&
+                                 bczb == BoundaryCondition::OUTFLOW) {
+                            cons[ikse] = cons[idx3(hr, jr, hr, nx, ny, nz)];
+                        }
+                        else if (bcxe == BoundaryCondition::PERIODIC &&
+                                 bczb == BoundaryCondition::REFLECTING) {
+                            cons[ikse] = cons[idx3(hr, jr, hr, nx, ny, nz)];
+                            cons[ikse].momentum(3) *= -1;
+                        }
+                        else if (bcxe == BoundaryCondition::OUTFLOW &&
+                                 bczb == BoundaryCondition::PERIODIC) {
+                            cons[ikse] = cons[idx3(
+                                nx - (hr + 1),
+                                jr,
+                                nz - (hr + 1),
+                                nx,
+                                ny,
+                                nz
+                            )];
+                        }
+                        else if (bcxe == BoundaryCondition::OUTFLOW &&
+                                 bczb == BoundaryCondition::OUTFLOW) {
+                            cons[ikse] =
+                                cons[idx3(nx - (hr + 1), jr, hr, nx, ny, nz)];
+                        }
+                        else if (bcxe == BoundaryCondition::OUTFLOW &&
+                                 bczb == BoundaryCondition::REFLECTING) {
+                            cons[ikse] =
+                                cons[idx3(nx - (hr + 1), jr, hr, nx, ny, nz)];
+                            cons[ikse].momentum(3) *= -1;
+                        }
+                        else if (bcxe == BoundaryCondition::REFLECTING &&
+                                 bczb == BoundaryCondition::PERIODIC) {
+                            cons[ikse] = cons[idx3(
+                                nx - (hr + 1),
+                                jr,
+                                nz - (hr + 1),
+                                nx,
+                                ny,
+                                nz
+                            )];
+                            cons[ikse].momentum(1) *= -1;
+                        }
+                        else if (bcxe == BoundaryCondition::REFLECTING &&
+                                 bczb == BoundaryCondition::OUTFLOW) {
+                            cons[ikse] =
+                                cons[idx3(nx - (hr + 1), jr, hr, nx, ny, nz)];
+                            cons[ikse].momentum(1) *= -1;
+                        }
+                        else if (bcxe == BoundaryCondition::REFLECTING &&
+                                 bczb == BoundaryCondition::REFLECTING) {
+                            cons[ikse] =
+                                cons[idx3(nx - (hr + 1), jr, hr, nx, ny, nz)];
+                            cons[ikse].momentum(1) *= -1;
+                            cons[ikse].momentum(3) *= -1;
+                        }
+
+                        //================================================================
+                        // Fill ghosts zones at x1 boundaries
+                        if (kk < nz - 2 * hr) {
+                            // Fill ghost zones at i-j corners
+                            auto ijsw = idx3(rr, rr, kr, nx, ny, nz);
+                            auto ijse = idx3(nx - rs, rr, kr, nx, ny, nz);
+                            auto ijne = idx3(nx - rs, ny - rs, kr, nx, ny, nz);
+                            auto ijnw = idx3(rr, ny - rs, kr, nx, ny, nz);
 
                             // Apply boundary conditions at southwest corner
                             if (bcxb == BoundaryCondition::PERIODIC &&
-                                bczb == BoundaryCondition::PERIODIC) {
-                                // the sw corner is set the the real ne corner
-                                cons[iksw] = cons[idx3(
+                                bcyb == BoundaryCondition::PERIODIC) {
+                                // The sw corner is set to the real ne
+                                // corner
+                                cons[ijsw] = cons[idx3(
                                     nx - (hr + 1),
-                                    jr,
-                                    nz - (hr + 1),
-                                    nx,
-                                    ny,
-                                    nz
-                                )];
-                            }
-                            else if (bcxb == BoundaryCondition::PERIODIC &&
-                                     bczb == BoundaryCondition::OUTFLOW) {
-                                cons[iksw] = cons
-                                    [idx3(nx - (hr + 1), jr, hr, nx, ny, nz)];
-                            }
-                            else if (bcxb == BoundaryCondition::PERIODIC &&
-                                     bczb == BoundaryCondition::REFLECTING) {
-                                cons[iksw] = cons
-                                    [idx3(nx - (hr + 1), jr, hr, nx, ny, nz)];
-                                cons[iksw].momentum(3) *= -1;
-                            }
-                            else if (bcxb == BoundaryCondition::OUTFLOW &&
-                                     bczb == BoundaryCondition::PERIODIC) {
-                                cons[iksw] = cons
-                                    [idx3(hr, jr, nz - (hr + 1), nx, ny, nz)];
-                            }
-                            else if (bcxb == BoundaryCondition::OUTFLOW &&
-                                     bczb == BoundaryCondition::OUTFLOW) {
-                                cons[iksw] = cons[idx3(hr, jr, hr, nx, ny, nz)];
-                            }
-                            else if (bcxb == BoundaryCondition::OUTFLOW &&
-                                     bczb == BoundaryCondition::REFLECTING) {
-                                cons[iksw] = cons[idx3(hr, jr, hr, nx, ny, nz)];
-                                cons[iksw].momentum(3) *= -1;
-                            }
-                            else if (bcxb == BoundaryCondition::REFLECTING &&
-                                     bczb == BoundaryCondition::PERIODIC) {
-                                cons[iksw] = cons
-                                    [idx3(hr, jr, nz - (hr + 1), nx, ny, nz)];
-                                cons[iksw].momentum(1) *= -1;
-                            }
-                            else if (bcxb == BoundaryCondition::REFLECTING &&
-                                     bczb == BoundaryCondition::OUTFLOW) {
-                                cons[iksw] = cons[idx3(hr, jr, hr, nx, ny, nz)];
-                                cons[iksw].momentum(1) *= -1;
-                            }
-                            else if (bcxb == BoundaryCondition::REFLECTING &&
-                                     bczb == BoundaryCondition::REFLECTING) {
-                                cons[iksw] = cons[idx3(hr, jr, hr, nx, ny, nz)];
-                                cons[iksw].momentum(1) *= -1;
-                                cons[iksw].momentum(3) *= -1;
-                            }
-
-                            // Fill ghost zones at northwest corner
-                            if (bcxb == BoundaryCondition::PERIODIC &&
-                                bcze == BoundaryCondition::PERIODIC) {
-                                cons[iknw] = cons
-                                    [idx3(nx - (hr + 1), jr, hr, nx, ny, nz)];
-                            }
-                            else if (bcxb == BoundaryCondition::PERIODIC &&
-                                     bcze == BoundaryCondition::OUTFLOW) {
-                                cons[iknw] = cons[idx3(
-                                    nx - (hr + 1),
-                                    jr,
-                                    nz - (hr + 1),
-                                    nx,
-                                    ny,
-                                    nz
-                                )];
-                            }
-                            else if (bcxb == BoundaryCondition::PERIODIC &&
-                                     bcze == BoundaryCondition::REFLECTING) {
-                                cons[iknw] = cons[idx3(
-                                    nx - (hr + 1),
-                                    jr,
-                                    nz - (hr + 1),
-                                    nx,
-                                    ny,
-                                    nz
-                                )];
-                                cons[iknw].momentum(3) *= -1;
-                            }
-                            else if (bcxb == BoundaryCondition::OUTFLOW &&
-                                     bcze == BoundaryCondition::PERIODIC) {
-                                cons[iknw] = cons[idx3(hr, jr, hr, nx, ny, nz)];
-                            }
-                            else if (bcxb == BoundaryCondition::OUTFLOW &&
-                                     bcze == BoundaryCondition::OUTFLOW) {
-                                cons[iknw] = cons
-                                    [idx3(hr, jr, nz - (hr + 1), nx, ny, nz)];
-                            }
-                            else if (bcxb == BoundaryCondition::OUTFLOW &&
-                                     bcze == BoundaryCondition::REFLECTING) {
-                                cons[iknw] = cons
-                                    [idx3(hr, jr, nz - (hr + 1), nx, ny, nz)];
-                                cons[iknw].momentum(3) *= -1;
-                            }
-                            else if (bcxb == BoundaryCondition::REFLECTING &&
-                                     bcze == BoundaryCondition::PERIODIC) {
-                                cons[iknw] = cons[idx3(hr, jr, hr, nx, ny, nz)];
-                                cons[iknw].momentum(1) *= -1;
-                            }
-                            else if (bcxb == BoundaryCondition::REFLECTING &&
-                                     bcze == BoundaryCondition::OUTFLOW) {
-                                cons[iknw] = cons
-                                    [idx3(hr, jr, nz - (hr + 1), nx, ny, nz)];
-                                cons[iknw].momentum(1) *= -1;
-                            }
-                            else if (bcxb == BoundaryCondition::REFLECTING &&
-                                     bcze == BoundaryCondition::REFLECTING) {
-                                cons[iknw] = cons
-                                    [idx3(hr, jr, nz - (hr + 1), nx, ny, nz)];
-                                cons[iknw].momentum(1) *= -1;
-                                cons[iknw].momentum(3) *= -1;
-                            }
-
-                            // Fill ghost zones at northeast corner
-                            if (bcxe == BoundaryCondition::PERIODIC &&
-                                bcze == BoundaryCondition::PERIODIC) {
-                                cons[ikne] = cons[idx3(hr, jr, hr, nx, ny, nz)];
-                            }
-                            else if (bcxe == BoundaryCondition::PERIODIC &&
-                                     bcze == BoundaryCondition::OUTFLOW) {
-                                cons[ikne] = cons
-                                    [idx3(hr, jr, nz - (hr + 1), nx, ny, nz)];
-                            }
-                            else if (bcxe == BoundaryCondition::PERIODIC &&
-                                     bcze == BoundaryCondition::REFLECTING) {
-                                cons[ikne] = cons
-                                    [idx3(hr, jr, nz - (hr + 1), nx, ny, nz)];
-                                cons[ikne].momentum(3) *= -1;
-                            }
-                            else if (bcxe == BoundaryCondition::OUTFLOW &&
-                                     bcze == BoundaryCondition::PERIODIC) {
-                                cons[ikne] = cons
-                                    [idx3(nx - (hr + 1), jr, hr, nx, ny, nz)];
-                            }
-                            else if (bcxe == BoundaryCondition::OUTFLOW &&
-                                     bcze == BoundaryCondition::OUTFLOW) {
-                                cons[ikne] = cons[idx3(
-                                    nx - (hr + 1),
-                                    jr,
-                                    nz - (hr + 1),
-                                    nx,
-                                    ny,
-                                    nz
-                                )];
-                            }
-                            else if (bcxe == BoundaryCondition::OUTFLOW &&
-                                     bcze == BoundaryCondition::REFLECTING) {
-                                cons[ikne] = cons[idx3(
-                                    nx - (hr + 1),
-                                    jr,
-                                    nz - (hr + 1),
-                                    nx,
-                                    ny,
-                                    nz
-                                )];
-                                cons[ikne].momentum(3) *= -1;
-                            }
-                            else if (bcxe == BoundaryCondition::REFLECTING &&
-                                     bcze == BoundaryCondition::PERIODIC) {
-                                cons[ikne] = cons[idx3(
-                                    nx - (hr + 1),
-                                    jr,
-                                    nz - (hr + 1),
-                                    nx,
-                                    ny,
-                                    nz
-                                )];
-                                cons[ikne].momentum(1) *= -1;
-                            }
-                            else if (bcxe == BoundaryCondition::REFLECTING &&
-                                     bcze == BoundaryCondition::OUTFLOW) {
-                                cons[ikne] = cons[idx3(
-                                    nx - (hr + 1),
-                                    jr,
                                     ny - (hr + 1),
+                                    kr,
                                     nx,
                                     ny,
                                     nz
                                 )];
-                                cons[ikne].momentum(1) *= -1;
                             }
-                            else if (bcxe == BoundaryCondition::REFLECTING &&
-                                     bcze == BoundaryCondition::REFLECTING) {
-                                cons[ikne] = cons[idx3(
-                                    nx - (hr + 1),
-                                    jr,
-                                    nz - (hr + 1),
-                                    nx,
-                                    ny,
-                                    nz
-                                )];
-                                cons[ikne].momentum(1) *= -1;
-                                cons[ikne].momentum(3) *= -1;
+                            else if (bcxb == BoundaryCondition::PERIODIC &&
+                                     bcyb == BoundaryCondition::OUTFLOW) {
+                                cons[ijsw] = cons
+                                    [idx3(nx - (hr + 1), hr, kr, nx, ny, nz)];
+                            }
+                            else if (bcxb == BoundaryCondition::PERIODIC &&
+                                     bcyb == BoundaryCondition::REFLECTING) {
+                                cons[ijsw] = cons
+                                    [idx3(nx - (hr + 1), hr, kr, nx, ny, nz)];
+                                cons[ijsw].momentum(2) *= -1;
+                            }
+                            else if (bcxb == BoundaryCondition::OUTFLOW &&
+                                     bcyb == BoundaryCondition::PERIODIC) {
+                                cons[ijsw] = cons
+                                    [idx3(hr, ny - (hr + 1), kr, nx, ny, nz)];
+                            }
+                            else if (bcxb == BoundaryCondition::OUTFLOW &&
+                                     bcyb == BoundaryCondition::OUTFLOW) {
+                                cons[ijsw] = cons[idx3(hr, hr, kr, nx, ny, nz)];
+                            }
+                            else if (bcxb == BoundaryCondition::OUTFLOW &&
+                                     bcyb == BoundaryCondition::REFLECTING) {
+                                cons[ijsw] = cons[idx3(hr, hr, kr, nx, ny, nz)];
+                                cons[ijsw].momentum(2) *= -1;
+                            }
+                            else if (bcxb == BoundaryCondition::REFLECTING &&
+                                     bcyb == BoundaryCondition::PERIODIC) {
+                                cons[ijsw] = cons
+                                    [idx3(hr, ny - (hr + 1), kr, nx, ny, nz)];
+                                cons[ijsw].momentum(1) *= -1;
+                            }
+                            else if (bcxb == BoundaryCondition::REFLECTING &&
+                                     bcyb == BoundaryCondition::OUTFLOW) {
+                                cons[ijsw] = cons[idx3(hr, hr, kr, nx, ny, nz)];
+                                cons[ijsw].momentum(1) *= -1;
+                            }
+                            else if (bcxb == BoundaryCondition::REFLECTING &&
+                                     bcyb == BoundaryCondition::REFLECTING) {
+                                cons[ijsw] = cons[idx3(hr, hr, kr, nx, ny, nz)];
+                                cons[ijsw].momentum(1) *= -1;
+                                cons[ijsw].momentum(2) *= -1;
                             }
 
-                            // Fill ghost zones at southeast corner
+                            // Apply boundary conditions at southeast corner
                             if (bcxe == BoundaryCondition::PERIODIC &&
-                                bczb == BoundaryCondition::PERIODIC) {
-                                cons[ikse] = cons
-                                    [idx3(hr, jr, nz - (hr + 1), nx, ny, nz)];
+                                bcyb == BoundaryCondition::PERIODIC) {
+                                cons[ijse] = cons[idx3(hr, hr, kr, nx, ny, nz)];
                             }
                             else if (bcxe == BoundaryCondition::PERIODIC &&
-                                     bczb == BoundaryCondition::OUTFLOW) {
-                                cons[ikse] = cons[idx3(hr, jr, hr, nx, ny, nz)];
+                                     bcyb == BoundaryCondition::OUTFLOW) {
+                                cons[ijse] = cons
+                                    [idx3(hr, ny - (hr + 1), kr, nx, ny, nz)];
                             }
                             else if (bcxe == BoundaryCondition::PERIODIC &&
-                                     bczb == BoundaryCondition::REFLECTING) {
-                                cons[ikse] = cons[idx3(hr, jr, hr, nx, ny, nz)];
-                                cons[ikse].momentum(3) *= -1;
+                                     bcyb == BoundaryCondition::REFLECTING) {
+                                cons[ijse] = cons
+                                    [idx3(hr, ny - (hr + 1), kr, nx, ny, nz)];
+                                cons[ijse].momentum(2) *= -1;
                             }
                             else if (bcxe == BoundaryCondition::OUTFLOW &&
-                                     bczb == BoundaryCondition::PERIODIC) {
-                                cons[ikse] = cons[idx3(
+                                     bcyb == BoundaryCondition::PERIODIC) {
+                                cons[ijse] = cons
+                                    [idx3(nx - (hr + 1), hr, kr, nx, ny, nz)];
+                            }
+                            else if (bcxe == BoundaryCondition::OUTFLOW &&
+                                     bcyb == BoundaryCondition::OUTFLOW) {
+                                cons[ijse] = cons[idx3(
                                     nx - (hr + 1),
-                                    jr,
-                                    nz - (hr + 1),
+                                    ny - (hr + 1),
+                                    kr,
                                     nx,
                                     ny,
                                     nz
                                 )];
                             }
                             else if (bcxe == BoundaryCondition::OUTFLOW &&
-                                     bczb == BoundaryCondition::OUTFLOW) {
-                                cons[ikse] = cons
-                                    [idx3(nx - (hr + 1), jr, hr, nx, ny, nz)];
-                            }
-                            else if (bcxe == BoundaryCondition::OUTFLOW &&
-                                     bczb == BoundaryCondition::REFLECTING) {
-                                cons[ikse] = cons
-                                    [idx3(nx - (hr + 1), jr, hr, nx, ny, nz)];
-                                cons[ikse].momentum(3) *= -1;
-                            }
-                            else if (bcxe == BoundaryCondition::REFLECTING &&
-                                     bczb == BoundaryCondition::PERIODIC) {
-                                cons[ikse] = cons[idx3(
+                                     bcyb == BoundaryCondition::REFLECTING) {
+                                cons[ijse] = cons[idx3(
                                     nx - (hr + 1),
-                                    jr,
-                                    nz - (hr + 1),
+                                    ny - (hr + 1),
+                                    kr,
                                     nx,
                                     ny,
                                     nz
                                 )];
-                                cons[ikse].momentum(1) *= -1;
+                                cons[ijse].momentum(2) *= -1;
                             }
                             else if (bcxe == BoundaryCondition::REFLECTING &&
-                                     bczb == BoundaryCondition::OUTFLOW) {
-                                cons[ikse] = cons
-                                    [idx3(nx - (hr + 1), jr, hr, nx, ny, nz)];
-                                cons[ikse].momentum(1) *= -1;
+                                     bcyb == BoundaryCondition::PERIODIC) {
+                                cons[ijse] = cons
+                                    [idx3(nx - (hr + 1), hr, kr, nx, ny, nz)];
+                                cons[ijse].momentum(1) *= -1;
                             }
                             else if (bcxe == BoundaryCondition::REFLECTING &&
-                                     bczb == BoundaryCondition::REFLECTING) {
-                                cons[ikse] = cons
-                                    [idx3(nx - (hr + 1), jr, hr, nx, ny, nz)];
-                                cons[ikse].momentum(1) *= -1;
-                                cons[ikse].momentum(3) *= -1;
+                                     bcyb == BoundaryCondition::OUTFLOW) {
+                                cons[ijse] = cons[idx3(
+                                    nx - (hr + 1),
+                                    ny - (hr + 1),
+                                    kr,
+                                    nx,
+                                    ny,
+                                    nz
+                                )];
+                                cons[ijse].momentum(1) *= -1;
+                            }
+                            else if (bcxe == BoundaryCondition::REFLECTING &&
+                                     bcyb == BoundaryCondition::REFLECTING) {
+                                cons[ijse] = cons[idx3(
+                                    nx - (hr + 1),
+                                    ny - (hr + 1),
+                                    kr,
+                                    nx,
+                                    ny,
+                                    nz
+                                )];
+                                cons[ijse].momentum(1) *= -1;
+                                cons[ijse].momentum(2) *= -1;
+                            }
+
+                            // Apply boundary conditions at northeast corner
+                            if (bcxe == BoundaryCondition::PERIODIC &&
+                                bcye == BoundaryCondition::PERIODIC) {
+                                cons[ijne] = cons[idx3(hr, hr, kr, nx, ny, nz)];
+                            }
+                            else if (bcxe == BoundaryCondition::PERIODIC &&
+                                     bcye == BoundaryCondition::OUTFLOW) {
+                                cons[ijne] = cons
+                                    [idx3(hr, ny - (hr + 1), kr, nx, ny, nz)];
+                            }
+                            else if (bcxe == BoundaryCondition::PERIODIC &&
+                                     bcye == BoundaryCondition::REFLECTING) {
+                                cons[ijne] = cons
+                                    [idx3(hr, ny - (hr + 1), kr, nx, ny, nz)];
+                                cons[ijne].momentum(2) *= -1;
+                            }
+                            else if (bcxe == BoundaryCondition::OUTFLOW &&
+                                     bcye == BoundaryCondition::PERIODIC) {
+                                cons[ijne] = cons
+                                    [idx3(nx - (hr + 1), hr, kr, nx, ny, nz)];
+                            }
+                            else if (bcxe == BoundaryCondition::OUTFLOW &&
+                                     bcye == BoundaryCondition::OUTFLOW) {
+                                cons[ijne] = cons[idx3(
+                                    nx - (hr + 1),
+                                    ny - (hr + 1),
+                                    kr,
+                                    nx,
+                                    ny,
+                                    nz
+                                )];
+                            }
+                            else if (bcxe == BoundaryCondition::OUTFLOW &&
+                                     bcye == BoundaryCondition::REFLECTING) {
+                                cons[ijne] = cons[idx3(
+                                    nx - (hr + 1),
+                                    ny - (hr + 1),
+                                    kr,
+                                    nx,
+                                    ny,
+                                    nz
+                                )];
+                                cons[ijne].momentum(2) *= -1;
+                            }
+                            else if (bcxe == BoundaryCondition::REFLECTING &&
+                                     bcye == BoundaryCondition::PERIODIC) {
+                                cons[ijne] = cons
+                                    [idx3(nx - (hr + 1), hr, kr, nx, ny, nz)];
+                                cons[ijne].momentum(1) *= -1;
+                            }
+                            else if (bcxe == BoundaryCondition::REFLECTING &&
+                                     bcye == BoundaryCondition::OUTFLOW) {
+                                cons[ijne] = cons[idx3(
+                                    nx - (hr + 1),
+                                    ny - (hr + 1),
+                                    kr,
+                                    nx,
+                                    ny,
+                                    nz
+                                )];
+                                cons[ijne].momentum(1) *= -1;
+                            }
+                            else if (bcxe == BoundaryCondition::REFLECTING &&
+                                     bcye == BoundaryCondition::REFLECTING) {
+                                cons[ijne] = cons[idx3(
+                                    nx - (hr + 1),
+                                    ny - (hr + 1),
+                                    kr,
+                                    nx,
+                                    ny,
+                                    nz
+                                )];
+                                cons[ijne].momentum(1) *= -1;
+                                cons[ijne].momentum(2) *= -1;
+                            }
+
+                            // Apply boundary conditions at northwest corner
+                            if (bcxb == BoundaryCondition::PERIODIC &&
+                                bcye == BoundaryCondition::PERIODIC) {
+                                cons[ijnw] = cons
+                                    [idx3(nx - (hr + 1), hr, kr, nx, ny, nz)];
+                            }
+                            else if (bcxb == BoundaryCondition::PERIODIC &&
+                                     bcye == BoundaryCondition::OUTFLOW) {
+                                cons[ijnw] = cons[idx3(
+                                    nx - (hr + 1),
+                                    ny - (hr + 1),
+                                    kr,
+                                    nx,
+                                    ny,
+                                    nz
+                                )];
+                            }
+                            else if (bcxb == BoundaryCondition::PERIODIC &&
+                                     bcye == BoundaryCondition::REFLECTING) {
+                                cons[ijnw] = cons[idx3(
+                                    nx - (hr + 1),
+                                    ny - (hr + 1),
+                                    kr,
+                                    nx,
+                                    ny,
+                                    nz
+                                )];
+                                cons[ijnw].momentum(2) *= -1;
+                            }
+                            else if (bcxb == BoundaryCondition::OUTFLOW &&
+                                     bcye == BoundaryCondition::PERIODIC) {
+                                cons[ijnw] = cons[idx3(hr, hr, kr, nx, ny, nz)];
+                            }
+                            else if (bcxb == BoundaryCondition::OUTFLOW &&
+                                     bcye == BoundaryCondition::OUTFLOW) {
+                                cons[ijnw] = cons
+                                    [idx3(hr, ny - (hr + 1), kr, nx, ny, nz)];
+                            }
+                            else if (bcxb == BoundaryCondition::OUTFLOW &&
+                                     bcye == BoundaryCondition::REFLECTING) {
+                                cons[ijnw] = cons
+                                    [idx3(hr, ny - (hr + 1), kr, nx, ny, nz)];
+                                cons[ijnw].momentum(2) *= -1;
+                            }
+                            else if (bcxb == BoundaryCondition::REFLECTING &&
+                                     bcye == BoundaryCondition::PERIODIC) {
+                                cons[ijnw] = cons[idx3(hr, hr, kr, nx, ny, nz)];
+                                cons[ijnw].momentum(1) *= -1;
+                            }
+                            else if (bcxb == BoundaryCondition::REFLECTING &&
+                                     bcye == BoundaryCondition::OUTFLOW) {
+                                cons[ijnw] = cons
+                                    [idx3(hr, ny - (hr + 1), kr, nx, ny, nz)];
+                                cons[ijnw].momentum(1) *= -1;
+                            }
+                            else if (bcxb == BoundaryCondition::REFLECTING &&
+                                     bcye == BoundaryCondition::REFLECTING) {
+                                cons[ijnw] = cons
+                                    [idx3(hr, ny - (hr + 1), kr, nx, ny, nz)];
+                                cons[ijnw].momentum(1) *= -1;
+                                cons[ijnw].momentum(2) *= -1;
                             }
 
                             //================================================================
-                            // Fill ghosts zones at x1 boundaries
-                            if (kk < nz - 2 * hr) {
-                                // Fill ghost zones at i-j corners
-                                auto ijsw = idx3(rr, rr, kr, nx, ny, nz);
-                                auto ijse = idx3(nx - rs, rr, kr, nx, ny, nz);
-                                auto ijne =
-                                    idx3(nx - rs, ny - rs, kr, nx, ny, nz);
-                                auto ijnw = idx3(rr, ny - rs, kr, nx, ny, nz);
+                            auto ing  = idx3(rr, jr, kr, nx, ny, nz);
+                            auto outg = idx3(nx - rs, jr, kr, nx, ny, nz);
 
-                                // Apply boundary conditions at southwest corner
-                                if (bcxb == BoundaryCondition::PERIODIC &&
-                                    bcyb == BoundaryCondition::PERIODIC) {
-                                    // The sw corner is set to the real ne
-                                    // corner
-                                    cons[ijsw] = cons[idx3(
-                                        nx - (hr + 1),
-                                        ny - (hr + 1),
-                                        kr,
-                                        nx,
-                                        ny,
-                                        nz
-                                    )];
+                            switch (sim_state->bcs[0]) {
+                                case BoundaryCondition::REFLECTING: {
+                                    const auto inr =
+                                        idx3(2 * hr - rs, jr, kr, nx, ny, nz);
+                                    cons[ing] = cons[inr];
+                                    cons[ing].momentum(1) *= -1;
+                                    break;
                                 }
-                                else if (bcxb == BoundaryCondition::PERIODIC &&
-                                         bcyb == BoundaryCondition::OUTFLOW) {
-                                    cons[ijsw] = cons[idx3(
-                                        nx - (hr + 1),
-                                        hr,
-                                        kr,
-                                        nx,
-                                        ny,
-                                        nz
-                                    )];
-                                }
-                                else if (bcxb == BoundaryCondition::PERIODIC &&
-                                         bcyb ==
-                                             BoundaryCondition::REFLECTING) {
-                                    cons[ijsw] = cons[idx3(
-                                        nx - (hr + 1),
-                                        hr,
-                                        kr,
-                                        nx,
-                                        ny,
-                                        nz
-                                    )];
-                                    cons[ijsw].momentum(2) *= -1;
-                                }
-                                else if (bcxb == BoundaryCondition::OUTFLOW &&
-                                         bcyb == BoundaryCondition::PERIODIC) {
-                                    cons[ijsw] = cons[idx3(
-                                        hr,
-                                        ny - (hr + 1),
-                                        kr,
-                                        nx,
-                                        ny,
-                                        nz
-                                    )];
-                                }
-                                else if (bcxb == BoundaryCondition::OUTFLOW &&
-                                         bcyb == BoundaryCondition::OUTFLOW) {
-                                    cons[ijsw] =
-                                        cons[idx3(hr, hr, kr, nx, ny, nz)];
-                                }
-                                else if (bcxb == BoundaryCondition::OUTFLOW &&
-                                         bcyb ==
-                                             BoundaryCondition::REFLECTING) {
-                                    cons[ijsw] =
-                                        cons[idx3(hr, hr, kr, nx, ny, nz)];
-                                    cons[ijsw].momentum(2) *= -1;
-                                }
-                                else if (bcxb ==
-                                             BoundaryCondition::REFLECTING &&
-                                         bcyb == BoundaryCondition::PERIODIC) {
-                                    cons[ijsw] = cons[idx3(
-                                        hr,
-                                        ny - (hr + 1),
-                                        kr,
-                                        nx,
-                                        ny,
-                                        nz
-                                    )];
-                                    cons[ijsw].momentum(1) *= -1;
-                                }
-                                else if (bcxb ==
-                                             BoundaryCondition::REFLECTING &&
-                                         bcyb == BoundaryCondition::OUTFLOW) {
-                                    cons[ijsw] =
-                                        cons[idx3(hr, hr, kr, nx, ny, nz)];
-                                    cons[ijsw].momentum(1) *= -1;
-                                }
-                                else if (bcxb ==
-                                             BoundaryCondition::REFLECTING &&
-                                         bcyb ==
-                                             BoundaryCondition::REFLECTING) {
-                                    cons[ijsw] =
-                                        cons[idx3(hr, hr, kr, nx, ny, nz)];
-                                    cons[ijsw].momentum(1) *= -1;
-                                    cons[ijsw].momentum(2) *= -1;
-                                }
-
-                                // Apply boundary conditions at southeast corner
-                                if (bcxe == BoundaryCondition::PERIODIC &&
-                                    bcyb == BoundaryCondition::PERIODIC) {
-                                    cons[ijse] =
-                                        cons[idx3(hr, hr, kr, nx, ny, nz)];
-                                }
-                                else if (bcxe == BoundaryCondition::PERIODIC &&
-                                         bcyb == BoundaryCondition::OUTFLOW) {
-                                    cons[ijse] = cons[idx3(
-                                        hr,
-                                        ny - (hr + 1),
-                                        kr,
-                                        nx,
-                                        ny,
-                                        nz
-                                    )];
-                                }
-                                else if (bcxe == BoundaryCondition::PERIODIC &&
-                                         bcyb ==
-                                             BoundaryCondition::REFLECTING) {
-                                    cons[ijse] = cons[idx3(
-                                        hr,
-                                        ny - (hr + 1),
-                                        kr,
-                                        nx,
-                                        ny,
-                                        nz
-                                    )];
-                                    cons[ijse].momentum(2) *= -1;
-                                }
-                                else if (bcxe == BoundaryCondition::OUTFLOW &&
-                                         bcyb == BoundaryCondition::PERIODIC) {
-                                    cons[ijse] = cons[idx3(
-                                        nx - (hr + 1),
-                                        hr,
-                                        kr,
-                                        nx,
-                                        ny,
-                                        nz
-                                    )];
-                                }
-                                else if (bcxe == BoundaryCondition::OUTFLOW &&
-                                         bcyb == BoundaryCondition::OUTFLOW) {
-                                    cons[ijse] = cons[idx3(
-                                        nx - (hr + 1),
-                                        ny - (hr + 1),
-                                        kr,
-                                        nx,
-                                        ny,
-                                        nz
-                                    )];
-                                }
-                                else if (bcxe == BoundaryCondition::OUTFLOW &&
-                                         bcyb ==
-                                             BoundaryCondition::REFLECTING) {
-                                    cons[ijse] = cons[idx3(
-                                        nx - (hr + 1),
-                                        ny - (hr + 1),
-                                        kr,
-                                        nx,
-                                        ny,
-                                        nz
-                                    )];
-                                    cons[ijse].momentum(2) *= -1;
-                                }
-                                else if (bcxe ==
-                                             BoundaryCondition::REFLECTING &&
-                                         bcyb == BoundaryCondition::PERIODIC) {
-                                    cons[ijse] = cons[idx3(
-                                        nx - (hr + 1),
-                                        hr,
-                                        kr,
-                                        nx,
-                                        ny,
-                                        nz
-                                    )];
-                                    cons[ijse].momentum(1) *= -1;
-                                }
-                                else if (bcxe ==
-                                             BoundaryCondition::REFLECTING &&
-                                         bcyb == BoundaryCondition::OUTFLOW) {
-                                    cons[ijse] = cons[idx3(
-                                        nx - (hr + 1),
-                                        ny - (hr + 1),
-                                        kr,
-                                        nx,
-                                        ny,
-                                        nz
-                                    )];
-                                    cons[ijse].momentum(1) *= -1;
-                                }
-                                else if (bcxe ==
-                                             BoundaryCondition::REFLECTING &&
-                                         bcyb ==
-                                             BoundaryCondition::REFLECTING) {
-                                    cons[ijse] = cons[idx3(
-                                        nx - (hr + 1),
-                                        ny - (hr + 1),
-                                        kr,
-                                        nx,
-                                        ny,
-                                        nz
-                                    )];
-                                    cons[ijse].momentum(1) *= -1;
-                                    cons[ijse].momentum(2) *= -1;
-                                }
-
-                                // Apply boundary conditions at northeast corner
-                                if (bcxe == BoundaryCondition::PERIODIC &&
-                                    bcye == BoundaryCondition::PERIODIC) {
-                                    cons[ijne] =
-                                        cons[idx3(hr, hr, kr, nx, ny, nz)];
-                                }
-                                else if (bcxe == BoundaryCondition::PERIODIC &&
-                                         bcye == BoundaryCondition::OUTFLOW) {
-                                    cons[ijne] = cons[idx3(
-                                        hr,
-                                        ny - (hr + 1),
-                                        kr,
-                                        nx,
-                                        ny,
-                                        nz
-                                    )];
-                                }
-                                else if (bcxe == BoundaryCondition::PERIODIC &&
-                                         bcye ==
-                                             BoundaryCondition::REFLECTING) {
-                                    cons[ijne] = cons[idx3(
-                                        hr,
-                                        ny - (hr + 1),
-                                        kr,
-                                        nx,
-                                        ny,
-                                        nz
-                                    )];
-                                    cons[ijne].momentum(2) *= -1;
-                                }
-                                else if (bcxe == BoundaryCondition::OUTFLOW &&
-                                         bcye == BoundaryCondition::PERIODIC) {
-                                    cons[ijne] = cons[idx3(
-                                        nx - (hr + 1),
-                                        hr,
-                                        kr,
-                                        nx,
-                                        ny,
-                                        nz
-                                    )];
-                                }
-                                else if (bcxe == BoundaryCondition::OUTFLOW &&
-                                         bcye == BoundaryCondition::OUTFLOW) {
-                                    cons[ijne] = cons[idx3(
-                                        nx - (hr + 1),
-                                        ny - (hr + 1),
-                                        kr,
-                                        nx,
-                                        ny,
-                                        nz
-                                    )];
-                                }
-                                else if (bcxe == BoundaryCondition::OUTFLOW &&
-                                         bcye ==
-                                             BoundaryCondition::REFLECTING) {
-                                    cons[ijne] = cons[idx3(
-                                        nx - (hr + 1),
-                                        ny - (hr + 1),
-                                        kr,
-                                        nx,
-                                        ny,
-                                        nz
-                                    )];
-                                    cons[ijne].momentum(2) *= -1;
-                                }
-                                else if (bcxe ==
-                                             BoundaryCondition::REFLECTING &&
-                                         bcye == BoundaryCondition::PERIODIC) {
-                                    cons[ijne] = cons[idx3(
-                                        nx - (hr + 1),
-                                        hr,
-                                        kr,
-                                        nx,
-                                        ny,
-                                        nz
-                                    )];
-                                    cons[ijne].momentum(1) *= -1;
-                                }
-                                else if (bcxe ==
-                                             BoundaryCondition::REFLECTING &&
-                                         bcye == BoundaryCondition::OUTFLOW) {
-                                    cons[ijne] = cons[idx3(
-                                        nx - (hr + 1),
-                                        ny - (hr + 1),
-                                        kr,
-                                        nx,
-                                        ny,
-                                        nz
-                                    )];
-                                    cons[ijne].momentum(1) *= -1;
-                                }
-                                else if (bcxe ==
-                                             BoundaryCondition::REFLECTING &&
-                                         bcye ==
-                                             BoundaryCondition::REFLECTING) {
-                                    cons[ijne] = cons[idx3(
-                                        nx - (hr + 1),
-                                        ny - (hr + 1),
-                                        kr,
-                                        nx,
-                                        ny,
-                                        nz
-                                    )];
-                                    cons[ijne].momentum(1) *= -1;
-                                    cons[ijne].momentum(2) *= -1;
-                                }
-
-                                // Apply boundary conditions at northwest corner
-                                if (bcxb == BoundaryCondition::PERIODIC &&
-                                    bcye == BoundaryCondition::PERIODIC) {
-                                    cons[ijnw] = cons[idx3(
-                                        nx - (hr + 1),
-                                        hr,
-                                        kr,
-                                        nx,
-                                        ny,
-                                        nz
-                                    )];
-                                }
-                                else if (bcxb == BoundaryCondition::PERIODIC &&
-                                         bcye == BoundaryCondition::OUTFLOW) {
-                                    cons[ijnw] = cons[idx3(
-                                        nx - (hr + 1),
-                                        ny - (hr + 1),
-                                        kr,
-                                        nx,
-                                        ny,
-                                        nz
-                                    )];
-                                }
-                                else if (bcxb == BoundaryCondition::PERIODIC &&
-                                         bcye ==
-                                             BoundaryCondition::REFLECTING) {
-                                    cons[ijnw] = cons[idx3(
-                                        nx - (hr + 1),
-                                        ny - (hr + 1),
-                                        kr,
-                                        nx,
-                                        ny,
-                                        nz
-                                    )];
-                                    cons[ijnw].momentum(2) *= -1;
-                                }
-                                else if (bcxb == BoundaryCondition::OUTFLOW &&
-                                         bcye == BoundaryCondition::PERIODIC) {
-                                    cons[ijnw] =
-                                        cons[idx3(hr, hr, kr, nx, ny, nz)];
-                                }
-                                else if (bcxb == BoundaryCondition::OUTFLOW &&
-                                         bcye == BoundaryCondition::OUTFLOW) {
-                                    cons[ijnw] = cons[idx3(
-                                        hr,
-                                        ny - (hr + 1),
-                                        kr,
-                                        nx,
-                                        ny,
-                                        nz
-                                    )];
-                                }
-                                else if (bcxb == BoundaryCondition::OUTFLOW &&
-                                         bcye ==
-                                             BoundaryCondition::REFLECTING) {
-                                    cons[ijnw] = cons[idx3(
-                                        hr,
-                                        ny - (hr + 1),
-                                        kr,
-                                        nx,
-                                        ny,
-                                        nz
-                                    )];
-                                    cons[ijnw].momentum(2) *= -1;
-                                }
-                                else if (bcxb ==
-                                             BoundaryCondition::REFLECTING &&
-                                         bcye == BoundaryCondition::PERIODIC) {
-                                    cons[ijnw] =
-                                        cons[idx3(hr, hr, kr, nx, ny, nz)];
-                                    cons[ijnw].momentum(1) *= -1;
-                                }
-                                else if (bcxb ==
-                                             BoundaryCondition::REFLECTING &&
-                                         bcye == BoundaryCondition::OUTFLOW) {
-                                    cons[ijnw] = cons[idx3(
-                                        hr,
-                                        ny - (hr + 1),
-                                        kr,
-                                        nx,
-                                        ny,
-                                        nz
-                                    )];
-                                    cons[ijnw].momentum(1) *= -1;
-                                }
-                                else if (bcxb ==
-                                             BoundaryCondition::REFLECTING &&
-                                         bcye ==
-                                             BoundaryCondition::REFLECTING) {
-                                    cons[ijnw] = cons[idx3(
-                                        hr,
-                                        ny - (hr + 1),
-                                        kr,
-                                        nx,
-                                        ny,
-                                        nz
-                                    )];
-                                    cons[ijnw].momentum(1) *= -1;
-                                    cons[ijnw].momentum(2) *= -1;
-                                }
-
-                                //================================================================
-                                auto ing  = idx3(rr, jr, kr, nx, ny, nz);
-                                auto outg = idx3(nx - rs, jr, kr, nx, ny, nz);
-
-                                switch (sim_state->bcs[0]) {
-                                    case BoundaryCondition::REFLECTING: {
-                                        const auto inr = idx3(
-                                            2 * hr - rs,
-                                            jr,
-                                            kr,
-                                            nx,
-                                            ny,
-                                            nz
+                                case BoundaryCondition::DYNAMIC:
+                                    for (int qq = 0; qq < nvars; qq++) {
+                                        cons[ing][qq] = sim_state->bsources[qq](
+                                            sim_state->x1min,
+                                            sim_state->x2[jj],
+                                            sim_state->x3[kk],
+                                            sim_state->t
                                         );
-                                        cons[ing] = cons[inr];
-                                        cons[ing].momentum(1) *= -1;
-                                        break;
                                     }
-                                    case BoundaryCondition::DYNAMIC:
-                                        for (int qq = 0; qq < nvars; qq++) {
-                                            cons[ing][qq] =
-                                                sim_state->bsources[qq](
-                                                    sim_state->x1min,
-                                                    sim_state->x2[jj],
-                                                    sim_state->x3[kk],
-                                                    sim_state->t
-                                                );
-                                        }
-                                        break;
-                                    case BoundaryCondition::PERIODIC: {
-                                        const auto outr = idx3(
-                                            nx - 2 * hr + rr,
-                                            jr,
-                                            kr,
-                                            nx,
-                                            ny,
-                                            nz
-                                        );
-                                        cons[ing] = cons[outr];
-                                        break;
-                                    }
-                                    default: {
-                                        const auto inr =
-                                            idx3(hr, jr, kr, nx, ny, nz);
-                                        cons[ing] = cons[inr];
-                                        break;
-                                    }
+                                    break;
+                                case BoundaryCondition::PERIODIC: {
+                                    const auto outr = idx3(
+                                        nx - 2 * hr + rr,
+                                        jr,
+                                        kr,
+                                        nx,
+                                        ny,
+                                        nz
+                                    );
+                                    cons[ing] = cons[outr];
+                                    break;
                                 }
-
-                                switch (sim_state->bcs[1]) {
-                                    case BoundaryCondition::REFLECTING: {
-                                        const auto outr = idx3(
-                                            nx - 2 * hr + rr,
-                                            jr,
-                                            kr,
-                                            nx,
-                                            ny,
-                                            nz
-                                        );
-                                        cons[outg] = cons[outr];
-                                        cons[outg].momentum(1) *= -1;
-                                        break;
-                                    }
-                                    case BoundaryCondition::DYNAMIC:
-                                        for (int qq = 0; qq < nvars; qq++) {
-                                            cons[outg][qq] =
-                                                sim_state->bsources[qq](
-                                                    sim_state->x1max,
-                                                    sim_state->x2[jj],
-                                                    sim_state->x3[kk],
-                                                    sim_state->t
-                                                );
-                                        }
-                                        break;
-                                    case BoundaryCondition::PERIODIC: {
-                                        const auto inr = idx3(
-                                            2 * hr - rs,
-                                            jr,
-                                            kr,
-                                            nx,
-                                            ny,
-                                            nz
-                                        );
-                                        cons[outg] = cons[inr];
-                                        break;
-                                    }
-                                    default: {
-                                        const auto outr = idx3(
-                                            nx - (hr + 1),
-                                            jr,
-                                            kr,
-                                            nx,
-                                            ny,
-                                            nz
-                                        );
-                                        cons[outg] = cons[outr];
-                                        break;
-                                    }
+                                default: {
+                                    const auto inr =
+                                        idx3(hr, jr, kr, nx, ny, nz);
+                                    cons[ing] = cons[inr];
+                                    break;
                                 }
                             }
 
-                            // Fill ghost zones at x3 boundaries
-                            if (ii < nx - 2 * hr) {
-                                // Fill ghost zones at j-k corners
-                                auto jksw = idx3(ir, rr, rr, nx, ny, nz);
-                                auto jkse = idx3(ir, ny - rs, rr, nx, ny, nz);
-                                auto jkne =
-                                    idx3(ir, ny - rs, nz - rs, nx, ny, nz);
-                                auto jknw = idx3(ir, rr, nz - rs, nx, ny, nz);
-
-                                // Apply boundary conditions at southwest corner
-                                if (bcyb == BoundaryCondition::PERIODIC &&
-                                    bczb == BoundaryCondition::PERIODIC) {
-                                    cons[jksw] = cons[idx3(
-                                        ir,
-                                        ny - (hr + 1),
-                                        nz - (hr + 1),
+                            switch (sim_state->bcs[1]) {
+                                case BoundaryCondition::REFLECTING: {
+                                    const auto outr = idx3(
+                                        nx - 2 * hr + rr,
+                                        jr,
+                                        kr,
                                         nx,
                                         ny,
                                         nz
-                                    )];
+                                    );
+                                    cons[outg] = cons[outr];
+                                    cons[outg].momentum(1) *= -1;
+                                    break;
                                 }
-                                else if (bcyb == BoundaryCondition::PERIODIC &&
-                                         bczb == BoundaryCondition::OUTFLOW) {
-                                    cons[jksw] = cons[idx3(
-                                        ir,
-                                        ny - (hr + 1),
-                                        hr,
-                                        nx,
-                                        ny,
-                                        nz
-                                    )];
-                                }
-                                else if (bcyb == BoundaryCondition::PERIODIC &&
-                                         bczb ==
-                                             BoundaryCondition::REFLECTING) {
-                                    cons[jksw] = cons[idx3(
-                                        ir,
-                                        ny - (hr + 1),
-                                        hr,
-                                        nx,
-                                        ny,
-                                        nz
-                                    )];
-                                    cons[jksw].momentum(3) *= -1;
-                                }
-                                else if (bcyb == BoundaryCondition::OUTFLOW &&
-                                         bczb == BoundaryCondition::PERIODIC) {
-                                    cons[jksw] = cons[idx3(
-                                        ir,
-                                        hr,
-                                        nz - (hr + 1),
-                                        nx,
-                                        ny,
-                                        nz
-                                    )];
-                                }
-                                else if (bcyb == BoundaryCondition::OUTFLOW &&
-                                         bczb == BoundaryCondition::OUTFLOW) {
-                                    cons[jksw] =
-                                        cons[idx3(ir, hr, hr, nx, ny, nz)];
-                                }
-                                else if (bcyb == BoundaryCondition::OUTFLOW &&
-                                         bczb ==
-                                             BoundaryCondition::REFLECTING) {
-                                    cons[jksw] =
-                                        cons[idx3(ir, hr, hr, nx, ny, nz)];
-                                    cons[jksw].momentum(3) *= -1;
-                                }
-                                else if (bcyb ==
-                                             BoundaryCondition::REFLECTING &&
-                                         bczb == BoundaryCondition::PERIODIC) {
-                                    cons[jksw] = cons[idx3(
-                                        ir,
-                                        hr,
-                                        nz - (hr + 1),
-                                        nx,
-                                        ny,
-                                        nz
-                                    )];
-                                    cons[jksw].momentum(2) *= -1;
-                                }
-                                else if (bcyb ==
-                                             BoundaryCondition::REFLECTING &&
-                                         bczb == BoundaryCondition::OUTFLOW) {
-                                    cons[jksw] =
-                                        cons[idx3(ir, hr, hr, nx, ny, nz)];
-                                    cons[jksw].momentum(2) *= -1;
-                                }
-                                else if (bcyb ==
-                                             BoundaryCondition::REFLECTING &&
-                                         bczb ==
-                                             BoundaryCondition::REFLECTING) {
-                                    cons[jksw] =
-                                        cons[idx3(ir, hr, hr, nx, ny, nz)];
-                                    cons[jksw].momentum(2) *= -1;
-                                    cons[jksw].momentum(3) *= -1;
-                                }
-
-                                // Apply boundary conditions at southeast corner
-                                if (bcye == BoundaryCondition::PERIODIC &&
-                                    bczb == BoundaryCondition::PERIODIC) {
-                                    cons[jkse] = cons[idx3(
-                                        ir,
-                                        hr,
-                                        nz - (hr + 1),
-                                        nx,
-                                        ny,
-                                        nz
-                                    )];
-                                }
-                                else if (bcye == BoundaryCondition::PERIODIC &&
-                                         bczb == BoundaryCondition::OUTFLOW) {
-                                    cons[jkse] =
-                                        cons[idx3(ir, hr, hr, nx, ny, nz)];
-                                }
-                                else if (bcye == BoundaryCondition::PERIODIC &&
-                                         bczb ==
-                                             BoundaryCondition::REFLECTING) {
-                                    cons[jkse] =
-                                        cons[idx3(ir, hr, hr, nx, ny, nz)];
-                                    cons[jkse].momentum(3) *= -1;
-                                }
-                                else if (bcye == BoundaryCondition::OUTFLOW &&
-                                         bczb == BoundaryCondition::PERIODIC) {
-                                    cons[jkse] = cons[idx3(
-                                        ir,
-                                        ny - (hr + 1),
-                                        nz - (hr + 1),
-                                        nx,
-                                        ny,
-                                        nz
-                                    )];
-                                }
-                                else if (bcye == BoundaryCondition::OUTFLOW &&
-                                         bczb == BoundaryCondition::OUTFLOW) {
-                                    cons[jkse] = cons[idx3(
-                                        ir,
-                                        ny - (hr + 1),
-                                        hr,
-                                        nx,
-                                        ny,
-                                        nz
-                                    )];
-                                }
-                                else if (bcye == BoundaryCondition::OUTFLOW &&
-                                         bczb ==
-                                             BoundaryCondition::REFLECTING) {
-                                    cons[jkse] = cons[idx3(
-                                        ir,
-                                        ny - (hr + 1),
-                                        hr,
-                                        nx,
-                                        ny,
-                                        nz
-                                    )];
-                                    cons[jkse].momentum(3) *= -1;
-                                }
-                                else if (bcye ==
-                                             BoundaryCondition::REFLECTING &&
-                                         bczb == BoundaryCondition::PERIODIC) {
-                                    cons[jkse] = cons[idx3(
-                                        ir,
-                                        ny - (hr + 1),
-                                        nz - (hr + 1),
-                                        nx,
-                                        ny,
-                                        nz
-                                    )];
-                                    cons[jkse].momentum(2) *= -1;
-                                }
-                                else if (bcye ==
-                                             BoundaryCondition::REFLECTING &&
-                                         bczb == BoundaryCondition::OUTFLOW) {
-                                    cons[jkse] = cons[idx3(
-                                        ir,
-                                        ny - (hr + 1),
-                                        hr,
-                                        nx,
-                                        ny,
-                                        nz
-                                    )];
-                                    cons[jkse].momentum(2) *= -1;
-                                }
-                                else if (bcye ==
-                                             BoundaryCondition::REFLECTING &&
-                                         bczb ==
-                                             BoundaryCondition::REFLECTING) {
-                                    cons[jkse] = cons[idx3(
-                                        ir,
-                                        ny - (hr + 1),
-                                        hr,
-                                        nx,
-                                        ny,
-                                        nz
-                                    )];
-                                    cons[jkse].momentum(2) *= -1;
-                                    cons[jkse].momentum(3) *= -1;
-                                }
-
-                                // Apply boundary conditions at northeast corner
-                                if (bcye == BoundaryCondition::PERIODIC &&
-                                    bcze == BoundaryCondition::PERIODIC) {
-                                    cons[jkne] =
-                                        cons[idx3(ir, hr, hr, nx, ny, nz)];
-                                }
-                                else if (bcye == BoundaryCondition::PERIODIC &&
-                                         bcze == BoundaryCondition::OUTFLOW) {
-                                    cons[jkne] = cons[idx3(
-                                        ir,
-                                        hr,
-                                        nz - (hr + 1),
-                                        nx,
-                                        ny,
-                                        nz
-                                    )];
-                                }
-                                else if (bcye == BoundaryCondition::PERIODIC &&
-                                         bcze ==
-                                             BoundaryCondition::REFLECTING) {
-                                    cons[jkne] = cons[idx3(
-                                        ir,
-                                        hr,
-                                        nz - (hr + 1),
-                                        nx,
-                                        ny,
-                                        nz
-                                    )];
-                                    cons[jkne].momentum(3) *= -1;
-                                }
-                                else if (bcye == BoundaryCondition::OUTFLOW &&
-                                         bcze == BoundaryCondition::PERIODIC) {
-                                    cons[jkne] = cons[idx3(
-                                        ir,
-                                        ny - (hr + 1),
-                                        hr,
-                                        nx,
-                                        ny,
-                                        nz
-                                    )];
-                                }
-                                else if (bcye == BoundaryCondition::OUTFLOW &&
-                                         bcze == BoundaryCondition::OUTFLOW) {
-                                    cons[jkne] = cons[idx3(
-                                        ir,
-                                        ny - (hr + 1),
-                                        nz - (hr + 1),
-                                        nx,
-                                        ny,
-                                        nz
-                                    )];
-                                }
-                                else if (bcye == BoundaryCondition::OUTFLOW &&
-                                         bcze ==
-                                             BoundaryCondition::REFLECTING) {
-                                    cons[jkne] = cons[idx3(
-                                        ir,
-                                        ny - (hr + 1),
-                                        nz - (hr + 1),
-                                        nx,
-                                        ny,
-                                        nz
-                                    )];
-                                    cons[jkne].momentum(3) *= -1;
-                                }
-                                else if (bcye ==
-                                             BoundaryCondition::REFLECTING &&
-                                         bcze == BoundaryCondition::PERIODIC) {
-                                    cons[jkne] = cons[idx3(
-                                        ir,
-                                        ny - (hr + 1),
-                                        hr,
-                                        nx,
-                                        ny,
-                                        nz
-                                    )];
-                                    cons[jkne].momentum(2) *= -1;
-                                }
-                                else if (bcye ==
-                                             BoundaryCondition::REFLECTING &&
-                                         bcze == BoundaryCondition::OUTFLOW) {
-                                    cons[jkne] = cons[idx3(
-                                        ir,
-                                        ny - (hr + 1),
-                                        nz - (hr + 1),
-                                        nx,
-                                        ny,
-                                        nz
-                                    )];
-                                    cons[jkne].momentum(2) *= -1;
-                                }
-                                else if (bcye ==
-                                             BoundaryCondition::REFLECTING &&
-                                         bcze ==
-                                             BoundaryCondition::REFLECTING) {
-                                    cons[jkne] = cons[idx3(
-                                        ir,
-                                        ny - (hr + 1),
-                                        nz - (hr + 1),
-                                        nx,
-                                        ny,
-                                        nz
-                                    )];
-                                    cons[jkne].momentum(2) *= -1;
-                                    cons[jkne].momentum(3) *= -1;
-                                }
-
-                                // Apply boundary conditions at northwest corner
-                                if (bcyb == BoundaryCondition::PERIODIC &&
-                                    bcze == BoundaryCondition::PERIODIC) {
-                                    cons[jknw] = cons[idx3(
-                                        ir,
-                                        ny - (hr + 1),
-                                        hr,
-                                        nx,
-                                        ny,
-                                        nz
-                                    )];
-                                }
-                                else if (bcyb == BoundaryCondition::PERIODIC &&
-                                         bcze == BoundaryCondition::OUTFLOW) {
-                                    cons[jknw] = cons[idx3(
-                                        ir,
-                                        ny - (hr + 1),
-                                        nz - (hr + 1),
-                                        nx,
-                                        ny,
-                                        nz
-                                    )];
-                                }
-                                else if (bcyb == BoundaryCondition::PERIODIC &&
-                                         bcze ==
-                                             BoundaryCondition::REFLECTING) {
-                                    cons[jknw] = cons[idx3(
-                                        ir,
-                                        ny - (hr + 1),
-                                        nz - (hr + 1),
-                                        nx,
-                                        ny,
-                                        nz
-                                    )];
-                                    cons[jknw].momentum(3) *= -1;
-                                }
-                                else if (bcyb == BoundaryCondition::OUTFLOW &&
-                                         bcze == BoundaryCondition::PERIODIC) {
-                                    cons[jknw] =
-                                        cons[idx3(ir, hr, hr, nx, ny, nz)];
-                                }
-                                else if (bcyb == BoundaryCondition::OUTFLOW &&
-                                         bcze == BoundaryCondition::OUTFLOW) {
-                                    cons[jknw] = cons[idx3(
-                                        ir,
-                                        hr,
-                                        nz - (hr + 1),
-                                        nx,
-                                        ny,
-                                        nz
-                                    )];
-                                }
-                                else if (bcyb == BoundaryCondition::OUTFLOW &&
-                                         bcze ==
-                                             BoundaryCondition::REFLECTING) {
-                                    cons[jknw] = cons[idx3(
-                                        ir,
-                                        hr,
-                                        nz - (hr + 1),
-                                        nx,
-                                        ny,
-                                        nz
-                                    )];
-                                    cons[jknw].momentum(3) *= -1;
-                                }
-                                else if (bcyb ==
-                                             BoundaryCondition::REFLECTING &&
-                                         bcze == BoundaryCondition::PERIODIC) {
-                                    cons[jknw] =
-                                        cons[idx3(ir, hr, hr, nx, ny, nz)];
-                                    cons[jknw].momentum(2) *= -1;
-                                }
-                                else if (bcyb ==
-                                             BoundaryCondition::REFLECTING &&
-                                         bcze == BoundaryCondition::OUTFLOW) {
-                                    cons[jknw] = cons[idx3(
-                                        ir,
-                                        hr,
-                                        nz - (hr + 1),
-                                        nx,
-                                        ny,
-                                        nz
-                                    )];
-                                    cons[jknw].momentum(2) *= -1;
-                                }
-                                else if (bcyb ==
-                                             BoundaryCondition::REFLECTING &&
-                                         bcze ==
-                                             BoundaryCondition::REFLECTING) {
-                                    cons[jknw] = cons[idx3(
-                                        ir,
-                                        hr,
-                                        nz - (hr + 1),
-                                        nx,
-                                        ny,
-                                        nz
-                                    )];
-                                    cons[jknw].momentum(2) *= -1;
-                                    cons[jknw].momentum(3) *= -1;
-                                }
-
-                                //================================================================
-                                auto ing  = idx3(ir, jr, rr, nx, ny, nz);
-                                auto outg = idx3(ir, jr, nz - rs, nx, ny, nz);
-
-                                switch (geometry) {
-                                    case Geometry::SPHERICAL: {
-                                        // the x3 direction is periodic in phi
-                                        const auto inr = idx3(
-                                            ir,
-                                            jr,
-                                            2 * hr - rs,
-                                            nx,
-                                            ny,
-                                            nz
-                                        );
-                                        const auto outr = idx3(
-                                            ir,
-                                            jr,
-                                            nz - 2 * hr + rr,
-                                            nx,
-                                            ny,
-                                            nz
-                                        );
-                                        cons[ing]  = cons[outr];
-                                        cons[outg] = cons[inr];
-                                        break;
+                                case BoundaryCondition::DYNAMIC:
+                                    for (int qq = 0; qq < nvars; qq++) {
+                                        cons[outg][qq] =
+                                            sim_state->bsources[qq](
+                                                sim_state->x1max,
+                                                sim_state->x2[jj],
+                                                sim_state->x3[kk],
+                                                sim_state->t
+                                            );
                                     }
-                                    default:
-                                        switch (sim_state->bcs[4]) {
-                                            case BoundaryCondition::
-                                                REFLECTING: {
-                                                const auto inr = idx3(
-                                                    ir,
-                                                    jr,
-                                                    2 * hr - rs,
-                                                    nx,
-                                                    ny,
-                                                    nz
-                                                );
-                                                cons[ing] = cons[inr];
-                                                cons[ing].momentum(3) *= -1;
-                                                break;
-                                            }
-                                            case BoundaryCondition::DYNAMIC:
-                                                for (auto qq = 0;
-                                                     qq < sim_state->nvars;
-                                                     qq++) {
-                                                    cons[ing][qq] =
-                                                        sim_state->bsources[qq](
-                                                            sim_state->x1[ii],
-                                                            sim_state->x2[jj],
-                                                            sim_state->x3min,
-                                                            sim_state->t
-                                                        );
-                                                }
-                                                break;
-                                            case BoundaryCondition::PERIODIC: {
-                                                const auto outr = idx3(
-                                                    ir,
-                                                    jr,
-                                                    nz - 2 * hr + rr,
-                                                    nx,
-                                                    ny,
-                                                    nz
-                                                );
-                                                cons[ing] = cons[outr];
-                                                break;
-                                            }
-                                            default: {
-                                                const auto inr = idx3(
-                                                    ir,
-                                                    jr,
-                                                    hr,
-                                                    nx,
-                                                    ny,
-                                                    nz
-                                                );
-                                                cons[ing] = cons[inr];
-                                                break;
-                                            }
-                                        }
-
-                                        switch (sim_state->bcs[5]) {
-                                            case BoundaryCondition::
-                                                REFLECTING: {
-                                                const auto outr = idx3(
-                                                    ir,
-                                                    jr,
-                                                    nz - 2 * hr + rr,
-                                                    nx,
-                                                    ny,
-                                                    nz
-                                                );
-                                                cons[outg] = cons[outr];
-                                                cons[outg].momentum(3) *= -1;
-                                                break;
-                                            }
-                                            case BoundaryCondition::DYNAMIC:
-                                                for (auto qq = 0;
-                                                     qq < sim_state->nvars;
-                                                     qq++) {
-                                                    cons[outg][qq] =
-                                                        sim_state->bsources[qq](
-                                                            sim_state->x1[ii],
-                                                            sim_state->x2[jj],
-                                                            sim_state->x3max,
-                                                            sim_state->t
-                                                        );
-                                                }
-                                                break;
-                                            case BoundaryCondition::PERIODIC: {
-                                                const auto inr = idx3(
-                                                    ir,
-                                                    jr,
-                                                    2 * hr - rs,
-                                                    nx,
-                                                    ny,
-                                                    nz
-                                                );
-                                                cons[outg] = cons[inr];
-                                                break;
-                                            }
-                                            default: {
-                                                const auto outr = idx3(
-                                                    ir,
-                                                    jr,
-                                                    nz - (hr + 1),
-                                                    nx,
-                                                    ny,
-                                                    nz
-                                                );
-                                                cons[outg] = cons[outr];
-                                                break;
-                                            }
-                                        }
-                                        break;
+                                    break;
+                                case BoundaryCondition::PERIODIC: {
+                                    const auto inr =
+                                        idx3(2 * hr - rs, jr, kr, nx, ny, nz);
+                                    cons[outg] = cons[inr];
+                                    break;
+                                }
+                                default: {
+                                    const auto outr =
+                                        idx3(nx - (hr + 1), jr, kr, nx, ny, nz);
+                                    cons[outg] = cons[outr];
+                                    break;
                                 }
                             }
                         }
 
+                        // Fill ghost zones at x3 boundaries
                         if (ii < nx - 2 * hr) {
-                            // Fill the ghost zones at the x2 boundaries
-                            if (kk < nz - 2 * hr) {
-                                auto ing  = idx3(ir, rr, kr, nx, ny, nz);
-                                auto outg = idx3(ir, ny - rs, kr, nx, ny, nz);
+                            // Fill ghost zones at j-k corners
+                            auto jksw = idx3(ir, rr, rr, nx, ny, nz);
+                            auto jkse = idx3(ir, ny - rs, rr, nx, ny, nz);
+                            auto jkne = idx3(ir, ny - rs, nz - rs, nx, ny, nz);
+                            auto jknw = idx3(ir, rr, nz - rs, nx, ny, nz);
 
-                                switch (geometry) {
-                                    case Geometry::SPHERICAL: {
-                                        // theta boundaries are reflecting
-                                        const auto inr = idx3(
-                                            ir,
-                                            2 * hr - rs,
-                                            kr,
-                                            nx,
-                                            ny,
-                                            nz
-                                        );
-                                        const auto outr = idx3(
-                                            ir,
-                                            ny - 2 * hr + rr,
-                                            kr,
-                                            nx,
-                                            ny,
-                                            nz
-                                        );
-                                        cons[ing]  = cons[inr];
-                                        cons[outg] = cons[outr];
-                                        if (half_sphere) {
-                                            cons[outg].momentum(2) *= -1;
-                                        }
-                                        break;
-                                    }
+                            // Apply boundary conditions at southwest corner
+                            if (bcyb == BoundaryCondition::PERIODIC &&
+                                bczb == BoundaryCondition::PERIODIC) {
+                                cons[jksw] = cons[idx3(
+                                    ir,
+                                    ny - (hr + 1),
+                                    nz - (hr + 1),
+                                    nx,
+                                    ny,
+                                    nz
+                                )];
+                            }
+                            else if (bcyb == BoundaryCondition::PERIODIC &&
+                                     bczb == BoundaryCondition::OUTFLOW) {
+                                cons[jksw] = cons
+                                    [idx3(ir, ny - (hr + 1), hr, nx, ny, nz)];
+                            }
+                            else if (bcyb == BoundaryCondition::PERIODIC &&
+                                     bczb == BoundaryCondition::REFLECTING) {
+                                cons[jksw] = cons
+                                    [idx3(ir, ny - (hr + 1), hr, nx, ny, nz)];
+                                cons[jksw].momentum(3) *= -1;
+                            }
+                            else if (bcyb == BoundaryCondition::OUTFLOW &&
+                                     bczb == BoundaryCondition::PERIODIC) {
+                                cons[jksw] = cons
+                                    [idx3(ir, hr, nz - (hr + 1), nx, ny, nz)];
+                            }
+                            else if (bcyb == BoundaryCondition::OUTFLOW &&
+                                     bczb == BoundaryCondition::OUTFLOW) {
+                                cons[jksw] = cons[idx3(ir, hr, hr, nx, ny, nz)];
+                            }
+                            else if (bcyb == BoundaryCondition::OUTFLOW &&
+                                     bczb == BoundaryCondition::REFLECTING) {
+                                cons[jksw] = cons[idx3(ir, hr, hr, nx, ny, nz)];
+                                cons[jksw].momentum(3) *= -1;
+                            }
+                            else if (bcyb == BoundaryCondition::REFLECTING &&
+                                     bczb == BoundaryCondition::PERIODIC) {
+                                cons[jksw] = cons
+                                    [idx3(ir, hr, nz - (hr + 1), nx, ny, nz)];
+                                cons[jksw].momentum(2) *= -1;
+                            }
+                            else if (bcyb == BoundaryCondition::REFLECTING &&
+                                     bczb == BoundaryCondition::OUTFLOW) {
+                                cons[jksw] = cons[idx3(ir, hr, hr, nx, ny, nz)];
+                                cons[jksw].momentum(2) *= -1;
+                            }
+                            else if (bcyb == BoundaryCondition::REFLECTING &&
+                                     bczb == BoundaryCondition::REFLECTING) {
+                                cons[jksw] = cons[idx3(ir, hr, hr, nx, ny, nz)];
+                                cons[jksw].momentum(2) *= -1;
+                                cons[jksw].momentum(3) *= -1;
+                            }
 
-                                    case Geometry::CYLINDRICAL: {
-                                        // phi boundaries are periodic
-                                        const auto inr = idx3(
-                                            ir,
-                                            2 * hr - rs,
-                                            kr,
-                                            nx,
-                                            ny,
-                                            nz
-                                        );
-                                        const auto outr = idx3(
-                                            ir,
-                                            ny - 2 * hr + rr,
-                                            kr,
-                                            nx,
-                                            ny,
-                                            nz
-                                        );
-                                        cons[ing]  = cons[outr];
-                                        cons[outg] = cons[inr];
-                                        break;
-                                    }
-                                    default:
-                                        switch (sim_state->bcs[2]) {
-                                            case BoundaryCondition::
-                                                REFLECTING: {
-                                                auto inr = idx3(
-                                                    ir,
-                                                    2 * hr - rs,
-                                                    kr,
-                                                    nx,
-                                                    ny,
-                                                    nz
-                                                );
-                                                cons[ing] = cons[inr];
-                                                cons[ing].momentum(2) *= -1;
-                                                break;
-                                            }
-                                            case BoundaryCondition::DYNAMIC:
-                                                for (auto qq = 0;
-                                                     qq < sim_state->nvars;
-                                                     qq++) {
-                                                    cons[ing][qq] =
-                                                        sim_state->bsources[qq](
-                                                            sim_state->x1[ii],
-                                                            sim_state->x2min,
-                                                            sim_state->x3[kk],
-                                                            sim_state->t
-                                                        );
-                                                }
-                                                break;
-                                            case BoundaryCondition::PERIODIC: {
-                                                auto outr = idx3(
-                                                    ir,
-                                                    ny - 2 * hr + rr,
-                                                    kr,
-                                                    nx,
-                                                    ny,
-                                                    nz
-                                                );
-                                                cons[ing] = cons[outr];
-                                                break;
-                                            }
-                                            default: {
-                                                auto inr = idx3(
-                                                    ir,
-                                                    hr,
-                                                    kr,
-                                                    nx,
-                                                    ny,
-                                                    nz
-                                                );
-                                                cons[ing] = cons[inr];
-                                                break;
-                                            }
-                                        }
+                            // Apply boundary conditions at southeast corner
+                            if (bcye == BoundaryCondition::PERIODIC &&
+                                bczb == BoundaryCondition::PERIODIC) {
+                                cons[jkse] = cons
+                                    [idx3(ir, hr, nz - (hr + 1), nx, ny, nz)];
+                            }
+                            else if (bcye == BoundaryCondition::PERIODIC &&
+                                     bczb == BoundaryCondition::OUTFLOW) {
+                                cons[jkse] = cons[idx3(ir, hr, hr, nx, ny, nz)];
+                            }
+                            else if (bcye == BoundaryCondition::PERIODIC &&
+                                     bczb == BoundaryCondition::REFLECTING) {
+                                cons[jkse] = cons[idx3(ir, hr, hr, nx, ny, nz)];
+                                cons[jkse].momentum(3) *= -1;
+                            }
+                            else if (bcye == BoundaryCondition::OUTFLOW &&
+                                     bczb == BoundaryCondition::PERIODIC) {
+                                cons[jkse] = cons[idx3(
+                                    ir,
+                                    ny - (hr + 1),
+                                    nz - (hr + 1),
+                                    nx,
+                                    ny,
+                                    nz
+                                )];
+                            }
+                            else if (bcye == BoundaryCondition::OUTFLOW &&
+                                     bczb == BoundaryCondition::OUTFLOW) {
+                                cons[jkse] = cons
+                                    [idx3(ir, ny - (hr + 1), hr, nx, ny, nz)];
+                            }
+                            else if (bcye == BoundaryCondition::OUTFLOW &&
+                                     bczb == BoundaryCondition::REFLECTING) {
+                                cons[jkse] = cons
+                                    [idx3(ir, ny - (hr + 1), hr, nx, ny, nz)];
+                                cons[jkse].momentum(3) *= -1;
+                            }
+                            else if (bcye == BoundaryCondition::REFLECTING &&
+                                     bczb == BoundaryCondition::PERIODIC) {
+                                cons[jkse] = cons[idx3(
+                                    ir,
+                                    ny - (hr + 1),
+                                    nz - (hr + 1),
+                                    nx,
+                                    ny,
+                                    nz
+                                )];
+                                cons[jkse].momentum(2) *= -1;
+                            }
+                            else if (bcye == BoundaryCondition::REFLECTING &&
+                                     bczb == BoundaryCondition::OUTFLOW) {
+                                cons[jkse] = cons
+                                    [idx3(ir, ny - (hr + 1), hr, nx, ny, nz)];
+                                cons[jkse].momentum(2) *= -1;
+                            }
+                            else if (bcye == BoundaryCondition::REFLECTING &&
+                                     bczb == BoundaryCondition::REFLECTING) {
+                                cons[jkse] = cons
+                                    [idx3(ir, ny - (hr + 1), hr, nx, ny, nz)];
+                                cons[jkse].momentum(2) *= -1;
+                                cons[jkse].momentum(3) *= -1;
+                            }
 
-                                        switch (sim_state->bcs[3]) {
-                                            case BoundaryCondition::
-                                                REFLECTING: {
-                                                auto outr = idx3(
-                                                    ir,
-                                                    ny - 2 * hr + rr,
-                                                    kr,
-                                                    nx,
-                                                    ny,
-                                                    nz
-                                                );
-                                                cons[outg] = cons[outr];
-                                                cons[outg].momentum(2) *= -1;
-                                                break;
-                                            }
-                                            case BoundaryCondition::DYNAMIC:
-                                                for (auto qq = 0;
-                                                     qq < sim_state->nvars;
-                                                     qq++) {
-                                                    cons[outg][qq] =
-                                                        sim_state->bsources[qq](
-                                                            sim_state->x1[ii],
-                                                            sim_state->x2max,
-                                                            sim_state->x3[kk],
-                                                            sim_state->t
-                                                        );
-                                                }
-                                                break;
-                                            case BoundaryCondition::PERIODIC: {
-                                                auto inr = idx3(
-                                                    ir,
-                                                    2 * hr - rs,
-                                                    kr,
-                                                    nx,
-                                                    ny,
-                                                    nz
-                                                );
-                                                cons[outg] = cons[inr];
-                                                break;
-                                            }
-                                            default: {
-                                                auto outr = idx3(
-                                                    ir,
-                                                    ny - (hr + 1),
-                                                    kr,
-                                                    nx,
-                                                    ny,
-                                                    nz
-                                                );
-                                                cons[outg] = cons[outr];
-                                                break;
-                                            }
-                                        }
-                                        break;
+                            // Apply boundary conditions at northeast corner
+                            if (bcye == BoundaryCondition::PERIODIC &&
+                                bcze == BoundaryCondition::PERIODIC) {
+                                cons[jkne] = cons[idx3(ir, hr, hr, nx, ny, nz)];
+                            }
+                            else if (bcye == BoundaryCondition::PERIODIC &&
+                                     bcze == BoundaryCondition::OUTFLOW) {
+                                cons[jkne] = cons
+                                    [idx3(ir, hr, nz - (hr + 1), nx, ny, nz)];
+                            }
+                            else if (bcye == BoundaryCondition::PERIODIC &&
+                                     bcze == BoundaryCondition::REFLECTING) {
+                                cons[jkne] = cons
+                                    [idx3(ir, hr, nz - (hr + 1), nx, ny, nz)];
+                                cons[jkne].momentum(3) *= -1;
+                            }
+                            else if (bcye == BoundaryCondition::OUTFLOW &&
+                                     bcze == BoundaryCondition::PERIODIC) {
+                                cons[jkne] = cons
+                                    [idx3(ir, ny - (hr + 1), hr, nx, ny, nz)];
+                            }
+                            else if (bcye == BoundaryCondition::OUTFLOW &&
+                                     bcze == BoundaryCondition::OUTFLOW) {
+                                cons[jkne] = cons[idx3(
+                                    ir,
+                                    ny - (hr + 1),
+                                    nz - (hr + 1),
+                                    nx,
+                                    ny,
+                                    nz
+                                )];
+                            }
+                            else if (bcye == BoundaryCondition::OUTFLOW &&
+                                     bcze == BoundaryCondition::REFLECTING) {
+                                cons[jkne] = cons[idx3(
+                                    ir,
+                                    ny - (hr + 1),
+                                    nz - (hr + 1),
+                                    nx,
+                                    ny,
+                                    nz
+                                )];
+                                cons[jkne].momentum(3) *= -1;
+                            }
+                            else if (bcye == BoundaryCondition::REFLECTING &&
+                                     bcze == BoundaryCondition::PERIODIC) {
+                                cons[jkne] = cons
+                                    [idx3(ir, ny - (hr + 1), hr, nx, ny, nz)];
+                                cons[jkne].momentum(2) *= -1;
+                            }
+                            else if (bcye == BoundaryCondition::REFLECTING &&
+                                     bcze == BoundaryCondition::OUTFLOW) {
+                                cons[jkne] = cons[idx3(
+                                    ir,
+                                    ny - (hr + 1),
+                                    nz - (hr + 1),
+                                    nx,
+                                    ny,
+                                    nz
+                                )];
+                                cons[jkne].momentum(2) *= -1;
+                            }
+                            else if (bcye == BoundaryCondition::REFLECTING &&
+                                     bcze == BoundaryCondition::REFLECTING) {
+                                cons[jkne] = cons[idx3(
+                                    ir,
+                                    ny - (hr + 1),
+                                    nz - (hr + 1),
+                                    nx,
+                                    ny,
+                                    nz
+                                )];
+                                cons[jkne].momentum(2) *= -1;
+                                cons[jkne].momentum(3) *= -1;
+                            }
+
+                            // Apply boundary conditions at northwest corner
+                            if (bcyb == BoundaryCondition::PERIODIC &&
+                                bcze == BoundaryCondition::PERIODIC) {
+                                cons[jknw] = cons
+                                    [idx3(ir, ny - (hr + 1), hr, nx, ny, nz)];
+                            }
+                            else if (bcyb == BoundaryCondition::PERIODIC &&
+                                     bcze == BoundaryCondition::OUTFLOW) {
+                                cons[jknw] = cons[idx3(
+                                    ir,
+                                    ny - (hr + 1),
+                                    nz - (hr + 1),
+                                    nx,
+                                    ny,
+                                    nz
+                                )];
+                            }
+                            else if (bcyb == BoundaryCondition::PERIODIC &&
+                                     bcze == BoundaryCondition::REFLECTING) {
+                                cons[jknw] = cons[idx3(
+                                    ir,
+                                    ny - (hr + 1),
+                                    nz - (hr + 1),
+                                    nx,
+                                    ny,
+                                    nz
+                                )];
+                                cons[jknw].momentum(3) *= -1;
+                            }
+                            else if (bcyb == BoundaryCondition::OUTFLOW &&
+                                     bcze == BoundaryCondition::PERIODIC) {
+                                cons[jknw] = cons[idx3(ir, hr, hr, nx, ny, nz)];
+                            }
+                            else if (bcyb == BoundaryCondition::OUTFLOW &&
+                                     bcze == BoundaryCondition::OUTFLOW) {
+                                cons[jknw] = cons
+                                    [idx3(ir, hr, nz - (hr + 1), nx, ny, nz)];
+                            }
+                            else if (bcyb == BoundaryCondition::OUTFLOW &&
+                                     bcze == BoundaryCondition::REFLECTING) {
+                                cons[jknw] = cons
+                                    [idx3(ir, hr, nz - (hr + 1), nx, ny, nz)];
+                                cons[jknw].momentum(3) *= -1;
+                            }
+                            else if (bcyb == BoundaryCondition::REFLECTING &&
+                                     bcze == BoundaryCondition::PERIODIC) {
+                                cons[jknw] = cons[idx3(ir, hr, hr, nx, ny, nz)];
+                                cons[jknw].momentum(2) *= -1;
+                            }
+                            else if (bcyb == BoundaryCondition::REFLECTING &&
+                                     bcze == BoundaryCondition::OUTFLOW) {
+                                cons[jknw] = cons
+                                    [idx3(ir, hr, nz - (hr + 1), nx, ny, nz)];
+                                cons[jknw].momentum(2) *= -1;
+                            }
+                            else if (bcyb == BoundaryCondition::REFLECTING &&
+                                     bcze == BoundaryCondition::REFLECTING) {
+                                cons[jknw] = cons
+                                    [idx3(ir, hr, nz - (hr + 1), nx, ny, nz)];
+                                cons[jknw].momentum(2) *= -1;
+                                cons[jknw].momentum(3) *= -1;
+                            }
+
+                            //================================================================
+                            auto ing  = idx3(ir, jr, rr, nx, ny, nz);
+                            auto outg = idx3(ir, jr, nz - rs, nx, ny, nz);
+
+                            switch (geometry) {
+                                case Geometry::SPHERICAL: {
+                                    // the x3 direction is periodic in phi
+                                    const auto inr =
+                                        idx3(ir, jr, 2 * hr - rs, nx, ny, nz);
+                                    const auto outr = idx3(
+                                        ir,
+                                        jr,
+                                        nz - 2 * hr + rr,
+                                        nx,
+                                        ny,
+                                        nz
+                                    );
+                                    cons[ing]  = cons[outr];
+                                    cons[outg] = cons[inr];
+                                    break;
                                 }
+                                default:
+                                    switch (sim_state->bcs[4]) {
+                                        case BoundaryCondition::REFLECTING: {
+                                            const auto inr = idx3(
+                                                ir,
+                                                jr,
+                                                2 * hr - rs,
+                                                nx,
+                                                ny,
+                                                nz
+                                            );
+                                            cons[ing] = cons[inr];
+                                            cons[ing].momentum(3) *= -1;
+                                            break;
+                                        }
+                                        case BoundaryCondition::DYNAMIC:
+                                            for (auto qq = 0;
+                                                 qq < sim_state->nvars;
+                                                 qq++) {
+                                                cons[ing][qq] =
+                                                    sim_state->bsources[qq](
+                                                        sim_state->x1[ii],
+                                                        sim_state->x2[jj],
+                                                        sim_state->x3min,
+                                                        sim_state->t
+                                                    );
+                                            }
+                                            break;
+                                        case BoundaryCondition::PERIODIC: {
+                                            const auto outr = idx3(
+                                                ir,
+                                                jr,
+                                                nz - 2 * hr + rr,
+                                                nx,
+                                                ny,
+                                                nz
+                                            );
+                                            cons[ing] = cons[outr];
+                                            break;
+                                        }
+                                        default: {
+                                            const auto inr =
+                                                idx3(ir, jr, hr, nx, ny, nz);
+                                            cons[ing] = cons[inr];
+                                            break;
+                                        }
+                                    }
+
+                                    switch (sim_state->bcs[5]) {
+                                        case BoundaryCondition::REFLECTING: {
+                                            const auto outr = idx3(
+                                                ir,
+                                                jr,
+                                                nz - 2 * hr + rr,
+                                                nx,
+                                                ny,
+                                                nz
+                                            );
+                                            cons[outg] = cons[outr];
+                                            cons[outg].momentum(3) *= -1;
+                                            break;
+                                        }
+                                        case BoundaryCondition::DYNAMIC:
+                                            for (auto qq = 0;
+                                                 qq < sim_state->nvars;
+                                                 qq++) {
+                                                cons[outg][qq] =
+                                                    sim_state->bsources[qq](
+                                                        sim_state->x1[ii],
+                                                        sim_state->x2[jj],
+                                                        sim_state->x3max,
+                                                        sim_state->t
+                                                    );
+                                            }
+                                            break;
+                                        case BoundaryCondition::PERIODIC: {
+                                            const auto inr = idx3(
+                                                ir,
+                                                jr,
+                                                2 * hr - rs,
+                                                nx,
+                                                ny,
+                                                nz
+                                            );
+                                            cons[outg] = cons[inr];
+                                            break;
+                                        }
+                                        default: {
+                                            const auto outr = idx3(
+                                                ir,
+                                                jr,
+                                                nz - (hr + 1),
+                                                nx,
+                                                ny,
+                                                nz
+                                            );
+                                            cons[outg] = cons[outr];
+                                            break;
+                                        }
+                                    }
+                                    break;
+                            }
+                        }
+                    }
+
+                    if (ii < nx - 2 * hr) {
+                        // Fill the ghost zones at the x2 boundaries
+                        if (kk < nz - 2 * hr) {
+                            auto ing  = idx3(ir, rr, kr, nx, ny, nz);
+                            auto outg = idx3(ir, ny - rs, kr, nx, ny, nz);
+
+                            switch (geometry) {
+                                case Geometry::SPHERICAL: {
+                                    // theta boundaries are reflecting
+                                    const auto inr =
+                                        idx3(ir, 2 * hr - rs, kr, nx, ny, nz);
+                                    const auto outr = idx3(
+                                        ir,
+                                        ny - 2 * hr + rr,
+                                        kr,
+                                        nx,
+                                        ny,
+                                        nz
+                                    );
+                                    cons[ing]  = cons[inr];
+                                    cons[outg] = cons[outr];
+                                    if (half_sphere) {
+                                        cons[outg].momentum(2) *= -1;
+                                    }
+                                    break;
+                                }
+
+                                case Geometry::CYLINDRICAL: {
+                                    // phi boundaries are periodic
+                                    const auto inr =
+                                        idx3(ir, 2 * hr - rs, kr, nx, ny, nz);
+                                    const auto outr = idx3(
+                                        ir,
+                                        ny - 2 * hr + rr,
+                                        kr,
+                                        nx,
+                                        ny,
+                                        nz
+                                    );
+                                    cons[ing]  = cons[outr];
+                                    cons[outg] = cons[inr];
+                                    break;
+                                }
+                                default:
+                                    switch (sim_state->bcs[2]) {
+                                        case BoundaryCondition::REFLECTING: {
+                                            auto inr = idx3(
+                                                ir,
+                                                2 * hr - rs,
+                                                kr,
+                                                nx,
+                                                ny,
+                                                nz
+                                            );
+                                            cons[ing] = cons[inr];
+                                            cons[ing].momentum(2) *= -1;
+                                            break;
+                                        }
+                                        case BoundaryCondition::DYNAMIC:
+                                            for (auto qq = 0;
+                                                 qq < sim_state->nvars;
+                                                 qq++) {
+                                                cons[ing][qq] =
+                                                    sim_state->bsources[qq](
+                                                        sim_state->x1[ii],
+                                                        sim_state->x2min,
+                                                        sim_state->x3[kk],
+                                                        sim_state->t
+                                                    );
+                                            }
+                                            break;
+                                        case BoundaryCondition::PERIODIC: {
+                                            auto outr = idx3(
+                                                ir,
+                                                ny - 2 * hr + rr,
+                                                kr,
+                                                nx,
+                                                ny,
+                                                nz
+                                            );
+                                            cons[ing] = cons[outr];
+                                            break;
+                                        }
+                                        default: {
+                                            auto inr =
+                                                idx3(ir, hr, kr, nx, ny, nz);
+                                            cons[ing] = cons[inr];
+                                            break;
+                                        }
+                                    }
+
+                                    switch (sim_state->bcs[3]) {
+                                        case BoundaryCondition::REFLECTING: {
+                                            auto outr = idx3(
+                                                ir,
+                                                ny - 2 * hr + rr,
+                                                kr,
+                                                nx,
+                                                ny,
+                                                nz
+                                            );
+                                            cons[outg] = cons[outr];
+                                            cons[outg].momentum(2) *= -1;
+                                            break;
+                                        }
+                                        case BoundaryCondition::DYNAMIC:
+                                            for (auto qq = 0;
+                                                 qq < sim_state->nvars;
+                                                 qq++) {
+                                                cons[outg][qq] =
+                                                    sim_state->bsources[qq](
+                                                        sim_state->x1[ii],
+                                                        sim_state->x2max,
+                                                        sim_state->x3[kk],
+                                                        sim_state->t
+                                                    );
+                                            }
+                                            break;
+                                        case BoundaryCondition::PERIODIC: {
+                                            auto inr = idx3(
+                                                ir,
+                                                2 * hr - rs,
+                                                kr,
+                                                nx,
+                                                ny,
+                                                nz
+                                            );
+                                            cons[outg] = cons[inr];
+                                            break;
+                                        }
+                                        default: {
+                                            auto outr = idx3(
+                                                ir,
+                                                ny - (hr + 1),
+                                                kr,
+                                                nx,
+                                                ny,
+                                                nz
+                                            );
+                                            cons[outg] = cons[outr];
+                                            break;
+                                        }
+                                    }
+                                    break;
                             }
                         }
                     }
                 }
-            );
+            });
         };
 
         template <typename T>
@@ -2013,6 +1679,8 @@ namespace simbi {
             const luint gid = idx2(ii, jj, self->nx, self->ny);
             if ((ii < self->nx) && (jj < self->ny)) {
                 real plus_v1, plus_v2, minus_v1, minus_v2;
+                const auto ireal = get_real_idx(ii, self->radius, self->xag);
+                const auto jreal = get_real_idx(jj, self->radius, self->yag);
                 if constexpr (is_relativistic<T>::value) {
                     if constexpr (dt_type == TIMESTEP_TYPE::ADAPTIVE) {
                         const real rho = prim_buffer[gid].rho();
@@ -2045,7 +1713,7 @@ namespace simbi {
                     minus_v1       = (v1 - cs);
                     minus_v2       = (v2 - cs);
                 }
-                const auto cell = self->cell_factors(ii, jj);
+                const auto cell = self->cell_factors(ireal, jreal);
                 v1p             = std::abs(plus_v1);
                 v1m             = std::abs(minus_v1);
                 v2p             = std::abs(plus_v2);
@@ -2059,16 +1727,12 @@ namespace simbi {
                         break;
 
                     case Geometry::SPHERICAL: {
-                        const auto ireal =
-                            get_real_idx(ii, self->radius, self->xag);
-                        const auto jreal =
-                            get_real_idx(jj, self->radius, self->yag);
                         // Compute avg spherical distance 3/4 *(rf^4 -
                         // ri^4)/(rf^3 - ri^3)
                         const real rl = cell.x1L();
                         const real rr = cell.x1R();
                         const real tl = cell.x2L();
-                        const real tr = cell.x1R();
+                        const real tr = cell.x2R();
                         if (self->mesh_motion) {
                             const real vfaceL = rl * self->hubble_param;
                             const real vfaceR = rr * self->hubble_param;
@@ -2109,10 +1773,6 @@ namespace simbi {
                         break;
                     }
                     case Geometry::AXIS_CYLINDRICAL: {
-                        const auto ireal =
-                            get_real_idx(ii, self->radius, self->xag);
-                        const auto jreal =
-                            get_real_idx(jj, self->radius, self->yag);
                         // Compute avg spherical distance 3/4 *(rf^4 -
                         // ri^4)/(rf^3 - ri^3)
                         const real rl = cell.x1L();
@@ -2286,7 +1946,7 @@ namespace simbi {
                     vMinus         = (v - cs);
                 }
                 const auto ireal = get_real_idx(ii, self->radius, self->xag);
-                const auto cell  = self->cell_factors(ii);
+                const auto cell  = self->cell_factors(ireal);
 
                 const real x1l    = cell.x1L();
                 const real x1r    = cell.x1R();
@@ -2322,6 +1982,8 @@ namespace simbi {
             const luint gid = idx2(ii, jj, self->nx, self->ny);
             if ((ii < self->nx) && (jj < self->ny)) {
                 real plus_v1, plus_v2, minus_v1, minus_v2;
+                const auto ireal = get_real_idx(ii, self->radius, self->xag);
+                const auto jreal = get_real_idx(jj, self->radius, self->yag);
                 if constexpr (is_relativistic_mhd<T>::value) {
                     if constexpr (dt_type == TIMESTEP_TYPE::ADAPTIVE) {
                         real speeds[4];
@@ -2351,7 +2013,7 @@ namespace simbi {
                     minus_v2       = (v2 - cs);
                 }
 
-                const auto cell = self->cell_factors(ii, jj);
+                const auto cell = self->cell_factors(ireal, jreal);
                 v1p             = std::abs(plus_v1);
                 v1m             = std::abs(minus_v1);
                 v2p             = std::abs(plus_v2);
@@ -2367,10 +2029,6 @@ namespace simbi {
                     case Geometry::SPHERICAL: {
                         // Compute avg spherical distance 3/4 *(rf^4 -
                         // ri^4)/(rf^3 - ri^3)
-                        const auto ireal =
-                            get_real_idx(ii, self->radius, self->xag);
-                        const auto jreal =
-                            get_real_idx(jj, self->radius, self->yag);
                         const real rl = cell.x1L();
                         const real rr = cell.x1R();
                         const real tl = cell.x2L();
@@ -2389,12 +2047,6 @@ namespace simbi {
                         break;
                     }
                     case Geometry::PLANAR_CYLINDRICAL: {
-                        // Compute avg spherical distance 3/4 *(rf^4 -
-                        // ri^4)/(rf^3 - ri^3)
-                        const auto ireal =
-                            get_real_idx(ii, self->radius, self->xag);
-                        const auto jreal =
-                            get_real_idx(jj, self->radius, self->yag);
                         const real rl = cell.x1L();
                         const real rr = cell.x1R();
                         const real tl = cell.x2L();
@@ -2413,10 +2065,6 @@ namespace simbi {
                         break;
                     }
                     case Geometry::AXIS_CYLINDRICAL: {
-                        const auto ireal =
-                            get_real_idx(ii, self->radius, self->xag);
-                        const auto jreal =
-                            get_real_idx(jj, self->radius, self->yag);
                         const real rl = cell.x1L();
                         const real rr = cell.x1R();
                         const real zl = cell.x2L();
@@ -2462,6 +2110,9 @@ namespace simbi {
             if ((ii < self->nx) && (jj < self->ny) && (kk < self->nz)) {
                 real v1p, v1m, v2p, v2m, v3p, v3m, cfl_dt;
                 real speeds[4];
+                const auto ireal = get_real_idx(ii, self->radius, self->nxv);
+                const auto jreal = get_real_idx(jj, self->radius, self->nyv);
+                const auto kreal = get_real_idx(kk, self->radius, self->nzv);
                 const auto prims = prim_buffer;
                 // Left/Right wave speeds
                 if constexpr (dt_type == TIMESTEP_TYPE::ADAPTIVE) {
@@ -2484,8 +2135,7 @@ namespace simbi {
                     v3m = 1.0;
                 }
 
-                const auto cell = self->cell_factors(ii, jj, kk);
-
+                const auto cell = self->cell_factors(ireal, jreal, kreal);
                 switch (geometry) {
                     case Geometry::CARTESIAN:
                         cfl_dt = my_min3<real>(
@@ -2496,15 +2146,9 @@ namespace simbi {
 
                         break;
                     case Geometry::SPHERICAL: {
-                        const auto ireal =
-                            get_real_idx(ii, self->radius, self->nxv);
-                        const auto jreal =
-                            get_real_idx(jj, self->radius, self->nyv);
-
-                        const real x1l = cell.x1L();
-                        const real x1r = cell.x1R();
-                        const real dx1 = x1r - x1l;
-
+                        const real x1l   = cell.x1L();
+                        const real x1r   = cell.x1R();
+                        const real dx1   = x1r - x1l;
                         const real x2l   = cell.x2L();
                         const real x2r   = cell.x2R();
                         const real rmean = cell.x1mean;
@@ -2518,8 +2162,6 @@ namespace simbi {
                         break;
                     }
                     default: {
-                        const auto ireal =
-                            get_real_idx(ii, self->radius, self->nxv);
                         const real x1l = cell.x1L();
                         const real x1r = cell.x1R();
                         const real dx1 = x1r - x1l;
@@ -3123,7 +2765,7 @@ namespace simbi {
                     }
                     buffer[idx2(txa, tya - radius, sx, sy)] =
                         data[idx2(ia, ja - radius, ni, nj)];
-                    buffer[idx2(txa, tya + txl, sx, sy)] =
+                    buffer[idx2(txa, tya + tyl, sx, sy)] =
                         data[idx2(ia, ja + tyl, ni, nj)];
                 }
                 if (tx < radius) {
@@ -3831,12 +3473,12 @@ namespace simbi {
                  {"geometry", state.coord_system.c_str()},
                  {"regime", regime.c_str()},
                  {"dimensions", &state.dimensions},
-                 {"x1_cell_spacing", cell2str.at(state.x1_cell_spacing).c_str()
-                 },
-                 {"x2_cell_spacing", cell2str.at(state.x2_cell_spacing).c_str()
-                 },
-                 {"x3_cell_spacing", cell2str.at(state.x3_cell_spacing).c_str()}
-                };
+                 {"x1_cell_spacing",
+                  cell2str.at(state.x1_cell_spacing).c_str()},
+                 {"x2_cell_spacing",
+                  cell2str.at(state.x2_cell_spacing).c_str()},
+                 {"x3_cell_spacing",
+                  cell2str.at(state.x3_cell_spacing).c_str()}};
 
             for (const auto& [name, value] : attributes) {
                 H5::DataType type;
