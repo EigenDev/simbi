@@ -206,6 +206,16 @@ class Hydro:
         logger.info("=" * 80)
         logger.info("Simulation Parameters")
         logger.info("=" * 80)
+        
+        def format_tuple_of_tuples(param: Any) -> str:
+            if helpers.tuple_of_tuples(param):
+                formatted = tuple(
+                    tuple(f"{x:.3f}" if isinstance(x, float) else str(x) for x in inner_tuple)
+                    for inner_tuple in param
+                )
+                return str(formatted).replace("'", "").replace(" ", "")
+            else:
+                return str(param)
 
         def format_param(param: Any) -> str:
             """
@@ -225,6 +235,9 @@ class Hydro:
                 if len(param) > 6:
                     return f"user-defined {param.__class__.__name__} terms"
                 return [format_param(p) for p in param]  # type: ignore
+            elif isinstance(param, tuple):
+                return format_tuple_of_tuples(param)
+                
             return str(param)
 
         for key, param in params.locals.items():
