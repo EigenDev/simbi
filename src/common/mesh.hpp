@@ -20,7 +20,7 @@ namespace simbi {
 
 using namespace simbi::helpers;
 
-template <typename Derived, int dim>
+template <typename Derived, int dim, typename C, typename P>
 struct Mesh {
     Mesh()  = default;
     ~Mesh() = default;
@@ -37,7 +37,7 @@ struct Mesh {
      * @param cellspacing
      * @return arithmetic or geometric mean between a and b
      */
-    STATIC real calc_any_mean(
+    DUAL real calc_any_mean(
         const real a,
         const real b,
         const simbi::Cellspacing cellspacing
@@ -51,20 +51,19 @@ struct Mesh {
         }
     }
 
-    STATIC real
-    get_cell_centroid_cylindrical(const real xr, const real xl) const
+    DUAL real get_cell_centroid_cylindrical(const real xr, const real xl) const
     {
         return (2.0 / 3.0) * (xr * xr * xr - xl * xl * xl) /
                (xr * xr - xl * xl);
     }
 
-    STATIC real get_cell_centroid_spherical(const real xr, const real xl) const
+    DUAL real get_cell_centroid_spherical(const real xr, const real xl) const
     {
         return 0.75 * (xr * xr * xr * xr - xl * xl * xl * xl) /
                (xr * xr * xr - xl * xl * xl);
     }
 
-    STATIC real get_cell_centroid_cartesian(const real xr, const real xl) const
+    DUAL real get_cell_centroid_cartesian(const real xr, const real xl) const
     {
         return 0.5 * (xr + xl);
     }
@@ -89,12 +88,12 @@ struct Mesh {
         real normals[2 * dim];
         real dV, x1mean, x2mean, x3mean;
 
-        const Mesh<Derived, dim>& parent;
+        const Mesh<Derived, dim, C, P>& parent;
         real hubble_param;
         bool homolog;
         ~CellParams() = default;
 
-        DUAL CellParams(const Mesh<Derived, dim>& parent)
+        DUAL CellParams(const Mesh<Derived, dim, C, P>& parent)
             : dV(0.0),
               x1mean(0.0),
               x2mean(0.0),
@@ -103,13 +102,6 @@ struct Mesh {
               hubble_param(parent.derived().hubble_param),
               homolog(parent.derived().homolog)
         {
-        }
-
-        // Singleton instance
-        static CellParams& instance()
-        {
-            static CellParams instance;
-            return instance;
         }
 
         //===================================================
@@ -540,7 +532,7 @@ struct Mesh {
                   cot * (wgam2 * v2 * v3 - bmu.two * bmu.three)) /
                 x1mean;
 
-            const auto geom_source = typename Derived::conserved_t{
+            return typename Derived::conserved_t{
               0.0,
               rsource,
               tsource,
@@ -550,8 +542,6 @@ struct Mesh {
               0.0,
               0.0
             };
-
-            return geom_source;
         }
 
         /**
@@ -611,19 +601,6 @@ struct Mesh {
             }
         }
 
-        DUAL auto geom_sources_spherical(const auto& prb) const
-        {
-            if constexpr (Derived::regime == "srmhd") {
-                return geom_sources_spherical_rmhd(prb);
-            }
-            else if constexpr (Derived::regime == "srhd") {
-                return geom_sources_spherical_srhd(prb);
-            }
-            else {
-                return typename Derived::conserved_t{};
-            }
-        }
-
         DUAL auto geom_sources_cylindrical_rmhd(const auto& prb) const
         {
             // Grab central primitives
@@ -640,7 +617,7 @@ struct Mesh {
             const real psource =
                 -(wgam2 * v1 * v2 - bmuc.one * bmuc.two) / x1mean;
 
-            const auto geom_source = typename Derived::conserved_t{
+            return typename Derived::conserved_t{
               0.0,
               rsource,
               psource,
@@ -650,8 +627,6 @@ struct Mesh {
               0.0,
               0.0
             };
-
-            return geom_source;
         }
 
         DUAL auto geom_sources_cylindrical_nomhd(const auto& prb) const
@@ -667,34 +642,42 @@ struct Mesh {
             const real rsource = (wgam2 * v2 * v2 + pt) / x1mean;
 
             if constexpr (dim == 1) {
-                const auto geom_source = typename Derived::conserved_t{
+                return typename Derived::conserved_t{
                   0.0,
                   rsource,
                   0.0,
                 };
-                return geom_source;
             }
             else if constexpr (dim == 2) {
-                const real psource     = -(wgam2 * v1 * v2) / x1mean;
-                const auto geom_source = typename Derived::conserved_t{
+                const real psource = -(wgam2 * v1 * v2) / x1mean;
+                return typename Derived::conserved_t{
                   0.0,
                   rsource,
                   psource,
                   0.0,
                 };
-                return geom_source;
             }
             else {
-                const real psource     = -(wgam2 * v1 * v2) / x1mean;
-                const auto geom_source = typename Derived::conserved_t{
+                const real psource = -(wgam2 * v1 * v2) / x1mean;
+                return typename Derived::conserved_t{
                   0.0,
                   rsource,
                   psource,
                   0.0,
                   0.0,
                 };
-                return geom_source;
             }
+        }
+
+        DUAL auto geom_sources_axis_cylindrical_nomhd(const auto& prb) const
+        {
+            // Grab central primitives
+            const real pt      = prb.total_pressure();
+            const real rsource = pt / x1mean;
+            if constexpr (dim == 2) {
+                return typename Derived::conserved_t{0.0, rsource, 0.0, 0.0};
+            }
+            return typename Derived::conserved_t{};
         }
 
         DUAL auto geom_sources_default(const auto& prb) const
@@ -704,26 +687,7 @@ struct Mesh {
 
         DUAL auto geom_sources(const auto& prb) const
         {
-            if constexpr (Derived::regime == "srmhd") {
-                switch (parent.derived().geometry) {
-                    case Geometry::SPHERICAL:
-                        return geom_sources_spherical_rmhd(prb);
-                    case Geometry::CYLINDRICAL:
-                        return geom_sources_cylindrical_rmhd(prb);
-                    default:
-                        return geom_sources_default(prb);
-                }
-            }
-            else {
-                switch (parent.derived().geometry) {
-                    case Geometry::SPHERICAL:
-                        return geom_sources_spherical_nomhd(prb);
-                    case Geometry::CYLINDRICAL:
-                        return geom_sources_cylindrical_nomhd(prb);
-                    default:
-                        return geom_sources_default(prb);
-                }
-            }
+            return (this->*(parent.geom_source_func))(prb);
         }
 
         //===================================================
@@ -867,20 +831,40 @@ struct Mesh {
         if (derived().geometry == Geometry::SPHERICAL) {
             area_func     = &CellParams::calculate_areas_spherical;
             centroid_func = &Mesh::get_cell_centroid_spherical;
+            if constexpr (Derived::regime == "srmhd") {
+                geom_source_func = &CellParams::geom_sources_spherical_rmhd;
+            }
+            else {
+                geom_source_func = &CellParams::geom_sources_spherical_nomhd;
+            }
         }
         else if (derived().geometry == Geometry::CYLINDRICAL) {
             area_func     = &CellParams::calculate_areas_cylindrical;
             centroid_func = &Mesh::get_cell_centroid_cylindrical;
+            if constexpr (Derived::regime == "srmhd") {
+                geom_source_func = &CellParams::geom_sources_cylindrical_rmhd;
+            }
+            else {
+                geom_source_func = &CellParams::geom_sources_cylindrical_nomhd;
+            }
         }
         else if (derived().geometry == Geometry::PLANAR_CYLINDRICAL) {
             area_func = &CellParams::calculate_areas_planar_cylindrical;
+            if constexpr (Derived::regime != "srmhd") {
+                geom_source_func = &CellParams::geom_sources_cylindrical_nomhd;
+            }
         }
         else if (derived().geometry == Geometry::AXIS_CYLINDRICAL) {
             area_func = &CellParams::calculate_area_axis_cylindrical;
+            if constexpr (Derived::regime != "srmhd") {
+                geom_source_func =
+                    &CellParams::geom_sources_axis_cylindrical_nomhd;
+            }
         }
         else {
-            area_func     = &CellParams::calculate_areas_default;
-            centroid_func = &Mesh::get_cell_centroid_cartesian;
+            area_func        = &CellParams::calculate_areas_default;
+            centroid_func    = &Mesh::get_cell_centroid_cartesian;
+            geom_source_func = &CellParams::geom_sources_default;
         }
 
         if (derived().geometry == Geometry::CARTESIAN) {
@@ -896,11 +880,6 @@ struct Mesh {
     }
 
     void set_mesh_funcs() { SINGLE((helpers::hybrid_set_mesh_funcs), this); }
-
-    DUAL void initialize_cell_params() const
-    {
-        CellParams::set_mesh_funcs(*this);
-    }
 
     DUAL CellParams
     cell_factors(const luint ii, const luint jj = 0, const luint kk = 0) const
@@ -918,9 +897,12 @@ struct Mesh {
     using CF = real (Mesh::*)(const real, const real) const;
     using AF = void (CellParams::*)(const luint, const luint, const luint);
     using VF = real (CellParams::*)() const;
+    using GF = C (CellParams::*)(const P&) const;
+
     CF centroid_func;
     AF area_func;
     VF idV1func, idV2func, idV3func;
+    GF geom_source_func;
 
     DUAL Derived& derived() { return static_cast<Derived&>(*this); }
 
