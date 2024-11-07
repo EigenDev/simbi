@@ -857,8 +857,7 @@ void Newtonian<dim>::simulate(
 )
 {
     anyDisplayProps();
-    // set the boundary, hydro, and gravity sources terms
-    // respectively
+    // set the boundary, hydro, and gravity sources terms respectively
     for (auto&& q : bsources) {
         this->bsources.push_back(q.value_or(nullptr));
     }
@@ -889,7 +888,6 @@ void Newtonian<dim>::simulate(
         this->hsources.end(),
         [](const auto& q) { return q == nullptr; }
     );
-
     // Stuff for moving mesh
     this->hubble_param = adot(t) / a(t);
     this->mesh_motion  = (hubble_param != 0);
@@ -911,51 +909,8 @@ void Newtonian<dim>::simulate(
 
     // Copy the state array into real & profile variables
     for (size_t i = 0; i < total_zones; i++) {
-        const real rho = state[0][i];
-        const real m1  = state[1][i];
-        const real m2  = [&] {
-            if constexpr (dim < 2) {
-                return static_cast<real>(0.0);
-            }
-            return state[2][i];
-        }();
-        const real m3 = [&] {
-            if constexpr (dim < 3) {
-                return static_cast<real>(0.0);
-            }
-            return state[3][i];
-        }();
-        const real e = [&] {
-            if constexpr (dim == 1) {
-                return state[2][i];
-            }
-            else if constexpr (dim == 2) {
-                return state[3][i];
-            }
-            else {
-                return state[4][i];
-            }
-        }();
-
-        const real rho_chi = [&] {
-            if constexpr (dim == 1) {
-                return state[3][i];
-            }
-            else if constexpr (dim == 2) {
-                return state[4][i];
-            }
-            else {
-                return state[5][i];
-            }
-        }();
-        if constexpr (dim == 1) {
-            cons[i] = {rho, m1, e, rho_chi};
-        }
-        else if constexpr (dim == 2) {
-            cons[i] = {rho, m1, m2, e, rho_chi};
-        }
-        else {
-            cons[i] = {rho, m1, m2, m3, e, rho_chi};
+        for (int q = 0; q < conserved_t::nmem; q++) {
+            cons[i][q] = state[q][i];
         }
     }
     // Deallocate duplicate memory and setup the system

@@ -588,6 +588,7 @@ void RMHD<dim>::cons2prim()
                 v2 *= w;
                 v3 *= w;
             }
+
             prims[gid] =
                 primitive_t{rhohat, v1, v2, v3, pg, b1, b2, b3, dchi / d};
 
@@ -2150,19 +2151,19 @@ void RMHD<dim>::advance()
             b3L = b3_data[zlf] - dt * step * curl_e(3, e1, e2, cell, 0);
             b3R = b3_data[zrf] - dt * step * curl_e(3, e1, e2, cell, 1);
 
-            if constexpr (global::debug_mode) {
-                const auto divb = (b1R - b1L) * invdx1 + (b2R - b2L) * invdx2 +
-                                  (b3R - b3L) * invdx3;
+            // if constexpr (global::debug_mode) {
+            const auto divb = (b1R - b1L) * invdx1 + (b2R - b2L) * invdx2 +
+                              (b3R - b3L) * invdx3;
 
-                if (!goes_to_zero(divb)) {
-                    if (kk == 0 && jj == 2 && ii == 4) {
-                        printf("========================================\n");
-                        printf("DIV.B: %.2e\n", divb);
-                        printf("========================================\n");
-                        printf("Divergence of B is not zero!\n");
-                    }
+            if (!goes_to_zero(divb)) {
+                if (kk == 0 && jj == 2 && ii == 4) {
+                    printf("========================================\n");
+                    printf("DIV.B: %.2e\n", divb);
+                    printf("========================================\n");
+                    printf("Divergence of B is not zero!\n");
                 }
             }
+            // }
             b1c = static_cast<real>(0.5) * (b1R + b1L);
             b2c = static_cast<real>(0.5) * (b2R + b2L);
             b3c = static_cast<real>(0.5) * (b3R + b3L);
@@ -2209,7 +2210,6 @@ void RMHD<dim>::simulate(
     for (auto&& q : gsources) {
         this->gsources.push_back(q.value_or(nullptr));
     }
-
     // check if ~all~ boundary sources have been set.
     // if the user forgot one, the code will run with
     // and outflow outer boundary condition
@@ -2227,7 +2227,6 @@ void RMHD<dim>::simulate(
         std::all_of(this->hsources.begin(), this->hsources.end(), [](auto q) {
             return q == nullptr;
         });
-
     // Stuff for moving mesh
     this->hubble_param = adot(t) / a(t);
     this->mesh_motion  = (hubble_param != 0);
@@ -2265,20 +2264,10 @@ void RMHD<dim>::simulate(
 
     // Copy the state array into real & profile variables
     for (size_t i = 0; i < total_zones; i++) {
-        const real d   = state[0][i];
-        const real m1  = state[1][i];
-        const real m2  = state[2][i];
-        const real m3  = state[3][i];
-        const real tau = state[4][i];
-        // volume-averaged magnetic fields pre-baked into
-        // initial conserved from python initialization
-        const real b1   = state[5][i];
-        const real b2   = state[6][i];
-        const real b3   = state[7][i];
-        const real dchi = state[8][i];
-        cons[i]         = conserved_t{d, m1, m2, m3, tau, b1, b2, b3, dchi};
+        for (int q = 0; q < conserved_t::nmem; q++) {
+            cons[i][q] = state[q][i];
+        }
     }
-
     // set up the problem and release old state from memory
     deallocate_state();
     offload();
@@ -2288,7 +2277,6 @@ void RMHD<dim>::simulate(
     this->set_mesh_funcs();
 
     config_ghosts(this);
-    // std::cin.get();
     cons2prim();
     adapt_dt<TIMESTEP_TYPE::MINIMUM>();
 
