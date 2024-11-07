@@ -1230,42 +1230,16 @@ void SRHD<dim>::simulate(
 
     // Copy the state array into real & profile variables
     for (size_t i = 0; i < total_zones; i++) {
-        const real d  = state[0][i];
-        const real s1 = state[1][i];
-        const real s2 = [&] {
-            if constexpr (dim < 2) {
-                return static_cast<real>(0.0);
-            }
-            return state[2][i];
-        }();
-        const real s3 = [&] {
-            if constexpr (dim < 3) {
-                return static_cast<real>(0.0);
-            }
-            return state[3][i];
-        }();
-        const real E = [&] {
-            if constexpr (dim == 1) {
-                return state[2][i];
-            }
-            else if constexpr (dim == 2) {
-                return state[3][i];
-            }
-            else {
-                return state[4][i];
-            }
-        }();
-        const real S = std::sqrt(s1 * s1 + s2 * s2 + s3 * s3);
-        if constexpr (dim == 1) {
-            cons[i] = conserved_t{d, s1, E};
+        for (int q = 0; q < conserved_t::nmem; q++) {
+            cons[i][q] = state[q][i];
         }
-        else if constexpr (dim == 2) {
-            cons[i] = conserved_t{d, s1, s2, E};
-        }
-        else {
-            cons[i] = conserved_t{d, s1, s2, s3, E};
-        }
-        pressure_guess[i] = std::abs(S - d - E);
+        const auto d = cons[i][0];
+        const real s = std::sqrt(
+            cons[i][1] * cons[i][1] + cons[i][2] * cons[i][2] +
+            cons[i][3] * cons[i][3]
+        );
+        const auto e      = cons[i][dim + 1];
+        pressure_guess[i] = std::abs(s - d - e);
     }
 
     // Deallocate duplicate memory and setup the system
