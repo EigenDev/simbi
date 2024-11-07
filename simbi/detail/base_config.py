@@ -60,7 +60,7 @@ class simbi_property(Generic[T]):
             return self
         if self.fget is None:
             raise ValueError("Property has no getter")
-        return cast(T, self.type_converter(self.fget(obj)))
+        return cast(T, self.type_converter(self.fget(obj))) #type: ignore
 
     @staticmethod
     def type_converter(input_obj: Any) -> Any:
