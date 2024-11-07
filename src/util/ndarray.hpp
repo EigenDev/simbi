@@ -81,21 +81,19 @@ namespace simbi {
         ndarray()  = default;
         ~ndarray() = default;
         ndarray& operator=(ndarray rhs);   // Assignment operator
-        DUAL ndarray(
-            std::initializer_list<DT> list
+        ndarray(std::initializer_list<DT> list
         );   // Initializer list constructor
-        DUAL ndarray(
-            size_type size
+        ndarray(size_type size
         );   // Zero-initialize the array with defined size
-        DUAL ndarray(
+        ndarray(
             size_type size,
             const DT val
         );   // Fill-initialize the array with defined size
-        ndarray(const ndarray& rhs);            // Copy-constructor for array
-        ndarray(const std::vector<DT>& rhs);    // Copy-constructor for vector
-        DUAL ndarray(ndarray&& rhs) noexcept;   // Move-constructor for array
-        DUAL ndarray(std::vector<DT>&& rhs);    // Move-constructor for vector
-        void swap(ndarray& rhs);                // Swap function
+        ndarray(const ndarray& rhs);           // Copy-constructor for array
+        ndarray(const std::vector<DT>& rhs);   // Copy-constructor for vector
+        ndarray(ndarray&& rhs) noexcept;       // Move-constructor for array
+        ndarray(std::vector<DT>&& rhs);        // Move-constructor for vector
+        void swap(ndarray& rhs);               // Swap function
 
         // Function that returns the number of elements in array after pushing
         // the data
