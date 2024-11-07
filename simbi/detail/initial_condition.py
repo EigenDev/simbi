@@ -261,6 +261,7 @@ def construct_the_state(model: Any, initial_state: NDArray[numpy_float]) -> None
             if bfields_stag.size
             else []
         )
+        
 
         dens = calc_labframe_density(rho, velocity, model.regime)
         mom = calc_labframe_momentum(
@@ -274,4 +275,4 @@ def construct_the_state(model: Any, initial_state: NDArray[numpy_float]) -> None
         check_valid_state(mom, "momentum")
         check_valid_state(energy, "energy")
 
-        model.u[...] = np.array([rho, *mom, energy, *mean_bfields])
+        model.u[...] = np.array([dens, *mom, energy, *mean_bfields])
