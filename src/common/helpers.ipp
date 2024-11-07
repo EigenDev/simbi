@@ -219,6 +219,8 @@ namespace simbi {
             const auto half_sphere = sim_state->half_sphere;
             const auto hr          = sim_state->radius;   // halo radius
             auto* cons             = sim_state->cons.data();
+            const auto xe          = nx - 2 * hr;
+            const auto ye          = ny - 2 * hr;
             parallel_for(sim_state->activeP, [=] DEV(const luint gid) {
                 const luint jj = axid<2, BlkAx::J>(gid, xag, yag);
                 const luint ii = axid<2, BlkAx::I>(gid, xag, yag);
@@ -234,7 +236,7 @@ namespace simbi {
                 for (luint rr = 0; rr < hr; rr++) {
                     const auto rs = rr + 1;
                     // Fill ghost zones at x1 boundaries
-                    if (jj < ny - 2 * hr) {
+                    if (jj < ye) {
                         auto ing  = idx2(rr, jr, nx, ny);
                         auto outg = idx2(nx - rs, jr, nx, ny);
 
@@ -255,9 +257,8 @@ namespace simbi {
                                 }
                                 break;
                             case BoundaryCondition::PERIODIC: {
-                                const auto outr =
-                                    idx2(nx - 2 * hr + rr, jr, nx, ny);
-                                cons[ing] = cons[outr];
+                                const auto outr = idx2(xe + rr, jr, nx, ny);
+                                cons[ing]       = cons[outr];
                                 break;
                             }
                             default: {
@@ -269,9 +270,8 @@ namespace simbi {
 
                         switch (sim_state->bcs[1]) {
                             case BoundaryCondition::REFLECTING: {
-                                const auto outr =
-                                    idx2(nx - 2 * hr + rr, jr, nx, ny);
-                                cons[outg] = cons[outr];
+                                const auto outr = idx2(xe + rr, jr, nx, ny);
+                                cons[outg]      = cons[outr];
                                 cons[outg].momentum(1) *= -1;
                                 break;
                             }
@@ -299,17 +299,16 @@ namespace simbi {
                     }
 
                     // Fill ghost zones at x2 boundaries
-                    if (ii < nx - 2 * hr) {
+                    if (ii < xe) {
                         auto ing  = idx2(ir, rr, nx, ny);
                         auto outg = idx2(ir, ny - rs, nx, ny);
 
                         switch (geometry) {
                             case Geometry::SPHERICAL: {
-                                const auto inr = idx2(ir, 2 * hr - rs, nx, ny);
-                                const auto outr =
-                                    idx2(ir, ny - 2 * hr + rr, nx, ny);
-                                cons[ing]  = cons[inr];
-                                cons[outg] = cons[outr];
+                                const auto inr  = idx2(ir, 2 * hr - rs, nx, ny);
+                                const auto outr = idx2(ir, ye + rr, nx, ny);
+                                cons[ing]       = cons[inr];
+                                cons[outg]      = cons[outr];
                                 if (half_sphere) {
                                     cons[outg].momentum(2) *= -1;
                                 }
@@ -336,7 +335,7 @@ namespace simbi {
                                         break;
                                     case BoundaryCondition::PERIODIC: {
                                         const auto outr =
-                                            idx2(ir, ny - 2 * hr + rr, nx, ny);
+                                            idx2(ir, ye + rr, nx, ny);
                                         cons[ing] = cons[outr];
                                         break;
                                     }
@@ -350,7 +349,7 @@ namespace simbi {
                                 switch (sim_state->bcs[3]) {
                                     case BoundaryCondition::REFLECTING: {
                                         const auto outr =
-                                            idx2(ir, ny - 2 * hr + rr, nx, ny);
+                                            idx2(ir, ye + rr, nx, ny);
                                         cons[outg] = cons[outr];
                                         cons[outg].momentum(2) *= -1;
                                         break;
@@ -405,6 +404,10 @@ namespace simbi {
             const auto bcye = sim_state->bcs[3];
             const auto bczb = sim_state->bcs[4];
             const auto bcze = sim_state->bcs[5];
+
+            const auto xe = nx - 2 * hr;
+            const auto ye = ny - 2 * hr;
+            const auto ze = nz - 2 * hr;
             parallel_for(sim_state->activeP, [=] DEV(const luint gid) {
                 const luint kk = axid<3, BlkAx::K>(gid, xag, yag);
                 const luint jj = axid<3, BlkAx::J>(gid, xag, yag, kk);
@@ -421,7 +424,7 @@ namespace simbi {
                 const auto kr = kk + hr;
                 for (luint rr = 0; rr < hr; rr++) {
                     const auto rs = rr + 1;
-                    if (jj < ny - 2 * hr) {
+                    if (jj < ye) {
                         // Fill ghost zones at i-k corners
                         auto iksw = idx3(rr, jr, rr, nx, ny, nz);
                         auto ikse = idx3(nx - rs, jr, rr, nx, ny, nz);
@@ -694,7 +697,7 @@ namespace simbi {
 
                         //================================================================
                         // Fill ghosts zones at x1 boundaries
-                        if (kk < nz - 2 * hr) {
+                        if (kk < ze) {
                             // Fill ghost zones at i-j corners
                             auto ijsw = idx3(rr, rr, kr, nx, ny, nz);
                             auto ijse = idx3(nx - rs, rr, kr, nx, ny, nz);
@@ -997,14 +1000,8 @@ namespace simbi {
                                     }
                                     break;
                                 case BoundaryCondition::PERIODIC: {
-                                    const auto outr = idx3(
-                                        nx - 2 * hr + rr,
-                                        jr,
-                                        kr,
-                                        nx,
-                                        ny,
-                                        nz
-                                    );
+                                    const auto outr =
+                                        idx3(xe + rr, jr, kr, nx, ny, nz);
                                     cons[ing] = cons[outr];
                                     break;
                                 }
@@ -1018,14 +1015,8 @@ namespace simbi {
 
                             switch (sim_state->bcs[1]) {
                                 case BoundaryCondition::REFLECTING: {
-                                    const auto outr = idx3(
-                                        nx - 2 * hr + rr,
-                                        jr,
-                                        kr,
-                                        nx,
-                                        ny,
-                                        nz
-                                    );
+                                    const auto outr =
+                                        idx3(xe + rr, jr, kr, nx, ny, nz);
                                     cons[outg] = cons[outr];
                                     cons[outg].momentum(1) *= -1;
                                     break;
@@ -1057,7 +1048,7 @@ namespace simbi {
                         }
 
                         // Fill ghost zones at x3 boundaries
-                        if (ii < nx - 2 * hr) {
+                        if (ii < xe) {
                             // Fill ghost zones at j-k corners
                             auto jksw = idx3(ir, rr, rr, nx, ny, nz);
                             auto jkse = idx3(ir, ny - rs, rr, nx, ny, nz);
@@ -1330,14 +1321,8 @@ namespace simbi {
                                     // the x3 direction is periodic in phi
                                     const auto inr =
                                         idx3(ir, jr, 2 * hr - rs, nx, ny, nz);
-                                    const auto outr = idx3(
-                                        ir,
-                                        jr,
-                                        nz - 2 * hr + rr,
-                                        nx,
-                                        ny,
-                                        nz
-                                    );
+                                    const auto outr =
+                                        idx3(ir, jr, ze + rr, nx, ny, nz);
                                     cons[ing]  = cons[outr];
                                     cons[outg] = cons[inr];
                                     break;
@@ -1374,7 +1359,7 @@ namespace simbi {
                                             const auto outr = idx3(
                                                 ir,
                                                 jr,
-                                                nz - 2 * hr + rr,
+                                                ze + rr,
                                                 nx,
                                                 ny,
                                                 nz
@@ -1395,7 +1380,7 @@ namespace simbi {
                                             const auto outr = idx3(
                                                 ir,
                                                 jr,
-                                                nz - 2 * hr + rr,
+                                                ze + rr,
                                                 nx,
                                                 ny,
                                                 nz
@@ -1447,9 +1432,9 @@ namespace simbi {
                         }
                     }
 
-                    if (ii < nx - 2 * hr) {
+                    if (ii < xe) {
                         // Fill the ghost zones at the x2 boundaries
-                        if (kk < nz - 2 * hr) {
+                        if (kk < ze) {
                             auto ing  = idx3(ir, rr, kr, nx, ny, nz);
                             auto outg = idx3(ir, ny - rs, kr, nx, ny, nz);
 
@@ -1458,14 +1443,8 @@ namespace simbi {
                                     // theta boundaries are reflecting
                                     const auto inr =
                                         idx3(ir, 2 * hr - rs, kr, nx, ny, nz);
-                                    const auto outr = idx3(
-                                        ir,
-                                        ny - 2 * hr + rr,
-                                        kr,
-                                        nx,
-                                        ny,
-                                        nz
-                                    );
+                                    const auto outr =
+                                        idx3(ir, ye + rr, kr, nx, ny, nz);
                                     cons[ing]  = cons[inr];
                                     cons[outg] = cons[outr];
                                     if (half_sphere) {
@@ -1478,14 +1457,8 @@ namespace simbi {
                                     // phi boundaries are periodic
                                     const auto inr =
                                         idx3(ir, 2 * hr - rs, kr, nx, ny, nz);
-                                    const auto outr = idx3(
-                                        ir,
-                                        ny - 2 * hr + rr,
-                                        kr,
-                                        nx,
-                                        ny,
-                                        nz
-                                    );
+                                    const auto outr =
+                                        idx3(ir, ye + rr, kr, nx, ny, nz);
                                     cons[ing]  = cons[outr];
                                     cons[outg] = cons[inr];
                                     break;
@@ -1521,7 +1494,7 @@ namespace simbi {
                                         case BoundaryCondition::PERIODIC: {
                                             auto outr = idx3(
                                                 ir,
-                                                ny - 2 * hr + rr,
+                                                ye + rr,
                                                 kr,
                                                 nx,
                                                 ny,
@@ -1542,7 +1515,7 @@ namespace simbi {
                                         case BoundaryCondition::REFLECTING: {
                                             auto outr = idx3(
                                                 ir,
-                                                ny - 2 * hr + rr,
+                                                ye + rr,
                                                 kr,
                                                 nx,
                                                 ny,
