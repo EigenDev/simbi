@@ -1,4 +1,3 @@
-
 /**
  * ***********************(C) COPYRIGHT 2024 Marcus DuPont**********************
  * @file       smrt_ptr.hpp
@@ -24,15 +23,22 @@
 #include <atomic>
 #include <exception>
 #include <memory>
+#include <type_traits>
 #include <utility>
 
 namespace simbi {
+    template <typename>
+    class function;
+
     namespace util {
 
         struct refcnt {
             std::atomic<int> count;
 
             refcnt() : count(1) {}
+
+            refcnt(const refcnt&)            = delete;
+            refcnt& operator=(const refcnt&) = delete;
 
             void inc() { count.fetch_add(1, std::memory_order_relaxed); }
 
@@ -49,13 +55,13 @@ namespace simbi {
         // Default deleter for scalar types
         template <typename ptrT>
         struct default_delete {
-            DUAL void operator()(ptrT* ptr) const { delete ptr; }
+            void operator()(ptrT* ptr) const { delete ptr; }
         };
 
         // Default deleter for array types
         template <typename ptrT>
         struct default_delete<ptrT[]> {
-            DUAL void operator()(ptrT* ptr) const { delete[] ptr; }
+            void operator()(ptrT* ptr) const { delete[] ptr; }
         };
 
         template <typename ptrT, typename delete_policy = default_delete<ptrT>>
@@ -68,7 +74,7 @@ namespace simbi {
             ptrT* pData;
             refcnt_t* pRef;
 
-            void release()
+            void release() noexcept
             {
                 if (pRef && pRef->release() == 0) {
                     deleter_t()(pData);
@@ -80,15 +86,20 @@ namespace simbi {
             using ptr_t = ptrT;
 
             // Default constructor
-            DUAL smart_ptr() : pData(nullptr), pRef(nullptr) {}
+            constexpr smart_ptr() noexcept : pData(nullptr), pRef(nullptr) {}
 
             // Constructor from raw pointer
             explicit smart_ptr(ptr_t* pData) : pData(pData), pRef(new refcnt())
             {
+                if (!pRef) {
+                    delete pData;
+                    throw std::bad_alloc();
+                }
             }
 
             // Constructor from nullptr
-            smart_ptr(std::nullptr_t) noexcept : pData(nullptr), pRef(nullptr)
+            constexpr smart_ptr(std::nullptr_t) noexcept
+                : pData(nullptr), pRef(nullptr)
             {
             }
 
@@ -112,7 +123,7 @@ namespace simbi {
             ~smart_ptr() { release(); }
 
             // Copy Assignment
-            smart_ptr& operator=(const smart_ptr& other)
+            smart_ptr& operator=(const smart_ptr& other) noexcept
             {
                 if (this != &other) {
                     release();
@@ -147,7 +158,7 @@ namespace simbi {
                 return *this;
             }
 
-            void reset(ptr_t* ptr = nullptr)
+            void reset(ptr_t* ptr = nullptr) noexcept
             {
                 smart_ptr temp(ptr);
                 swap(temp);
@@ -172,7 +183,7 @@ namespace simbi {
             }
 
             // Dereference operator
-            DUAL ptr_t& operator*() const
+            ptr_t& operator*() const
             {
                 if (!pData) {
                     error_out();
@@ -181,7 +192,7 @@ namespace simbi {
             }
 
             // Arrow operator
-            DUAL ptr_t* operator->() const
+            ptr_t* operator->() const
             {
                 if (!pData) {
                     error_out();
@@ -190,27 +201,27 @@ namespace simbi {
             }
 
             // Get raw pointer
-            DUAL ptr_t* get() const { return pData; }
+            ptr_t* get() const noexcept { return pData; }
 
             // Check if the smart pointer is valid
-            DUAL explicit operator bool() const noexcept
+            constexpr explicit operator bool() const noexcept
             {
                 return pData != nullptr;
             }
 
             // comparison with nullptr
-            DUAL bool operator==(std::nullptr_t) const noexcept
+            constexpr bool operator==(std::nullptr_t) const noexcept
             {
                 return pData == nullptr;
             }
 
             // comparison with nullptr
-            DUAL bool operator!=(std::nullptr_t) const noexcept
+            constexpr bool operator!=(std::nullptr_t) const noexcept
             {
                 return pData != nullptr;
             }
 
-            DUAL void error_out() const
+            void error_out() const
             {
                 if constexpr (global::on_gpu) {
                     printf("[GPU ERROR]: DEREFERENCING NULL POINTER\n");
@@ -232,7 +243,7 @@ namespace simbi {
             ptrT* pData;
             refcnt_t* pRef;
 
-            void release()
+            void release() noexcept
             {
                 if (pRef && pRef->release() == 0) {
                     deleter_t()(pData);
@@ -243,13 +254,17 @@ namespace simbi {
           public:
             using ptr_t = ptrT;
 
-            smart_ptr() : pData(nullptr), pRef(nullptr) {}
+            constexpr smart_ptr() noexcept : pData(nullptr), pRef(nullptr) {}
 
             explicit smart_ptr(ptr_t* pData) : pData(pData), pRef(new refcnt())
             {
+                if (!pRef) {
+                    delete[] pData;
+                    throw std::bad_alloc();
+                }
             }
 
-            smart_ptr(const smart_ptr& other)
+            smart_ptr(const smart_ptr& other) noexcept
                 : pData(other.pData), pRef(other.pRef)
             {
                 if (pRef) {
@@ -266,7 +281,7 @@ namespace simbi {
 
             ~smart_ptr() { release(); }
 
-            smart_ptr& operator=(const smart_ptr& other)
+            smart_ptr& operator=(const smart_ptr& other) noexcept
             {
                 if (this != &other) {
                     release();
@@ -291,7 +306,7 @@ namespace simbi {
                 return *this;
             }
 
-            void reset(ptr_t* ptr = nullptr)
+            void reset(ptr_t* ptr = nullptr) noexcept
             {
                 smart_ptr temp(ptr);
                 swap(temp);
@@ -315,7 +330,7 @@ namespace simbi {
                 }
             }
 
-            DUAL ptr_t& operator*() const
+            ptr_t& operator*() const
             {
                 if (!pData) {
                     error_out();
@@ -323,7 +338,7 @@ namespace simbi {
                 return *pData;
             }
 
-            DUAL ptr_t* operator->() const
+            ptr_t* operator->() const
             {
                 if (!pData) {
                     error_out();
@@ -331,10 +346,10 @@ namespace simbi {
                 return pData;
             }
 
-            DUAL ptr_t* get() const { return pData; }
+            ptr_t* get() const noexcept { return pData; }
 
             template <typename IndexType>
-            DUAL ptrT& operator[](IndexType index)
+            ptrT& operator[](IndexType index)
             {
                 if (!pData) {
                     error_out();
@@ -343,7 +358,7 @@ namespace simbi {
             }
 
             template <typename IndexType>
-            DUAL const ptrT& operator[](IndexType index) const
+            const ptrT& operator[](IndexType index) const
             {
                 if (!pData) {
                     error_out();
@@ -351,7 +366,7 @@ namespace simbi {
                 return pData[index];
             }
 
-            DUAL void error_out() const
+            void error_out() const
             {
                 if constexpr (global::on_gpu) {
                     printf("[GPU ERROR]: DEFERENCING NULL POINTER\n");
@@ -361,8 +376,23 @@ namespace simbi {
                 }
             }
 
-            explicit operator bool() const noexcept { return pData != nullptr; }
+            constexpr explicit operator bool() const noexcept
+            {
+                return pData != nullptr;
+            }
         };
+
+        template <typename T, typename... Args>
+        constexpr smart_ptr<T> make_unique(Args&&... args)
+        {
+            return smart_ptr<T>(new T(std::forward<Args>(args)...));
+        }
+
+        template <typename T>
+        constexpr smart_ptr<T> make_unique(std::size_t size)
+        {
+            return smart_ptr<T>(new std::remove_extent<T>::type[size]());
+        }
 
     }   // namespace util
 }   // namespace simbi
