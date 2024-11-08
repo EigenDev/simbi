@@ -183,7 +183,7 @@ namespace simbi {
             }
 
             // Dereference operator
-            ptr_t& operator*() const
+            DUAL ptr_t& operator*() const
             {
                 if (!pData) {
                     error_out();
@@ -192,7 +192,7 @@ namespace simbi {
             }
 
             // Arrow operator
-            ptr_t* operator->() const
+            DUAL ptr_t* operator->() const
             {
                 if (!pData) {
                     error_out();
@@ -201,7 +201,7 @@ namespace simbi {
             }
 
             // Get raw pointer
-            ptr_t* get() const noexcept { return pData; }
+            DUAL ptr_t* get() const noexcept { return pData; }
 
             // Check if the smart pointer is valid
             constexpr explicit operator bool() const noexcept
@@ -221,7 +221,7 @@ namespace simbi {
                 return pData != nullptr;
             }
 
-            void error_out() const
+            DUAL void error_out() const
             {
                 if constexpr (global::on_gpu) {
                     printf("[GPU ERROR]: DEREFERENCING NULL POINTER\n");
@@ -330,7 +330,7 @@ namespace simbi {
                 }
             }
 
-            ptr_t& operator*() const
+            DUAL ptr_t& operator*() const
             {
                 if (!pData) {
                     error_out();
@@ -338,7 +338,7 @@ namespace simbi {
                 return *pData;
             }
 
-            ptr_t* operator->() const
+            DUAL ptr_t* operator->() const
             {
                 if (!pData) {
                     error_out();
@@ -346,10 +346,10 @@ namespace simbi {
                 return pData;
             }
 
-            ptr_t* get() const noexcept { return pData; }
+            DUAL ptr_t* get() const noexcept { return pData; }
 
             template <typename IndexType>
-            ptrT& operator[](IndexType index)
+            DUAL ptrT& operator[](IndexType index)
             {
                 if (!pData) {
                     error_out();
@@ -366,7 +366,7 @@ namespace simbi {
                 return pData[index];
             }
 
-            void error_out() const
+            DUAL void error_out() const
             {
                 if constexpr (global::on_gpu) {
                     printf("[GPU ERROR]: DEFERENCING NULL POINTER\n");
