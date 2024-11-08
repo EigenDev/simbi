@@ -79,40 +79,26 @@ namespace simbi {
         ExecutionPolicy<> fullP, activeP;
 
         //=========================== GPU Threads Per Dimension
-        std::string readGpuEnvVar(std::string const& key) const
+        std::string readGpuEnvVar(const std::string& key) const
         {
-            char* val = std::getenv(key.c_str());
-            if (val) {
+            if (const char* val = std::getenv(key.c_str())) {
                 return std::string(val);
             }
-            return std::string("1");
+            return "1";
         }
 
-        auto get_xblock_dims() const
+        luint get_block_dims(const std::string& key) const
         {
-            return static_cast<luint>(std::stoi(readGpuEnvVar("GPUXBLOCK_SIZE"))
-            );
-        }
-
-        auto get_yblock_dims() const
-        {
-            return static_cast<luint>(std::stoi(readGpuEnvVar("GPUYBLOCK_SIZE"))
-            );
-        }
-
-        auto get_zblock_dims() const
-        {
-            return static_cast<luint>(std::stoi(readGpuEnvVar("GPUZBLOCK_SIZE"))
-            );
+            return static_cast<luint>(std::stoi(readGpuEnvVar(key)));
         }
 
         void define_tinterval(real dlogt, real chkpt_interval)
         {
             real round_place = 1.0 / chkpt_interval;
-            t_interval       = dlogt != 0
-                                   ? tstart * std::pow(10.0, dlogt)
-                                   : floor(tstart * round_place + 0.5) / round_place +
-                                   chkpt_interval;
+            t_interval       = dlogt != 0 ? tstart * std::pow(10.0, dlogt)
+                                          : std::floor(tstart * round_place + 0.5) /
+                                              round_place +
+                                          chkpt_interval;
         }
 
         void define_chkpt_idx(int chkpt_idx)
@@ -122,11 +108,11 @@ namespace simbi {
 
         void deallocate_state()
         {
-            state  = std::vector<std::vector<real>>();
-            bfield = std::vector<std::vector<real>>();
+            state.clear();
+            bfield.clear();
         }
 
-        void print_shared_mem()
+        void print_shared_mem() const
         {
             if constexpr (global::on_sm) {
                 printf(
@@ -139,28 +125,26 @@ namespace simbi {
         template <typename P>
         void compute_bytes_and_strides(int dim)
         {
-            xblockdim = xag > gpu_block_dimx ? gpu_block_dimx : xag;
-            yblockdim = yag > gpu_block_dimy ? gpu_block_dimy : yag;
-            zblockdim = zag > gpu_block_dimz ? gpu_block_dimz : zag;
+            xblockdim = std::min(xag, gpu_block_dimx);
+            yblockdim = std::min(yag, gpu_block_dimy);
+            zblockdim = std::min(zag, gpu_block_dimz);
+
             if constexpr (global::on_gpu) {
                 if (xblockdim * yblockdim * zblockdim < global::WARP_SIZE) {
                     if (nz > 1) {
-                        xblockdim = 4;
-                        yblockdim = 4;
-                        zblockdim = 4;
+                        xblockdim = yblockdim = zblockdim = 4;
                     }
                     else if (ny > 1) {
-                        xblockdim = 16;
-                        yblockdim = 16;
-                        zblockdim = 1;
+                        xblockdim = yblockdim = 16;
+                        zblockdim             = 1;
                     }
                     else {
                         xblockdim = 128;
-                        yblockdim = 1;
-                        zblockdim = 1;
+                        yblockdim = zblockdim = 1;
                     }
                 }
             }
+
             step = (time_order == "rk1") ? 1.0 : 0.5;
             sx   = (global::on_sm) ? xblockdim + 2 * radius : nx;
             sy = (dim < 2) ? 1 : (global::on_sm) ? yblockdim + 2 * radius : ny;
@@ -203,9 +187,9 @@ namespace simbi {
               x1(init_conditions.x1),
               x2(init_conditions.x2),
               x3(init_conditions.x3),
-              gpu_block_dimx(get_xblock_dims()),
-              gpu_block_dimy(get_yblock_dims()),
-              gpu_block_dimz(get_zblock_dims()),
+              gpu_block_dimx(get_block_dims("GPUXBLOCK_SIZE")),
+              gpu_block_dimy(get_block_dims("GPUYBLOCK_SIZE")),
+              gpu_block_dimz(get_block_dims("GPUZBLOCK_SIZE")),
               global_iter(0),
               t(init_conditions.tstart),
               tend(init_conditions.tend),
@@ -237,7 +221,7 @@ namespace simbi {
             initialize(init_conditions);
             if (std::getenv("USE_OMP")) {
                 global::use_omp = true;
-                if (char* omp_tnum = std::getenv("OMP_NUM_THREADS")) {
+                if (const char* omp_tnum = std::getenv("OMP_NUM_THREADS")) {
                     omp_set_num_threads(std::stoi(omp_tnum));
                 }
             }
@@ -245,9 +229,9 @@ namespace simbi {
 
         void initialize(const InitialConditions& init_conditions)
         {
-            const bool pcm = spatial_order == "pcm";
+            const bool pcm = (spatial_order == "pcm");
             radius         = pcm ? 1 : 2;
-            // Define simulation params
+
             xag = nx - 2 * radius;
             yag = (ny == 1) ? 1 : ny - 2 * radius;
             zag = (nz == 1) ? 1 : nz - 2 * radius;
@@ -294,20 +278,11 @@ namespace simbi {
                 }
             }
 
-            if (zag > 1) {
-                checkpoint_zones = zag;
-            }
-            else if (yag > 1) {
-                checkpoint_zones = yag;
-            }
-            else {
-                checkpoint_zones = xag;
-            }
+            checkpoint_zones = (zag > 1) ? zag : (yag > 1) ? yag : xag;
 
             define_tinterval(dlogt, chkpt_interval);
             define_chkpt_idx(init_conditions.chkpt_idx);
         }
     };
-
 }   // namespace simbi
 #endif

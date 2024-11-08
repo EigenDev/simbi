@@ -65,11 +65,6 @@ cdef class SimState:
         sim_cond.constant_sources    = sim_info['constant_sources']
         sim_cond.quirk_smoothing     = sim_info['quirk_smoothing']
         sim_cond.bfield              = sim_info["bfield"]
-        mhd: bool = False 
-        if sim_info["bfield"] is not None:
-            mhd = True
-            nvar = 9
-
         if dim > 1:
             sim_cond.x2 = sim_info['x2']
         if dim > 2:

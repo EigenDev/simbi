@@ -91,10 +91,6 @@ namespace simbi {
             // Constructor from raw pointer
             explicit smart_ptr(ptr_t* pData) : pData(pData), pRef(new refcnt())
             {
-                if (!pRef) {
-                    delete pData;
-                    throw std::bad_alloc();
-                }
             }
 
             // Constructor from nullptr
@@ -258,10 +254,6 @@ namespace simbi {
 
             explicit smart_ptr(ptr_t* pData) : pData(pData), pRef(new refcnt())
             {
-                if (!pRef) {
-                    delete[] pData;
-                    throw std::bad_alloc();
-                }
             }
 
             smart_ptr(const smart_ptr& other) noexcept

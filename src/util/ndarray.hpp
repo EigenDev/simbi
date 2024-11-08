@@ -78,13 +78,17 @@ namespace simbi {
         unique_p<gpuDeleter> dev_arr;   // Device-side array
 
       public:
-        ndarray()  = default;
+        ndarray() noexcept
+            : sz(0),
+              nd_capacity(0),
+              dimensions(1),
+              arr(nullptr),
+              dev_arr(nullptr) {};
         ~ndarray() = default;
-        ndarray& operator=(ndarray rhs);   // Assignment operator
-        ndarray(std::initializer_list<DT> list
-        );   // Initializer list constructor
-        ndarray(size_type size
-        );   // Zero-initialize the array with defined size
+        // Assignment operator
+        ndarray& operator=(ndarray rhs);
+        // Zeri-initialize the array with defined size
+        ndarray(size_type size);
         ndarray(
             size_type size,
             const DT val

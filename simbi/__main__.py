@@ -6,8 +6,8 @@ import subprocess
 import tracemalloc
 import importlib
 from pathlib import Path
-from typing import List, Optional, Sequence
-from . import Hydro, logger, display_top
+from typing import Optional, Sequence
+from . import Hydro, logger
 from .detail import get_subparser, bcolors, max_thread_count
 
 try:
@@ -403,16 +403,10 @@ def configure_state(
     with open(script) as setup_file:
         root = ast.parse(setup_file.read())
 
-    setup_classes = []
-    for node in root.body:
-        if isinstance(node, ast.ClassDef):
-            for base in node.bases:
-                if base.id == 'BaseConfig':
-                    setup_classes += [node.name]
-                elif base.id in setup_classes:
-                    # if the setup class inherited from another setup class
-                    # then we already know it is a descendant of the BaseConfig
-                    setup_classes += [node.name]
+    setup_classes = [
+        node.name for node in root.body if isinstance(node, ast.ClassDef)
+        for base in node.bases if base.id == 'BaseConfig' or base.id in setup_classes
+    ]
                     
     if not setup_classes:
         raise ValueError("Invalid simbi configuration")
@@ -451,10 +445,7 @@ def configure_state(
         
         config.trace_memory = args.trace_mem
             
-        if config.__doc__:
-            state_docs += [f"{config.__doc__}"]
-        else:
-            state_docs += [f"No docstring for problem class: {setup_class}"]
+        state_docs.append(config.__doc__ or f"No docstring for problem class: {setup_class}")
         state: Hydro = Hydro.gen_from_setup(config)
         
         if config.order_of_integration == "first" or args.order == "first":
@@ -466,31 +457,32 @@ def configure_state(
         elif config.order_of_integration is not None:
             raise ValueError("Order of integration must either be first or second")
             
-        kwargs[idx] = {}
-        kwargs[idx]['spatial_order'] = config.spatial_order
-        kwargs[idx]['time_order']  = config.time_order
-        kwargs[idx]['cfl'] = config.cfl_number
-        kwargs[idx]['chkpt_interval'] = config.check_point_interval
-        kwargs[idx]['tstart'] = config.default_start_time
-        kwargs[idx]['tend'] = config.default_end_time
-        kwargs[idx]['solver'] = config.solver
-        kwargs[idx]['boundary_conditions'] = config.boundary_conditions
-        kwargs[idx]['plm_theta'] = config.plm_theta
-        kwargs[idx]['dlogt'] = config.dlogt
-        kwargs[idx]['data_directory'] = config.data_directory
-        kwargs[idx]['x1_cell_spacing'] = config.x1_cell_spacing
-        kwargs[idx]['x2_cell_spacing'] = config.x2_cell_spacing
-        kwargs[idx]['x3_cell_spacing'] = config.x3_cell_spacing
-        kwargs[idx]['bsources'] = config.boundary_sources
-        kwargs[idx]['gsources'] = config.gravity_sources
-        kwargs[idx]['hsources'] = config.hydro_sources
-        kwargs[idx]['passive_scalars'] = config.passive_scalars
-        kwargs[idx]['scale_factor'] = config.scale_factor
-        kwargs[idx]['scale_factor_derivative'] = config.scale_factor_derivative
-        kwargs[idx]['quirk_smoothing'] = config.use_quirk_smoothing
-        kwargs[idx]['constant_sources'] = config.constant_sources
-        kwargs[idx]['object_positions'] = config.object_zones
-        kwargs[idx]['engine_duration'] = config.engine_duration
+        kwargs[idx] = {
+            'spatial_order': config.spatial_order,
+            'time_order': config.time_order,
+            'cfl': config.cfl_number,
+            'chkpt_interval': config.check_point_interval,
+            'tstart': config.default_start_time,
+            'tend': config.default_end_time,
+            'solver': config.solver,
+            'boundary_conditions': config.boundary_conditions,
+            'plm_theta': config.plm_theta,
+            'dlogt': config.dlogt,
+            'data_directory': config.data_directory,
+            'x1_cell_spacing': config.x1_cell_spacing,
+            'x2_cell_spacing': config.x2_cell_spacing,
+            'x3_cell_spacing': config.x3_cell_spacing,
+            'bsources': config.boundary_sources,
+            'gsources': config.gravity_sources,
+            'hsources': config.hydro_sources,
+            'passive_scalars': config.passive_scalars,
+            'scale_factor': config.scale_factor,
+            'scale_factor_derivative': config.scale_factor_derivative,
+            'quirk_smoothing': config.use_quirk_smoothing,
+            'constant_sources': config.constant_sources,
+            'object_positions': config.object_zones,
+            'engine_duration': config.engine_duration
+        }
         states.append(state)
 
     if peek_only:
@@ -503,29 +495,28 @@ def run(parser: argparse.ArgumentParser, *_) -> None:
     parser, (args, argv) = parse_run_arguments(parser)
     sim_states, kwargs, state_docs = configure_state(
         args.setup_script, parser, args, argv)
+    
     if args.nthreads:
         os.environ['OMP_NUM_THREADS'] = f'{args.nthreads}'
-        os.environ['NTHREADS']        = f'{args.nthreads}'
+        os.environ['NTHREADS'] = f'{args.nthreads}'
         
     if args.compute_mode == 'omp':
         os.environ['USE_OMP'] = "1"
 
     run_parser = get_subparser(parser, 0)
     sim_actions = [
-            g for g in run_parser._action_groups if g.title in [
-                'override', 'onthefly']
-        ]
+        g for g in run_parser._action_groups if g.title in ['override', 'onthefly']
+    ]
     
-    sim_dicts = [{
-        a.dest: getattr(args, a.dest, None)
-        for a in group._group_actions
-        } for group in sim_actions
+    sim_dicts = [
+        {a.dest: getattr(args, a.dest, None) for a in group._group_actions}
+        for group in sim_actions
     ]
     
     overridable_args = vars(argparse.Namespace(**sim_dicts[0])).keys()
     sim_args = argparse.Namespace(**{**sim_dicts[0], **sim_dicts[1]})
     
-    for coord, block in zip(['X','Y','Z'], args.gpu_block_dims):
+    for coord, block in zip(['X', 'Y', 'Z'], args.gpu_block_dims):
         os.environ[f'GPU{coord}BLOCK_SIZE'] = str(block)
         
     for idx, sim_state in enumerate(sim_states):
@@ -537,16 +528,17 @@ def run(parser: argparse.ArgumentParser, *_) -> None:
                 continue
             
             kwargs[idx][arg] = getattr(args, arg)
-        logger.info("=" * 80) # type: ignore
-        logger.info(state_docs[idx]) # type: ignore
-        logger.info("=" * 80) #type: ignore
+        
+        logger.info("=" * 80)
+        logger.info(state_docs[idx])
+        logger.info("=" * 80)
         sim_state.simulate(**kwargs[idx])
 
 
 def plot_checkpoints(
-        parser: argparse.ArgumentParser,
-        args: argparse.Namespace,
-        argv: list) -> None:
+    parser: argparse.ArgumentParser,
+    args: argparse.Namespace,
+    argv: list) -> None:
     
     from .tools.plot import main
     main(parser, args, argv)

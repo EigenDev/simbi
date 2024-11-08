@@ -4,14 +4,6 @@
 #include <stdexcept>
 #include <typeinfo>
 
-// Initializer list constructor
-template <typename DT, global::Platform build_mode>
-simbi::ndarray<DT, build_mode>::ndarray(std::initializer_list<DT> list)
-    : simbi::ndarray<DT, build_mode>(list.size())
-{
-    std::copy(std::begin(list), std::end(list), arr.get());
-};
-
 // Zero-initialize the array with defined size
 template <typename DT, global::Platform build_mode>
 simbi::ndarray<DT, build_mode>::ndarray(size_type size)
