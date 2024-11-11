@@ -49,7 +49,7 @@ namespace simbi {
             }
         }
 
-        DUAL function(function&& other) noexcept
+        DEV function(function&& other) noexcept
             : callable(std::move(other.callable))
         {
             other.callable = nullptr;
@@ -69,7 +69,7 @@ namespace simbi {
         {
         }
 
-        ~function() = default;
+        ~function() {};
 
         function& operator=(const function& other)
         {
@@ -96,7 +96,7 @@ namespace simbi {
             return *this;
         }
 
-        DUAL R operator()(Args... args) const
+        DEV R operator()(Args... args) const
         {
 
             if (!callable) {
@@ -110,17 +110,14 @@ namespace simbi {
             return callable->invoke(std::forward<Args>(args)...);
         }
 
-        DUAL explicit operator bool() const noexcept
-        {
-            return callable != nullptr;
-        }
+        explicit operator bool() const noexcept { return callable != nullptr; }
 
-        DUAL bool operator==(std::nullptr_t) const noexcept
+        bool operator==(std::nullptr_t) const noexcept
         {
             return callable == nullptr;
         }
 
-        DUAL bool operator!=(std::nullptr_t) const noexcept
+        bool operator!=(std::nullptr_t) const noexcept
         {
             return callable != nullptr;
         }
@@ -132,9 +129,9 @@ namespace simbi {
 
       private:
         struct callable_base {
-            virtual ~callable_base()                  = default;
-            DUAL virtual R invoke(Args... args) const = 0;
-            virtual callable_base* clone() const      = 0;
+            virtual ~callable_base()                 = default;
+            DEV virtual R invoke(Args... args) const = 0;
+            virtual callable_base* clone() const     = 0;
         };
 
         template <typename F, typename DecayType = std::decay_t<F>>
@@ -145,7 +142,7 @@ namespace simbi {
 
             callable_impl(const DecayType& f) : f(f) {}
 
-            DUAL R invoke(Args... args) const override
+            DEV R invoke(Args... args) const override
             {
                 return f(std::forward<Args>(args)...);
             }

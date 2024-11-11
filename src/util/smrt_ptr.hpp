@@ -350,7 +350,7 @@ namespace simbi {
             }
 
             template <typename IndexType>
-            const ptrT& operator[](IndexType index) const
+            DUAL const ptrT& operator[](IndexType index) const
             {
                 if (!pData) {
                     error_out();

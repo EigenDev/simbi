@@ -48,7 +48,7 @@ simbi::ndarray<DT, build_mode>::ndarray(const std::vector<DT>& rhs)
 
 // Move-constructor for vector
 template <typename DT, global::Platform build_mode>
-DUAL simbi::ndarray<DT, build_mode>::ndarray(std::vector<DT>&& rhs)
+simbi::ndarray<DT, build_mode>::ndarray(std::vector<DT>&& rhs)
     : sz(rhs.size()),
       nd_capacity(rhs.capacity() * sizeof(DT)),
       dimensions(1),
