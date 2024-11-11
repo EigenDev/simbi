@@ -351,50 +351,6 @@ DUAL real RMHD<dim>::curl_e(
     }
 }
 
-template <int dim>
-void RMHD<dim>::emit_troubled_cells() const
-{
-    for (luint gid = 0; gid < total_zones; gid++) {
-        if (troubled_cells[gid] != 0) {
-            const luint kk    = get_height(gid, nx, ny);
-            const luint jj    = get_row(gid, nx, ny, kk);
-            const luint ii    = get_column(gid, nx, ny, kk);
-            const lint ireal  = get_real_idx(ii, radius, xag);
-            const lint jreal  = get_real_idx(jj, radius, yag);
-            const lint kreal  = get_real_idx(kk, radius, zag);
-            const auto cell   = this->cell_factors(ireal, jreal, kreal);
-            const real x1mean = cell.x1mean;
-            const real x2mean = yag == 1 ? 0.0 : cell.x2mean;
-            const real x3mean = zag == 1 ? 0.0 : cell.x3mean;
-            const real m1     = cons[gid].momentum(1);
-            const real m2     = cons[gid].momentum(2);
-            const real m3     = cons[gid].momentum(3);
-            const real et     = (cons[gid].dens() + cons[gid].nrg());
-            const real b1     = cons[gid].bcomponent(1);
-            const real b2     = cons[gid].bcomponent(2);
-            const real b3     = cons[gid].bcomponent(3);
-            const real m      = std::sqrt(m1 * m1 + m2 * m2 + m3 * m3);
-            const real vsq    = (m * m) / (et * et);
-            const real bsq    = (b1 * b1 + b2 * b2 + b3 * b3);
-            const real w      = 1.0 / std::sqrt(1.0 - vsq);
-            fprintf(
-                stderr,
-                "\nCons2Prim cannot converge\nDensity: %.2e, Pressure: "
-                "%.2e, Vsq: %.2e, Bsq: %.2e, x1coord: %.2e, x2coord: "
-                "%.2e, x3coord: %.2e, iter: %" PRIu64 "\n",
-                cons[gid].dens() / w,
-                prims[gid].p(),
-                vsq,
-                bsq,
-                x1mean,
-                x2mean,
-                x3mean,
-                global_iter
-            );
-        }
-    }
-}
-
 //-----------------------------------------------------------------------------------------
 //                          Get The Primitive
 //-----------------------------------------------------------------------------------------
@@ -2156,12 +2112,16 @@ void RMHD<dim>::advance()
                               (b3R - b3L) * invdx3;
 
             if (!goes_to_zero(divb)) {
-                if (kk == 0 && jj == 2 && ii == 4) {
-                    printf("========================================\n");
-                    printf("DIV.B: %.2e\n", divb);
-                    printf("========================================\n");
-                    printf("Divergence of B is not zero!\n");
-                }
+                printf("========================================\n");
+                printf("DIV.B: %.2e\n", divb);
+                printf("========================================\n");
+                printf(
+                    "Divergence of B is not zero at: %" PRIu64 ", %" PRIu64
+                    ", %" PRIu64 "!\n",
+                    ii,
+                    jj,
+                    kk
+                );
             }
             // }
             b1c = static_cast<real>(0.5) * (b1R + b1L);
@@ -2210,31 +2170,11 @@ void RMHD<dim>::simulate(
     for (auto&& q : gsources) {
         this->gsources.push_back(q.value_or(nullptr));
     }
-    // check if ~all~ boundary sources have been set.
-    // if the user forgot one, the code will run with
-    // and outflow outer boundary condition
-    this->all_outer_bounds =
-        std::all_of(this->bsources.begin(), this->bsources.end(), [](auto q) {
-            return q != nullptr;
-        });
-
-    this->null_gravity =
-        std::all_of(this->gsources.begin(), this->gsources.end(), [](auto q) {
-            return q == nullptr;
-        });
-
-    this->null_sources =
-        std::all_of(this->hsources.begin(), this->hsources.end(), [](auto q) {
-            return q == nullptr;
-        });
+    check_sources();
     // Stuff for moving mesh
     this->hubble_param = adot(t) / a(t);
     this->mesh_motion  = (hubble_param != 0);
     this->homolog      = mesh_motion && geometry != simbi::Geometry::CARTESIAN;
-
-    if (x2max == 0.5 * M_PI) {
-        this->half_sphere = true;
-    }
 
     bcs.resize(dim * 2);
     for (int i = 0; i < 2 * dim; i++) {
@@ -2286,36 +2226,21 @@ void RMHD<dim>::simulate(
     }
 
     // Simulate :)
-    try {
-        simbi::detail::logger::with_logger(*this, tend, [&] {
-            riemann_fluxes();
-            advance();
-            config_ghosts(this);
-            cons2prim();
-            adapt_dt();
+    simbi::detail::logger::with_logger(*this, tend, [&] {
+        riemann_fluxes();
+        advance();
+        config_ghosts(this);
+        cons2prim();
+        adapt_dt();
 
-            t += step * dt;
-            if (mesh_motion) {
-                // update x1 endpoints
-                const real vmin =
-                    (homolog) ? x1min * hubble_param : hubble_param;
-                const real vmax =
-                    (homolog) ? x1max * hubble_param : hubble_param;
-                x1max += step * dt * vmax;
-                x1min += step * dt * vmin;
-                hubble_param = adot(t) / a(t);
-            }
-        });
-    }
-    catch (const SimulationFailureException& e) {
-        std::cerr << std::string(80, '=') << "\n";
-        std::cerr << e.what() << '\n';
-        std::cerr << std::string(80, '=') << "\n";
-        troubled_cells.copyFromGpu();
-        cons.copyFromGpu();
-        prims.copyFromGpu();
-        hasCrashed = true;
-        write_to_file(*this);
-        emit_troubled_cells();
-    }
+        t += step * dt;
+        if (mesh_motion) {
+            // update x1 endpoints
+            const real vmin = (homolog) ? x1min * hubble_param : hubble_param;
+            const real vmax = (homolog) ? x1max * hubble_param : hubble_param;
+            x1max += step * dt * vmax;
+            x1min += step * dt * vmin;
+            hubble_param = adot(t) / a(t);
+        }
+    });
 };

@@ -19,16 +19,17 @@
 #define LOGGER_HPP
 
 #include "build_options.hpp"   // for real, Platform, global::BuildPlatform, luint
-#include "common/helpers.hpp"   // for get_real_idx, catch_signals, Inter...
-#include "common/traits.hpp"    // for is_relativistic
-#include "device_api.hpp"       // for gpuEventCreate, gpuEventDestroy
-#include "printb.hpp"           // for writeln, writefl
-#include "progress.hpp"         // for progress_bar
-#include <chrono>               // for time_point, high_resolution_clock
-#include <cmath>                // for INFINITY, pow
-#include <iostream>             // for operator<<, char_traits, basic_ost...
-#include <memory>               // for allocator
-#include <type_traits>          // for conditional_t
+#include "common/exceptions.hpp"   // for SimulationFailureException
+#include "common/helpers.hpp"      // for get_real_idx, catch_signals, Inter...
+#include "common/traits.hpp"       // for is_relativistic
+#include "device_api.hpp"          // for gpuEventCreate, gpuEventDestroy
+#include "printb.hpp"              // for writeln, writefl
+#include "progress.hpp"            // for progress_bar
+#include <chrono>                  // for time_point, high_resolution_clock
+#include <cmath>                   // for INFINITY, pow
+#include <iostream>                // for operator<<, char_traits, basic_ost...
+#include <memory>                  // for allocator
+#include <type_traits>             // for conditional_t
 
 using namespace std::chrono;
 
@@ -147,6 +148,57 @@ namespace simbi {
             };
 
             template <typename sim_state_t>
+            void emit_troubled_cells(sim_state_t& sim_state)
+            {
+                const luint nx             = sim_state.nx;
+                const luint ny             = sim_state.ny;
+                const luint nz             = sim_state.nz;
+                const luint radius         = sim_state.radius;
+                const luint xag            = sim_state.xag;
+                const luint yag            = sim_state.yag;
+                const luint zag            = sim_state.zag;
+                const luint total_zones    = nx * ny * nz;
+                const auto& troubled_cells = sim_state.troubled_cells;
+                auto& prims                = sim_state.prims;
+                for (luint gid = 0; gid < total_zones; gid++) {
+                    if (troubled_cells[gid] != 0) {
+                        const luint kk   = get_height(gid, nx, ny);
+                        const luint jj   = get_row(gid, nx, ny, kk);
+                        const luint ii   = get_column(gid, nx, ny, kk);
+                        const lint ireal = get_real_idx(ii, radius, xag);
+                        const lint jreal = get_real_idx(jj, radius, yag);
+                        const lint kreal = get_real_idx(kk, radius, zag);
+                        const auto cell =
+                            sim_state.cell_factors(ireal, jreal, kreal);
+                        const real x1mean = cell.x1mean;
+                        const real x2mean = cell.x2mean;
+                        const real x3mean = cell.x3mean;
+                        prims[gid].error_at(x1mean, x2mean, x3mean);
+                    }
+                }
+            }
+
+            template <typename sim_state_t>
+            void emit_exception(sim_state_t& sim_state, auto& err)
+            {
+                auto print_pattern = [](auto pattern) {
+                    for (int i = 0; i < 40; ++i) {
+                        std::cerr << pattern;
+                    }
+                    std::cerr << std::endl;
+                };
+                print_pattern("-+");
+                std::cerr << err.what() << '\n';
+                print_pattern("-+");
+                sim_state.troubled_cells.copyFromGpu();
+                sim_state.cons.copyFromGpu();
+                sim_state.prims.copyFromGpu();
+                sim_state.hasCrashed = true;
+                write_to_file(sim_state);
+                emit_troubled_cells(sim_state);
+            }
+
+            template <typename sim_state_t>
             void print_gpu_info(
                 int n,
                 const sim_state_t& sim_state,
@@ -165,7 +217,7 @@ namespace simbi {
                 );
 
                 std::cout << "\033[s";    // Save cursor position
-                std::cout << "\033[2A";   // Move cursor up two lines
+                std::cout << "\033[1A";   // Move cursor up two lines
                 util::writefl<Color::LIGHT_MAGENTA>(
                     "iteration:{:>06}  dt: {:>08.2e}  time: {:>08.2e}  "
                     "zones/sec: {:>08.2e}  ebw(%): {:>04.2f} ",
@@ -273,8 +325,6 @@ namespace simbi {
                             delta_t = timer.get_duration();
                         }
                         //=================== Record Benchmarks
-                        n++;
-                        sim_state.global_iter = n;
                         if (n % nfold == 0) {
                             ncheck += 1;
                             speed = sim_state.total_zones / delta_t;
@@ -295,6 +345,8 @@ namespace simbi {
                                 );
                             }
                         }
+                        n++;
+                        sim_state.global_iter = n;
 
                         // Write to a file at every checkpoint interval
                         if (sim_state.t >= sim_state.t_interval &&
@@ -311,16 +363,18 @@ namespace simbi {
                         }
 
                         if (sim_state.inFailureState) {
-                            throw helpers::SimulationFailureException();
+                            throw exception::SimulationFailureException();
                         }
                         // Listen to kill signals
                         helpers::catch_signals();
                     }
-                    catch (helpers::InterruptException& e) {
-                        util::writeln("Interrupt Exception: {}", e.what());
+                    catch (exception::InterruptException& e) {
                         sim_state.inFailureState = true;
                         sim_state.wasInterrupted = true;
-                        helpers::write_to_file(sim_state);
+                        emit_exception(sim_state, e);
+                    }
+                    catch (exception::SimulationFailureException& e) {
+                        emit_exception(sim_state, e);
                     }
                 }
                 logger.print_avg_speed();

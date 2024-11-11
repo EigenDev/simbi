@@ -145,7 +145,29 @@ namespace simbi {
         DUAL conserved_t
         gravity_sources(const primitive_t& prims, const auto& cell) const;
 
-        void emit_troubled_cells() const;
+        void check_sources()
+        {
+            // check if ~all~ boundary sources have been set.
+            // if the user forgot one, the code will run with
+            // and outflow outer boundary condition
+            this->all_outer_bounds = std::all_of(
+                this->bsources.begin(),
+                this->bsources.end(),
+                [](const auto& q) { return q != nullptr; }
+            );
+
+            this->null_gravity = std::all_of(
+                this->gsources.begin(),
+                this->gsources.end(),
+                [](const auto& q) { return q == nullptr; }
+            );
+
+            this->null_sources = std::all_of(
+                this->hsources.begin(),
+                this->hsources.end(),
+                [](const auto& q) { return q == nullptr; }
+            );
+        }
     };
 }   // namespace simbi
 
