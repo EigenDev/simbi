@@ -385,14 +385,3 @@ def display_top(
 
 def tuple_of_tuples(x: Any) -> bool:
     return all(isinstance(a, tuple) for a in x)
-
-
-def print_midway(char: str = "=") -> None:
-        """prints a character til the middle of the terminal
-
-        Args:
-            char (str, optional): _description_. Defaults to "=".
-        """
-        import os 
-        columns = os.get_terminal_size().columns
-        print(char*(columns // 2))
