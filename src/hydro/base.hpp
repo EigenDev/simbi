@@ -278,8 +278,8 @@ namespace simbi {
                 }
             }
 
+            half_sphere      = (x2max == 0.5 * M_PI);
             checkpoint_zones = (zag > 1) ? zag : (yag > 1) ? yag : xag;
-
             define_tinterval(dlogt, chkpt_interval);
             define_chkpt_idx(init_conditions.chkpt_idx);
         }
