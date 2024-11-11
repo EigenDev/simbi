@@ -187,6 +187,7 @@ sources = [
     ### Common IMPLEMENTATIONS
     #######################
     'src/common/helpers.cpp',
+    'src/common/exceptions.cpp',
 
     #######################
     #### GPU / CPU IMPLEMENTATIONS

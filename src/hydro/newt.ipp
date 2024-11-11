@@ -26,73 +26,6 @@ Newtonian<dim>::Newtonian(
 template <int dim>
 Newtonian<dim>::~Newtonian() = default;
 
-template <int dim>
-void Newtonian<dim>::emit_troubled_cells() const
-{
-    for (luint gid = 0; gid < total_zones; gid++) {
-        if (troubled_cells[gid] != 0) {
-            const luint kk    = get_height(gid, nx, ny);
-            const luint jj    = get_row(gid, nx, ny, kk);
-            const luint ii    = get_column(gid, nx, ny, kk);
-            const lint ireal  = get_real_idx(ii, radius, xag);
-            const lint jreal  = get_real_idx(jj, radius, yag);
-            const lint kreal  = get_real_idx(kk, radius, zag);
-            const auto cell   = this->cell_factors(ireal, jreal, kreal);
-            const real x1mean = cell.x1mean;
-            const real x2mean = cell.x2mean;
-            const real x3mean = cell.x3mean;
-            const real rho    = cons[gid].dens();
-            const real v1     = cons[gid].momentum(1) / rho;
-            const real v2     = (dim < 2) ? cons[gid].momentum(2) / rho : 0.0;
-            const real v3     = (dim < 3) ? cons[gid].momentum(3) / rho : 0.0;
-            const real vsq    = v1 * v1 + v2 * v2 + v3 * v3;
-            if constexpr (dim == 1) {
-                fprintf(
-                    stderr,
-                    "\nPrimitives in bad  state\nDensity: %.2e, Pressure: "
-                    "%.2e, Vsq: %.2e, x1coord: %.2e, iter: %" PRIu64 "\n",
-                    cons[gid].dens(),
-                    prims[gid].p(),
-                    vsq,
-                    x1mean,
-                    global_iter
-                );
-            }
-            else if constexpr (dim == 2) {
-                fprintf(
-                    stderr,
-                    "\nPrimitives in bad  state\n"
-                    "Density: %.2e, "
-                    "Pressure: "
-                    "%.2e, Vsq: %.2e, x1coord: %.2e, x2coord: %.2e, iter: "
-                    "%" PRIu64 "\n",
-                    cons[gid].dens(),
-                    prims[gid].p(),
-                    vsq,
-                    x1mean,
-                    x2mean,
-                    global_iter
-                );
-            }
-            else {
-                fprintf(
-                    stderr,
-                    "\nPrimitives in bad  state\nDensity: %.2e, Pressure: "
-                    "%.2e, Vsq: %.2e, x1coord: %.2e, x2coord: %.2e, "
-                    "x3coord: %.2e, iter: %" PRIu64 "\n",
-                    cons[gid].dens(),
-                    prims[gid].p(),
-                    vsq,
-                    x1mean,
-                    x2mean,
-                    x3mean,
-                    global_iter
-                );
-            }
-        }
-    }
-}
-
 //-----------------------------------------------------------------------------------------
 //                          Get The Primitive
 //-----------------------------------------------------------------------------------------
@@ -867,35 +800,12 @@ void Newtonian<dim>::simulate(
     for (auto&& q : gsources) {
         this->gsources.push_back(q.value_or(nullptr));
     }
+    check_sources();
 
-    // check if ~all~ boundary sources have been set.
-    // if the user forgot one, the code will run with
-    // and outflow outer boundary condition
-    this->all_outer_bounds = std::all_of(
-        this->bsources.begin(),
-        this->bsources.end(),
-        [](const auto& q) { return q != nullptr; }
-    );
-
-    this->null_gravity = std::all_of(
-        this->gsources.begin(),
-        this->gsources.end(),
-        [](const auto& q) { return q == nullptr; }
-    );
-
-    this->null_sources = std::all_of(
-        this->hsources.begin(),
-        this->hsources.end(),
-        [](const auto& q) { return q == nullptr; }
-    );
     // Stuff for moving mesh
     this->hubble_param = adot(t) / a(t);
     this->mesh_motion  = (hubble_param != 0);
     this->homolog      = mesh_motion && geometry != simbi::Geometry::CARTESIAN;
-
-    if (x2max == 0.5 * M_PI) {
-        this->half_sphere = true;
-    }
 
     bcs.resize(dim * 2);
     for (int i = 0; i < 2 * dim; i++) {
@@ -936,41 +846,26 @@ void Newtonian<dim>::simulate(
     }
 
     // Simulate :)
-    try {
-        simbi::detail::logger::with_logger(*this, tend, [&] {
-            advance();
-            config_ghosts(this);
-            cons2prim();
+    simbi::detail::logger::with_logger(*this, tend, [&] {
+        advance();
+        config_ghosts(this);
+        cons2prim();
 
-            if constexpr (global::on_gpu) {
-                adapt_dt(fullP);
-            }
-            else {
-                adapt_dt();
-            }
+        if constexpr (global::on_gpu) {
+            adapt_dt(fullP);
+        }
+        else {
+            adapt_dt();
+        }
 
-            t += step * dt;
-            if (mesh_motion) {
-                // update x1 endpoints
-                const real vmin =
-                    (homolog) ? x1min * hubble_param : hubble_param;
-                const real vmax =
-                    (homolog) ? x1max * hubble_param : hubble_param;
-                x1max += step * dt * vmax;
-                x1min += step * dt * vmin;
-                hubble_param = adot(t) / a(t);
-            }
-        });
-    }
-    catch (const SimulationFailureException& e) {
-        std::cerr << std::string(80, '=') << "\n";
-        std::cerr << e.what() << '\n';
-        std::cerr << std::string(80, '=') << "\n";
-        troubled_cells.copyFromGpu();
-        cons.copyFromGpu();
-        prims.copyFromGpu();
-        hasCrashed = true;
-        write_to_file(*this);
-        emit_troubled_cells();
-    }
+        t += step * dt;
+        if (mesh_motion) {
+            // update x1 endpoints
+            const real vmin = (homolog) ? x1min * hubble_param : hubble_param;
+            const real vmax = (homolog) ? x1max * hubble_param : hubble_param;
+            x1max += step * dt * vmax;
+            x1min += step * dt * vmin;
+            hubble_param = adot(t) / a(t);
+        }
+    });
 };

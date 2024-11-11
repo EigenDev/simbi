@@ -22,6 +22,7 @@
 #include "enums.hpp"
 #include "traits.hpp"
 #include <cmath>
+#include <iostream>
 #include <vector>
 
 using namespace simbi;
@@ -1051,6 +1052,56 @@ struct anyPrimitive : generic_hydro::anyHydro<dim, anyPrimitive<dim, R>, R> {
               ind3,
               d * vn * chi()
             };
+        }
+    }
+
+    // overload the << operator for error logging
+    friend std::ostream& operator<<(std::ostream& os, const anyPrimitive& prim)
+    {
+        os << "Primitive Variables: \n";
+        os << "Density: " << prim.rho() << "\n";
+        os << "Pressure: " << prim.p() << "\n";
+        os << "Velocity: " << prim.v1() << " " << prim.v2() << " " << prim.v3()
+           << "\n";
+        if constexpr (R == Regime::RMHD) {
+            os << "Magnetic Field: " << prim.b1() << " " << prim.b2() << " "
+               << prim.b3() << "\n";
+        }
+        return os;
+    }
+
+    // define an error_at function that will print the primitive state
+    // at at the given coordinates, omitting coordinates that go
+    // beyond the dimensions of the primitive
+    void error_at(const real x1, const real x2, const real x3) const
+    {
+        std::cerr << "Primitives in non-physical state.\n";
+        if constexpr (dim == 1) {
+            std::cerr << "Primitive Variables at (" << x1 << "): \n";
+        }
+        else if constexpr (dim == 2) {
+            std::cerr << "Primitive Variables at (" << x1 << ", " << x2
+                      << "): \n";
+        }
+        else {
+            std::cerr << "Primitive Variables at (" << x1 << ", " << x2 << ", "
+                      << x3 << "): \n";
+        }
+        std::cerr << "Density: " << rho() << "\n";
+        std::cerr << "Pressure: " << p() << "\n";
+        if constexpr (dim == 1) {
+            std::cerr << "Velocity: (" << v1() << ")\n";
+        }
+        else if constexpr (dim == 2) {
+            std::cerr << "Velocity: (" << v1() << ", " << v2() << ")\n";
+        }
+        else {
+            std::cerr << "Velocity: (" << v1() << ", " << v2() << ", " << v3()
+                      << ")\n";
+        }
+        if constexpr (R == Regime::RMHD) {
+            std::cerr << "Magnetic Field:(" << b1() << ", " << b2() << ", "
+                      << b3() << ")\n";
         }
     }
 };
