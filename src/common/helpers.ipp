@@ -3227,7 +3227,7 @@ namespace simbi {
         )
         {
             const auto full_filename = data_directory + filename;
-            display_message(full_filename);
+            display_message("[Writing file:" + full_filename + "]");
 
             // Create a new file using the default property list.
             H5::H5File file(full_filename, H5F_ACC_TRUNC);

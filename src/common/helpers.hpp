@@ -54,7 +54,13 @@ extern real gpu_theoretical_bw;   //  = 1875e6 * (192.0 / 8.0) * 2 / 1e9;
 
 namespace simbi {
     namespace helpers {
-        void display_message(const std::string& full_filename);
+        // forward declarations
+        STATIC real minmod(real a, real b, real c);
+        STATIC real vanLeer(real a, real b);
+
+        //==========================================================================
+        // TEMPLATES
+        //==========================================================================
 
         template <int dim>
         struct real_func {
@@ -129,21 +135,6 @@ namespace simbi {
         {
             return idx / width / length;
         }
-
-        class InterruptException : public std::exception
-        {
-          public:
-            InterruptException(int s);
-            const char* what() const noexcept;
-            int status;
-        };
-
-        class SimulationFailureException : public std::exception
-        {
-          public:
-            SimulationFailureException();
-            const char* what() const noexcept;
-        };
 
         /*
         Catch keyboard Ctrl+C and other signals and pass
@@ -275,13 +266,6 @@ namespace simbi {
         //  HELPER-METHODS
         //---------------------------------------------------------------------------------------------------------
         //----------------Define Methods-------------------------------
-        /**
-         * @brief formats a real number to a string in the format 000_000 etc
-         *
-         * @param value
-         * @return std::string
-         */
-        std::string format_real(real value);
 
         /**
          * @brief write to the hdf5 file (serial)
@@ -328,49 +312,6 @@ namespace simbi {
             geom_class->initialize_function_pointers();
         }
 
-        //-------------------Inline for Speed -------------------------
-        /**
-         * @brief compute the minmod slope limiter
-         *
-         * @param x
-         * @param y
-         * @param z
-         * @return minmod value between x, y, and z
-         */
-        STATIC real minmod(const real x, const real y, const real z)
-        {
-            return 0.25 * std::abs(sgn(x) + sgn(y)) * (sgn(x) + sgn(z)) *
-                   my_min3(std::abs(x), std::abs(y), std::abs(z));
-        };
-
-        /**
-         * @brief compute the minmod slope limiter
-         *
-         * @param x
-         * @param y
-         * @return minmod value between x and y
-         */
-        STATIC real minmod(const real x, const real y)
-        {
-            return 0.5 * std::abs(sgn(x) + sgn(y)) * sgn(x) *
-                   my_min(std::abs(x), std::abs(y));
-        };
-
-        /**
-         * @brief compute the van Leer slope limiter (van Leer 1977)
-         *
-         * @param x
-         * @param y
-         * @return van Leer value between x and y
-         */
-        STATIC real vanLeer(const real x, const real y)
-        {
-            if (x * y > 0.0) {
-                return static_cast<real>(2.0) * (x * y) / (x + y);
-            }
-            return static_cast<real>(0.0);
-        };
-
         // the plm gradient for generic hydro
         template <typename T>
         STATIC T
@@ -403,136 +344,6 @@ namespace simbi {
                 }
             }
             return result;
-        }
-
-        /**
-         * @brief Get the real idx of an array object
-         *
-         * @param idx the global index
-         * @param offset the halo radius
-         * @param active_zones the number of real, active zones in the grid
-         * @return the nearest active index corresponding to the global index
-         * given
-         */
-        STATIC
-        constexpr luint
-        get_real_idx(const lint idx, const lint offset, const lint active_zones)
-        {
-            if (idx > active_zones - 1 + offset) {
-                return active_zones - 1;
-            }
-            return (idx - offset > 0) * (idx - offset);
-        }
-
-        /**
-         * @brief calculate relativistic f & df/dp from Mignone and Bodo (2005)
-         * @param gamma adiabatic index
-         * @param tau energy density minus rest mass energy
-         * @param d lab frame density
-         * @param S lab frame momentum density
-         * @param p pressure
-         */
-        STATIC auto newton_fg(real gamma, real tau, real d, real s, real p)
-        {
-            const auto et  = tau + d + p;
-            const auto v2  = s * s / (et * et);
-            const auto w   = 1.0 / std::sqrt(1.0 - v2);
-            const auto rho = d / w;
-            const auto eps =
-                (tau + (1.0 - w) * d + (1.0 - w * w) * p) / (d * w);
-            const auto c2 = (gamma - 1) * gamma * eps / (1 + gamma * eps);
-            return std::make_tuple((gamma - 1.0) * rho * eps - p, c2 * v2 - 1);
-        }
-
-        /**
-         * @brief calculate the bracketing function described in Kastaun,
-         * Kalinani, & Colfi (2021)
-         *
-         * @param mu minimization variable
-         * @param beesq rescaled magnetic field squared
-         * @param r vector of rescaled momentum
-         * @param beedr inner product between rescaled magnetic field & momentum
-         * @return Eq. (49)
-         */
-        STATIC real kkc_fmu49(
-            const real mu,
-            const real beesq,
-            const real beedrsq,
-            const real r
-        )
-        {
-            // the minimum enthalpy is unity for non-relativistic flows
-            constexpr real hlim = 1.0;
-
-            // Equation (26)
-            const real x = 1.0 / (1.0 + mu * beesq);
-
-            // Equation (38)
-            const real rbar_sq = r * r * x * x + mu * x * (1.0 + x) * beedrsq;
-
-            return mu * std::sqrt(hlim * hlim + rbar_sq) - 1.0;
-        }
-
-        /**
-         * @brief Returns the master function described in Kastaun, Kalinani, &
-         * Colfi (2021)
-         *
-         * @param mu minimization variable
-         * @param r vector of rescaled momentum
-         * @param rparr parallel component of rescaled momentum vector
-         * @param beesq rescaled magnetic field squared
-         * @param beedr inner product between rescaled magnetic field & momentum
-         * @param qterm rescaled gas energy density
-         * @param dterm mass density
-         * @param gamma adiabatic index
-         * @return Eq. (44)
-         */
-        STATIC real kkc_fmu44(
-            const real mu,
-            const real r,
-            const real rparr,
-            const real rperp,
-            const real beesq,
-            const real beedrsq,
-            const real qterm,
-            const real dterm,
-            const real gamma
-        )
-        {
-            // Equation (26)
-            const real x = 1.0 / (1.0 + mu * beesq);
-
-            // Equation (38)
-            const real rbar_sq = r * r * x * x + mu * x * (1.0 + x) * beedrsq;
-
-            // Equation (39)
-            const real qbar =
-                qterm - 0.5 * (beesq + mu * mu * x * x * beesq * rperp * rperp);
-
-            // Equation (32) inverted and squared
-            const real vsq  = mu * mu * rbar_sq;
-            const real gbsq = vsq / std::abs(1.0 - vsq);
-            const real g    = std::sqrt(1.0 + gbsq);
-
-            // Equation (41)
-            const real rhohat = dterm / g;
-
-            // Equation (42)
-            const real epshat = g * (qbar - mu * rbar_sq) + gbsq / (1.0 + g);
-
-            // Equation (43)
-            const real phat = (gamma - 1.0) * rhohat * epshat;
-            const real ahat = phat / (rhohat * (1.0 + epshat));
-
-            // Equation (46) - (48)
-            const real vhatA = (1.0 + ahat) * (1.0 + epshat) / g;
-            const real vhatB = (1.0 + ahat) * (1.0 + qbar - mu * rbar_sq);
-            const real vhat  = my_max(vhatA, vhatB);
-
-            // Equation (45)
-            const real muhat = 1.0 / (vhat + rbar_sq * mu);
-
-            return mu - muhat;
         }
 
         //======================================
@@ -615,90 +426,6 @@ namespace simbi {
         //======================================
         //              HELPER OVERLOADS
         //======================================
-        /**
-         * @brief check if left and right pressures meet the Quirk (1994)
-         * criterion
-         *
-         * @param pl left pressure
-         * @param pr right pressure
-         * @return true if smoothing needed, false otherwise
-         */
-        STATIC
-        bool quirk_strong_shock(const real pl, const real pr)
-        {
-            return std::abs(pr - pl) / my_min(pl, pr) > QUIRK_THRESHOLD;
-        }
-
-        /**
-         * @brief kronecker delta
-         *
-         * @param i
-         * @param j
-         * @return 1 for identity, 0 otherwise
-         */
-        STATIC
-        constexpr unsigned int kronecker(luint i, luint j) { return (i == j); }
-
-        /**
-         * @brief Get the 2d idx object depending on row-major or column-major
-         * ordering
-         *
-         * @param ii column index
-         * @param jj row index
-         * @param nx number of columns
-         * @param ny number of rows
-         * @return row-major or column-major index for 2D array
-         */
-        STATIC
-        auto
-        idx2(const luint ii, const luint jj, const luint nx, const luint ny)
-        {
-            if constexpr (global::col_maj) {
-                return ii * ny + jj;
-            }
-            return jj * nx + ii;
-        }
-
-        /**
-         * @brief Get the 3D idx object depending on row-major or column-major
-         * ordering
-         *
-         * @param ii column index
-         * @param jj row index
-         * @param kk height index
-         * @param nx number of columns
-         * @param ny number of rows
-         * @param nz number of heights
-         * @return row-major or column-major index for 3D array
-         */
-        STATIC
-        auto idx3(
-            const luint ii,
-            const luint jj,
-            const luint kk,
-            const luint nx,
-            const luint ny,
-            const luint nk
-        )
-        {
-            if constexpr (global::col_maj) {
-                return ii * nk * ny + jj * nk + kk;
-            }
-            return kk * nx * ny + jj * nx + ii;
-        }
-
-        /**
-         * @brief the next permutation in the set {1,2} or {1, 2, 3}
-         *
-         * @param nhat normal component value
-         * @param step permutation steps
-         * @return next permutation
-         */
-        STATIC
-        constexpr auto next_perm(const luint nhat, const luint step)
-        {
-            return ((nhat - 1) + step) % 3 + 1;
-        };
 
         /**
          * @brief           get the index of the direction neighbor
@@ -741,95 +468,11 @@ namespace simbi {
         template <typename T>
         void config_ghosts(T* sim_state);
 
-        /**
-         * @brief perform the reduction within the warp
-         *
-         * @param val
-         * @return reduced min in the warp
-         */
-        inline DEV real warpReduceMin(real val)
-        {
-#if CUDA_CODE
-            // Adapted from https://stackoverflow.com/a/59883722/13874039
-            // to work with older cuda versions
-            int mask;
-#if __CUDA_ARCH__ >= 700
-            mask = __match_any_sync(__activemask(), val);
-#else
-            const int tid = threadIdx.z * blockDim.x * blockDim.y +
-                            threadIdx.y * blockDim.x + threadIdx.x;
-            unsigned tmask = __activemask();
-            for (int i = 0; i < global::WARP_SIZE; i++) {
-                unsigned long long tval =
-                    __shfl_sync(tmask, (unsigned long long) val, i);
-                unsigned my_mask =
-                    __ballot_sync(tmask, (tval == (unsigned long long) val));
-                if (i == (tid & (global::WARP_SIZE - 1))) {
-                    mask = my_mask;
-                }
-            }
-#endif
-            for (int offset = global::WARP_SIZE / 2; offset > 0; offset /= 2) {
-                real next_val = __shfl_down_sync(mask, val, offset);
-                val           = (val < next_val) ? val : next_val;
-            }
-            return val;
-#elif HIP_CODE
-            for (int offset = global::WARP_SIZE / 2; offset > 0; offset /= 2) {
-                real next_val = __shfl_down(val, offset);
-                val           = (val < next_val) ? val : next_val;
-            }
-            return val;
-#else
-            return 0.0;
-#endif
-        };
-
-        /**
-         * @brief perform the reduction in the GPU block
-         *
-         * @param val
-         * @return block reduced value
-         */
-        inline DEV real blockReduceMin(real val)
-        {
-#if GPU_CODE
-            static __shared__ real
-                shared[global::WARP_SIZE];   // Shared mem for 32 (Nvidia) / 64
-                                             // (AMD) partial mins
-            const int tid = threadIdx.z * blockDim.x * blockDim.y +
-                            threadIdx.y * blockDim.x + threadIdx.x;
-            const int bsz = blockDim.x * blockDim.y * blockDim.z;
-            int lane      = tid % global::WARP_SIZE;
-            int wid       = tid / global::WARP_SIZE;
-
-            val = warpReduceMin(val);   // Each warp performs partial reduction
-            if (lane == 0) {
-                shared[wid] = val;   // Write reduced value to shared memory
-            }
-            __syncthreads();   // Wait for all partial reductions
-
-            // printf("Lane[%d]: %f\n", lane, shared[lane]);
-            // read from shared memory only if that warp existed
-            val = (tid < bsz / global::WARP_SIZE) ? shared[lane] : val;
-
-            if (wid == 0) {
-                val = warpReduceMin(val);   // Final reduce within first warp
-            }
-            return val;
-#else
-            return 0.0;
-#endif
-        };
-
         template <typename T>
         KERNEL void deviceReduceKernel(T* self, lint nmax);
 
         template <typename T>
         KERNEL void deviceReduceWarpAtomicKernel(T* self, lint nmax);
-
-        // display the CPU / GPU device properties
-        void anyDisplayProps();
 
         /**
          * @brief Get the Flops count in GB / s
@@ -942,6 +585,306 @@ namespace simbi {
             const V ka,
             const V radius
         );
+
+        void display_message(
+            const std::string& message,
+            int row       = -1,
+            int col       = -1,
+            bool is_error = false
+        );
+
+        // display the CPU / GPU device properties
+        void anyDisplayProps();
+
+        /**
+         * @brief perform the reduction in the GPU block
+         *
+         * @param val
+         * @return block reduced value
+         */
+        inline DEV real blockReduceMin(real val)
+        {
+#if GPU_CODE
+            static __shared__ real
+                shared[global::WARP_SIZE];   // Shared mem for 32 (Nvidia) / 64
+                                             // (AMD) partial mins
+            const int tid = threadIdx.z * blockDim.x * blockDim.y +
+                            threadIdx.y * blockDim.x + threadIdx.x;
+            const int bsz = blockDim.x * blockDim.y * blockDim.z;
+            int lane      = tid % global::WARP_SIZE;
+            int wid       = tid / global::WARP_SIZE;
+
+            val = warpReduceMin(val);   // Each warp performs partial reduction
+            if (lane == 0) {
+                shared[wid] = val;   // Write reduced value to shared memory
+            }
+            __syncthreads();   // Wait for all partial reductions
+
+            // printf("Lane[%d]: %f\n", lane, shared[lane]);
+            // read from shared memory only if that warp existed
+            val = (tid < bsz / global::WARP_SIZE) ? shared[lane] : val;
+
+            if (wid == 0) {
+                val = warpReduceMin(val);   // Final reduce within first warp
+            }
+            return val;
+#else
+            return 0.0;
+#endif
+        };
+
+        /**
+         * @brief perform the reduction within the warp
+         *
+         * @param val
+         * @return reduced min in the warp
+         */
+        inline DEV real warpReduceMin(real val)
+        {
+#if CUDA_CODE
+            // Adapted from https://stackoverflow.com/a/59883722/13874039
+            // to work with older cuda versions
+            int mask;
+#if __CUDA_ARCH__ >= 700
+            mask = __match_any_sync(__activemask(), val);
+#else
+            const int tid = threadIdx.z * blockDim.x * blockDim.y +
+                            threadIdx.y * blockDim.x + threadIdx.x;
+            unsigned tmask = __activemask();
+            for (int i = 0; i < global::WARP_SIZE; i++) {
+                unsigned long long tval =
+                    __shfl_sync(tmask, (unsigned long long) val, i);
+                unsigned my_mask =
+                    __ballot_sync(tmask, (tval == (unsigned long long) val));
+                if (i == (tid & (global::WARP_SIZE - 1))) {
+                    mask = my_mask;
+                }
+            }
+#endif
+            for (int offset = global::WARP_SIZE / 2; offset > 0; offset /= 2) {
+                real next_val = __shfl_down_sync(mask, val, offset);
+                val           = (val < next_val) ? val : next_val;
+            }
+            return val;
+#elif HIP_CODE
+            for (int offset = global::WARP_SIZE / 2; offset > 0; offset /= 2) {
+                real next_val = __shfl_down(val, offset);
+                val           = (val < next_val) ? val : next_val;
+            }
+            return val;
+#else
+            return 0.0;
+#endif
+        };
+
+        /**
+         * @brief the next permutation in the set {1,2} or {1, 2, 3}
+         *
+         * @param nhat normal component value
+         * @param step permutation steps
+         * @return next permutation
+         */
+        STATIC
+        constexpr auto next_perm(const luint nhat, const luint step)
+        {
+            return ((nhat - 1) + step) % 3 + 1;
+        };
+
+        /**
+         * @brief Get the 3D idx object depending on row-major or column-major
+         * ordering
+         *
+         * @param ii column index
+         * @param jj row index
+         * @param kk height index
+         * @param nx number of columns
+         * @param ny number of rows
+         * @param nz number of heights
+         * @return row-major or column-major index for 3D array
+         */
+        STATIC
+        auto idx3(
+            const luint ii,
+            const luint jj,
+            const luint kk,
+            const luint nx,
+            const luint ny,
+            const luint nk
+        )
+        {
+            if constexpr (global::col_maj) {
+                return ii * nk * ny + jj * nk + kk;
+            }
+            return kk * nx * ny + jj * nx + ii;
+        }
+
+        /**
+         * @brief kronecker delta
+         *
+         * @param i
+         * @param j
+         * @return 1 for identity, 0 otherwise
+         */
+        STATIC
+        constexpr unsigned int kronecker(luint i, luint j) { return (i == j); }
+
+        /**
+         * @brief Get the 2d idx object depending on row-major or column-major
+         * ordering
+         *
+         * @param ii column index
+         * @param jj row index
+         * @param nx number of columns
+         * @param ny number of rows
+         * @return row-major or column-major index for 2D array
+         */
+        STATIC
+        auto
+        idx2(const luint ii, const luint jj, const luint nx, const luint ny)
+        {
+            if constexpr (global::col_maj) {
+                return ii * ny + jj;
+            }
+            return jj * nx + ii;
+        }
+
+        /**
+         * @brief check if left and right pressures meet the Quirk (1994)
+         * criterion
+         *
+         * @param pl left pressure
+         * @param pr right pressure
+         * @return true if smoothing needed, false otherwise
+         */
+        STATIC
+        bool quirk_strong_shock(const real pl, const real pr)
+        {
+            return std::abs(pr - pl) / my_min(pl, pr) > QUIRK_THRESHOLD;
+        }
+
+        /**
+         * @brief Get the real idx of an array object
+         *
+         * @param idx the global index
+         * @param offset the halo radius
+         * @param active_zones the number of real, active zones in the grid
+         * @return the nearest active index corresponding to the global index
+         * given
+         */
+        STATIC
+        constexpr luint
+        get_real_idx(const lint idx, const lint offset, const lint active_zones)
+        {
+            if (idx > active_zones - 1 + offset) {
+                return active_zones - 1;
+            }
+            return (idx - offset > 0) * (idx - offset);
+        }
+
+        /**
+         * @brief calculate relativistic f & df/dp from Mignone and Bodo (2005)
+         * @param gamma adiabatic index
+         * @param tau energy density minus rest mass energy
+         * @param d lab frame density
+         * @param S lab frame momentum density
+         * @param p pressure
+         */
+        DEV std::tuple<real, real>
+        newton_fg(real gamma, real tau, real d, real s, real p);
+
+        /**
+         * @brief calculate the bracketing function described in Kastaun,
+         * Kalinani, & Colfi (2021)
+         *
+         * @param mu minimization variable
+         * @param beesq rescaled magnetic field squared
+         * @param r vector of rescaled momentum
+         * @param beedr inner product between rescaled magnetic field & momentum
+         * @return Eq. (49)
+         */
+        DEV real kkc_fmu49(
+            const real mu,
+            const real beesq,
+            const real beedrsq,
+            const real r
+        );
+
+        /**
+         * @brief Returns the master function described in Kastaun, Kalinani, &
+         * Colfi (2021)
+         *
+         * @param mu minimization variable
+         * @param r vector of rescaled momentum
+         * @param rparr parallel component of rescaled momentum vector
+         * @param beesq rescaled magnetic field squared
+         * @param beedr inner product between rescaled magnetic field & momentum
+         * @param qterm rescaled gas energy density
+         * @param dterm mass density
+         * @param gamma adiabatic index
+         * @return Eq. (44)
+         */
+        DEV real kkc_fmu44(
+            const real mu,
+            const real r,
+            const real rparr,
+            const real rperp,
+            const real beesq,
+            const real beedrsq,
+            const real qterm,
+            const real dterm,
+            const real gamma
+        );
+
+        //-------------------Inline for Speed -------------------------
+        /**
+         * @brief compute the minmod slope limiter
+         *
+         * @param x
+         * @param y
+         * @param z
+         * @return minmod value between x, y, and z
+         */
+        STATIC real minmod(const real x, const real y, const real z)
+        {
+            return 0.25 * std::abs(sgn(x) + sgn(y)) * (sgn(x) + sgn(z)) *
+                   my_min3(std::abs(x), std::abs(y), std::abs(z));
+        };
+
+        /**
+         * @brief compute the minmod slope limiter
+         *
+         * @param x
+         * @param y
+         * @return minmod value between x and y
+         */
+        STATIC real minmod(const real x, const real y)
+        {
+            return 0.5 * std::abs(sgn(x) + sgn(y)) * sgn(x) *
+                   my_min(std::abs(x), std::abs(y));
+        };
+
+        /**
+         * @brief compute the van Leer slope limiter (van Leer 1977)
+         *
+         * @param x
+         * @param y
+         * @return van Leer value between x and y
+         */
+        STATIC real vanLeer(const real x, const real y)
+        {
+            if (x * y > 0.0) {
+                return static_cast<real>(2.0) * (x * y) / (x + y);
+            }
+            return static_cast<real>(0.0);
+        };
+
+        /**
+         * @brief formats a real number to a string in the format 000_000 etc
+         *
+         * @param value
+         * @return std::string
+         */
+        std::string format_real(real value);
 
     }   // namespace helpers
 }   // namespace simbi
