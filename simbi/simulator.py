@@ -566,9 +566,6 @@ class Hydro:
             "nxv": nxp + 1,
             "nyv": nyp + 1,
             "nzv": nzp + 1,
-            "nxe": nxp + 2,
-            "nye": nyp + 2,
-            "nze": nzp + 2,
             "bfield": [[0], [0], [0]],
         }
 
