@@ -566,6 +566,9 @@ class Hydro:
             "nxv": nxp + 1,
             "nyv": nyp + 1,
             "nzv": nzp + 1,
+            "nxe": nxp + 2,
+            "nye": nyp + 2,
+            "nze": nzp + 2,
             "bfield": [[0], [0], [0]],
         }
 
@@ -591,6 +594,10 @@ class Hydro:
                 b1 = self.initial_state[5]
                 b2 = self.initial_state[6]
                 b3 = self.initial_state[7]
+            # pad the bfields at axis that aren't their own
+            b1 = np.pad(b1, ((1, 1), (1, 1), (0,0)), mode='edge')
+            b2 = np.pad(b2, ((1, 1), (0, 0), (1,1)), mode='edge')
+            b3 = np.pad(b3, ((0, 0), (1, 1), (1,1)), mode='edge')
             init_conditions["bfield"] = [b1.flat, b2.flat, b3.flat]
 
         lambdas: dict[str, list[Optional[Callable[..., float]]]] = {
