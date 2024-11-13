@@ -200,19 +200,24 @@ def read_file(filename: str) -> tuple[dict[str, Any], dict[str, Any], dict[str, 
                     name: str, shape: tuple[int, ...]
                 ) -> NDArray[numpy_float]:
                     return hf.get(name)[:].reshape(shape)
-
+                
                 b1 = read_bfield(
                     "b1",
-                    (ds["zactive_zones"], ds["yactive_zones"], ds["xactive_zones"] + 1),
+                    (ds["zactive_zones"] + 2, ds["yactive_zones"] + 2, ds["xactive_zones"] + 1),
                 )
                 b2 = read_bfield(
                     "b2",
-                    (ds["zactive_zones"], ds["yactive_zones"] + 1, ds["xactive_zones"]),
+                    (ds["zactive_zones"] + 2, ds["yactive_zones"] + 1, ds["xactive_zones"] + 2),
                 )
                 b3 = read_bfield(
                     "b3",
-                    (ds["zactive_zones"] + 1, ds["yactive_zones"], ds["xactive_zones"]),
+                    (ds["zactive_zones"] + 1, ds["yactive_zones"] + 2, ds["xactive_zones"] + 2),
                 )
+                
+                # unpad from ghost zones from the fields in the orthogonal directions
+                b1 = unpad(b1, ((1, 1), (1, 1), (0, 0)))
+                b2 = unpad(b2, ((1, 1), (0, 0), (1, 1)))
+                b3 = unpad(b3, ((0, 0), (1, 1), (1, 1)))
 
                 fields.update(
                     {
