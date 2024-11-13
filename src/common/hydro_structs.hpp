@@ -228,6 +228,11 @@ template <int dim, Regime R>
 struct anyConserved : generic_hydro::anyHydro<dim, anyConserved<dim, R>, R> {
     using generic_hydro::anyHydro<dim, anyConserved<dim, R>, R>::anyHydro;
 
+    // velocity components from Mignone & delZanna 2021
+    real aL, aR, dL, dR, vj, vk;
+
+    DUAL real vtran(const luint perm) const { return perm == 1 ? vj : vk; }
+
     // Define accessors for the conserved variables
     DUAL real& dens() { return this->vals[0]; }
 

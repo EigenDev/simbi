@@ -75,7 +75,7 @@ namespace simbi {
         luint xblockdim, yblockdim, zblockdim, sx, sy, sz;
         luint xblockspace, yblockspace, zblockspace;
         luint shBlockSpace, shBlockBytes;
-        luint nxv, nyv, nzv, nv;
+        luint nxv, nyv, nzv, nxe, nye, nze, nv;
         ExecutionPolicy<> fullP, activeP;
 
         //=========================== GPU Threads Per Dimension
@@ -238,6 +238,9 @@ namespace simbi {
             nxv = xag + 1;
             nyv = yag + 1;
             nzv = zag + 1;
+            nxe = xag + 2;
+            nye = yag + 2;
+            nze = zag + 2;
 
             nv           = nxv * nyv * nzv;
             idx_active   = pcm ? 1 : 2;

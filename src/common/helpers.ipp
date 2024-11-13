@@ -3234,9 +3234,9 @@ namespace simbi {
 
             // Create the data space for the dataset.
             hsize_t dims[1]   = {state.nx * state.ny * state.nz};
-            hsize_t dimxv[1]  = {state.nxv * state.yag * state.zag};
-            hsize_t dimyv[1]  = {state.xag * state.nyv * state.zag};
-            hsize_t dimzv[1]  = {state.xag * state.yag * state.nzv};
+            hsize_t dimxv[1]  = {state.nxv * state.nye * state.nze};
+            hsize_t dimyv[1]  = {state.nxe * state.nyv * state.nze};
+            hsize_t dimzv[1]  = {state.nxe * state.nye * state.nzv};
             hsize_t dimx[1]   = {state.x1.size()};
             hsize_t dimy[1]   = {state.x2.size()};
             hsize_t dimz[1]   = {state.x3.size()};
