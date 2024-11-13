@@ -61,7 +61,11 @@ DUAL real RMHD<dim>::calc_edge_emf(
     const luint ia,
     const luint ja,
     const luint ka,
-    const luint nhat
+    const luint nhat,
+    const real bw,
+    const real be,
+    const real bs,
+    const real bn
 ) const
 {
     const real ew = fw.ecomponent(nhat);
@@ -149,12 +153,32 @@ DUAL real RMHD<dim>::calc_edge_emf(
             );
         }
         case CTTYPE::MdZ: {
-            return 0.0;
-            // const auto term1 = -(ajw * vjw * bkw) - (aje * vje * bke);
-            // const auto term2 = +(akn * vkn * bjn) + (aks * vks * bjs);
-            // const auto term3 = +(dje * bke) - (djw * bkw);
-            // const auto term4 = -(dks * bjs) + (dkn * bjn);
-            // return term1 + term2 + term3 + term4;
+            // d-coefficients from MdZ (2021), Eqns. (34 & 35)a
+            const auto dw = static_cast<real>(0.5) * (fs.dL + fn.dL);
+            const auto de = static_cast<real>(0.5) * (fs.dR + fn.dR);
+            const auto ds = static_cast<real>(0.5) * (fw.dL + fe.dL);
+            const auto dn = static_cast<real>(0.5) * (fw.dR + fe.dR);
+
+            // a-coefficients from MdZ (2021), Eqns. (34 & 35)b
+            const auto aw = static_cast<real>(0.5) * (fs.aL + fn.aL);
+            const auto ae = static_cast<real>(0.5) * (fs.aR + fn.aR);
+            const auto as = static_cast<real>(0.5) * (fw.aL + fe.aL);
+            const auto an = static_cast<real>(0.5) * (fw.aR + fe.aR);
+
+            // average velocity coefficients
+            const auto nt1 = nhat % 2 == 0 ? 1 : 2;
+            const auto nt2 = nhat % 2 == 0 ? 2 : 1;
+            const auto vw  = fw.vtran(nt1);
+            const auto ve  = fe.vtran(nt1);
+            const auto vn  = fn.vtran(nt2);
+            const auto vs  = fs.vtran(nt2);
+
+            const auto term1 = -(aw * vw * bw) - (ae * ve * be);
+            const auto term2 = +(an * vn * bn) + (as * vs * bs);
+            const auto term3 = +(de * be) - (dw * bw);
+            const auto term4 = +(ds * bs) - (dn * bn);
+
+            return term1 + term2 + term3 + term4;
         }
         default:   // ALPHA, Eq. (49)
         {
@@ -1108,10 +1132,10 @@ DUAL RMHD<dim>::conserved_t RMHD<dim>::calc_hlle_flux(
     const auto fR     = prims2flux(prR, nhat);
     const auto lambda = calc_eigenvals(prL, prR, nhat);
     // Grab the fastest wave speeds
-    const real aL  = lambda.afL();
-    const real aR  = lambda.afR();
-    const real aLm = aL < 0.0 ? aL : 0.0;
-    const real aRp = aR > 0.0 ? aR : 0.0;
+    const auto aL  = lambda.afL();
+    const auto aR  = lambda.afR();
+    const auto aLm = aL < 0.0 ? aL : 0.0;
+    const auto aRp = aR > 0.0 ? aR : 0.0;
 
     auto net_flux = [&] {
         // Compute the HLL Flux component-wise
@@ -1122,38 +1146,10 @@ DUAL RMHD<dim>::conserved_t RMHD<dim>::calc_hlle_flux(
             return fR - uR * vface;
         }
         else {
-            if constexpr (comp_ct_type == CTTYPE::MdZ) {
-                const luint nps[] = {next_perm(nhat, 1), next_perm(nhat, 2)};
-                conserved_t f_hll;
-                // fill in the gas varibales
-                for (int i = 0; i < 5; i++) {
-                    f_hll[i] = (fL[i] * aRp - fR[i] * aLm +
-                                (uR[i] - uL[i]) * aLm * aRp) /
-                               (aRp - aLm);
-                }
-
-                const auto alpL = aRp / (aRp - aLm);
-                const auto alpR = aLm / (aRp - aLm);
-                const auto dL   = -aRp * aLm / (aRp - aLm);
-                const auto dR   = dL;
-
-                // for loop over the tangential fields using np1, np2
-                for (auto&& i : nps) {
-                    f_hll[i] =
-                        alpL * fL[i] + alpR * fR[i] + dL * uL[i] - dR * uR[i];
-                }
-
-                const auto u_hll =
-                    (uR * aRp - uL * aLm - fR + fL) / (aRp - aLm);
-                return f_hll - u_hll * vface;
-            }
-            else {
-                const auto f_hll =
-                    (fL * aRp - fR * aLm + (uR - uL) * aLm * aRp) / (aRp - aLm);
-                const auto u_hll =
-                    (uR * aRp - uL * aLm - fR + fL) / (aRp - aLm);
-                return f_hll - u_hll * vface;
-            }
+            const auto f_hll =
+                (fL * aRp - fR * aLm + (uR - uL) * aLm * aRp) / (aRp - aLm);
+            const auto u_hll = (uR * aRp - uL * aLm - fR + fL) / (aRp - aLm);
+            return f_hll - u_hll * vface;
         }
     }();
 
@@ -1164,7 +1160,27 @@ DUAL RMHD<dim>::conserved_t RMHD<dim>::calc_hlle_flux(
     else {
         net_flux.chi() = prL.chi() * net_flux.dens();
     }
-    net_flux.calc_electric_field(nhat);
+
+    if constexpr (comp_ct_type == CTTYPE::MdZ) {
+        // set the wave coefficients
+        const auto afac = 1.0 / (aRp - aLm);
+        net_flux.aL     = +aRp * afac;
+        net_flux.aR     = -aLm * afac;
+        net_flux.dL     = -aRp * aLm * afac;
+        net_flux.dR     = net_flux.dL;
+
+        const auto nj  = next_perm(nhat, 1);
+        const auto nk  = next_perm(nhat, 2);
+        const auto vLj = prL.vcomponent(nj);
+        const auto vLk = prL.vcomponent(nk);
+        const auto vRj = prR.vcomponent(nj);
+        const auto vRk = prR.vcomponent(nk);
+        net_flux.vj    = (aRp * vLj - aLm * vRj) * afac;
+        net_flux.vk    = (aRp * vLk - aLm * vRk) * afac;
+    }
+    else {
+        net_flux.calc_electric_field(nhat);
+    }
     return net_flux;
 };
 
@@ -1696,6 +1712,211 @@ DUAL RMHD<dim>::conserved_t RMHD<dim>::calc_hlld_flux(
 };
 
 template <int dim>
+void RMHD<dim>::set_flux_and_fields()
+{
+    const auto xe = nxe - 2;
+    const auto ye = nye - 2;
+    const auto ze = nze - 2;
+    parallel_for(activeP, [xe, ye, ze, this] DEV(const luint gid) {
+        const luint kk = axid<3, BlkAx::K>(gid, xag, yag);
+        const luint jj = axid<3, BlkAx::J>(gid, xag, yag, kk);
+        const luint ii = axid<3, BlkAx::I>(gid, xag, yag, kk);
+
+        if (global::on_gpu) {
+            if ((ii >= xag) || (jj >= yag) || (kk >= zag)) {
+                return;
+            }
+        }
+
+        // the fluxes only ever need the ghosts zones one cell deep
+        constexpr auto hr = 1;
+        const auto ir     = ii + hr;
+        const auto jr     = jj + hr;
+        const auto kr     = kk + hr;
+        for (luint rr = 0; rr < hr; rr++) {
+            const auto rs = rr + 1;
+
+            // Helper lambda to handle boundary conditions
+            auto handle_boundary_conditions = [&](auto& field,
+                                                  auto& bstag,
+                                                  auto idx,
+                                                  auto real_idx,
+                                                  auto bcidx,
+                                                  auto momentum_idx,
+                                                  auto wrap_idx) {
+                switch (bcs[bcidx]) {
+                    case BoundaryCondition::PERIODIC:
+                        field[idx] = field[wrap_idx];
+                        bstag[idx] = bstag[wrap_idx];
+                        break;
+                    case BoundaryCondition::REFLECTING:
+                        field[idx] = field[real_idx];
+                        field[idx].momentum(momentum_idx) *= -1.0;
+                        bstag[idx] = bstag[real_idx];
+                        break;
+                    default:   // outflow
+                        field[idx] = field[real_idx];
+                        bstag[idx] = bstag[real_idx];
+                        break;
+                }
+            };
+
+            // fill the ghost zones for the fluxes at the x1 boundaries
+            if (jj < ye && kk < ze) {
+                for (int q = 0; q < 2; q++) {
+                    const auto ifq  = ii + q;
+                    const auto x1jb = idx3(ifq, rr, kr, nxv, nye, nze);
+                    const auto x1je = idx3(ifq, nye - rs, kr, nxv, nye, nze);
+                    const auto x1kb = idx3(ifq, jr, rr, nxv, nye, nze);
+                    const auto x1ke = idx3(ifq, jr, nze - rs, nxv, nye, nze);
+
+                    // x2
+                    handle_boundary_conditions(
+                        fri,
+                        bstag1,
+                        x1jb,
+                        idx3(ifq, hr, kr, nxv, nye, nze),
+                        2,
+                        2,
+                        idx3(ifq, ye, kr, nxv, nye, nze)
+                    );
+                    handle_boundary_conditions(
+                        fri,
+                        bstag1,
+                        x1je,
+                        idx3(ifq, ye, kr, nxv, nye, nze),
+                        3,
+                        2,
+                        idx3(ifq, hr, kr, nxv, nye, nze)
+                    );
+
+                    handle_boundary_conditions(
+                        fri,
+                        bstag1,
+                        x1kb,
+                        idx3(ifq, jr, hr, nxv, nye, nze),
+                        4,
+                        3,
+                        idx3(ifq, jr, ze, nxv, nye, nze)
+                    );
+                    handle_boundary_conditions(
+                        fri,
+                        bstag1,
+                        x1ke,
+                        idx3(ifq, jr, ze, nxv, nye, nze),
+                        5,
+                        3,
+                        idx3(ifq, jr, hr, nxv, nye, nze)
+                    );
+                }
+            }
+
+            // fill the ghost zones for the fluxes at the x2 boundaries
+            if (ii < xe && kk < ze) {
+                for (int q = 0; q < 2; q++) {
+                    const auto jfq  = jj + q;
+                    const auto x2ib = idx3(rr, jfq, kr, nxe, nyv, nze);
+                    const auto x2ie = idx3(nxe - rs, jfq, kr, nxe, nyv, nze);
+                    const auto x2kb = idx3(ir, jfq, rr, nxe, nyv, nze);
+                    const auto x2ke = idx3(ir, jfq, nze - rs, nxe, nyv, nze);
+
+                    // x1
+                    handle_boundary_conditions(
+                        gri,
+                        bstag2,
+                        x2ib,
+                        idx3(hr, jfq, kr, nxe, nyv, nze),
+                        0,
+                        1,
+                        idx3(xe, jfq, kr, nxe, nyv, nze)
+                    );
+                    handle_boundary_conditions(
+                        gri,
+                        bstag2,
+                        x2ie,
+                        idx3(xe, jfq, kr, nxe, nyv, nze),
+                        0,
+                        1,
+                        idx3(hr, jfq, kr, nxe, nyv, nze)
+                    );
+
+                    // x3
+                    handle_boundary_conditions(
+                        gri,
+                        bstag2,
+                        x2kb,
+                        idx3(ir, jfq, hr, nxe, nyv, nze),
+                        4,
+                        3,
+                        idx3(ir, jfq, ze, nxe, nyv, nze)
+                    );
+                    handle_boundary_conditions(
+                        gri,
+                        bstag2,
+                        x2ke,
+                        idx3(ir, jfq, ze, nxe, nyv, nze),
+                        5,
+                        3,
+                        idx3(ir, jfq, hr, nxe, nyv, nze)
+                    );
+                }
+            }
+
+            // fill the ghost zones for the fluxes at the x3 boundaries
+            if (ii < xe && jj < ye) {
+                for (int q = 0; q < 2; q++) {
+                    const auto kfq  = kk + q;
+                    const auto x3ib = idx3(rr, jr, kfq, nxe, nye, nzv);
+                    const auto x3ie = idx3(nxe - rs, jr, kfq, nxe, nye, nzv);
+                    const auto x3jb = idx3(ir, rr, kfq, nxe, nye, nzv);
+                    const auto x3je = idx3(ir, nye - rs, kfq, nxe, nye, nzv);
+
+                    // x1
+                    handle_boundary_conditions(
+                        hri,
+                        bstag3,
+                        x3ib,
+                        idx3(hr, jr, kfq, nxe, nye, nzv),
+                        0,
+                        1,
+                        idx3(xe, jr, kfq, nxe, nye, nzv)
+                    );
+                    handle_boundary_conditions(
+                        hri,
+                        bstag3,
+                        x3ie,
+                        idx3(xe, jr, kfq, nxe, nye, nzv),
+                        1,
+                        1,
+                        idx3(hr, jr, kfq, nxe, nye, nzv)
+                    );
+
+                    // x2
+                    handle_boundary_conditions(
+                        hri,
+                        bstag3,
+                        x3jb,
+                        idx3(ir, hr, kfq, nxe, nye, nzv),
+                        2,
+                        2,
+                        idx3(ir, ye, kfq, nxe, nye, nzv)
+                    );
+                    handle_boundary_conditions(
+                        hri,
+                        bstag3,
+                        x3je,
+                        idx3(ir, ye, kfq, nxe, nye, nzv),
+                        3,
+                        2,
+                        idx3(ir, hr, kfq, nxe, nye, nzv)
+                    );
+                }
+            }
+        }
+    });
+}
+
+template <int dim>
 void RMHD<dim>::riemann_fluxes()
 {
     const auto prim_dat = prims.data();
@@ -1716,9 +1937,14 @@ void RMHD<dim>::riemann_fluxes()
             }
         }
 
-        const luint ia  = ii + radius;
-        const luint ja  = jj + radius;
-        const luint ka  = kk + radius;
+        // active zones for primitive variables
+        const luint ia = ii + radius;
+        const luint ja = jj + radius;
+        const luint ka = kk + radius;
+        // active zones for fluxes
+        const luint iaf = ii + 1;
+        const luint jaf = jj + 1;
+        const luint kaf = kk + 1;
         const luint tx  = (global::on_sm) ? threadIdx.x : 0;
         const luint ty  = (global::on_sm) ? threadIdx.y : 0;
         const luint tz  = (global::on_sm) ? threadIdx.z : 0;
@@ -1778,9 +2004,9 @@ void RMHD<dim>::riemann_fluxes()
         const real vfs[2] = {cell.v1fL(), cell.v1fR()};
         // Calc Rimeann Flux at all interfaces
         for (int q = 0; q < 2; q++) {
-            const auto xf = idx3(ii + q, jj, kk, nxv, yag, zag);
-            const auto yf = idx3(ii, jj + q, kk, xag, nyv, zag);
-            const auto zf = idx3(ii, jj, kk + q, xag, yag, nzv);
+            const auto xf = idx3(ii + q, jaf, kaf, nxv, nye, nze);
+            const auto yf = idx3(iaf, jj + q, kaf, nxe, nyv, nze);
+            const auto zf = idx3(iaf, jaf, kk + q, nxe, nye, nzv);
             // fluxes in i direction
             pL = prb[idx3(txa + q - 1, tya, tza, sx, sy, sz)];
             pR = prb[idx3(txa + q + 0, tya, tza, sx, sy, sz)];
@@ -1909,12 +2135,12 @@ void RMHD<dim>::advance()
 {
     const auto prim_dat = prims.data();
     // copy the bfield vectors as to not modify the original
-    const auto b1_data = bstag1;
-    const auto b2_data = bstag2;
-    const auto b3_data = bstag3;
+    const auto b1now = bstag1;
+    const auto b2now = bstag2;
+    const auto b3now = bstag3;
     simbi::parallel_for(
         activeP,
-        [prim_dat, b1_data, b2_data, b3_data, this] DEV(const luint idx) {
+        [prim_dat, b1now, b2now, b3now, this] DEV(const luint idx) {
             // e1, e2, e3 values at cell edges
             real e1[4], e2[4], e3[4];
 
@@ -1932,9 +2158,14 @@ void RMHD<dim>::advance()
                 }
             }
 
-            const luint ia  = ii + radius;
-            const luint ja  = jj + radius;
-            const luint ka  = kk + radius;
+            // active zones for primitive variables
+            const luint ia = ii + radius;
+            const luint ja = jj + radius;
+            const luint ka = kk + radius;
+            // active zones for fluxes
+            const luint iaf = ii + 1;
+            const luint jaf = jj + 1;
+            const luint kaf = kk + 1;
             const luint tx  = (global::on_sm) ? threadIdx.x : 0;
             const luint ty  = (global::on_sm) ? threadIdx.y : 0;
             const luint tz  = (global::on_sm) ? threadIdx.z : 0;
@@ -1970,12 +2201,12 @@ void RMHD<dim>::advance()
             // mesh factors
             const auto cell = this->cell_factors(ii, jj, kk);
 
-            const auto xlf = idx3(ii + 0, jj, kk, nxv, yag, zag);
-            const auto xrf = idx3(ii + 1, jj, kk, nxv, yag, zag);
-            const auto ylf = idx3(ii, jj + 0, kk, xag, nyv, zag);
-            const auto yrf = idx3(ii, jj + 1, kk, xag, nyv, zag);
-            const auto zlf = idx3(ii, jj, kk + 0, xag, yag, nzv);
-            const auto zrf = idx3(ii, jj, kk + 1, xag, yag, nzv);
+            const auto xlf = idx3(ii + 0, jaf, kaf, nxv, nye, nze);
+            const auto xrf = idx3(ii + 1, jaf, kaf, nxv, nye, nze);
+            const auto ylf = idx3(iaf, jj + 0, kaf, nxe, nyv, nze);
+            const auto yrf = idx3(iaf, jj + 1, kaf, nxe, nyv, nze);
+            const auto zlf = idx3(iaf, jaf, kk + 0, nxe, nye, nzv);
+            const auto zrf = idx3(iaf, jaf, kk + 1, nxe, nye, nzv);
 
             // compute edge emfs in clockwise direction wrt cell plane
             detail::for_sequence(
@@ -1989,23 +2220,16 @@ void RMHD<dim>::advance()
                     auto east  = corner == Corner::NE || corner == Corner::SE;
                     auto south = !north;
                     auto west  = !east;
-                    auto qn    = my_min<lint>(jj + north, yag - 1);
-                    auto qs    = my_max<lint>(jj - south, 0);
-                    auto qe    = my_min<lint>(ii + east, xag - 1);
-                    auto qw    = my_max<lint>(ii - west, 0);
 
-                    // printf(
-                    //     "I-J --- qn: %lld, qs: %lld, qe: %lld, qw: %lld\n",
-                    //     qn,
-                    //     qs,
-                    //     qe,
-                    //     qw
-                    // );
+                    auto qn = jaf + north;
+                    auto qs = jaf - south;
+                    auto qe = iaf + east;
+                    auto qw = iaf - west;
 
-                    auto nidx = idx3(ii + east, qn, kk, nxv, yag, zag);
-                    auto sidx = idx3(ii + east, qs, kk, nxv, yag, zag);
-                    auto eidx = idx3(qe, jj + north, kk, xag, nyv, zag);
-                    auto widx = idx3(qw, jj + north, kk, xag, nyv, zag);
+                    auto nidx = idx3(ii + east, qn, kaf, nxv, nye, nze);
+                    auto sidx = idx3(ii + east, qs, kaf, nxv, nye, nze);
+                    auto eidx = idx3(qe, jj + north, kaf, nxe, nyv, nze);
+                    auto widx = idx3(qw, jj + north, kaf, nxe, nyv, nze);
 
                     e3[q] = calc_edge_emf<Plane::IJ, corner>(
                         gri[widx],
@@ -2019,26 +2243,23 @@ void RMHD<dim>::advance()
                         txa,
                         tya,
                         tza,
-                        3
+                        3,
+                        b2now[widx],
+                        b2now[eidx],
+                        b1now[sidx],
+                        b1now[nidx]
                     );
 
                     // calc directional indices for i-k plane
-                    qn   = my_min<lint>(kk + north, zag - 1);
-                    qs   = my_max<lint>(kk - south, 0);
-                    qe   = my_min<lint>(ii + east, xag - 1);
-                    qw   = my_max<lint>(ii - west, 0);
-                    nidx = idx3(ii + east, jj, qn, nxv, yag, zag);
-                    sidx = idx3(ii + east, jj, qs, nxv, yag, zag);
-                    eidx = idx3(qe, jj, kk + north, xag, yag, nzv);
-                    widx = idx3(qw, jj, kk + north, xag, yag, nzv);
+                    qn   = kaf + north;
+                    qs   = kaf - south;
+                    qe   = iaf + east;
+                    qw   = iaf - west;
+                    nidx = idx3(ii + east, jaf, qn, nxv, nye, nze);
+                    sidx = idx3(ii + east, jaf, qs, nxv, nye, nze);
+                    eidx = idx3(qe, jaf, kk + north, nxe, nye, nzv);
+                    widx = idx3(qw, jaf, kk + north, nxe, nye, nzv);
 
-                    // printf(
-                    //     "I-K --- qn: %lld, qs: %lld, qe: %lld, qw: %lld\n",
-                    //     qn,
-                    //     qs,
-                    //     qe,
-                    //     qw
-                    // );
                     e2[q] = calc_edge_emf<Plane::IK, corner>(
                         hri[widx],
                         hri[eidx],
@@ -2051,26 +2272,23 @@ void RMHD<dim>::advance()
                         txa,
                         tya,
                         tza,
-                        2
+                        2,
+                        b3now[widx],
+                        b3now[eidx],
+                        b1now[sidx],
+                        b1now[nidx]
                     );
 
                     // calc directional indices for j-k plane
-                    qn   = my_min<lint>(kk + north, zag - 1);
-                    qs   = my_max<lint>(kk - south, 0);
-                    qe   = my_min<lint>(jj + east, yag - 1);
-                    qw   = my_max<lint>(jj - west, 0);
-                    nidx = idx3(ii, jj + east, qn, xag, nyv, zag);
-                    sidx = idx3(ii, jj + east, qs, xag, nyv, zag);
-                    eidx = idx3(ii, qe, kk + north, xag, yag, nzv);
-                    widx = idx3(ii, qe, kk + north, xag, yag, nzv);
+                    qn   = kaf + north;
+                    qs   = kaf - south;
+                    qe   = jaf + east;
+                    qw   = jaf - west;
+                    nidx = idx3(iaf, jj + east, qn, nxe, nyv, nze);
+                    sidx = idx3(iaf, jj + east, qs, nxe, nyv, nze);
+                    eidx = idx3(iaf, qe, kk + north, nxe, nye, nzv);
+                    widx = idx3(iaf, qe, kk + north, nxe, nye, nzv);
 
-                    // printf(
-                    //     "J-K --- qn: %lld, qs: %lld, qe: %lld, qw: %lld\n",
-                    //     qn,
-                    //     qs,
-                    //     qe,
-                    //     qw
-                    // );
                     e1[q] = calc_edge_emf<Plane::JK, corner>(
                         hri[widx],
                         hri[eidx],
@@ -2083,7 +2301,11 @@ void RMHD<dim>::advance()
                         txa,
                         tya,
                         tza,
-                        1
+                        1,
+                        b3now[widx],
+                        b3now[eidx],
+                        b2now[sidx],
+                        b2now[nidx]
                     );
                 }
             );
@@ -2098,26 +2320,26 @@ void RMHD<dim>::advance()
             auto& b2c = cons[aid].b2();
             auto& b3c = cons[aid].b3();
 
-            b1L = b1_data[xlf] - dt * step * curl_e(1, e2, e3, cell, 0);
-            b1R = b1_data[xrf] - dt * step * curl_e(1, e2, e3, cell, 1);
+            b1L = b1now[xlf] - dt * step * curl_e(1, e2, e3, cell, 0);
+            b1R = b1now[xrf] - dt * step * curl_e(1, e2, e3, cell, 1);
 
-            b2L = b2_data[ylf] - dt * step * curl_e(2, e3, e1, cell, 0);
-            b2R = b2_data[yrf] - dt * step * curl_e(2, e3, e1, cell, 1);
+            b2L = b2now[ylf] - dt * step * curl_e(2, e3, e1, cell, 0);
+            b2R = b2now[yrf] - dt * step * curl_e(2, e3, e1, cell, 1);
 
-            b3L = b3_data[zlf] - dt * step * curl_e(3, e1, e2, cell, 0);
-            b3R = b3_data[zrf] - dt * step * curl_e(3, e1, e2, cell, 1);
+            b3L = b3now[zlf] - dt * step * curl_e(3, e1, e2, cell, 0);
+            b3R = b3now[zrf] - dt * step * curl_e(3, e1, e2, cell, 1);
 
             // if constexpr (global::debug_mode) {
             const auto divb = (b1R - b1L) * invdx1 + (b2R - b2L) * invdx2 +
                               (b3R - b3L) * invdx3;
-
             if (!goes_to_zero(divb)) {
                 printf("========================================\n");
                 printf("DIV.B: %.2e\n", divb);
                 printf("========================================\n");
                 printf(
-                    "Divergence of B is not zero at: %" PRIu64 ", %" PRIu64
-                    ", %" PRIu64 "!\n",
+                    "[%" PRIu64 "] Divergence of B is not zero at: %" PRIu64
+                    ", %" PRIu64 ", %" PRIu64 "!\n",
+                    global_iter,
                     ii,
                     jj,
                     kk
@@ -2182,13 +2404,13 @@ void RMHD<dim>::simulate(
     }
 
     // allocate space for face-centered magnetic fields
-    bstag1.resize(nxv * yag * zag);
-    bstag2.resize(xag * nyv * zag);
-    bstag3.resize(xag * yag * nzv);
+    bstag1.resize(nxv * nye * nze);
+    bstag2.resize(nxe * nyv * nze);
+    bstag3.resize(nxe * nye * nzv);
     // allocate space for Riemann fluxes
-    fri.resize(nxv * yag * zag);
-    gri.resize(xag * nyv * zag);
-    hri.resize(xag * yag * nzv);
+    fri.resize(nxv * nye * nze);
+    gri.resize(nxe * nyv * nze);
+    hri.resize(nxe * nye * nzv);
     // set the staggered magnetic fields to ics
     bstag1 = bfield[0];
     bstag2 = bfield[1];
@@ -2228,6 +2450,7 @@ void RMHD<dim>::simulate(
     // Simulate :)
     simbi::detail::logger::with_logger(*this, tend, [&] {
         riemann_fluxes();
+        set_flux_and_fields();
         advance();
         config_ghosts(this);
         cons2prim();

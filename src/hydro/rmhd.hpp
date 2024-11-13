@@ -80,6 +80,7 @@ namespace simbi {
         /* Methods */
         void cons2prim();
         DUAL primitive_t cons2prim(const conserved_t& cons) const;
+        void set_flux_and_fields();
         void riemann_fluxes();
         void advance();
 
@@ -177,7 +178,11 @@ namespace simbi {
             const luint ia,
             const luint ja,
             const luint ka,
-            const luint nhat
+            const luint nhat,
+            const real bw = 0.0,
+            const real be = 0.0,
+            const real bs = 0.0,
+            const real bn = 0.0
         ) const;
 
         void offload()
