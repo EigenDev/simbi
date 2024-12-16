@@ -65,6 +65,9 @@ namespace generic_hydro {
             return 3 + dim;
         }();
         real vals[nmem];
+        // velocity components from Mignone & delZanna 2021
+        real aL, aR, dL, dR, vjL, vjR, vkL, vkR, lamL, lamR;
+
         // Default Destructor
         ~anyHydro() = default;
 
@@ -101,6 +104,16 @@ namespace generic_hydro {
             for (luint i = 0; i < nmem; i++) {
                 vals[i] = other.vals[i];
             }
+            aL   = other.aL;
+            aR   = other.aR;
+            dL   = other.dL;
+            dR   = other.dR;
+            vjL  = other.vjL;
+            vjR  = other.vjR;
+            vkL  = other.vkL;
+            vkR  = other.vkR;
+            lamL = other.lamL;
+            lamR = other.lamR;
             return *self();
         }
 
@@ -169,6 +182,16 @@ namespace generic_hydro {
             return *self();
         }
 
+        DUAL constexpr real vLtrans(const luint perm) const
+        {
+            return perm == 1 ? vjL : vkL;
+        }
+
+        DUAL constexpr real vRtrans(const luint perm) const
+        {
+            return perm == 1 ? vjR : vkR;
+        }
+
       private:
         DUAL Derived* self() { return static_cast<Derived*>(this); }
     };
@@ -227,11 +250,6 @@ struct mag_four_vec {
 template <int dim, Regime R>
 struct anyConserved : generic_hydro::anyHydro<dim, anyConserved<dim, R>, R> {
     using generic_hydro::anyHydro<dim, anyConserved<dim, R>, R>::anyHydro;
-
-    // velocity components from Mignone & delZanna 2021
-    real aL, aR, dL, dR, vj, vk;
-
-    DUAL real vtran(const luint perm) const { return perm == 1 ? vj : vk; }
 
     // Define accessors for the conserved variables
     DUAL real& dens() { return this->vals[0]; }
