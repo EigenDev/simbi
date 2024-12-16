@@ -85,7 +85,7 @@ DUAL real RMHD<dim>::calc_edge_emf(
     const auto nwp = prims[nwidx];
     const auto nep = prims[neidx];
 
-    // get mean efields
+    // get mean e-fields
     const real esw        = swp.ecomponent(nhat);
     const real ese        = sep.ecomponent(nhat);
     const real enw        = nwp.ecomponent(nhat);
@@ -165,20 +165,32 @@ DUAL real RMHD<dim>::calc_edge_emf(
             const auto as = static_cast<real>(0.5) * (fw.aL + fe.aL);
             const auto an = static_cast<real>(0.5) * (fw.aR + fe.aR);
 
-            // average velocity coefficients
-            const auto nt1 = nhat % 2 == 0 ? 1 : 2;
-            const auto nt2 = nhat % 2 == 0 ? 2 : 1;
-            const auto vw  = fw.vtran(nt1);
-            const auto ve  = fe.vtran(nt1);
-            const auto vn  = fn.vtran(nt2);
-            const auto vs  = fs.vtran(nt2);
+            // average velocity coefficients, just after Eq. (27)
+            const auto lPv = my_max(fn.lamR, fs.lamR);
+            const auto lMv = my_min(fn.lamL, fs.lamL);
+            const auto lPh = my_max(fe.lamR, fw.lamR);
+            const auto lMh = my_min(fe.lamL, fw.lamL);
 
-            const auto term1 = -(aw * vw * bw) - (ae * ve * be);
-            const auto term2 = +(an * vn * bn) + (as * vs * bs);
-            const auto term3 = +(de * be) - (dw * bw);
-            const auto term4 = +(ds * bs) - (dn * bn);
+            // compute transverse velocities according to Eq. (29)
+            const auto nj  = nhat % 2 == 0 ? 1 : 2;
+            const auto nk  = nhat % 2 == 0 ? 2 : 1;
+            const auto aph = lPh / (lPh - lMh);
+            const auto amh = lMh / (lPh - lMh);
+            const auto apv = lPv / (lPv - lMv);
+            const auto amv = lMv / (lPv - lMv);
+            const auto vw  = aph * fw.vLtrans(nj) - amh * fw.vRtrans(nj);
+            const auto ve  = aph * fe.vLtrans(nj) - amh * fe.vRtrans(nj);
+            const auto vn  = apv * fn.vLtrans(nk) - amv * fn.vRtrans(nk);
+            const auto vs  = apv * fs.vLtrans(nk) - amv * fs.vRtrans(nk);
 
-            return term1 + term2 + term3 + term4;
+            const auto sign = nhat == 2 ? -1.0 : 1.0;
+            const auto f_we = +(aw * vw * bw) + (ae * ve * be);
+            const auto f_ns = +(an * vn * bn) + (as * vs * bs);
+            // dissipation terms
+            const auto phi_we = +(dw * bw) - (de * be);
+            const auto phi_ns = +(dn * bn) - (ds * bs);
+
+            return sign * (f_ns - phi_ns) - sign * (f_we + phi_we);
         }
         default:   // ALPHA, Eq. (49)
         {
@@ -1162,21 +1174,42 @@ DUAL RMHD<dim>::conserved_t RMHD<dim>::calc_hlle_flux(
     }
 
     if constexpr (comp_ct_type == CTTYPE::MdZ) {
-        // set the wave coefficients
-        const auto afac = 1.0 / (aRp - aLm);
-        net_flux.aL     = +aRp * afac;
-        net_flux.aR     = -aLm * afac;
-        net_flux.dL     = -aRp * aLm * afac;
-        net_flux.dR     = net_flux.dL;
-
-        const auto nj  = next_perm(nhat, 1);
-        const auto nk  = next_perm(nhat, 2);
-        const auto vLj = prL.vcomponent(nj);
-        const auto vLk = prL.vcomponent(nk);
-        const auto vRj = prR.vcomponent(nj);
-        const auto vRk = prR.vcomponent(nk);
-        net_flux.vj    = (aRp * vLj - aLm * vRj) * afac;
-        net_flux.vk    = (aRp * vLk - aLm * vRk) * afac;
+        const auto nj = next_perm(nhat, 1);
+        const auto nk = next_perm(nhat, 2);
+        net_flux.lamR = aRp;
+        net_flux.lamL = aLm;
+        if (vface <= aLm) {
+            net_flux.aL  = 1.0;
+            net_flux.aR  = 0.0;
+            net_flux.dL  = 0.0;
+            net_flux.dR  = 0.0;
+            net_flux.vjL = prL.vcomponent(nj);
+            net_flux.vkL = prL.vcomponent(nk);
+            net_flux.vjR = 0.0;
+            net_flux.vkR = 0.0;
+        }
+        else if (vface >= aRp) {
+            net_flux.aL  = 0.0;
+            net_flux.aR  = 1.0;
+            net_flux.dL  = 0.0;
+            net_flux.dR  = 0.0;
+            net_flux.vjL = 0.0;
+            net_flux.vkL = 0.0;
+            net_flux.vjR = prR.vcomponent(nj);
+            net_flux.vkR = prR.vcomponent(nk);
+        }
+        else {
+            // set the wave coefficients
+            const auto afac = 1.0 / (aRp - aLm);
+            net_flux.aL     = +aRp * afac;
+            net_flux.aR     = -aLm * afac;
+            net_flux.dL     = -aRp * aLm * afac;
+            net_flux.dR     = net_flux.dL;
+            net_flux.vjL    = prL.vcomponent(nj);
+            net_flux.vkL    = prL.vcomponent(nk);
+            net_flux.vjR    = prR.vcomponent(nj);
+            net_flux.vkR    = prR.vcomponent(nk);
+        }
     }
     else {
         net_flux.calc_electric_field(nhat);
@@ -1192,6 +1225,8 @@ DUAL RMHD<dim>::conserved_t RMHD<dim>::calc_hllc_flux(
     const real vface
 ) const
 {
+    real aS, chiL, chiR;
+    bool bfn      = false;
     const auto uL = prims2cons(prL);
     const auto uR = prims2cons(prR);
     const auto fL = prims2flux(prL, nhat);
@@ -1234,7 +1269,7 @@ DUAL RMHD<dim>::conserved_t RMHD<dim>::calc_hllc_flux(
         const real bp2 = hll_state.bcomponent(np2);
 
         // check if normal magnetic field is approaching zero
-        const auto bfn = goes_to_zero(bn);
+        bfn = goes_to_zero(bn);
 
         const real uhlld = hll_state.dens();
         const real uhllm = hll_state.momentum(nhat);
@@ -1263,13 +1298,18 @@ DUAL RMHD<dim>::conserved_t RMHD<dim>::calc_hllc_flux(
             );
         }();
         const real quad  = -0.5 * (b + sgn(b) * std::sqrt(b * b - 4.0 * a * c));
-        const auto aS    = c / quad;
+        aS               = c / quad;
         const real vp1   = bfn ? 0.0 : (bp1 * aS - fpb1) / bn;   // Eq. (38)
         const real vp2   = bfn ? 0.0 : (bp2 * aS - fpb2) / bn;   // Eq. (38)
         const real invg2 = (1.0 - (aS * aS + vp1 * vp1 + vp2 * vp2));
         const real vsdB  = (aS * bn + vp1 * bp1 + vp2 * bp2);
         const real pS    = -aS * (fhlle - bn * vsdB) + fhllm + bn * bn * invg2;
 
+        // set the chi values if using MdZ21 CT
+        if constexpr (comp_ct_type == CTTYPE::MdZ) {
+            chiL = -(prL.vcomponent(nhat) - aS) / (aLm - aS);
+            chiR = -(prR.vcomponent(nhat) - aS) / (aRp - aS);
+        }
         const auto on_left = vface < aS;
         const auto u       = on_left ? uL : uR;
         const auto f       = on_left ? fL : fR;
@@ -1318,7 +1358,61 @@ DUAL RMHD<dim>::conserved_t RMHD<dim>::calc_hllc_flux(
     else {
         net_flux.chi() = prL.chi() * net_flux.dens();
     }
-    net_flux.calc_electric_field(nhat);
+
+    if constexpr (comp_ct_type == CTTYPE::MdZ) {
+        const auto nj = next_perm(nhat, 1);
+        const auto nk = next_perm(nhat, 2);
+        net_flux.lamR = aRp;
+        net_flux.lamL = aLm;
+        if (vface <= aLm) {
+            net_flux.aL  = 1.0;
+            net_flux.aR  = 0.0;
+            net_flux.dL  = 0.0;
+            net_flux.dR  = 0.0;
+            net_flux.vjL = prL.vcomponent(nj);
+            net_flux.vkL = prL.vcomponent(nk);
+            net_flux.vjR = 0.0;
+            net_flux.vkR = 0.0;
+        }
+        else if (vface >= aRp) {
+            net_flux.aL  = 0.0;
+            net_flux.aR  = 1.0;
+            net_flux.dL  = 0.0;
+            net_flux.dR  = 0.0;
+            net_flux.vjL = 0.0;
+            net_flux.vkL = 0.0;
+            net_flux.vjR = prR.vcomponent(nj);
+            net_flux.vkR = prR.vcomponent(nk);
+        }
+        else {
+            // if Bn is zero, then the HLLC solver admits a jummp in the
+            // transverse magnetic field components across the middle wave.
+            // If not, HLLC has the same flux and diffusion coefficients as
+            // the HLL solver.
+            if (bfn) {
+                constexpr auto half = static_cast<real>(0.5);
+                const auto aaS      = std::abs(aS);
+                net_flux.aL         = half;
+                net_flux.aR         = half;
+                net_flux.dL = half * (aaS - std::abs(aLm)) * chiL + half * aaS;
+                net_flux.dR = half * (aaS - std::abs(aRp)) * chiR + half * aaS;
+            }
+            else {
+                const auto afac = 1.0 / (aRp - aLm);
+                net_flux.aL     = +aRp * afac;
+                net_flux.aR     = -aLm * afac;
+                net_flux.dL     = -aRp * aLm * afac;
+                net_flux.dR     = net_flux.dL;
+            }
+            net_flux.vjL = prL.vcomponent(nj);
+            net_flux.vkL = prL.vcomponent(nk);
+            net_flux.vjR = prR.vcomponent(nj);
+            net_flux.vkR = prR.vcomponent(nk);
+        }
+    }
+    else {
+        net_flux.calc_electric_field(nhat);
+    }
     return net_flux;
 };
 
@@ -1512,6 +1606,8 @@ DUAL RMHD<dim>::conserved_t RMHD<dim>::calc_hlld_flux(
     const real vface
 ) const
 {
+    bool degenerate = false;
+    real chiL, chiR, laL, laR, veeL, veeR, veeS;
     const auto uL = prims2cons(prL);
     const auto uR = prims2cons(prR);
     const auto fL = prims2flux(prL, nhat);
@@ -1621,11 +1717,17 @@ DUAL RMHD<dim>::conserved_t RMHD<dim>::calc_hlld_flux(
         }
 
         // speed of the contact wave
-        const real vnc = prC.vcomponent(nhat);
+        const auto vnc = prC.vcomponent(nhat);
 
         // Alfven speeds
-        const real laL = prAL.alfven();
-        const real laR = prAR.alfven();
+        laL = prAL.alfven();
+        laR = prAR.alfven();
+
+        if constexpr (comp_ct_type == CTTYPE::MdZ) {
+            // Eq. (46)
+            degenerate =
+                std::abs(laR - laL) < global::epsilon * std::abs(aRp - aLm);
+        }
 
         // do compound inequalities in two steps
         const auto on_left =
@@ -1655,6 +1757,18 @@ DUAL RMHD<dim>::conserved_t RMHD<dim>::calc_hlld_flux(
         const real mn  = (ea + p) * vna - vdba * bn;
         const real mp1 = (ea + p) * vp1 - vdba * bp1;
         const real mp2 = (ea + p) * vp2 - vdba * bp2;
+
+        if constexpr (comp_ct_type == CTTYPE::MdZ) {
+            const auto xL = (prL.vcomponent(nhat) - vnc) * (aLm - vnc) /
+                            ((laL - aLm) * (laL + aLm - 2.0 * vnc));
+            const auto xR = (prR.vcomponent(nhat) - vnc) * (aRp - vnc) /
+                            ((laR - aRp) * (laR + aRp - 2.0 * vnc));
+            chiL = (laL - aLm) * xL;
+            chiR = (laR - aRp) * xR;
+            veeL = (laL + aLm) / (std::abs(laL) + std::abs(aLm));
+            veeR = (laR + aRp) / (std::abs(laR) + std::abs(aRp));
+            veeS = (laR + laL) / (std::abs(laR) + std::abs(laL));
+        }
 
         conserved_t ua;
         ua.dens()           = da;
@@ -1707,7 +1821,61 @@ DUAL RMHD<dim>::conserved_t RMHD<dim>::calc_hlld_flux(
     else {
         net_flux.chi() = prL.chi() * net_flux.dens();
     }
-    net_flux.calc_electric_field(nhat);
+
+    if constexpr (comp_ct_type == CTTYPE::MdZ) {
+        const auto nj       = next_perm(nhat, 1);
+        const auto nk       = next_perm(nhat, 2);
+        constexpr auto half = static_cast<real>(0.5);
+        net_flux.lamR       = aRp;
+        net_flux.lamL       = aLm;
+        if (vface <= aLm) {
+            net_flux.aL  = 1.0;
+            net_flux.aR  = 0.0;
+            net_flux.dL  = 0.0;
+            net_flux.dR  = 0.0;
+            net_flux.vjL = prL.vcomponent(nj);
+            net_flux.vkL = prL.vcomponent(nk);
+            net_flux.vjR = 0.0;
+            net_flux.vkR = 0.0;
+        }
+        else if (vface >= aRp) {
+            net_flux.aL  = 0.0;
+            net_flux.aR  = 1.0;
+            net_flux.dL  = 0.0;
+            net_flux.dR  = 0.0;
+            net_flux.vjL = 0.0;
+            net_flux.vkL = 0.0;
+            net_flux.vjR = prR.vcomponent(nj);
+            net_flux.vkR = prR.vcomponent(nk);
+        }
+        else {
+            // if Bn is zero, then the HLLC solver admits a jummp in the
+            // transverse magnetic field components across the middle wave.
+            // If not, HLLC has the same flux and diffusion coefficients as
+            // the HLL solver.
+            if (degenerate) {
+                net_flux.aL = half;
+                net_flux.aR = half;
+                net_flux.dL = half * veeL * chiL + half * std::abs(laL);
+                net_flux.dR = half * veeR * chiR + half * std::abs(laR);
+            }
+            else {
+                net_flux.aL = half * (1.0 + veeS);
+                net_flux.aR = half * (1.0 - veeS);
+                net_flux.dL = half * (veeL - veeS) * chiL +
+                              half * (std::abs(laL) - veeS * laL);
+                net_flux.dR = half * (veeR - veeS) * chiR +
+                              half * (std::abs(laR) - veeS * laR);
+            }
+            net_flux.vjL = prL.vcomponent(nj);
+            net_flux.vkL = prL.vcomponent(nk);
+            net_flux.vjR = prR.vcomponent(nj);
+            net_flux.vkR = prR.vcomponent(nk);
+        }
+    }
+    else {
+        net_flux.calc_electric_field(nhat);
+    }
     return net_flux;
 };
 
@@ -2287,7 +2455,7 @@ void RMHD<dim>::advance()
                     nidx = idx3(iaf, jj + east, qn, nxe, nyv, nze);
                     sidx = idx3(iaf, jj + east, qs, nxe, nyv, nze);
                     eidx = idx3(iaf, qe, kk + north, nxe, nye, nzv);
-                    widx = idx3(iaf, qe, kk + north, nxe, nye, nzv);
+                    widx = idx3(iaf, qw, kk + north, nxe, nye, nzv);
 
                     e1[q] = calc_edge_emf<Plane::JK, corner>(
                         hri[widx],
