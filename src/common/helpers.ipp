@@ -77,6 +77,62 @@ namespace simbi {
             write_hdf5(data_directory, filename, sim_state);
         }
 
+        // Helper function to apply boundary conditions
+        void apply_boundary_conditions(
+            auto& cons,
+            auto idx,
+            auto real_idx,
+            auto wrap_idx,
+            auto bc,
+            auto momentum_idx
+        )
+        {
+            switch (bc) {
+                case BoundaryCondition::PERIODIC:
+                    cons[idx] = cons[wrap_idx];
+                    break;
+                case BoundaryCondition::REFLECTING:
+                    cons[idx] = cons[real_idx];
+                    if (momentum_idx != -1) {
+                        cons[idx].momentum(momentum_idx) *= -1;
+                    }
+                    break;
+                default:   // OUTFLOW
+                    cons[idx] = cons[real_idx];
+                    break;
+            }
+        }
+
+        // Helper function to handle corners
+        void handle_corner(
+            auto& cons,
+            auto idx,
+            auto real_idx,
+            auto wrap_idx,
+            auto bc1,
+            auto bc2,
+            auto momentum_idx1,
+            auto momentum_idx2
+        )
+        {
+            apply_boundary_conditions(
+                cons,
+                idx,
+                real_idx,
+                wrap_idx,
+                bc1,
+                momentum_idx1
+            );
+            apply_boundary_conditions(
+                cons,
+                idx,
+                real_idx,
+                wrap_idx,
+                bc2,
+                momentum_idx2
+            );
+        }
+
         template <typename sim_state_t>
         void config_ghosts1D(sim_state_t* sim_state)
         {

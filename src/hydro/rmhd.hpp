@@ -27,6 +27,7 @@
 #include "common/mesh.hpp"            // for Mesh
 #include "util/exec_policy.hpp"       // for ExecutionPolicy
 #include "util/ndarray.hpp"           // for ndarray
+#include <dlfcn.h>                    // for dlopen, dlclose, dlsym
 #include <functional>                 // for function
 #include <optional>                   // for optional
 #include <type_traits>                // for conditional_t
@@ -51,6 +52,35 @@ namespace simbi {
         using mag_fourvec_t = mag_four_vec<dim>;
         using function_t    = typename helpers::real_func<dim>::type;
 
+        // hydrodynamic source functions
+        function_t dens_source;
+        function_t mom1_source;
+        function_t mom2_source;
+        function_t mom3_source;
+        function_t ener_source;
+        function_t b1_source;
+        function_t b2_source;
+        function_t b3_source;
+        function_t chi_source;
+
+        // gravity source functions
+        function_t g1_func;
+        function_t g2_func;
+        function_t g3_func;
+
+        // boundary source functions
+        function_t bx1_inner_func;
+        function_t bx1_outer_func;
+        function_t bx2_inner_func;
+        function_t bx2_outer_func;
+        function_t bx3_inner_func;
+        function_t bx3_outer_func;
+
+        // library handles
+        void* hsource_handle = nullptr;
+        void* gsource_handle = nullptr;
+        void* bsource_handle = nullptr;
+
         template <typename T>
         using RiemannFuncPointer = conserved_t (T::*)(
             const primitive_t&,
@@ -60,9 +90,9 @@ namespace simbi {
         ) const;
         RiemannFuncPointer<RMHD<dim>> riemann_solve;
 
-        ndarray<function_t> bsources;   // boundary sources
-        ndarray<function_t> hsources;   // hydro sources
-        ndarray<function_t> gsources;   // gravity sources
+        std::vector<function_t> bsources;   // boundary sources
+        std::vector<function_t> hsources;   // hydro sources
+        std::vector<function_t> gsources;   // gravity sources
 
         /* Shared Data Members */
         ndarray<primitive_t> prims;
@@ -117,6 +147,16 @@ namespace simbi {
             const primitive_t& prR,
             const luint nhat,
             const real vface
+        ) const;
+
+        DUAL real div_b(
+            const auto b1L,
+            const auto b1R,
+            const auto b2L,
+            const auto b2R,
+            const auto b3L,
+            const auto b3R,
+            const auto& cell
         ) const;
 
         DUAL void set_riemann_solver()
@@ -217,31 +257,176 @@ namespace simbi {
         DUAL conserved_t
         gravity_sources(const primitive_t& prims, const auto& cell) const;
 
-        void check_sources()
+        void load_functions()
         {
-            // check if ~all~ boundary sources have been set.
-            // if the user forgot one, the code will run with
-            // and outflow outer boundary condition
-            this->all_outer_bounds = std::all_of(
-                this->bsources.begin(),
-                this->bsources.end(),
-                [](const auto& q) { return q != nullptr; }
-            );
+            // Load the symbol based on the dimension
+            using f2arg = real (*)(real, real);
+            using f3arg = real (*)(real, real, real);
+            using f4arg = real (*)(real, real, real, real);
 
-            this->null_gravity = std::all_of(
-                this->gsources.begin(),
-                this->gsources.end(),
-                [](const auto& q) { return q == nullptr; }
-            );
+            //=================================================================
+            // Check if the hydro source library is set
+            //=================================================================
+            null_sources = true;
+            if (!hydro_source_lib.empty()) {
+                // Load the shared library
+                hsource_handle = dlopen(hydro_source_lib.c_str(), RTLD_LAZY);
+                if (!hsource_handle) {
+                    std::cerr << "Cannot open library: " << dlerror() << '\n';
+                    return;
+                }
 
-            this->null_sources = std::all_of(
-                this->hsources.begin(),
-                this->hsources.end(),
-                [](const auto& q) { return q == nullptr; }
-            );
+                // Clear any existing error
+                dlerror();
+
+                const std::vector<std::pair<const char*, function_t&>> symbols =
+                    {{"dens_source", dens_source},
+                     {"mom1_source", mom1_source},
+                     {"mom2_source", mom2_source},
+                     {"mom3_source", mom3_source},
+                     {"ener_source", ener_source},
+                     {"b1_source", b1_source},
+                     {"b2_source", b2_source},
+                     {"b3_source", b3_source},
+                     {"chi_source", chi_source}};
+
+                bool success = true;
+                for (const auto& [symbol, func] : symbols) {
+                    void* source            = dlsym(hsource_handle, symbol);
+                    const char* dlsym_error = dlerror();
+                    // if can't load symbol, print error and
+                    // set null_sources to true
+                    if (dlsym_error) {
+                        std::cerr << "Cannot load symbol '" << symbol
+                                  << "': " << dlsym_error << '\n';
+                        success = false;
+                        dlclose(hsource_handle);
+                        break;
+                    }
+
+                    // Assign the function pointer based on the dimension
+                    if constexpr (dim == 1) {
+                        func = reinterpret_cast<f2arg>(source);
+                    }
+                    else if constexpr (dim == 2) {
+                        func = reinterpret_cast<f3arg>(source);
+                    }
+                    else if constexpr (dim == 3) {
+                        func = reinterpret_cast<f4arg>(source);
+                    }
+                }
+                if (success) {
+                    null_sources = false;
+                }
+            }
+
+            //=================================================================
+            // Check if the gravity source library is set
+            //=================================================================
+            null_gravity = true;
+            if (!gravity_source_lib.empty()) {
+                gsource_handle = dlopen(gravity_source_lib.c_str(), RTLD_LAZY);
+                if (!gsource_handle) {
+                    std::cerr << "Cannot open library: " << dlerror() << '\n';
+                    return;
+                }
+
+                // Clear any existing error
+                dlerror();
+
+                // Load the symbol based on the dimension
+                const std::vector<std::pair<const char*, function_t&>>
+                    g_symbols = {
+                      {"g1_func", g1_func},
+                      {"g2_func", g2_func},
+                      {"g3_func", g3_func}
+                    };
+
+                bool success = true;
+                for (const auto& [symbol, func] : g_symbols) {
+                    void* source            = dlsym(gsource_handle, symbol);
+                    const char* dlsym_error = dlerror();
+                    // if can't load symbol, print error
+                    if (dlsym_error) {
+                        std::cerr << "Cannot load symbol '" << symbol
+                                  << "': " << dlsym_error << '\n';
+                        success = false;
+                        dlclose(gsource_handle);
+                        break;
+                    }
+
+                    // Assign the function pointer based on the dimension
+                    if constexpr (dim == 1) {
+                        func = reinterpret_cast<f2arg>(source);
+                    }
+                    else if constexpr (dim == 2) {
+                        func = reinterpret_cast<f3arg>(source);
+                    }
+                    else if constexpr (dim == 3) {
+                        func = reinterpret_cast<f4arg>(source);
+                    }
+                }
+                if (success) {
+                    null_gravity = false;
+                }
+            }
+
+            //=================================================================
+            // Check if the boundary source library is set
+            //=================================================================
+            if (!boundary_source_lib.empty()) {
+                bsource_handle = dlopen(boundary_source_lib.c_str(), RTLD_LAZY);
+                if (!bsource_handle) {
+                    std::cerr << "Cannot open library: " << dlerror() << '\n';
+                    return;
+                }
+
+                // Clear any existing error
+                dlerror();
+
+                // Load the symbol based on the dimension
+                const std::vector<std::pair<const char*, function_t&>>
+                    b_symbols = {
+                      {"bx1_inner_func", bx1_inner_func},
+                      {"bx1_outer_func", bx1_outer_func},
+                      {"bx2_inner_func", bx2_inner_func},
+                      {"bx2_outer_func", bx2_outer_func},
+                      {"bx3_inner_func", bx3_inner_func},
+                      {"bx3_outer_func", bx3_outer_func}
+                    };
+
+                for (const auto& [symbol, func] : b_symbols) {
+                    void* source            = dlsym(bsource_handle, symbol);
+                    const char* dlsym_error = dlerror();
+                    // if can't load symbol, print error
+                    if (dlsym_error) {
+                        // it is only unsuccessful if the boundary
+                        // condition is set to dynamic
+                        for (int i = 0; i < 6; ++i) {
+                            if (symbol == b_symbols[i].first &&
+                                bcs[i] == BoundaryCondition::DYNAMIC) {
+                                std::cerr << "Cannot load symbol '" << symbol
+                                          << "': " << dlsym_error << '\n';
+                                bcs[i] = BoundaryCondition::OUTFLOW;
+                                dlclose(bsource_handle);
+                            }
+                        }
+
+                        // Assign the function pointer based on the dimension
+                        if constexpr (dim == 1) {
+                            func = reinterpret_cast<f2arg>(source);
+                        }
+                        else if constexpr (dim == 2) {
+                            func = reinterpret_cast<f3arg>(source);
+                        }
+                        else if constexpr (dim == 3) {
+                            func = reinterpret_cast<f4arg>(source);
+                        }
+                    }
+                }
+            }
         }
     };
-
 }   // namespace simbi
 
 template <>

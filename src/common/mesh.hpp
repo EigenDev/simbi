@@ -460,7 +460,7 @@ struct Mesh {
                         return x3l;
                     }
                     return my_min<real>(
-                        x3l + parent.derived().dx3 * (ii == 0 ? 0.5 : 1.0),
+                        x3l + parent.derived().dx3,
                         parent.derived().x3max
                     );
                 }

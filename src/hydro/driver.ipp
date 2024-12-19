@@ -28,17 +28,13 @@ Driver::Driver() = default;
 
 Driver::~Driver() = default;
 
-template <typename Func>
 void Driver::run(
     std::vector<std::vector<real>> state,
     const int dim,
     const std::string regime,
     const InitialConditions& init_cond,
     std::function<real(real)> const& scale_factor,
-    std::function<real(real)> const& scale_factor_derivative,
-    Func const& bsources,
-    Func const& hsources,
-    Func const& gsources
+    std::function<real(real)> const& scale_factor_derivative
 )
 {
     if (dim == 1) {
@@ -48,9 +44,9 @@ void Driver::run(
                 init_cond,
                 scale_factor,
                 scale_factor_derivative,
-                optional_vec<1>(bsources),
-                optional_vec<1>(hsources),
-                optional_vec<1>(gsources)
+                {std::nullopt},
+                {std::nullopt},
+                {std::nullopt}
             );
         }
         else if (regime == "srhd") {
@@ -59,9 +55,9 @@ void Driver::run(
                 init_cond,
                 scale_factor,
                 scale_factor_derivative,
-                optional_vec<1>(bsources),
-                optional_vec<1>(hsources),
-                optional_vec<1>(gsources)
+                {std::nullopt},
+                {std::nullopt},
+                {std::nullopt}
             );
         }
         else {
@@ -70,9 +66,9 @@ void Driver::run(
                 init_cond,
                 scale_factor,
                 scale_factor_derivative,
-                optional_vec<1>(bsources),
-                optional_vec<1>(hsources),
-                optional_vec<1>(gsources)
+                {std::nullopt},
+                {std::nullopt},
+                {std::nullopt}
             );
         }
     }
@@ -83,9 +79,9 @@ void Driver::run(
                 init_cond,
                 scale_factor,
                 scale_factor_derivative,
-                optional_vec<2>(bsources),
-                optional_vec<2>(hsources),
-                optional_vec<2>(gsources)
+                {std::nullopt, std::nullopt},
+                {std::nullopt, std::nullopt},
+                {std::nullopt, std::nullopt}
             );
         }
         else if (regime == "srhd") {
@@ -94,9 +90,9 @@ void Driver::run(
                 init_cond,
                 scale_factor,
                 scale_factor_derivative,
-                optional_vec<2>(bsources),
-                optional_vec<2>(hsources),
-                optional_vec<2>(gsources)
+                {std::nullopt, std::nullopt},
+                {std::nullopt, std::nullopt},
+                {std::nullopt, std::nullopt}
             );
         }
         else {
@@ -105,9 +101,9 @@ void Driver::run(
                 init_cond,
                 scale_factor,
                 scale_factor_derivative,
-                optional_vec<2>(bsources),
-                optional_vec<2>(hsources),
-                optional_vec<2>(gsources)
+                {std::nullopt, std::nullopt},
+                {std::nullopt, std::nullopt},
+                {std::nullopt, std::nullopt}
             );
         }
     }
@@ -118,9 +114,9 @@ void Driver::run(
                 init_cond,
                 scale_factor,
                 scale_factor_derivative,
-                optional_vec<3>(bsources),
-                optional_vec<3>(hsources),
-                optional_vec<3>(gsources)
+                {std::nullopt, std::nullopt, std::nullopt},
+                {std::nullopt, std::nullopt, std::nullopt},
+                {std::nullopt, std::nullopt, std::nullopt}
             );
         }
         else if (regime == "srhd") {
@@ -129,9 +125,9 @@ void Driver::run(
                 init_cond,
                 scale_factor,
                 scale_factor_derivative,
-                optional_vec<3>(bsources),
-                optional_vec<3>(hsources),
-                optional_vec<3>(gsources)
+                {std::nullopt, std::nullopt, std::nullopt},
+                {std::nullopt, std::nullopt, std::nullopt},
+                {std::nullopt, std::nullopt, std::nullopt}
             );
         }
         else {
@@ -140,9 +136,9 @@ void Driver::run(
                 init_cond,
                 scale_factor,
                 scale_factor_derivative,
-                optional_vec<3>(bsources),
-                optional_vec<3>(hsources),
-                optional_vec<3>(gsources)
+                {std::nullopt, std::nullopt, std::nullopt},
+                {std::nullopt, std::nullopt, std::nullopt},
+                {std::nullopt, std::nullopt, std::nullopt}
             );
         }
     }

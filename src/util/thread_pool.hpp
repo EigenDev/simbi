@@ -64,6 +64,9 @@ namespace simbi {
             {
                 {
                     std::unique_lock<std::mutex> lock(queue_mutex);
+                    if (should_terminate) {
+                        return;
+                    }
                     jobs.push(job);
                 }
                 cv_task.notify_one();
@@ -96,7 +99,7 @@ namespace simbi {
                 };
                 step();
 
-                for ([[gnu::unused]] auto& worker : threads) {
+                for ([[maybe_unused]] auto& worker : threads) {
                     queueUp([block_start, block_end, func] {
                         for (index_type q = block_start; q < block_end; q++) {
                             func(q);
@@ -127,6 +130,11 @@ namespace simbi {
             ThreadPool(const unsigned int nthreads)
                 : nthreads(nthreads), should_terminate(false), busy(0)
             {
+                if (nthreads == 0) {
+                    throw std::invalid_argument(
+                        "Number of threads must be greater than zero."
+                    );
+                }
                 threads.reserve(nthreads);
                 for (unsigned int i = 0; i < nthreads; i++) {
                     threads.emplace_back(
@@ -164,12 +172,17 @@ namespace simbi {
                         }
                         job = std::move(jobs.front());
                         jobs.pop();
-                        ++busy;
+                        busy.fetch_add(1, std::memory_order_relaxed);
                     }
-                    job();
+                    try {
+                        job();
+                    }
+                    catch (...) {
+                        // Handle exceptions if necessary
+                    }
                     {
                         std::unique_lock<std::mutex> latch(queue_mutex);
-                        --busy;
+                        busy.fetch_sub(1, std::memory_order_relaxed);
                         cv_finished.notify_one();
                     }
                 }
@@ -179,7 +192,8 @@ namespace simbi {
             {
                 std::unique_lock<std::mutex> latch(queue_mutex);
                 cv_finished.wait(latch, [this] {
-                    return jobs.empty() && busy == 0;
+                    return jobs.empty() &&
+                           busy.load(std::memory_order_relaxed) == 0;
                 });
             }
 
@@ -190,7 +204,7 @@ namespace simbi {
             std::condition_variable cv_finished;
             std::vector<std_thread> threads;
             std::queue<std::function<void()>> jobs;
-            unsigned int busy;
+            std::atomic<unsigned int> busy;
         };
 
         inline auto get_nthreads = [] {
@@ -212,8 +226,11 @@ namespace simbi {
         template <typename T>
         T fetch_minimum(std::atomic<T>& a, T val)
         {
-            T old = a;
-            while (old > val && !a.compare_exchange_weak(old, val)) {
+            T old = a.load(std::memory_order_relaxed);
+            while (old > val &&
+                   !a.compare_exchange_weak(old, val, std::memory_order_relaxed)
+            ) {
+                // Add a backoff strategy if necessary
             }
             return old;
         }
@@ -221,8 +238,12 @@ namespace simbi {
         template <typename T>
         void update_minimum(std::atomic<T>& a, T const& value) noexcept
         {
-            T old = a;
-            while (old > value && !a.compare_exchange_weak(old, value)) {
+            T old = a.load(std::memory_order_relaxed);
+            while (
+                old > value &&
+                !a.compare_exchange_weak(old, value, std::memory_order_relaxed)
+            ) {
+                // Add a backoff strategy if necessary
             }
         }
     }   // namespace pooling

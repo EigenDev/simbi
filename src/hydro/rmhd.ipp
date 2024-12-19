@@ -25,7 +25,22 @@ RMHD<dim>::RMHD(
 
 // Destructor
 template <int dim>
-RMHD<dim>::~RMHD() = default;
+RMHD<dim>::~RMHD()
+{
+    if (hsource_handle) {
+        dlclose(hsource_handle);
+    }
+
+    if (gsource_handle) {
+        dlclose(gsource_handle);
+    }
+
+    if (bsource_handle) {
+        dlclose(bsource_handle);
+    }
+
+    // Show the cursor
+};
 
 /**
  * @brief           implement Gardiner & Stone 2005
@@ -190,7 +205,7 @@ DUAL real RMHD<dim>::calc_edge_emf(
             const auto phi_we = +(dw * bw) - (de * be);
             const auto phi_ns = +(dn * bn) - (ds * bs);
 
-            return sign * (f_ns - phi_ns) - sign * (f_we + phi_we);
+            return sign * ((f_ns - phi_ns) - (f_we + phi_we));
         }
         default:   // ALPHA, Eq. (49)
         {
@@ -303,12 +318,12 @@ DUAL real RMHD<dim>::curl_e(
                 const real dph = cell.x3R() - cell.x3L();
                 if (side == 0) {
                     return ((ek[IJ::NW] * std::sin(tr) -
-                             ek[IJ::SW] * std::sin(tr)) /
+                             ek[IJ::SW] * std::sin(tl)) /
                                 dth -
                             (ej[IK::NW] - ej[IK::SW]) / dph) /
                            (cell.x1mean * std::sin(cell.x2mean));
                 }
-                return ((ek[IJ::NE] * std::sin(tr) - ek[IJ::SE] * std::sin(tr)
+                return ((ek[IJ::NE] * std::sin(tr) - ek[IJ::SE] * std::sin(tl)
                         ) / dth -
                         (ej[IK::NE] - ej[IK::SE]) / dph) /
                        (cell.x1mean * std::sin(cell.x2mean));
@@ -824,16 +839,15 @@ DUAL void RMHD<dim>::calc_max_wave_speeds(
         speeds[0]       = -speeds[3];
     }
     else if (bn2 < global::epsilon) {   // Eq. (58)
-        const real g2 = prims.lorentz_factor_squared();
-        const real vdbperp =
-            prims.vdotb() - prims.vcomponent(nhat) * prims.bcomponent(nhat);
-        const real q    = bmusq - cs2 * vdbperp * vdbperp;
-        const real a2   = rho * h * (cs2 + g2 * (1.0 - cs2)) + q;
-        const real a1   = -2.0 * rho * h * g2 * vn * (1.0 - cs2);
-        const real a0   = rho * h * (-cs2 + g2 * vn * vn * (1.0 - cs2)) - q;
-        const real disq = a1 * a1 - 4.0 * a2 * a0;
-        speeds[3]       = 0.5 * (-a1 + std::sqrt(disq)) / a2;
-        speeds[0]       = 0.5 * (-a1 - std::sqrt(disq)) / a2;
+        const real g2      = prims.lorentz_factor_squared();
+        const real vdbperp = prims.vdotb() - vn * bn;
+        const real q       = bmusq - cs2 * vdbperp * vdbperp;
+        const real a2      = rho * h * (cs2 + g2 * (1.0 - cs2)) + q;
+        const real a1      = -2.0 * rho * h * g2 * vn * (1.0 - cs2);
+        const real a0      = rho * h * (-cs2 + g2 * vn * vn * (1.0 - cs2)) - q;
+        const real disq    = a1 * a1 - 4.0 * a2 * a0;
+        speeds[3]          = 0.5 * (-a1 + std::sqrt(disq)) / a2;
+        speeds[0]          = 0.5 * (-a1 - std::sqrt(disq)) / a2;
     }
     else {   // solve the full quartic Eq. (56)
         const real bmu0 = bmu.zero;
@@ -1047,19 +1061,13 @@ void RMHD<dim>::adapt_dt()
             }
 
             case simbi::Geometry::SPHERICAL: {
-                const real x1l = cell.x1L();
-                const real x1r = cell.x1R();
-                const real dx1 = x1r - x1l;
+                const real rproj = cell.x1mean * std::sin(cell.x2mean);
 
-                const real x2l   = cell.x2L();
-                const real x2r   = cell.x2R();
-                const real rmean = cell.x1mean;
-                const real th    = 0.5 * (x2r + x2l);
-                const real rproj = rmean * std::sin(th);
-                cfl_dt           = std::min(
-                    {dx1 / (std::max(v1p, v1m)),
-                               rmean * dx2 / (std::max(v2p, v2m)),
-                               rproj * dx3 / (std::max(v3p, v3m))}
+                cfl_dt = std::min(
+                    {(cell.x1R() - cell.x1L()) / (std::max(v1p, v1m)),
+                     cell.x1mean * (cell.x2R() - cell.x2L()) /
+                         (std::max(v2p, v2m)),
+                     rproj * (cell.x3R() - cell.x3L()) / (std::max(v3p, v3m))}
                 );
                 break;
             }
@@ -1606,7 +1614,6 @@ DUAL RMHD<dim>::conserved_t RMHD<dim>::calc_hlld_flux(
     const real vface
 ) const
 {
-    bool degenerate = false;
     real chiL, chiR, laL, laR, veeL, veeR, veeS;
     const auto uL = prims2cons(prL);
     const auto uR = prims2cons(prR);
@@ -1711,11 +1718,6 @@ DUAL RMHD<dim>::conserved_t RMHD<dim>::calc_hlld_flux(
 
             return p1;
         }();
-
-        if (!hlld_success) {
-            return hll_flux - hll_state * vface;
-        }
-
         // speed of the contact wave
         const auto vnc = prC.vcomponent(nhat);
 
@@ -1725,8 +1727,26 @@ DUAL RMHD<dim>::conserved_t RMHD<dim>::calc_hlld_flux(
 
         if constexpr (comp_ct_type == CTTYPE::MdZ) {
             // Eq. (46)
-            degenerate =
-                std::abs(laR - laL) < global::epsilon * std::abs(aRp - aLm);
+            auto degenerate = std::abs(laR - laL) < 1.e-9 * std::abs(aRp - aLm);
+            const auto xL   = (prAL.vcomponent(nhat) - vnc) * (aLm - vnc) /
+                            ((laL - aLm) * (laL + aLm - 2.0 * vnc));
+            const auto xR = (prAR.vcomponent(nhat) - vnc) * (aRp - vnc) /
+                            ((laR - aRp) * (laR + aRp - 2.0 * vnc));
+            chiL = (laL - aLm) * xL;
+            chiR = (laR - aRp) * xR;
+            veeL = (laL + aLm) / (std::abs(laL) + std::abs(aLm));
+            veeR = (laR + aRp) / (std::abs(laR) + std::abs(aRp));
+            veeS = [=] {
+                if (degenerate) {
+                    return 0.0;
+                }
+                return (laR + laL) / (std::abs(laR) + std::abs(laL));
+                ;
+            }();
+        }
+
+        if (!hlld_success) {
+            return hll_flux - hll_state * vface;
         }
 
         // do compound inequalities in two steps
@@ -1757,18 +1777,6 @@ DUAL RMHD<dim>::conserved_t RMHD<dim>::calc_hlld_flux(
         const real mn  = (ea + p) * vna - vdba * bn;
         const real mp1 = (ea + p) * vp1 - vdba * bp1;
         const real mp2 = (ea + p) * vp2 - vdba * bp2;
-
-        if constexpr (comp_ct_type == CTTYPE::MdZ) {
-            const auto xL = (prL.vcomponent(nhat) - vnc) * (aLm - vnc) /
-                            ((laL - aLm) * (laL + aLm - 2.0 * vnc));
-            const auto xR = (prR.vcomponent(nhat) - vnc) * (aRp - vnc) /
-                            ((laR - aRp) * (laR + aRp - 2.0 * vnc));
-            chiL = (laL - aLm) * xL;
-            chiR = (laR - aRp) * xR;
-            veeL = (laL + aLm) / (std::abs(laL) + std::abs(aLm));
-            veeR = (laR + aRp) / (std::abs(laR) + std::abs(aRp));
-            veeS = (laR + laL) / (std::abs(laR) + std::abs(laL));
-        }
 
         conserved_t ua;
         ua.dens()           = da;
@@ -1828,50 +1836,43 @@ DUAL RMHD<dim>::conserved_t RMHD<dim>::calc_hlld_flux(
         constexpr auto half = static_cast<real>(0.5);
         net_flux.lamR       = aRp;
         net_flux.lamL       = aLm;
-        if (vface <= aLm) {
-            net_flux.aL  = 1.0;
-            net_flux.aR  = 0.0;
-            net_flux.dL  = 0.0;
-            net_flux.dR  = 0.0;
-            net_flux.vjL = prL.vcomponent(nj);
-            net_flux.vkL = prL.vcomponent(nk);
-            net_flux.vjR = 0.0;
-            net_flux.vkR = 0.0;
-        }
-        else if (vface >= aRp) {
-            net_flux.aL  = 0.0;
-            net_flux.aR  = 1.0;
-            net_flux.dL  = 0.0;
-            net_flux.dR  = 0.0;
-            net_flux.vjL = 0.0;
-            net_flux.vkL = 0.0;
-            net_flux.vjR = prR.vcomponent(nj);
-            net_flux.vkR = prR.vcomponent(nk);
-        }
-        else {
-            // if Bn is zero, then the HLLC solver admits a jummp in the
-            // transverse magnetic field components across the middle wave.
-            // If not, HLLC has the same flux and diffusion coefficients as
-            // the HLL solver.
-            if (degenerate) {
-                net_flux.aL = half;
-                net_flux.aR = half;
-                net_flux.dL = half * veeL * chiL + half * std::abs(laL);
-                net_flux.dR = half * veeR * chiR + half * std::abs(laR);
-            }
-            else {
-                net_flux.aL = half * (1.0 + veeS);
-                net_flux.aR = half * (1.0 - veeS);
-                net_flux.dL = half * (veeL - veeS) * chiL +
-                              half * (std::abs(laL) - veeS * laL);
-                net_flux.dR = half * (veeR - veeS) * chiR +
-                              half * (std::abs(laR) - veeS * laR);
-            }
-            net_flux.vjL = prL.vcomponent(nj);
-            net_flux.vkL = prL.vcomponent(nk);
-            net_flux.vjR = prR.vcomponent(nj);
-            net_flux.vkR = prR.vcomponent(nk);
-        }
+        // if (vface <= aLm) {
+        //     net_flux.aL  = 1.0;
+        //     net_flux.aR  = 0.0;
+        //     net_flux.dL  = 0.0;
+        //     net_flux.dR  = 0.0;
+        //     net_flux.vjL = prL.vcomponent(nj);
+        //     net_flux.vkL = prL.vcomponent(nk);
+        //     net_flux.vjR = 0.0;
+        //     net_flux.vkR = 0.0;
+        // }
+        // else if (vface >= aRp) {
+        //     net_flux.aL  = 0.0;
+        //     net_flux.aR  = 1.0;
+        //     net_flux.dL  = 0.0;
+        //     net_flux.dR  = 0.0;
+        //     net_flux.vjL = 0.0;
+        //     net_flux.vkL = 0.0;
+        //     net_flux.vjR = prR.vcomponent(nj);
+        //     net_flux.vkR = prR.vcomponent(nk);
+        // }
+        // else {
+        // if Bn is zero, then the HLLC solver admits a jummp in the
+        // transverse magnetic field components across the middle wave.
+        // If not, HLLC has the same flux and diffusion coefficients as
+        // the HLL solver.
+        net_flux.aL = half * (1.0 + veeS);
+        net_flux.aR = half * (1.0 - veeS);
+        net_flux.dL =
+            half * (veeL - veeS) * chiL + half * (std::abs(laL) - veeS * laL);
+        net_flux.dR =
+            half * (veeR - veeS) * chiR + half * (std::abs(laR) - veeS * laR);
+
+        net_flux.vjL = prL.vcomponent(nj);
+        net_flux.vkL = prL.vcomponent(nk);
+        net_flux.vjR = prR.vcomponent(nj);
+        net_flux.vkR = prR.vcomponent(nk);
+        // }
     }
     else {
         net_flux.calc_electric_field(nhat);
@@ -2223,6 +2224,50 @@ void RMHD<dim>::riemann_fluxes()
 //===================================================================================================================
 //                                           SOURCE TERMS
 //===================================================================================================================
+
+template <int dim>
+DUAL real RMHD<dim>::div_b(
+    const auto b1L,
+    const auto b1R,
+    const auto b2L,
+    const auto b2R,
+    const auto b3L,
+    const auto b3R,
+    const auto& cell
+) const
+{
+    // compute 3D divergence of magnetic field depending on geometry
+    switch (geometry) {
+        case Geometry::CARTESIAN:
+            return (b1R - b1L) * cell.idx1() + (b2R - b2L) * cell.idx2() +
+                   (b3R - b3L) * cell.idx3();
+        case Geometry::SPHERICAL: {
+            const auto r      = cell.x1mean;
+            const auto r2     = r * r;
+            const auto rrf    = cell.x1R() * cell.x1R();
+            const auto rlf    = cell.x1L() * cell.x1L();
+            const auto dr     = cell.x1R() - cell.x1L();
+            const auto dtheta = cell.x2R() - cell.x2L();
+            const auto dphi   = cell.x3R() - cell.x3L();
+            const auto sint   = std::sin(cell.x2mean);
+            const auto tlf    = std::sin(cell.x2L());
+            const auto trf    = std::sin(cell.x2R());
+            const auto rsint  = r * sint;
+            return (rrf * b1R - rlf * b1L) / (r2 * dr) +
+                   (trf * b2R - tlf * b2L) / (rsint * dtheta) +
+                   (b3R - b3L) / (rsint * dphi);
+        }
+        default: {   // Cylindrical
+            const auto r    = cell.x1mean;
+            const auto dr   = cell.x1R() - cell.x1L();
+            const auto dphi = cell.x2R() - cell.x2L();
+            const auto dz   = cell.x3R() - cell.x3L();
+            return (cell.x1R() * b1R - cell.x1L() * b1L) / (r * dr) +
+                   (b2R - b2L) / (dphi * r) + (b3R - b3L) / dz;
+        }
+    }
+}
+
 template <int dim>
 DUAL RMHD<dim>::conserved_t RMHD<dim>::hydro_sources(const auto& cell) const
 {
@@ -2235,21 +2280,44 @@ DUAL RMHD<dim>::conserved_t RMHD<dim>::hydro_sources(const auto& cell) const
 
     conserved_t res;
     if constexpr (dim == 1) {
-        for (int q = 0; q < conserved_t::nmem; q++) {
-            res[q] = hsources[q](x1c, t);
-        }
+        res = {
+          dens_source(x1c, t),
+          mom1_source(x1c, t),
+          mom2_source(x1c, t),
+          mom3_source(x1c, t),
+          ener_source(x1c, t),
+          b1_source(x1c, t),
+          b2_source(x1c, t),
+          b3_source(x1c, t),
+          chi_source(x1c, t)
+        };
     }
     else if constexpr (dim == 2) {
-        for (int q = 0; q < conserved_t::nmem; q++) {
-            res[q] = hsources[q](x1c, x2c, t);
-        }
+        res = {
+          dens_source(x1c, x2c, t),
+          mom1_source(x1c, x2c, t),
+          mom2_source(x1c, x2c, t),
+          mom3_source(x1c, x2c, t),
+          ener_source(x1c, x2c, t),
+          b1_source(x1c, x2c, t),
+          b2_source(x1c, x2c, t),
+          b3_source(x1c, x2c, t),
+          chi_source(x1c, x2c, t)
+        };
     }
     else {
-        for (int q = 0; q < conserved_t::nmem; q++) {
-            res[q] = hsources[q](x1c, x2c, x3c, t);
-        }
+        res = {
+          dens_source(x1c, x2c, x3c, t),
+          mom1_source(x1c, x2c, x3c, t),
+          mom2_source(x1c, x2c, x3c, t),
+          mom3_source(x1c, x2c, x3c, t),
+          ener_source(x1c, x2c, x3c, t),
+          b1_source(x1c, x2c, x3c, t),
+          b2_source(x1c, x2c, x3c, t),
+          b3_source(x1c, x2c, x3c, t),
+          chi_source(x1c, x2c, x3c, t)
+        };
     }
-
     return res;
 }
 
@@ -2497,29 +2565,35 @@ void RMHD<dim>::advance()
             b3L = b3now[zlf] - dt * step * curl_e(3, e1, e2, cell, 0);
             b3R = b3now[zrf] - dt * step * curl_e(3, e1, e2, cell, 1);
 
-            // if constexpr (global::debug_mode) {
-            const auto divb = (b1R - b1L) * invdx1 + (b2R - b2L) * invdx2 +
-                              (b3R - b3L) * invdx3;
-            if (!goes_to_zero(divb)) {
-                printf("========================================\n");
-                printf("DIV.B: %.2e\n", divb);
-                printf("========================================\n");
-                printf(
-                    "[%" PRIu64 "] Divergence of B is not zero at: %" PRIu64
-                    ", %" PRIu64 ", %" PRIu64 "!\n",
-                    global_iter,
-                    ii,
-                    jj,
-                    kk
-                );
+            if constexpr (global::debug_mode) {
+                const auto divb = div_b(b1L, b1R, b2L, b2R, b3L, b3R, cell);
+                if (!goes_to_zero(divb)) {
+                    printf("========================================\n");
+                    printf("DIV.B: %.2e\n", divb);
+                    printf("========================================\n");
+                    printf(
+                        "[%" PRIu64 "] Divergence of B is not zero at: %" PRIu64
+                        ", %" PRIu64 ", %" PRIu64 "!\n",
+                        global_iter,
+                        ii,
+                        jj,
+                        kk
+                    );
+                    printf("B1L: %.2e, B1R: %.2e\n", b1L, b1R);
+                    printf("B2L: %.2e, B2R: %.2e\n", b2L, b2R);
+                    printf("B3L: %.2e, B3R: %.2e\n", b3L, b3R);
+                    printf("theta_mean: %.2e\n", cell.x2mean);
+                    printf("tL: %.2e, tR: %.2e\n", cell.x2L(), cell.x2R());
+                    std::cin.get();
+                }
             }
-            // }
             b1c = static_cast<real>(0.5) * (b1R + b1L);
             b2c = static_cast<real>(0.5) * (b2R + b2L);
             b3c = static_cast<real>(0.5) * (b3R + b3L);
 
             // TODO: implement functional source and gravity
-            const auto source_terms = hydro_sources(cell);
+            const auto source_terms = conserved_t{};   // hydro_sources(cell);
+
             // Gravity
             const auto gravity = gravity_sources(prb[tid], cell);
 
@@ -2549,18 +2623,8 @@ void RMHD<dim>::simulate(
 )
 {
     anyDisplayProps();
-    // set the boundary, hydro, and gracity sources terms
-    // respectively
-    for (auto&& q : bsources) {
-        this->bsources.push_back(q.value_or(nullptr));
-    }
-    for (auto&& q : hsources) {
-        this->hsources.push_back(q.value_or(nullptr));
-    }
-    for (auto&& q : gsources) {
-        this->gsources.push_back(q.value_or(nullptr));
-    }
-    check_sources();
+    load_functions();
+
     // Stuff for moving mesh
     this->hubble_param = adot(t) / a(t);
     this->mesh_motion  = (hubble_param != 0);

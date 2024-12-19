@@ -456,7 +456,9 @@ def configure_state(
             config.time_order  = "rk2"
         elif config.order_of_integration is not None:
             raise ValueError("Order of integration must either be first or second")
-            
+        
+        # if a user defined c++ functions are present, compile them
+        config._compile_source_terms()
         kwargs[idx] = {
             'spatial_order': config.spatial_order,
             'time_order': config.time_order,
@@ -472,16 +474,16 @@ def configure_state(
             'x1_cell_spacing': config.x1_cell_spacing,
             'x2_cell_spacing': config.x2_cell_spacing,
             'x3_cell_spacing': config.x3_cell_spacing,
-            'bsources': config.boundary_sources,
-            'gsources': config.gravity_sources,
-            'hsources': config.hydro_sources,
             'passive_scalars': config.passive_scalars,
             'scale_factor': config.scale_factor,
             'scale_factor_derivative': config.scale_factor_derivative,
             'quirk_smoothing': config.use_quirk_smoothing,
             'constant_sources': config.constant_sources,
             'object_positions': config.object_zones,
-            'engine_duration': config.engine_duration
+            'engine_duration': config.engine_duration,
+            'hdir': config.hydro_source_lib,
+            'gdir': config.gravity_source_lib,
+            'bdir': config.boundary_source_lib,
         }
         states.append(state)
 

@@ -160,14 +160,14 @@ namespace simbi {
                 std::cout
                     << "\033[999B";   // Move cursor to bottom of the screen
 
-                // check if "crashed" or "interrupted" is within the messaage
-                // if so, move uo six lines
+                // check if "crashed" or "interrupted" is within the message
+                // if so, move up six lines
                 if (message.find("crashed") != std::string::npos ||
                     message.find("interrupted") != std::string::npos) {
-                    std::cout << "\033[6A";   // Move cursor up six lines
+                    std::cout << "\033[7A";   // Move cursor up six lines
                 }
                 else {
-                    std::cout << "\033[3A";   // Move cursor up three lines
+                    std::cout << "\033[10A";   // Move cursor up four lines
                 }
             }
 
@@ -184,8 +184,13 @@ namespace simbi {
                 std::cout << "\033[0m";   // Reset text attributes
             }
 
-            // Restore cursor position
+            // // Restore cursor position
             std::cout << "\033[u";
+
+            // std::cout << "\n";
+
+            // move the cursor down one line
+            // std::cout << "\033[1B";
         }
 
         /**

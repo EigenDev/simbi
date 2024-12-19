@@ -1,6 +1,10 @@
 import argparse
 import abc
 import logging
+import subprocess
+import textwrap
+import sys
+import inspect
 from .dynarg import DynamicArg
 from . import get_subparser
 from typing import (
@@ -13,13 +17,13 @@ from typing import (
     Union,
     Sequence,
     cast,
-    Tuple,
     final
 )
 from numpy.typing import NDArray
 from numpy import float64 as numpy_float
 from numpy import int32 as numpy_int
 from numpy import str_ as numpy_string
+from pathlib import Path
 
 __all__ = ["BaseConfig", "simbi_property", "simbi_classproperty"]
 
@@ -106,6 +110,9 @@ class BaseConfig(metaclass=abc.ABCMeta):
     log_output = False
     log_directory: str = ""
     trace_memory: bool = False
+    hydro_source_lib: str = ""
+    gravity_source_lib: str = ""
+    boundary_source_lib: str = ""
 
     def __init_subclass__(cls: Any, *args: Any, **kwargs: Any) -> None:
         super().__init_subclass__(*args, **kwargs)
@@ -193,16 +200,16 @@ class BaseConfig(metaclass=abc.ABCMeta):
         return None
 
     @simbi_classproperty
-    def gravity_sources(cls) -> list[Optional[Callable[[*Tuple[float, ...]], float]]]:
-        return [None]
+    def gravity_sources(cls) -> str:
+        return ""
 
     @simbi_classproperty
-    def hydro_sources(cls) -> list[Optional[Callable[[*Tuple[float, ...]], float]]]:
-        return [None]
+    def hydro_sources(cls) -> str:
+        return ""
 
     @simbi_classproperty
-    def boundary_sources(cls) -> list[Optional[Callable[[*Tuple[float, ...]], float]]]:
-        return [None]
+    def boundary_sources(cls) -> str:
+        return ""
 
     @simbi_property
     def default_start_time(self) -> Union[DynamicArg, float]:
@@ -280,6 +287,39 @@ class BaseConfig(metaclass=abc.ABCMeta):
     def engine_duration(self) -> float:
         return 0.0
 
+    @classmethod 
+    def _compile_source_terms(cls) -> None:
+        libdir = Path(__file__).resolve().parent.parent.parent / "src" / "libs"
+        # get the class file name, stripping off the directory path
+        cls_file_name = inspect.getfile(cls).split("/")[-1].split(".")[0]
+        sources = {
+            "hydro": cls.hydro_sources,
+            "gravity": cls.gravity_sources,
+            "boundary": cls.boundary_sources,
+        }
+        for source_name, source_code in sources.items():
+            if source_code:
+                cpp_file = libdir / f"{cls_file_name}.{source_name}.cpp"
+                so_file = libdir / f"{cls_file_name}.{source_name}.so"
+                if source_name == "hydro":
+                    cls.hydro_source_lib = str(so_file)
+                elif source_name == "gravity":
+                    cls.gravity_source_lib = str(so_file)
+                elif source_name == "boundary":
+                    cls.boundary_source_lib = str(so_file)
+                    
+                with open(cpp_file, "w") as f:
+                    f.write(textwrap.dedent(source_code))
+                    
+                try:
+                    subprocess.run(
+                    ["c++", "-shared", "-std=c++20", "-O3", "-fPIC", "-o", so_file, cpp_file],
+                    check=True,
+                    )
+                except subprocess.CalledProcessError as e:
+                    print(e)
+                    sys.exit(1)
+            
     @classmethod
     def _find_dynamic_args(cls) -> None:
         members = [

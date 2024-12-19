@@ -40,6 +40,8 @@ class OrszagTang(BaseConfig):
             ],
             dtype=object,
         )
+        
+        self.cs: float = (self.ad_gamma - 1.0) /self.ad_gamma
 
     @simbi_property
     def initial_state(self) -> Sequence[NDArray[numpy_float]]:
@@ -84,7 +86,7 @@ class OrszagTang(BaseConfig):
 
     @simbi_property
     def default_end_time(self) -> float:
-        return 0.5 * XMAX
+        return (XMAX - XMIN) / self.cs
 
     @simbi_property
     def solver(self) -> str:

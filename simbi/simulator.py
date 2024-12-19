@@ -6,8 +6,10 @@ import numpy as np
 import os
 import inspect
 import importlib
+import textwrap
 import tracemalloc
 import simbi.detail as detail
+import subprocess
 from pathlib import Path
 from .detail import initial_condition as simbi_ic
 from .detail import helpers
@@ -44,9 +46,6 @@ class Hydro:
     scale_factor: CallableOrNone = None
     scale_factor_derivative: CallableOrNone = None
     discontinuity: bool = False
-    bsources: list[CallableOrNone] = [None]
-    hsources: list[CallableOrNone] = [None]
-    gsources: list[CallableOrNone] = [None]
     x1: Any = []
     x2: Any = []
     x3: Any = []
@@ -338,12 +337,12 @@ class Hydro:
         constant_sources: bool = False,
         scale_factor: Optional[Callable[[float], float]] = None,
         scale_factor_derivative: Optional[Callable[[float], float]] = None,
-        bsources: list[CallableOrNone] = [None],
-        hsources: list[CallableOrNone] = [None],
-        gsources: list[CallableOrNone] = [None],
         object_positions: Optional[Union[Sequence[Any], NDArray[Any]]] = None,
         spatial_order: str = "plm",
         time_order: str = "rk2",
+        hdir: str = "",
+        gdir: str = "",
+        bdir: str = "",
     ) -> None:
         """
         Simulate the Hydro Setup
@@ -369,9 +368,6 @@ class Hydro:
             constant_sources (bool): Set to true if wanting the source terms to never die.
             scale_factor (Optional[Callable[[float], float]]): The scalar function for moving mesh (e.g., in cosmology).
             scale_factor_derivative (Optional[Callable[[float], float]]): The first derivative of the scalar function for moving mesh.
-            bsources (list[CallableOrNone]): List of boundary source terms.
-            hsources (list[CallableOrNone]): List of hydro source terms.
-            gsources (list[CallableOrNone]): List of gravity source terms.
             object_positions (Optional[Union[Sequence[Any], NDArray[Any]]]): An optional boolean array that masks the immersed boundary.
             spatial_order (str): Space order of integration ("pcm" or "plm").
             time_order (str): Time order of integration ("rk1" or "rk2").
@@ -379,10 +375,6 @@ class Hydro:
         Returns:
             None
         """
-        bsources = helpers.as_list(bsources)
-        hsources = helpers.as_list(hsources)
-        gsources = helpers.as_list(gsources)
-
         if spatial_order not in ["pcm", "plm"]:
             raise ValueError(
                 f"Space order can only be one of {['pcm', 'plm']}")
@@ -567,8 +559,11 @@ class Hydro:
             "nyv": nyp + 1,
             "nzv": nzp + 1,
             "bfield": [[0], [0], [0]],
+            "hydro_source_lib": hdir.encode("utf-8"),
+            "gravity_source_lib": "".encode("utf-8"),
+            "boundary_sources_lib": "".encode("utf-8"),
         }
-
+        
         if self.mhd:
             if self.discontinuity:
                 b1 = np.zeros(shape=(nzp, nyp, init_conditions["nxv"]))
@@ -597,30 +592,12 @@ class Hydro:
             b3 = np.pad(b3, ((0, 0), (1, 1), (1,1)), mode='edge')
             init_conditions["bfield"] = [b1.flat, b2.flat, b3.flat]
 
-        lambdas: dict[str, list[Optional[Callable[..., float]]]] = {
-            "boundary_sources": bsources,
-            "hydro_sources": hsources,
-            "gravity_sources": gsources,
+        lambdas: dict[str, Optional[float]] = {
+            "boundary_sources": None,
+            "hydro_sources": None,
+            "gravity_sources": None,
         }
-        for name, source in lambdas.items():
-            ngiven = len(source)
-            if not all(item is None for item in source):
-                nterms: int = self.dimensionality + 3 * (
-                    (source != gsources) + self.mhd
-                )
-                if ngiven < nterms:
-                    if ngiven == nterms - 1:
-                        if self.dimensionality == 1:
-                            # define null source terms for scalar concentration
-                            source += [lambda x, t: 0.0]
-                        elif self.dimensionality == 2:
-                            source += [lambda x, y, t: 0.0]
-                        else:
-                            source += [lambda x, y, z, t: 0.0]
-                    else:
-                        raise ValueError(
-                            f"Number of {name} terms should be equal to the number {nterms}")
-
+        
         lib_mode = "cpu" if compute_mode in ["cpu", "omp"] else "gpu"
         sim_state = getattr(
             importlib.import_module(f".{lib_mode}_ext", package="simbi.libs"),
@@ -636,7 +613,6 @@ class Hydro:
             helpers.print_progress()
 
         state_contig = self.u.reshape(self.u.shape[0], -1)
-
         sim_state().run(
             state=state_contig,
             dim=self.dimensionality,

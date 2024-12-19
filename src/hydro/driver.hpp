@@ -29,17 +29,13 @@ namespace simbi {
         Driver();
         ~Driver();
 
-        template <typename Func>
         void
         run(std::vector<std::vector<real>> state,
             const int dim,
             const std::string regime,
             const InitialConditions& init_cond,
             std::function<real(real)> const& scale_factor,
-            std::function<real(real)> const& scale_factor_derivative,
-            Func const& bsources,
-            Func const& hsources,
-            Func const& gsources);
+            std::function<real(real)> const& scale_factor_derivative);
     };
 
 }   // namespace simbi

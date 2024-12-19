@@ -56,6 +56,8 @@ namespace simbi {
         simbi::Cellspacing x1_cell_spacing, x2_cell_spacing, x3_cell_spacing;
         std::string data_directory;
         ndarray<bool> object_pos;
+        bool using_fourvelocity;
+        std::string hydro_source_lib, gravity_source_lib, boundary_source_lib;
 
         // Common members
         real dt, t_interval, time_constant, hubble_param;
@@ -63,7 +65,7 @@ namespace simbi {
         real dlogx1, dx1, dlogx2, dx2, dlogx3, dx3, invdx1, invdx2, invdx3;
         bool linspace, mesh_motion, null_gravity, null_sources;
         bool half_sphere, all_outer_bounds;
-        bool homolog, hasCrashed, wasInterrupted, using_fourvelocity;
+        bool homolog, hasCrashed, wasInterrupted;
         luint active_zones, idx_active, radius;
         luint xag, yag, zag, init_chkpt_idx, chkpt_idx;
         ndarray<simbi::BoundaryCondition> bcs;
@@ -216,7 +218,10 @@ namespace simbi {
               object_pos(std::move(init_conditions.object_cells)),
               using_fourvelocity(
                   global::VelocityType == global::Velocity::FourVelocity
-              )
+              ),
+              hydro_source_lib(init_conditions.hydro_source_lib),
+              gravity_source_lib(init_conditions.gravity_source_lib),
+              boundary_source_lib(init_conditions.boundary_source_lib)
         {
             initialize(init_conditions);
             if (std::getenv("USE_OMP")) {

@@ -3,12 +3,17 @@ from libcpp cimport bool
 from libcpp.string cimport string 
 
 # adapted from: https://stackoverflow.com/a/39052204/13874039
+# cdef extern from "util/pyobj_wrapper.hpp":
+#     cdef cppclass PyObjWrapper:
+#         PyObjWrapper()
+#         PyObjWrapper(object) # define a constructor that takes a Python object
+#                              # note - doesn't match c++ signature - that's fine!
+
 cdef extern from "util/pyobj_wrapper.hpp":
     cdef cppclass PyObjWrapper:
-        PyObjWrapper()
-        PyObjWrapper(object) # define a constructor that takes a Python object
-                             # note - doesn't match c++ signature - that's fine!
-
+        PyObjWrapper() except +
+        PyObjWrapper(object py_func) except +
+        
 cdef extern from "build_options.hpp":
     cdef bool col_maj "COLUMN_MAJOR"
     ctypedef double real 
@@ -23,6 +28,7 @@ cdef extern from "common/hydro_structs.hpp":
         string data_directory, coord_system, solver
         string x1_cell_spacing, x2_cell_spacing, x3_cell_spacing
         string spatial_order, time_order
+        string hydro_source_lib, gravity_source_lib, boundary_source_lib
         vector[string] boundary_conditions
         vector[vector[real]] boundary_sources
         vector[real] x1, x2, x3
@@ -37,9 +43,6 @@ cdef extern from "hydro/driver.hpp" namespace "simbi":
             string regime, 
             InitialConditions sim_cond,
             PyObjWrapper a,
-            PyObjWrapper adot,
-            vector[PyObjWrapper] boundary_sources,
-            vector[PyObjWrapper] hydro_sources,
-            vector[PyObjWrapper] gravity_sources
+            PyObjWrapper adot
         ) except +
         

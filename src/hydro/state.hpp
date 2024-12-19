@@ -36,17 +36,17 @@ namespace simbi {
 
         template <>
         struct func_t<1> {
-            using type = simbi::function<real(real, real)>;
+            using type = std::function<real(real, real)>;
         };
 
         template <>
         struct func_t<2> {
-            using type = simbi::function<real(real, real, real)>;
+            using type = std::function<real(real, real, real)>;
         };
 
         template <>
         struct func_t<3> {
-            using type = simbi::function<real(real, real, real, real)>;
+            using type = std::function<real(real, real, real, real)>;
         };
 
         template <int dim>

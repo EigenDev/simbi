@@ -69,17 +69,17 @@ namespace simbi {
 
         template <>
         struct real_func<1> {
-            using type = simbi::function<real(real, real)>;
+            using type = std::function<real(real, real)>;
         };
 
         template <>
         struct real_func<2> {
-            using type = simbi::function<real(real, real, real)>;
+            using type = std::function<real(real, real, real)>;
         };
 
         template <>
         struct real_func<3> {
-            using type = simbi::function<real(real, real, real, real)>;
+            using type = std::function<real(real, real, real, real)>;
         };
 
         /**
@@ -452,6 +452,28 @@ namespace simbi {
          */
         template <class IndexType>
         DUAL bool in_range(IndexType val, IndexType lower, IndexType upper);
+
+        // Helper function to apply boundary conditions
+        void apply_boundary_conditions(
+            auto& cons,
+            auto idx,
+            auto real_idx,
+            auto wrap_idx,
+            auto bc,
+            auto momentum_idx = -1
+        );
+
+        // Helper function to handle corners
+        void handle_corner(
+            auto& cons,
+            auto idx,
+            auto real_idx,
+            auto wrap_idx,
+            auto bc1,
+            auto bc2,
+            auto momentum_idx1,
+            auto momentum_idx2
+        );
 
         // configure the ghost zones in 1D hydro
         template <typename sim_state_t>
