@@ -356,8 +356,8 @@ class Visualizer:
                                     xj, xk = "x3v", "x1v"
                                 else:
                                     xj, xk = "x1v", "x2v"
-                                jidx = find_nearest(mesh[xj], xjcoord)[0]
-                                kidx = find_nearest(mesh[xk], xkcoord)[0]
+                                jidx = find_nearest(mesh.get(xj, np.linspace(0, 1)), xjcoord)[0]
+                                kidx = find_nearest(mesh.get(xk, np.linspace(0, 1)), xkcoord)[0]
                                 if self.ndim == 2:
                                     yvar = var[jidx]
                                 else:
