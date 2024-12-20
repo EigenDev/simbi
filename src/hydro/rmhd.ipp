@@ -2622,7 +2622,6 @@ void RMHD<dim>::simulate(
     const std::vector<std::optional<RMHD<dim>::function_t>>& gsources
 )
 {
-    anyDisplayProps();
     load_functions();
 
     // Stuff for moving mesh
@@ -2673,11 +2672,6 @@ void RMHD<dim>::simulate(
     config_ghosts(this);
     cons2prim();
     adapt_dt<TIMESTEP_TYPE::MINIMUM>();
-
-    // Save initial condition
-    if (t == 0 || init_chkpt_idx == 0) {
-        write_to_file(*this);
-    }
 
     // Simulate :)
     simbi::detail::logger::with_logger(*this, tend, [&] {

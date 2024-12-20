@@ -1109,7 +1109,6 @@ void SRHD<dim>::simulate(
     const std::vector<std::optional<SRHD<dim>::function_t>>& gsources
 )
 {
-    anyDisplayProps();
     // set the boundary, hydro, and gracity sources terms
     // respectively
     for (auto&& q : bsources) {
@@ -1168,10 +1167,6 @@ void SRHD<dim>::simulate(
     }
     else {
         adapt_dt<TIMESTEP_TYPE::MINIMUM>();
-    }
-    // Save initial condition
-    if (t == 0 || init_chkpt_idx == 0) {
-        write_to_file(*this);
     }
 
     // Simulate :)

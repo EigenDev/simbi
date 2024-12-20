@@ -789,7 +789,6 @@ void Newtonian<dim>::simulate(
     const std::vector<std::optional<Newtonian<dim>::function_t>>& gsources
 )
 {
-    anyDisplayProps();
     // set the boundary, hydro, and gravity sources terms respectively
     for (auto&& q : bsources) {
         this->bsources.push_back(q.value_or(nullptr));
@@ -838,11 +837,6 @@ void Newtonian<dim>::simulate(
     }
     else {
         adapt_dt();
-    }
-
-    // Save initial condition
-    if (t == 0 || init_chkpt_idx == 0) {
-        write_to_file(*this);
     }
 
     // Simulate :)
