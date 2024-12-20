@@ -93,8 +93,22 @@ namespace global {
     constexpr bool col_maj = false;
 #endif
 
+    // Template function to get epsilon value
+    template <typename T>
+    constexpr T get_epsilon();
+
+    template <>
+    constexpr float get_epsilon<float>() {
+        return 1e-6f;
+    }
+
+    template <>
+    constexpr double get_epsilon<double>() {
+        return 1e-12;
+    }
+
     // float or double precision tolerance scale
-    constexpr real epsilon = std::numeric_limits<real>::epsilon() * 1e3;
+    constexpr real epsilon = get_epsilon<real>();
 
 //======================== Managed Memory Check
 #ifdef MANAGED_MEMORY
