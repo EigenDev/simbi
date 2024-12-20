@@ -120,7 +120,7 @@ class Hydro:
                 raise ValueError("State arrays across discontinuity need to have equal length")
             length = lengths.pop()
             if length in {3, 4, 5, 6} and not self.mhd:
-                self.dimensionality = 1 if length in {3, 4} else 2 if length == 6 else 3
+                self.dimensionality = 1 if length == 3 else 2 if length == 4 else 3
                 self.discontinuity = True
             elif length == 8 and self.mhd:
                 self.dimensionality = 3
@@ -143,12 +143,12 @@ class Hydro:
         if ngeom != self.dimensionality:
             raise ValueError(
                 f"Detecting a {
-                    self.dimensionality}D run, but only {ngeom} geometry tuple(s)")
+                    self.dimensionality}D run, but {ngeom} geometry tuple(s)")
 
         if len(self.resolution) != self.dimensionality:
             raise ValueError(
                 f"Detecting a {
-                    self.dimensionality}D run, but only {nres} resolution args")
+                    self.dimensionality}D run, but {nres} resolution args")
 
         initial_state = np.asanyarray(initial_state, dtype=object)
         size = len(initial_state[0])
