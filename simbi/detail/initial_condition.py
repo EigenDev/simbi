@@ -242,9 +242,6 @@ def construct_the_state(model: Any, initial_state: NDArray[numpy_float]) -> None
         rho, *velocity, pressure = initial_state[: model.number_of_non_em_terms]
         velocity = np.asanyarray(velocity)
         bfields_stag = initial_state[model.number_of_non_em_terms :]
-        b1mean = 0.5 * (bfields_stag[0][..., 1:] + bfields_stag[0][..., :-1])
-        b2mean = 0.5 * (bfields_stag[1][:, 1:] + bfields_stag[1][:, :-1])
-        b3mean = 0.5 * (bfields_stag[2][1:] + bfields_stag[2][:-1])
         mean_bfields = (
             np.array(
                 [
