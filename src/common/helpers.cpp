@@ -14,6 +14,48 @@ namespace simbi {
         // Flag that detects whether program was terminated by external forces
         sig_bool killsig_received = false;
 
+        std::string getColorCode(Color color)
+        {
+            switch (color) {
+                case Color::RED:
+                    return "\033[31m";
+                case Color::GREEN:
+                    return "\033[32m";
+                case Color::YELLOW:
+                    return "\033[33m";
+                case Color::BLUE:
+                    return "\033[34m";
+                case Color::MAGENTA:
+                    return "\033[35m";
+                case Color::CYAN:
+                    return "\033[36m";
+                case Color::WHITE:
+                    return "\033[37m";
+                case Color::LIGHT_BLUE:
+                    return "\033[0;94m";
+                case Color::LIGHT_CYAN:
+                    return "\033[0;96m";
+                case Color::LIGHT_GREEN:
+                    return "\033[0;92m";
+                case Color::LIGHT_GREY:
+                    return "\033[0;37m";
+                case Color::LIGHT_MAGENTA:
+                    return "\033[0;95m";
+                case Color::LIGHT_RED:
+                    return "\033[0;91m";
+                case Color::LIGHT_YELLOW:
+                    return "\033[0;93m";
+                case Color::BLACK:
+                    return "\033[0;30m";
+                case Color::DARK_GREY:
+                    return "\033[0;90m";
+                case Color::BOLD:
+                    return "\033[1m";
+                default:
+                    return "\033[0m";
+            }
+        }
+
         void catch_signals()
         {
             const static auto signal_handler = [](int sig) {
@@ -21,6 +63,9 @@ namespace simbi {
             };
             std::signal(SIGTERM, signal_handler);
             std::signal(SIGINT, signal_handler);
+            std::signal(SIGABRT, signal_handler);
+            std::signal(SIGSEGV, signal_handler);
+            std::signal(SIGQUIT, signal_handler);
             if (killsig_received) {
                 killsig_received = false;
                 throw exception::InterruptException(1);
@@ -116,13 +161,6 @@ namespace simbi {
                           << 2.0 * props.memoryClockRate *
                                  (props.memoryBusWidth / 8) / 1.0e6
                           << std::endl;
-                std::cout << std::endl
-                          << std::endl
-                          << std::endl
-                          << std::endl
-                          << std::endl
-                          << std::endl
-                          << std::endl;
                 ;
                 gpu_theoretical_bw = 2.0 * props.memoryClockRate *
                                      (props.memoryBusWidth / 8) / 1.0e6;
@@ -131,66 +169,13 @@ namespace simbi {
             const auto processor_count = std::thread::hardware_concurrency();
             std::cout << std::string(80, '=') << "\n";
             std::cout << "CPU Compute Thread(s): " << processor_count
-                      << std::endl
-                      << std::endl
-                      << std::endl
-                      << std::endl
-                      << std::endl
                       << std::endl;
 
 #endif
-        }
-
-        void display_message(
-            const std::string& message,
-            int row,
-            int col,
-            bool is_error
-        )
-        {
-            // Save cursor position
-            std::cout << "\033[s";
-
-            // Move to specified location if provided
-            if (row >= 0 && col >= 0) {
-                std::cout << "\033[" << row << ";" << col << "H";
-            }
-            else {
-                // Move to a dedicated line (e.g., the bottom of the screen)
-                std::cout
-                    << "\033[999B";   // Move cursor to bottom of the screen
-
-                // check if "crashed" or "interrupted" is within the message
-                // if so, move up six lines
-                if (message.find("crashed") != std::string::npos ||
-                    message.find("interrupted") != std::string::npos) {
-                    std::cout << "\033[7A";   // Move cursor up six lines
-                }
-                else {
-                    std::cout << "\033[10A";   // Move cursor up four lines
-                }
-            }
-
-            // Set text color to red if it's an error message
-            if (is_error) {
-                std::cout << "\033[1;31m";   // Bold red text
-            }
-
-            // Display the message
-            std::cout << message << std::endl;
-
-            // Reset text color if it was changed
-            if (is_error) {
-                std::cout << "\033[0m";   // Reset text attributes
-            }
-
-            // // Restore cursor position
-            std::cout << "\033[u";
-
-            // std::cout << "\n";
-
-            // move the cursor down one line
-            // std::cout << "\033[1B";
+            // Because I need all of the previous text off of the screen before
+            // the simulation starts and the table gets generated, we insert
+            // about 40 new to effectively scroll the screen up
+            std::cout << std::string(40, '\n');
         }
 
         /**
@@ -301,8 +286,11 @@ namespace simbi {
             const auto rho = d / w;
             const auto eps =
                 (tau + (1.0 - w) * d + (1.0 - w * w) * p) / (d * w);
-            const auto c2 = (gamma - 1) * gamma * eps / (1 + gamma * eps);
-            return std::make_tuple((gamma - 1.0) * rho * eps - p, c2 * v2 - 1);
+            const auto c2 = (gamma - 1) * gamma * eps / (1.0 + gamma * eps);
+            return std::make_tuple(
+                (gamma - 1.0) * rho * eps - p,
+                c2 * v2 - 1.0
+            );
         }
     }   // namespace helpers
 }   // namespace simbi

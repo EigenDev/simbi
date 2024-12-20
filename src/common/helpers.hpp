@@ -23,6 +23,7 @@
 #include "common/traits.hpp"      // for is_1D_primitive, is_2D_primitive
 #include "util/exec_policy.hpp"   // for ExecutionPolicy
 #include "util/functional.hpp"    // for Function
+#include "util/tabulate.hpp"      // for PrettyTable
 #include <cmath>                  // for sqrt, exp, INFINITY
 #include <cstdlib>                // for abs, size_t
 #include <exception>              // for exception
@@ -260,7 +261,7 @@ namespace simbi {
          * <zone>.chkpt.<time>.h5
          */
         template <typename Sim_type>
-        void write_to_file(Sim_type& sim_state);
+        void write_to_file(Sim_type& sim_state, PrettyTable& table);
 
         //---------------------------------------------------------------------------------------------------------
         //  HELPER-METHODS
@@ -281,7 +282,8 @@ namespace simbi {
         void write_hdf5(
             const std::string data_directory,
             const std::string filename,
-            const T& state
+            const T& state,
+            PrettyTable& table
         );
 
         /**
@@ -608,12 +610,7 @@ namespace simbi {
             const V radius
         );
 
-        void display_message(
-            const std::string& message,
-            int row       = -1,
-            int col       = -1,
-            bool is_error = false
-        );
+        std::string getColorCode(Color color);
 
         // display the CPU / GPU device properties
         void anyDisplayProps();

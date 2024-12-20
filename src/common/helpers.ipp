@@ -22,7 +22,7 @@ namespace simbi {
         }
 
         template <typename Sim_type>
-        void write_to_file(Sim_type& sim_state)
+        void write_to_file(Sim_type& sim_state, PrettyTable& table)
         {
             sim_state.prims.copyFromGpu();
             sim_state.cons.copyFromGpu();
@@ -74,7 +74,7 @@ namespace simbi {
             );
             sim_state.chkpt_idx = step;
             step++;
-            write_hdf5(data_directory, filename, sim_state);
+            write_hdf5(data_directory, filename, sim_state, table);
         }
 
         // Helper function to apply boundary conditions
@@ -3279,11 +3279,13 @@ namespace simbi {
         void write_hdf5(
             const std::string data_directory,
             const std::string filename,
-            const T& state
+            const T& state,
+            PrettyTable& table
         )
         {
             const auto full_filename = data_directory + filename;
-            display_message("[Writing file:" + full_filename + "]");
+            table.postInfo("[Writing checkpoint: " + full_filename + "]");
+            table.print();
 
             // Create a new file using the default property list.
             H5::H5File file(full_filename, H5F_ACC_TRUNC);
