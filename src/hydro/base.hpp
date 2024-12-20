@@ -96,11 +96,26 @@ namespace simbi {
 
         void define_tinterval(real dlogt, real chkpt_interval)
         {
-            real round_place = 1.0 / chkpt_interval;
-            t_interval       = dlogt != 0 ? tstart * std::pow(10.0, dlogt)
-                                          : std::floor(tstart * round_place + 0.5) /
-                                              round_place +
-                                          chkpt_interval;
+            // Set the initial time interval
+            // based on the current time, advanced
+            // by the checkpoint interval to the nearest
+            // place in the log10 scale. If dlogt is 0
+            // then the interval is set to the current time
+            // shifted towards the nearest checkpoint interval
+            // if the checkpoint interval is 0 then the interval
+            // is set to the current time
+            if (dlogt != 0) {
+                t_interval = std::pow(10.0, std::floor(std::log10(t) + dlogt));
+            }
+            else if (chkpt_interval != 0) {
+                const real round_place = 1.0 / chkpt_interval;
+                t_interval =
+                    std::floor(tstart * round_place + 0.5) / round_place +
+                    chkpt_interval;
+            }
+            else {
+                t_interval = t;
+            }
         }
 
         void define_chkpt_idx(int chkpt_idx)
