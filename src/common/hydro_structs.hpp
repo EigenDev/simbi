@@ -21,6 +21,7 @@
 #include "build_options.hpp"
 #include "enums.hpp"
 #include "traits.hpp"
+#include "util/tabulate.hpp"
 #include <cmath>
 #include <iostream>
 #include <vector>
@@ -1097,36 +1098,48 @@ struct anyPrimitive : generic_hydro::anyHydro<dim, anyPrimitive<dim, R>, R> {
     // define an error_at function that will print the primitive state
     // at at the given coordinates, omitting coordinates that go
     // beyond the dimensions of the primitive
-    void error_at(const real x1, const real x2, const real x3) const
+    void
+    error_at(const real x1, const real x2, const real x3, PrettyTable& table)
+        const
     {
-        std::cerr << "Primitives in non-physical state.\n";
+        std::ostringstream oss;
+        oss << "Primitives in non-physical state.\n";
         if constexpr (dim == 1) {
-            std::cerr << "Primitive Variables at (" << x1 << "): \n";
+            oss << "Primitive Variables at (" << x1 << "): \n";
         }
         else if constexpr (dim == 2) {
-            std::cerr << "Primitive Variables at (" << x1 << ", " << x2
-                      << "): \n";
+            oss << "Primitive Variables at (" << x1 << ", " << x2 << "): \n";
         }
         else {
-            std::cerr << "Primitive Variables at (" << x1 << ", " << x2 << ", "
-                      << x3 << "): \n";
+            if (x2 == INFINITY) {   // an effective 1D run
+                oss << "Primitive Variables at (" << x1 << "): \n";
+            }
+            else if (x3 == INFINITY) {
+                oss << "Primitive Variables at (" << x1 << ", " << x2
+                    << "): \n";
+            }
+            else {
+                oss << "Primitive Variables at (" << x1 << ", " << x2 << ", "
+                    << x3 << "): \n";
+            }
         }
-        std::cerr << "Density: " << rho() << "\n";
-        std::cerr << "Pressure: " << p() << "\n";
+        oss << "Density: " << rho() << "\n";
+        oss << "Pressure: " << p() << "\n";
         if constexpr (dim == 1) {
-            std::cerr << "Velocity: (" << v1() << ")\n";
+            oss << "Velocity: (" << v1() << ")\n";
         }
         else if constexpr (dim == 2) {
-            std::cerr << "Velocity: (" << v1() << ", " << v2() << ")\n";
+            oss << "Velocity: (" << v1() << ", " << v2() << ")\n";
         }
         else {
-            std::cerr << "Velocity: (" << v1() << ", " << v2() << ", " << v3()
-                      << ")\n";
+            oss << "Velocity: (" << v1() << ", " << v2() << ", " << v3()
+                << ")\n";
         }
         if constexpr (R == Regime::RMHD) {
-            std::cerr << "Magnetic Field:(" << b1() << ", " << b2() << ", "
-                      << b3() << ")\n";
+            oss << "Magnetic Field:(" << b1() << ", " << b2() << ", " << b3()
+                << ")\n";
         }
+        table.postError("Bad Primitives: " + oss.str());
     }
 };
 

@@ -19,6 +19,8 @@
 #ifndef ENUMS_HPP
 #define ENUMS_HPP
 
+#include <map>
+
 namespace simbi {
     enum class Cellspacing {
         LINSPACE,
@@ -160,6 +162,28 @@ namespace simbi {
     enum class LIMITER {
         MINMOD,
         VAN_LEER
+    };
+
+    enum class Color {
+        DEFAULT,
+        BLACK,
+        BLUE,
+        LIGHT_GREY,
+        DARK_GREY,
+        LIGHT_RED,
+        LIGHT_GREEN,
+        LIGHT_YELLOW,
+        LIGHT_BLUE,
+        LIGHT_MAGENTA,
+        LIGHT_CYAN,
+        WHITE,
+        RED,
+        GREEN,
+        YELLOW,
+        CYAN,
+        MAGENTA,
+        BOLD,
+        RESET,
     };
 
     constexpr auto comp_wave_speed    = WaveSpeeds::MIGNONE_AND_BODO_05;
