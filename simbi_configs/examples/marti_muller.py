@@ -37,18 +37,32 @@ class MartiMuller(BaseConfig):
         return "srhd"
     
     #-------------------- Uncomment if one wants the mesh to move
-    # @simbi_property
-    # def boundary_conditions(self) -> Sequence[str]:
-    #     return ["outflow", "dynamic"]
-    # @simbi_classproperty
-    # def scale_factor(cls) -> Callable[[float], float]:
-    #     return lambda t: 1 
+#     @simbi_property
+#     def boundary_conditions(self) -> Sequence[str]:
+#         return ["outflow", "dynamic"]
     
-    # @simbi_classproperty
-    # def scale_factor_derivative(cls) -> Callable[[float], float]:
-    #     return lambda t: 0.5
+#     @simbi_classproperty
+#     def scale_factor(cls) -> Callable[[float], float]:
+#         return lambda t: 1 
     
-    # @simbi_classproperty
-    # def boundary_sources(cls) -> list[Callable[[float, float], float]]:
-    #     return [lambda x,t: 0.1 , lambda x,t: 0.0, lambda x,t: 3e-10]
+#     @simbi_classproperty
+#     def scale_factor_derivative(cls) -> Callable[[float], float]:
+#         return lambda t: 0.5
+    
+#     @simbi_classproperty
+#     def boundary_sources(self) -> str:
+#         return f"""
+# extern "C" {{
+#     void bx1_outer_source(double x, double t, double arr[]){{
+#         double rho_ambient = 0.1;
+#         double v_ambient   = 0.0;
+#         double pressure    = 1.e-10;
+#         double enthalpy    = 1.0 + {self.ad_gamma} * pressure / rho_ambient / ({self.ad_gamma} - 1.0);
+#         arr[0] = rho_ambient;                     // density
+#         arr[1] = 0.0;                             // x1-momentum
+#         arr[2] = rho_ambient * enthalpy - pressure - rho_ambient; // energy
+#         arr[3] = 0.0;                             // scalar concentration
+#     }}
+# }}
+#         """
     
