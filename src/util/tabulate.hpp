@@ -67,7 +67,6 @@ namespace simbi {
         std::string messageBoardTitle;
         std::vector<std::pair<LogLevel, std::string>> messages;
         std::mutex mtx;
-        std::function<void()> customMessageHandler;
         int progress;
         bool showProgressBar;
         ProgressBarStyle progressBarStyle;
@@ -229,10 +228,10 @@ namespace simbi {
                 columnWidths.size() * (2 * padding + 3) + 1;
             int barWidth = totalWidth - 2;
             int pos      = barWidth * progress / 100;
+            std::cout << getColorCode(separatorColor) << "║";
             std::cout << getColorCode(progressBarColor);
             switch (progressBarStyle) {
                 case ProgressBarStyle::Bar:
-                    std::cout << "[";
                     for (int i = 0; i < barWidth; ++i) {
                         if (i < pos) {
                             std::cout << "=";
@@ -247,7 +246,6 @@ namespace simbi {
                     std::cout << "] " << progress << " %\n";
                     break;
                 case ProgressBarStyle::Block:
-                    std::cout << "[";
                     for (int i = 0; i < barWidth; ++i) {
                         if (i < pos) {
                             std::cout << "█";
@@ -259,7 +257,10 @@ namespace simbi {
                             std::cout << " ";
                         }
                     }
-                    std::cout << "] " << progress << " %\n";
+                    std::cout << getColorCode(Color::DEFAULT);
+                    std::cout << getColorCode(separatorColor) << "║ "
+                              << getColorCode(Color::DEFAULT) << progress
+                              << " %\n";
                     break;
                 case ProgressBarStyle::Spinner:
                     static const char spinnerChars[] = {'|', '/', '-', '\\'};
@@ -267,7 +268,6 @@ namespace simbi {
                               << " %\n";
                     break;
                 case ProgressBarStyle::Arrow:
-                    std::cout << "[";
                     for (int i = 0; i < barWidth; ++i) {
                         if (i < pos) {
                             std::cout << ">";
@@ -276,7 +276,10 @@ namespace simbi {
                             std::cout << " ";
                         }
                     }
-                    std::cout << "] " << progress << " %\n";
+                    std::cout << getColorCode(Color::DEFAULT);
+                    std::cout << getColorCode(separatorColor) << "║ "
+                              << getColorCode(Color::DEFAULT) << progress
+                              << " %\n";
                     break;
                 case ProgressBarStyle::Dots:
                     std::cout << "[";
@@ -288,7 +291,10 @@ namespace simbi {
                             std::cout << " ";
                         }
                     }
-                    std::cout << "] " << progress << " %\n";
+                    std::cout << getColorCode(Color::DEFAULT);
+                    std::cout << getColorCode(separatorColor) << "║ "
+                              << getColorCode(Color::DEFAULT) << progress
+                              << " %\n";
                     break;
                 case ProgressBarStyle::Mixed:
                     std::cout << "[";
@@ -303,9 +309,19 @@ namespace simbi {
                             std::cout << " ";
                         }
                     }
-                    std::cout << "] " << progress << " %\n";
+                    std::cout << getColorCode(Color::DEFAULT);
+                    std::cout << getColorCode(separatorColor) << "║ "
+                              << getColorCode(Color::DEFAULT) << progress
+                              << " %\n";
                     break;
             }
+            // print bottom separator
+            std::cout << getColorCode(separatorColor) << "╚";
+            for (int i = 0; i < totalWidth - 2; ++i) {
+                std::cout << "═";
+            }
+            std::cout << "╝" << std::endl;
+
             std::cout << getColorCode(Color::DEFAULT);   // Reset color
         }
 
@@ -313,6 +329,7 @@ namespace simbi {
         PrettyTable(Intializers init)
             : borderStyle(init.style),
               padding(init.pad),
+              progress(0),
               showProgressBar(init.showProgress),
               progressBarStyle(init.progressStyle),
               progressBarColor(init.progressColor),
@@ -362,11 +379,9 @@ namespace simbi {
         {
             std::lock_guard<std::mutex> lock(mtx);
             messages.emplace_back(level, message);
-        }
-
-        void setCustomMessageHandler(std::function<void()> handler)
-        {
-            customMessageHandler = handler;
+            if (messages.size() > 10) {
+                messages.erase(messages.begin());
+            }
         }
 
         void setProgress(int value)
@@ -390,7 +405,6 @@ namespace simbi {
             std::lock_guard<std::mutex> lock(mtx);
             std::cout << "\033[H\033[J";   // Move cursor to home position
                                            // and clear screen
-
             if (!title.empty()) {
                 int totalWidth = std::accumulate(
                                      columnWidths.begin(),
@@ -415,19 +429,6 @@ namespace simbi {
             }
             printProgressBar();
             printMessageBoard();
-        }
-
-        void startMessageBoard()
-        {
-            std::thread([this]() {
-                while (true) {
-                    std::this_thread::sleep_for(std::chrono::seconds(5));
-                    if (customMessageHandler) {
-                        customMessageHandler();
-                    }
-                    print();
-                }
-            }).detach();
         }
     };
 }   // namespace simbi

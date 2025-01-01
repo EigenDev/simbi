@@ -119,152 +119,6 @@ namespace simbi {
         };
 
         namespace logger {
-            // class PrettyTable
-            // {
-            //   private:
-            //     std::string title;
-            //     std::vector<std::vector<std::string>> rows;
-            //     std::vector<int> columnWidths;
-            //     double progress = 0.0;
-            //     std::time_t startTime;
-            //     int printedLines = 0;
-
-            //     const std::string RESET   = "\033[0m";
-            //     const std::string BOLD    = "\033[1m";
-            //     const std::string RED     = "\033[31m";
-            //     const std::string GREEN   = "\033[32m";
-            //     const std::string YELLOW  = "\033[33m";
-            //     const std::string BLUE    = "\033[34m";
-            //     const std::string MAGENTA = "\033[35m";
-            //     const std::string CYAN    = "\033[36m";
-            //     const std::string WHITE   = "\033[37m";
-
-            //     void calculateColumnWidths()
-            //     {
-            //         columnWidths.clear();
-            //         for (const auto& row : rows) {
-            //             for (size_t i = 0; i < row.size(); ++i) {
-            //                 if (columnWidths.size() <= i) {
-            //                     columnWidths.push_back(row[i].size());
-            //                 }
-            //                 else {
-            //                     columnWidths[i] = std::max(
-            //                         columnWidths[i],
-            //                         static_cast<int>(row[i].size())
-            //                     );
-            //                 }
-            //             }
-            //         }
-            //     }
-
-            //     void printSeparator() const
-            //     {
-            //         std::cout << BOLD << WHITE;
-            //         for (const auto& width : columnWidths) {
-            //             std::cout << "╠" << std::string(width + 2, '=');
-            //         }
-            //         std::cout << "╣" << RESET << std::endl;
-            //     }
-
-            //     void saveCursorPosition() const
-            //     {
-            //         std::cout << "\033[s";   // Save cursor position
-            //     }
-
-            //     void restoreCursorPosition() const
-            //     {
-            //         std::cout << "\033[u";   // Restore cursor position
-            //     }
-
-            //     void moveCursorUp(int lines) const
-            //     {
-            //         if (lines > 0) {
-            //             std::cout << "\033[" << lines << "A";
-            //         }
-            //     }
-
-            //     void printProgressBar() const
-            //     {
-            //         int tableWidth = 0;
-            //         for (const auto& width : columnWidths) {
-            //             tableWidth +=
-            //                 width + 3;   // Column width + padding + border
-            //         }
-            //         tableWidth += 1;   // Right border
-
-            //         int barWidth = tableWidth - 2;   // Adjust for borders
-            //         std::cout << BOLD << WHITE << "╠";
-            //         int pos = barWidth * progress;
-            //         for (int i = 0; i < barWidth; ++i) {
-            //             if (i < pos) {
-            //                 std::cout << "█";
-            //             }
-            //             else if (i == pos) {
-            //                 std::cout << ">";
-            //             }
-            //             else {
-            //                 std::cout << " ";
-            //             }
-            //         }
-            //         std::cout << "╣ " << static_cast<int>(progress * 100.0)
-            //                   << "%" << RESET << std::endl;
-            //     }
-
-            //   public:
-            //     PrettyTable(const std::string& title)
-            //         : title(title), startTime(std::time(nullptr))
-            //     {
-            //     }
-
-            //     void addRow(const std::vector<std::string>& row)
-            //     {
-            //         rows.push_back(row);
-            //         calculateColumnWidths();
-            //     }
-
-            //     void
-            //     updateRow(size_t index, const std::vector<std::string>& row)
-            //     {
-            //         if (index < rows.size()) {
-            //             rows[index] = row;
-            //             calculateColumnWidths();
-            //         }
-            //     }
-
-            //     void setProgress(double value) { progress = value; }
-
-            //     void print()
-            //     {
-            //         if (printedLines > 0) {
-            //             moveCursorUp(printedLines);
-            //         }
-            //         else {
-            //             saveCursorPosition();
-            //         }
-
-            //         std::cout << BOLD << CYAN << title << RESET << std::endl;
-            //         printSeparator();
-            //         for (const auto& row : rows) {
-            //             for (size_t i = 0; i < row.size(); ++i) {
-            //                 std::cout << BOLD << WHITE << "║ " << RESET
-            //                           << std::setw(columnWidths[i]) <<
-            //                           std::left
-            //                           << row[i] << " ";
-            //             }
-            //             std::cout << BOLD << WHITE << "║" << RESET <<
-            //             std::endl; printSeparator();
-            //         }
-
-            //         printProgressBar();
-
-            //         if (printedLines == 0) {
-            //             printedLines =
-            //                 2 + rows.size() * 2 +
-            //                 1;   // Title + separators and rows + progress
-            //                 bar
-            //         }
-            //     }
-            // };
 
             class CursorManager
             {
@@ -363,7 +217,15 @@ namespace simbi {
                                 }
                             }
 
-                            prims[gid].error_at(x1mean, x2mean, x3mean, table);
+                            prims[gid].error_at(
+                                ii,
+                                jj,
+                                kk,
+                                x1mean,
+                                x2mean,
+                                x3mean,
+                                table
+                            );
                         }
                     }
                 }
@@ -471,7 +333,7 @@ namespace simbi {
                      "Time Elapsed",
                      "Time Remaining"}
                 );
-                table.addRow({"0", "0", "0", "0", "0", "0"});
+                table.addRow({"0", "0", "0", "0", "00:00:00", "00:00:00"});
 
                 // if at the very beginning of the simulation
                 // write the initial state to a file
@@ -522,6 +384,9 @@ namespace simbi {
                         n++;
                         sim_state.global_iter = n;
 
+                        if (sim_state.inFailureState) {
+                            throw exception::SimulationFailureException();
+                        }
                         // Write to a file at every checkpoint interval
                         if (sim_state.t >= sim_state.t_interval &&
                             sim_state.t != INFINITY) {
@@ -538,10 +403,6 @@ namespace simbi {
                                     sim_state.chkpt_interval;
                             }
                         }
-
-                        if (sim_state.inFailureState) {
-                            throw exception::SimulationFailureException();
-                        }
                         // Listen to kill signals
                         helpers::catch_signals();
                     }
@@ -551,7 +412,6 @@ namespace simbi {
                         logger.emit_exception(sim_state, e, table);
                     }
                     catch (exception::SimulationFailureException& e) {
-                        printf("Simulation failed\n");
                         logger.emit_exception(sim_state, e, table);
                     }
                 }

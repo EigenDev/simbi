@@ -22,6 +22,7 @@
 #include <iomanip>            // for scientific, precision
 #include <iostream>           // for operator <<
 #include <map>                // for allocator, map
+#include <mutex>
 #include <sstream>   // for operator>>, ws, basic_istream, basic_istringstream
 #include <string>    // for string
 
@@ -42,6 +43,9 @@ namespace simbi {
 
         template <Color C = Color::DEFAULT, typename... ARGS>
         void writefl(std::string const& fmt, ARGS... args);
+
+        template <typename... Args>
+        void sync_print(Args... args);
     }   // namespace util
 
 }   // namespace simbi

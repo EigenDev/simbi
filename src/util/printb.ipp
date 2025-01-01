@@ -144,6 +144,16 @@ namespace simbi {
             write<C>(fmt, args...);
             std::cout << std::flush;
         }
+
+        template <typename... Args>
+        void sync_print(Args... args)
+        {
+            static std::mutex print_mutex;
+            std::lock_guard<std::mutex> guard(print_mutex);
+            std::ostringstream oss;
+            (oss << ... << args) << '\n';
+            std::cout << oss.str();
+        }
     }   // namespace util
 
 }   // namespace simbi
