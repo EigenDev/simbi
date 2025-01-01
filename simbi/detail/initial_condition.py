@@ -114,10 +114,10 @@ def load_checkpoint(model: Any, filename: str) -> None:
 
     dens = calc_labframe_density(fields["rho"], vel, setup["regime"])
     mom = calc_labframe_momentum(
-        setup["ad_gamma"], fields["rho"], vel, fields["p"], bfields, setup["regime"]
+        setup["adiabatic_gamma"], fields["rho"], vel, fields["p"], bfields, setup["regime"]
     )
     energy = calc_labframe_energy(
-        setup["ad_gamma"], fields["rho"], fields["p"], vel, bfields, setup["regime"]
+        setup["adiabatic_gamma"], fields["rho"], fields["p"], vel, bfields, setup["regime"]
     )
 
     check_valid_state(dens, "density")
