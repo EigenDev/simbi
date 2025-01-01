@@ -1,6 +1,7 @@
 plots/
 build/
 builddir/
+src/lib/
 *.egg-info/
 data/
 science
