@@ -314,7 +314,41 @@ class Hydro:
                     "Please include a number of boundary conditions equal to at least half the number of cell faces"
                 )
         self.boundary_conditions = boundary_conditions
-        
+    
+    def _check_curvilinear_boundary_conditions(self) -> None:
+        """
+        check the boundary conditions given by the user. If the user sets the coordinate
+        system to spherical or cylindrical, the boundary conditions are set to the defaults
+        for the given coordinate system. If the user sets the coordinate system to cartesian,
+        the boundary conditions are set to the defaults for cartesian coordinates.
+        """
+        if self.coord_system == "spherical":
+            bcs = ["reflecting", "outflow"]
+            # if the user set dynamics boundaries, use them
+            if self.boundary_conditions[0] == "dynamic":
+                bcs[0] = "dynamic"
+            elif self.boundary_conditions[1] == "dynamic":
+                bcs[1] = "dynamic"
+                
+            if self.dimensionality > 1:
+                bcs += ["reflecting", "reflecting"]
+                if self.dimensionality > 2:
+                    bcs += ["periodic", "periodic"]
+            self.boundary_conditions = bcs
+        elif "cylindrical" in self.coord_system:
+            bcs = ["reflecting", "outflow"]
+            if self.dimensionality > 1:
+                if self.coord_system == 'axis_cylindrical':
+                    # these are just what the user put for z
+                    bcs += [self.boundary_conditions[2], self.boundary_conditions[3]]
+                elif self.coord_system == 'planar_cylindrical':
+                    # phi boundaries are periodic
+                    bcs += ["periodic", "periodic"]
+                else:
+                    bcs += ["periodic", "periodic"]
+                    bcs += [self.boundary_conditions[4], self.boundary_conditions[5]]
+            self.boundary_conditions = bcs
+            
     def simulate(
         self,
         tstart: float = 0.0,
@@ -419,6 +453,7 @@ class Hydro:
                 )
 
         self._check_boundary_conditions(boundary_conditions)
+        self._check_curvilinear_boundary_conditions()
         if not chkpt:
             simbi_ic.initializeModel(
                 self, spatial_order, volume_factor, passive_scalars
@@ -560,8 +595,8 @@ class Hydro:
             "nzv": nzp + 1,
             "bfield": [[0], [0], [0]],
             "hydro_source_lib": hdir.encode("utf-8"),
-            "gravity_source_lib": "".encode("utf-8"),
-            "boundary_sources_lib": "".encode("utf-8"),
+            "gravity_source_lib": gdir.encode("utf-8"),
+            "boundary_source_lib": bdir.encode("utf-8"),
         }
         
         if self.mhd:
