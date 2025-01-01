@@ -2,6 +2,13 @@ using sig_bool = std::atomic<bool>;
 #define SINGLE(kernel_name, ...)                    kernel_name(__VA_ARGS__);
 #define CALL(kernel_name, gridsize, blocksize, ...) kernel_name(__VA_ARGS__);
 
+using atomic_bool_shared =  std::atomic<bool>;
+using atomic_bool =  std::atomic<bool>;
+
+template<typename T>
+void store_atomic_bool(T& var, bool value) {
+    var.store(value);
+}
 namespace global {
     constexpr auto BuildPlatform = Platform::CPU;
     constexpr int WARP_SIZE      = 32;

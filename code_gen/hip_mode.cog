@@ -1,6 +1,13 @@
 #include "hip/hip_runtime.h"
 #define HIP_CODE 1
 
+using atomic_bool_shared =  volatile __shared__ bool;
+using atomic_bool =  volatile bool;
+template<typename T>
+void store_atomic_bool(T& var, bool value) {
+    var = value;
+}
+
 #define DEV    __device__
 #define KERNEL __global__
 #define DUAL   __host__ __device__
