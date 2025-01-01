@@ -184,7 +184,7 @@ def read_file(filename: str) -> tuple[dict[str, Any], dict[str, Any], dict[str, 
 
         fields = {f"v{i+1}": v[i] for i in range(len(v))}
         fields.update(
-            {"rho": rho, "p": p, "chi": chi, "ad_gamma": ds.pop("adiabatic_gamma")}
+            {"rho": rho, "p": p, "chi": chi, "ad_gamma": ds["adiabatic_gamma"]}
         )
 
         vsqr = np.sum(v**2, axis=0)
