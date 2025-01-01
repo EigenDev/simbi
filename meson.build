@@ -36,7 +36,7 @@ hdf5    = dependency('hdf5', language: 'cpp', required: true)
 # ensure the install directory recognizes conda environment
 py3_purelib   = py3.get_path('purelib')
 py3env_prefix = py3.get_variable('prefix', 'empty')
-message('python path -- ' + py3.path())
+message('python path -- ' + py3.full_path())
 message('python install_dir -- ' + py3env_prefix)
 if py3_purelib.endswith('site-packages')
     py3_install_dir = py3_purelib
