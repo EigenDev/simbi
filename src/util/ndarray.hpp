@@ -34,6 +34,7 @@ namespace simbi {
     template <typename DT, global::Platform build_mode = global::BuildPlatform>
     class ndarray
     {
+        using value_type = DT;
         template <typename Deleter>
         using unique_p = util::smart_ptr<DT[], Deleter>;
 

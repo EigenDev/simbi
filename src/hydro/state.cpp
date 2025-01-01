@@ -29,10 +29,7 @@ namespace simbi {
             const InitialConditions& init_cond,
             const std::string& regime,
             std::function<real(real)> const& scale_factor,
-            std::function<real(real)> const& scale_factor_derivative,
-            std::vector<fopt<1>> const& bsources,
-            std::vector<fopt<1>> const& hsources,
-            std::vector<fopt<1>> const& gsources
+            std::function<real(real)> const& scale_factor_derivative
         )
         {
             using sr_rm_or_nt = std::variant<
@@ -53,13 +50,7 @@ namespace simbi {
 
             std::visit(
                 [=](auto&& arg) {
-                    arg->simulate(
-                        scale_factor,
-                        scale_factor_derivative,
-                        bsources,
-                        hsources,
-                        gsources
-                    );
+                    arg->simulate(scale_factor, scale_factor_derivative);
                 },
                 self
             );
@@ -71,10 +62,7 @@ namespace simbi {
             const InitialConditions& init_cond,
             const std::string& regime,
             std::function<real(real)> const& scale_factor,
-            std::function<real(real)> const& scale_factor_derivative,
-            std::vector<fopt<2>> const& bsources,
-            std::vector<fopt<2>> const& hsources,
-            std::vector<fopt<2>> const& gsources
+            std::function<real(real)> const& scale_factor_derivative
         )
         {
             using sr_rm_or_nt = std::variant<
@@ -94,13 +82,7 @@ namespace simbi {
             }();
             std::visit(
                 [=](auto&& arg) {
-                    arg->simulate(
-                        scale_factor,
-                        scale_factor_derivative,
-                        bsources,
-                        hsources,
-                        gsources
-                    );
+                    arg->simulate(scale_factor, scale_factor_derivative);
                 },
                 self
             );
@@ -112,10 +94,7 @@ namespace simbi {
             const InitialConditions& init_cond,
             const std::string& regime,
             std::function<real(real)> const& scale_factor,
-            std::function<real(real)> const& scale_factor_derivative,
-            std::vector<fopt<3>> const& bsources,
-            std::vector<fopt<3>> const& hsources,
-            std::vector<fopt<3>> const& gsources
+            std::function<real(real)> const& scale_factor_derivative
         )
         {
             using sr_rm_or_nt = std::variant<
@@ -136,13 +115,7 @@ namespace simbi {
 
             std::visit(
                 [=](auto&& arg) {
-                    arg->simulate(
-                        scale_factor,
-                        scale_factor_derivative,
-                        bsources,
-                        hsources,
-                        gsources
-                    );
+                    arg->simulate(scale_factor, scale_factor_derivative);
                 },
                 self
             );

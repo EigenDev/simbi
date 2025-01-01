@@ -53,28 +53,20 @@ namespace simbi {
         using function_t    = typename helpers::real_func<dim>::type;
 
         // hydrodynamic source functions
-        function_t dens_source;
-        function_t mom1_source;
-        function_t mom2_source;
-        function_t mom3_source;
-        function_t ener_source;
-        function_t b1_source;
-        function_t b2_source;
-        function_t b3_source;
-        function_t chi_source;
+        function_t hydro_source;
 
         // gravity source functions
-        function_t g1_func;
-        function_t g2_func;
-        function_t g3_func;
+        function_t gravity_source;
 
-        // boundary source functions
-        function_t bx1_inner_func;
-        function_t bx1_outer_func;
-        function_t bx2_inner_func;
-        function_t bx2_outer_func;
-        function_t bx3_inner_func;
-        function_t bx3_outer_func;
+        // boundary source functions at x1 boundaries
+        function_t bx1_inner_source;
+        function_t bx1_outer_source;
+        // boundary source functions at x2 boundaries
+        function_t bx2_inner_source;
+        function_t bx2_outer_source;
+        // boundary source functions at x3 boundaries
+        function_t bx3_inner_source;
+        function_t bx3_outer_source;
 
         // library handles
         void* hsource_handle = nullptr;
@@ -86,6 +78,7 @@ namespace simbi {
             const primitive_t&,
             const primitive_t&,
             const luint,
+            const real,
             const real
         ) const;
         RiemannFuncPointer<RMHD<dim>> riemann_solve;
@@ -114,11 +107,8 @@ namespace simbi {
         void riemann_fluxes();
         void advance();
 
-        DUAL void calc_max_wave_speeds(
-            const primitive_t& prims,
-            const luint nhat,
-            real speeds[4]
-        ) const;
+        DUAL auto
+        calc_max_wave_speeds(const primitive_t& prims, const luint nhat) const;
 
         DUAL eigenvals_t calc_eigenvals(
             const primitive_t& primsL,
@@ -132,21 +122,24 @@ namespace simbi {
             const primitive_t& prL,
             const primitive_t& prR,
             const luint nhat,
-            const real vface
+            const real vface,
+            const real bface
         ) const;
 
         DUAL conserved_t calc_hllc_flux(
             const primitive_t& prL,
             const primitive_t& prR,
             const luint nhat,
-            const real vface
+            const real vface,
+            const real bface
         ) const;
 
         DUAL conserved_t calc_hlld_flux(
             const primitive_t& prL,
             const primitive_t& prR,
             const luint nhat,
-            const real vface
+            const real vface,
+            const real bface
         ) const;
 
         DUAL real div_b(
@@ -187,10 +180,7 @@ namespace simbi {
 
         void simulate(
             std::function<real(real)> const& a,
-            std::function<real(real)> const& adot,
-            const std::vector<std::optional<function_t>>& boundary_sources,
-            const std::vector<std::optional<function_t>>& hydro_sources,
-            const std::vector<std::optional<function_t>>& gravity_sources
+            std::function<real(real)> const& adot
         );
 
         DUAL real curl_e(
@@ -260,9 +250,9 @@ namespace simbi {
         void load_functions()
         {
             // Load the symbol based on the dimension
-            using f2arg = real (*)(real, real);
-            using f3arg = real (*)(real, real, real);
-            using f4arg = real (*)(real, real, real, real);
+            using f2arg = void (*)(real, real, real[]);
+            using f3arg = void (*)(real, real, real, real[]);
+            using f4arg = void (*)(real, real, real, real, real[]);
 
             //=================================================================
             // Check if the hydro source library is set
@@ -280,15 +270,9 @@ namespace simbi {
                 dlerror();
 
                 const std::vector<std::pair<const char*, function_t&>> symbols =
-                    {{"dens_source", dens_source},
-                     {"mom1_source", mom1_source},
-                     {"mom2_source", mom2_source},
-                     {"mom3_source", mom3_source},
-                     {"ener_source", ener_source},
-                     {"b1_source", b1_source},
-                     {"b2_source", b2_source},
-                     {"b3_source", b3_source},
-                     {"chi_source", chi_source}};
+                    {
+                      {"hydro_source", hydro_source},
+                    };
 
                 bool success = true;
                 for (const auto& [symbol, func] : symbols) {
@@ -337,9 +321,7 @@ namespace simbi {
                 // Load the symbol based on the dimension
                 const std::vector<std::pair<const char*, function_t&>>
                     g_symbols = {
-                      {"g1_func", g1_func},
-                      {"g2_func", g2_func},
-                      {"g3_func", g3_func}
+                      {"gravity_source", gravity_source},
                     };
 
                 bool success = true;
@@ -387,12 +369,12 @@ namespace simbi {
                 // Load the symbol based on the dimension
                 const std::vector<std::pair<const char*, function_t&>>
                     b_symbols = {
-                      {"bx1_inner_func", bx1_inner_func},
-                      {"bx1_outer_func", bx1_outer_func},
-                      {"bx2_inner_func", bx2_inner_func},
-                      {"bx2_outer_func", bx2_outer_func},
-                      {"bx3_inner_func", bx3_inner_func},
-                      {"bx3_outer_func", bx3_outer_func}
+                      {"bx1_inner_source", bx1_inner_source},
+                      {"bx1_outer_source", bx1_outer_source},
+                      {"bx2_inner_source", bx2_inner_source},
+                      {"bx2_outer_source", bx2_outer_source},
+                      {"bx3_inner_source", bx3_inner_source},
+                      {"bx3_outer_source", bx3_outer_source},
                     };
 
                 for (const auto& [symbol, func] : b_symbols) {
@@ -400,7 +382,7 @@ namespace simbi {
                     const char* dlsym_error = dlerror();
                     // if can't load symbol, print error
                     if (dlsym_error) {
-                        // it is only unsuccessful if the boundary
+                        // erro out  only  if the boundary
                         // condition is set to dynamic
                         for (int i = 0; i < 6; ++i) {
                             if (symbol == b_symbols[i].first &&
@@ -411,7 +393,8 @@ namespace simbi {
                                 dlclose(bsource_handle);
                             }
                         }
-
+                    }
+                    else {
                         // Assign the function pointer based on the dimension
                         if constexpr (dim == 1) {
                             func = reinterpret_cast<f2arg>(source);

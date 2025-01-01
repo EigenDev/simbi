@@ -4,26 +4,6 @@
 using namespace simbi;
 using namespace simbi::hydrostate;
 
-template <int dim, typename F>
-fopt<dim> optional_wrapper(F func)
-{
-    if (func) {
-        return fopt<dim>(func);
-    }
-    return std::nullopt;
-}
-
-template <int dim, typename F>
-auto optional_vec(std::vector<F> const& vfunc)
-{
-    // vector of optional functions
-    std::vector<fopt<dim>> res;
-    for (auto&& i : vfunc) {
-        res.push_back(optional_wrapper<dim>(i));
-    }
-    return res;
-}
-
 Driver::Driver() = default;
 
 Driver::~Driver() = default;
@@ -43,10 +23,7 @@ void Driver::run(
                 state,
                 init_cond,
                 scale_factor,
-                scale_factor_derivative,
-                {std::nullopt},
-                {std::nullopt},
-                {std::nullopt}
+                scale_factor_derivative
             );
         }
         else if (regime == "srhd") {
@@ -54,10 +31,7 @@ void Driver::run(
                 state,
                 init_cond,
                 scale_factor,
-                scale_factor_derivative,
-                {std::nullopt},
-                {std::nullopt},
-                {std::nullopt}
+                scale_factor_derivative
             );
         }
         else {
@@ -65,10 +39,7 @@ void Driver::run(
                 state,
                 init_cond,
                 scale_factor,
-                scale_factor_derivative,
-                {std::nullopt},
-                {std::nullopt},
-                {std::nullopt}
+                scale_factor_derivative
             );
         }
     }
@@ -78,10 +49,7 @@ void Driver::run(
                 state,
                 init_cond,
                 scale_factor,
-                scale_factor_derivative,
-                {std::nullopt, std::nullopt},
-                {std::nullopt, std::nullopt},
-                {std::nullopt, std::nullopt}
+                scale_factor_derivative
             );
         }
         else if (regime == "srhd") {
@@ -89,10 +57,7 @@ void Driver::run(
                 state,
                 init_cond,
                 scale_factor,
-                scale_factor_derivative,
-                {std::nullopt, std::nullopt},
-                {std::nullopt, std::nullopt},
-                {std::nullopt, std::nullopt}
+                scale_factor_derivative
             );
         }
         else {
@@ -100,10 +65,7 @@ void Driver::run(
                 state,
                 init_cond,
                 scale_factor,
-                scale_factor_derivative,
-                {std::nullopt, std::nullopt},
-                {std::nullopt, std::nullopt},
-                {std::nullopt, std::nullopt}
+                scale_factor_derivative
             );
         }
     }
@@ -113,10 +75,7 @@ void Driver::run(
                 state,
                 init_cond,
                 scale_factor,
-                scale_factor_derivative,
-                {std::nullopt, std::nullopt, std::nullopt},
-                {std::nullopt, std::nullopt, std::nullopt},
-                {std::nullopt, std::nullopt, std::nullopt}
+                scale_factor_derivative
             );
         }
         else if (regime == "srhd") {
@@ -124,10 +83,7 @@ void Driver::run(
                 state,
                 init_cond,
                 scale_factor,
-                scale_factor_derivative,
-                {std::nullopt, std::nullopt, std::nullopt},
-                {std::nullopt, std::nullopt, std::nullopt},
-                {std::nullopt, std::nullopt, std::nullopt}
+                scale_factor_derivative
             );
         }
         else {
@@ -135,10 +91,7 @@ void Driver::run(
                 state,
                 init_cond,
                 scale_factor,
-                scale_factor_derivative,
-                {std::nullopt, std::nullopt, std::nullopt},
-                {std::nullopt, std::nullopt, std::nullopt},
-                {std::nullopt, std::nullopt, std::nullopt}
+                scale_factor_derivative
             );
         }
     }

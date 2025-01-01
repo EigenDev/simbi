@@ -321,12 +321,12 @@ DUAL real RMHD<dim>::curl_e(
                              ek[IJ::SW] * std::sin(tl)) /
                                 dth -
                             (ej[IK::NW] - ej[IK::SW]) / dph) /
-                           (cell.x1mean * std::sin(cell.x2mean));
+                           (cell.x1L() * std::sin(cell.x2mean));
                 }
                 return ((ek[IJ::NE] * std::sin(tr) - ek[IJ::SE] * std::sin(tl)
                         ) / dth -
                         (ej[IK::NE] - ej[IK::SE]) / dph) /
-                       (cell.x1mean * std::sin(cell.x2mean));
+                       (cell.x1R() * std::sin(cell.x2mean));
             }
             else if (nhat == 2) {
                 // compute the curl in the theta-hat direction
@@ -418,12 +418,8 @@ void RMHD<dim>::cons2prim()
     // const auto gr = gamma / (gamma - 1.0);
     simbi::parallel_for(fullP, total_zones, [this] DEV(luint gid) {
         bool workLeftToDo = true;
-        volatile __shared__ bool found_failure;
 
-        auto tid = get_threadId();
-        if (tid == 0) {
-            found_failure = inFailureState;
-        }
+        atomic_bool_shared found_failure(inFailureState.load());
         simbi::gpu::api::synchronize();
 
         real invdV = 1.0;
@@ -516,8 +512,8 @@ void RMHD<dim>::cons2prim()
                     if (iter >= global::MAX_ITER || !std::isfinite(f)) {
                         troubled_cells[gid] = 1;
                         dt                  = INFINITY;
-                        inFailureState      = true;
-                        found_failure       = true;
+                        store_atomic_bool(inFailureState, true);
+                        store_atomic_bool(found_failure, true);
                         break;
                     }
                     iter++;
@@ -551,8 +547,8 @@ void RMHD<dim>::cons2prim()
                 if (iter >= global::MAX_ITER || !std::isfinite(f)) {
                     troubled_cells[gid] = 1;
                     dt                  = INFINITY;
-                    inFailureState      = true;
-                    found_failure       = true;
+                    store_atomic_bool(inFailureState, true);
+                    store_atomic_bool(found_failure, true);
                     break;
                 }
                 iter++;
@@ -603,9 +599,9 @@ void RMHD<dim>::cons2prim()
 
             if (!std::isfinite(yy)) {
                 troubled_cells[gid] = 1;
-                inFailureState      = true;
-                found_failure       = true;
-                dt                  = INFINITY;
+                store_atomic_bool(inFailureState, true);
+                store_atomic_bool(found_failure, true);
+                dt = INFINITY;
             }
             simbi::gpu::api::synchronize();
         }
@@ -781,10 +777,9 @@ RMHD<dim>::cons2prim(const RMHD<dim>::conserved_t& cons) const
 */
 
 template <int dim>
-DUAL void RMHD<dim>::calc_max_wave_speeds(
+DUAL auto RMHD<dim>::calc_max_wave_speeds(
     const RMHD<dim>::primitive_t& prims,
-    const luint nhat,
-    real speeds[4]
+    const luint nhat
 ) const
 {
     /*
@@ -830,13 +825,14 @@ DUAL void RMHD<dim>::calc_max_wave_speeds(
     const real bn2   = bn * bn;
     const real vn    = prims.vcomponent(nhat);
     if (prims.vsquared() < global::epsilon) {   // Eq.(57)
-        const real fac  = 1.0 / (rho * h + bmusq);
-        const real a    = 1.0;
-        const real b    = -(bmusq + rho * h * cs2 + bn2 * cs2) * fac;
-        const real c    = cs2 * bn2 * fac;
-        const real disq = std::sqrt(b * b - 4.0 * a * c);
-        speeds[3]       = std::sqrt(0.5 * (-b + disq));
-        speeds[0]       = -speeds[3];
+        const real fac     = 1.0 / (rho * h + bmusq);
+        const real a       = 1.0;
+        const real b       = -(bmusq + rho * h * cs2 + bn2 * cs2) * fac;
+        const real c       = cs2 * bn2 * fac;
+        const real disq    = std::sqrt(b * b - 4.0 * a * c);
+        const auto lambdaR = std::sqrt(0.5 * (-b + disq));
+        const auto lambdaL = -lambdaR;
+        return std::make_tuple(lambdaL, lambdaR);
     }
     else if (bn2 < global::epsilon) {   // Eq. (58)
         const real g2      = prims.lorentz_factor_squared();
@@ -846,10 +842,14 @@ DUAL void RMHD<dim>::calc_max_wave_speeds(
         const real a1      = -2.0 * rho * h * g2 * vn * (1.0 - cs2);
         const real a0      = rho * h * (-cs2 + g2 * vn * vn * (1.0 - cs2)) - q;
         const real disq    = a1 * a1 - 4.0 * a2 * a0;
-        speeds[3]          = 0.5 * (-a1 + std::sqrt(disq)) / a2;
-        speeds[0]          = 0.5 * (-a1 - std::sqrt(disq)) / a2;
+        const auto lambdaR = 0.5 * (-a1 + std::sqrt(disq)) / a2;
+        const auto lambdaL = 0.5 * (-a1 - std::sqrt(disq)) / a2;
+        return std::make_tuple(lambdaL, lambdaR);
     }
     else {   // solve the full quartic Eq. (56)
+        // initialize quartic speed array
+        real speeds[4] = {0.0, 0.0, 0.0, 0.0};
+
         const real bmu0 = bmu.zero;
         const real bmun = bmu.normal(nhat);
         const real w    = prims.lorentz_factor();
@@ -882,7 +882,13 @@ DUAL void RMHD<dim>::calc_max_wave_speeds(
                    cs2 * w2 * w2 * h * rho * vn2 * vn2 -
                    cs2 * w2 * h * rho * vn2 + w2 * w2 * h * rho * vn2 * vn2);
 
-        [[maybe_unused]] const auto nroots = quartic(a3, a2, a1, a0, speeds);
+        const auto nroots = solve_quartic(a3, a2, a1, a0, speeds);
+
+        // if there are no roots, return null
+        if (nroots == 0) {
+            return std::make_tuple(0.0, 0.0);
+        }
+        return std::make_tuple(speeds[0], speeds[nroots - 1]);
 
         if constexpr (global::debug_mode) {
             if (nroots != 4) {
@@ -914,18 +920,15 @@ DUAL RMHD<dim>::eigenvals_t RMHD<dim>::calc_eigenvals(
     const luint nhat
 ) const
 {
-    real speeds[4];
     // left side
-    calc_max_wave_speeds(primsL, nhat, speeds);
-    const real lpL = speeds[3];
-    const real lmL = speeds[0];
-
+    auto [lmL, lpL] = calc_max_wave_speeds(primsL, nhat);
     // right_side
-    calc_max_wave_speeds(primsR, nhat, speeds);
-    const real lpR = speeds[3];
-    const real lmR = speeds[0];
+    auto [lmR, lpR] = calc_max_wave_speeds(primsR, nhat);
 
-    return {my_min(lmL, lmR), my_max(lpL, lpR)};
+    const auto aR = my_max(lpL, lpR);
+    const auto aL = my_min(lmL, lmR);
+
+    return {aL, aR};
 };
 
 //-----------------------------------------------------------------------------------------
@@ -1005,13 +1008,9 @@ void RMHD<dim>::adapt_dt()
     );
     gpu::api::deviceSynch();
 #else
-    // singleton instance of thread pool. lazy-evaluated
-    static auto& thread_pool =
-        simbi::pooling::ThreadPool::instance(simbi::pooling::get_nthreads());
     std::atomic<real> min_dt = INFINITY;
-    thread_pool.parallel_for(active_zones, [&](luint gid) {
+    pooling::getThreadPool().parallel_for(active_zones, [&](luint gid) {
         real v1p, v1m, v2p, v2m, v3p, v3m, cfl_dt;
-        real speeds[4];
         const luint kk  = axid<dim, BlkAx::K>(gid, xag, yag);
         const luint jj  = axid<dim, BlkAx::J>(gid, xag, yag, kk);
         const luint ii  = axid<dim, BlkAx::I>(gid, xag, yag, kk);
@@ -1021,15 +1020,15 @@ void RMHD<dim>::adapt_dt()
         const luint aid = idx3(ia, ja, ka, nx, ny, nz);
         // Left/Right wave speeds
         if constexpr (dt_type == TIMESTEP_TYPE::ADAPTIVE) {
-            calc_max_wave_speeds(prims[aid], 1, speeds);
-            v1p = std::abs(speeds[3]);
-            v1m = std::abs(speeds[0]);
-            calc_max_wave_speeds(prims[aid], 2, speeds);
-            v2p = std::abs(speeds[3]);
-            v2m = std::abs(speeds[0]);
-            calc_max_wave_speeds(prims[aid], 3, speeds);
-            v3p = std::abs(speeds[3]);
-            v3m = std::abs(speeds[0]);
+            std::tie(v1m, v1p) = calc_max_wave_speeds(prims[aid], 1);
+            v1p                = std::abs(v1p);
+            v1m                = std::abs(v1m);
+            std::tie(v2m, v2p) = calc_max_wave_speeds(prims[aid], 2);
+            v2p                = std::abs(v2p);
+            v2m                = std::abs(v2m);
+            std::tie(v3m, v3p) = calc_max_wave_speeds(prims[aid], 3);
+            v3p                = std::abs(v3p);
+            v3m                = std::abs(v3m);
         }
         else {
             v1p = 1.0;
@@ -1143,13 +1142,14 @@ DUAL RMHD<dim>::conserved_t RMHD<dim>::calc_hlle_flux(
     const RMHD<dim>::primitive_t& prL,
     const RMHD<dim>::primitive_t& prR,
     const luint nhat,
-    const real vface
+    const real vface,
+    const real bface
 ) const
 {
-    const auto uL     = prims2cons(prL);
-    const auto uR     = prims2cons(prR);
-    const auto fL     = prims2flux(prL, nhat);
-    const auto fR     = prims2flux(prR, nhat);
+    const auto uL     = prL.to_conserved(gamma);
+    const auto uR     = prR.to_conserved(gamma);
+    const auto fL     = prL.to_flux(gamma, nhat);
+    const auto fR     = prR.to_flux(gamma, nhat);
     const auto lambda = calc_eigenvals(prL, prR, nhat);
     // Grab the fastest wave speeds
     const auto aL  = lambda.afL();
@@ -1157,9 +1157,14 @@ DUAL RMHD<dim>::conserved_t RMHD<dim>::calc_hlle_flux(
     const auto aLm = aL < 0.0 ? aL : 0.0;
     const auto aRp = aR > 0.0 ? aR : 0.0;
 
+    const auto stationary = aLm == aRp;
+
     auto net_flux = [&] {
         // Compute the HLL Flux component-wise
-        if (vface <= aLm) {
+        if (stationary) {
+            return (fL + fR) * 0.5 - (uR + uL) * 0.5 * vface;
+        }
+        else if (vface <= aLm) {
             return fL - uL * vface;
         }
         else if (vface >= aRp) {
@@ -1230,15 +1235,16 @@ DUAL RMHD<dim>::conserved_t RMHD<dim>::calc_hllc_flux(
     const RMHD<dim>::primitive_t& prL,
     const RMHD<dim>::primitive_t& prR,
     const luint nhat,
-    const real vface
+    const real vface,
+    const real bface
 ) const
 {
     real aS, chiL, chiR;
-    bool bfn      = false;
-    const auto uL = prims2cons(prL);
-    const auto uR = prims2cons(prR);
-    const auto fL = prims2flux(prL, nhat);
-    const auto fR = prims2flux(prR, nhat);
+    bool null_normal_field = false;
+    const auto uL          = prL.to_conserved(gamma);
+    const auto uR          = prR.to_conserved(gamma);
+    const auto fL          = prL.to_flux(gamma, nhat);
+    const auto fR          = prR.to_flux(gamma, nhat);
 
     const auto lambda = calc_eigenvals(prL, prR, nhat);
     const real aL     = lambda.afL();
@@ -1261,10 +1267,8 @@ DUAL RMHD<dim>::conserved_t RMHD<dim>::calc_hllc_flux(
         const auto hll_flux =
             (fL * aRp - fR * aLm + (uR - uL) * aRp * aLm) / (aRp - aLm);
 
-        if (quirk_smoothing) {
-            if (quirk_strong_shock(prL.p(), prR.p())) {
-                return hll_flux - hll_state * vface;
-            }
+        if (quirk_smoothing && quirk_strong_shock(prL.p(), prR.p())) {
+            return hll_flux - hll_state * vface;
         }
 
         // get the perpendicular directional unit vectors
@@ -1272,12 +1276,13 @@ DUAL RMHD<dim>::conserved_t RMHD<dim>::calc_hllc_flux(
         const auto np2 = next_perm(nhat, 2);
         // the normal component of the magnetic field is assumed to
         // be continuous across the interface, so bnL = bnR = bn
-        const real bn  = hll_state.bcomponent(nhat);
+        const auto bn = bface;
+        // const real bn  = hll_state.bcomponent(nhat);
         const real bp1 = hll_state.bcomponent(np1);
         const real bp2 = hll_state.bcomponent(np2);
 
         // check if normal magnetic field is approaching zero
-        bfn = goes_to_zero(bn);
+        null_normal_field = goes_to_zero(bn);
 
         const real uhlld = hll_state.dens();
         const real uhllm = hll_state.momentum(nhat);
@@ -1289,35 +1294,31 @@ DUAL RMHD<dim>::conserved_t RMHD<dim>::calc_hllc_flux(
         const real fpb1  = hll_flux.bcomponent(np1);
         const real fpb2  = hll_flux.bcomponent(np2);
 
-        //------Calculate the contact wave velocity and pressure
-        const real fdb   = (bp1 * fpb1 + bp2 * fpb2);
-        const real bpsq  = bp1 * bp1 + bp2 * bp2;
-        const real fbpsq = fpb1 * fpb1 + fpb2 * fpb2;
+        // //------Calculate the contact wave velocity and pressure
+        real a, b, c;
+        if (null_normal_field) {
+            a = fhlle;
+            b = -(fhllm + uhlle);
+            c = uhllm;
+        }
+        else {
+            const real fdb   = bp1 * fpb1 + bp2 * fpb2;
+            const real bpsq  = bp1 * bp1 + bp2 * bp2;
+            const real fbpsq = fpb1 * fpb1 + fpb2 * fpb2;
+            a                = fhlle - fdb;
+            b                = -(fhllm + uhlle) + bpsq + fbpsq;
+            c                = uhllm - fdb;
+        }
 
-        const auto [a, b, c] = [&] {
-            if (bfn) {
-                return std::make_tuple(fhlle, -(fhllm + uhlle), uhllm);
-            }
-
-            return std::make_tuple(
-                fhlle - fdb,
-                -(uhlle + fhllm) + bpsq + fbpsq,
-                uhllm - fdb
-            );
-        }();
-        const real quad  = -0.5 * (b + sgn(b) * std::sqrt(b * b - 4.0 * a * c));
-        aS               = c / quad;
-        const real vp1   = bfn ? 0.0 : (bp1 * aS - fpb1) / bn;   // Eq. (38)
-        const real vp2   = bfn ? 0.0 : (bp2 * aS - fpb2) / bn;   // Eq. (38)
-        const real invg2 = (1.0 - (aS * aS + vp1 * vp1 + vp2 * vp2));
-        const real vsdB  = (aS * bn + vp1 * bp1 + vp2 * bp2);
-        const real pS    = -aS * (fhlle - bn * vsdB) + fhllm + bn * bn * invg2;
+        const real quad = -0.5 * (b + sgn(b) * std::sqrt(b * b - 4.0 * a * c));
+        aS              = c / quad;
 
         // set the chi values if using MdZ21 CT
         if constexpr (comp_ct_type == CTTYPE::MdZ) {
             chiL = -(prL.vcomponent(nhat) - aS) / (aLm - aS);
             chiR = -(prR.vcomponent(nhat) - aS) / (aRp - aS);
         }
+
         const auto on_left = vface < aS;
         const auto u       = on_left ? uL : uR;
         const auto f       = on_left ? fL : fR;
@@ -1330,34 +1331,65 @@ DUAL RMHD<dim>::conserved_t RMHD<dim>::calc_hllc_flux(
         const real ump2  = u.momentum(np2);
         const real fmp1  = f.momentum(np1);
         const real fmp2  = f.momentum(np2);
-        const real tau   = u.nrg();
-        const real et    = tau + d;
+        const real et    = u.nrg() + d;
         const real cfac  = 1.0 / (ws - aS);
 
         const real v  = pr.vcomponent(nhat);
         const real vs = cfac * (ws - v);
         const real ds = vs * d;
-        const real es = cfac * (ws * et - mnorm + pS * aS - vsdB * bn);
-        const real mn = (es + pS) * aS - vsdB * bn;
-        const real mp1 =
-            bfn ? vs * ump1
-                    : cfac * (-bn * (bp1 * invg2 + vsdB * vp1) + ws * ump1 - fmp1);
-        const real mp2 =
-            bfn ? vs * ump2
-                    : cfac * (-bn * (bp2 * invg2 + vsdB * vp2) + ws * ump2 - fmp2);
-
-        // start state
+        // star state
         conserved_t us;
-        us.dens()           = ds;
-        us.momentum(nhat)   = mn;
-        us.momentum(np1)    = mp1;
-        us.momentum(np2)    = mp2;
-        us.nrg()            = es - ds;
-        us.bcomponent(nhat) = bn;
-        us.bcomponent(np1)  = bfn ? vs * pr.bcomponent(np1) : bp1;
-        us.bcomponent(np2)  = bfn ? vs * pr.bcomponent(np2) : bp2;
+        if (null_normal_field) {
+            const real pS       = -aS * fhlle + fhllm;
+            const real es       = cfac * (ws * et - mnorm + pS * aS);
+            const real mn       = (es + pS) * aS;
+            const real mp1      = vs * ump1;
+            const real mp2      = vs * ump2;
+            us.dens()           = ds;
+            us.momentum(nhat)   = mn;
+            us.momentum(np1)    = mp1;
+            us.momentum(np2)    = mp2;
+            us.nrg()            = es - ds;
+            us.bcomponent(nhat) = bn;
+            us.bcomponent(np1)  = vs * pr.bcomponent(np1);
+            us.bcomponent(np2)  = vs * pr.bcomponent(np2);
+        }
+        else {
+            const real vp1   = (bp1 * aS - fpb1) / bn;
+            const real vp2   = (bp2 * aS - fpb2) / bn;
+            const real invg2 = (1.0 - (aS * aS + vp1 * vp1 + vp2 * vp2));
+            const real vsdB  = (aS * bn + vp1 * bp1 + vp2 * bp2);
+            const real pS = -aS * (fhlle - bn * vsdB) + fhllm + bn * bn * invg2;
+            const real es = cfac * (ws * et - mnorm + pS * aS - vsdB * bn);
+            const real mn = (es + pS) * aS - vsdB * bn;
+            const real mp1 =
+                cfac * (-bn * (bp1 * invg2 + vsdB * vp1) + ws * ump1 - fmp1);
+            const real mp2 =
+                cfac * (-bn * (bp2 * invg2 + vsdB * vp2) + ws * ump2 - fmp2);
 
-        return f + (us - u) * ws - us * vface;
+            us.dens()           = ds;
+            us.momentum(nhat)   = mn;
+            us.momentum(np1)    = mp1;
+            us.momentum(np2)    = mp2;
+            us.nrg()            = es - ds;
+            us.bcomponent(nhat) = bn;
+            us.bcomponent(np1)  = bp1;
+            us.bcomponent(np2)  = bp2;
+        }
+
+        const auto hllc_flux = f + (us - u) * ws - us * vface;
+        // check if any of the hllc_flux components are nan
+        // for (int qq = 0; qq < conserved_t::nmem; qq++) {
+        //     if (std::isnan(hllc_flux[qq])) {
+        //         printf("HLLC Flux component %d is NaN\n", qq);
+        //         printf("pL: % .2e, pR: % .2e\n", prL[qq], prR[qq]);
+        //         printf("aLm: % .2e, aRp: % .2e, aS: %.2e\n", aLm, aRp, aS);
+        //         // std::cin.get();
+        //     }
+        // }
+
+        return hllc_flux;
+        // return f + (us - u) * ws - us * vface;
     }();
     // upwind the concentration
     if (net_flux.dens() < 0.0) {
@@ -1397,7 +1429,7 @@ DUAL RMHD<dim>::conserved_t RMHD<dim>::calc_hllc_flux(
             // transverse magnetic field components across the middle wave.
             // If not, HLLC has the same flux and diffusion coefficients as
             // the HLL solver.
-            if (bfn) {
+            if (null_normal_field) {
                 constexpr auto half = static_cast<real>(0.5);
                 const auto aaS      = std::abs(aS);
                 net_flux.aL         = half;
@@ -1611,14 +1643,15 @@ DUAL RMHD<dim>::conserved_t RMHD<dim>::calc_hlld_flux(
     const RMHD<dim>::primitive_t& prL,
     const RMHD<dim>::primitive_t& prR,
     const luint nhat,
-    const real vface
+    const real vface,
+    const real bface
 ) const
 {
     real chiL, chiR, laL, laR, veeL, veeR, veeS;
-    const auto uL = prims2cons(prL);
-    const auto uR = prims2cons(prR);
-    const auto fL = prims2flux(prL, nhat);
-    const auto fR = prims2flux(prR, nhat);
+    const auto uL = prL.to_conserved(gamma);
+    const auto uR = prR.to_conserved(gamma);
+    const auto fL = prL.to_flux(gamma, nhat);
+    const auto fR = prR.to_flux(gamma, nhat);
 
     const auto lambda = calc_eigenvals(prL, prR, nhat);
     const real aL     = lambda.afL();
@@ -1655,7 +1688,8 @@ DUAL RMHD<dim>::conserved_t RMHD<dim>::calc_hlld_flux(
         const auto np2 = next_perm(nhat, 2);
         // the normal component of the magnetic field is assumed to
         // be continuous across the interface, so bnL = bnR = bn
-        const real bn = hll_state.bcomponent(nhat);
+        const auto bn = bface;
+        // const real bn = hll_state.bcomponent(nhat);
 
         // Eq. (12)
         const conserved_t r[2] = {uL * aLm - fL, uR * aRp - fR};
@@ -1836,43 +1870,43 @@ DUAL RMHD<dim>::conserved_t RMHD<dim>::calc_hlld_flux(
         constexpr auto half = static_cast<real>(0.5);
         net_flux.lamR       = aRp;
         net_flux.lamL       = aLm;
-        // if (vface <= aLm) {
-        //     net_flux.aL  = 1.0;
-        //     net_flux.aR  = 0.0;
-        //     net_flux.dL  = 0.0;
-        //     net_flux.dR  = 0.0;
-        //     net_flux.vjL = prL.vcomponent(nj);
-        //     net_flux.vkL = prL.vcomponent(nk);
-        //     net_flux.vjR = 0.0;
-        //     net_flux.vkR = 0.0;
-        // }
-        // else if (vface >= aRp) {
-        //     net_flux.aL  = 0.0;
-        //     net_flux.aR  = 1.0;
-        //     net_flux.dL  = 0.0;
-        //     net_flux.dR  = 0.0;
-        //     net_flux.vjL = 0.0;
-        //     net_flux.vkL = 0.0;
-        //     net_flux.vjR = prR.vcomponent(nj);
-        //     net_flux.vkR = prR.vcomponent(nk);
-        // }
-        // else {
-        // if Bn is zero, then the HLLC solver admits a jummp in the
-        // transverse magnetic field components across the middle wave.
-        // If not, HLLC has the same flux and diffusion coefficients as
-        // the HLL solver.
-        net_flux.aL = half * (1.0 + veeS);
-        net_flux.aR = half * (1.0 - veeS);
-        net_flux.dL =
-            half * (veeL - veeS) * chiL + half * (std::abs(laL) - veeS * laL);
-        net_flux.dR =
-            half * (veeR - veeS) * chiR + half * (std::abs(laR) - veeS * laR);
+        if (vface <= aLm) {
+            net_flux.aL  = 1.0;
+            net_flux.aR  = 0.0;
+            net_flux.dL  = 0.0;
+            net_flux.dR  = 0.0;
+            net_flux.vjL = prL.vcomponent(nj);
+            net_flux.vkL = prL.vcomponent(nk);
+            net_flux.vjR = 0.0;
+            net_flux.vkR = 0.0;
+        }
+        else if (vface >= aRp) {
+            net_flux.aL  = 0.0;
+            net_flux.aR  = 1.0;
+            net_flux.dL  = 0.0;
+            net_flux.dR  = 0.0;
+            net_flux.vjL = 0.0;
+            net_flux.vkL = 0.0;
+            net_flux.vjR = prR.vcomponent(nj);
+            net_flux.vkR = prR.vcomponent(nk);
+        }
+        else {
+            // if Bn is zero, then the HLLC solver admits a jummp in the
+            // transverse magnetic field components across the middle wave.
+            // If not, HLLC has the same flux and diffusion coefficients as
+            // the HLL solver.
+            net_flux.aL = half * (1.0 + veeS);
+            net_flux.aR = half * (1.0 - veeS);
+            net_flux.dL = half * (veeL - veeS) * chiL +
+                          half * (std::abs(laL) - veeS * laL);
+            net_flux.dR = half * (veeR - veeS) * chiR +
+                          half * (std::abs(laR) - veeS * laR);
 
-        net_flux.vjL = prL.vcomponent(nj);
-        net_flux.vkL = prL.vcomponent(nk);
-        net_flux.vjR = prR.vcomponent(nj);
-        net_flux.vkR = prR.vcomponent(nk);
-        // }
+            net_flux.vjL = prL.vcomponent(nj);
+            net_flux.vkL = prL.vcomponent(nk);
+            net_flux.vjR = prR.vcomponent(nj);
+            net_flux.vkR = prR.vcomponent(nk);
+        }
     }
     else {
         net_flux.calc_electric_field(nhat);
@@ -1883,16 +1917,182 @@ DUAL RMHD<dim>::conserved_t RMHD<dim>::calc_hlld_flux(
 template <int dim>
 void RMHD<dim>::set_flux_and_fields()
 {
-    const auto xe = nxe - 2;
-    const auto ye = nye - 2;
-    const auto ze = nze - 2;
-    parallel_for(activeP, [xe, ye, ze, this] DEV(const luint gid) {
+    const auto xe      = nxe - 2;
+    const auto ye      = nye - 2;
+    const auto ze      = nze - 2;
+    const auto m2inner = reflect_inner_x2_momentum ? 2 : -1;
+    const auto m2outer = reflect_outer_x2_momentum ? 2 : -1;
+
+    // Helper lambda to handle boundary conditions
+    auto handle_boundary_conditions = [&](auto& field,
+                                          auto& bstag,
+                                          auto idx,
+                                          auto real_idx,
+                                          auto wrap_idx,
+                                          auto bcidx,
+                                          auto momentum_idx) {
+        switch (bcs[bcidx]) {
+            case BoundaryCondition::PERIODIC:
+                field[idx] = field[wrap_idx];
+                bstag[idx] = bstag[wrap_idx];
+                break;
+            case BoundaryCondition::REFLECTING:
+                field[idx] = field[real_idx];
+                bstag[idx] = bstag[real_idx];
+                if (momentum_idx != -1) {
+                    field[idx].momentum(momentum_idx) *= -1.0;
+                    bstag[idx] *= -1.0;
+                }
+                break;
+            default:   // outflow
+                field[idx] = field[real_idx];
+                bstag[idx] = bstag[real_idx];
+                break;
+        }
+    };
+    // update the flux and field in the x1 direction
+    parallel_for(xvertexP, [=, this] DEV(const luint gid) {
+        const luint kk = axid<3, BlkAx::K>(gid, nxv, yag);
+        const luint jj = axid<3, BlkAx::J>(gid, nxv, yag, kk);
+        const luint ii = axid<3, BlkAx::I>(gid, nxv, yag, kk);
+
+        if (global::on_gpu) {
+            if ((ii >= nxv) || (jj >= yag) || (kk >= zag)) {
+                return;
+            }
+        }
+
+        // the fluxes only ever need the ghosts zones one cell deep for
+        // constrained transport
+        constexpr auto hr = 1;
+        constexpr auto rr = 0;
+        constexpr auto rs = rr + 1;
+        const auto jr     = jj + hr;
+        const auto kr     = kk + hr;
+        // fill the ghost zones for the fluxes at the x1 boundaries
+        if (jj < ye && kk < ze) {
+            const auto x1jb = idx3(ii, rr, kr, nxv, nye, nze);
+            const auto x1je = idx3(ii, nye - rs, kr, nxv, nye, nze);
+            const auto x1kb = idx3(ii, jr, rr, nxv, nye, nze);
+            const auto x1ke = idx3(ii, jr, nze - rs, nxv, nye, nze);
+
+            // across x2 interface
+            handle_boundary_conditions(
+                fri,
+                bstag1,
+                x1jb,
+                idx3(ii, hr, kr, nxv, nye, nze),
+                idx3(ii, ye, kr, nxv, nye, nze),
+                2,
+                m2inner
+            );
+            handle_boundary_conditions(
+                fri,
+                bstag1,
+                x1je,
+                idx3(ii, ye, kr, nxv, nye, nze),
+                idx3(ii, hr, kr, nxv, nye, nze),
+                3,
+                m2outer
+            );
+
+            // across x3 interface
+            handle_boundary_conditions(
+                fri,
+                bstag1,
+                x1kb,
+                idx3(ii, jr, hr, nxv, nye, nze),
+                idx3(ii, jr, ze, nxv, nye, nze),
+                4,
+                3
+            );
+            handle_boundary_conditions(
+                fri,
+                bstag1,
+                x1ke,
+                idx3(ii, jr, ze, nxv, nye, nze),
+                idx3(ii, jr, hr, nxv, nye, nze),
+                5,
+                3
+            );
+        }
+    });
+
+    // update the flux and field in the x2 direction
+    parallel_for(yvertexP, [=, this] DEV(const luint gid) {
+        const luint kk = axid<3, BlkAx::K>(gid, xag, nyv);
+        const luint jj = axid<3, BlkAx::J>(gid, xag, nyv, kk);
+        const luint ii = axid<3, BlkAx::I>(gid, xag, nyv, kk);
+
+        if (global::on_gpu) {
+            if ((ii >= xag) || (jj >= nyv) || (kk >= zag)) {
+                return;
+            }
+        }
+
+        // the fluxes only ever need the ghosts zones one cell deep
+        constexpr auto hr = 1;
+        constexpr auto rr = 0;
+        constexpr auto rs = rr + 1;
+        const auto ir     = ii + hr;
+        const auto kr     = kk + hr;
+        // fill the ghost zones for the fluxes at the x2 boundaries
+        if (ii < xe && kk < ze) {
+            const auto x2ib = idx3(rr, jj, kr, nxe, nyv, nze);
+            const auto x2ie = idx3(nxe - rs, jj, kr, nxe, nyv, nze);
+            const auto x2kb = idx3(ir, jj, rr, nxe, nyv, nze);
+            const auto x2ke = idx3(ir, jj, nze - rs, nxe, nyv, nze);
+
+            // across x1 interface
+            handle_boundary_conditions(
+                gri,
+                bstag2,
+                x2ib,
+                idx3(hr, jj, kr, nxe, nyv, nze),
+                idx3(xe, jj, kr, nxe, nyv, nze),
+                0,
+                1
+            );
+            handle_boundary_conditions(
+                gri,
+                bstag2,
+                x2ie,
+                idx3(xe, jj, kr, nxe, nyv, nze),
+                idx3(hr, jj, kr, nxe, nyv, nze),
+                1,
+                1
+            );
+
+            // across x3 interface
+            handle_boundary_conditions(
+                gri,
+                bstag2,
+                x2kb,
+                idx3(ir, jj, hr, nxe, nyv, nze),
+                idx3(ir, jj, ze, nxe, nyv, nze),
+                4,
+                3
+            );
+            handle_boundary_conditions(
+                gri,
+                bstag2,
+                x2ke,
+                idx3(ir, jj, ze, nxe, nyv, nze),
+                idx3(ir, jj, hr, nxe, nyv, nze),
+                5,
+                3
+            );
+        }
+    });
+
+    // update the flux and field in the x3 direction
+    parallel_for(zvertexP, [=, this] DEV(const luint gid) {
         const luint kk = axid<3, BlkAx::K>(gid, xag, yag);
         const luint jj = axid<3, BlkAx::J>(gid, xag, yag, kk);
         const luint ii = axid<3, BlkAx::I>(gid, xag, yag, kk);
 
         if (global::on_gpu) {
-            if ((ii >= xag) || (jj >= yag) || (kk >= zag)) {
+            if ((ii >= xag) || (jj >= yag) || (kk >= nzv)) {
                 return;
             }
         }
@@ -1901,186 +2101,54 @@ void RMHD<dim>::set_flux_and_fields()
         constexpr auto hr = 1;
         const auto ir     = ii + hr;
         const auto jr     = jj + hr;
-        const auto kr     = kk + hr;
-        for (luint rr = 0; rr < hr; rr++) {
-            const auto rs = rr + 1;
+        const auto rr     = 0;
+        const auto rs     = rr + 1;
+        // fill the ghost zones for the fluxes at the x3 boundaries
+        if (ii < xe && jj < ye) {
+            const auto x3ib = idx3(rr, jr, kk, nxe, nye, nzv);
+            const auto x3ie = idx3(nxe - rs, jr, kk, nxe, nye, nzv);
+            const auto x3jb = idx3(ir, rr, kk, nxe, nye, nzv);
+            const auto x3je = idx3(ir, nye - rs, kk, nxe, nye, nzv);
 
-            // Helper lambda to handle boundary conditions
-            auto handle_boundary_conditions = [&](auto& field,
-                                                  auto& bstag,
-                                                  auto idx,
-                                                  auto real_idx,
-                                                  auto bcidx,
-                                                  auto momentum_idx,
-                                                  auto wrap_idx) {
-                switch (bcs[bcidx]) {
-                    case BoundaryCondition::PERIODIC:
-                        field[idx] = field[wrap_idx];
-                        bstag[idx] = bstag[wrap_idx];
-                        break;
-                    case BoundaryCondition::REFLECTING:
-                        field[idx] = field[real_idx];
-                        field[idx].momentum(momentum_idx) *= -1.0;
-                        bstag[idx] = bstag[real_idx];
-                        break;
-                    default:   // outflow
-                        field[idx] = field[real_idx];
-                        bstag[idx] = bstag[real_idx];
-                        break;
-                }
-            };
+            // across x1 interface
+            handle_boundary_conditions(
+                hri,
+                bstag3,
+                x3ib,
+                idx3(hr, jr, kk, nxe, nye, nzv),
+                idx3(xe, jr, kk, nxe, nye, nzv),
+                0,
+                3
+            );
+            handle_boundary_conditions(
+                hri,
+                bstag3,
+                x3ie,
+                idx3(xe, jr, kk, nxe, nye, nzv),
+                idx3(hr, jr, kk, nxe, nye, nzv),
+                1,
+                3
+            );
 
-            // fill the ghost zones for the fluxes at the x1 boundaries
-            if (jj < ye && kk < ze) {
-                for (int q = 0; q < 2; q++) {
-                    const auto ifq  = ii + q;
-                    const auto x1jb = idx3(ifq, rr, kr, nxv, nye, nze);
-                    const auto x1je = idx3(ifq, nye - rs, kr, nxv, nye, nze);
-                    const auto x1kb = idx3(ifq, jr, rr, nxv, nye, nze);
-                    const auto x1ke = idx3(ifq, jr, nze - rs, nxv, nye, nze);
-
-                    // x2
-                    handle_boundary_conditions(
-                        fri,
-                        bstag1,
-                        x1jb,
-                        idx3(ifq, hr, kr, nxv, nye, nze),
-                        2,
-                        2,
-                        idx3(ifq, ye, kr, nxv, nye, nze)
-                    );
-                    handle_boundary_conditions(
-                        fri,
-                        bstag1,
-                        x1je,
-                        idx3(ifq, ye, kr, nxv, nye, nze),
-                        3,
-                        2,
-                        idx3(ifq, hr, kr, nxv, nye, nze)
-                    );
-
-                    handle_boundary_conditions(
-                        fri,
-                        bstag1,
-                        x1kb,
-                        idx3(ifq, jr, hr, nxv, nye, nze),
-                        4,
-                        3,
-                        idx3(ifq, jr, ze, nxv, nye, nze)
-                    );
-                    handle_boundary_conditions(
-                        fri,
-                        bstag1,
-                        x1ke,
-                        idx3(ifq, jr, ze, nxv, nye, nze),
-                        5,
-                        3,
-                        idx3(ifq, jr, hr, nxv, nye, nze)
-                    );
-                }
-            }
-
-            // fill the ghost zones for the fluxes at the x2 boundaries
-            if (ii < xe && kk < ze) {
-                for (int q = 0; q < 2; q++) {
-                    const auto jfq  = jj + q;
-                    const auto x2ib = idx3(rr, jfq, kr, nxe, nyv, nze);
-                    const auto x2ie = idx3(nxe - rs, jfq, kr, nxe, nyv, nze);
-                    const auto x2kb = idx3(ir, jfq, rr, nxe, nyv, nze);
-                    const auto x2ke = idx3(ir, jfq, nze - rs, nxe, nyv, nze);
-
-                    // x1
-                    handle_boundary_conditions(
-                        gri,
-                        bstag2,
-                        x2ib,
-                        idx3(hr, jfq, kr, nxe, nyv, nze),
-                        0,
-                        1,
-                        idx3(xe, jfq, kr, nxe, nyv, nze)
-                    );
-                    handle_boundary_conditions(
-                        gri,
-                        bstag2,
-                        x2ie,
-                        idx3(xe, jfq, kr, nxe, nyv, nze),
-                        0,
-                        1,
-                        idx3(hr, jfq, kr, nxe, nyv, nze)
-                    );
-
-                    // x3
-                    handle_boundary_conditions(
-                        gri,
-                        bstag2,
-                        x2kb,
-                        idx3(ir, jfq, hr, nxe, nyv, nze),
-                        4,
-                        3,
-                        idx3(ir, jfq, ze, nxe, nyv, nze)
-                    );
-                    handle_boundary_conditions(
-                        gri,
-                        bstag2,
-                        x2ke,
-                        idx3(ir, jfq, ze, nxe, nyv, nze),
-                        5,
-                        3,
-                        idx3(ir, jfq, hr, nxe, nyv, nze)
-                    );
-                }
-            }
-
-            // fill the ghost zones for the fluxes at the x3 boundaries
-            if (ii < xe && jj < ye) {
-                for (int q = 0; q < 2; q++) {
-                    const auto kfq  = kk + q;
-                    const auto x3ib = idx3(rr, jr, kfq, nxe, nye, nzv);
-                    const auto x3ie = idx3(nxe - rs, jr, kfq, nxe, nye, nzv);
-                    const auto x3jb = idx3(ir, rr, kfq, nxe, nye, nzv);
-                    const auto x3je = idx3(ir, nye - rs, kfq, nxe, nye, nzv);
-
-                    // x1
-                    handle_boundary_conditions(
-                        hri,
-                        bstag3,
-                        x3ib,
-                        idx3(hr, jr, kfq, nxe, nye, nzv),
-                        0,
-                        1,
-                        idx3(xe, jr, kfq, nxe, nye, nzv)
-                    );
-                    handle_boundary_conditions(
-                        hri,
-                        bstag3,
-                        x3ie,
-                        idx3(xe, jr, kfq, nxe, nye, nzv),
-                        1,
-                        1,
-                        idx3(hr, jr, kfq, nxe, nye, nzv)
-                    );
-
-                    // x2
-                    handle_boundary_conditions(
-                        hri,
-                        bstag3,
-                        x3jb,
-                        idx3(ir, hr, kfq, nxe, nye, nzv),
-                        2,
-                        2,
-                        idx3(ir, ye, kfq, nxe, nye, nzv)
-                    );
-                    handle_boundary_conditions(
-                        hri,
-                        bstag3,
-                        x3je,
-                        idx3(ir, ye, kfq, nxe, nye, nzv),
-                        3,
-                        2,
-                        idx3(ir, hr, kfq, nxe, nye, nzv)
-                    );
-                }
-            }
+            // across x2 interface
+            handle_boundary_conditions(
+                hri,
+                bstag3,
+                x3jb,
+                idx3(ir, hr, kk, nxe, nye, nzv),
+                idx3(ir, ye, kk, nxe, nye, nzv),
+                2,
+                m2inner
+            );
+            handle_boundary_conditions(
+                hri,
+                bstag3,
+                x3je,
+                idx3(ir, ye, kk, nxe, nye, nzv),
+                idx3(ir, hr, kk, nxe, nye, nzv),
+                3,
+                m2outer
+            );
         }
     });
 }
@@ -2089,19 +2157,18 @@ template <int dim>
 void RMHD<dim>::riemann_fluxes()
 {
     const auto prim_dat = prims.data();
-    simbi::parallel_for(activeP, [prim_dat, this] DEV(const luint idx) {
-        primitive_t pL, pLL, pR, pRR;
-
+    // Compute the fluxes in the x1 direction
+    simbi::parallel_for(xvertexP, [prim_dat, this] DEV(const luint idx) {
         // primitive buffer that returns dynamic shared array
         // if working with shared memory on GPU, identity otherwise
         const auto prb = sm_or_identity(prim_dat);
 
-        const luint kk = axid<dim, BlkAx::K>(idx, xag, yag);
-        const luint jj = axid<dim, BlkAx::J>(idx, xag, yag, kk);
-        const luint ii = axid<dim, BlkAx::I>(idx, xag, yag, kk);
+        const luint kk = axid<dim, BlkAx::K>(idx, nxv, yag);
+        const luint jj = axid<dim, BlkAx::J>(idx, nxv, yag, kk);
+        const luint ii = axid<dim, BlkAx::I>(idx, nxv, yag, kk);
 
         if constexpr (global::on_gpu) {
-            if ((ii >= xag) || (jj >= yag) || (kk >= zag)) {
+            if ((ii >= nxv) || (jj >= yag) || (kk >= yag)) {
                 return;
             }
         }
@@ -2110,10 +2177,7 @@ void RMHD<dim>::riemann_fluxes()
         const luint ia = ii + radius;
         const luint ja = jj + radius;
         const luint ka = kk + radius;
-        // active zones for fluxes
-        const luint iaf = ii + 1;
-        const luint jaf = jj + 1;
-        const luint kaf = kk + 1;
+
         const luint tx  = (global::on_sm) ? threadIdx.x : 0;
         const luint ty  = (global::on_sm) ? threadIdx.y : 0;
         const luint tz  = (global::on_sm) ? threadIdx.z : 0;
@@ -2144,80 +2208,185 @@ void RMHD<dim>::riemann_fluxes()
             );
         }
 
-        const auto il = get_real_idx(ii - 1, 0, xag);
-        const auto ir = get_real_idx(ii + 1, 0, xag);
-        const auto jl = get_real_idx(jj - 1, 0, yag);
-        const auto jr = get_real_idx(jj + 1, 0, yag);
-        const auto kl = get_real_idx(kk - 1, 0, zag);
-        const auto kr = get_real_idx(kk + 1, 0, zag);
+        const auto iobj = get_real_idx(ii, 0, xag);
 
         // object to left or right? (x1-direction)
-        const bool object_x[2] = {
-          ib_check<dim>(object_pos, il, jj, kk, xag, yag, 1),
-          ib_check<dim>(object_pos, ir, jj, kk, xag, yag, 1)
-        };
+        const bool object_x =
+            ib_check<dim>(object_pos, iobj, jj, kk, xag, yag, 1);
+
+        const auto vface = this->cell_factors(ii, jj, kk).v1fL();
+        // active x1 flux perpendicular zone indices
+        const auto jaf = jj + 1;
+        const auto kaf = kk + 1;
+        const auto xf  = idx3(ii, jaf, kaf, nxv, nye, nze);
+
+        // fluxes in i direction
+        auto pL = prb[idx3(txa - 1, tya, tza, sx, sy, sz)];
+        auto pR = prb[idx3(txa + 0, tya, tza, sx, sy, sz)];
+
+        if (!use_pcm) {
+            const auto pLL = prb[idx3(txa - 2, tya, tza, sx, sy, sz)];
+            const auto pRR = prb[idx3(txa + 1, tya, tza, sx, sy, sz)];
+
+            pL = pL + plm_gradient(pL, pLL, pR, plm_theta) * 0.5;
+            pR = pR - plm_gradient(pR, pL, pRR, plm_theta) * 0.5;
+        }
+        ib_modify<dim>(pR, pL, object_x, 1);
+        fri[xf] = (this->*riemann_solve)(pL, pR, 1, vface, bstag1[xf]);
+    });
+
+    // compute the fluxes in the x2 direction
+    simbi::parallel_for(yvertexP, [prim_dat, this] DEV(const luint idx) {
+        // primitive buffer that returns dynamic shared array
+        // if working with shared memory on GPU, identity otherwise
+        const auto prb = sm_or_identity(prim_dat);
+
+        const luint kk = axid<dim, BlkAx::K>(idx, xag, nyv);
+        const luint jj = axid<dim, BlkAx::J>(idx, xag, nyv, kk);
+        const luint ii = axid<dim, BlkAx::I>(idx, xag, nyv, kk);
+
+        if constexpr (global::on_gpu) {
+            if ((ii >= nxe) || (jj >= nyv) || (kk >= nze)) {
+                return;
+            }
+        }
+
+        // active zones for primitive variables
+        const luint ia = ii + radius;
+        const luint ja = jj + radius;
+        const luint ka = kk + radius;
+
+        const luint tx  = (global::on_sm) ? threadIdx.x : 0;
+        const luint ty  = (global::on_sm) ? threadIdx.y : 0;
+        const luint tz  = (global::on_sm) ? threadIdx.z : 0;
+        const luint txa = (global::on_sm) ? tx + radius : ia;
+        const luint tya = (global::on_sm) ? ty + radius : ja;
+        const luint tza = (global::on_sm) ? tz + radius : ka;
+
+        if constexpr (global::on_sm) {
+            load_shared_buffer<dim>(
+                fullP,
+                prb,
+                prims,
+                nx,
+                ny,
+                nz,
+                sx,
+                sy,
+                tx,
+                ty,
+                tz,
+                txa,
+                tya,
+                tza,
+                ia,
+                ja,
+                ka,
+                radius
+            );
+        }
+
+        const auto jobj = get_real_idx(jj, 0, yag);
 
         // object in front or behind? (x2-direction)
-        const bool object_y[2] = {
-          ib_check<dim>(object_pos, ii, jl, kk, xag, yag, 2),
-          ib_check<dim>(object_pos, ii, jr, kk, xag, yag, 2)
-        };
+        const bool object_y =
+            ib_check<dim>(object_pos, ii, jobj, kk, xag, yag, 2);
 
-        // object above or below? (x3-direction)
-        const bool object_z[2] = {
-          ib_check<dim>(object_pos, ii, jj, kl, xag, yag, 3),
-          ib_check<dim>(object_pos, ii, jj, kr, xag, yag, 3)
-        };
+        const auto vface = this->cell_factors(ii, jj, kk).v2fL();
+        // active x2 flux perpendicular zone indices
+        const auto iaf = ii + 1;
+        const auto kaf = kk + 1;
+        const auto yf  = idx3(iaf, jj, kaf, nxe, nyv, nze);
 
-        const auto cell   = this->cell_factors(ii, jj, kk);
-        const real vfs[2] = {cell.v1fL(), cell.v1fR()};
-        // Calc Rimeann Flux at all interfaces
-        for (int q = 0; q < 2; q++) {
-            const auto xf = idx3(ii + q, jaf, kaf, nxv, nye, nze);
-            const auto yf = idx3(iaf, jj + q, kaf, nxe, nyv, nze);
-            const auto zf = idx3(iaf, jaf, kk + q, nxe, nye, nzv);
-            // fluxes in i direction
-            pL = prb[idx3(txa + q - 1, tya, tza, sx, sy, sz)];
-            pR = prb[idx3(txa + q + 0, tya, tza, sx, sy, sz)];
+        // fluxes in j direction
+        auto pL = prb[idx3(txa, tya - 1, tza, sx, sy, sz)];
+        auto pR = prb[idx3(txa, tya + 0, tza, sx, sy, sz)];
+        if (!use_pcm) {
+            const auto pLL = prb[idx3(txa, tya - 2, tza, sx, sy, sz)];
+            const auto pRR = prb[idx3(txa, tya + 1, tza, sx, sy, sz)];
 
-            if (!use_pcm) {
-                pLL = prb[idx3(txa + q - 2, tya, tza, sx, sy, sz)];
-                pRR = prb[idx3(txa + q + 1, tya, tza, sx, sy, sz)];
-
-                pL = pL + plm_gradient(pL, pLL, pR, plm_theta) * 0.5;
-                pR = pR - plm_gradient(pR, pL, pRR, plm_theta) * 0.5;
-            }
-            ib_modify<dim>(pR, pL, object_x[q], 1);
-            fri[xf] = (this->*riemann_solve)(pL, pR, 1, vfs[q]);
-
-            // fluxes in j direction
-            pL = prb[idx3(txa, tya + q - 1, tza, sx, sy, sz)];
-            pR = prb[idx3(txa, tya + q + 0, tza, sx, sy, sz)];
-
-            if (!use_pcm) {
-                pLL = prb[idx3(txa, tya + q - 2, tza, sx, sy, sz)];
-                pRR = prb[idx3(txa, tya + q + 1, tza, sx, sy, sz)];
-
-                pL = pL + plm_gradient(pL, pLL, pR, plm_theta) * 0.5;
-                pR = pR - plm_gradient(pR, pL, pRR, plm_theta) * 0.5;
-            }
-            ib_modify<dim>(pR, pL, object_y[q], 2);
-            gri[yf] = (this->*riemann_solve)(pL, pR, 2, 0);
-
-            // fluxes in k direction
-            pL = prb[idx3(txa, tya, tza + q - 1, sx, sy, sz)];
-            pR = prb[idx3(txa, tya, tza + q + 0, sx, sy, sz)];
-
-            if (!use_pcm) {
-                pLL = prb[idx3(txa, tya, tza + q - 2, sx, sy, sz)];
-                pRR = prb[idx3(txa, tya, tza + q + 1, sx, sy, sz)];
-
-                pL = pL + plm_gradient(pL, pLL, pR, plm_theta) * 0.5;
-                pR = pR - plm_gradient(pR, pL, pRR, plm_theta) * 0.5;
-            }
-            ib_modify<dim>(pR, pL, object_z[q], 3);
-            hri[zf] = (this->*riemann_solve)(pL, pR, 3, 0);
+            pL = pL + plm_gradient(pL, pLL, pR, plm_theta) * 0.5;
+            pR = pR - plm_gradient(pR, pL, pRR, plm_theta) * 0.5;
         }
+        ib_modify<dim>(pR, pL, object_y, 2);
+        gri[yf] = (this->*riemann_solve)(pL, pR, 2, vface, bstag2[yf]);
+    });
+
+    // compute the fluxes in the x3 direction
+    simbi::parallel_for(zvertexP, [prim_dat, this] DEV(const luint idx) {
+        // primitive buffer that returns dynamic shared array
+        // if working with shared memory on GPU, identity otherwise
+        const auto prb = sm_or_identity(prim_dat);
+
+        const luint kk = axid<dim, BlkAx::K>(idx, xag, yag);
+        const luint jj = axid<dim, BlkAx::J>(idx, xag, yag, kk);
+        const luint ii = axid<dim, BlkAx::I>(idx, xag, yag, kk);
+
+        if constexpr (global::on_gpu) {
+            if ((ii >= nxe) || (jj >= yag) || (kk >= zag)) {
+                return;
+            }
+        }
+
+        // active zones for primitive variables
+        const luint ia = ii + radius;
+        const luint ja = jj + radius;
+        const luint ka = kk + radius;
+
+        const luint tx  = (global::on_sm) ? threadIdx.x : 0;
+        const luint ty  = (global::on_sm) ? threadIdx.y : 0;
+        const luint tz  = (global::on_sm) ? threadIdx.z : 0;
+        const luint txa = (global::on_sm) ? tx + radius : ia;
+        const luint tya = (global::on_sm) ? ty + radius : ja;
+        const luint tza = (global::on_sm) ? tz + radius : ka;
+
+        if constexpr (global::on_sm) {
+            load_shared_buffer<dim>(
+                fullP,
+                prb,
+                prims,
+                nx,
+                ny,
+                nz,
+                sx,
+                sy,
+                tx,
+                ty,
+                tz,
+                txa,
+                tya,
+                tza,
+                ia,
+                ja,
+                ka,
+                radius
+            );
+        }
+
+        const auto kobj = get_real_idx(kk, 0, zag);
+        // object above or below? (x3-direction)
+        const bool object_z =
+            ib_check<dim>(object_pos, ii, jj, kobj, xag, yag, 3);
+
+        const auto vface = this->cell_factors(ii, jj, kk).v3fL();
+        // active x3 flux perpendicular zone indices
+        const auto iaf = ii + 1;
+        const auto jaf = jj + 1;
+        const auto zf  = idx3(iaf, jaf, kk, nxe, nye, nzv);
+
+        // fluxes in k direction
+        auto pL = prb[idx3(txa, tya, tza - 1, sx, sy, sz)];
+        auto pR = prb[idx3(txa, tya, tza + 0, sx, sy, sz)];
+
+        if (!use_pcm) {
+            const auto pLL = prb[idx3(txa, tya, tza - 2, sx, sy, sz)];
+            const auto pRR = prb[idx3(txa, tya, tza + 1, sx, sy, sz)];
+
+            pL = pL + plm_gradient(pL, pLL, pR, plm_theta) * 0.5;
+            pR = pR - plm_gradient(pR, pL, pRR, plm_theta) * 0.5;
+        }
+        ib_modify<dim>(pR, pL, object_z, 3);
+        hri[zf] = (this->*riemann_solve)(pL, pR, 3, vface, bstag3[zf]);
     });
 }
 
@@ -2280,43 +2449,13 @@ DUAL RMHD<dim>::conserved_t RMHD<dim>::hydro_sources(const auto& cell) const
 
     conserved_t res;
     if constexpr (dim == 1) {
-        res = {
-          dens_source(x1c, t),
-          mom1_source(x1c, t),
-          mom2_source(x1c, t),
-          mom3_source(x1c, t),
-          ener_source(x1c, t),
-          b1_source(x1c, t),
-          b2_source(x1c, t),
-          b3_source(x1c, t),
-          chi_source(x1c, t)
-        };
+        hydro_source(x1c, t, res);
     }
     else if constexpr (dim == 2) {
-        res = {
-          dens_source(x1c, x2c, t),
-          mom1_source(x1c, x2c, t),
-          mom2_source(x1c, x2c, t),
-          mom3_source(x1c, x2c, t),
-          ener_source(x1c, x2c, t),
-          b1_source(x1c, x2c, t),
-          b2_source(x1c, x2c, t),
-          b3_source(x1c, x2c, t),
-          chi_source(x1c, x2c, t)
-        };
+        hydro_source(x1c, x2c, t, res);
     }
     else {
-        res = {
-          dens_source(x1c, x2c, x3c, t),
-          mom1_source(x1c, x2c, x3c, t),
-          mom2_source(x1c, x2c, x3c, t),
-          mom3_source(x1c, x2c, x3c, t),
-          ener_source(x1c, x2c, x3c, t),
-          b1_source(x1c, x2c, x3c, t),
-          b2_source(x1c, x2c, x3c, t),
-          b3_source(x1c, x2c, x3c, t),
-          chi_source(x1c, x2c, x3c, t)
-        };
+        hydro_source(x1c, x2c, x3c, t, res);
     }
     return res;
 }
@@ -2338,26 +2477,18 @@ DUAL RMHD<dim>::conserved_t RMHD<dim>::gravity_sources(
         const auto x2c = cell.x2mean;
         if constexpr (dim > 2) {
             const auto x3c = cell.x3mean;
-            for (int q = 1; q < dimensions + 1; q++) {
-                res[q] = gsources[q](x1c, x2c, x3c, t);
-            }
-            res[dimensions + 1] = gsources[1](x1c, x2c, x3c, t) * prims[1] +
-                                  gsources[2](x1c, x2c, x3c, t) * prims[2] +
-                                  gsources[3](x1c, x2c, x3c, t) * prims[3];
+            gravity_source(x1c, x2c, x3c, t, res);
+            res[dimensions + 1] =
+                res[1] * prims[1] + res[2] * prims[2] + res[3] * prims[3];
         }
         else {
-            for (int q = 1; q < dimensions + 1; q++) {
-                res[q] = gsources[q](x1c, x2c, t);
-            }
-            res[dimensions + 1] = gsources[1](x1c, x2c, t) * prims[1] +
-                                  gsources[2](x1c, x2c, t) * prims[2];
+            gravity_source(x1c, x2c, t, res);
+            res[dimensions + 1] = res[1] * prims[1] + res[2] * prims[2];
         }
     }
     else {
-        for (int q = 1; q < dimensions + 1; q++) {
-            res[q] = gsources[q](x1c, t);
-        }
-        res[dimensions + 1] = gsources[1](x1c, t) * prims[1];
+        gravity_source(x1c, t, res);
+        res[dimensions + 1] = res[1] * prims[1];
     }
 
     return res;
@@ -2587,12 +2718,13 @@ void RMHD<dim>::advance()
                     std::cin.get();
                 }
             }
+
             b1c = static_cast<real>(0.5) * (b1R + b1L);
             b2c = static_cast<real>(0.5) * (b2R + b2L);
             b3c = static_cast<real>(0.5) * (b3R + b3L);
 
             // TODO: implement functional source and gravity
-            const auto source_terms = conserved_t{};   // hydro_sources(cell);
+            const auto source_terms = hydro_sources(cell);
 
             // Gravity
             const auto gravity = gravity_sources(prb[tid], cell);
@@ -2616,14 +2748,9 @@ void RMHD<dim>::advance()
 template <int dim>
 void RMHD<dim>::simulate(
     std::function<real(real)> const& a,
-    std::function<real(real)> const& adot,
-    const std::vector<std::optional<RMHD<dim>::function_t>>& bsources,
-    const std::vector<std::optional<RMHD<dim>::function_t>>& hsources,
-    const std::vector<std::optional<RMHD<dim>::function_t>>& gsources
+    std::function<real(real)> const& adot
 )
 {
-    load_functions();
-
     // Stuff for moving mesh
     this->hubble_param = adot(t) / a(t);
     this->mesh_motion  = (hubble_param != 0);
@@ -2633,6 +2760,8 @@ void RMHD<dim>::simulate(
     for (int i = 0; i < 2 * dim; i++) {
         this->bcs[i] = boundary_cond_map.at(boundary_conditions[i]);
     }
+
+    load_functions();
 
     // allocate space for face-centered magnetic fields
     bstag1.resize(nxv * nye * nze);

@@ -43,17 +43,36 @@ namespace simbi {
         F function
     )
     {
-        simbi::launch(p, [first, last, function] DEV() {
+        simbi::launch(p, [=] DEV() {
 #if GPU_CODE
             for (auto idx : range(first, last, globalThreadCount())) {
                 function(idx);
             }
 #else
-            // singleton instance of thread pool. lazy-evaluated
-            static auto& thread_pool = simbi::pooling::ThreadPool::instance(
-                simbi::pooling::get_nthreads()
-            );
-            thread_pool.parallel_for(first, last, function);
+            simbi::pooling::getThreadPool().parallel_for(first, last, function);
+#endif
+        });
+    }
+
+    template <
+        typename index_type,
+        typename F,
+        global::Platform P = global::BuildPlatform>
+    void parallel_for(
+        const ExecutionPolicy<>& p,
+        index_type first,
+        index_type last,
+        index_type step,
+        F function
+    )
+    {
+        simbi::launch(p, [=] DEV() {
+#if GPU_CODE
+            for (auto idx : range(first, last, globalThreadCount())) {
+                function(idx);
+            }
+#else
+            simbi::pooling::getThreadPool().parallel_for(first, last, step, function);
 #endif
         });
     }
@@ -71,11 +90,7 @@ namespace simbi {
                 function(idx);
             }
 #else
-            // singleton instance of thread pool. lazy-evaluated
-            static auto& thread_pool = simbi::pooling::ThreadPool::instance(
-                simbi::pooling::get_nthreads()
-            );
-            thread_pool.parallel_for(first, last, function);
+            simbi::pooling::getThreadPool().parallel_for(first, last, function);
 #endif
         });
     }
@@ -91,11 +106,7 @@ namespace simbi {
                 function(idx);
             }
 #else
-            // singleton instance of thread pool. lazy-evaluated
-            static auto& thread_pool = simbi::pooling::ThreadPool::instance(
-                simbi::pooling::get_nthreads()
-            );
-            thread_pool.parallel_for(first, last, function);
+            simbi::pooling::getThreadPool().parallel_for(first, last, function);
 #endif
         });
     }

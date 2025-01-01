@@ -518,20 +518,31 @@ struct Mesh {
             const real gam2  = prb.lorentz_factor_squared();
             const real wgam2 = wt * gam2;
 
-            // source terms in momentum
-            // r-source terms are (T_{\theta\theta})
-            const auto rsource = pt * (a1R() - a1L()) / dV +
-                                 (wgam2 * (v2 * v2 + v3 * v3) -
-                                  bmu.two * bmu.two - bmu.three * bmu.three) /
-                                     x1mean;
-            const auto tsource =
-                pt * (a2R() - a2L()) / dV +
-                cot * (wgam2 * v3 * v3 - bmu.three * bmu.three) / x1mean;
-            const auto psource =
-                -(wgam2 * v1 * v3 - bmu.one * bmu.three +
-                  cot * (wgam2 * v2 * v3 - bmu.two * bmu.three)) /
-                x1mean;
+            // geometric source terms in momentum
+            const auto rsource =
+                pt * (a1R() - a1L()) / dV +
+                wgam2 * (v2 * v2 + v3 * v3) / x1mean -
+                (bmu.two * bmu.two + bmu.three * bmu.three) / x1mean;
 
+            const auto tsource =
+                pt * (a2R() - a2L()) / dV -
+                wgam2 * (v2 * v1 - v3 * v3 * cot) / x1mean +
+                (bmu.two * bmu.one - bmu.three * bmu.three * cot) / x1mean;
+            const auto psource = -wgam2 * v3 * (v1 + cot * v2) / x1mean +
+                                 bmu.three * (bmu.one + cot * bmu.two) / x1mean;
+
+            // printf(
+            //     "B1: %.2e, B2: %.2e, B3: %.2e\n",
+            //     prb.b1(),
+            //     prb.b2(),
+            //     prb.b3()
+            // );
+            // printf(
+            //     "bmu-one: %.2e, bmu-two: %.2e, bmu-three: %.2e\n",
+            //     bmu.one,
+            //     bmu.two,
+            //     bmu.three
+            // );
             return typename Derived::conserved_t{
               0.0,
               rsource,

@@ -41,7 +41,7 @@ namespace simbi {
         real gamma;
         real cfl;
         std::string coord_system;
-        sig_bool inFailureState;
+        atomic_bool inFailureState;
         real hllc_z;
         luint nx, ny, nz, nzones;
         ndarray<real> x1, x2, x3;
@@ -64,7 +64,8 @@ namespace simbi {
         real x1min, x1max, x2min, x2max, x3min, x3max, step;
         real dlogx1, dx1, dlogx2, dx2, dlogx3, dx3, invdx1, invdx2, invdx3;
         bool linspace, mesh_motion, null_gravity, null_sources;
-        bool half_sphere, all_outer_bounds;
+        bool half_sphere, all_outer_bounds, reflect_inner_x2_momentum,
+            reflect_outer_x2_momentum;
         bool homolog, hasCrashed, wasInterrupted;
         luint active_zones, idx_active, radius;
         luint xag, yag, zag, init_chkpt_idx, chkpt_idx;
@@ -78,7 +79,7 @@ namespace simbi {
         luint xblockspace, yblockspace, zblockspace;
         luint shBlockSpace, shBlockBytes;
         luint nxv, nyv, nzv, nxe, nye, nze, nv;
-        ExecutionPolicy<> fullP, activeP;
+        ExecutionPolicy<> fullP, activeP, xvertexP, yvertexP, zvertexP;
 
         //=========================== GPU Threads Per Dimension
         std::string readGpuEnvVar(const std::string& key) const
@@ -180,6 +181,18 @@ namespace simbi {
                 {xag, yag, zag},
                 {xblockdim, yblockdim, zblockdim},
                 shBlockBytes
+            );
+            xvertexP = simbi::ExecutionPolicy(
+                {nxv, yag, zag},
+                {xblockdim, yblockdim, zblockdim}
+            );
+            yvertexP = simbi::ExecutionPolicy(
+                {xag, nyv, zag},
+                {xblockdim, yblockdim, zblockdim}
+            );
+            zvertexP = simbi::ExecutionPolicy(
+                {xag, yag, nzv},
+                {xblockdim, yblockdim, zblockdim}
             );
         }
 
@@ -301,7 +314,11 @@ namespace simbi {
                 }
             }
 
-            half_sphere      = (x2max == 0.5 * M_PI);
+            half_sphere = (x2max == 0.5 * M_PI) && coord_system == "spherical";
+            reflect_inner_x2_momentum = (coord_system != "spherical");
+            reflect_outer_x2_momentum =
+                (coord_system != "spherical") ||
+                ((coord_system == "spherical") && half_sphere);
             checkpoint_zones = (zag > 1) ? zag : (yag > 1) ? yag : xag;
             define_tinterval(dlogt, chkpt_interval);
             define_chkpt_idx(init_conditions.chkpt_idx);

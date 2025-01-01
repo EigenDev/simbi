@@ -117,6 +117,47 @@ namespace simbi {
                 parallel_for(static_cast<index_type>(0), stop, func);
             }
 
+            template <typename index_type, typename F>
+            void parallel_for(
+                const index_type start,
+                const index_type stop,
+                const index_type step,
+                const F& func
+            )
+            {
+                if (global::use_omp) {
+#pragma omp parallel for schedule(static)
+                    for (index_type idx = start; idx < stop; idx += step) {
+                        func(idx);
+                    }
+                    return;
+                }
+                auto batch_size = static_cast<index_type>(
+                    (stop - start + nthreads - 1) / nthreads
+                );
+                index_type block_start = start - batch_size;
+                index_type block_end   = start;
+
+                auto blockStep = [&] {
+                    block_start += batch_size;
+                    block_end += batch_size;
+                    block_end = (block_end > stop) ? stop : block_end;
+                };
+                blockStep();
+
+                for ([[maybe_unused]] auto& worker : threads) {
+                    queueUp([block_start, block_end, step, func] {
+                        for (index_type q = block_start; q < block_end;
+                             q += step) {
+                            func(q);
+                        }
+                    });
+                    blockStep();
+                }
+
+                waitUntilFinished();
+            }
+
             bool poolBusy()
             {
                 std::unique_lock<std::mutex> lock(queue_mutex);
@@ -207,7 +248,8 @@ namespace simbi {
             std::atomic<unsigned int> busy;
         };
 
-        inline auto get_nthreads = [] {
+        inline auto get_nthreads() -> unsigned int
+        {
             if (const char* thread_env = std::getenv("NTHREADS")) {
                 return static_cast<unsigned int>(
                     std::stoul(std::string(thread_env))
@@ -222,6 +264,13 @@ namespace simbi {
 
             return std_thread::hardware_concurrency();
         };
+
+        // Global accessor function
+        inline ThreadPool& getThreadPool()
+        {
+            static ThreadPool& pool = ThreadPool::instance(get_nthreads());
+            return pool;
+        }
 
         template <typename T>
         T fetch_minimum(std::atomic<T>& a, T val)

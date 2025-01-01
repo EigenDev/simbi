@@ -274,11 +274,8 @@ template <int dim>
 template <TIMESTEP_TYPE dt_type>
 void SRHD<dim>::adapt_dt()
 {
-    // singleton instance of thread pool. lazy-evaluated
-    static auto& thread_pool =
-        simbi::pooling::ThreadPool::instance(simbi::pooling::get_nthreads());
     std::atomic<real> min_dt = INFINITY;
-    thread_pool.parallel_for(total_zones, [&](luint gid) {
+    pooling::getThreadPool().parallel_for(total_zones, [&](luint gid) {
         real v1p, v1m, v2p, v2m, v3p, v3m, cfl_dt;
         const luint kk    = axid<dim, BlkAx::K>(gid, nx, ny);
         const luint jj    = axid<dim, BlkAx::J>(gid, nx, ny, kk);
@@ -857,19 +854,13 @@ DUAL SRHD<dim>::conserved_t SRHD<dim>::hydro_sources(const auto& cell) const
 
     conserved_t res;
     if constexpr (dim == 1) {
-        for (int q = 0; q < conserved_t::nmem; q++) {
-            res[q] = hsources[q](x1c, t);
-        }
+        hydro_source(x1c, t, res);
     }
     else if constexpr (dim == 2) {
-        for (int q = 0; q < conserved_t::nmem; q++) {
-            res[q] = hsources[q](x1c, x2c, t);
-        }
+        hydro_source(x1c, x2c, t, res);
     }
     else {
-        for (int q = 0; q < conserved_t::nmem; q++) {
-            res[q] = hsources[q](x1c, x2c, x3c, t);
-        }
+        hydro_source(x1c, x2c, x3c, t, res);
     }
 
     return res;
@@ -892,26 +883,18 @@ DUAL SRHD<dim>::conserved_t SRHD<dim>::gravity_sources(
         const auto x2c = cell.x2mean;
         if constexpr (dim > 2) {
             const auto x3c = cell.x3mean;
-            for (int q = 1; q < dimensions + 1; q++) {
-                res[q] = gsources[q](x1c, x2c, x3c, t);
-            }
-            res[dimensions + 1] = gsources[1](x1c, x2c, x3c, t) * prims[1] +
-                                  gsources[2](x1c, x2c, x3c, t) * prims[2] +
-                                  gsources[3](x1c, x2c, x3c, t) * prims[3];
+            gravity_source(x1c, x2c, x3c, t, res);
+            res[dimensions + 1] =
+                res[1] * prims[1] + res[2] * prims[2] + res[3] * prims[3];
         }
         else {
-            for (int q = 1; q < dimensions + 1; q++) {
-                res[q] = gsources[q](x1c, x2c, t);
-            }
-            res[dimensions + 1] = gsources[1](x1c, x2c, t) * prims[1] +
-                                  gsources[2](x1c, x2c, t) * prims[2];
+            gravity_source(x1c, x2c, t, res);
+            res[dimensions + 1] = res[1] * prims[1] + res[2] * prims[2];
         }
     }
     else {
-        for (int q = 1; q < dimensions + 1; q++) {
-            res[q] = gsources[q](x1c, t);
-        }
-        res[dimensions + 1] = gsources[1](x1c, t) * prims[1];
+        gravity_source(x1c, t, res);
+        res[dimensions + 1] = res[1] * prims[1];
     }
 
     return res;
@@ -1103,25 +1086,9 @@ void SRHD<dim>::advance()
 template <int dim>
 void SRHD<dim>::simulate(
     std::function<real(real)> const& a,
-    std::function<real(real)> const& adot,
-    const std::vector<std::optional<SRHD<dim>::function_t>>& bsources,
-    const std::vector<std::optional<SRHD<dim>::function_t>>& hsources,
-    const std::vector<std::optional<SRHD<dim>::function_t>>& gsources
+    std::function<real(real)> const& adot
 )
 {
-    // set the boundary, hydro, and gracity sources terms
-    // respectively
-    for (auto&& q : bsources) {
-        this->bsources.push_back(q.value_or(nullptr));
-    }
-    for (auto&& q : hsources) {
-        this->hsources.push_back(q.value_or(nullptr));
-    }
-    for (auto&& q : gsources) {
-        this->gsources.push_back(q.value_or(nullptr));
-    }
-    check_sources();
-
     // Stuff for moving mesh
     this->hubble_param = adot(t) / a(t);
     this->mesh_motion  = (hubble_param != 0);
@@ -1131,6 +1098,7 @@ void SRHD<dim>::simulate(
     for (int i = 0; i < 2 * dim; i++) {
         this->bcs[i] = boundary_cond_map.at(boundary_conditions[i]);
     }
+    load_functions();
 
     cons.resize(total_zones);
     prims.resize(total_zones);

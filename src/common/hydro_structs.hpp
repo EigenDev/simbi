@@ -129,21 +129,21 @@ namespace generic_hydro {
         }
 
         // + operator
-        DUAL Derived operator+(const Derived& prim) const
+        DUAL Derived operator+(const Derived& other) const
         {
             Derived result;
             for (luint i = 0; i < nmem; i++) {
-                result.vals[i] = vals[i] + prim.vals[i];
+                result.vals[i] = vals[i] + other.vals[i];
             }
             return result;
         }
 
         // - operator
-        DUAL Derived operator-(const Derived& prim) const
+        DUAL Derived operator-(const Derived& other) const
         {
             Derived result;
             for (luint i = 0; i < nmem; i++) {
-                result.vals[i] = vals[i] - prim.vals[i];
+                result.vals[i] = vals[i] - other.vals[i];
             }
             return result;
         }
@@ -193,6 +193,9 @@ namespace generic_hydro {
         {
             return perm == 1 ? vjR : vkR;
         }
+
+        // implicit conversion to underlying array
+        DUAL operator real*() { return vals; }
 
       private:
         DUAL Derived* self() { return static_cast<Derived*>(this); }
@@ -450,7 +453,14 @@ struct anyConserved : generic_hydro::anyHydro<dim, anyConserved<dim, R>, R> {
                 }
             }
         }
-        return m1();
+
+        if constexpr (global::on_gpu) {
+            printf("Invalid momentum %llu\n", nhat);
+            asm("trap;");
+        }
+        else {
+            throw std::invalid_argument("Invalid momentum component");
+        }
     }
 
     DUAL real bcomponent(const luint nhat) const
@@ -481,8 +491,14 @@ struct anyConserved : generic_hydro::anyHydro<dim, anyConserved<dim, R>, R> {
                 return b3();
             }
         }
-        // throw an error if the dimension is not correct
-        return b1();
+
+        if constexpr (global::on_gpu) {
+            printf("Invalid bcomponent %llu\n", nhat);
+            asm("trap;");
+        }
+        else {
+            throw std::invalid_argument("Invalid bcomponent");
+        }
     }
 
     DUAL real ecomponent(const luint nhat) const
@@ -1062,7 +1078,7 @@ struct anyPrimitive : generic_hydro::anyHydro<dim, anyPrimitive<dim, R>, R> {
             const real m2    = (ed + bsq) * v2 - vdb * b2;
             const real m3    = (ed + bsq) * v3 - vdb * b3;
             const real mn    = (nhat == 1) ? m1 : (nhat == 2) ? m2 : m3;
-            const auto bmu   = mag_fourvec_t(this);
+            const auto bmu   = mag_four_vec(*this);
             const real ind1  = (nhat == 1) ? 0.0 : vn * b1 - v1 * bn;
             const real ind2  = (nhat == 2) ? 0.0 : vn * b2 - v2 * bn;
             const real ind3  = (nhat == 3) ? 0.0 : vn * b3 - v3 * bn;
@@ -1086,8 +1102,16 @@ struct anyPrimitive : generic_hydro::anyHydro<dim, anyPrimitive<dim, R>, R> {
         os << "Primitive Variables: \n";
         os << "Density: " << prim.rho() << "\n";
         os << "Pressure: " << prim.p() << "\n";
-        os << "Velocity: " << prim.v1() << " " << prim.v2() << " " << prim.v3()
-           << "\n";
+        if constexpr (dim == 3) {
+            os << "Velocity: " << prim.v1() << " " << prim.v2() << " "
+               << prim.v3() << "\n";
+        }
+        else if constexpr (dim == 2) {
+            os << "Velocity: " << prim.v1() << " " << prim.v2() << "\n";
+        }
+        else {
+            os << "Velocity: " << prim.v1() << "\n";
+        }
         if constexpr (R == Regime::RMHD) {
             os << "Magnetic Field: " << prim.b1() << " " << prim.b2() << " "
                << prim.b3() << "\n";
@@ -1098,9 +1122,15 @@ struct anyPrimitive : generic_hydro::anyHydro<dim, anyPrimitive<dim, R>, R> {
     // define an error_at function that will print the primitive state
     // at at the given coordinates, omitting coordinates that go
     // beyond the dimensions of the primitive
-    void
-    error_at(const real x1, const real x2, const real x3, PrettyTable& table)
-        const
+    void error_at(
+        const luint ii,
+        const luint jj,
+        const luint kk,
+        const real x1,
+        const real x2,
+        const real x3,
+        PrettyTable& table
+    ) const
     {
         std::ostringstream oss;
         oss << "Primitives in non-physical state.\n";
@@ -1108,19 +1138,30 @@ struct anyPrimitive : generic_hydro::anyHydro<dim, anyPrimitive<dim, R>, R> {
             oss << "Primitive Variables at (" << x1 << "): \n";
         }
         else if constexpr (dim == 2) {
-            oss << "Primitive Variables at (" << x1 << ", " << x2 << "): \n";
+            if (x2 == INFINITY) {   // an effective 1D run
+                oss << "Primitive Variables at (" << x1 << "): \n";
+                oss << "[" << ii << "]\n";
+            }
+            else {
+                oss << "Primitive Variables at (" << x1 << ", " << x2
+                    << "): \n";
+                oss << "[" << ii << ", " << jj << "]\n";
+            }
         }
         else {
             if (x2 == INFINITY) {   // an effective 1D run
                 oss << "Primitive Variables at (" << x1 << "): \n";
+                oss << "[" << ii << "]\n";
             }
             else if (x3 == INFINITY) {
                 oss << "Primitive Variables at (" << x1 << ", " << x2
                     << "): \n";
+                oss << "[" << ii << ", " << jj << "]\n";
             }
             else {
                 oss << "Primitive Variables at (" << x1 << ", " << x2 << ", "
                     << x3 << "): \n";
+                oss << "[" << ii << ", " << jj << ", " << kk << "]\n";
             }
         }
         oss << "Density: " << rho() << "\n";
@@ -1217,6 +1258,10 @@ struct is_3D_mhd_primitive<anyPrimitive<3, Regime::RMHD>> : std::true_type {
 
 template <int dim>
 struct is_relativistic_mhd<anyPrimitive<dim, Regime::RMHD>> : std::true_type {
+};
+
+template <int dim>
+struct is_relativistic_mhd<anyConserved<dim, Regime::RMHD>> : std::true_type {
 };
 
 template <int dim>

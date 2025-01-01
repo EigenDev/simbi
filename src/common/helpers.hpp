@@ -70,17 +70,17 @@ namespace simbi {
 
         template <>
         struct real_func<1> {
-            using type = std::function<real(real, real)>;
+            using type = std::function<void(real, real, real[])>;
         };
 
         template <>
         struct real_func<2> {
-            using type = std::function<real(real, real, real)>;
+            using type = std::function<void(real, real, real, real[])>;
         };
 
         template <>
         struct real_func<3> {
-            using type = std::function<real(real, real, real, real)>;
+            using type = std::function<void(real, real, real, real, real[])>;
         };
 
         /**
@@ -456,21 +456,29 @@ namespace simbi {
         DUAL bool in_range(IndexType val, IndexType lower, IndexType upper);
 
         // Helper function to apply boundary conditions
+        template <typename T>
         void apply_boundary_conditions(
             auto& cons,
             auto idx,
             auto real_idx,
+            auto reflect_idx,
             auto wrap_idx,
             auto bc,
             auto momentum_idx = -1
         );
 
         // Helper function to handle corners
+        template <typename T, Plane P>
         void handle_corner(
             auto& cons,
             auto idx,
-            auto real_idx,
-            auto wrap_idx,
+            auto ii,
+            auto jj,
+            auto kk,
+            auto nx,
+            auto ny,
+            auto nz,
+            auto radius,
             auto bc1,
             auto bc2,
             auto momentum_idx1,
@@ -536,12 +544,15 @@ namespace simbi {
         // https://stackoverflow.com/a/50747781/13874039
 
         // solve the cubic equation
+        // template <typename T>
+        // DUAL void solve_cubic(T b, T c, T d, T res[3]);
+
         template <typename T>
-        DUAL T cubic(T b, T c, T d);
+        DUAL T solve_cubic(T a, T b, T c);
 
         // solve the quartic equation
         template <typename T>
-        DUAL int quartic(T b, T c, T d, T e, T res[4]);
+        DUAL int solve_quartic(T b, T c, T d, T e, T res[4]);
 
         // swap any two values
         template <typename T>

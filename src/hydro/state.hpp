@@ -29,29 +29,6 @@ struct InitialConditions;
 
 namespace simbi {
     namespace hydrostate {
-        template <int dim>
-        struct func_t {
-            using type = int;
-        };
-
-        template <>
-        struct func_t<1> {
-            using type = std::function<real(real, real)>;
-        };
-
-        template <>
-        struct func_t<2> {
-            using type = std::function<real(real, real, real)>;
-        };
-
-        template <>
-        struct func_t<3> {
-            using type = std::function<real(real, real, real, real)>;
-        };
-
-        template <int dim>
-        using fopt = std::optional<typename func_t<dim>::type>;
-
         enum class HydroRegime {
             Newtonian,
             SRHD,
@@ -63,10 +40,7 @@ namespace simbi {
             std::vector<std::vector<real>>& state,
             const InitialConditions& init_cond,
             std::function<real(real)> const& scale_factor,
-            std::function<real(real)> const& scale_factor_derivative,
-            std::vector<fopt<D>> const& bsources,
-            std::vector<fopt<D>> const& hsources,
-            std::vector<fopt<D>> const& gsources
+            std::function<real(real)> const& scale_factor_derivative
         ) = delete;
 
         template <>
@@ -74,10 +48,7 @@ namespace simbi {
             std::vector<std::vector<real>>& state,
             const InitialConditions& init_cond,
             std::function<real(real)> const& scale_factor,
-            std::function<real(real)> const& scale_factor_derivative,
-            std::vector<fopt<1>> const& bsources,
-            std::vector<fopt<1>> const& hsources,
-            std::vector<fopt<1>> const& gsources
+            std::function<real(real)> const& scale_factor_derivative
         );
 
         template <>
@@ -85,10 +56,7 @@ namespace simbi {
             std::vector<std::vector<real>>& state,
             const InitialConditions& init_cond,
             std::function<real(real)> const& scale_factor,
-            std::function<real(real)> const& scale_factor_derivative,
-            std::vector<fopt<1>> const& bsources,
-            std::vector<fopt<1>> const& hsources,
-            std::vector<fopt<1>> const& gsources
+            std::function<real(real)> const& scale_factor_derivative
         );
 
         template <>
@@ -96,10 +64,7 @@ namespace simbi {
             std::vector<std::vector<real>>& state,
             const InitialConditions& init_cond,
             std::function<real(real)> const& scale_factor,
-            std::function<real(real)> const& scale_factor_derivative,
-            std::vector<fopt<1>> const& bsources,
-            std::vector<fopt<1>> const& hsources,
-            std::vector<fopt<1>> const& gsources
+            std::function<real(real)> const& scale_factor_derivative
         );
 
         template <>
@@ -107,10 +72,7 @@ namespace simbi {
             std::vector<std::vector<real>>& state,
             const InitialConditions& init_cond,
             std::function<real(real)> const& scale_factor,
-            std::function<real(real)> const& scale_factor_derivative,
-            std::vector<fopt<2>> const& bsources,
-            std::vector<fopt<2>> const& hsources,
-            std::vector<fopt<2>> const& gsources
+            std::function<real(real)> const& scale_factor_derivative
         );
 
         template <>
@@ -118,10 +80,7 @@ namespace simbi {
             std::vector<std::vector<real>>& state,
             const InitialConditions& init_cond,
             std::function<real(real)> const& scale_factor,
-            std::function<real(real)> const& scale_factor_derivative,
-            std::vector<fopt<2>> const& bsources,
-            std::vector<fopt<2>> const& hsources,
-            std::vector<fopt<2>> const& gsources
+            std::function<real(real)> const& scale_factor_derivative
         );
 
         template <>
@@ -129,10 +88,7 @@ namespace simbi {
             std::vector<std::vector<real>>& state,
             const InitialConditions& init_cond,
             std::function<real(real)> const& scale_factor,
-            std::function<real(real)> const& scale_factor_derivative,
-            std::vector<fopt<2>> const& bsources,
-            std::vector<fopt<2>> const& hsources,
-            std::vector<fopt<2>> const& gsources
+            std::function<real(real)> const& scale_factor_derivative
         );
 
         template <>
@@ -140,10 +96,7 @@ namespace simbi {
             std::vector<std::vector<real>>& state,
             const InitialConditions& init_cond,
             std::function<real(real)> const& scale_factor,
-            std::function<real(real)> const& scale_factor_derivative,
-            std::vector<fopt<3>> const& bsources,
-            std::vector<fopt<3>> const& hsources,
-            std::vector<fopt<3>> const& gsources
+            std::function<real(real)> const& scale_factor_derivative
         );
 
         template <>
@@ -151,10 +104,7 @@ namespace simbi {
             std::vector<std::vector<real>>& state,
             const InitialConditions& init_cond,
             std::function<real(real)> const& scale_factor,
-            std::function<real(real)> const& scale_factor_derivative,
-            std::vector<fopt<3>> const& bsources,
-            std::vector<fopt<3>> const& hsources,
-            std::vector<fopt<3>> const& gsources
+            std::function<real(real)> const& scale_factor_derivative
         );
 
         template <>
@@ -162,10 +112,7 @@ namespace simbi {
             std::vector<std::vector<real>>& state,
             const InitialConditions& init_cond,
             std::function<real(real)> const& scale_factor,
-            std::function<real(real)> const& scale_factor_derivative,
-            std::vector<fopt<3>> const& bsources,
-            std::vector<fopt<3>> const& hsources,
-            std::vector<fopt<3>> const& gsources
+            std::function<real(real)> const& scale_factor_derivative
         );
     }   // namespace hydrostate
 }   // namespace simbi
