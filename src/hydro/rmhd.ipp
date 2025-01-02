@@ -333,16 +333,28 @@ DUAL real RMHD<dim>::curl_e(
                 const real dr  = cell.x1R() - cell.x1L();
                 const real dph = cell.x3R() - cell.x3L();
                 if (side == 0) {
-                    return (-(ej[IJ::SE] * cell.x1R() - ek[IJ::SW] * cell.x1L()
+                    if (cell.at_pole(cell.x2L())) {
+                        return (-(ej[IJ::SE] * cell.x1R() -
+                                  ej[IJ::SW] * cell.x1L()) /
+                                dr) /
+                               cell.x1mean;
+                    }
+                    return (-(ej[IJ::SE] * cell.x1R() - ej[IJ::SW] * cell.x1L()
                             ) / dr +
                             (ek[JK::NW] - ek[JK::SW]) /
-                                (std::sin(cell.x2mean) * dph)) /
+                                (std::sin(cell.x2L()) * dph)) /
                            cell.x1mean;
                 }
-                return (-(ej[IJ::NE] * cell.x1R() - ek[IJ::NW] * cell.x1L()) /
+                if (cell.at_pole(cell.x2R())) {
+                    return (-(ej[IJ::NE] * cell.x1R() - ej[IJ::NW] * cell.x1L()
+                            ) /
+                            dr) /
+                           cell.x1mean;
+                }
+                return (-(ej[IJ::NE] * cell.x1R() - ej[IJ::NW] * cell.x1L()) /
                             dr +
-                        (ek[JK::NE] - ek[JK::SE]) /
-                            (std::sin(cell.x2mean) * dph)) /
+                        (ek[JK::NE] - ek[JK::SE]) / (std::sin(cell.x2R()) * dph)
+                       ) /
                        cell.x1mean;
             }
             else {
@@ -2763,19 +2775,18 @@ void RMHD<dim>::simulate(
 
     load_functions();
 
-    // allocate space for face-centered magnetic fields
-    bstag1.resize(nxv * nye * nze);
-    bstag2.resize(nxe * nyv * nze);
-    bstag3.resize(nxe * nye * nzv);
     // allocate space for Riemann fluxes
     fri.resize(nxv * nye * nze);
     gri.resize(nxe * nyv * nze);
     hri.resize(nxe * nye * nzv);
+
     // set the staggered magnetic fields to ics
     bstag1 = bfield[0];
     bstag2 = bfield[1];
     bstag3 = bfield[2];
 
+    // deallocate the old magnetic field
+    deallocate_staggered_field();
     // allocate space for volume-average quantities
     cons.resize(total_zones);
     prims.resize(total_zones);
@@ -2783,6 +2794,7 @@ void RMHD<dim>::simulate(
     if constexpr (global::on_gpu) {
         dt_min.resize(active_zones);
     }
+    std::cout << "Allocated space for conserved and primitive variables\n";
 
     // Copy the state array into real & profile variables
     for (size_t i = 0; i < total_zones; i++) {
@@ -2802,6 +2814,8 @@ void RMHD<dim>::simulate(
     cons2prim();
     adapt_dt<TIMESTEP_TYPE::MINIMUM>();
 
+    std::cout << "All memory allocated, starting simulation...\n";
+    std::cin.get();
     // Simulate :)
     simbi::detail::logger::with_logger(*this, tend, [&] {
         riemann_fluxes();
