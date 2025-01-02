@@ -90,8 +90,8 @@ void Newtonian<dim>::cons2prim()
 
         if (pre < 0 || !std::isfinite(pre)) {
             troubled_cells[gid] = 1;
-            inFailureState      = true;
-            dt                  = INFINITY;
+            inFailureState.store(true);
+            dt = INFINITY;
         }
     });
 }
@@ -522,8 +522,8 @@ DUAL Newtonian<dim>::conserved_t Newtonian<dim>::calc_hllc_flux(
 //                                           SOURCE TERMS
 //===================================================================================================================
 template <int dim>
-DUAL Newtonian<dim>::conserved_t Newtonian<dim>::hydro_sources(const auto& cell
-) const
+DUAL Newtonian<dim>::conserved_t
+Newtonian<dim>::hydro_sources(const auto& cell) const
 {
     if (null_sources) {
         return conserved_t{};

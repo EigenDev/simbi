@@ -419,8 +419,19 @@ void RMHD<dim>::cons2prim()
     simbi::parallel_for(fullP, total_zones, [this] DEV(luint gid) {
         bool workLeftToDo = true;
 
-        atomic_bool_shared found_failure(inFailureState.load());
-        simbi::gpu::api::synchronize();
+        atomic_bool_shared found_failure;
+        if constexpr (global::on_gpu) {
+            auto tid = get_threadId();
+            if (tid == 0) {
+                found_failure.store(inFailureState.load());
+            }
+            simbi::gpu::api::synchronize();
+        }
+        else {
+            found_failure.store(inFailureState.load());
+        }
+        // atomic_bool_shared found_failure(inFailureState.load());
+        // simbi::gpu::api::synchronize();
 
         real invdV = 1.0;
         while (!found_failure && workLeftToDo) {
@@ -512,8 +523,8 @@ void RMHD<dim>::cons2prim()
                     if (iter >= global::MAX_ITER || !std::isfinite(f)) {
                         troubled_cells[gid] = 1;
                         dt                  = INFINITY;
-                        store_atomic_bool(inFailureState, true);
-                        store_atomic_bool(found_failure, true);
+                        inFailureState.store(true);
+                        found_failure.store(true);
                         break;
                     }
                     iter++;
@@ -547,8 +558,8 @@ void RMHD<dim>::cons2prim()
                 if (iter >= global::MAX_ITER || !std::isfinite(f)) {
                     troubled_cells[gid] = 1;
                     dt                  = INFINITY;
-                    store_atomic_bool(inFailureState, true);
-                    store_atomic_bool(found_failure, true);
+                    inFailureState.store(true);
+                    found_failure.store(true);
                     break;
                 }
                 iter++;
@@ -599,8 +610,8 @@ void RMHD<dim>::cons2prim()
 
             if (!std::isfinite(yy)) {
                 troubled_cells[gid] = 1;
-                store_atomic_bool(inFailureState, true);
-                store_atomic_bool(found_failure, true);
+                inFailureState.store(true);
+                found_failure.store(true);
                 dt = INFINITY;
             }
             simbi::gpu::api::synchronize();
@@ -617,7 +628,7 @@ void RMHD<dim>::cons2prim()
  * @return none
  */
 template <int dim>
-DUAL RMHD<dim>::primitive_t
+DEV RMHD<dim>::primitive_t
 RMHD<dim>::cons2prim(const RMHD<dim>::conserved_t& cons) const
 {
     const real d    = cons.dens();
@@ -1094,9 +1105,10 @@ void RMHD<dim>::adapt_dt()
 //                                            FLUX CALCULATIONS
 //===================================================================================================================
 template <int dim>
-DUAL RMHD<dim>::conserved_t
-RMHD<dim>::prims2flux(const RMHD<dim>::primitive_t& prims, const luint nhat)
-    const
+DUAL RMHD<dim>::conserved_t RMHD<dim>::prims2flux(
+    const RMHD<dim>::primitive_t& prims,
+    const luint nhat
+) const
 {
     const real rho   = prims.rho();
     const real v1    = prims.vcomponent(1);
@@ -1924,13 +1936,15 @@ void RMHD<dim>::set_flux_and_fields()
     const auto m2outer = reflect_outer_x2_momentum ? 2 : -1;
 
     // Helper lambda to handle boundary conditions
-    auto handle_boundary_conditions = [&](auto& field,
+    auto handle_boundary_conditions = [=, this] DEV(
+                                          auto& field,
                                           auto& bstag,
                                           auto idx,
                                           auto real_idx,
                                           auto wrap_idx,
                                           auto bcidx,
-                                          auto momentum_idx) {
+                                          auto momentum_idx
+                                      ) {
         switch (bcs[bcidx]) {
             case BoundaryCondition::PERIODIC:
                 field[idx] = field[wrap_idx];

@@ -346,8 +346,8 @@ namespace simbi {
                     }
                 }
                 catch (exception::SimulationFailureException& e) {
-                    sim_state.inFailureState = true;
-                    sim_state.hasCrashed     = true;
+                    sim_state.inFailureState.store(true);
+                    sim_state.hasCrashed = true;
                     logger.emit_exception(sim_state, e, table);
                 }
 
@@ -390,9 +390,11 @@ namespace simbi {
                         // Write to a file at every checkpoint interval
                         if (sim_state.t >= sim_state.t_interval &&
                             sim_state.t != INFINITY) {
-                            table.setProgress(static_cast<int>(
-                                (sim_state.t / end_time) * 100.0
-                            ));
+                            table.setProgress(
+                                static_cast<int>(
+                                    (sim_state.t / end_time) * 100.0
+                                )
+                            );
                             helpers::write_to_file(sim_state, table);
                             if (sim_state.dlogt != 0) {
                                 sim_state.t_interval *=
@@ -407,7 +409,7 @@ namespace simbi {
                         helpers::catch_signals();
                     }
                     catch (exception::InterruptException& e) {
-                        sim_state.inFailureState = true;
+                        sim_state.inFailureState.store(true);
                         sim_state.wasInterrupted = true;
                         logger.emit_exception(sim_state, e, table);
                     }

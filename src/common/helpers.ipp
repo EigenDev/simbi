@@ -79,14 +79,14 @@ namespace simbi {
 
         // Helper function to apply boundary conditions
         template <typename T>
-        void apply_boundary_conditions(
+        DEV void apply_boundary_conditions(
             auto& cons,
-            auto idx,
-            auto real_idx,
-            auto reflect_idx,
-            auto wrap_idx,
-            auto bc,
-            auto momentum_idx
+            luint idx,
+            luint real_idx,
+            luint reflect_idx,
+            luint wrap_idx,
+            BoundaryCondition bc,
+            int momentum_idx
         )
         {
             switch (bc) {
@@ -113,20 +113,20 @@ namespace simbi {
 
         // Helper function to handle corners
         template <typename T, Plane P>
-        void handle_corner(
+        DEV void handle_corner(
             auto& cons,
-            auto idx,
-            auto ii,
-            auto jj,
-            auto kk,
-            auto nx,
-            auto ny,
-            auto nz,
-            auto radius,
-            auto bc1,
-            auto bc2,
-            auto momentum_idx1,
-            auto momentum_idx2
+            luint idx,
+            lint ii,
+            lint jj,
+            lint kk,
+            lint nx,
+            lint ny,
+            lint nz,
+            lint radius,
+            BoundaryCondition bc1,
+            BoundaryCondition bc2,
+            int momentum_idx1,
+            int momentum_idx2
         )
         {
             // periodic index adjusted for the halo radius
@@ -258,9 +258,7 @@ namespace simbi {
                                 sim_state->t,
                                 sources
                             );
-                            for (auto qq = 0;
-                                 qq < sim_state_t::conserved_t::nmem;
-                                 qq++) {
+                            for (auto qq = 0; qq < 4; qq++) {
                                 cons[0][qq] = sources[qq];
                             }
                             break;
@@ -284,9 +282,7 @@ namespace simbi {
                                 sim_state->t,
                                 sources
                             );
-                            for (auto qq = 0;
-                                 qq < sim_state_t::conserved_t::nmem;
-                                 qq++) {
+                            for (auto qq = 0; qq < 4; qq++) {
                                 cons[grid_size - 1][qq] = sources[qq];
                             }
                             break;
@@ -311,9 +307,7 @@ namespace simbi {
                                 sim_state->t,
                                 sources
                             );
-                            for (auto qq = 0;
-                                 qq < sim_state_t::conserved_t::nmem;
-                                 qq++) {
+                            for (auto qq = 0; qq < 4; qq++) {
                                 cons[0][qq] = sources[qq];
                                 cons[1][qq] = sources[qq];
                             }
@@ -342,9 +336,7 @@ namespace simbi {
                                 sim_state->t,
                                 sources
                             );
-                            for (auto qq = 0;
-                                 qq < sim_state_t::conserved_t::nmem;
-                                 qq++) {
+                            for (auto qq = 0; qq < 4; qq++) {
                                 cons[grid_size - 1][qq] = sources[qq];
                                 cons[grid_size - 2][qq] = sources[qq];
                             }
@@ -385,205 +377,230 @@ namespace simbi {
             // the poles
             const auto m2outer = sim_state->reflect_outer_x2_momentum ? 2 : -1;
             const auto m2inner = sim_state->reflect_inner_x2_momentum ? 2 : -1;
-            parallel_for(sim_state->activeP, [=] DEV(const luint gid) {
-                const luint jj = axid<2, BlkAx::J>(gid, xag, yag);
-                const luint ii = axid<2, BlkAx::I>(gid, xag, yag);
+            parallel_for(
+                sim_state->activeP,
+                [sim_state,
+                 xag,
+                 yag,
+                 nx,
+                 ny,
+                 hr,
+                 cons,
+                 xe,
+                 ye,
+                 m2outer,
+                 m2inner] DEV(const luint gid) {
+                    const luint jj = axid<2, BlkAx::J>(gid, xag, yag);
+                    const luint ii = axid<2, BlkAx::I>(gid, xag, yag);
 
-                if constexpr (global::on_gpu) {
-                    if ((ii >= xag) || (jj >= yag)) {
-                        return;
+                    if constexpr (global::on_gpu) {
+                        if ((ii >= xag) || (jj >= yag)) {
+                            return;
+                        }
+                    }
+
+                    const auto ir = ii + hr;
+                    const auto jr = jj + hr;
+                    for (luint rr = 0; rr < hr; rr++) {
+                        const auto rs = rr + 1;
+                        // Fill ghost zones at x1 boundaries
+                        if (jj < ye) {
+                            auto ing  = idx2(rr, jr, nx, ny);
+                            auto outg = idx2(nx - rs, jr, nx, ny);
+
+                            if (sim_state->bcs[0] ==
+                                BoundaryCondition::DYNAMIC) {
+                                auto cell = sim_state->cell_factors(rr, jr);
+                                if constexpr (sim_state_t::regime == "srmhd") {
+                                    real sources[9];
+                                    sim_state->bx1_inner_source(
+                                        cell.x1mean,
+                                        cell.x2mean,
+                                        sim_state->t,
+                                        sources
+                                    );
+                                    for (auto qq = 0;
+                                         qq < sim_state_t::conserved_t::nmem;
+                                         qq++) {
+                                        cons[ing][qq] = sources[qq];
+                                    }
+                                }
+                                else {
+                                    real sources[6];
+                                    sim_state->bx1_inner_source(
+                                        cell.x1mean,
+                                        cell.x2mean,
+                                        sim_state->t,
+                                        sources
+                                    );
+                                    for (auto qq = 0;
+                                         qq < sim_state_t::conserved_t::nmem;
+                                         qq++) {
+                                        cons[ing][qq] = sources[qq];
+                                    }
+                                }
+                            }
+                            else {
+                                apply_boundary_conditions<sim_state_t>(
+                                    cons,
+                                    ing,
+                                    idx2(hr, jr, nx, ny),   // real index
+                                    idx2(2 * hr - rs, jr, nx, ny),   // reflect
+                                                                     // index
+                                    idx2(xe + rr, jr, nx, ny),   // wrap index
+                                    sim_state->bcs[0],
+                                    1
+                                );
+                            }
+
+                            if (sim_state->bcs[1] ==
+                                BoundaryCondition::DYNAMIC) {
+                                auto cell =
+                                    sim_state->cell_factors(nx - rs, jr);
+                                if constexpr (sim_state_t::regime == "srmhd") {
+                                    real sources[9];
+                                    sim_state->bx1_outer_source(
+                                        cell.x1mean,
+                                        cell.x2mean,
+                                        sim_state->t,
+                                        sources
+                                    );
+                                    for (auto qq = 0;
+                                         qq < sim_state_t::conserved_t::nmem;
+                                         qq++) {
+                                        cons[outg][qq] = sources[qq];
+                                    }
+                                }
+                                else {
+                                    real sources[6];
+                                    sim_state->bx1_outer_source(
+                                        cell.x1mean,
+                                        cell.x2mean,
+                                        sim_state->t,
+                                        sources
+                                    );
+                                    for (auto qq = 0;
+                                         qq < sim_state_t::conserved_t::nmem;
+                                         qq++) {
+                                        cons[outg][qq] = sources[qq];
+                                    }
+                                }
+                            }
+                            else {
+                                apply_boundary_conditions<sim_state_t>(
+                                    cons,
+                                    outg,
+                                    idx2(nx - (hr + 1), jr, nx, ny),   // real
+                                                                       // index
+                                    idx2(xe + rr, jr, nx, ny),       // reflect
+                                                                     // index
+                                    idx2(2 * hr - rs, jr, nx, ny),   // wrap
+                                                                     // index
+                                    sim_state->bcs[1],
+                                    1
+                                );
+                            }
+                        }
+
+                        // Fill ghost zones at x2 boundaries
+                        if (ii < xe) {
+                            auto ing  = idx2(ir, rr, nx, ny);
+                            auto outg = idx2(ir, ny - rs, nx, ny);
+                            if (sim_state->bcs[2] ==
+                                BoundaryCondition::DYNAMIC) {
+                                auto cell = sim_state->cell_factors(ir, rr);
+                                if constexpr (sim_state_t::regime == "srmhd") {
+                                    real sources[9];
+                                    sim_state->bx2_inner_source(
+                                        cell.x1mean,
+                                        cell.x2mean,
+                                        sim_state->t,
+                                        sources
+                                    );
+                                    for (auto qq = 0;
+                                         qq < sim_state_t::conserved_t::nmem;
+                                         qq++) {
+                                        cons[ing][qq] = sources[qq];
+                                    }
+                                }
+                                else {
+                                    real sources[6];
+                                    sim_state->bx2_inner_source(
+                                        cell.x1mean,
+                                        cell.x2mean,
+                                        sim_state->t,
+                                        sources
+                                    );
+                                    for (auto qq = 0;
+                                         qq < sim_state_t::conserved_t::nmem;
+                                         qq++) {
+                                        cons[ing][qq] = sources[qq];
+                                    }
+                                }
+                            }
+                            else {
+                                apply_boundary_conditions<sim_state_t>(
+                                    cons,
+                                    ing,
+                                    idx2(ir, hr, nx, ny),   // real index
+                                    idx2(ir, 2 * hr - rs, nx, ny),   // reflect
+                                                                     // index
+                                    idx2(ir, ye + rr, nx, ny),   // wrap index
+                                    sim_state->bcs[2],
+                                    m2inner
+                                );
+                            }
+                            if (sim_state->bcs[3] ==
+                                BoundaryCondition::DYNAMIC) {
+                                auto cell =
+                                    sim_state->cell_factors(ir, ny - rs);
+                                if constexpr (sim_state_t::regime == "srmhd") {
+                                    real sources[9];
+                                    sim_state->bx2_outer_source(
+                                        cell.x1mean,
+                                        cell.x2mean,
+                                        sim_state->t,
+                                        sources
+                                    );
+                                    for (auto qq = 0;
+                                         qq < sim_state_t::conserved_t::nmem;
+                                         qq++) {
+                                        cons[outg][qq] = sources[qq];
+                                    }
+                                }
+                                else {
+                                    real sources[6];
+                                    sim_state->bx2_outer_source(
+                                        cell.x1mean,
+                                        cell.x2mean,
+                                        sim_state->t,
+                                        sources
+                                    );
+                                    for (auto qq = 0;
+                                         qq < sim_state_t::conserved_t::nmem;
+                                         qq++) {
+                                        cons[outg][qq] = sources[qq];
+                                    }
+                                }
+                            }
+                            else {
+                                apply_boundary_conditions<sim_state_t>(
+                                    cons,
+                                    outg,
+                                    idx2(ir, ny - (hr + 1), nx, ny),   // real
+                                                                       // index
+                                    idx2(ir, ye + rr, nx, ny),       // reflect
+                                                                     // index
+                                    idx2(ir, 2 * hr - rs, nx, ny),   // wrap
+                                                                     // index
+                                    sim_state->bcs[3],
+                                    m2outer
+                                );
+                            }
+                        }
                     }
                 }
-
-                const auto ir = ii + hr;
-                const auto jr = jj + hr;
-                for (luint rr = 0; rr < hr; rr++) {
-                    const auto rs = rr + 1;
-                    // Fill ghost zones at x1 boundaries
-                    if (jj < ye) {
-                        auto ing  = idx2(rr, jr, nx, ny);
-                        auto outg = idx2(nx - rs, jr, nx, ny);
-
-                        if (sim_state->bcs[0] == BoundaryCondition::DYNAMIC) {
-                            auto cell = sim_state->cell_factors(rr, jr);
-                            if constexpr (sim_state_t::regime == "srmhd") {
-                                real sources[9];
-                                sim_state->bx1_inner_source(
-                                    cell.x1mean,
-                                    cell.x2mean,
-                                    sim_state->t,
-                                    sources
-                                );
-                                for (auto qq = 0;
-                                     qq < sim_state_t::conserved_t::nmem;
-                                     qq++) {
-                                    cons[ing][qq] = sources[qq];
-                                }
-                            }
-                            else {
-                                real sources[6];
-                                sim_state->bx1_inner_source(
-                                    cell.x1mean,
-                                    cell.x2mean,
-                                    sim_state->t,
-                                    sources
-                                );
-                                for (auto qq = 0;
-                                     qq < sim_state_t::conserved_t::nmem;
-                                     qq++) {
-                                    cons[ing][qq] = sources[qq];
-                                }
-                            }
-                        }
-                        else {
-                            apply_boundary_conditions<sim_state_t>(
-                                cons,
-                                ing,
-                                idx2(hr, jr, nx, ny),            // real index
-                                idx2(2 * hr - rs, jr, nx, ny),   // reflect
-                                                                 // index
-                                idx2(xe + rr, jr, nx, ny),       // wrap index
-                                sim_state->bcs[0],
-                                1
-                            );
-                        }
-
-                        if (sim_state->bcs[1] == BoundaryCondition::DYNAMIC) {
-                            auto cell = sim_state->cell_factors(nx - rs, jr);
-                            if constexpr (sim_state_t::regime == "srmhd") {
-                                real sources[9];
-                                sim_state->bx1_outer_source(
-                                    cell.x1mean,
-                                    cell.x2mean,
-                                    sim_state->t,
-                                    sources
-                                );
-                                for (auto qq = 0;
-                                     qq < sim_state_t::conserved_t::nmem;
-                                     qq++) {
-                                    cons[outg][qq] = sources[qq];
-                                }
-                            }
-                            else {
-                                real sources[6];
-                                sim_state->bx1_outer_source(
-                                    cell.x1mean,
-                                    cell.x2mean,
-                                    sim_state->t,
-                                    sources
-                                );
-                                for (auto qq = 0;
-                                     qq < sim_state_t::conserved_t::nmem;
-                                     qq++) {
-                                    cons[outg][qq] = sources[qq];
-                                }
-                            }
-                        }
-                        else {
-                            apply_boundary_conditions<sim_state_t>(
-                                cons,
-                                outg,
-                                idx2(nx - (hr + 1), jr, nx, ny),   // real index
-                                idx2(xe + rr, jr, nx, ny),   // reflect index
-                                idx2(2 * hr - rs, jr, nx, ny),   // wrap index
-                                sim_state->bcs[1],
-                                1
-                            );
-                        }
-                    }
-
-                    // Fill ghost zones at x2 boundaries
-                    if (ii < xe) {
-                        auto ing  = idx2(ir, rr, nx, ny);
-                        auto outg = idx2(ir, ny - rs, nx, ny);
-                        if (sim_state->bcs[2] == BoundaryCondition::DYNAMIC) {
-                            auto cell = sim_state->cell_factors(ir, rr);
-                            if constexpr (sim_state_t::regime == "srmhd") {
-                                real sources[9];
-                                sim_state->bx2_inner_source(
-                                    cell.x1mean,
-                                    cell.x2mean,
-                                    sim_state->t,
-                                    sources
-                                );
-                                for (auto qq = 0;
-                                     qq < sim_state_t::conserved_t::nmem;
-                                     qq++) {
-                                    cons[ing][qq] = sources[qq];
-                                }
-                            }
-                            else {
-                                real sources[6];
-                                sim_state->bx2_inner_source(
-                                    cell.x1mean,
-                                    cell.x2mean,
-                                    sim_state->t,
-                                    sources
-                                );
-                                for (auto qq = 0;
-                                     qq < sim_state_t::conserved_t::nmem;
-                                     qq++) {
-                                    cons[ing][qq] = sources[qq];
-                                }
-                            }
-                        }
-                        else {
-                            apply_boundary_conditions<sim_state_t>(
-                                cons,
-                                ing,
-                                idx2(ir, hr, nx, ny),            // real index
-                                idx2(ir, 2 * hr - rs, nx, ny),   // reflect
-                                                                 // index
-                                idx2(ir, ye + rr, nx, ny),       // wrap index
-                                sim_state->bcs[2],
-                                m2inner
-                            );
-                        }
-                        if (sim_state->bcs[3] == BoundaryCondition::DYNAMIC) {
-                            auto cell = sim_state->cell_factors(ir, ny - rs);
-                            if constexpr (sim_state_t::regime == "srmhd") {
-                                real sources[9];
-                                sim_state->bx2_outer_source(
-                                    cell.x1mean,
-                                    cell.x2mean,
-                                    sim_state->t,
-                                    sources
-                                );
-                                for (auto qq = 0;
-                                     qq < sim_state_t::conserved_t::nmem;
-                                     qq++) {
-                                    cons[outg][qq] = sources[qq];
-                                }
-                            }
-                            else {
-                                real sources[6];
-                                sim_state->bx2_outer_source(
-                                    cell.x1mean,
-                                    cell.x2mean,
-                                    sim_state->t,
-                                    sources
-                                );
-                                for (auto qq = 0;
-                                     qq < sim_state_t::conserved_t::nmem;
-                                     qq++) {
-                                    cons[outg][qq] = sources[qq];
-                                }
-                            }
-                        }
-                        else {
-                            apply_boundary_conditions<sim_state_t>(
-                                cons,
-                                outg,
-                                idx2(ir, ny - (hr + 1), nx, ny),   // real index
-                                idx2(ir, ye + rr, nx, ny),   // reflect index
-                                idx2(ir, 2 * hr - rs, nx, ny),   // wrap index
-                                sim_state->bcs[3],
-                                m2outer
-                            );
-                        }
-                    }
-                }
-            });
+            );
         }
 
         template <typename sim_state_t>
@@ -613,429 +630,191 @@ namespace simbi {
             // the poles
             const auto m2outer = sim_state->reflect_outer_x2_momentum ? 2 : -1;
             const auto m2inner = sim_state->reflect_inner_x2_momentum ? 2 : -1;
-            parallel_for(sim_state->activeP, [=] DEV(const luint gid) {
-                const luint kk = axid<3, BlkAx::K>(gid, xag, yag);
-                const luint jj = axid<3, BlkAx::J>(gid, xag, yag, kk);
-                const luint ii = axid<3, BlkAx::I>(gid, xag, yag, kk);
+            parallel_for(
+                sim_state->activeP,
+                [sim_state,
+                 xag,
+                 yag,
+                 nx,
+                 ny,
+                 nz,
+                 hr,
+                 cons,
+                 bcxb,
+                 bcxe,
+                 bcyb,
+                 bcye,
+                 bczb,
+                 bcze,
+                 xe,
+                 ye,
+                 ze,
+                 m2inner,
+                 m2outer] DEV(const luint gid) {
+                    const luint kk = axid<3, BlkAx::K>(gid, xag, yag);
+                    const luint jj = axid<3, BlkAx::J>(gid, xag, yag, kk);
+                    const luint ii = axid<3, BlkAx::I>(gid, xag, yag, kk);
 
-                if (global::on_gpu) {
-                    if ((ii >= xag) || (jj >= yag) || (kk >= sim_state->zag)) {
-                        return;
+                    if (global::on_gpu) {
+                        if ((ii >= xag) || (jj >= yag) ||
+                            (kk >= sim_state->zag)) {
+                            return;
+                        }
                     }
-                }
 
-                const auto ir = ii + hr;
-                const auto jr = jj + hr;
-                const auto kr = kk + hr;
-                for (luint rr = 0; rr < hr; rr++) {
-                    const auto rs = rr + 1;
-                    if (jj < ye) {
-                        // Fill ghost zones at i-k corners
-                        auto iksw = idx3(rr, jr, rr, nx, ny, nz);
-                        auto ikse = idx3(nx - rs, jr, rr, nx, ny, nz);
-                        auto ikne = idx3(nx - rs, jr, nz - rs, nx, ny, nz);
-                        auto iknw = idx3(rr, jr, nz - rs, nx, ny, nz);
+                    const auto ir = ii + hr;
+                    const auto jr = jj + hr;
+                    const auto kr = kk + hr;
+                    for (luint rr = 0; rr < hr; rr++) {
+                        const auto rs = rr + 1;
+                        if (jj < ye) {
+                            // Fill ghost zones at i-k corners
+                            auto iksw = idx3(rr, jr, rr, nx, ny, nz);
+                            auto ikse = idx3(nx - rs, jr, rr, nx, ny, nz);
+                            auto ikne = idx3(nx - rs, jr, nz - rs, nx, ny, nz);
+                            auto iknw = idx3(rr, jr, nz - rs, nx, ny, nz);
 
-                        handle_corner<sim_state_t, Plane::IK>(
-                            cons,
-                            iksw,
-                            -(hr - rr),
-                            jr,
-                            -(hr - rr),
-                            nx,
-                            ny,
-                            nz,
-                            hr,
-                            bcxb,
-                            bczb,
-                            1,
-                            3
-                        );
-                        handle_corner<sim_state_t, Plane::IK>(
-                            cons,
-                            iknw,
-                            -(hr - rr),
-                            jr,
-                            nz - rs,
-                            nx,
-                            ny,
-                            nz,
-                            hr,
-                            bcxb,
-                            bcze,
-                            1,
-                            3
-                        );
-                        handle_corner<sim_state_t, Plane::IK>(
-                            cons,
-                            ikne,
-                            nx - rs,
-                            jr,
-                            nz - rs,
-                            nx,
-                            ny,
-                            nz,
-                            hr,
-                            bcxe,
-                            bcze,
-                            1,
-                            3
-                        );
-                        handle_corner<sim_state_t, Plane::IK>(
-                            cons,
-                            ikse,
-                            nx - rs,
-                            jr,
-                            -(hr - rr),
-                            nx,
-                            ny,
-                            nz,
-                            hr,
-                            bcxe,
-                            bczb,
-                            1,
-                            3
-                        );
-
-                        //================================================================
-                        // Fill ghosts zones at x1 boundaries
-                        if (kk < ze) {
-                            // Fill ghost zones at i-j corners
-                            auto ijsw = idx3(rr, rr, kr, nx, ny, nz);
-                            auto ijse = idx3(nx - rs, rr, kr, nx, ny, nz);
-                            auto ijne = idx3(nx - rs, ny - rs, kr, nx, ny, nz);
-                            auto ijnw = idx3(rr, ny - rs, kr, nx, ny, nz);
-
-                            handle_corner<sim_state_t, Plane::IJ>(
+                            handle_corner<sim_state_t, Plane::IK>(
                                 cons,
-                                ijsw,
+                                iksw,
                                 -(hr - rr),
+                                jr,
                                 -(hr - rr),
-                                kr,
                                 nx,
                                 ny,
                                 nz,
                                 hr,
                                 bcxb,
-                                bcyb,
+                                bczb,
                                 1,
-                                2
+                                3
                             );
-                            handle_corner<sim_state_t, Plane::IJ>(
+                            handle_corner<sim_state_t, Plane::IK>(
                                 cons,
-                                ijse,
-                                nx - rs,
+                                iknw,
                                 -(hr - rr),
-                                kr,
-                                nx,
-                                ny,
-                                nz,
-                                hr,
-                                bcxe,
-                                bcyb,
-                                1,
-                                2
-                            );
-                            handle_corner<sim_state_t, Plane::IJ>(
-                                cons,
-                                ijne,
-                                nx - rs,
-                                ny - rs,
-                                kr,
-                                nx,
-                                ny,
-                                nz,
-                                hr,
-                                bcxe,
-                                bcye,
-                                1,
-                                2
-                            );
-                            handle_corner<sim_state_t, Plane::IJ>(
-                                cons,
-                                ijnw,
-                                -(hr - rr),
-                                ny - rs,
-                                kr,
+                                jr,
+                                nz - rs,
                                 nx,
                                 ny,
                                 nz,
                                 hr,
                                 bcxb,
-                                bcye,
+                                bcze,
                                 1,
-                                2
-                            );
-
-                            auto ing  = idx3(rr, jr, kr, nx, ny, nz);
-                            auto outg = idx3(nx - rs, jr, kr, nx, ny, nz);
-                            if (bcxb == BoundaryCondition::DYNAMIC) {
-                                auto cell = sim_state->cell_factors(rr, jr, kr);
-                                if constexpr (sim_state_t::regime == "srmhd") {
-                                    real sources[9];
-                                    sim_state->bx1_inner_source(
-                                        cell.x1mean,
-                                        cell.x2mean,
-                                        cell.x3mean,
-                                        sim_state->t,
-                                        sources
-                                    );
-                                    for (auto qq = 0;
-                                         qq < sim_state_t::conserved_t::nmem;
-                                         qq++) {
-                                        cons[ing][qq] = sources[qq];
-                                    }
-                                }
-                                else {
-                                    real sources[6];
-                                    sim_state->bx1_inner_source(
-                                        cell.x1mean,
-                                        cell.x2mean,
-                                        cell.x3mean,
-                                        sim_state->t,
-                                        sources
-                                    );
-                                    for (auto qq = 0;
-                                         qq < sim_state_t::conserved_t::nmem;
-                                         qq++) {
-                                        cons[ing][qq] = sources[qq];
-                                    }
-                                }
-                            }
-                            else {
-                                apply_boundary_conditions<sim_state_t>(
-                                    cons,
-                                    ing,
-                                    idx3(hr, jr, kr, nx, ny, nz),
-                                    idx3(2 * hr - rs, jr, kr, nx, ny, nz),
-                                    idx3(xe + rr, jr, kr, nx, ny, nz),
-                                    bcxb,
-                                    1
-                                );
-                            }
-
-                            if (bcxe == BoundaryCondition::DYNAMIC) {
-                                auto cell =
-                                    sim_state->cell_factors(xe + rr, jr, kr);
-                                if constexpr (sim_state_t::regime == "srmhd") {
-                                    real sources[9];
-                                    sim_state->bx1_outer_source(
-                                        cell.x1mean,
-                                        cell.x2mean,
-                                        cell.x3mean,
-                                        sim_state->t,
-                                        sources
-                                    );
-                                    for (auto qq = 0;
-                                         qq < sim_state_t::conserved_t::nmem;
-                                         qq++) {
-                                        cons[outg][qq] = sources[qq];
-                                    }
-                                }
-                                else {
-                                    real sources[6];
-                                    sim_state->bx1_outer_source(
-                                        cell.x1mean,
-                                        cell.x2mean,
-                                        cell.x3mean,
-                                        sim_state->t,
-                                        sources
-                                    );
-                                    for (auto qq = 0;
-                                         qq < sim_state_t::conserved_t::nmem;
-                                         qq++) {
-                                        cons[outg][qq] = sources[qq];
-                                    }
-                                }
-                            }
-                            else {
-                                apply_boundary_conditions<sim_state_t>(
-                                    cons,
-                                    outg,
-                                    idx3(nx - (hr + 1), jr, kr, nx, ny, nz),
-                                    idx3(xe + rr, jr, kr, nx, ny, nz),
-                                    idx3(2 * hr - rs, jr, kr, nx, ny, nz),
-                                    bcxe,
-                                    1
-                                );
-                            }
-                        }
-
-                        // Fill ghost zones at x3 boundaries
-                        if (ii < xe) {
-                            // Fill ghost zones at j-k corners
-                            auto jksw = idx3(ir, rr, rr, nx, ny, nz);
-                            auto jkse = idx3(ir, ny - rs, rr, nx, ny, nz);
-                            auto jkne = idx3(ir, ny - rs, nz - rs, nx, ny, nz);
-                            auto jknw = idx3(ir, rr, nz - rs, nx, ny, nz);
-
-                            handle_corner<sim_state_t, Plane::JK>(
-                                cons,
-                                jksw,
-                                ir,
-                                -(hr - rr),
-                                -(hr - rr),
-                                nx,
-                                ny,
-                                nz,
-                                hr,
-                                bcyb,
-                                bczb,
-                                2,
                                 3
                             );
-                            handle_corner<sim_state_t, Plane::JK>(
+                            handle_corner<sim_state_t, Plane::IK>(
                                 cons,
-                                jkse,
-                                ir,
-                                ny - rs,
-                                -(hr - rr),
-                                nx,
-                                ny,
-                                nz,
-                                hr,
-                                bcye,
-                                bczb,
-                                2,
-                                3
-                            );
-                            handle_corner<sim_state_t, Plane::JK>(
-                                cons,
-                                jkne,
-                                ir,
-                                ny - rs,
+                                ikne,
+                                nx - rs,
+                                jr,
                                 nz - rs,
                                 nx,
                                 ny,
                                 nz,
                                 hr,
-                                bcye,
+                                bcxe,
                                 bcze,
-                                2,
+                                1,
                                 3
                             );
-                            handle_corner<sim_state_t, Plane::JK>(
+                            handle_corner<sim_state_t, Plane::IK>(
                                 cons,
-                                jknw,
-                                ir,
+                                ikse,
+                                nx - rs,
+                                jr,
                                 -(hr - rr),
-                                nz - rs,
                                 nx,
                                 ny,
                                 nz,
                                 hr,
-                                bcyb,
-                                bcze,
-                                2,
+                                bcxe,
+                                bczb,
+                                1,
                                 3
                             );
 
-                            auto ing  = idx3(ir, jr, rr, nx, ny, nz);
-                            auto outg = idx3(ir, jr, nz - rs, nx, ny, nz);
-                            if (bczb == BoundaryCondition::DYNAMIC) {
-                                auto cell = sim_state->cell_factors(ir, jr, rr);
-                                if constexpr (sim_state_t::regime == "srmhd") {
-                                    real sources[9];
-                                    sim_state->bx3_inner_source(
-                                        cell.x1mean,
-                                        cell.x2mean,
-                                        cell.x3mean,
-                                        sim_state->t,
-                                        sources
-                                    );
-                                    for (auto qq = 0;
-                                         qq < sim_state_t::conserved_t::nmem;
-                                         qq++) {
-                                        cons[ing][qq] = sources[qq];
-                                    }
-                                }
-                                else {
-                                    real sources[6];
-                                    sim_state->bx3_inner_source(
-                                        cell.x1mean,
-                                        cell.x2mean,
-                                        cell.x3mean,
-                                        sim_state->t,
-                                        sources
-                                    );
-                                    for (auto qq = 0;
-                                         qq < sim_state_t::conserved_t::nmem;
-                                         qq++) {
-                                        cons[ing][qq] = sources[qq];
-                                    }
-                                }
-                            }
-                            else {
-                                apply_boundary_conditions<sim_state_t>(
-                                    cons,
-                                    ing,
-                                    idx3(ir, jr, hr, nx, ny, nz),
-                                    idx3(ir, jr, 2 * hr - rs, nx, ny, nz),
-                                    idx3(ir, jr, ze + rr, nx, ny, nz),
-                                    bczb,
-                                    3
-                                );
-                            }
-                            if (bcxe == BoundaryCondition::DYNAMIC) {
-                                auto cell =
-                                    sim_state->cell_factors(ir, jr, ze + rr);
-                                if constexpr (sim_state_t::regime == "srmhd") {
-                                    real sources[9];
-                                    sim_state->bx3_outer_source(
-                                        cell.x1mean,
-                                        cell.x2mean,
-                                        cell.x3mean,
-                                        sim_state->t,
-                                        sources
-                                    );
-                                    for (auto qq = 0;
-                                         qq < sim_state_t::conserved_t::nmem;
-                                         qq++) {
-                                        cons[outg][qq] = sources[qq];
-                                    }
-                                }
-                                else {
-                                    real sources[6];
-                                    sim_state->bx3_outer_source(
-                                        cell.x1mean,
-                                        cell.x2mean,
-                                        cell.x3mean,
-                                        sim_state->t,
-                                        sources
-                                    );
-                                    for (auto qq = 0;
-                                         qq < sim_state_t::conserved_t::nmem;
-                                         qq++) {
-                                        cons[outg][qq] = sources[qq];
-                                    }
-                                }
-                            }
-                            else {
-                                apply_boundary_conditions<sim_state_t>(
-                                    cons,
-                                    outg,
-                                    idx3(ir, jr, ny - (hr + 1), nx, ny, nz),
-                                    idx3(ir, jr, ze + rr, nx, ny, nz),
-                                    idx3(ir, jr, 2 * hr - rs, nx, ny, nz),
-                                    bcze,
-                                    3
-                                );
-                            }
-                        }
-
-                        if (ii < xe) {
-                            // Fill the ghost zones at the x2 boundaries
+                            //================================================================
+                            // Fill ghosts zones at x1 boundaries
                             if (kk < ze) {
-                                auto ing  = idx3(ir, rr, kr, nx, ny, nz);
-                                auto outg = idx3(ir, ny - rs, kr, nx, ny, nz);
+                                // Fill ghost zones at i-j corners
+                                auto ijsw = idx3(rr, rr, kr, nx, ny, nz);
+                                auto ijse = idx3(nx - rs, rr, kr, nx, ny, nz);
+                                auto ijne =
+                                    idx3(nx - rs, ny - rs, kr, nx, ny, nz);
+                                auto ijnw = idx3(rr, ny - rs, kr, nx, ny, nz);
 
-                                if (bcyb == BoundaryCondition::DYNAMIC) {
+                                handle_corner<sim_state_t, Plane::IJ>(
+                                    cons,
+                                    ijsw,
+                                    -(hr - rr),
+                                    -(hr - rr),
+                                    kr,
+                                    nx,
+                                    ny,
+                                    nz,
+                                    hr,
+                                    bcxb,
+                                    bcyb,
+                                    1,
+                                    2
+                                );
+                                handle_corner<sim_state_t, Plane::IJ>(
+                                    cons,
+                                    ijse,
+                                    nx - rs,
+                                    -(hr - rr),
+                                    kr,
+                                    nx,
+                                    ny,
+                                    nz,
+                                    hr,
+                                    bcxe,
+                                    bcyb,
+                                    1,
+                                    2
+                                );
+                                handle_corner<sim_state_t, Plane::IJ>(
+                                    cons,
+                                    ijne,
+                                    nx - rs,
+                                    ny - rs,
+                                    kr,
+                                    nx,
+                                    ny,
+                                    nz,
+                                    hr,
+                                    bcxe,
+                                    bcye,
+                                    1,
+                                    2
+                                );
+                                handle_corner<sim_state_t, Plane::IJ>(
+                                    cons,
+                                    ijnw,
+                                    -(hr - rr),
+                                    ny - rs,
+                                    kr,
+                                    nx,
+                                    ny,
+                                    nz,
+                                    hr,
+                                    bcxb,
+                                    bcye,
+                                    1,
+                                    2
+                                );
+
+                                auto ing  = idx3(rr, jr, kr, nx, ny, nz);
+                                auto outg = idx3(nx - rs, jr, kr, nx, ny, nz);
+                                if (bcxb == BoundaryCondition::DYNAMIC) {
                                     auto cell =
-                                        sim_state->cell_factors(ir, rr, kr);
+                                        sim_state->cell_factors(rr, jr, kr);
                                     if constexpr (sim_state_t::regime ==
                                                   "srmhd") {
                                         real sources[9];
-                                        sim_state->bx2_inner_source(
+                                        sim_state->bx1_inner_source(
                                             cell.x1mean,
                                             cell.x2mean,
                                             cell.x3mean,
@@ -1051,7 +830,7 @@ namespace simbi {
                                     }
                                     else {
                                         real sources[6];
-                                        sim_state->bx2_inner_source(
+                                        sim_state->bx1_inner_source(
                                             cell.x1mean,
                                             cell.x2mean,
                                             cell.x3mean,
@@ -1070,23 +849,24 @@ namespace simbi {
                                     apply_boundary_conditions<sim_state_t>(
                                         cons,
                                         ing,
-                                        idx3(ir, hr, kr, nx, ny, nz),
-                                        idx3(ir, 2 * hr - rs, kr, nx, ny, nz),
-                                        idx3(ir, ye + rr, kr, nx, ny, nz),
-                                        bcyb,
-                                        m2inner
+                                        idx3(hr, jr, kr, nx, ny, nz),
+                                        idx3(2 * hr - rs, jr, kr, nx, ny, nz),
+                                        idx3(xe + rr, jr, kr, nx, ny, nz),
+                                        bcxb,
+                                        1
                                     );
                                 }
-                                if (bcye == BoundaryCondition::DYNAMIC) {
+
+                                if (bcxe == BoundaryCondition::DYNAMIC) {
                                     auto cell = sim_state->cell_factors(
-                                        ir,
-                                        ye + rr,
+                                        xe + rr,
+                                        jr,
                                         kr
                                     );
                                     if constexpr (sim_state_t::regime ==
                                                   "srmhd") {
                                         real sources[9];
-                                        sim_state->bx2_outer_source(
+                                        sim_state->bx1_outer_source(
                                             cell.x1mean,
                                             cell.x2mean,
                                             cell.x3mean,
@@ -1102,7 +882,7 @@ namespace simbi {
                                     }
                                     else {
                                         real sources[6];
-                                        sim_state->bx2_outer_source(
+                                        sim_state->bx1_outer_source(
                                             cell.x1mean,
                                             cell.x2mean,
                                             cell.x3mean,
@@ -1121,36 +901,337 @@ namespace simbi {
                                     apply_boundary_conditions<sim_state_t>(
                                         cons,
                                         outg,
-                                        idx3(ir, ny - (hr + 1), kr, nx, ny, nz),
-                                        idx3(ir, ye + rr, kr, nx, ny, nz),
-                                        idx3(ir, 2 * hr - rs, kr, nx, ny, nz),
-                                        bcye,
-                                        m2outer
+                                        idx3(nx - (hr + 1), jr, kr, nx, ny, nz),
+                                        idx3(xe + rr, jr, kr, nx, ny, nz),
+                                        idx3(2 * hr - rs, jr, kr, nx, ny, nz),
+                                        bcxe,
+                                        1
                                     );
                                 }
-                                // apply_boundary_conditions<sim_state_t>(
-                                //     cons,
-                                //     ing,
-                                //     idx3(ir, hr, kr, nx, ny, nz),
-                                //     idx3(ir, 2 * hr - rs, kr, nx, ny, nz),
-                                //     idx3(ir, ye + rr, kr, nx, ny, nz),
-                                //     bcyb,
-                                //     m2inner
-                                // );
-                                // apply_boundary_conditions<sim_state_t>(
-                                //     cons,
-                                //     outg,
-                                //     idx3(ir, ny - (hr + 1), kr, nx, ny, nz),
-                                //     idx3(ir, ye + rr, kr, nx, ny, nz),
-                                //     idx3(ir, 2 * hr - rs, kr, nx, ny, nz),
-                                //     bcye,
-                                //     m2outer
-                                // );
+                            }
+
+                            // Fill ghost zones at x3 boundaries
+                            if (ii < xe) {
+                                // Fill ghost zones at j-k corners
+                                auto jksw = idx3(ir, rr, rr, nx, ny, nz);
+                                auto jkse = idx3(ir, ny - rs, rr, nx, ny, nz);
+                                auto jkne =
+                                    idx3(ir, ny - rs, nz - rs, nx, ny, nz);
+                                auto jknw = idx3(ir, rr, nz - rs, nx, ny, nz);
+
+                                handle_corner<sim_state_t, Plane::JK>(
+                                    cons,
+                                    jksw,
+                                    ir,
+                                    -(hr - rr),
+                                    -(hr - rr),
+                                    nx,
+                                    ny,
+                                    nz,
+                                    hr,
+                                    bcyb,
+                                    bczb,
+                                    2,
+                                    3
+                                );
+                                handle_corner<sim_state_t, Plane::JK>(
+                                    cons,
+                                    jkse,
+                                    ir,
+                                    ny - rs,
+                                    -(hr - rr),
+                                    nx,
+                                    ny,
+                                    nz,
+                                    hr,
+                                    bcye,
+                                    bczb,
+                                    2,
+                                    3
+                                );
+                                handle_corner<sim_state_t, Plane::JK>(
+                                    cons,
+                                    jkne,
+                                    ir,
+                                    ny - rs,
+                                    nz - rs,
+                                    nx,
+                                    ny,
+                                    nz,
+                                    hr,
+                                    bcye,
+                                    bcze,
+                                    2,
+                                    3
+                                );
+                                handle_corner<sim_state_t, Plane::JK>(
+                                    cons,
+                                    jknw,
+                                    ir,
+                                    -(hr - rr),
+                                    nz - rs,
+                                    nx,
+                                    ny,
+                                    nz,
+                                    hr,
+                                    bcyb,
+                                    bcze,
+                                    2,
+                                    3
+                                );
+
+                                auto ing  = idx3(ir, jr, rr, nx, ny, nz);
+                                auto outg = idx3(ir, jr, nz - rs, nx, ny, nz);
+                                if (bczb == BoundaryCondition::DYNAMIC) {
+                                    auto cell =
+                                        sim_state->cell_factors(ir, jr, rr);
+                                    if constexpr (sim_state_t::regime ==
+                                                  "srmhd") {
+                                        real sources[9];
+                                        sim_state->bx3_inner_source(
+                                            cell.x1mean,
+                                            cell.x2mean,
+                                            cell.x3mean,
+                                            sim_state->t,
+                                            sources
+                                        );
+                                        for (auto qq = 0;
+                                             qq <
+                                             sim_state_t::conserved_t::nmem;
+                                             qq++) {
+                                            cons[ing][qq] = sources[qq];
+                                        }
+                                    }
+                                    else {
+                                        real sources[6];
+                                        sim_state->bx3_inner_source(
+                                            cell.x1mean,
+                                            cell.x2mean,
+                                            cell.x3mean,
+                                            sim_state->t,
+                                            sources
+                                        );
+                                        for (auto qq = 0;
+                                             qq <
+                                             sim_state_t::conserved_t::nmem;
+                                             qq++) {
+                                            cons[ing][qq] = sources[qq];
+                                        }
+                                    }
+                                }
+                                else {
+                                    apply_boundary_conditions<sim_state_t>(
+                                        cons,
+                                        ing,
+                                        idx3(ir, jr, hr, nx, ny, nz),
+                                        idx3(ir, jr, 2 * hr - rs, nx, ny, nz),
+                                        idx3(ir, jr, ze + rr, nx, ny, nz),
+                                        bczb,
+                                        3
+                                    );
+                                }
+                                if (bcxe == BoundaryCondition::DYNAMIC) {
+                                    auto cell = sim_state->cell_factors(
+                                        ir,
+                                        jr,
+                                        ze + rr
+                                    );
+                                    if constexpr (sim_state_t::regime ==
+                                                  "srmhd") {
+                                        real sources[9];
+                                        sim_state->bx3_outer_source(
+                                            cell.x1mean,
+                                            cell.x2mean,
+                                            cell.x3mean,
+                                            sim_state->t,
+                                            sources
+                                        );
+                                        for (auto qq = 0;
+                                             qq <
+                                             sim_state_t::conserved_t::nmem;
+                                             qq++) {
+                                            cons[outg][qq] = sources[qq];
+                                        }
+                                    }
+                                    else {
+                                        real sources[6];
+                                        sim_state->bx3_outer_source(
+                                            cell.x1mean,
+                                            cell.x2mean,
+                                            cell.x3mean,
+                                            sim_state->t,
+                                            sources
+                                        );
+                                        for (auto qq = 0;
+                                             qq <
+                                             sim_state_t::conserved_t::nmem;
+                                             qq++) {
+                                            cons[outg][qq] = sources[qq];
+                                        }
+                                    }
+                                }
+                                else {
+                                    apply_boundary_conditions<sim_state_t>(
+                                        cons,
+                                        outg,
+                                        idx3(ir, jr, ny - (hr + 1), nx, ny, nz),
+                                        idx3(ir, jr, ze + rr, nx, ny, nz),
+                                        idx3(ir, jr, 2 * hr - rs, nx, ny, nz),
+                                        bcze,
+                                        3
+                                    );
+                                }
+                            }
+
+                            if (ii < xe) {
+                                // Fill the ghost zones at the x2 boundaries
+                                if (kk < ze) {
+                                    auto ing = idx3(ir, rr, kr, nx, ny, nz);
+                                    auto outg =
+                                        idx3(ir, ny - rs, kr, nx, ny, nz);
+
+                                    if (bcyb == BoundaryCondition::DYNAMIC) {
+                                        auto cell =
+                                            sim_state->cell_factors(ir, rr, kr);
+                                        if constexpr (sim_state_t::regime ==
+                                                      "srmhd") {
+                                            real sources[9];
+                                            sim_state->bx2_inner_source(
+                                                cell.x1mean,
+                                                cell.x2mean,
+                                                cell.x3mean,
+                                                sim_state->t,
+                                                sources
+                                            );
+                                            for (auto qq = 0;
+                                                 qq <
+                                                 sim_state_t::conserved_t::nmem;
+                                                 qq++) {
+                                                cons[ing][qq] = sources[qq];
+                                            }
+                                        }
+                                        else {
+                                            real sources[6];
+                                            sim_state->bx2_inner_source(
+                                                cell.x1mean,
+                                                cell.x2mean,
+                                                cell.x3mean,
+                                                sim_state->t,
+                                                sources
+                                            );
+                                            for (auto qq = 0;
+                                                 qq <
+                                                 sim_state_t::conserved_t::nmem;
+                                                 qq++) {
+                                                cons[ing][qq] = sources[qq];
+                                            }
+                                        }
+                                    }
+                                    else {
+                                        apply_boundary_conditions<sim_state_t>(
+                                            cons,
+                                            ing,
+                                            idx3(ir, hr, kr, nx, ny, nz),
+                                            idx3(
+                                                ir,
+                                                2 * hr - rs,
+                                                kr,
+                                                nx,
+                                                ny,
+                                                nz
+                                            ),
+                                            idx3(ir, ye + rr, kr, nx, ny, nz),
+                                            bcyb,
+                                            m2inner
+                                        );
+                                    }
+                                    if (bcye == BoundaryCondition::DYNAMIC) {
+                                        auto cell = sim_state->cell_factors(
+                                            ir,
+                                            ye + rr,
+                                            kr
+                                        );
+                                        if constexpr (sim_state_t::regime ==
+                                                      "srmhd") {
+                                            real sources[9];
+                                            sim_state->bx2_outer_source(
+                                                cell.x1mean,
+                                                cell.x2mean,
+                                                cell.x3mean,
+                                                sim_state->t,
+                                                sources
+                                            );
+                                            for (auto qq = 0;
+                                                 qq <
+                                                 sim_state_t::conserved_t::nmem;
+                                                 qq++) {
+                                                cons[outg][qq] = sources[qq];
+                                            }
+                                        }
+                                        else {
+                                            real sources[6];
+                                            sim_state->bx2_outer_source(
+                                                cell.x1mean,
+                                                cell.x2mean,
+                                                cell.x3mean,
+                                                sim_state->t,
+                                                sources
+                                            );
+                                            for (auto qq = 0;
+                                                 qq <
+                                                 sim_state_t::conserved_t::nmem;
+                                                 qq++) {
+                                                cons[outg][qq] = sources[qq];
+                                            }
+                                        }
+                                    }
+                                    else {
+                                        apply_boundary_conditions<sim_state_t>(
+                                            cons,
+                                            outg,
+                                            idx3(
+                                                ir,
+                                                ny - (hr + 1),
+                                                kr,
+                                                nx,
+                                                ny,
+                                                nz
+                                            ),
+                                            idx3(ir, ye + rr, kr, nx, ny, nz),
+                                            idx3(
+                                                ir,
+                                                2 * hr - rs,
+                                                kr,
+                                                nx,
+                                                ny,
+                                                nz
+                                            ),
+                                            bcye,
+                                            m2outer
+                                        );
+                                    }
+                                    // apply_boundary_conditions<sim_state_t>(
+                                    //     cons,
+                                    //     ing,
+                                    //     idx3(ir, hr, kr, nx, ny, nz),
+                                    //     idx3(ir, 2 * hr - rs, kr, nx, ny,
+                                    //     nz), idx3(ir, ye + rr, kr, nx, ny,
+                                    //     nz), bcyb, m2inner
+                                    // );
+                                    // apply_boundary_conditions<sim_state_t>(
+                                    //     cons,
+                                    //     outg,
+                                    //     idx3(ir, ny - (hr + 1), kr, nx, ny,
+                                    //     nz), idx3(ir, ye + rr, kr, nx, ny,
+                                    //     nz), idx3(ir, 2 * hr - rs, kr, nx,
+                                    //     ny, nz), bcye, m2outer
+                                    // );
+                                }
                             }
                         }
                     }
                 }
-            });
+            );
         }
 
         template <typename T>
@@ -1172,7 +1253,7 @@ namespace simbi {
         compute_dt(U* self, const V* prim_buffer, real* dt_min)
         {
 #if GPU_CODE
-            real vPlus, vMinus;
+            real v1p, v1m;
             int ii = blockDim.x * blockIdx.x + threadIdx.x;
             if (ii < self->total_zones) {
                 const auto ireal = get_real_idx(ii, self->radius, self->xag);
@@ -1184,12 +1265,12 @@ namespace simbi {
                         real h =
                             1.0 + self->gamma * p / (rho * (self->gamma - 1));
                         real cs = std::sqrt(self->gamma * p / (rho * h));
-                        vPlus   = (v + cs) / (1.0 + v * cs);
-                        vMinus  = (v - cs) / (1.0 - v * cs);
+                        v1p     = (v + cs) / (1.0 + v * cs);
+                        v1m     = (v - cs) / (1.0 - v * cs);
                     }
                     else {
-                        vPlus  = 1.0;
-                        vMinus = 1.0;
+                        v1p = 1.0;
+                        v1m = 1.0;
                     }
                 }
                 else {
@@ -1197,8 +1278,8 @@ namespace simbi {
                     const real p   = prim_buffer[ii].p();
                     const real v   = prim_buffer[ii].get_v1();
                     const real cs  = std::sqrt(self->gamma * p / rho);
-                    vPlus          = std::abs(v + cs);
-                    vMinus         = std::abs(v - cs);
+                    v1p            = std::abs(v + cs);
+                    v1m            = std::abs(v - cs);
                 }
                 const auto cell   = self->cell_factors(ireal);
                 const real x1l    = cell.x1L();
@@ -1212,8 +1293,7 @@ namespace simbi {
                                         : x1r * self->hubble_param;
                 const real cfl_dt =
                     dx1 /
-                    (my_max(std::abs(vPlus + vfaceR), std::abs(vMinus + vfaceL))
-                    );
+                    (my_max(std::abs(v1p + vfaceR), std::abs(v1m + vfaceL)));
                 dt_min[ii] = self->cfl * cfl_dt;
             }
 #endif
@@ -1234,7 +1314,6 @@ namespace simbi {
             const luint jj  = blockDim.y * blockIdx.y + threadIdx.y;
             const luint gid = idx2(ii, jj, self->nx, self->ny);
             if ((ii < self->nx) && (jj < self->ny)) {
-                real plus_v1, plus_v2, minus_v1, minus_v2;
                 const auto ireal = get_real_idx(ii, self->radius, self->xag);
                 const auto jreal = get_real_idx(jj, self->radius, self->yag);
                 if constexpr (is_relativistic<T>::value) {
@@ -1245,17 +1324,17 @@ namespace simbi {
                         const real v2  = prim_buffer[gid].get_v2();
                         real h =
                             1.0 + self->gamma * p / (rho * (self->gamma - 1));
-                        real cs  = std::sqrt(self->gamma * p / (rho * h));
-                        plus_v1  = (v1 + cs) / (1.0 + v1 * cs);
-                        plus_v2  = (v2 + cs) / (1.0 + v2 * cs);
-                        minus_v1 = (v1 - cs) / (1.0 - v1 * cs);
-                        minus_v2 = (v2 - cs) / (1.0 - v2 * cs);
+                        real cs = std::sqrt(self->gamma * p / (rho * h));
+                        v1p     = (v1 + cs) / (1.0 + v1 * cs);
+                        v2p     = (v2 + cs) / (1.0 + v2 * cs);
+                        v1m     = (v1 - cs) / (1.0 - v1 * cs);
+                        v2m     = (v2 - cs) / (1.0 - v2 * cs);
                     }
                     else {
-                        plus_v1  = 1.0;
-                        plus_v2  = 1.0;
-                        minus_v1 = 1.0;
-                        minus_v2 = 1.0;
+                        v1p = 1.0;
+                        v2p = 1.0;
+                        v1m = 1.0;
+                        v2m = 1.0;
                     }
                 }
                 else {
@@ -1264,16 +1343,16 @@ namespace simbi {
                     const real v1  = prim_buffer[gid].get_v1();
                     const real v2  = prim_buffer[gid].get_v2();
                     real cs        = std::sqrt(self->gamma * p / rho);
-                    plus_v1        = (v1 + cs);
-                    plus_v2        = (v2 + cs);
-                    minus_v1       = (v1 - cs);
-                    minus_v2       = (v2 - cs);
+                    v1p            = (v1 + cs);
+                    v2p            = (v2 + cs);
+                    v1m            = (v1 - cs);
+                    v2m            = (v2 - cs);
                 }
                 const auto cell = self->cell_factors(ireal, jreal);
-                v1p             = std::abs(plus_v1);
-                v1m             = std::abs(minus_v1);
-                v2p             = std::abs(plus_v2);
-                v2m             = std::abs(minus_v2);
+                v1p             = std::abs(v1p);
+                v1m             = std::abs(v1m);
+                v2p             = std::abs(v2p);
+                v2m             = std::abs(v2m);
                 switch (geometry) {
                     case Geometry::CARTESIAN:
                         cfl_dt = my_min(
@@ -1292,8 +1371,8 @@ namespace simbi {
                         if (self->mesh_motion) {
                             const real vfaceL = rl * self->hubble_param;
                             const real vfaceR = rr * self->hubble_param;
-                            v1p               = std::abs(plus_v1 - vfaceR);
-                            v1m               = std::abs(minus_v1 - vfaceL);
+                            v1p               = std::abs(v1p - vfaceR);
+                            v1m               = std::abs(v1m - vfaceL);
                         }
                         const real rmean = cell.x1mean;
                         cfl_dt           = my_min(
@@ -1318,8 +1397,8 @@ namespace simbi {
                         if (self->mesh_motion) {
                             const real vfaceL = rl * self->hubble_param;
                             const real vfaceR = rr * self->hubble_param;
-                            v1p               = std::abs(plus_v1 - vfaceR);
-                            v1m               = std::abs(minus_v1 - vfaceL);
+                            v1p               = std::abs(v1p - vfaceR);
+                            v1m               = std::abs(v1m - vfaceL);
                         }
                         const real rmean = cell.x1mean;
                         cfl_dt           = my_min(
@@ -1338,8 +1417,8 @@ namespace simbi {
                         if (self->mesh_motion) {
                             const real vfaceL = rl * self->hubble_param;
                             const real vfaceR = rr * self->hubble_param;
-                            v1p               = std::abs(plus_v1 - vfaceR);
-                            v1m               = std::abs(minus_v1 - vfaceL);
+                            v1p               = std::abs(v1p - vfaceR);
+                            v1m               = std::abs(v1m - vfaceL);
                         }
                         cfl_dt = my_min(
                             (rr - rl) / (my_max(v1p, v1m)),
@@ -1370,7 +1449,7 @@ namespace simbi {
             const luint kk  = blockDim.z * blockIdx.z + threadIdx.z;
             const luint gid = idx3(ii, jj, kk, self->nx, self->ny, self->nz);
             if ((ii < self->nx) && (jj < self->ny) && (kk < self->nz)) {
-                real plus_v1, plus_v2, minus_v1, minus_v2, plus_v3, minus_v3;
+                real v1p, v2p, v1m, v2m, v3p, v3m;
 
                 if constexpr (is_relativistic<T>::value) {
                     if constexpr (dt_type == TIMESTEP_TYPE::ADAPTIVE) {
@@ -1382,21 +1461,21 @@ namespace simbi {
 
                         real h =
                             1.0 + self->gamma * p / (rho * (self->gamma - 1));
-                        real cs  = std::sqrt(self->gamma * p / (rho * h));
-                        plus_v1  = (v1 + cs) / (1.0 + v1 * cs);
-                        plus_v2  = (v2 + cs) / (1.0 + v2 * cs);
-                        plus_v3  = (v3 + cs) / (1.0 + v3 * cs);
-                        minus_v1 = (v1 - cs) / (1.0 - v1 * cs);
-                        minus_v2 = (v2 - cs) / (1.0 - v2 * cs);
-                        minus_v3 = (v3 - cs) / (1.0 - v3 * cs);
+                        real cs = std::sqrt(self->gamma * p / (rho * h));
+                        v1p     = (v1 + cs) / (1.0 + v1 * cs);
+                        v2p     = (v2 + cs) / (1.0 + v2 * cs);
+                        v3p     = (v3 + cs) / (1.0 + v3 * cs);
+                        v1m     = (v1 - cs) / (1.0 - v1 * cs);
+                        v2m     = (v2 - cs) / (1.0 - v2 * cs);
+                        v3m     = (v3 - cs) / (1.0 - v3 * cs);
                     }
                     else {
-                        plus_v1  = 1.0;
-                        plus_v2  = 1.0;
-                        plus_v3  = 1.0;
-                        minus_v1 = 1.0;
-                        minus_v2 = 1.0;
-                        minus_v3 = 1.0;
+                        v1p = 1.0;
+                        v2p = 1.0;
+                        v3p = 1.0;
+                        v1m = 1.0;
+                        v2m = 1.0;
+                        v3m = 1.0;
                     }
                 }
                 else {
@@ -1406,13 +1485,13 @@ namespace simbi {
                     const real v2  = prim_buffer[gid].get_v2();
                     const real v3  = prim_buffer[gid].get_v3();
 
-                    real cs  = std::sqrt(self->gamma * p / rho);
-                    plus_v1  = (v1 + cs);
-                    plus_v2  = (v2 + cs);
-                    plus_v3  = (v3 + cs);
-                    minus_v1 = (v1 - cs);
-                    minus_v2 = (v2 - cs);
-                    minus_v3 = (v3 - cs);
+                    real cs = std::sqrt(self->gamma * p / rho);
+                    v1p     = (v1 + cs);
+                    v2p     = (v2 + cs);
+                    v3p     = (v3 + cs);
+                    v1m     = (v1 - cs);
+                    v2m     = (v2 - cs);
+                    v3m     = (v3 - cs);
                 }
 
                 const auto ireal = get_real_idx(ii, self->radius, self->xag);
@@ -1431,24 +1510,20 @@ namespace simbi {
                 switch (geometry) {
                     case Geometry::CARTESIAN: {
                         cfl_dt = my_min3<real>(
-                            dx1 /
-                                (my_max(std::abs(plus_v1), std::abs(minus_v1))),
-                            dx2 /
-                                (my_max(std::abs(plus_v2), std::abs(minus_v2))),
-                            dx3 /
-                                (my_max(std::abs(plus_v3), std::abs(minus_v3)))
+                            dx1 / (my_max(std::abs(v1p), std::abs(v1m))),
+                            dx2 / (my_max(std::abs(v2p), std::abs(v2m))),
+                            dx3 / (my_max(std::abs(v3p), std::abs(v3m)))
                         );
                         break;
                     }
                     case Geometry::SPHERICAL: {
                         const real rmean = cell.x1mean;
                         cfl_dt           = my_min3<real>(
-                            dx1 /
-                                (my_max(std::abs(plus_v1), std::abs(minus_v1))),
+                            dx1 / (my_max(std::abs(v1p), std::abs(v1m))),
                             rmean * dx2 /
-                                (my_max(std::abs(plus_v2), std::abs(minus_v2))),
+                                (my_max(std::abs(v2p), std::abs(v2m))),
                             rmean * std::sin(cell.x2mean) * dx3 /
-                                (my_max(std::abs(plus_v3), std::abs(minus_v3)))
+                                (my_max(std::abs(v3p), std::abs(v3m)))
                         );
                         break;
                     }
@@ -1456,12 +1531,10 @@ namespace simbi {
                         const real rmean = cell.x1mean;
                         const real th    = 0.5 * (x2l + x2r);
                         cfl_dt           = my_min3<real>(
-                            dx1 /
-                                (my_max(std::abs(plus_v1), std::abs(minus_v1))),
+                            dx1 / (my_max(std::abs(v1p), std::abs(v1m))),
                             rmean * dx2 /
-                                (my_max(std::abs(plus_v2), std::abs(minus_v2))),
-                            dx3 /
-                                (my_max(std::abs(plus_v3), std::abs(minus_v3)))
+                                (my_max(std::abs(v2p), std::abs(v2m))),
+                            dx3 / (my_max(std::abs(v3p), std::abs(v3m)))
                         );
                         break;
                     }
@@ -1477,20 +1550,20 @@ namespace simbi {
         compute_dt(U* self, const V* prim_buffer, real* dt_min)
         {
 #if GPU_CODE
-            real vPlus, vMinus;
+            real v1p, v1m;
             int ii  = blockDim.x * blockIdx.x + threadIdx.x;
             int gid = ii;
             if (ii < self->total_zones) {
                 if constexpr (is_relativistic_mhd<T>::value) {
                     if constexpr (dt_type == TIMESTEP_TYPE::ADAPTIVE) {
-                        real speeds[4];
-                        self->calc_max_wave_speeds(prim_buffer[gid], 1, speeds);
-                        vPlus  = std::abs(speeds[3]);
-                        vMinus = std::abs(speeds[0]);
+                        std::tie(v1p, v1m) =
+                            self->calc_max_wave_speeds(prim_buffer[gid], 1);
+                        v1p = std::abs(v1p);
+                        v1m = std::abs(v1m);
                     }
                     else {
-                        vPlus  = 1.0;
-                        vMinus = 1.0;
+                        v1p = 1.0;
+                        v1m = 1.0;
                     }
                 }
                 else {
@@ -1498,8 +1571,8 @@ namespace simbi {
                     const real p   = prim_buffer[gid].p();
                     const real v   = prim_buffer[gid].get_v1();
                     const real cs  = std::sqrt(self->gamma * p / rho);
-                    vPlus          = (v + cs);
-                    vMinus         = (v - cs);
+                    v1p            = (v + cs);
+                    v1m            = (v - cs);
                 }
                 const auto ireal = get_real_idx(ii, self->radius, self->xag);
                 const auto cell  = self->cell_factors(ireal);
@@ -1515,8 +1588,7 @@ namespace simbi {
                                         : x1r * self->hubble_param;
                 const real cfl_dt =
                     dx1 /
-                    (my_max(std::abs(vPlus + vfaceR), std::abs(vMinus + vfaceL))
-                    );
+                    (my_max(std::abs(v1p + vfaceR), std::abs(v1m + vfaceL)));
                 dt_min[ii] = self->cfl * cfl_dt;
             }
 #endif
@@ -1537,24 +1609,24 @@ namespace simbi {
             const luint jj  = blockDim.y * blockIdx.y + threadIdx.y;
             const luint gid = idx2(ii, jj, self->nx, self->ny);
             if ((ii < self->nx) && (jj < self->ny)) {
-                real plus_v1, plus_v2, minus_v1, minus_v2;
                 const auto ireal = get_real_idx(ii, self->radius, self->xag);
                 const auto jreal = get_real_idx(jj, self->radius, self->yag);
                 if constexpr (is_relativistic_mhd<T>::value) {
                     if constexpr (dt_type == TIMESTEP_TYPE::ADAPTIVE) {
-                        real speeds[4];
-                        self->calc_max_wave_speeds(prim_buffer[gid], 1, speeds);
-                        plus_v1  = std::abs(speeds[3]);
-                        minus_v1 = std::abs(speeds[0]);
-                        self->calc_max_wave_speeds(prim_buffer[gid], 2, speeds);
-                        plus_v2  = std::abs(speeds[3]);
-                        minus_v2 = std::abs(speeds[0]);
+                        std::tie(v1m, v1p) =
+                            self->calc_max_wave_speeds(prim_buffer[gid], 1);
+                        v1p = std::abs(v1p);
+                        v1m = std::abs(v1m);
+                        std::tie(v2m, v2p) =
+                            self->calc_max_wave_speeds(prim_buffer[gid], 2);
+                        v2p = std::abs(v2p);
+                        v2m = std::abs(v2m);
                     }
                     else {
-                        plus_v1  = 1.0;
-                        plus_v2  = 1.0;
-                        minus_v1 = 1.0;
-                        minus_v2 = 1.0;
+                        v1p = 1.0;
+                        v2p = 1.0;
+                        v1m = 1.0;
+                        v2m = 1.0;
                     }
                 }
                 else {
@@ -1563,17 +1635,17 @@ namespace simbi {
                     const real v1  = prim_buffer[gid].get_v1();
                     const real v2  = prim_buffer[gid].get_v2();
                     real cs        = std::sqrt(self->gamma * p / rho);
-                    plus_v1        = (v1 + cs);
-                    plus_v2        = (v2 + cs);
-                    minus_v1       = (v1 - cs);
-                    minus_v2       = (v2 - cs);
+                    v1p            = (v1 + cs);
+                    v2p            = (v2 + cs);
+                    v1m            = (v1 - cs);
+                    v2m            = (v2 - cs);
                 }
 
                 const auto cell = self->cell_factors(ireal, jreal);
-                v1p             = std::abs(plus_v1);
-                v1m             = std::abs(minus_v1);
-                v2p             = std::abs(plus_v2);
-                v2m             = std::abs(minus_v2);
+                v1p             = std::abs(v1p);
+                v1m             = std::abs(v1m);
+                v2p             = std::abs(v2p);
+                v2m             = std::abs(v2m);
                 switch (geometry) {
                     case Geometry::CARTESIAN:
                         cfl_dt = my_min(
@@ -1592,8 +1664,8 @@ namespace simbi {
                         if (self->mesh_motion) {
                             const real vfaceL = rl * self->hubble_param;
                             const real vfaceR = rr * self->hubble_param;
-                            v1p               = std::abs(plus_v1 - vfaceR);
-                            v1m               = std::abs(minus_v1 - vfaceL);
+                            v1p               = std::abs(v1p - vfaceR);
+                            v1m               = std::abs(v1m - vfaceL);
                         }
                         const real rmean = cell.x1mean;
                         cfl_dt           = my_min(
@@ -1610,8 +1682,8 @@ namespace simbi {
                         if (self->mesh_motion) {
                             const real vfaceL = rl * self->hubble_param;
                             const real vfaceR = rr * self->hubble_param;
-                            v1p               = std::abs(plus_v1 - vfaceR);
-                            v1m               = std::abs(minus_v1 - vfaceL);
+                            v1p               = std::abs(v1p - vfaceR);
+                            v1m               = std::abs(v1m - vfaceL);
                         }
                         const real rmean = cell.x1mean;
                         cfl_dt           = my_min(
@@ -1628,8 +1700,8 @@ namespace simbi {
                         if (self->mesh_motion) {
                             const real vfaceL = rl * self->hubble_param;
                             const real vfaceR = rr * self->hubble_param;
-                            v1p               = std::abs(plus_v1 - vfaceR);
-                            v1m               = std::abs(minus_v1 - vfaceL);
+                            v1p               = std::abs(v1p - vfaceR);
+                            v1m               = std::abs(v1m - vfaceL);
                         }
                         cfl_dt = my_min(
                             (rr - rl) / (my_max(v1p, v1m)),
@@ -1665,22 +1737,24 @@ namespace simbi {
 
             if ((ii < self->nx) && (jj < self->ny) && (kk < self->nz)) {
                 real v1p, v1m, v2p, v2m, v3p, v3m, cfl_dt;
-                real speeds[4];
                 const auto ireal = get_real_idx(ii, self->radius, self->nxv);
                 const auto jreal = get_real_idx(jj, self->radius, self->nyv);
                 const auto kreal = get_real_idx(kk, self->radius, self->nzv);
                 const auto prims = prim_buffer;
                 // Left/Right wave speeds
                 if constexpr (dt_type == TIMESTEP_TYPE::ADAPTIVE) {
-                    self->calc_max_wave_speeds(prims[aid], 1, speeds);
-                    v1p = std::abs(speeds[3]);
-                    v1m = std::abs(speeds[0]);
-                    self->calc_max_wave_speeds(prims[aid], 2, speeds);
-                    v2p = std::abs(speeds[3]);
-                    v2m = std::abs(speeds[0]);
-                    self->calc_max_wave_speeds(prims[aid], 3, speeds);
-                    v3p = std::abs(speeds[3]);
-                    v3m = std::abs(speeds[0]);
+                    std::tie(v1m, v1p) =
+                        self->calc_max_wave_speeds(prim_buffer[gid], 1);
+                    v1p = std::abs(v1p);
+                    v1m = std::abs(v1m);
+                    std::tie(v2m, v2p) =
+                        self->calc_max_wave_speeds(prim_buffer[gid], 2);
+                    v2p = std::abs(v2p);
+                    v2m = std::abs(v2m);
+                    std::tie(v3m, v3p) =
+                        self->calc_max_wave_speeds(prim_buffer[gid], 3);
+                    v3p = std::abs(v3p);
+                    v3m = std::abs(v3m);
                 }
                 else {
                     v1p = 1.0;
@@ -3102,12 +3176,12 @@ namespace simbi {
                  {"geometry", state.coord_system.c_str()},
                  {"regime", regime.c_str()},
                  {"dimensions", &state.dimensions},
-                 {"x1_cell_spacing", cell2str.at(state.x1_cell_spacing).c_str()
-                 },
-                 {"x2_cell_spacing", cell2str.at(state.x2_cell_spacing).c_str()
-                 },
-                 {"x3_cell_spacing", cell2str.at(state.x3_cell_spacing).c_str()}
-                };
+                 {"x1_cell_spacing",
+                  cell2str.at(state.x1_cell_spacing).c_str()},
+                 {"x2_cell_spacing",
+                  cell2str.at(state.x2_cell_spacing).c_str()},
+                 {"x3_cell_spacing",
+                  cell2str.at(state.x3_cell_spacing).c_str()}};
 
             for (const auto& [name, value] : attributes) {
                 H5::DataType type;

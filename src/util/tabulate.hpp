@@ -359,7 +359,7 @@ namespace simbi {
         void updateRow(int index, const std::vector<std::string>& row)
         {
             std::lock_guard<std::mutex> lock(mtx);
-            if (index < table.size()) {
+            if (static_cast<size_t>(index) < table.size()) {
                 table[index] = row;
                 updateColumnWidths(row);
             }

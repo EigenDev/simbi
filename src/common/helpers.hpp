@@ -70,17 +70,17 @@ namespace simbi {
 
         template <>
         struct real_func<1> {
-            using type = std::function<void(real, real, real[])>;
+            using type = simbi::function<void(real, real, real[])>;
         };
 
         template <>
         struct real_func<2> {
-            using type = std::function<void(real, real, real, real[])>;
+            using type = simbi::function<void(real, real, real, real[])>;
         };
 
         template <>
         struct real_func<3> {
-            using type = std::function<void(real, real, real, real, real[])>;
+            using type = simbi::function<void(real, real, real, real, real[])>;
         };
 
         /**
@@ -457,32 +457,32 @@ namespace simbi {
 
         // Helper function to apply boundary conditions
         template <typename T>
-        void apply_boundary_conditions(
+        DEV void apply_boundary_conditions(
             auto& cons,
-            auto idx,
-            auto real_idx,
-            auto reflect_idx,
-            auto wrap_idx,
-            auto bc,
-            auto momentum_idx = -1
+            luint idx,
+            luint real_idx,
+            luint reflect_idx,
+            luint wrap_idx,
+            BoundaryCondition bc,
+            int momentum_idx
         );
 
         // Helper function to handle corners
         template <typename T, Plane P>
-        void handle_corner(
+        DEV void handle_corner(
             auto& cons,
-            auto idx,
-            auto ii,
-            auto jj,
-            auto kk,
-            auto nx,
-            auto ny,
-            auto nz,
-            auto radius,
-            auto bc1,
-            auto bc2,
-            auto momentum_idx1,
-            auto momentum_idx2
+            luint idx,
+            lint ii,
+            lint jj,
+            lint kk,
+            lint nx,
+            lint ny,
+            lint nz,
+            lint radius,
+            BoundaryCondition bc1,
+            BoundaryCondition bc2,
+            int momentum_idx1,
+            int momentum_idx2
         );
 
         // configure the ghost zones in 1D hydro
@@ -627,43 +627,6 @@ namespace simbi {
         void anyDisplayProps();
 
         /**
-         * @brief perform the reduction in the GPU block
-         *
-         * @param val
-         * @return block reduced value
-         */
-        inline DEV real blockReduceMin(real val)
-        {
-#if GPU_CODE
-            static __shared__ real
-                shared[global::WARP_SIZE];   // Shared mem for 32 (Nvidia) / 64
-                                             // (AMD) partial mins
-            const int tid = threadIdx.z * blockDim.x * blockDim.y +
-                            threadIdx.y * blockDim.x + threadIdx.x;
-            const int bsz = blockDim.x * blockDim.y * blockDim.z;
-            int lane      = tid % global::WARP_SIZE;
-            int wid       = tid / global::WARP_SIZE;
-
-            val = warpReduceMin(val);   // Each warp performs partial reduction
-            if (lane == 0) {
-                shared[wid] = val;   // Write reduced value to shared memory
-            }
-            __syncthreads();   // Wait for all partial reductions
-
-            // printf("Lane[%d]: %f\n", lane, shared[lane]);
-            // read from shared memory only if that warp existed
-            val = (tid < bsz / global::WARP_SIZE) ? shared[lane] : val;
-
-            if (wid == 0) {
-                val = warpReduceMin(val);   // Final reduce within first warp
-            }
-            return val;
-#else
-            return 0.0;
-#endif
-        };
-
-        /**
          * @brief perform the reduction within the warp
          *
          * @param val
@@ -700,6 +663,43 @@ namespace simbi {
             for (int offset = global::WARP_SIZE / 2; offset > 0; offset /= 2) {
                 real next_val = __shfl_down(val, offset);
                 val           = (val < next_val) ? val : next_val;
+            }
+            return val;
+#else
+            return 0.0;
+#endif
+        };
+
+        /**
+         * @brief perform the reduction in the GPU block
+         *
+         * @param val
+         * @return block reduced value
+         */
+        inline DEV real blockReduceMin(real val)
+        {
+#if GPU_CODE
+            static __shared__ real
+                shared[global::WARP_SIZE];   // Shared mem for 32 (Nvidia) / 64
+                                             // (AMD) partial mins
+            const int tid = threadIdx.z * blockDim.x * blockDim.y +
+                            threadIdx.y * blockDim.x + threadIdx.x;
+            const int bsz = blockDim.x * blockDim.y * blockDim.z;
+            int lane      = tid % global::WARP_SIZE;
+            int wid       = tid / global::WARP_SIZE;
+
+            val = warpReduceMin(val);   // Each warp performs partial reduction
+            if (lane == 0) {
+                shared[wid] = val;   // Write reduced value to shared memory
+            }
+            __syncthreads();   // Wait for all partial reductions
+
+            // printf("Lane[%d]: %f\n", lane, shared[lane]);
+            // read from shared memory only if that warp existed
+            val = (tid < bsz / global::WARP_SIZE) ? shared[lane] : val;
+
+            if (wid == 0) {
+                val = warpReduceMin(val);   // Final reduce within first warp
             }
             return val;
 #else

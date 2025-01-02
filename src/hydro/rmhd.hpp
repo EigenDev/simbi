@@ -102,7 +102,7 @@ namespace simbi {
 
         /* Methods */
         void cons2prim();
-        DUAL primitive_t cons2prim(const conserved_t& cons) const;
+        DEV primitive_t cons2prim(const conserved_t& cons) const;
         void set_flux_and_fields();
         void riemann_fluxes();
         void advance();

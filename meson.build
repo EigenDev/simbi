@@ -4,40 +4,32 @@ project('simbi', 'c', 'cpp', 'cython',
     default_options : { 
         'cpp_std': 'c++20', 
         'cpp_args': ['-march=native'],
-        # 'b_lto': true,
     },
 )
 
-# silence the deprecated numpy API warnings until the numpy teams
-# fixes the issue
-add_project_arguments('-DNPY_NO_DEPRECATED_API=NPY_1_7_API_VERSION', language : 'cpp')
-add_project_arguments('-DCYTHON_EXTERN_C=extern "C++"', language : 'cpp')
+# Silence deprecated numpy API warnings
+add_project_arguments(['-DNPY_NO_DEPRECATED_API=NPY_1_7_API_VERSION', '-DCYTHON_EXTERN_C=extern "C++"'], language : 'cpp')
 
-# BUILD CONFIG
+# Build configuration
 conf_data = configuration_data()
+foreach opt : ['four_velocity', 'column_major', 'progress_bar', 'shared_memory']
+    conf_data.set10(opt.to_upper(), get_option(opt))
+endforeach
 conf_data.set10('FLOAT_PRECISION', get_option('precision') == 'single')
-conf_data.set10('FOUR_VELOCITY',   get_option('four_velocity'))
-conf_data.set10('COLUMN_MAJOR',    get_option('column_major'))
-conf_data.set10('PROGRESS_BAR',    get_option('progress_bar'))
-conf_data.set10('SHARED_MEMORY',   get_option('shared_memory'))
-configure_file(
-    input:  'build_options.hpp.in',
-    output: 'build_options.hpp',
-    configuration: conf_data
-)
+configure_file(input: 'build_options.hpp.in', output: 'build_options.hpp', configuration: conf_data)
 
-# DEPENDENCIES
-fs      = import('fs')
-pymod   = import('python')
-py3     = pymod.find_installation('python3', required: true)
+# Dependencies
+fs = import('fs')
+pymod = import('python')
+py3 = pymod.find_installation('python3', required: true)
 py3_dep = py3.dependency()
-omp     = dependency('openmp', language: 'cpp')
-hdf5    = dependency('hdf5', language: 'cpp', required: true)
-# ensure the install directory recognizes conda environment
-py3_purelib   = py3.get_path('purelib')
+omp = dependency('openmp', language: 'cpp')
+hdf5 = dependency('hdf5', language: 'cpp', required: true)
+depends = [py3_dep, hdf5, omp]
+
+# Python install directory
+py3_purelib = py3.get_path('purelib')
 py3env_prefix = py3.get_variable('prefix', 'empty')
-message('python path -- ' + py3.full_path())
-message('python install_dir -- ' + py3env_prefix)
 if py3_purelib.endswith('site-packages')
     py3_install_dir = py3_purelib
 elif py3env_prefix.endswith('site-packages')
@@ -47,48 +39,27 @@ else
 endif
 
 # Check if on a Mac
-host_system = host_machine.system()
-if host_system == 'darwin'
+if host_machine.system() == 'darwin'
     homebrew = find_program('brew')
     if homebrew.found()
         brew_prefix = run_command(['brew', '--prefix'], check: true).stdout().strip()
-        brew_inc = f'-I@brew_prefix@/include'
-        # brew_lib = f'@brew_prefix@/lib'
-        add_project_arguments([brew_inc], language: 'cpp')
+        add_project_arguments([f'-I{brew_prefix}/include'], language: 'cpp')
     endif
 endif
 
-install_dir_permission = run_command(py3,
-  ['-c', f'import os; print(os.access("@py3_install_dir@", os.W_OK))'],
-  check : true
-).stdout().strip()
+# Install directory permission
+install_dir_permission = run_command(py3, ['-c', f'import os; print(os.access("{py3_install_dir}", os.W_OK))'], check: true).stdout().strip()
+pip_args = install_dir_permission == 'False' ? '--user' : []
 
-pip_args = []
-if install_dir_permission == 'False'
-    py3_install_dir = run_command('python', '-m', 'site', '--user-site', check: true).stdout().strip()
-    pip_args='--user'
-endif
-#################################################################
-# SOME BOOK KEEPING FOR ALL INSTALLS
-##################################################################
-incdir_numpy = run_command(py3,
-  ['-c', 'import numpy; print(numpy.get_include())'],
-  check : true
-).stdout().strip()
-all_inc       = include_directories(incdir_numpy, 'src')
-depends       = [py3_dep, hdf5, omp]
-gpu_depends   = []
-gpu_linkers   = []
-gpu_comp_args = []
-host_compiler  = meson.get_compiler('cpp')
+# Include directories
+incdir_numpy = run_command(py3, ['-c', 'import numpy; print(numpy.get_include())'], check: true).stdout().strip()
+all_inc = include_directories(incdir_numpy, 'src')
+
+# Compiler settings
+host_compiler = meson.get_compiler('cpp')
 host_compiler_name = host_compiler.get_id()
-if host_compiler_name == 'g++' or host_compiler_name == 'gcc'
-max_errors = '-fmax-errors=1'
+max_errors = host_compiler_name.startswith('g') ? '-fmax-errors=1' : '-ferror-limit=1'
 add_project_arguments([max_errors], language: 'cpp')
-elif host_compiler_name == 'clang++' or host_compiler_name == 'clang'
-max_errors = '-ferror-limit=1'
-add_project_arguments([max_errors], language: 'cpp')
-endif
 
 # if CC, CXX environment variables explicitly set, get their values
 # this is useful because cuda lags behind on tested gcc versions
@@ -97,108 +68,80 @@ if cc_var == ''
   cc_var = host_compiler_name
 endif
 
-##################################################################
-# GPU CHECK
-##################################################################
-if get_option('gpu_compilation').enabled()
-    hip  = dependency('HIP', cmake_module_path : '/opt/rocm', modules: ['hip::device', 'hip::host'], required: false)
-    cuda = dependency('CUDA', required: false)
-    host_compiler_version = host_compiler.version().split('.')[0]
-    if host_compiler_name == 'g++' or host_compiler_name == 'gcc'
-        if host_compiler_version.to_int() >= 13
-            warning(f'The detected gcc version: gcc-@host_compiler_version@ might not be compatible with cuda version')
-        endif
-    endif
+# GPU Compilation
+gpu_dict = {
+    'standard': 'c++20',
+    'arch': 'sm_86',
+    'cc_var': cc_var,
 
-    if hip.found()
-        env = environment()
-        check_hip_config = run_command('hipconfig','--platform', check: true)
-        hip_platform     = check_hip_config.stdout().strip()
-        hip_platform_err = check_hip_config.stderr().strip()
+}
+gpu_depends = []
+gpu_linkers = []
+gpu_comp_args = []
+if get_option('gpu_compilation').enabled()
+    hip = dependency('HIP', cmake_module_path: '/opt/rocm', modules: ['hip::device', 'hip::host'], required: false)
+    cuda = dependency('CUDA', required: false)
+    if hip.found() or cuda.found()
+        gpu_cc = hip.found() ? 'hipcc' : 'nvcc'
+        gpu_compiler = find_program(gpu_cc)
         gpu_arch = get_option('gpu_arch')
-        if hip_platform == 'nvidia'
-            hip_runtime  = 'cuda'
-            hip_compiler = 'nvcc'
-            gpu_depends += [cuda]
-            gpu_linkers += ['-lcudart']
-            gpu_comp_args = [
+        if hip.found()
+            hip_platform = run_command('hipconfig', '--platform', check: true).stdout().strip()
+            gpu_comp_args = hip_platform == 'nvidia' ? [
                 '-DGPU_PLATFORM_NVIDIA=1',
                 '-std=c++20',
                 f'-arch=sm_@gpu_arch@',
                 f'-ccbin=@cc_var@',
-                # '--ptxas-options=-v', 
                 '--extended-lambda',
+                '-dc',
+                '-dlto',
                 '--expt-relaxed-constexpr',
                 '--compiler-options', 
-                f'-fPIC', '-O3', '-x=cu'
-            ]
-        elif hip_platform == 'amd' 
-            hip_runtime  = 'rocm'
-            hip_compiler = 'hipcc'
-            gpu_linkers += ['-lamdhip64']
-            gpu_comp_args = [
+                '-fPIC', '-O3', '-x=cu'
+            ] : [
                 '-DGPU_PLATFORM_AMD=1',
                 '-std=c++20',
                 '-fPIC',
-                f'@max_errors@', 
+                max_errors, 
                 '-O3', 
-                f'--offload-arch=gfx@gpu_arch@',
+                f'--offload-arch=gfx{gpu_arch}',
                 '-march=native',
             ]
-            rocm_path = run_command('hipconfig', '--rocmpath', check: true).stdout().strip()
-            # Meson does not support hip yet, so we manually
-            # declare the dependency
-            hip_dep = declare_dependency(
-                link_args: [f'-L@rocm_path@/lib', '-lamdhip64', '-O3', '-lgcc_s', '-lpthread', '-lm', '-lrt'],
-                include_directories: [f'@rocm_path@/include']
-            )
-            gpu_depends += [hip_dep]
-        endif
-        env.set('HIP_PLATFORM', hip_platform)
-        env.set('HIP_RUNTIME',  hip_runtime)
-        env.set('HIP_COMPILER', hip_compiler)
-        message(f'GPU Platform -- @hip_platform@')
-        message(f'GPU Runtime  -- @hip_runtime@')
-        message(f'GPU Compiler -- @hip_compiler@')
-    elif cuda.found()
-        gpu_depends += [cuda]
-        gpu_linkers += ['-lcudart']
-        gpu_arch = get_option('gpu_arch')
-        gpu_comp_args = [
+            gpu_linkers = hip_platform == 'nvidia' ? ['-lcudart', '-dlto', '-lcudadevrt', '-dlink'] : ['-lamdhip64']
+            if hip_platform == 'amd'
+                rocm_path = run_command('hipconfig', '--rocmpath', check: true).stdout().strip()
+                hip_dep = declare_dependency(
+                    link_args: [f'-L{rocm_path}/lib', '-lamdhip64', '-O3', '-lgcc_s', '-lpthread', '-lm', '-lrt'],
+                    include_directories: [f'{rocm_path}/include']
+                )
+                gpu_depends += [hip_dep]
+            endif
+        elif cuda.found()
+            gpu_comp_args = [
                 '-std=c++20',
                 '-DGPU_PLATFORM_NVIDIA=1',
                 f'-arch=sm_@gpu_arch@', 
                 f'-ccbin=@cc_var@',
-                # '--ptxas-options=-v', 
+                '-dc',
+                '-dlto',
                 '--extended-lambda',
                 '--expt-relaxed-constexpr',
                 '--compiler-options', 
-                f'-fPIC,@max_errors@', '-O3',
+                '-fPIC', max_errors, '-O3',
                 '-x=cu',
-        ]
-        message(f'GPU Platform -- nvidia')
-        message(f'GPU Runtime  -- cuda')
-        message(f'GPU Compiler -- nvcc')
+            ]
+            gpu_linkers = ['-lcudart', '-dlto']
+        endif
     endif
 endif
 
+# Source and header files
 sources = [
-    #######################
-    ### Common IMPLEMENTATIONS
-    #######################
     'src/common/helpers.cpp',
     'src/common/exceptions.cpp',
-
-    #######################
-    #### GPU / CPU IMPLEMENTATIONS
-    #######################
     'src/hydro/rmhd.cpp',
     'src/hydro/srhd.cpp',
     'src/hydro/newt.cpp',
-    
-    #######################
-    #### UTIL IMPLEMENTATIONS
-    #######################
     'src/util/device_api.cpp',
 ]
 
@@ -207,11 +150,9 @@ headers = [
     'src/common/enums.hpp',
     'src/common/hydro_structs.hpp',
     'src/common/traits.hpp',
-    
     'src/hydro/srhd.hpp',
     'src/hydro/newt.hpp',
     'src/hydro/rmhd.hpp',
-
     'src/util/device_api.hpp',
     'src/util/exec_policy.hpp',
     'src/util/kernel.hpp',
@@ -226,15 +167,14 @@ headers = [
 
 templates = [
     'src/common/helpers.ipp',
-
     'src/hydro/srhd.ipp',
     'src/hydro/newt.ipp',
     'src/hydro/rmhd.ipp',
-
     'src/util/ndarray.ipp',
     'src/util/printb.ipp',
 ]
 
+# CPU Extension Module
 cpu_ext = py3.extension_module(
     'cpu_ext',
     ['src/cpu_ext.pyx', 'src/call_obj.pyx'] + sources + headers + templates,
@@ -246,64 +186,88 @@ cpu_ext = py3.extension_module(
     install_dir: meson.current_source_dir() + '/simbi/libs',
 )
 
-if get_option('gpu_compilation').enabled()
-    if hip.found() or cuda.found()
-        gpu_cc = hip.found() ? 'hipcc' : 'nvcc'
-        gpu_compiler = find_program(gpu_cc)
-        gpu_objs = []
-        gpu_includes = [
-            '-I' + meson.current_source_dir() + '/src',
-            '-I.',
-            '-I' + meson.current_build_dir(),
-            '-I' + get_option('gpu_include_dir'),
-            '-I' + get_option('hdf5_include_dir')
-        ]
-        foreach source : sources
-            gpu_trg = custom_target(
-                fs.name(source) + '_target',
-                command : [
-                    gpu_compiler,
-                    gpu_includes,
-                    gpu_comp_args,
-                    '-c',
-                    '@INPUT@',
-                    '-o',
-                    '@OUTPUT@',
-                    '-DGPU_CODE=1',
-                    '-DMANAGED_MEMORY',
-                ],
-                input : source,
-                output : '@BASENAME@.o',
-                build_by_default: true,
-                depend_files: headers + templates,
-            )
-            gpu_objs += [gpu_trg]
-        endforeach
-
-        gpu_lib = static_library(
-            'simbi_gpu',
-            gpu_objs,
+# GPU Extension Module
+if get_option('gpu_compilation').enabled() and (hip.found() or cuda.found())
+    gpu_objs = []
+    gpu_includes = [
+        '-I' + meson.current_source_dir() + '/src',
+        '-I.',
+        '-I' + meson.current_build_dir(),
+        '-I' + get_option('gpu_include_dir'),
+        '-I' + get_option('hdf5_include_dir')
+    ]
+    foreach source : sources
+        gpu_trg = custom_target(
+            fs.name(source) + '_target',
+            command : [
+                gpu_compiler,
+                gpu_includes,
+                gpu_comp_args,
+                '-c',
+                '@INPUT@',
+                '-o',
+                '@OUTPUT@',
+                '-DGPU_CODE=1',
+                '-DMANAGED_MEMORY',
+            ],
+            input : source,
+            output : '@BASENAME@.o',
             build_by_default: true,
+            depend_files: headers + templates,
         )
+        gpu_objs += [gpu_trg]
+    endforeach
 
-        gpu_ext = py3.extension_module(
-            'gpu_ext',
-            ['src/gpu_ext.pyx', 'src/call_obj.pyx'],
-            link_with: gpu_lib,
-            include_directories: all_inc,
-            dependencies: depends + gpu_depends,
-            cpp_args: ['-DMANAGED_MEMORY'],
-            override_options: ['cython_language=cpp'],
-            install: true,
-            install_dir: meson.current_source_dir() + '/simbi/libs',
-            # link_args: ['-Wl,--incremental']  # Enable incremental linking
-        )
-    endif
+    # link the device objects with link time optimization
+    gpu_lto_obj = custom_target(
+        'gpu_lto_obj',
+        command : [
+            gpu_compiler,
+            gpu_objs,
+            [
+                '-arch=sm_86',
+                # '-fuse-linker-plugin',
+                '-fPIC',
+                # '-march=native',
+            ],
+            gpu_linkers + ['-lhdf5'],
+            '-o',
+            '@OUTPUT@',
+            '-DGPU_CODE=1',
+            '-DMANAGED_MEMORY',
+        ],
+        input : gpu_objs,
+        output : 'gpu_lto.o',
+        build_by_default: true,
+    )
+
+    # combine the device objects and lto objects into a static library
+    # that the cpu will link against
+    gpu_lib = static_library(
+        'simbi_gpu',
+        gpu_objs + [gpu_lto_obj],
+        # include_directories: all_inc,
+        link_args: gpu_linkers + ['-lhdf5'],
+        build_by_default: true,
+        cpp_args: ['-fPIC'],
+        # install: true,
+        # install_dir: meson.current_source_dir() + '/simbi/libs',
+    )
+
+    gpu_ext = py3.extension_module(
+        'gpu_ext',
+        ['src/gpu_ext.pyx', 'src/call_obj.pyx'],
+        link_with: gpu_lib,
+        include_directories: all_inc,
+        dependencies: depends + gpu_depends,
+        cpp_args: ['-DMANAGED_MEMORY'],
+        override_options: ['cython_language=cpp'],
+        install: true,
+        install_dir: meson.current_source_dir() + '/simbi/libs',
+    )
 endif
 
-#-------------
-# Radiation
-#-------------
+# Radiation Module
 rad_src = [
     'simbi/afterglow/src/rad_units.cpp',
     'simbi/afterglow/src/rad_units.hpp',

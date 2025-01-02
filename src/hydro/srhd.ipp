@@ -42,13 +42,18 @@ void SRHD<dim>::cons2prim()
     const auto* const cons_data = cons.data();
     simbi::parallel_for(fullP, total_zones, [cons_data, this] DEV(luint gid) {
         bool workLeftToDo = true;
-        volatile __shared__ bool found_failure;
+        atomic_bool_shared found_failure;
 
-        auto tid = get_threadId();
-        if (tid == 0) {
-            found_failure = inFailureState;
+        if constexpr (global::on_gpu) {
+            auto tid = get_threadId();
+            if (tid == 0) {
+                found_failure.store(inFailureState.load());
+            }
+            simbi::gpu::api::synchronize();
         }
-        simbi::gpu::api::synchronize();
+        else {
+            found_failure.store(inFailureState.load());
+        }
 
         real invdV = 1.0;
         while (!found_failure && workLeftToDo) {
@@ -113,8 +118,8 @@ void SRHD<dim>::cons2prim()
                 if (iter >= global::MAX_ITER || !std::isfinite(peq)) {
                     troubled_cells[gid] = 1;
                     dt                  = INFINITY;
-                    inFailureState      = true;
-                    found_failure       = true;
+                    inFailureState.store(true);
+                    found_failure.store(true);
                     break;
                 }
                 iter++;
@@ -159,9 +164,9 @@ void SRHD<dim>::cons2prim()
 
             if (peq < 0) {
                 troubled_cells[gid] = 1;
-                inFailureState      = true;
-                found_failure       = true;
-                dt                  = INFINITY;
+                inFailureState.store(true);
+                found_failure.store(true);
+                dt = INFINITY;
             }
             simbi::gpu::api::synchronize();
         }
