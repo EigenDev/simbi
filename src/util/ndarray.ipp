@@ -116,12 +116,12 @@ template <typename DT, global::Platform build_mode>
 constexpr void simbi::ndarray<DT, build_mode>::resize(size_type new_size)
 {
     if (new_size > sz) {
-        auto new_arr = util::make_unique<DT[]>(new_size * sizeof(DT));
+        auto new_arr = util::make_unique<DT[]>(new_size);
         std::copy(arr.get(), arr.get() + sz, new_arr.get());
         arr.swap(new_arr);
     }
     sz          = new_size;
-    nd_capacity = new_size * sizeof(DT);
+    nd_capacity = new_size;
 }
 
 template <typename DT, global::Platform build_mode>
@@ -129,13 +129,13 @@ constexpr void
 simbi::ndarray<DT, build_mode>::resize(size_type new_size, const DT new_value)
 {
     if (new_size > sz) {
-        auto new_arr = util::make_unique<DT[]>(new_size * sizeof(DT));
+        auto new_arr = util::make_unique<DT[]>(new_size);
         std::copy(arr.get(), arr.get() + sz, new_arr.get());
         std::fill(new_arr.get() + sz, new_arr.get() + new_size, new_value);
         arr.swap(new_arr);
     }
     sz          = new_size;
-    nd_capacity = new_size * sizeof(DT);
+    nd_capacity = new_size;
 }
 
 // Template class to return the size of

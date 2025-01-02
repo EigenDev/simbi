@@ -2786,7 +2786,6 @@ void RMHD<dim>::simulate(
     for (int i = 0; i < 2 * dim; i++) {
         this->bcs[i] = boundary_cond_map.at(boundary_conditions[i]);
     }
-
     load_functions();
 
     // allocate space for Riemann fluxes
@@ -2808,7 +2807,6 @@ void RMHD<dim>::simulate(
     if constexpr (global::on_gpu) {
         dt_min.resize(active_zones);
     }
-    std::cout << "Allocated space for conserved and primitive variables\n";
 
     // Copy the state array into real & profile variables
     for (size_t i = 0; i < total_zones; i++) {
@@ -2828,8 +2826,6 @@ void RMHD<dim>::simulate(
     cons2prim();
     adapt_dt<TIMESTEP_TYPE::MINIMUM>();
 
-    std::cout << "All memory allocated, starting simulation...\n";
-    std::cin.get();
     // Simulate :)
     simbi::detail::logger::with_logger(*this, tend, [&] {
         riemann_fluxes();
