@@ -102,7 +102,7 @@ def load_checkpoint(model: Any, filename: str) -> None:
     print(f"Loading from checkpoint: {filename}...", flush=True)
     setup: dict[str, Any] = {}
     volume_factor: Union[float, NDArray[numpy_float]] = 1.0
-    fields, setup, mesh = read_file(filename)
+    fields, setup, mesh = read_file(filename, return_staggered_field=model.mhd)
     dim: int = setup["dimensions"]
 
     vel = np.array([fields[f"v{i}"] for i in range(1, dim + 1)])
@@ -154,6 +154,13 @@ def load_checkpoint(model: Any, filename: str) -> None:
     npad = ((0, 0),) + ((padwith, padwith),) * dim
     model.u = np.pad(model.u * volume_factor, npad, "edge")
     model.chkpt_idx = setup["chkpt_idx"]
+    
+    if model.mhd:
+        model.bfield = [
+            fields["b1stag"],
+            fields["b2stag"],
+            fields["b3stag"]
+        ]
 
 
 @release_memory
@@ -180,6 +187,7 @@ def construct_the_state(model: Any, initial_state: NDArray[numpy_float]) -> None
 
     model.u = np.zeros((model.nvars - 1, *np.asanyarray(model.resolution).flat[::-1]))
 
+    
     if model.discontinuity:
         logger.info(
             f"Initializing Problem With a {
@@ -238,6 +246,31 @@ def construct_the_state(model: Any, initial_state: NDArray[numpy_float]) -> None
                     part[...].transpose()
                     + np.array([dens, *mom, energy, *mean_bfields])
                 ).transpose()
+         
+         # if it's an MHD run, load the staggered fields
+        if model.mhd:
+            nxp, nyp, nzp = model.resolution
+            b1 = np.zeros(shape=(nzp + 0, nyp + 0, nxp + 1))
+            b2 = np.zeros(shape=(nzp + 0, nyp + 1, nxp + 0))
+            b3 = np.zeros(shape=(nzp + 1, nyp + 0, nxp + 0))
+
+            region_one = model.x1 < model.geometry[0][2]
+            region_two = np.logical_not(region_one)
+            xc = helpers.calc_centroid(
+                model.x1, coord_system=model.coord_system)
+            a = xc < model.geometry[0][2]
+            b = np.logical_not(a)
+            b1[..., region_one] = model.initial_state[0][5]
+            b1[..., region_two] = model.initial_state[1][5]
+            b2[..., a] = model.initial_state[0][6]
+            b2[..., b] = model.initial_state[1][6]
+            b3[..., a] = model.initial_state[0][7]
+            b3[..., b] = model.initial_state[1][7]
+            model.bfield = [
+                np.pad(b1, ((1, 1), (1, 1), (0, 0))),
+                np.pad(b2, ((1, 1), (0, 0), (1, 1))),
+                np.pad(b3, ((1, 1), (1, 1), (1, 1)))
+            ]
     else:
         rho, *velocity, pressure = initial_state[: model.number_of_non_em_terms]
         velocity = np.asanyarray(velocity)
@@ -265,5 +298,12 @@ def construct_the_state(model: Any, initial_state: NDArray[numpy_float]) -> None
         check_valid_state(dens, "density")
         check_valid_state(mom, "momentum")
         check_valid_state(energy, "energy")
-
         model.u[...] = np.array([dens, *mom, energy, *mean_bfields])
+        
+        if model.mhd:
+            model.bfield = [
+                np.pad(bfields_stag[0], ((1, 1), (1, 1), (0, 0))),
+                np.pad(bfields_stag[1], ((1, 1), (0, 0), (1, 1))),
+                np.pad(bfields_stag[2], ((0, 0), (1, 1), (1, 1)))
+            ]
+

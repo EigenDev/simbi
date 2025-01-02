@@ -199,6 +199,11 @@ struct Mesh {
             }
         }
 
+        DUAL bool at_pole(real val) const
+        {
+            return std::abs(std::sin(val)) < 1.0e-10;
+        }
+
         // ==================================================
         // VOLUME CALCULATIONS
         // ==================================================

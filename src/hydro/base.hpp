@@ -124,10 +124,14 @@ namespace simbi {
             init_chkpt_idx = chkpt_idx + (chkpt_idx > 0);
         }
 
+        void deallocate_staggered_field()
+        {
+            std::vector<std::vector<real>>().swap(bfield);
+        }
+
         void deallocate_state()
         {
-            state.clear();
-            bfield.clear();
+            std::vector<std::vector<real>>().swap(state);
         }
 
         void print_shared_mem() const
