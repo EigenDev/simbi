@@ -106,6 +106,7 @@ def class_register(cls: Any) -> Any:
 @class_register
 class BaseConfig(metaclass=abc.ABCMeta):
     dynamic_args: list[DynamicArg] = []
+    problem_var_dict: dict[str, Any] = {}
     base_properties: dict[str, Any] = {}
     log_output = False
     log_directory: str = ""
@@ -433,6 +434,20 @@ class BaseConfig(metaclass=abc.ABCMeta):
                     val = round(val, 3)
                 val = str(val)
                 logger.info(f"{member.name:.<30} {val:<15} {member.help}")
+        
+        # check if problem variable dictionary is not empty
+        if cls.problem_var_dict:
+            for key, value in cls.problem_var_dict.items():
+                val  = value[0]
+                help = value[1]
+                if isinstance(val, float):
+                    if order_of_mag(abs(val)) > 3:
+                        logger.info(f"{key:.<30} {val:<15.2e}")
+                        continue
+                    val = round(val, 3)
+                val = str(val)
+                logger.info(f"{key.replace("_", " "):.<30} {val:<15} {help}")
+            
 
     @final
     def __del__(self) -> None:

@@ -56,7 +56,7 @@ class Hydro:
     geometry: Any
     u: NDArray[Any]
     resolution: Sequence[int]
-    bfield: NDArray[numpy_float]
+    bfield: NDArray[numpy_float] = np.array([[0.0], [0.0], [0.0]])
     trace_memory: bool = False
 
     def __init__(
@@ -593,39 +593,11 @@ class Hydro:
             "nxv": nxp + 1,
             "nyv": nyp + 1,
             "nzv": nzp + 1,
-            "bfield": [[0], [0], [0]],
+            "bfield": [b.flat for b in self.bfield],
             "hydro_source_lib": hdir.encode("utf-8"),
             "gravity_source_lib": gdir.encode("utf-8"),
             "boundary_source_lib": bdir.encode("utf-8"),
-        }
-        
-        if self.mhd:
-            if self.discontinuity:
-                b1 = np.zeros(shape=(nzp, nyp, init_conditions["nxv"]))
-                b2 = np.zeros(shape=(nzp, init_conditions["nyv"], nxp))
-                b3 = np.zeros(shape=(init_conditions["nzv"], nyp, nxp))
-
-                region_one = self.x1 < self.geometry[0][2]
-                region_two = np.logical_not(region_one)
-                xc = helpers.calc_centroid(
-                    self.x1, coord_system=self.coord_system)
-                a = xc < self.geometry[0][2]
-                b = np.logical_not(a)
-                b1[..., region_one] = self.initial_state[0][5]
-                b1[..., region_two] = self.initial_state[1][5]
-                b2[..., a] = self.initial_state[0][6]
-                b2[..., b] = self.initial_state[1][6]
-                b3[..., a] = self.initial_state[0][7]
-                b3[..., b] = self.initial_state[1][7]
-            else:
-                b1 = self.initial_state[5]
-                b2 = self.initial_state[6]
-                b3 = self.initial_state[7]
-            # pad the bfields at axis that aren't their own
-            b1 = np.pad(b1, ((1, 1), (1, 1), (0,0)), mode='edge')
-            b2 = np.pad(b2, ((1, 1), (0, 0), (1,1)), mode='edge')
-            b3 = np.pad(b3, ((0, 0), (1, 1), (1,1)), mode='edge')
-            init_conditions["bfield"] = [b1.flat, b2.flat, b3.flat]
+        }   
 
         lambdas: dict[str, Optional[float]] = {
             "boundary_sources": None,

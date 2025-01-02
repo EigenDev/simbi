@@ -157,7 +157,7 @@ def get_dimensionality(files: Union[list[str], dict[int, list[str]]]) -> int:
     return ndim
 
 @no_type_check
-def read_file(filename: str) -> tuple[dict[str, Any], dict[str, Any], dict[str, Any]]:
+def read_file(filename: str, return_staggered_field: bool = False) -> tuple[dict[str, Any], dict[str, Any], dict[str, Any]]:
     with h5py.File(filename, "r") as hf:
         ds = dict(hf.get("sim_info").attrs)
         ndim: int = ds["dimensions"]
@@ -214,6 +214,9 @@ def read_file(filename: str) -> tuple[dict[str, Any], dict[str, Any], dict[str, 
                     (ds["zactive_zones"] + 1, ds["yactive_zones"] + 2, ds["xactive_zones"] + 2),
                 )
                 
+                if return_staggered_field:
+                    fields.update({"b1stag": b1, "b2stag": b2, "b3stag": b3})
+                    
                 # unpad from ghost zones from the fields in the orthogonal directions
                 b1 = unpad(b1, ((1, 1), (1, 1), (0, 0)))
                 b2 = unpad(b2, ((1, 1), (0, 0), (1, 1)))
