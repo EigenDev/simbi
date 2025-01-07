@@ -2185,7 +2185,7 @@ void RMHD<dim>::riemann_fluxes()
     const auto prim_dat = prims.data();
     // Compute the fluxes in the x1 direction
     simbi::parallel_for(xvertexP, [prim_dat, this] DEV(const luint idx) {
-        // primitive buffer that returns dynamic shared array
+        //  primitive buffer that returns dynamic shared array
         // if working with shared memory on GPU, identity otherwise
         const auto prb = sm_or_identity(prim_dat);
 
@@ -2194,7 +2194,7 @@ void RMHD<dim>::riemann_fluxes()
         const luint ii = axid<dim, BlkAx::I>(idx, nxv, yag, kk);
 
         if constexpr (global::on_gpu) {
-            if ((ii >= nxv) || (jj >= yag) || (kk >= yag)) {
+            if ((ii >= nxv) || (jj >= yag) || (kk >= zag)) {
                 return;
             }
         }
@@ -2236,9 +2236,9 @@ void RMHD<dim>::riemann_fluxes()
 
         const auto iobj = get_real_idx(ii, 0, xag);
 
-        // object to left or right? (x1-direction)
-        const bool object_x =
-            ib_check<dim>(object_pos, iobj, jj, kk, xag, yag, 1);
+        // object to left or right ? (x1 - direction)
+        const bool object_x = false;
+        ib_check<dim>(object_pos, iobj, jj, kk, xag, yag, 1);
 
         const auto vface = this->cell_factors(ii, jj, kk).v1fL();
         // active x1 flux perpendicular zone indices
@@ -2272,7 +2272,7 @@ void RMHD<dim>::riemann_fluxes()
         const luint ii = axid<dim, BlkAx::I>(idx, xag, nyv, kk);
 
         if constexpr (global::on_gpu) {
-            if ((ii >= nxe) || (jj >= nyv) || (kk >= nze)) {
+            if ((ii >= xag) || (jj >= nyv) || (kk >= zag)) {
                 return;
             }
         }
@@ -2349,7 +2349,7 @@ void RMHD<dim>::riemann_fluxes()
         const luint ii = axid<dim, BlkAx::I>(idx, xag, yag, kk);
 
         if constexpr (global::on_gpu) {
-            if ((ii >= nxe) || (jj >= yag) || (kk >= zag)) {
+            if ((ii >= xag) || (jj >= yag) || (kk >= nzv)) {
                 return;
             }
         }

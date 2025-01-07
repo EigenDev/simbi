@@ -779,11 +779,12 @@ void Newtonian<dim>::simulate(
         this->bcs[i] = boundary_cond_map.at(boundary_conditions[i]);
     }
     load_functions();
-
     cons.resize(total_zones);
     prims.resize(total_zones);
     troubled_cells.resize(total_zones, 0);
-    dt_min.resize(total_zones);
+    if constexpr (global::on_gpu) {
+        dt_min.resize(total_zones);
+    }
 
     // Copy the state array into real & profile variables
     for (size_t i = 0; i < total_zones; i++) {
@@ -798,8 +799,8 @@ void Newtonian<dim>::simulate(
     print_shared_mem();
     init_riemann_solver();
     this->set_mesh_funcs();
-
     config_ghosts(this);
+
     cons2prim();
     if constexpr (global::on_gpu) {
         adapt_dt(fullP);
