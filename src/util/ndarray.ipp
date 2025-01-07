@@ -39,7 +39,7 @@ simbi::ndarray<DT, build_mode>::ndarray(const ndarray& rhs)
 template <typename DT, global::Platform build_mode>
 simbi::ndarray<DT, build_mode>::ndarray(const std::vector<DT>& rhs)
     : sz(rhs.size()),
-      nd_capacity(rhs.capacity() * sizeof(DT)),
+      nd_capacity(rhs.size() * sizeof(DT)),
       dimensions(1),
       arr(new DT[rhs.size()])
 {
@@ -50,7 +50,7 @@ simbi::ndarray<DT, build_mode>::ndarray(const std::vector<DT>& rhs)
 template <typename DT, global::Platform build_mode>
 simbi::ndarray<DT, build_mode>::ndarray(std::vector<DT>&& rhs)
     : sz(rhs.size()),
-      nd_capacity(rhs.capacity() * sizeof(DT)),
+      nd_capacity(rhs.size() * sizeof(DT)),
       dimensions(1),
       arr(new DT[rhs.size()])
 {
@@ -407,9 +407,9 @@ void simbi::ndarray<DT, build_mode>::copyToGpu()
 {
     if (arr) {
         if (!dev_arr) {
-            dev_arr.reset((DT*) myGpuMalloc(nd_capacity));
+            dev_arr.reset((DT*) myGpuMalloc(sz * sizeof(DT)));
         }
-        gpu::api::copyHostToDevice(dev_arr.get(), arr.get(), nd_capacity);
+        gpu::api::copyHostToDevice(dev_arr.get(), arr.get(), sz * sizeof(DT));
     }
 }
 
@@ -417,7 +417,7 @@ template <typename DT, global::Platform build_mode>
 void simbi::ndarray<DT, build_mode>::copyFromGpu()
 {
     if (dev_arr) {
-        gpu::api::copyDevToHost(arr.get(), dev_arr.get(), nd_capacity);
+        gpu::api::copyDevToHost(arr.get(), dev_arr.get(), sz * sizeof(DT));
     }
 }
 
@@ -428,7 +428,7 @@ void simbi::ndarray<DT, build_mode>::copyBetweenGpu(const ndarray& rhs)
         gpu::api::copyDevToDev(
             dev_arr.get(),
             rhs.dev_arr.get(),
-            rhs.nd_capacity
+            sz * sizeof(DT)
         );
     }
 }
@@ -484,5 +484,35 @@ DT* simbi::ndarray<DT, build_mode>::data() const
     }
     else {
         return arr.get();
+    }
+};
+
+template <typename DT, global::Platform build_mode>
+void simbi::ndarray<DT, build_mode>::clear()
+{
+    sz = 0;
+    arr.reset();
+    dev_arr.reset();
+};
+
+template <typename DT, global::Platform build_mode>
+void simbi::ndarray<DT, build_mode>::shrink_to_fit()
+{
+    if (sz < nd_capacity) {
+        auto new_arr = util::make_unique<DT[]>(sz);
+        std::copy(arr.get(), arr.get() + sz, new_arr.get());
+        arr.swap(new_arr);
+        nd_capacity = sz;
+    }
+};
+
+template <typename DT, global::Platform build_mode>
+void simbi::ndarray<DT, build_mode>::reserve(size_type new_capacity)
+{
+    if (new_capacity > nd_capacity) {
+        auto new_arr = util::make_unique<DT[]>(new_capacity);
+        std::copy(arr.get(), arr.get() + sz, new_arr.get());
+        arr.swap(new_arr);
+        nd_capacity = new_capacity;
     }
 };
