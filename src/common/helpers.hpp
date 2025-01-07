@@ -500,11 +500,9 @@ namespace simbi {
         template <typename T>
         void config_ghosts(T* sim_state);
 
-        template <typename T>
-        KERNEL void deviceReduceKernel(T* self, lint nmax);
-
-        template <typename T>
-        KERNEL void deviceReduceWarpAtomicKernel(T* self, lint nmax);
+        template <int dim, typename T>
+        KERNEL void
+        deviceReduceWarpAtomicKernel(T* self, real* dt_min, lint nmax);
 
         /**
          * @brief Get the Flops count in GB / s
