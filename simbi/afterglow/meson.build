@@ -8,12 +8,12 @@ rad_src = files(
 py3.extension_module(
     'rad_hydro',
     ['src/rad_hydro.pyx'] + rad_src,
-    include_directories: include_directories('src', incdir_numpy),
+    include_directories: include_directories('src', numpy_include),
     dependencies: [
         py3.dependency(),
-        dependency('openmp', language: 'cpp')
+        openmp_dep,
     ],
     override_options: ['cython_language=cpp'],
     install: true,
-    install_dir: meson.current_source_dir() + '/libs'
+    install_dir: py_install_dir,
 )

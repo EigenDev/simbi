@@ -1,42 +1,59 @@
 # Check for GPU dependencies
-hip = dependency('HIP', cmake_module_path: '/opt/rocm', modules: ['hip::device', 'hip::host'], required: false)
+hip  = dependency('HIP', cmake_module_path: '/opt/rocm', modules: ['hip::device', 'hip::host'], required: false)
 cuda = dependency('CUDA', required: false)
+fs = import('fs')
+include_flags = []
+foreach inc : include_dirs
+    include_flags += ['-I' + inc]
+endforeach
 
-gpu_comp_args = []
-gpu_link_args = []
+gpu_flags = [
+    '-DGPU_CODE=1',
+    '-DMANAGED_MEMORY',
+]   
 
+gpu_arch = get_option('gpu_arch')
 gpu_settings = {
     'nvidia': {
         'compiler': 'nvcc',
-        'arch': f'sm_@get_option("gpu_arch", "86")@',
-        'args': ['-fPIC', f'-arch=sm_@get_option("gpu_arch", "86")@', '-dc', '-dlto', '--expt-relaxed-constexpr', '-O3'],
-        'linker': ['-lcudart'],
+        'arch': f'-arch=sm_@gpu_arch@',
+        'args': [
+            f'-arch=sm_@gpu_arch@', 
+            '-x',
+            'cu',
+            '-dc',
+            '--extended-lambda', 
+            '--expt-relaxed-constexpr',
+            '-std=c++20',
+            '--compiler-options',
+            '-fPIC',
+        ],
+        'link_args': ['-lcudart'],
+        'inter_link_args': ['-dlink', '-Xcompiler', '-fPIC'],
+        'extra_link_args': ['-lcudadevrt'],
         'gpu_dependency': cuda
     },
     'amd': {
         'compiler': 'hipcc',
-        'arch': f'gfx@get_option("gpu_arch", "906")@',
-        'args': ['-fPIC', f'--offload-arch=gfx@get_option("gpu_arch", "70")@', '-O3'],
-        'linker': ['-lamdhip64'],
+        'arch': f'gfx@gpu_arch@',
+        'args': ['-fPIC', f'--offload-arch=gfx@gpu_arch@'],
+        'link_args': ['-lamdhip64'],
+        'inter_link_args': [],
+        'extra_link_args': [],
         'gpu_dependency': hip
     }
 }
 
+
+
 settings = {}
 if hip.found() or cuda.found()
     if hip.found()
-        settings = gpu_settings['amd']
-    elif cuda.found()
-        settings = gpu_settings['nvidia']
-    endif
-    gpu_compiler = find_program(settings['compiler'])
-    gpu_args = settings['args']
-    gpu_linkers = settings['linker']
-endif
-
-if hip.found() or cuda.found()
-    if hip.found()
-        settings = gpu_settings['amd']
+        if run_command('hipconfig', '--platform', check: true).stdout().strip() == 'nvidia'
+            settings = gpu_settings['nvidia']
+        else
+            settings = gpu_settings['amd']
+        endif
     elif cuda.found()
         settings = gpu_settings['nvidia']
     endif
@@ -44,19 +61,35 @@ if hip.found() or cuda.found()
 
     # Compile GPU sources
     gpu_objs = []
-    gpu_objs = custom_target(
-        'gpu_objects',
-        input: sources,
-        output: '@BASENAME@.o',
-        command: [gpu_compiler, '@INPUT@', '-o', '@OUTPUT@'] + gpu_args,
-        build_by_default: true
-    )
+    foreach src : sources
+        gpu_objs += [custom_target(
+            fs.name(src) + '_gpu_obj',
+            input: src,
+            output: '@BASENAME@.o',
+            command: [gpu_compiler, include_flags, settings['args'] , '-c', '@INPUT@', '-o', '@OUTPUT@', gpu_flags],
+            depend_files: [headers, templates],
+            build_by_default: true
+        )]
+    endforeach
 
-    # Link GPU objects into a static library
-    static_library(
-        'gpu_lib',
-        gpu_objs,
-        link_args: settings['linker'],
-        install: false
+    # perform intermediate link step
+    gpu_objs += [custom_target(
+        'gpu_link',
+        input: gpu_objs,
+        output: 'gpu_link.o',
+        command: [gpu_compiler, settings['inter_link_args'], '@INPUT@', '-o', '@OUTPUT@'] + settings['extra_link_args'] + settings['arch'],
+        build_by_default: true
+    )]
+
+    py3.extension_module(
+        'gpu_ext',
+        ['../src/gpu_ext.pyx'] + gpu_objs,
+        # link_args: settings['link_args'][1],
+        include_directories: include_directories('..', '../src', numpy_include),
+        dependencies: general_dependencies + settings['gpu_dependency'],
+        cpp_args: ['-DMANAGED_MEMORY'],
+        override_options: ['cython_language=cpp'],
+        install: true,
+        install_dir: py_install_dir,
     )
 endif

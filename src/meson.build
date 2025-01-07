@@ -5,7 +5,8 @@ sources = files(
     'hydro/rmhd.cpp',
     'hydro/srhd.cpp',
     'hydro/newt.cpp',
-    'util/device_api.cpp'
+    'util/device_api.cpp',
+    'util/jit_module.cpp',
 )
 
 headers = files(

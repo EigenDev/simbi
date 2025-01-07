@@ -31,22 +31,25 @@ conf_data.set10('FLOAT_PRECISION', get_option('precision') == 'single')
 configure_file(input: 'build_options.hpp.in', output: 'build_options.hpp', configuration: conf_data)
 
 # get numpy headers
-incdir_numpy = run_command(py3, ['-c', 'import numpy; print(numpy.get_include())'], check: true).stdout().strip()
+numpy_include = run_command(py3, ['-c', 'import numpy; print(numpy.get_include())'], check: true).stdout().strip()
+openmp_dep = dependency('openmp', language: 'cpp', required: true)
+hdf5_dep = dependency('hdf5', language: 'cpp', required: true)
 
 # Include Subdirectories
 subdir('src')
 subdir('simbi/afterglow')
 
+
 general_dependencies = [
-    dependency('openmp', language: 'cpp'),
-    dependency('hdf5', language: 'cpp', required: true),
+    openmp_dep,
+    hdf5_dep,
     py3.dependency()
 ]
 # CPU Extension Module
 py3.extension_module(
     'cpu_ext',
     ['src/cpu_ext.pyx'] + sources,
-    include_directories: include_directories('src', incdir_numpy),
+    include_directories: include_directories('src', numpy_include),
     cpp_args: ['-DGPU_CODE=0'],
     dependencies: general_dependencies,
     override_options: ['cython_language=cpp'],
@@ -56,16 +59,13 @@ py3.extension_module(
 
 # Check and configure GPU compilation
 if get_option('gpu_compilation').enabled()
+    all_inc = include_directories(numpy_include, 'src')
+    hdf5_inc = hdf5_dep.get_variable('includedir', cmake: 'HDF5_INCLUDE_DIRS')
+    include_dirs = [
+        meson.current_source_dir() + '/src',
+        '.',
+        meson.current_build_dir(),
+        hdf5_inc,
+    ]
     subdir('gpu')
-    py3.extension_module(
-        'gpu_ext',
-        ['src/gpu_ext.pyx'],
-        link_with: gpu_lib,
-        include_directories: include_directories('src', incdir_numpy),
-        dependencies: general_dependencies + settings['dependency'],
-        cpp_args: ['-DMANAGED_MEMORY'],
-        override_options: ['cython_language=cpp'],
-        install: true,
-        install_dir: meson.current_source_dir() + '/simbi/libs',
-    )
 endif
