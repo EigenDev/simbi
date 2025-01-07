@@ -291,6 +291,7 @@ class BaseConfig(metaclass=abc.ABCMeta):
     @classmethod 
     def _compile_source_terms(cls) -> None:
         libdir = Path(__file__).resolve().parent.parent.parent / "src" / "libs"
+        libdir.mkdir(parents=True, exist_ok=True)
         # get the class file name, stripping off the directory path
         cls_file_name = inspect.getfile(cls).split("/")[-1].split(".")[0]
         sources = {
@@ -308,8 +309,9 @@ class BaseConfig(metaclass=abc.ABCMeta):
                     cls.gravity_source_lib = str(so_file)
                 elif source_name == "boundary":
                     cls.boundary_source_lib = str(so_file)
-                    
-                with open(cpp_file, "w") as f:
+                
+
+                with open(cpp_file, 'w+') as f:
                     f.write(textwrap.dedent(source_code))
                     
                 try:
