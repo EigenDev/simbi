@@ -1,43 +1,55 @@
-#include <cuda_runtime.h>
-#include <cuda/atomic>
 #include <atomic>
+#include <cuda.h>
+#include <cuda/atomic>
+#include <cuda_runtime.h>
+#include <nvrtc.h>
 #define CUDA_CODE 1
 
-
-
-class atomic_bool_gpu {
-private:
+class atomic_bool_gpu
+{
+  private:
     cuda::atomic<int, cuda::thread_scope_device> value;
 
-public:
+  public:
     __host__ __device__ atomic_bool_gpu() : value(0) {}
-    __host__ __device__ atomic_bool_gpu(bool initial_value) : value(initial_value ? 1 : 0) {}
 
-    __host__ __device__ void store(bool new_value) {
+    __host__ __device__ atomic_bool_gpu(bool initial_value)
+        : value(initial_value ? 1 : 0)
+    {
+    }
+
+    __host__ __device__ void store(bool new_value)
+    {
         value.store(new_value ? 1 : 0, cuda::memory_order_relaxed);
     }
 
-    __host__ __device__ bool load() const {
+    __host__ __device__ bool load() const
+    {
         return value.load(cuda::memory_order_relaxed) != 0;
     }
 
-    __host__ __device__ bool exchange(bool new_value) {
-        return value.exchange(new_value ? 1 : 0, cuda::memory_order_relaxed) != 0;
+    __host__ __device__ bool exchange(bool new_value)
+    {
+        return value.exchange(new_value ? 1 : 0, cuda::memory_order_relaxed) !=
+               0;
     }
 
-    __host__ __device__ bool compare_exchange(bool expected, bool desired) {
+    __host__ __device__ bool compare_exchange(bool expected, bool desired)
+    {
         int expected_int = expected ? 1 : 0;
-        return value.compare_exchange_strong(expected_int, desired ? 1 : 0, cuda::memory_order_relaxed);
+        return value.compare_exchange_strong(
+            expected_int,
+            desired ? 1 : 0,
+            cuda::memory_order_relaxed
+        );
     }
 
     // Explicit conversion operator to bool
-    __host__ __device__ explicit operator bool() const {
-        return load();
-    }
+    __host__ __device__ explicit operator bool() const { return load(); }
 };
 
 using atomic_bool_shared = atomic_bool_gpu;
-using atomic_bool = atomic_bool_gpu;
+using atomic_bool        = atomic_bool_gpu;
 
 #define DEV    __device__
 #define KERNEL __global__
@@ -122,3 +134,19 @@ using devProp_t                        = cudaDeviceProp;
 using devError_t                       = cudaError_t;
 using devEvent_t                       = cudaEvent_t;
 using simbiStream_t                    = cudaStream_t;
+
+// tools for JIT compilation
+constexpr auto devCompileProgram    = nvrtcCompileProgram;
+constexpr auto devCreateProgram     = nvrtcCreateProgram;
+constexpr auto devGetIRSize         = nvrtcGetPTXSize;
+constexpr auto devGetIR             = nvrtcGetPTX;
+constexpr auto devGetProgramLogSize = nvrtcGetProgramLogSize;
+constexpr auto devGetProgramLog     = nvrtcGetProgramLog;
+constexpr auto devLoadModule        = cuModuleLoadData;
+constexpr auto devUnloadModule      = cuModuleUnload;
+constexpr auto devGetFunction       = cuModuleGetFunction;
+using devProgram_t                  = nvrtcProgram;
+using devContext_t                  = CUcontext;
+using devModule_t                   = CUmodule;
+using devDevice_t                   = CUdevice;
+using devFunction_t                 = CUfunction;

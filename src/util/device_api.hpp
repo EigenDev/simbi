@@ -118,7 +118,35 @@ namespace simbi {
             void getDeviceProperties(devProp_t* props, int i);
             void gpuMemset(void* obj, int val, size_t bytes);
             void deviceSynch();
-            void threadFence();
+
+            // JIT compilation
+            void gpuCreateProgram(
+                devProgram_t* program,
+                const char* source,
+                const char* prog_name,
+                int num_options,
+                const char** options,
+                const char** option_vals
+            );
+            int gpuProgram(
+                devProgram_t program,
+                int num_options,
+                const char** options
+            );
+            void gpuGetProgramLogSize(devProgram_t program, size_t* size);
+            void gpuGetProgramLog(devProgram_t program, char* log);
+            void gpuGetProgramIRSize(devProgram_t program, size_t* size);
+            void gpuGetProgramIR(devProgram_t program, char* ir);
+            void gpuDestroyProgram(devProgram_t program);
+            void gpuModuleLoadData(devModule_t* module, const char* ir);
+            void gpuModuleUnload(devModule_t module);
+            void gpuLoadModule(devModule_t* module, const char* ir);
+            void gpuGetFunction(
+                devFunction_t* function,
+                devModule_t module,
+                const char* name
+            );
+            void gpuGetIRSize(size_t* size, devModule_t module);
 
             DEV inline void synchronize()
             {

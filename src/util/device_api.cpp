@@ -180,6 +180,113 @@ namespace simbi {
 #endif
             }
 
+            void gpuCreateProgram(
+                devProgram_t* program,
+                const char* source,
+                const char* prog_name,
+                int num_options,
+                const char** options,
+                const char** option_vals
+            )
+            {
+#if GPU_CODE
+                auto status = error::status_t(devCreateProgram(
+                    program,
+                    source,
+                    prog_name,
+                    num_options,
+                    options,
+                    option_vals
+                ));
+                error::check_err(status, "Failed to create program");
+#endif
+            }
+
+            int gpuProgram(
+                devProgram_t program,
+                int num_options,
+                const char** options
+            )
+            {
+#if GPU_CODE
+                auto status = error::status_t(
+                    devCompileProgram(program, num_options, options)
+                );
+                error::check_err(status, "Failed to program");
+#endif
+                return 0;
+            }
+
+            void gpuGetProgramLogSize(devProgram_t program, size_t* size)
+            {
+#if GPU_CODE
+                auto status =
+                    error::status_t(devGetProgramLogSize(program, size));
+                error::check_err(status, "Failed to get program log size");
+#endif
+            }
+
+            void gpuGetProgramLog(devProgram_t program, char* log)
+            {
+#if GPU_CODE
+                auto status = error::status_t(devGetProgramLog(program, log));
+                error::check_err(status, "Failed to get program log");
+#endif
+            }
+
+            void gpuGetProgramIRSize(devProgram_t program, size_t* size)
+            {
+#if GPU_CODE
+                auto status = error::status_t(devGetIRSize(program, size));
+                error::check_err(status, "Failed to get program IR size");
+#endif
+            }
+
+            void gpuGetProgramIR(devProgram_t program, char* ir)
+            {
+#if GPU_CODE
+                auto status = error::status_t(devGetIR(program, ir));
+                error::check_err(status, "Failed to get program IR");
+#endif
+            }
+
+            void gpuModuleLoadData(devModule_t* module, const char* ir)
+            {
+#if GPU_CODE
+                auto status = error::status_t(devLoadModule(module, ir));
+                error::check_err(status, "Failed to load module");
+#endif
+            }
+
+            void gpuModuleUnload(devModule_t module)
+            {
+#if GPU_CODE
+                auto status = error::status_t(devUnloadModule(module));
+                error::check_err(status, "Failed to unload module");
+#endif
+            }
+
+            void gpuLoadModule(devModule_t* module, const char* ir)
+            {
+#if GPU_CODE
+                auto status = error::status_t(devLoadModule(module, ir));
+                error::check_err(status, "Failed to load module");
+#endif
+            }
+
+            void gpuGetFunction(
+                devFunction_t* function,
+                devModule_t module,
+                const char* name
+            )
+            {
+#if GPU_CODE
+                auto status =
+                    error::status_t(devGetFunction(function, module, name));
+                error::check_err(status, "Failed to get function");
+#endif
+            }
+
         }   // namespace api
 
     }   // namespace gpu

@@ -47,6 +47,10 @@ namespace simbi {
     using devError_t    = int;
     using devProp_t     = int;
     using devEvent_t    = std::chrono::high_resolution_clock::time_point;
+    using devModule_t   = void*;
+    using devFunction_t = int;
+    using devContext_t  = int;
+    using devProgram_t  = int;
 
     inline dim3 blockIdx(1, 1, 1);
     inline dim3 blockDim(1, 1, 1);
