@@ -73,6 +73,7 @@ lin_fields = [
     "v1",
     "v2",
     "v3",
+    "sigma",
 ]
 
 
