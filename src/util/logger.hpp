@@ -66,7 +66,7 @@ namespace simbi {
             void create_event(T& stamp)
             {
                 if constexpr (P == global::Platform::GPU) {
-                    gpu::api::gpuEventCreate(&stamp);
+                    gpu::api::eventCreate(&stamp);
                 }
             }
 
@@ -74,7 +74,7 @@ namespace simbi {
             void destroy_event(T& stamp)
             {
                 if constexpr (P == global::Platform::GPU) {
-                    gpu::api::gpuEventDestroy(stamp);
+                    gpu::api::eventDestroy(stamp);
                 }
             }
 
@@ -87,7 +87,7 @@ namespace simbi {
                     stamp = high_resolution_clock::now();
                 }
                 else {
-                    gpu::api::gpuEventRecord(stamp);
+                    gpu::api::eventRecord(stamp);
                 }
             }
 
@@ -102,8 +102,8 @@ namespace simbi {
                         );
                 }
                 else {
-                    gpu::api::gpuEventSynchronize(t2);
-                    gpu::api::gpuEventElapsedTime(&dt, t1, t2);
+                    gpu::api::eventSynchronize(t2);
+                    gpu::api::eventElapsedTime(&dt, t1, t2);
                     // time output from GPU automatically in ms so convert to
                     // seconds
                     dt *= 1e-3;
@@ -390,11 +390,9 @@ namespace simbi {
                         // Write to a file at every checkpoint interval
                         if (sim_state.t >= sim_state.t_interval &&
                             sim_state.t != INFINITY) {
-                            table.setProgress(
-                                static_cast<int>(
-                                    (sim_state.t / end_time) * 100.0
-                                )
-                            );
+                            table.setProgress(static_cast<int>(
+                                (sim_state.t / end_time) * 100.0
+                            ));
                             helpers::write_to_file(sim_state, table);
                             if (sim_state.dlogt != 0) {
                                 sim_state.t_interval *=

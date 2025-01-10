@@ -1,25 +1,8 @@
-/**
- * ***********************(C) COPYRIGHT 2024 Marcus DuPont**********************
- * @file       exec_policy.hpp
- * @brief      houses the execution policy object for gpu-specific runs
- *
- *
- * @note
- * @history:
- *   Version   Date            Author          Modification    Email
- *   V0.8.0    Dec-03-2023     Marcus DuPont marcus.dupont@princeton.edu
- *
- * @verbatim
- * ==============================================================================
- *
- * ==============================================================================
- * @endverbatim
- * ***********************(C) COPYRIGHT 2024 Marcus DuPont**********************
- */
 #ifndef EXEC_POLICY_HPP
 #define EXEC_POLICY_HPP
 
 #include "build_options.hpp"   // for dim3, luint, global::col_maj, simbiStream_t
+#include "device_api.hpp"      // for api::setDevice
 #include <exception>           // for exception
 #include <iostream>            // for operator<<, char_traits, basic_ostream
 #include <vector>              // for vector
@@ -36,100 +19,92 @@ namespace simbi {
         dim3 gridSize;
         dim3 blockSize;
         size_t sharedMemBytes;
-        simbiStream_t stream;
+        std::vector<simbiStream_t> streams;
+        std::vector<int> devices;
 
         ~ExecutionPolicy() = default;
         ExecutionPolicy()  = default;
 
-        ExecutionPolicy(const T nzones, const U blockSize)
-            : blockSize(dim3(blockSize)), sharedMemBytes(0), stream(0)
+        ExecutionPolicy(const T nzones, const U blockSize, int device = 0)
+            : blockSize(dim3(blockSize)), sharedMemBytes(0)
         {
             const T nBlocks = compute_blocks(nzones, blockSize);
             this->gridSize  = dim3(nBlocks);
-        }
-
-        ExecutionPolicy(
-            const T nzones,
-            const U blockSize,
-            const size_t sharedMemBytes
-        )
-            : blockSize(dim3(blockSize)),
-              sharedMemBytes(sharedMemBytes),
-              stream(0)
-        {
-            const T nBlocks = compute_blocks(nzones, blockSize);
-            this->gridSize  = dim3(nBlocks);
+            set_device(device);
         }
 
         ExecutionPolicy(
             const T nzones,
             const U blockSize,
             const size_t sharedMemBytes,
-            const simbiStream_t stream
+            int device = 0
         )
-            : blockSize(dim3(blockSize)),
-              sharedMemBytes(sharedMemBytes),
-              stream(stream)
+            : blockSize(dim3(blockSize)), sharedMemBytes(sharedMemBytes)
         {
             const T nBlocks = compute_blocks(nzones, blockSize);
             this->gridSize  = dim3(nBlocks);
+            set_device(device);
         }
 
-        ExecutionPolicy(const std::vector<T> glist, const std::vector<U> blist)
-            : sharedMemBytes(0), stream(0)
+        ExecutionPolicy(
+            const T nzones,
+            const U blockSize,
+            const size_t sharedMemBytes,
+            const std::vector<simbiStream_t>& streams,
+            int device = 0
+        )
+            : blockSize(dim3(blockSize)),
+              sharedMemBytes(sharedMemBytes),
+              streams(streams)
         {
-            try {
-                if (glist.size() != blist.size()) {
-                    throw ExecutionException();
-                }
-            }
-            catch (ExecutionException& e) {
-                std::cout << "Bad construction of execution policy"
-                          << std::endl;
-                std::cout << e.what() << std::endl;
-            }
-            build_grid(glist, blist);
+            const T nBlocks = compute_blocks(nzones, blockSize);
+            this->gridSize  = dim3(nBlocks);
+            set_device(device);
         }
 
         ExecutionPolicy(
             const std::vector<T> glist,
             const std::vector<U> blist,
-            const size_t sharedMemBytes
+            int device = 0
         )
-            : sharedMemBytes(sharedMemBytes), stream(0)
+            : sharedMemBytes(0)
         {
-            try {
-                if (glist.size() != blist.size()) {
-                    throw ExecutionException();
-                }
-            }
-            catch (ExecutionException& e) {
-                std::cout << "Bad construction of execution policy"
-                          << std::endl;
-                std::cout << e.what() << std::endl;
+            if (glist.size() != blist.size()) {
+                throw ExecutionException();
             }
             build_grid(glist, blist);
+            set_device(device);
         }
 
         ExecutionPolicy(
             const std::vector<T> glist,
             const std::vector<U> blist,
             const size_t sharedMemBytes,
-            const simbiStream_t stream
+            int device = 0
         )
-            : sharedMemBytes(sharedMemBytes), stream(stream)
+            : sharedMemBytes(sharedMemBytes)
         {
-            try {
-                if (glist.size() != blist.size()) {
-                    throw ExecutionException();
-                }
-            }
-            catch (ExecutionException& e) {
-                std::cout << "Bad construction of execution policy"
-                          << std::endl;
-                std::cout << e.what() << std::endl;
+            if (glist.size() != blist.size()) {
+                throw ExecutionException();
             }
             build_grid(glist, blist);
+            set_device(device);
+        }
+
+        ExecutionPolicy(
+            const std::vector<T> glist,
+            const std::vector<U> blist,
+            const size_t sharedMemBytes,
+            const std::vector<simbiStream_t>& streams,
+            int device = 0
+        )
+            : sharedMemBytes(sharedMemBytes), streams(streams)
+        {
+            if (glist.size() != blist.size()) {
+                throw ExecutionException();
+            }
+            build_grid(glist, blist);
+            set_device(device);
         }
 
         T compute_blocks(const T nzones, const luint nThreads) const
@@ -191,6 +166,26 @@ namespace simbi {
                 luint nzBlocks  = (glist[2] + blist[2] - 1) / blist[2];
                 this->gridSize  = dim3(nxBlocks, nyBlocks, nzBlocks);
                 this->blockSize = dim3(blist[0], blist[1], blist[2]);
+            }
+        }
+
+        void set_device(int device)
+        {
+            this->devices = {device};
+            gpu::api::setDevice(device);
+        }
+
+        void set_devices(const std::vector<int>& devices)
+        {
+            this->devices = devices;
+        }
+
+        void add_stream(simbiStream_t stream) { streams.push_back(stream); }
+
+        void synchronize() const
+        {
+            for (const auto& stream : streams) {
+                gpu::api::streamSynchronize(stream);
             }
         }
     };

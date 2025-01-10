@@ -50,7 +50,7 @@ namespace simbi {
         {
             if constexpr (build_mode == global::Platform::GPU) {
                 void* ptr;
-                gpu::api::gpuMalloc(&ptr, size);
+                gpu::api::malloc(&ptr, size);
                 return ptr;
             }
             return nullptr;
@@ -61,7 +61,7 @@ namespace simbi {
         {
             if constexpr (build_mode == global::Platform::GPU) {
                 void* ptr;
-                gpu::api::gpuMallocManaged(&ptr, size);
+                gpu::api::mallocManaged(&ptr, size);
                 return ptr;
             }
             return nullptr;
@@ -71,7 +71,7 @@ namespace simbi {
             void operator()(DT* ptr)
             {
                 if constexpr (build_mode == global::Platform::GPU) {
-                    gpu::api::gpuFree(ptr);
+                    gpu::api::free(ptr);
                 }
             }
         };
@@ -102,14 +102,14 @@ namespace simbi {
 
         // Function that returns the number of elements in array after pushing
         // the data
-        constexpr void push_back(const DT&);
+        constexpr ndarray& push_back(const DT&);
 
         // Function that returns the popped element
-        constexpr void pop_back();
+        constexpr ndarray& pop_back();
 
         // Function to resize ndarray
-        constexpr void resize(size_type new_size);
-        constexpr void resize(size_type new_size, const DT new_value);
+        constexpr ndarray& resize(size_type new_size);
+        constexpr ndarray& resize(size_type new_size, const DT new_value);
 
         // Function that returns the size of array
         constexpr size_type size() const;
@@ -207,6 +207,25 @@ namespace simbi {
         void clear();
         void shrink_to_fit();
         void reserve(size_type new_capacity);
+
+        // functional methods for in-place operations
+        template <typename UnaryFunc>
+        ndarray& map(UnaryFunc func);
+
+        template <typename UnaryFunc>
+        ndarray& map(UnaryFunc func) const;
+
+        template <typename UnaryPredicate>
+        ndarray& filter(UnaryPredicate pred);
+
+        template <typename UnaryPredicate>
+        ndarray filter(UnaryPredicate pred) const;
+
+        template <typename BinaryFunc>
+        DT reduce(BinaryFunc func, DT init);
+
+        template <typename BinaryFunc>
+        DT reduce(BinaryFunc func, DT init) const;
     };
 
 }   // namespace simbi

@@ -130,10 +130,20 @@ constexpr auto devEventSynchronize     = cudaEventSynchronize;
 constexpr auto devEventElapsedTime     = cudaEventElapsedTime;
 constexpr auto devGetDeviceProperties  = cudaGetDeviceProperties;
 constexpr auto devGetDeviceCount       = cudaGetDeviceCount;
-using devProp_t                        = cudaDeviceProp;
-using devError_t                       = cudaError_t;
-using devEvent_t                       = cudaEvent_t;
-using simbiStream_t                    = cudaStream_t;
+constexpr auto devSetDevice            = cudaSetDevice;
+constexpr auto devStreamCreate         = cudaStreamCreate;
+constexpr auto devStreamDestroy        = cudaStreamDestroy;
+constexpr auto devStreamSynchronize    = cudaStreamSynchronize;
+constexpr auto devStreamWaitEvent      = cudaStreamWaitEvent;
+constexpr auto devStreamQuery          = cudaStreamQuery;
+constexpr auto devEnablePeerAccess     = cudaDeviceEnablePeerAccess;
+constexpr auto devGetDevice            = cudaGetDevice;
+constexpr auto devPeerCopyAsync        = cudaMemcpyPeerAsync;
+
+using devProp_t     = cudaDeviceProp;
+using devError_t    = cudaError_t;
+using devEvent_t    = cudaEvent_t;
+using simbiStream_t = cudaStream_t;
 
 // tools for JIT compilation
 constexpr auto devCompileProgram    = nvrtcCompileProgram;

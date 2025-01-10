@@ -43,7 +43,7 @@ namespace simbi {
 #endif
             }
 
-            void gpuMalloc(void* obj, size_t elements)
+            void malloc(void* obj, size_t elements)
             {
 #if GPU_CODE
                 auto status = simbi::gpu::error::status_t(
@@ -56,7 +56,7 @@ namespace simbi {
 #endif
             }
 
-            void gpuMallocManaged(void* obj, size_t elements)
+            void mallocManaged(void* obj, size_t elements)
             {
 #if GPU_CODE
                 auto status = simbi::gpu::error::status_t(
@@ -69,7 +69,7 @@ namespace simbi {
 #endif
             }
 
-            void gpuFree(void* obj)
+            void free(void* obj)
             {
 #if GPU_CODE
                 auto status = simbi::gpu::error::status_t(devFree(obj));
@@ -80,7 +80,7 @@ namespace simbi {
 #endif
             }
 
-            void gpuMemset(void* obj, int val, size_t bytes)
+            void memset(void* obj, int val, size_t bytes)
             {
 #if GPU_CODE
                 auto status =
@@ -89,7 +89,7 @@ namespace simbi {
 #endif
             };
 
-            void gpuEventSynchronize(devEvent_t a)
+            void eventSynchronize(devEvent_t a)
             {
 #if GPU_CODE
                 auto status =
@@ -101,7 +101,7 @@ namespace simbi {
 #endif
             };
 
-            void gpuEventCreate(devEvent_t* a)
+            void eventCreate(devEvent_t* a)
             {
 #if GPU_CODE
                 auto status = simbi::gpu::error::status_t(devEventCreate(a));
@@ -109,7 +109,7 @@ namespace simbi {
 #endif
             };
 
-            void gpuEventDestroy(devEvent_t a)
+            void eventDestroy(devEvent_t a)
             {
 #if GPU_CODE
                 auto status = simbi::gpu::error::status_t(devEventDestroy(a));
@@ -117,7 +117,7 @@ namespace simbi {
 #endif
             };
 
-            void gpuEventRecord(devEvent_t a)
+            void eventRecord(devEvent_t a)
             {
 #if GPU_CODE
                 auto status = simbi::gpu::error::status_t(devEventRecord(a));
@@ -125,7 +125,7 @@ namespace simbi {
 #endif
             };
 
-            void gpuEventElapsedTime(float* time, devEvent_t a, devEvent_t b)
+            void eventElapsedTime(float* time, devEvent_t a, devEvent_t b)
             {
 #if GPU_CODE
                 auto status =
@@ -138,7 +138,7 @@ namespace simbi {
 #endif
             };
 
-            void getDeviceCount(int* devCount)
+            void deviceCount(int* devCount)
             {
 #if GPU_CODE
                 auto status =
@@ -171,7 +171,97 @@ namespace simbi {
 #endif
             };
 
-            void gpuMcFromSymbol(void* dst, const void* symbol, size_t count)
+            void setDevice(int device)
+            {
+#if GPU_CODE
+                auto status = error::status_t(devSetDevice(device));
+                error::check_err(status, "Failed to set device");
+#endif
+            };
+
+            void streamCreate(simbiStream_t* stream)
+            {
+#if GPU_CODE
+                auto status = error::status_t(devStreamCreate(stream));
+                error::check_err(status, "Failed to create stream");
+#endif
+            };
+
+            void streamDestroy(simbiStream_t stream)
+            {
+#if GPU_CODE
+                auto status = error::status_t(devStreamDestroy(stream));
+                error::check_err(status, "Failed to destroy stream");
+#endif
+            };
+
+            void streamSynchronize(simbiStream_t stream)
+            {
+#if GPU_CODE
+                auto status = error::status_t(devStreamSynchronize(stream));
+                error::check_err(status, "Failed to synchronize stream");
+#endif
+            };
+
+            void streamWaitEvent(simbiStream_t stream, devEvent_t event)
+            {
+#if GPU_CODE
+                auto status =
+                    error::status_t(devStreamWaitEvent(stream, event));
+                error::check_err(status, "Failed to wait for event");
+#endif
+            };
+
+            void streamQuery(simbiStream_t stream, int* status)
+            {
+#if GPU_CODE
+                auto stat = error::status_t(devStreamQuery(stream));
+                *status   = stat;
+                error::check_err(stat, "Failed to query stream");
+#endif
+            };
+
+            void memcpyAsync(
+                void* dst,
+                const void* src,
+                size_t bytes,
+                simbiMemcpyKind kind,
+                simbiStream_t stream
+            )
+            {
+#if GPU_CODE
+                auto status = error::status_t(
+                    devMemcpyAsync(dst, src, bytes, kind, stream)
+                );
+                error::check_err(status, "Failed to copy asynchronously");
+#endif
+            };
+
+            void enablePeerAccess(int device)
+            {
+#if GPU_CODE
+                auto status = error::status_t(devEnablePeerAccess(device));
+                error::check_err(status, "Failed to enable peer access");
+#endif
+            };
+
+            void peerCopyAsync(
+                void* dst,
+                const void* src,
+                size_t bytes,
+                simbiMemcpyKind kind,
+                simbiStream_t stream
+            )
+            {
+#if GPU_CODE
+                auto status = error::status_t(
+                    devMemcpyPeerAsync(dst, src, bytes, kind, stream)
+                );
+                error::check_err(status, "Failed to copy asynchronously");
+#endif
+            };
+
+            void memcpyFromSymbol(void* dst, const void* symbol, size_t count)
             {
 #if GPU_CODE
                 auto status =
@@ -180,7 +270,7 @@ namespace simbi {
 #endif
             }
 
-            void gpuCreateProgram(
+            void createProgram(
                 devProgram_t* program,
                 const char* source,
                 const char* prog_name,
@@ -202,11 +292,8 @@ namespace simbi {
 #endif
             }
 
-            int gpuProgram(
-                devProgram_t program,
-                int num_options,
-                const char** options
-            )
+            int
+            program(devProgram_t program, int num_options, const char** options)
             {
 #if GPU_CODE
                 auto status = error::status_t(
@@ -217,7 +304,7 @@ namespace simbi {
                 return 0;
             }
 
-            void gpuGetProgramLogSize(devProgram_t program, size_t* size)
+            void getProgramLogSize(devProgram_t program, size_t* size)
             {
 #if GPU_CODE
                 auto status =
@@ -226,7 +313,7 @@ namespace simbi {
 #endif
             }
 
-            void gpuGetProgramLog(devProgram_t program, char* log)
+            void getProgramLog(devProgram_t program, char* log)
             {
 #if GPU_CODE
                 auto status = error::status_t(devGetProgramLog(program, log));
@@ -234,7 +321,7 @@ namespace simbi {
 #endif
             }
 
-            void gpuGetProgramIRSize(devProgram_t program, size_t* size)
+            void getProgramIRSize(devProgram_t program, size_t* size)
             {
 #if GPU_CODE
                 auto status = error::status_t(devGetIRSize(program, size));
@@ -242,7 +329,7 @@ namespace simbi {
 #endif
             }
 
-            void gpuGetProgramIR(devProgram_t program, char* ir)
+            void getProgramIR(devProgram_t program, char* ir)
             {
 #if GPU_CODE
                 auto status = error::status_t(devGetIR(program, ir));
@@ -250,7 +337,7 @@ namespace simbi {
 #endif
             }
 
-            void gpuModuleLoadData(devModule_t* module, const char* ir)
+            void moduleLoadData(devModule_t* module, const char* ir)
             {
 #if GPU_CODE
                 auto status = error::status_t(devLoadModule(module, ir));
@@ -258,7 +345,7 @@ namespace simbi {
 #endif
             }
 
-            void gpuModuleUnload(devModule_t module)
+            void moduleUnload(devModule_t module)
             {
 #if GPU_CODE
                 auto status = error::status_t(devUnloadModule(module));
@@ -266,7 +353,7 @@ namespace simbi {
 #endif
             }
 
-            void gpuLoadModule(devModule_t* module, const char* ir)
+            void loadModule(devModule_t* module, const char* ir)
             {
 #if GPU_CODE
                 auto status = error::status_t(devLoadModule(module, ir));
@@ -274,7 +361,7 @@ namespace simbi {
 #endif
             }
 
-            void gpuGetFunction(
+            void getFunction(
                 devFunction_t* function,
                 devModule_t module,
                 const char* name

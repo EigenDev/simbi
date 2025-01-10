@@ -1,4 +1,5 @@
 #include <algorithm>
+#include <functional>
 #include <iostream>
 #include <memory>
 #include <stdexcept>
@@ -7,15 +8,15 @@
 // Zero-initialize the array with defined size
 template <typename DT, global::Platform build_mode>
 simbi::ndarray<DT, build_mode>::ndarray(size_type size)
-    : sz(size), nd_capacity(size * sizeof(DT)), dimensions(1)
+    : sz(size), nd_capacity(size), dimensions(1)
 {
     arr = util::make_unique<DT[]>(nd_capacity);
-};
+}
 
 // Initialize the array with a given value
 template <typename DT, global::Platform build_mode>
 simbi::ndarray<DT, build_mode>::ndarray(size_type size, const DT val)
-    : sz(size), nd_capacity(size * sizeof(DT)), dimensions(1)
+    : sz(size), nd_capacity(size), dimensions(1)
 {
     arr = util::make_unique<DT[]>(size);
     std::fill(arr.get(), arr.get() + sz, val);
@@ -23,7 +24,7 @@ simbi::ndarray<DT, build_mode>::ndarray(size_type size, const DT val)
     if constexpr (is_ndarray<DT>::value) {
         dimensions += val.ndim();
     }
-};
+}
 
 // Copy-constructor for array
 template <typename DT, global::Platform build_mode>
@@ -33,43 +34,56 @@ simbi::ndarray<DT, build_mode>::ndarray(const ndarray& rhs)
     copyBetweenGpu(rhs);
     std::copy(rhs.arr.get(), rhs.arr.get() + sz, arr.get());
     copyToGpu();
-};
+}
+
+// Move-constructor for array
+template <typename DT, global::Platform build_mode>
+simbi::ndarray<DT, build_mode>::ndarray(ndarray&& rhs) noexcept
+    : sz(rhs.sz),
+      nd_capacity(rhs.nd_capacity),
+      dimensions(rhs.dimensions),
+      arr(std::move(rhs.arr))
+{
+    rhs.sz          = 0;
+    rhs.nd_capacity = 0;
+    rhs.dimensions  = 0;
+}
 
 // Copy-constructor for vector
 template <typename DT, global::Platform build_mode>
 simbi::ndarray<DT, build_mode>::ndarray(const std::vector<DT>& rhs)
     : sz(rhs.size()),
-      nd_capacity(rhs.size() * sizeof(DT)),
+      nd_capacity(rhs.capacity()),
       dimensions(1),
       arr(new DT[rhs.size()])
 {
     std::copy(rhs.begin(), rhs.end(), arr.get());
-};
+}
 
 // Move-constructor for vector
 template <typename DT, global::Platform build_mode>
 simbi::ndarray<DT, build_mode>::ndarray(std::vector<DT>&& rhs)
     : sz(rhs.size()),
-      nd_capacity(rhs.size() * sizeof(DT)),
+      nd_capacity(rhs.capacity()),
       dimensions(1),
       arr(new DT[rhs.size()])
 {
     std::move(rhs.begin(), rhs.end(), arr.get());
-};
+}
 
 // Copy the arrays and deallocate the RHS
 template <typename DT, global::Platform build_mode>
 simbi::ndarray<DT, build_mode>&
-simbi::ndarray<DT, build_mode>::ndarray::operator=(ndarray other)
+simbi::ndarray<DT, build_mode>::operator=(ndarray other)
 {
     other.swap(*this);
     return *this;
-};
+}
 
 // Copy the arrays and deallocate the RHS
 template <typename DT, global::Platform build_mode>
 constexpr simbi::ndarray<DT, build_mode>&
-simbi::ndarray<DT, build_mode>::ndarray::operator+=(const ndarray& other)
+simbi::ndarray<DT, build_mode>::operator+=(const ndarray& other)
 {
     simbi::ndarray<DT, build_mode> newArray(sz + other.sz);
     std::copy(this->arr.get(), this->arr.get() + this->sz, newArray.arr.get());
@@ -80,7 +94,7 @@ simbi::ndarray<DT, build_mode>::ndarray::operator+=(const ndarray& other)
     );
     newArray.swap(*this);
     return *this;
-};
+}
 
 template <typename DT, global::Platform build_mode>
 void simbi::ndarray<DT, build_mode>::swap(ndarray& other)
@@ -90,30 +104,33 @@ void simbi::ndarray<DT, build_mode>::swap(ndarray& other)
     std::swap(nd_capacity, other.nd_capacity);
 }
 
-// Template class to insert the element
-// in array
+// Template class to insert the element in array
 template <typename DT, global::Platform build_mode>
-constexpr void simbi::ndarray<DT, build_mode>::push_back(const DT& data)
+constexpr simbi::ndarray<DT, build_mode>&
+simbi::ndarray<DT, build_mode>::push_back(const DT& data)
 {
     if (sz == nd_capacity) {
         resize(sz == 0 ? 1 : 2 * sz);
     }
     arr[sz++] = data;
+    return *this;
 }
 
-// Template class to return the popped element
-// in array
+// Template class to return the popped element in array
 template <typename DT, global::Platform build_mode>
-constexpr void simbi::ndarray<DT, build_mode>::pop_back()
+constexpr simbi::ndarray<DT, build_mode>&
+simbi::ndarray<DT, build_mode>::pop_back()
 {
     if (!empty()) {
         arr[sz - 1].~DT();
         --sz;
     }
+    return *this;
 }
 
 template <typename DT, global::Platform build_mode>
-constexpr void simbi::ndarray<DT, build_mode>::resize(size_type new_size)
+constexpr simbi::ndarray<DT, build_mode>&
+simbi::ndarray<DT, build_mode>::resize(size_type new_size)
 {
     if (new_size > sz) {
         auto new_arr = util::make_unique<DT[]>(new_size);
@@ -122,10 +139,11 @@ constexpr void simbi::ndarray<DT, build_mode>::resize(size_type new_size)
     }
     sz          = new_size;
     nd_capacity = new_size;
+    return *this;
 }
 
 template <typename DT, global::Platform build_mode>
-constexpr void
+constexpr simbi::ndarray<DT, build_mode>&
 simbi::ndarray<DT, build_mode>::resize(size_type new_size, const DT new_value)
 {
     if (new_size > sz) {
@@ -136,40 +154,36 @@ simbi::ndarray<DT, build_mode>::resize(size_type new_size, const DT new_value)
     }
     sz          = new_size;
     nd_capacity = new_size;
+    return *this;
 }
 
-// Template class to return the size of
-// array
+// Template class to return the size of array
 template <typename DT, global::Platform build_mode>
 constexpr size_type simbi::ndarray<DT, build_mode>::size() const
 {
     return sz;
 }
 
-// Template class to return the size of
-// array
+// Template class to return the capacity of array
 template <typename DT, global::Platform build_mode>
 constexpr size_type simbi::ndarray<DT, build_mode>::capacity() const
 {
     return nd_capacity;
 }
 
-// Template class to return the size of
-// array
+// Template class to return the number of dimensions of array
 template <typename DT, global::Platform build_mode>
 constexpr size_type simbi::ndarray<DT, build_mode>::ndim() const
 {
     return dimensions;
 }
 
-// Template class to return the element of
-// array at given index
+// Template class to return the element of array at given index
 template <typename DT, global::Platform build_mode>
 template <typename IndexType>
 DUAL constexpr DT& simbi::ndarray<DT, build_mode>::operator[](IndexType index)
 {
-    // if given index is greater than the
-    // size of array print Error
+    // if given index is greater than the size of array print Error
     if ((size_t) index >= sz) {
         printf(
             "Error: array index %" PRIu64
@@ -186,15 +200,13 @@ DUAL constexpr DT& simbi::ndarray<DT, build_mode>::operator[](IndexType index)
 #endif
 }
 
-// Template class to return the element of
-// array at given index
+// Template class to return the element of array at given index
 template <typename DT, global::Platform build_mode>
 template <typename IndexType>
 DUAL constexpr DT simbi::ndarray<DT, build_mode>::operator[](IndexType index
 ) const
 {
-    // if given index is greater than the
-    // size of array print Error
+    // if given index is greater than the size of array print Error
     if ((size_t) index >= sz) {
         printf(
             "Error: array index %" PRIu64
@@ -211,6 +223,7 @@ DUAL constexpr DT simbi::ndarray<DT, build_mode>::operator[](IndexType index
 #endif
 }
 
+// Template class to scale the array by a factor
 template <typename DT, global::Platform build_mode>
 constexpr simbi::ndarray<DT, build_mode>&
 simbi::ndarray<DT, build_mode>::operator*(const real scale_factor)
@@ -222,8 +235,9 @@ simbi::ndarray<DT, build_mode>::operator*(const real scale_factor)
         [scale_factor](DT& val) { return val * scale_factor; }
     );
     return *this;
-};
+}
 
+// Template class to scale the array by a factor
 template <typename DT, global::Platform build_mode>
 constexpr simbi::ndarray<DT, build_mode>&
 simbi::ndarray<DT, build_mode>::operator*=(const real scale_factor)
@@ -235,8 +249,9 @@ simbi::ndarray<DT, build_mode>::operator*=(const real scale_factor)
         [scale_factor](DT& val) { return val * scale_factor; }
     );
     return *this;
-};
+}
 
+// Template class to divide the array by a factor
 template <typename DT, global::Platform build_mode>
 constexpr simbi::ndarray<DT, build_mode>&
 simbi::ndarray<DT, build_mode>::operator/(const real scale_factor)
@@ -248,9 +263,9 @@ simbi::ndarray<DT, build_mode>::operator/(const real scale_factor)
         [scale_factor](DT& val) { return val / scale_factor; }
     );
     return *this;
-    ;
-};
+}
 
+// Template class to divide the array by a factor
 template <typename DT, global::Platform build_mode>
 constexpr simbi::ndarray<DT, build_mode>&
 simbi::ndarray<DT, build_mode>::operator/=(const real scale_factor)
@@ -262,7 +277,7 @@ simbi::ndarray<DT, build_mode>::operator/=(const real scale_factor)
         [scale_factor](DT& val) { return val / scale_factor; }
     );
     return *this;
-};
+}
 
 // Template class to return begin iterator
 template <typename DT, global::Platform build_mode>
@@ -280,6 +295,7 @@ simbi::ndarray<DT, build_mode>::end() const
     return iterator(arr.get() + sz);
 }
 
+// Template class to return the last element
 template <typename DT, global::Platform build_mode>
 DT simbi::ndarray<DT, build_mode>::back() const
 {
@@ -289,6 +305,7 @@ DT simbi::ndarray<DT, build_mode>::back() const
     return arr[sz - 1];
 }
 
+// Template class to return the last element
 template <typename DT, global::Platform build_mode>
 DT& simbi::ndarray<DT, build_mode>::back()
 {
@@ -298,6 +315,7 @@ DT& simbi::ndarray<DT, build_mode>::back()
     return arr[sz - 1];
 }
 
+// Template class to return the first element
 template <typename DT, global::Platform build_mode>
 DT& simbi::ndarray<DT, build_mode>::front()
 {
@@ -307,6 +325,7 @@ DT& simbi::ndarray<DT, build_mode>::front()
     return arr[0];
 }
 
+// Template class to return the first element
 template <typename DT, global::Platform build_mode>
 DT simbi::ndarray<DT, build_mode>::front() const
 {
@@ -316,12 +335,14 @@ DT simbi::ndarray<DT, build_mode>::front() const
     return arr[0];
 }
 
+// Template class to check if the array is empty
 template <typename DT, global::Platform build_mode>
 bool simbi::ndarray<DT, build_mode>::empty() const
 {
     return sz == 0;
 }
 
+// Template class to print the array
 template <typename DT, global::Platform build_mode>
 std::ostream&
 operator<<(std::ostream& out, const simbi::ndarray<DT, build_mode>& v)
@@ -402,6 +423,7 @@ operator<<(std::ostream& out, const simbi::ndarray<DT, build_mode>& v)
     return out;
 }
 
+// Template class to copy data to GPU
 template <typename DT, global::Platform build_mode>
 void simbi::ndarray<DT, build_mode>::copyToGpu()
 {
@@ -413,6 +435,7 @@ void simbi::ndarray<DT, build_mode>::copyToGpu()
     }
 }
 
+// Template class to copy data from GPU
 template <typename DT, global::Platform build_mode>
 void simbi::ndarray<DT, build_mode>::copyFromGpu()
 {
@@ -421,6 +444,7 @@ void simbi::ndarray<DT, build_mode>::copyFromGpu()
     }
 }
 
+// Template class to copy data between GPUs
 template <typename DT, global::Platform build_mode>
 void simbi::ndarray<DT, build_mode>::copyBetweenGpu(const ndarray& rhs)
 {
@@ -428,35 +452,40 @@ void simbi::ndarray<DT, build_mode>::copyBetweenGpu(const ndarray& rhs)
         gpu::api::copyDevToDev(
             dev_arr.get(),
             rhs.dev_arr.get(),
-            sz * sizeof(DT)
+            rhs.sz * sizeof(DT)
         );
     }
 }
 
+// Template class to return host data pointer
 template <typename DT, global::Platform build_mode>
 DT* simbi::ndarray<DT, build_mode>::host_data()
 {
     return arr.get();
-};
+}
 
+// Template class to return host data pointer
 template <typename DT, global::Platform build_mode>
 DT* simbi::ndarray<DT, build_mode>::host_data() const
 {
     return arr.get();
-};
+}
 
+// Template class to return device data pointer
 template <typename DT, global::Platform build_mode>
 DUAL DT* simbi::ndarray<DT, build_mode>::dev_data()
 {
     return dev_arr.get();
-};
+}
 
+// Template class to return device data pointer
 template <typename DT, global::Platform build_mode>
 DUAL DT* simbi::ndarray<DT, build_mode>::dev_data() const
 {
     return dev_arr.get();
-};
+}
 
+// Template class to return data pointer
 template <typename DT, global::Platform build_mode>
 DUAL DT* simbi::ndarray<DT, build_mode>::data()
 {
@@ -470,8 +499,9 @@ DUAL DT* simbi::ndarray<DT, build_mode>::data()
     else {
         return arr.get();
     }
-};
+}
 
+// Template class to return data pointer
 template <typename DT, global::Platform build_mode>
 DT* simbi::ndarray<DT, build_mode>::data() const
 {
@@ -485,34 +515,65 @@ DT* simbi::ndarray<DT, build_mode>::data() const
     else {
         return arr.get();
     }
-};
+}
+
+// Example of adding functional-style methods
+template <typename DT, global::Platform build_mode>
+template <typename UnaryFunction>
+simbi::ndarray<DT, build_mode>&
+simbi::ndarray<DT, build_mode>::map(UnaryFunction func)
+{
+    std::transform(arr.get(), arr.get() + sz, arr.get(), func);
+    return *this;
+}
 
 template <typename DT, global::Platform build_mode>
-void simbi::ndarray<DT, build_mode>::clear()
+template <typename UnaryFunction>
+simbi::ndarray<DT, build_mode>&
+simbi::ndarray<DT, build_mode>::map(UnaryFunction func) const
 {
-    sz = 0;
-    arr.reset();
-    dev_arr.reset();
-};
+    simbi::ndarray<DT, build_mode> result(sz);
+    std::transform(arr.get(), arr.get() + sz, result.arr.get(), func);
+    return result;
+}
 
 template <typename DT, global::Platform build_mode>
-void simbi::ndarray<DT, build_mode>::shrink_to_fit()
+template <typename UnaryPredicate>
+simbi::ndarray<DT, build_mode>&
+simbi::ndarray<DT, build_mode>::filter(UnaryPredicate pred)
 {
-    if (sz < nd_capacity) {
-        auto new_arr = util::make_unique<DT[]>(sz);
-        std::copy(arr.get(), arr.get() + sz, new_arr.get());
-        arr.swap(new_arr);
-        nd_capacity = sz;
-    }
-};
+    auto new_end = std::remove_if(arr.get(), arr.get() + sz, pred);
+    sz           = new_end - arr.get();
+    return *this;
+}
 
 template <typename DT, global::Platform build_mode>
-void simbi::ndarray<DT, build_mode>::reserve(size_type new_capacity)
+template <typename UnaryPredicate>
+simbi::ndarray<DT, build_mode>
+simbi::ndarray<DT, build_mode>::filter(UnaryPredicate pred) const
 {
-    if (new_capacity > nd_capacity) {
-        auto new_arr = util::make_unique<DT[]>(new_capacity);
-        std::copy(arr.get(), arr.get() + sz, new_arr.get());
-        arr.swap(new_arr);
-        nd_capacity = new_capacity;
-    }
-};
+    simbi::ndarray<DT, build_mode> result;
+    std::copy_if(
+        arr.get(),
+        arr.get() + sz,
+        std::back_inserter(result.arr),
+        pred
+    );
+    result.sz          = result.arr.size();
+    result.nd_capacity = result.sz;
+    return result;
+}
+
+template <typename DT, global::Platform build_mode>
+template <typename BinaryFunction>
+DT simbi::ndarray<DT, build_mode>::reduce(BinaryFunction func, DT init)
+{
+    return std::accumulate(arr.get(), arr.get() + sz, init, func);
+}
+
+template <typename DT, global::Platform build_mode>
+template <typename BinaryFunction>
+DT simbi::ndarray<DT, build_mode>::reduce(BinaryFunction func, DT init) const
+{
+    return std::accumulate(arr.get(), arr.get() + sz, init, func);
+}

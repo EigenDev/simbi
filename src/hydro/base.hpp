@@ -177,26 +177,43 @@ namespace simbi {
             shBlockSpace = xblockspace * yblockspace * zblockspace;
             shBlockBytes = shBlockSpace * sizeof(P) * global::on_sm;
 
-            fullP = simbi::ExecutionPolicy(
+            constexpr auto nStream = 0;
+            constexpr auto nDevice = 0;
+            fullP                  = simbi::ExecutionPolicy(
                 {nx, ny, nz},
-                {xblockdim, yblockdim, zblockdim}
+                {xblockdim, yblockdim, zblockdim},
+                0,
+                {nStream},
+                nDevice
             );
             activeP = simbi::ExecutionPolicy(
                 {xag, yag, zag},
                 {xblockdim, yblockdim, zblockdim},
-                shBlockBytes
+                shBlockBytes,
+                {nStream},
+                nDevice
+
             );
             xvertexP = simbi::ExecutionPolicy(
                 {nxv, yag, zag},
-                {xblockdim, yblockdim, zblockdim}
+                {xblockdim, yblockdim, zblockdim},
+                0,
+                {nStream},
+                nDevice
             );
             yvertexP = simbi::ExecutionPolicy(
                 {xag, nyv, zag},
-                {xblockdim, yblockdim, zblockdim}
+                {xblockdim, yblockdim, zblockdim},
+                0,
+                {nStream},
+                nDevice
             );
             zvertexP = simbi::ExecutionPolicy(
                 {xag, yag, nzv},
-                {xblockdim, yblockdim, zblockdim}
+                {xblockdim, yblockdim, zblockdim},
+                0,
+                {nStream},
+                nDevice
             );
         }
 

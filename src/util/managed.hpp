@@ -31,7 +31,7 @@ namespace simbi {
         {
             if constexpr (gpu_managed) {
                 void* ptr = nullptr;
-                gpu::api::gpuMallocManaged(&ptr, len);
+                gpu::api::mallocManaged(&ptr, len);
                 gpu::api::deviceSynch();
                 return ptr;
             }
@@ -42,7 +42,7 @@ namespace simbi {
         {
             if constexpr (gpu_managed) {
                 gpu::api::deviceSynch();
-                gpu::api::gpuFree(ptr);
+                gpu::api::free(ptr);
             }
             else {
                 ::operator delete(ptr);

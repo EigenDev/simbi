@@ -105,22 +105,43 @@ namespace simbi {
             void copyHostToDevice(void* to, const void* from, size_t bytes);
             void copyDevToHost(void* to, const void* from, size_t bytes);
             void copyDevToDev(void* to, const void* from, size_t bytes);
-            void gpuMalloc(void* obj, size_t bytes);
-            void gpuMallocManaged(void* obj, size_t bytes);
-            void gpuFree(void* obj);
-            void gpuMcFromSymbol(void* dst, const void* symbol, size_t count);
-            void gpuEventSynchronize(devEvent_t a);
-            void gpuEventCreate(devEvent_t* a);
-            void gpuEventDestroy(devEvent_t a);
-            void gpuEventRecord(devEvent_t a);
-            void gpuEventElapsedTime(float* time, devEvent_t a, devEvent_t b);
+            void malloc(void* obj, size_t bytes);
+            void mallocManaged(void* obj, size_t bytes);
+            void free(void* obj);
+            void memcpyFromSymbol(void* dst, const void* symbol, size_t count);
+            void eventSynchronize(devEvent_t a);
+            void eventCreate(devEvent_t* a);
+            void eventDestroy(devEvent_t a);
+            void eventRecord(devEvent_t a);
+            void eventElapsedTime(float* time, devEvent_t a, devEvent_t b);
             void getDeviceCount(int* devCount);
             void getDeviceProperties(devProp_t* props, int i);
-            void gpuMemset(void* obj, int val, size_t bytes);
+            void memset(void* obj, int val, size_t bytes);
             void deviceSynch();
+            void setDevice(int device);
+            void streamCreate(simbiStream_t* stream);
+            void streamDestroy(simbiStream_t stream);
+            void streamSynchronize(simbiStream_t stream);
+            void streamWaitEvent(simbiStream_t stream, devEvent_t event);
+            void streamQuery(simbiStream_t stream, int* status);
+            void peerCopyAsync(
+                void* dst,
+                const void* src,
+                size_t bytes,
+                simbiMemcpyKind kind,
+                simbiStream_t stream
+            );
+            void memcpyAsync(
+                void* dst,
+                const void* src,
+                size_t bytes,
+                simbiMemcpyKind kind,
+                simbiStream_t stream
+            );
+            void enablePeerAccess(int device);
 
             // JIT compilation
-            void gpuCreateProgram(
+            void createProgram(
                 devProgram_t* program,
                 const char* source,
                 const char* prog_name,
@@ -128,25 +149,25 @@ namespace simbi {
                 const char** options,
                 const char** option_vals
             );
-            int gpuProgram(
+            int program(
                 devProgram_t program,
                 int num_options,
                 const char** options
             );
-            void gpuGetProgramLogSize(devProgram_t program, size_t* size);
-            void gpuGetProgramLog(devProgram_t program, char* log);
-            void gpuGetProgramIRSize(devProgram_t program, size_t* size);
-            void gpuGetProgramIR(devProgram_t program, char* ir);
-            void gpuDestroyProgram(devProgram_t program);
-            void gpuModuleLoadData(devModule_t* module, const char* ir);
-            void gpuModuleUnload(devModule_t module);
-            void gpuLoadModule(devModule_t* module, const char* ir);
-            void gpuGetFunction(
+            void getProgramLogSize(devProgram_t program, size_t* size);
+            void getProgramLog(devProgram_t program, char* log);
+            void getProgramIRSize(devProgram_t program, size_t* size);
+            void getProgramIR(devProgram_t program, char* ir);
+            void destroyProgram(devProgram_t program);
+            void moduleLoadData(devModule_t* module, const char* ir);
+            void moduleUnload(devModule_t module);
+            void loadModule(devModule_t* module, const char* ir);
+            void getFunction(
                 devFunction_t* function,
                 devModule_t module,
                 const char* name
             );
-            void gpuGetIRSize(size_t* size, devModule_t module);
+            void getIRSize(size_t* size, devModule_t module);
 
             DEV inline void synchronize()
             {

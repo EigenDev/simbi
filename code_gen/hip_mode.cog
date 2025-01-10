@@ -172,10 +172,20 @@ constexpr auto devEventSynchronize     = hipEventSynchronize;
 constexpr auto devEventElapsedTime     = hipEventElapsedTime;
 constexpr auto devGetDeviceProperties  = hipGetDeviceProperties;
 constexpr auto devGetDeviceCount       = hipGetDeviceCount;
-using devProp_t                        = hipDeviceProp_t;
-using devError_t                       = hipError_t;
-using devEvent_t                       = hipEvent_t;
-using simbiStream_t                    = hipStream_t;
+constexpr auto devSetDevice            = hipSetDevice;
+constexpr auto devStreamCreate         = hipStreamCreate;
+constexpr auto devStreamDestroy        = hipStreamDestroy;
+constexpr auto devStreamSynchronize    = hipStreamSynchronize;
+constexpr auto devStreamWaitEvent      = hipStreamWaitEvent;
+constexpr auto devStreamQuery          = hipStreamQuery;
+constexpr auto devEnablePeerAccess     = hipDeviceEnablePeerAccess;
+constexpr auto devGetDevice            = hipGetDevice;
+constexpr auto devPeerCopyAsync        = hipMemcpyPeerAsync;
+
+using devProp_t     = hipDeviceProp_t;
+using devError_t    = hipError_t;
+using devEvent_t    = hipEvent_t;
+using simbiStream_t = hipStream_t;
 
 // tools for JIT compilation
 constexpr auto devCompileProgram    = hiprtcCompileProgram;
