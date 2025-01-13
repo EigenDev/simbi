@@ -248,116 +248,121 @@ namespace simbi {
             const auto grid_size   = sim_state->nx;
             const auto first_order = sim_state->use_pcm;
             auto* cons             = sim_state->cons.data();
-            parallel_for(sim_state->activeP, 0, 1, [=] DEV(const luint gid) {
-                if (first_order) {
-                    switch (sim_state->bcs[0]) {
-                        case BoundaryCondition::DYNAMIC:
-                            real sources[4];
-                            sim_state->bx1_inner_source(
-                                sim_state->x1min,
-                                sim_state->t,
-                                sources
-                            );
-                            for (auto qq = 0; qq < 4; qq++) {
-                                cons[0][qq] = sources[qq];
-                            }
-                            break;
-                        case BoundaryCondition::REFLECTING:
-                            cons[0] = cons[1];
-                            cons[0].momentum() *= -1;
-                            break;
-                        case BoundaryCondition::PERIODIC:
-                            cons[0] = cons[grid_size - 2];
-                            break;
-                        default:
-                            cons[0] = cons[1];
-                            break;
-                    }
+            parallel_for(
+                sim_state->activePolicy,
+                0,
+                1,
+                [=] DEV(const luint gid) {
+                    if (first_order) {
+                        switch (sim_state->bcs[0]) {
+                            case BoundaryCondition::DYNAMIC:
+                                real sources[4];
+                                sim_state->bx1_inner_source(
+                                    sim_state->x1min,
+                                    sim_state->t,
+                                    sources
+                                );
+                                for (auto qq = 0; qq < 4; qq++) {
+                                    cons[0][qq] = sources[qq];
+                                }
+                                break;
+                            case BoundaryCondition::REFLECTING:
+                                cons[0] = cons[1];
+                                cons[0].momentum() *= -1;
+                                break;
+                            case BoundaryCondition::PERIODIC:
+                                cons[0] = cons[grid_size - 2];
+                                break;
+                            default:
+                                cons[0] = cons[1];
+                                break;
+                        }
 
-                    switch (sim_state->bcs[1]) {
-                        case BoundaryCondition::DYNAMIC:
-                            real sources[4];
-                            sim_state->bx1_outer_source(
-                                sim_state->x1max,
-                                sim_state->t,
-                                sources
-                            );
-                            for (auto qq = 0; qq < 4; qq++) {
-                                cons[grid_size - 1][qq] = sources[qq];
-                            }
-                            break;
-                        case BoundaryCondition::REFLECTING:
-                            cons[grid_size - 1] = cons[grid_size - 2];
-                            cons[grid_size - 1].momentum() *= -1;
-                            break;
-                        case BoundaryCondition::PERIODIC:
-                            cons[grid_size - 1] = cons[1];
-                            break;
-                        default:
-                            cons[grid_size - 1] = cons[grid_size - 2];
-                            break;
+                        switch (sim_state->bcs[1]) {
+                            case BoundaryCondition::DYNAMIC:
+                                real sources[4];
+                                sim_state->bx1_outer_source(
+                                    sim_state->x1max,
+                                    sim_state->t,
+                                    sources
+                                );
+                                for (auto qq = 0; qq < 4; qq++) {
+                                    cons[grid_size - 1][qq] = sources[qq];
+                                }
+                                break;
+                            case BoundaryCondition::REFLECTING:
+                                cons[grid_size - 1] = cons[grid_size - 2];
+                                cons[grid_size - 1].momentum() *= -1;
+                                break;
+                            case BoundaryCondition::PERIODIC:
+                                cons[grid_size - 1] = cons[1];
+                                break;
+                            default:
+                                cons[grid_size - 1] = cons[grid_size - 2];
+                                break;
+                        }
+                    }
+                    else {
+                        switch (sim_state->bcs[0]) {
+                            case BoundaryCondition::DYNAMIC:
+                                real sources[4];
+                                sim_state->bx1_inner_source(
+                                    sim_state->x1min,
+                                    sim_state->t,
+                                    sources
+                                );
+                                for (auto qq = 0; qq < 4; qq++) {
+                                    cons[0][qq] = sources[qq];
+                                    cons[1][qq] = sources[qq];
+                                }
+                                break;
+                            case BoundaryCondition::REFLECTING:
+                                cons[0] = cons[3];
+                                cons[1] = cons[2];
+                                cons[0].momentum() *= -1;
+                                cons[1].momentum() *= -1;
+                                break;
+                            case BoundaryCondition::PERIODIC:
+                                cons[0] = cons[grid_size - 4];
+                                cons[1] = cons[grid_size - 3];
+                                break;
+                            default:
+                                cons[0] = cons[2];
+                                cons[1] = cons[2];
+                                break;
+                        }
+
+                        switch (sim_state->bcs[1]) {
+                            case BoundaryCondition::DYNAMIC:
+                                real sources[4];
+                                sim_state->bx1_outer_source(
+                                    sim_state->x1max,
+                                    sim_state->t,
+                                    sources
+                                );
+                                for (auto qq = 0; qq < 4; qq++) {
+                                    cons[grid_size - 1][qq] = sources[qq];
+                                    cons[grid_size - 2][qq] = sources[qq];
+                                }
+                                break;
+                            case BoundaryCondition::REFLECTING:
+                                cons[grid_size - 1] = cons[grid_size - 4];
+                                cons[grid_size - 2] = cons[grid_size - 3];
+                                cons[grid_size - 1].momentum() *= -1;
+                                cons[grid_size - 2].momentum() *= -1;
+                                break;
+                            case BoundaryCondition::PERIODIC:
+                                cons[grid_size - 1] = cons[3];
+                                cons[grid_size - 2] = cons[2];
+                                break;
+                            default:
+                                cons[grid_size - 1] = cons[grid_size - 3];
+                                cons[grid_size - 2] = cons[grid_size - 3];
+                                break;
+                        }
                     }
                 }
-                else {
-                    switch (sim_state->bcs[0]) {
-                        case BoundaryCondition::DYNAMIC:
-                            real sources[4];
-                            sim_state->bx1_inner_source(
-                                sim_state->x1min,
-                                sim_state->t,
-                                sources
-                            );
-                            for (auto qq = 0; qq < 4; qq++) {
-                                cons[0][qq] = sources[qq];
-                                cons[1][qq] = sources[qq];
-                            }
-                            break;
-                        case BoundaryCondition::REFLECTING:
-                            cons[0] = cons[3];
-                            cons[1] = cons[2];
-                            cons[0].momentum() *= -1;
-                            cons[1].momentum() *= -1;
-                            break;
-                        case BoundaryCondition::PERIODIC:
-                            cons[0] = cons[grid_size - 4];
-                            cons[1] = cons[grid_size - 3];
-                            break;
-                        default:
-                            cons[0] = cons[2];
-                            cons[1] = cons[2];
-                            break;
-                    }
-
-                    switch (sim_state->bcs[1]) {
-                        case BoundaryCondition::DYNAMIC:
-                            real sources[4];
-                            sim_state->bx1_outer_source(
-                                sim_state->x1max,
-                                sim_state->t,
-                                sources
-                            );
-                            for (auto qq = 0; qq < 4; qq++) {
-                                cons[grid_size - 1][qq] = sources[qq];
-                                cons[grid_size - 2][qq] = sources[qq];
-                            }
-                            break;
-                        case BoundaryCondition::REFLECTING:
-                            cons[grid_size - 1] = cons[grid_size - 4];
-                            cons[grid_size - 2] = cons[grid_size - 3];
-                            cons[grid_size - 1].momentum() *= -1;
-                            cons[grid_size - 2].momentum() *= -1;
-                            break;
-                        case BoundaryCondition::PERIODIC:
-                            cons[grid_size - 1] = cons[3];
-                            cons[grid_size - 2] = cons[2];
-                            break;
-                        default:
-                            cons[grid_size - 1] = cons[grid_size - 3];
-                            cons[grid_size - 2] = cons[grid_size - 3];
-                            break;
-                    }
-                }
-            });
+            );
         }
 
         template <typename sim_state_t>
@@ -378,7 +383,7 @@ namespace simbi {
             const auto m2outer = sim_state->reflect_outer_x2_momentum ? 2 : -1;
             const auto m2inner = sim_state->reflect_inner_x2_momentum ? 2 : -1;
             parallel_for(
-                sim_state->activeP,
+                sim_state->activePolicy,
                 [sim_state,
                  xag,
                  yag,
@@ -631,7 +636,7 @@ namespace simbi {
             const auto m2outer = sim_state->reflect_outer_x2_momentum ? 2 : -1;
             const auto m2inner = sim_state->reflect_inner_x2_momentum ? 2 : -1;
             parallel_for(
-                sim_state->activeP,
+                sim_state->activePolicy,
                 [sim_state,
                  xag,
                  yag,

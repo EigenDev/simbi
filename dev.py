@@ -130,8 +130,6 @@ def configure(
     command = [
         "meson", "setup", args.build_dir,
         f"-Dgpu_compilation={args.gpu_compilation}",
-        f"-Dhdf5_include_dir={hdf5_include}",
-        f"-Dgpu_include_dir={gpu_include}",
         f"-Dcolumn_major={args.column_major}",
         f"-Dprecision={args.precision}",
         f"-Dprofile={args.install_mode}",

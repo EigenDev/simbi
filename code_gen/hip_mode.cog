@@ -90,7 +90,7 @@ class atomic_bool_gpu
     }
 };
 
-using atomic_bool_shared = atomic_bool_gpu;
+using shared_atomic_bool = atomic_bool_gpu;
 using atomic_bool        = atomic_bool_gpu;
 
 template <typename T>
@@ -159,6 +159,11 @@ inline auto devEventCreate(hipEvent_t* stamp) { return hipEventCreate(stamp); };
 
 inline auto devEventRecord(hipEvent_t stamp) { return hipEventRecord(stamp); };
 
+inline auto devMallocHost(void** ptr, size_t size)
+{
+    return hipMallocHost(ptr, size);
+};
+
 constexpr auto devMemcpy               = hipMemcpy;
 constexpr auto devFree                 = hipFree;
 constexpr auto devMemset               = hipMemset;
@@ -181,6 +186,10 @@ constexpr auto devStreamQuery          = hipStreamQuery;
 constexpr auto devEnablePeerAccess     = hipDeviceEnablePeerAccess;
 constexpr auto devGetDevice            = hipGetDevice;
 constexpr auto devPeerCopyAsync        = hipMemcpyPeerAsync;
+constexpr auto devMemcpyAsync          = hipMemcpyAsync;
+constexpr auto devHostRegister         = hipHostRegister;
+constexpr auto devHostUnregister       = hipHostUnregister;
+constexpr auto devLaunchKernel         = hipLaunchKernel;
 
 using devProp_t     = hipDeviceProp_t;
 using devError_t    = hipError_t;
@@ -195,6 +204,7 @@ constexpr auto devGetIR             = hiprtcGetCode;
 constexpr auto devGetProgramLogSize = hiprtcGetProgramLogSize;
 constexpr auto devGetProgramLog     = hiprtcGetProgramLog;
 constexpr auto devLoadModule        = hipModuleLoadData;
+constexpr auto devDestroyProgram    = hiprtcDestroyProgram;
 constexpr auto devUnloadModule      = hipModuleUnload;
 constexpr auto devGetFunction       = hipModuleGetFunction;
 using devProgram_t                  = hiprtcProgram;

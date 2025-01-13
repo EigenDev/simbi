@@ -138,7 +138,7 @@ namespace simbi {
 #endif
             };
 
-            void deviceCount(int* devCount)
+            void getDeviceCount(int* devCount)
             {
 #if GPU_CODE
                 auto status =
@@ -203,11 +203,15 @@ namespace simbi {
 #endif
             };
 
-            void streamWaitEvent(simbiStream_t stream, devEvent_t event)
+            void streamWaitEvent(
+                simbiStream_t stream,
+                devEvent_t event,
+                unsigned int flags
+            )
             {
 #if GPU_CODE
                 auto status =
-                    error::status_t(devStreamWaitEvent(stream, event));
+                    error::status_t(devStreamWaitEvent(stream, event, flags));
                 error::check_err(status, "Failed to wait for event");
 #endif
             };
@@ -216,7 +220,7 @@ namespace simbi {
             {
 #if GPU_CODE
                 auto stat = error::status_t(devStreamQuery(stream));
-                *status   = stat;
+                // *status   = stat;
                 error::check_err(stat, "Failed to query stream");
 #endif
             };
@@ -237,27 +241,34 @@ namespace simbi {
 #endif
             };
 
-            void enablePeerAccess(int device)
+            void enablePeerAccess(int device, unsigned int flags)
             {
 #if GPU_CODE
-                auto status = error::status_t(devEnablePeerAccess(device));
+                auto status =
+                    error::status_t(devEnablePeerAccess(device, flags));
                 error::check_err(status, "Failed to enable peer access");
 #endif
             };
 
             void peerCopyAsync(
                 void* dst,
+                int dst_device,
                 const void* src,
+                int src_device,
                 size_t bytes,
-                simbiMemcpyKind kind,
                 simbiStream_t stream
             )
             {
 #if GPU_CODE
-                auto status = error::status_t(
-                    devMemcpyPeerAsync(dst, src, bytes, kind, stream)
-                );
-                error::check_err(status, "Failed to copy asynchronously");
+                auto status = error::status_t(devMemcpyPeerAsync(
+                    dst,
+                    dst_device,
+                    src,
+                    src_device,
+                    bytes,
+                    stream
+                ));
+                error::check_err(status, "Failed to copy peer asynchronously");
 #endif
             };
 
@@ -371,6 +382,107 @@ namespace simbi {
                 auto status =
                     error::status_t(devGetFunction(function, module, name));
                 error::check_err(status, "Failed to get function");
+#endif
+            }
+
+            void hostRegister(void* ptr, size_t size, unsigned int flags)
+            {
+#if GPU_CODE
+                auto status =
+                    error::status_t(devHostRegister(ptr, size, flags));
+                error::check_err(status, "Failed to register host memory");
+#endif
+            }
+
+            void hostUnregister(void* ptr)
+            {
+#if GPU_CODE
+                auto status = error::status_t(devHostUnregister(ptr));
+                error::check_err(status, "Failed to unregister host memory");
+#endif
+            }
+
+            void asyncCopyHostToDevice(
+                void* dst,
+                const void* src,
+                size_t bytes,
+                simbiStream_t stream
+            )
+            {
+#if GPU_CODE
+                auto status = error::status_t(devMemcpyAsync(
+                    dst,
+                    src,
+                    bytes,
+                    devMemcpyHostToDevice,
+                    stream
+                ));
+                error::check_err(status, "Failed to copy host to device");
+#endif
+            }
+
+            void asyncCopyDeviceToHost(
+                void* dst,
+                const void* src,
+                size_t bytes,
+                simbiStream_t stream
+            )
+            {
+#if GPU_CODE
+                auto status = error::status_t(devMemcpyAsync(
+                    dst,
+                    src,
+                    bytes,
+                    devMemcpyDeviceToHost,
+                    stream
+                ));
+                error::check_err(status, "Failed to copy device to host");
+#endif
+            }
+
+            void destroyProgram(devProgram_t* program)
+            {
+#if GPU_CODE
+                auto status = error::status_t(devDestroyProgram(program));
+                error::check_err(status, "Failed to destroy program");
+#endif
+            }
+
+            void getIRSize(size_t* size, devProgram_t module)
+            {
+#if GPU_CODE
+                auto status = error::status_t(devGetIRSize(module, size));
+                error::check_err(status, "Failed to get IR size");
+#endif
+            }
+
+            void alignedMalloc(void** ptr, size_t size)
+            {
+#if GPU_CODE
+                auto status = error::status_t(devMallocHost(ptr, size));
+                error::check_err(status, "Failed to allocate aligned memory");
+#endif
+            }
+
+            void launchKernel(
+                devFunction_t function,
+                dim3 grid,
+                dim3 block,
+                void** args,
+                size_t shared_mem,
+                simbiStream_t stream
+            )
+            {
+#if GPU_CODE
+                auto status = error::status_t(devLaunchKernel(
+                    function,
+                    grid,
+                    block,
+                    args,
+                    shared_mem,
+                    stream
+                ));
+                error::check_err(status, "Failed to launch kernel");
 #endif
             }
 

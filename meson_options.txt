@@ -30,18 +30,6 @@ option(
 )
 
 option(
-    'gpu_include_dir',
-    type: 'string',
-    value: '/opt/cuda/include',
-)
-
-option(
-    'hdf5_include_dir',
-    type: 'string',
-    value: '/usr/include/hdf5/serial',
-)
-
-option(
     'four_velocity',
     type: 'boolean',
     value: false

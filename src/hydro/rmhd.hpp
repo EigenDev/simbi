@@ -91,6 +91,7 @@ namespace simbi {
         ndarray<primitive_t> prims;
         ndarray<conserved_t> cons, fri, gri, hri;
         ndarray<real> dt_min, bstag1, bstag2, bstag3;
+        ndarray<real> b1const, b2const, b3const;
 
         RMHD();
         RMHD(
@@ -226,6 +227,9 @@ namespace simbi {
             bstag1.copyToGpu();
             bstag2.copyToGpu();
             bstag3.copyToGpu();
+            b1const.copyToGpu();
+            b2const.copyToGpu();
+            b3const.copyToGpu();
             fri.copyToGpu();
             gri.copyToGpu();
             hri.copyToGpu();

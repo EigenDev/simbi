@@ -13,6 +13,14 @@ struct ExecutionException : public std::exception {
 
 namespace simbi {
 
+    struct ExecutionPolicyConfig {
+        size_t sharedMemBytes              = 0;
+        std::vector<simbiStream_t> streams = {};
+        std::vector<int> devices           = {0};   // Default to device 0
+        size_t batch_size                  = 1024;
+        size_t min_elements_per_thread     = 1;
+    };
+
     template <typename T = luint, typename U = luint>
     struct ExecutionPolicy {
         T nzones;
@@ -21,90 +29,48 @@ namespace simbi {
         size_t sharedMemBytes;
         std::vector<simbiStream_t> streams;
         std::vector<int> devices;
+        T nzones_per_device;
+        std::vector<dim3> device_gridSizes;
+        size_t batch_size;
+        size_t min_elements_per_thread;
 
         ~ExecutionPolicy() = default;
         ExecutionPolicy()  = default;
 
-        ExecutionPolicy(const T nzones, const U blockSize, int device = 0)
-            : blockSize(dim3(blockSize)), sharedMemBytes(0)
-        {
-            const T nBlocks = compute_blocks(nzones, blockSize);
-            this->gridSize  = dim3(nBlocks);
-            set_device(device);
-        }
-
+        // Base constructor with config
         ExecutionPolicy(
             const T nzones,
             const U blockSize,
-            const size_t sharedMemBytes,
-            int device = 0
-        )
-            : blockSize(dim3(blockSize)), sharedMemBytes(sharedMemBytes)
-        {
-            const T nBlocks = compute_blocks(nzones, blockSize);
-            this->gridSize  = dim3(nBlocks);
-            set_device(device);
-        }
-
-        ExecutionPolicy(
-            const T nzones,
-            const U blockSize,
-            const size_t sharedMemBytes,
-            const std::vector<simbiStream_t>& streams,
-            int device = 0
+            const ExecutionPolicyConfig& config = {}
         )
             : blockSize(dim3(blockSize)),
-              sharedMemBytes(sharedMemBytes),
-              streams(streams)
+              sharedMemBytes(config.sharedMemBytes),
+              streams(config.streams),
+              devices(config.devices),
+              batch_size(config.batch_size),
+              min_elements_per_thread(config.min_elements_per_thread)
         {
             const T nBlocks = compute_blocks(nzones, blockSize);
             this->gridSize  = dim3(nBlocks);
-            set_device(device);
+            init_devices();
+            optimize_batch_size();
         }
 
+        // Vector constructor with config
         ExecutionPolicy(
-            const std::vector<T> glist,
-            const std::vector<U> blist,
-            int device = 0
+            const std::vector<T>& glist,
+            const std::vector<U>& blist,
+            const ExecutionPolicyConfig& config = {}
         )
-            : sharedMemBytes(0)
+            : sharedMemBytes(config.sharedMemBytes),
+              streams(config.streams),
+              devices(config.devices)
         {
             if (glist.size() != blist.size()) {
                 throw ExecutionException();
             }
+            init_devices();
             build_grid(glist, blist);
-            set_device(device);
-        }
-
-        ExecutionPolicy(
-            const std::vector<T> glist,
-            const std::vector<U> blist,
-            const size_t sharedMemBytes,
-            int device = 0
-        )
-            : sharedMemBytes(sharedMemBytes)
-        {
-            if (glist.size() != blist.size()) {
-                throw ExecutionException();
-            }
-            build_grid(glist, blist);
-            set_device(device);
-        }
-
-        ExecutionPolicy(
-            const std::vector<T> glist,
-            const std::vector<U> blist,
-            const size_t sharedMemBytes,
-            const std::vector<simbiStream_t>& streams,
-            int device = 0
-        )
-            : sharedMemBytes(sharedMemBytes), streams(streams)
-        {
-            if (glist.size() != blist.size()) {
-                throw ExecutionException();
-            }
-            build_grid(glist, blist);
-            set_device(device);
         }
 
         T compute_blocks(const T nzones, const luint nThreads) const
@@ -139,34 +105,99 @@ namespace simbi {
             }
         }
 
-        void build_grid(const std::vector<T> glist, const std::vector<U> blist)
+        // build grid to handle multiple devices
+        void build_grid(
+            const std::vector<T> gridList,
+            const std::vector<U> blockList
+        )
         {
-            if (glist.size() == 1) {
-                this->gridSize  = dim3((glist[0] + blist[0] - 1) / blist[0]);
-                this->blockSize = dim3(blist[0]);
-                this->nzones    = glist[0];
+            // Calculate total zoness
+            if (gridList.size() == 1) {
+                nzones = gridList[0];
             }
-            else if (glist.size() == 2) {
-                this->nzones   = glist[0] * glist[1];
-                luint nxBlocks = (glist[0] + blist[0] - 1) / blist[0];
-                luint nyBlocks = (glist[1] + blist[1] - 1) / blist[1];
+            else if (gridList.size() == 2) {
+                nzones = gridList[0] * gridList[1];
+            }
+            else if (gridList.size() == 3) {
+                nzones = gridList[0] * gridList[1] * gridList[2];
+            }
+
+            const int numDevices = devices.size();
+
+            // Calculate number of zones per device
+            nzones_per_device = (nzones + numDevices - 1) / numDevices;
+
+            // Set block size based on input
+            if (blockList.size() == 1) {
+                blockSize = dim3(blockList[0]);
+            }
+            else if (blockList.size() == 2) {
                 if constexpr (global::col_maj) {
-                    this->gridSize  = dim3(nyBlocks, nxBlocks);
-                    this->blockSize = dim3(blist[1], blist[0]);
+                    blockSize = dim3(blockList[1], blockList[0]);
                 }
                 else {
-                    this->gridSize  = dim3(nxBlocks, nyBlocks);
-                    this->blockSize = dim3(blist[0], blist[1]);
+                    blockSize = dim3(blockList[0], blockList[1]);
                 }
             }
-            else if (glist.size() == 3) {
-                this->nzones    = glist[0] * glist[1] * glist[2];
-                luint nxBlocks  = (glist[0] + blist[0] - 1) / blist[0];
-                luint nyBlocks  = (glist[1] + blist[1] - 1) / blist[1];
-                luint nzBlocks  = (glist[2] + blist[2] - 1) / blist[2];
-                this->gridSize  = dim3(nxBlocks, nyBlocks, nzBlocks);
-                this->blockSize = dim3(blist[0], blist[1], blist[2]);
+            else if (blockList.size() == 3) {
+                blockSize = dim3(blockList[0], blockList[1], blockList[2]);
             }
+
+            // Calculate grid size per device
+            for (int dev = 0; dev < numDevices; dev++) {
+                T dev_zones = (dev == numDevices - 1)
+                                  ? (nzones - dev * nzones_per_device)
+                                  : nzones_per_device;
+
+                if (gridList.size() == 1) {
+                    device_gridSizes[dev] =
+                        dim3((dev_zones + blockSize.x - 1) / blockSize.x);
+                }
+                else if (gridList.size() == 2) {
+                    // Handle 2D case considering column/row major ordering
+                    luint nxBlocks =
+                        (gridList[0] + blockSize.x - 1) / blockSize.x;
+                    luint nyBlocks =
+                        (gridList[1] + blockSize.y - 1) / blockSize.y;
+                    if constexpr (global::col_maj) {
+                        device_gridSizes[dev] = dim3(nyBlocks, nxBlocks);
+                    }
+                    else {
+                        device_gridSizes[dev] = dim3(nxBlocks, nyBlocks);
+                    }
+                }
+                else if (gridList.size() == 3) {
+                    // Handle 3D case
+                    luint nxBlocks =
+                        (gridList[0] + blockSize.x - 1) / blockSize.x;
+                    luint nyBlocks =
+                        (gridList[1] + blockSize.y - 1) / blockSize.y;
+                    luint nzBlocks =
+                        (gridList[2] + blockSize.z - 1) / blockSize.z;
+                    device_gridSizes[dev] = dim3(nxBlocks, nyBlocks, nzBlocks);
+                }
+            }
+
+            // Set default grid size to first device's grid size
+            this->gridSize = device_gridSizes[0];
+        }
+
+        dim3 get_device_gridSize(int device) const
+        {
+            if (device < device_gridSizes.size()) {
+                return device_gridSizes[device];
+            }
+            return dim3(0);
+        }
+
+        bool switch_to_device(int device) const
+        {
+            if (device < devices.size()) {
+                gpu::api::setDevice(device);
+                // this->gridSize = device_gridSizes[device];
+                return true;
+            }
+            return false;
         }
 
         void set_device(int device)
@@ -187,6 +218,34 @@ namespace simbi {
             for (const auto& stream : streams) {
                 gpu::api::streamSynchronize(stream);
             }
+        }
+
+        void optimize_batch_size()
+        {
+            if constexpr (global::on_gpu) {
+                const size_t threads_per_block =
+                    blockSize.x * blockSize.y * blockSize.z;
+                batch_size = threads_per_block * min_elements_per_thread;
+            }
+        }
+
+        size_t get_num_batches(size_t sz) const
+        {
+            return (sz + batch_size - 1) / batch_size;
+        }
+
+      private:
+        void init_devices()
+        {
+            if (devices.empty()) {
+                devices = {0};
+            }
+            // Initialize per-device resources
+            device_gridSizes.resize(devices.size());
+            nzones_per_device = (nzones + devices.size() - 1) / devices.size();
+
+            // Set initial device
+            set_device(devices[0]);
         }
     };
 

@@ -20,6 +20,8 @@
 
 #include "build_options.hpp"   // for Platform, global::BuildPlatform
 #include "device_api.hpp"      // for gpuFree, gpuMalloc, gpuMallocManaged
+#include "maybe.hpp"           // for maybe
+#include "parallel_for.hpp"    // for parallel_for
 #include "smrt_ptr.hpp"        // for smart_ptr
 #include <cstddef>             // for size_t
 #include <initializer_list>    // for initializer_list
@@ -31,7 +33,7 @@ using size_type = std::size_t;
 
 namespace simbi {
     // Template class to create array of different data_type
-    template <typename DT, global::Platform build_mode = global::BuildPlatform>
+    template <typename DT>
     class ndarray
     {
         using value_type = DT;
@@ -45,10 +47,14 @@ namespace simbi {
         size_type dimensions;    // Number of dimensions
         util::smart_ptr<DT[]> arr;   // Host-side array
 
+        bool is_gpu_synced           = false;
+        bool needs_gpu_sync          = false;
+        simbiStream_t current_stream = nullptr;
+
         // Device-side array allocation
         void* myGpuMalloc(size_type size)
         {
-            if constexpr (build_mode == global::Platform::GPU) {
+            if constexpr (global::on_gpu) {
                 void* ptr;
                 gpu::api::malloc(&ptr, size);
                 return ptr;
@@ -59,7 +65,7 @@ namespace simbi {
         // Device-side managed array allocation
         void* myGpuMallocManaged(size_type size)
         {
-            if constexpr (build_mode == global::Platform::GPU) {
+            if constexpr (global::on_gpu) {
                 void* ptr;
                 gpu::api::mallocManaged(&ptr, size);
                 return ptr;
@@ -70,7 +76,7 @@ namespace simbi {
         struct gpuDeleter {
             void operator()(DT* ptr)
             {
-                if constexpr (build_mode == global::Platform::GPU) {
+                if constexpr (global::on_gpu) {
                     gpu::api::free(ptr);
                 }
             }
@@ -186,6 +192,77 @@ namespace simbi {
             }
         };
 
+        // GPU-compatible slice view
+        class slice_view
+        {
+          private:
+            DT* data;
+            size_type view_size;
+            size_type offset;
+            bool on_device;
+
+          public:
+            DUAL slice_view(DT* data, size_type start, size_type end)
+                : data(data),
+                  view_size(end - start),
+                  offset(start),
+                  on_device(global::on_gpu)
+            {
+            }
+
+            DUAL DT& operator[](size_type i)
+            {
+                if constexpr (global::on_gpu) {
+                    return data[offset + i];
+                }
+                else {
+                    return data[offset + i];
+                }
+            }
+
+            DUAL const DT& operator[](size_type i) const
+            {
+                if constexpr (global::on_gpu) {
+                    return data[offset + i];
+                }
+                else {
+                    return data[offset + i];
+                }
+            }
+
+            DUAL size_type size() const { return view_size; }
+
+            DUAL size_type index() const { return offset; }
+        };
+
+        DUAL slice_view slice(size_type start, size_type end)
+        {
+            if (start > end || end > sz) {
+                // GPU-safe error handling
+                return slice_view(nullptr, 0, 0);
+            }
+            if constexpr (global::on_gpu) {
+                return slice_view(dev_arr.get(), start, end);
+            }
+            else {
+                return slice_view(arr.get(), start, end);
+            }
+        }
+
+        DUAL slice_view slice(size_type start, size_type end) const
+        {
+            if (start > end || end > sz) {
+                // GPU-safe error handling
+                return slice_view(nullptr, 0, 0);
+            }
+            if constexpr (global::on_gpu) {
+                return slice_view(dev_arr.get(), start, end);
+            }
+            else {
+                return slice_view(arr.get(), start, end);
+            }
+        }
+
         // Begin iterator
         iterator begin() const;
 
@@ -208,24 +285,67 @@ namespace simbi {
         void shrink_to_fit();
         void reserve(size_type new_capacity);
 
-        // functional methods for in-place operations
-        template <typename UnaryFunc>
-        ndarray& map(UnaryFunc func);
+        // Memory management methods
+        void pin_memory();
+        void unpin_memory();
 
-        template <typename UnaryFunc>
-        ndarray& map(UnaryFunc func) const;
+        // Stream support
+        void set_stream(simbiStream_t stream);
+        void async_copy_to_gpu();
+
+        // Memory optimization helpers
+        void ensure_gpu_synced();
+
+        // Aligned memory allocation
+        void* aligned_alloc(size_type size, size_type alignment = 32);
+
+        //======================================================================
+        // Functional methods
+        //======================================================================
+        // Map method
+        template <typename UnaryFunction>
+        DUAL ndarray& map(UnaryFunction f);
+
+        template <typename UnaryFunction>
+        DUAL ndarray map(UnaryFunction f) const;
+        // Filter method
+        template <typename UnaryPredicate>
+        DUAL ndarray& filter(UnaryPredicate pred);
 
         template <typename UnaryPredicate>
-        ndarray& filter(UnaryPredicate pred);
+        DUAL ndarray filter(UnaryPredicate pred) const;
 
-        template <typename UnaryPredicate>
-        ndarray filter(UnaryPredicate pred) const;
+        // Composed operations
+        template <typename F, typename G>
+        auto compose(F f, G g) const;
 
-        template <typename BinaryFunc>
-        DT reduce(BinaryFunc func, DT init);
+        // Chain operations
+        template <typename... Fs>
+        auto then(Fs... fs) const;
 
-        template <typename BinaryFunc>
-        DT reduce(BinaryFunc func, DT init) const;
+        // Chain transformations and return new array
+        template <typename... Transforms>
+        ndarray transform_chain(Transforms... transforms) const;
+
+        // Apply function to each element safely with bounds checking
+        template <typename F>
+        Maybe<ndarray> safe_map(F f) const;
+
+        // Combine two arrays element-wise with a binary operation
+        template <typename F>
+        ndarray combine(const ndarray& other, F binary_op) const;
+
+        // Split array into chunks for parallel processing
+        template <typename F>
+        ndarray
+        parallel_chunks(const ExecutionPolicy<>& policy, F chunk_op) const;
+
+        // transform_parallel method
+        template <typename NewType, typename F>
+        ndarray<NewType> transform_parallel(
+            const ExecutionPolicy<>& policy,
+            F transform_op
+        ) const;
     };
 
 }   // namespace simbi

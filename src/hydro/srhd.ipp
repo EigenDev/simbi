@@ -40,137 +40,143 @@ template <int dim>
 void SRHD<dim>::cons2prim()
 {
     const auto* const cons_data = cons.data();
-    simbi::parallel_for(fullP, total_zones, [cons_data, this] DEV(luint gid) {
-        bool workLeftToDo = true;
-        atomic_bool_shared found_failure;
+    simbi::parallel_for(
+        fullPolicy,
+        total_zones,
+        [cons_data, this] DEV(luint gid) {
+            bool workLeftToDo = true;
+            shared_atomic_bool found_failure;
 
-        if constexpr (global::on_gpu) {
-            auto tid = get_threadId();
-            if (tid == 0) {
-                found_failure.store(inFailureState.load());
-            }
-            simbi::gpu::api::synchronize();
-        }
-        else {
-            found_failure.store(inFailureState.load());
-        }
-
-        real invdV = 1.0;
-        while (!found_failure && workLeftToDo) {
-            if (homolog) {
-                if constexpr (dim == 1) {
-                    const auto ireal = get_real_idx(gid, radius, active_zones);
-                    const auto cell  = this->cell_factors(ireal);
-                    const real dV    = cell.dV;
-                    invdV            = 1.0 / dV;
+            if constexpr (global::on_gpu) {
+                auto tid = get_threadId();
+                if (tid == 0) {
+                    found_failure.store(inFailureState.load());
                 }
-                else if constexpr (dim == 2) {
-                    const luint ii   = gid % nx;
-                    const luint jj   = gid / nx;
-                    const auto ireal = get_real_idx(ii, radius, xag);
-                    const auto jreal = get_real_idx(jj, radius, yag);
-                    const auto cell  = this->cell_factors(ireal, jreal);
-                    const real dV    = cell.dV;
-                    invdV            = 1.0 / dV;
-                }
-                else {
-                    const luint kk   = get_height(gid, xag, yag);
-                    const luint jj   = get_row(gid, xag, yag, kk);
-                    const luint ii   = get_column(gid, xag, yag, kk);
-                    const auto ireal = get_real_idx(ii, radius, xag);
-                    const auto jreal = get_real_idx(jj, radius, yag);
-                    const auto kreal = get_real_idx(kk, radius, zag);
-                    const auto cell  = this->cell_factors(ireal, jreal, kreal);
-                    const real dV    = cell.dV;
-                    invdV            = 1.0 / dV;
-                }
-            }
-
-            const real d    = cons_data[gid].dens() * invdV;
-            const real s1   = cons_data[gid].momentum(1) * invdV;
-            const real s2   = cons_data[gid].momentum(2) * invdV;
-            const real s3   = cons_data[gid].momentum(3) * invdV;
-            const real tau  = cons_data[gid].nrg() * invdV;
-            const real dchi = cons_data[gid].chi() * invdV;
-            const real s    = std::sqrt(s1 * s1 + s2 * s2 + s3 * s3);
-
-            // Perform modified Newton Raphson based on
-            // https://www.sciencedirect.com/science/article/pii/S0893965913002930
-            // so far, the convergence rate is the same, but perhaps I need
-            // a slight tweak
-
-            // compute f(x_0)
-            // f = newton_f(gamma, tau, d, S, peq);
-            int iter       = 0;
-            real peq       = pressure_guess[gid];
-            const real tol = d * global::epsilon;
-            real dp;
-            do {
-                // compute x_[k+1]
-                auto [f, g] = newton_fg(gamma, tau, d, s, peq);
-                dp          = f / g;
-                peq -= dp;
-
-                // compute x*_k
-                // f     = newton_f(gamma, tau, d, S, peq);
-                // pstar = peq - f / g;
-
-                if (iter >= global::MAX_ITER || !std::isfinite(peq)) {
-                    troubled_cells[gid] = 1;
-                    dt                  = INFINITY;
-                    inFailureState.store(true);
-                    found_failure.store(true);
-                    break;
-                }
-                iter++;
-
-            } while (std::abs(dp) >= tol);
-
-            const real inv_et   = 1.0 / (tau + d + peq);
-            real v1             = s1 * inv_et;
-            pressure_guess[gid] = peq;
-            if constexpr (dim == 1) {
-                const real w = 1.0 / std::sqrt(1.0 - v1 * v1);
-                if constexpr (global::VelocityType ==
-                              global::Velocity::FourVelocity) {
-                    v1 *= w;
-                }
-                prims[gid] = primitive_t{d / w, v1, peq, dchi / d};
-            }
-            else if constexpr (dim == 2) {
-                real v2      = s2 * inv_et;
-                const real w = 1.0 / std::sqrt(1.0 - (v1 * v1 + v2 * v2));
-                if constexpr (global::VelocityType ==
-                              global::Velocity::FourVelocity) {
-                    v1 *= w;
-                    v2 *= w;
-                }
-                prims[gid] = primitive_t{d / w, v1, v2, peq, dchi / d};
+                simbi::gpu::api::synchronize();
             }
             else {
-                real v2        = s2 * inv_et;
-                real v3        = s3 * inv_et;
-                const real vsq = v1 * v1 + v2 * v2 + v3 * v3;
-                const real w   = 1.0 / std::sqrt(1.0 - vsq);
-                if constexpr (global::VelocityType ==
-                              global::Velocity::FourVelocity) {
-                    v1 *= w;
-                    v2 *= w;
-                    v3 *= w;
-                }
-                prims[gid] = primitive_t{d / w, v1, v2, v3, peq, dchi / d};
+                found_failure.store(inFailureState.load());
             }
-            workLeftToDo = false;
 
-            if (peq < 0) {
-                troubled_cells[gid] = 1;
-                inFailureState.store(true);
-                found_failure.store(true);
-                dt = INFINITY;
+            real invdV = 1.0;
+            while (!found_failure && workLeftToDo) {
+                if (homolog) {
+                    if constexpr (dim == 1) {
+                        const auto ireal =
+                            get_real_idx(gid, radius, active_zones);
+                        const auto cell = this->cell_factors(ireal);
+                        const real dV   = cell.dV;
+                        invdV           = 1.0 / dV;
+                    }
+                    else if constexpr (dim == 2) {
+                        const luint ii   = gid % nx;
+                        const luint jj   = gid / nx;
+                        const auto ireal = get_real_idx(ii, radius, xag);
+                        const auto jreal = get_real_idx(jj, radius, yag);
+                        const auto cell  = this->cell_factors(ireal, jreal);
+                        const real dV    = cell.dV;
+                        invdV            = 1.0 / dV;
+                    }
+                    else {
+                        const luint kk   = get_height(gid, xag, yag);
+                        const luint jj   = get_row(gid, xag, yag, kk);
+                        const luint ii   = get_column(gid, xag, yag, kk);
+                        const auto ireal = get_real_idx(ii, radius, xag);
+                        const auto jreal = get_real_idx(jj, radius, yag);
+                        const auto kreal = get_real_idx(kk, radius, zag);
+                        const auto cell =
+                            this->cell_factors(ireal, jreal, kreal);
+                        const real dV = cell.dV;
+                        invdV         = 1.0 / dV;
+                    }
+                }
+
+                const real d    = cons_data[gid].dens() * invdV;
+                const real s1   = cons_data[gid].momentum(1) * invdV;
+                const real s2   = cons_data[gid].momentum(2) * invdV;
+                const real s3   = cons_data[gid].momentum(3) * invdV;
+                const real tau  = cons_data[gid].nrg() * invdV;
+                const real dchi = cons_data[gid].chi() * invdV;
+                const real s    = std::sqrt(s1 * s1 + s2 * s2 + s3 * s3);
+
+                // Perform modified Newton Raphson based on
+                // https://www.sciencedirect.com/science/article/pii/S0893965913002930
+                // so far, the convergence rate is the same, but perhaps I need
+                // a slight tweak
+
+                // compute f(x_0)
+                // f = newton_f(gamma, tau, d, S, peq);
+                int iter       = 0;
+                real peq       = pressure_guess[gid];
+                const real tol = d * global::epsilon;
+                real dp;
+                do {
+                    // compute x_[k+1]
+                    auto [f, g] = newton_fg(gamma, tau, d, s, peq);
+                    dp          = f / g;
+                    peq -= dp;
+
+                    // compute x*_k
+                    // f     = newton_f(gamma, tau, d, S, peq);
+                    // pstar = peq - f / g;
+
+                    if (iter >= global::MAX_ITER || !std::isfinite(peq)) {
+                        troubled_cells[gid] = 1;
+                        dt                  = INFINITY;
+                        inFailureState.store(true);
+                        found_failure.store(true);
+                        break;
+                    }
+                    iter++;
+
+                } while (std::abs(dp) >= tol);
+
+                const real inv_et   = 1.0 / (tau + d + peq);
+                real v1             = s1 * inv_et;
+                pressure_guess[gid] = peq;
+                if constexpr (dim == 1) {
+                    const real w = 1.0 / std::sqrt(1.0 - v1 * v1);
+                    if constexpr (global::VelocityType ==
+                                  global::Velocity::FourVelocity) {
+                        v1 *= w;
+                    }
+                    prims[gid] = primitive_t{d / w, v1, peq, dchi / d};
+                }
+                else if constexpr (dim == 2) {
+                    real v2      = s2 * inv_et;
+                    const real w = 1.0 / std::sqrt(1.0 - (v1 * v1 + v2 * v2));
+                    if constexpr (global::VelocityType ==
+                                  global::Velocity::FourVelocity) {
+                        v1 *= w;
+                        v2 *= w;
+                    }
+                    prims[gid] = primitive_t{d / w, v1, v2, peq, dchi / d};
+                }
+                else {
+                    real v2        = s2 * inv_et;
+                    real v3        = s3 * inv_et;
+                    const real vsq = v1 * v1 + v2 * v2 + v3 * v3;
+                    const real w   = 1.0 / std::sqrt(1.0 - vsq);
+                    if constexpr (global::VelocityType ==
+                                  global::Velocity::FourVelocity) {
+                        v1 *= w;
+                        v2 *= w;
+                        v3 *= w;
+                    }
+                    prims[gid] = primitive_t{d / w, v1, v2, v3, peq, dchi / d};
+                }
+                workLeftToDo = false;
+
+                if (peq < 0) {
+                    troubled_cells[gid] = 1;
+                    inFailureState.store(true);
+                    found_failure.store(true);
+                    dt = INFINITY;
+                }
+                simbi::gpu::api::synchronize();
             }
-            simbi::gpu::api::synchronize();
         }
-    });
+    );
 }
 
 //----------------------------------------------------------------------------------------------------------
@@ -912,7 +918,7 @@ template <int dim>
 void SRHD<dim>::advance()
 {
     const auto prim_dat = prims.data();
-    simbi::parallel_for(activeP, [prim_dat, this] DEV(const luint idx) {
+    simbi::parallel_for(activePolicy, [prim_dat, this] DEV(const luint idx) {
         conserved_t fri[2], gri[2], hri[2];
         primitive_t pL, pLL, pR, pRR;
 
@@ -955,7 +961,7 @@ void SRHD<dim>::advance()
 
         if constexpr (global::on_sm) {
             load_shared_buffer<dim>(
-                activeP,
+                activePolicy,
                 prb,
                 prim_dat,
                 nx,
@@ -1129,14 +1135,13 @@ void SRHD<dim>::simulate(
     deallocate_state();
     offload();
     compute_bytes_and_strides<primitive_t>(dim);
-    print_shared_mem();
     init_riemann_solver();
     this->set_mesh_funcs();
 
     config_ghosts(this);
     cons2prim();
     if constexpr (global::on_gpu) {
-        adapt_dt<TIMESTEP_TYPE::MINIMUM>(fullP);
+        adapt_dt<TIMESTEP_TYPE::MINIMUM>(fullPolicy);
     }
     else {
         adapt_dt<TIMESTEP_TYPE::MINIMUM>();
@@ -1149,7 +1154,7 @@ void SRHD<dim>::simulate(
         cons2prim();
 
         if constexpr (global::on_gpu) {
-            adapt_dt(fullP);
+            adapt_dt(fullPolicy);
         }
         else {
             adapt_dt();

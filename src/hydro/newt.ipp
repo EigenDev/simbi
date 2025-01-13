@@ -29,6 +29,50 @@ Newtonian<dim>::~Newtonian() = default;
 //-----------------------------------------------------------------------------------------
 //                          Get The Primitive
 //-----------------------------------------------------------------------------------------
+template <int dim>
+void Newtonian<dim>::cons2prim()
+{
+    auto to_primitive = [this] DEV(const auto& cons) -> Maybe<primitive_t> {
+        const real rho = cons.dens();
+        const real v1  = (cons.momentum(1) / rho);
+        const real v2  = (cons.momentum(2) / rho);
+        const real v3  = (cons.momentum(3) / rho);
+        const real chi = cons.chi();
+        const real pre =
+            (gamma - 1.0) *
+            (cons.nrg() - 0.5 * rho * (v1 * v1 + v2 * v2 + v3 * v3));
+
+        if (pre < 0 || !std::isfinite(pre)) {
+            // store the invalid state
+            return simbi::Nothing;
+        }
+
+        if constexpr (dim == 1) {
+            return primitive_t{rho, v1, pre, chi / rho};
+        }
+        else if constexpr (dim == 2) {
+            return primitive_t{rho, v1, v2, pre, chi / rho};
+        }
+        else {
+            return primitive_t{rho, v1, v2, v3, pre, chi / rho};
+        }
+    };
+    shared_atomic_bool local_failure;
+    prims = cons.template transform_parallel<primitive_t>(
+        activePolicy,
+        [this,
+         local_failure_dat = &local_failure,
+         to_primitive] DEV(const auto& data) {
+            // Convert conserved to primitive
+            return Maybe(data).map(to_primitive).unwrap_or(primitive_t{});
+        }
+    );
+
+    if (local_failure.load()) {
+        inFailureState.store(true);
+    }
+}
+
 /**
  * Return the primitive
  * variables density , three-velocity, pressure
@@ -36,65 +80,69 @@ Newtonian<dim>::~Newtonian() = default;
  * @param  p execution policy class
  * @return none
  */
-template <int dim>
-void Newtonian<dim>::cons2prim()
-{
-    const auto* const ccons = cons.data();
-    simbi::parallel_for(fullP, total_zones, [ccons, this] DEV(const luint gid) {
-        real invdV = 1.0;
-        if (homolog) {
-            if constexpr (dim == 1) {
-                const auto ireal = get_real_idx(gid, radius, active_zones);
-                const auto cell  = this->cell_factors(ireal);
-                const real dV    = cell.dV;
-                invdV            = 1.0 / dV;
-            }
-            else if constexpr (dim == 2) {
-                const luint ii   = gid % nx;
-                const luint jj   = gid / nx;
-                const auto ireal = get_real_idx(ii, radius, xag);
-                const auto jreal = get_real_idx(jj, radius, yag);
-                const auto cell  = this->cell_factors(ireal, jreal);
-                const real dV    = cell.dV;
-                invdV            = 1.0 / dV;
-            }
-            else {
-                const luint kk   = get_height(gid, xag, yag);
-                const luint jj   = get_row(gid, xag, yag, kk);
-                const luint ii   = get_column(gid, xag, yag, kk);
-                const auto ireal = get_real_idx(ii, radius, xag);
-                const auto jreal = get_real_idx(jj, radius, yag);
-                const auto kreal = get_real_idx(kk, radius, zag);
-                const auto cell  = this->cell_factors(ireal, jreal, kreal);
-                const real dV    = cell.dV;
-                invdV            = 1.0 / dV;
-            }
-        }
-        const real rho     = ccons[gid].dens() * invdV;
-        const real v1      = (ccons[gid].momentum(1) / rho) * invdV;
-        const real v2      = (ccons[gid].momentum(2) / rho) * invdV;
-        const real v3      = (ccons[gid].momentum(3) / rho) * invdV;
-        const real rho_chi = ccons[gid].chi() * invdV;
-        const real pre =
-            (gamma - 1.0) *
-            (ccons[gid].nrg() - 0.5 * rho * (v1 * v1 + v2 * v2 + v3 * v3));
-        if constexpr (dim == 1) {
-            prims[gid] = {rho, v1, pre, rho_chi / rho};
-        }
-        else if constexpr (dim == 2) {
-            prims[gid] = {rho, v1, v2, pre, rho_chi / rho};
-        }
-        else {
-            prims[gid] = {rho, v1, v2, v3, pre, rho_chi / rho};
-        }
+// template <int dim>
+// void Newtonian<dim>::cons2prim()
+// {
+// const auto* const ccons = cons.data();
+// simbi::parallel_for(
+//     fullPolicy,
+//     total_zones,
+//     [ccons, this] DEV(const luint gid) {
+//         real invdV = 1.0;
+//         if (homolog) {
+//             if constexpr (dim == 1) {
+//                 const auto ireal = get_real_idx(gid, radius,
+//                 active_zones); const auto cell  =
+//                 this->cell_factors(ireal); const real dV    = cell.dV;
+//                 invdV            = 1.0 / dV;
+//             }
+//             else if constexpr (dim == 2) {
+//                 const luint ii   = gid % nx;
+//                 const luint jj   = gid / nx;
+//                 const auto ireal = get_real_idx(ii, radius, xag);
+//                 const auto jreal = get_real_idx(jj, radius, yag);
+//                 const auto cell  = this->cell_factors(ireal, jreal);
+//                 const real dV    = cell.dV;
+//                 invdV            = 1.0 / dV;
+//             }
+//             else {
+//                 const luint kk   = get_height(gid, xag, yag);
+//                 const luint jj   = get_row(gid, xag, yag, kk);
+//                 const luint ii   = get_column(gid, xag, yag, kk);
+//                 const auto ireal = get_real_idx(ii, radius, xag);
+//                 const auto jreal = get_real_idx(jj, radius, yag);
+//                 const auto kreal = get_real_idx(kk, radius, zag);
+//                 const auto cell  = this->cell_factors(ireal, jreal,
+//                 kreal); const real dV    = cell.dV; invdV = 1.0 / dV;
+//             }
+//         }
+//         const real rho     = ccons[gid].dens() * invdV;
+//         const real v1      = (ccons[gid].momentum(1) / rho) * invdV;
+//         const real v2      = (ccons[gid].momentum(2) / rho) * invdV;
+//         const real v3      = (ccons[gid].momentum(3) / rho) * invdV;
+//         const real rho_chi = ccons[gid].chi() * invdV;
+//         const real pre =
+//             (gamma - 1.0) *
+//             (ccons[gid].nrg() - 0.5 * rho * (v1 * v1 + v2 * v2 + v3 *
+//             v3));
+//         if constexpr (dim == 1) {
+//             prims[gid] = {rho, v1, pre, rho_chi / rho};
+//         }
+//         else if constexpr (dim == 2) {
+//             prims[gid] = {rho, v1, v2, pre, rho_chi / rho};
+//         }
+//         else {
+//             prims[gid] = {rho, v1, v2, v3, pre, rho_chi / rho};
+//         }
 
-        if (pre < 0 || !std::isfinite(pre)) {
-            troubled_cells[gid] = 1;
-            inFailureState.store(true);
-            dt = INFINITY;
-        }
-    });
-}
+//         if (pre < 0 || !std::isfinite(pre)) {
+//             troubled_cells[gid] = 1;
+//             inFailureState.store(true);
+//             dt = INFINITY;
+//         }
+//     }
+// );
+// }
 
 //----------------------------------------------------------------------------------------------------------
 //                              EIGENVALUE CALCULATIONS
@@ -584,10 +632,29 @@ DUAL Newtonian<dim>::conserved_t Newtonian<dim>::gravity_sources(
 //                                            UDOT CALCULATIONS
 //===================================================================================================================
 template <int dim>
+void Newtonian<dim>::update_mesh_motion(
+    std::function<real(real)> const& a,
+    std::function<real(real)> const& adot
+)
+{
+    if (!mesh_motion) {
+        return;
+    }
+
+    auto update = [this](real x, real h) {
+        return x + step * dt * (homolog ? x * h : h);
+    };
+
+    hubble_param = adot(t) / a(t);
+    x1max        = update(x1max, hubble_param);
+    x1min        = update(x1min, hubble_param);
+}
+
+template <int dim>
 void Newtonian<dim>::advance()
 {
     const auto prim_dat = prims.data();
-    simbi::parallel_for(activeP, [prim_dat, this] DEV(const luint idx) {
+    simbi::parallel_for(activePolicy, [prim_dat, this] DEV(const luint idx) {
         conserved_t fri[2], gri[2], hri[2];
         primitive_t pL, pLL, pR, pRR;
 
@@ -630,7 +697,7 @@ void Newtonian<dim>::advance()
 
         if constexpr (global::on_sm) {
             load_shared_buffer<dim>(
-                activeP,
+                activePolicy,
                 prb,
                 prim_dat,
                 nx,
@@ -792,18 +859,20 @@ void Newtonian<dim>::simulate(
             cons[i][q] = state[q][i];
         }
     }
+
     // Deallocate duplicate memory and setup the system
     deallocate_state();
     offload();
     compute_bytes_and_strides<primitive_t>(dim);
-    print_shared_mem();
     init_riemann_solver();
     this->set_mesh_funcs();
     config_ghosts(this);
 
     cons2prim();
+    printf("cons2prim done\n");
+    std::cin.get();
     if constexpr (global::on_gpu) {
-        adapt_dt(fullP);
+        adapt_dt(fullPolicy);
     }
     else {
         adapt_dt();
@@ -816,7 +885,7 @@ void Newtonian<dim>::simulate(
         cons2prim();
 
         if constexpr (global::on_gpu) {
-            adapt_dt(fullP);
+            adapt_dt(fullPolicy);
         }
         else {
             adapt_dt();

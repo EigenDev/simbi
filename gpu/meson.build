@@ -12,6 +12,16 @@ gpu_flags = [
     '-DMANAGED_MEMORY',
 ]   
 
+# Get CUDA paths
+cuda_path = run_command('which', 'nvcc', check: false).stdout().strip()
+cuda_root = ''
+if cuda_path != ''
+    cuda_root = fs.parent(fs.parent(cuda_path))
+endif
+
+# Get ROCm paths
+rocm_path = run_command('hipconfig', '--path', check: false).stdout().strip()
+
 gpu_arch = get_option('gpu_arch')
 gpu_settings = {
     'nvidia': {
@@ -28,7 +38,7 @@ gpu_settings = {
             '--compiler-options',
             '-fPIC',
         ],
-        'link_args': ['-lcudart'],
+        'link_args': [f'-L@cuda_root@/lib64','-lcudart', '-lnvrtc', '-lcuda'],
         'inter_link_args': ['-dlink', '-Xcompiler', '-fPIC'],
         'extra_link_args': ['-lcudadevrt'],
         'gpu_dependency': cuda
@@ -37,7 +47,7 @@ gpu_settings = {
         'compiler': 'hipcc',
         'arch': f'gfx@gpu_arch@',
         'args': ['-fPIC', f'--offload-arch=gfx@gpu_arch@'],
-        'link_args': ['-lamdhip64'],
+        'link_args': [f'-L@rocm_path@/lib','-lamdhip64', '-lhiprtc'],
         'inter_link_args': [],
         'extra_link_args': [],
         'gpu_dependency': hip
@@ -77,14 +87,14 @@ if hip.found() or cuda.found()
         'gpu_link',
         input: gpu_objs,
         output: 'gpu_link.o',
-        command: [gpu_compiler, settings['inter_link_args'], '@INPUT@', '-o', '@OUTPUT@'] + settings['extra_link_args'] + settings['arch'],
+        command: [gpu_compiler, settings['link_args'], settings['inter_link_args'], '@INPUT@', '-o', '@OUTPUT@'] + settings['extra_link_args'] + settings['arch'],
         build_by_default: true
     )]
 
     py3.extension_module(
         'gpu_ext',
         ['../src/gpu_ext.pyx'] + gpu_objs,
-        # link_args: settings['link_args'][1],
+        link_args: settings['link_args'],
         include_directories: include_directories('..', '../src', numpy_include),
         dependencies: general_dependencies + settings['gpu_dependency'],
         cpp_args: ['-DMANAGED_MEMORY'],

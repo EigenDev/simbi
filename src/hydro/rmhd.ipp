@@ -428,10 +428,10 @@ template <int dim>
 void RMHD<dim>::cons2prim()
 {
     // const auto gr = gamma / (gamma - 1.0);
-    simbi::parallel_for(fullP, total_zones, [this] DEV(luint gid) {
+    simbi::parallel_for(fullPolicy, total_zones, [this] DEV(luint gid) {
         bool workLeftToDo = true;
 
-        atomic_bool_shared found_failure;
+        shared_atomic_bool found_failure;
         if constexpr (global::on_gpu) {
             auto tid = get_threadId();
             if (tid == 0) {
@@ -442,7 +442,7 @@ void RMHD<dim>::cons2prim()
         else {
             found_failure.store(inFailureState.load());
         }
-        // atomic_bool_shared found_failure(inFailureState.load());
+        // shared_atomic_bool found_failure(inFailureState.load());
         // simbi::gpu::api::synchronize();
 
         real invdV = 1.0;
@@ -1003,7 +1003,7 @@ void RMHD<dim>::adapt_dt()
         // LAUNCH_ASYNC((compute_dt<primitive_t,dt_type>),
         // p.gridSize, p.blockSize, this, prims.data(), dt_min.data());
         compute_dt<primitive_t, dt_type>
-            <<<activeP.gridSize, activeP.blockSize>>>(
+            <<<activePolicy.gridSize, activePolicy.blockSize>>>(
                 this,
                 prims.data(),
                 dt_min.data()
@@ -1014,7 +1014,7 @@ void RMHD<dim>::adapt_dt()
         // p.gridSize, p.blockSize, this, prims.data(), dt_min.data(),
         // geometry);
         compute_dt<primitive_t, dt_type>
-            <<<activeP.gridSize, activeP.blockSize>>>(
+            <<<activePolicy.gridSize, activePolicy.blockSize>>>(
                 this,
                 prims.data(),
                 dt_min.data(),
@@ -1024,11 +1024,12 @@ void RMHD<dim>::adapt_dt()
     // LAUNCH_ASYNC((deviceReduceWarpAtomicKernel<dim>), p.gridSize,
     // p.blockSize, this, dt_min.data(), active_zones);
 
-    deviceReduceWarpAtomicKernel<dim><<<activeP.gridSize, activeP.blockSize>>>(
-        this,
-        dt_min.data(),
-        total_zones
-    );
+    deviceReduceWarpAtomicKernel<dim>
+        <<<activePolicy.gridSize, activePolicy.blockSize>>>(
+            this,
+            dt_min.data(),
+            total_zones
+        );
     gpu::api::deviceSynch();
 #else
     std::atomic<real> min_dt = INFINITY;
@@ -1263,7 +1264,8 @@ DUAL RMHD<dim>::conserved_t RMHD<dim>::calc_hllc_flux(
     const real bface
 ) const
 {
-    real aS, chiL, chiR;
+    real aS;
+    [[maybe_unused]] real chiL, chiR;
     bool null_normal_field = false;
     const auto uL          = prL.to_conserved(gamma);
     const auto uR          = prR.to_conserved(gamma);
@@ -1671,7 +1673,7 @@ DUAL RMHD<dim>::conserved_t RMHD<dim>::calc_hlld_flux(
     const real bface
 ) const
 {
-    real chiL, chiR, laL, laR, veeL, veeR, veeS;
+    [[maybe_unused]] real chiL, chiR, laL, laR, veeL, veeR, veeS;
     const auto uL = prL.to_conserved(gamma);
     const auto uR = prR.to_conserved(gamma);
     const auto fL = prL.to_flux(gamma, nhat);
@@ -1977,7 +1979,7 @@ void RMHD<dim>::set_flux_and_fields()
         }
     };
     // update the flux and field in the x1 direction
-    parallel_for(xvertexP, [=, this] DEV(const luint gid) {
+    parallel_for(xvertexPolicy, [=, this] DEV(const luint gid) {
         const luint kk = axid<3, BlkAx::K>(gid, nxv, yag);
         const luint jj = axid<3, BlkAx::J>(gid, nxv, yag, kk);
         const luint ii = axid<3, BlkAx::I>(gid, nxv, yag, kk);
@@ -2045,7 +2047,7 @@ void RMHD<dim>::set_flux_and_fields()
     });
 
     // update the flux and field in the x2 direction
-    parallel_for(yvertexP, [=, this] DEV(const luint gid) {
+    parallel_for(yvertexPolicy, [=, this] DEV(const luint gid) {
         const luint kk = axid<3, BlkAx::K>(gid, xag, nyv);
         const luint jj = axid<3, BlkAx::J>(gid, xag, nyv, kk);
         const luint ii = axid<3, BlkAx::I>(gid, xag, nyv, kk);
@@ -2112,7 +2114,7 @@ void RMHD<dim>::set_flux_and_fields()
     });
 
     // update the flux and field in the x3 direction
-    parallel_for(zvertexP, [=, this] DEV(const luint gid) {
+    parallel_for(zvertexPolicy, [=, this] DEV(const luint gid) {
         const luint kk = axid<3, BlkAx::K>(gid, xag, yag);
         const luint jj = axid<3, BlkAx::J>(gid, xag, yag, kk);
         const luint ii = axid<3, BlkAx::I>(gid, xag, yag, kk);
@@ -2184,7 +2186,7 @@ void RMHD<dim>::riemann_fluxes()
 {
     const auto prim_dat = prims.data();
     // Compute the fluxes in the x1 direction
-    simbi::parallel_for(xvertexP, [prim_dat, this] DEV(const luint idx) {
+    simbi::parallel_for(xvertexPolicy, [prim_dat, this] DEV(const luint idx) {
         //  primitive buffer that returns dynamic shared array
         // if working with shared memory on GPU, identity otherwise
         const auto prb = sm_or_identity(prim_dat);
@@ -2213,7 +2215,7 @@ void RMHD<dim>::riemann_fluxes()
 
         if constexpr (global::on_sm) {
             load_shared_buffer<dim>(
-                fullP,
+                fullPolicy,
                 prb,
                 prims,
                 nx,
@@ -2262,7 +2264,7 @@ void RMHD<dim>::riemann_fluxes()
     });
 
     // compute the fluxes in the x2 direction
-    simbi::parallel_for(yvertexP, [prim_dat, this] DEV(const luint idx) {
+    simbi::parallel_for(yvertexPolicy, [prim_dat, this] DEV(const luint idx) {
         // primitive buffer that returns dynamic shared array
         // if working with shared memory on GPU, identity otherwise
         const auto prb = sm_or_identity(prim_dat);
@@ -2291,7 +2293,7 @@ void RMHD<dim>::riemann_fluxes()
 
         if constexpr (global::on_sm) {
             load_shared_buffer<dim>(
-                fullP,
+                fullPolicy,
                 prb,
                 prims,
                 nx,
@@ -2339,7 +2341,7 @@ void RMHD<dim>::riemann_fluxes()
     });
 
     // compute the fluxes in the x3 direction
-    simbi::parallel_for(zvertexP, [prim_dat, this] DEV(const luint idx) {
+    simbi::parallel_for(zvertexPolicy, [prim_dat, this] DEV(const luint idx) {
         // primitive buffer that returns dynamic shared array
         // if working with shared memory on GPU, identity otherwise
         const auto prb = sm_or_identity(prim_dat);
@@ -2368,7 +2370,7 @@ void RMHD<dim>::riemann_fluxes()
 
         if constexpr (global::on_sm) {
             load_shared_buffer<dim>(
-                fullP,
+                fullPolicy,
                 prb,
                 prims,
                 nx,
@@ -2527,245 +2529,239 @@ template <int dim>
 void RMHD<dim>::advance()
 {
     const auto prim_dat = prims.data();
-    // copy the bfield vectors as to not modify the original
-    const auto b1now = bstag1;
-    const auto b2now = bstag2;
-    const auto b3now = bstag3;
-    simbi::parallel_for(
-        activeP,
-        [prim_dat, b1now, b2now, b3now, this] DEV(const luint idx) {
-            // e1, e2, e3 values at cell edges
-            real e1[4], e2[4], e3[4];
+    simbi::parallel_for(activePolicy, [prim_dat, this] DEV(const luint idx) {
+        // e1, e2, e3 values at cell edges
+        real e1[4], e2[4], e3[4];
 
-            // primitive buffer that returns dynamic shared array
-            // if working with shared memory on GPU, identity otherwise
-            const auto prb = sm_or_identity(prim_dat);
+        // primitive buffer that returns dynamic shared array
+        // if working with shared memory on GPU, identity otherwise
+        const auto prb = sm_or_identity(prim_dat);
 
-            const luint kk = axid<dim, BlkAx::K>(idx, xag, yag);
-            const luint jj = axid<dim, BlkAx::J>(idx, xag, yag, kk);
-            const luint ii = axid<dim, BlkAx::I>(idx, xag, yag, kk);
+        const luint kk = axid<dim, BlkAx::K>(idx, xag, yag);
+        const luint jj = axid<dim, BlkAx::J>(idx, xag, yag, kk);
+        const luint ii = axid<dim, BlkAx::I>(idx, xag, yag, kk);
 
-            if constexpr (global::on_gpu) {
-                if ((ii >= xag) || (jj >= yag) || (kk >= zag)) {
-                    return;
-                }
+        if constexpr (global::on_gpu) {
+            if ((ii >= xag) || (jj >= yag) || (kk >= zag)) {
+                return;
             }
+        }
 
-            // active zones for primitive variables
-            const luint ia = ii + radius;
-            const luint ja = jj + radius;
-            const luint ka = kk + radius;
-            // active zones for fluxes
-            const luint iaf = ii + 1;
-            const luint jaf = jj + 1;
-            const luint kaf = kk + 1;
-            const luint tx  = (global::on_sm) ? threadIdx.x : 0;
-            const luint ty  = (global::on_sm) ? threadIdx.y : 0;
-            const luint tz  = (global::on_sm) ? threadIdx.z : 0;
-            const luint txa = (global::on_sm) ? tx + radius : ia;
-            const luint tya = (global::on_sm) ? ty + radius : ja;
-            const luint tza = (global::on_sm) ? tz + radius : ka;
-            const luint aid = idx3(ia, ja, ka, nx, ny, nz);
-            const luint tid = idx3(txa, tya, tza, sx, sy, sz);
+        // active zones for primitive variables
+        const luint ia = ii + radius;
+        const luint ja = jj + radius;
+        const luint ka = kk + radius;
+        // active zones for fluxes
+        const luint iaf = ii + 1;
+        const luint jaf = jj + 1;
+        const luint kaf = kk + 1;
+        const luint tx  = (global::on_sm) ? threadIdx.x : 0;
+        const luint ty  = (global::on_sm) ? threadIdx.y : 0;
+        const luint tz  = (global::on_sm) ? threadIdx.z : 0;
+        const luint txa = (global::on_sm) ? tx + radius : ia;
+        const luint tya = (global::on_sm) ? ty + radius : ja;
+        const luint tza = (global::on_sm) ? tz + radius : ka;
+        const luint aid = idx3(ia, ja, ka, nx, ny, nz);
+        const luint tid = idx3(txa, tya, tza, sx, sy, sz);
 
-            if constexpr (global::on_sm) {
-                load_shared_buffer<dim>(
-                    activeP,
-                    prb,
-                    prims,
-                    nx,
-                    ny,
-                    nz,
-                    sx,
-                    sy,
-                    tx,
-                    ty,
-                    tz,
-                    txa,
-                    tya,
-                    tza,
-                    ia,
-                    ja,
-                    ka,
-                    radius
-                );
-            }
+        if constexpr (global::on_sm) {
+            load_shared_buffer<dim>(
+                activePolicy,
+                prb,
+                prims,
+                nx,
+                ny,
+                nz,
+                sx,
+                sy,
+                tx,
+                ty,
+                tz,
+                txa,
+                tya,
+                tza,
+                ia,
+                ja,
+                ka,
+                radius
+            );
+        }
 
-            // mesh factors
-            const auto cell = this->cell_factors(ii, jj, kk);
+        // mesh factors
+        const auto cell = this->cell_factors(ii, jj, kk);
 
-            const auto xlf = idx3(ii + 0, jaf, kaf, nxv, nye, nze);
-            const auto xrf = idx3(ii + 1, jaf, kaf, nxv, nye, nze);
-            const auto ylf = idx3(iaf, jj + 0, kaf, nxe, nyv, nze);
-            const auto yrf = idx3(iaf, jj + 1, kaf, nxe, nyv, nze);
-            const auto zlf = idx3(iaf, jaf, kk + 0, nxe, nye, nzv);
-            const auto zrf = idx3(iaf, jaf, kk + 1, nxe, nye, nzv);
+        const auto xlf = idx3(ii + 0, jaf, kaf, nxv, nye, nze);
+        const auto xrf = idx3(ii + 1, jaf, kaf, nxv, nye, nze);
+        const auto ylf = idx3(iaf, jj + 0, kaf, nxe, nyv, nze);
+        const auto yrf = idx3(iaf, jj + 1, kaf, nxe, nyv, nze);
+        const auto zlf = idx3(iaf, jaf, kk + 0, nxe, nye, nzv);
+        const auto zrf = idx3(iaf, jaf, kk + 1, nxe, nye, nzv);
 
-            // compute edge emfs in clockwise direction wrt cell plane
-            detail::for_sequence(
-                detail::make_index_sequence<4>(),
-                [&](auto qidx) {
-                    constexpr auto q      = static_cast<luint>(qidx);
-                    constexpr auto corner = static_cast<Corner>(q);
+        // compute edge emfs in clockwise direction wrt cell plane
+        detail::for_sequence(detail::make_index_sequence<4>(), [&](auto qidx) {
+            constexpr auto q      = static_cast<luint>(qidx);
+            constexpr auto corner = static_cast<Corner>(q);
 
-                    // calc directional indices for i-j plane
-                    auto north = corner == Corner::NE || corner == Corner::NW;
-                    auto east  = corner == Corner::NE || corner == Corner::SE;
-                    auto south = !north;
-                    auto west  = !east;
+            // calc directional indices for i-j plane
+            auto north = corner == Corner::NE || corner == Corner::NW;
+            auto east  = corner == Corner::NE || corner == Corner::SE;
+            auto south = !north;
+            auto west  = !east;
 
-                    auto qn = jaf + north;
-                    auto qs = jaf - south;
-                    auto qe = iaf + east;
-                    auto qw = iaf - west;
+            auto qn = jaf + north;
+            auto qs = jaf - south;
+            auto qe = iaf + east;
+            auto qw = iaf - west;
 
-                    auto nidx = idx3(ii + east, qn, kaf, nxv, nye, nze);
-                    auto sidx = idx3(ii + east, qs, kaf, nxv, nye, nze);
-                    auto eidx = idx3(qe, jj + north, kaf, nxe, nyv, nze);
-                    auto widx = idx3(qw, jj + north, kaf, nxe, nyv, nze);
+            auto nidx = idx3(ii + east, qn, kaf, nxv, nye, nze);
+            auto sidx = idx3(ii + east, qs, kaf, nxv, nye, nze);
+            auto eidx = idx3(qe, jj + north, kaf, nxe, nyv, nze);
+            auto widx = idx3(qw, jj + north, kaf, nxe, nyv, nze);
 
-                    e3[q] = calc_edge_emf<Plane::IJ, corner>(
-                        gri[widx],
-                        gri[eidx],
-                        fri[sidx],
-                        fri[nidx],
-                        prb,
-                        ii,
-                        jj,
-                        kk,
-                        txa,
-                        tya,
-                        tza,
-                        3,
-                        b2now[widx],
-                        b2now[eidx],
-                        b1now[sidx],
-                        b1now[nidx]
-                    );
-
-                    // calc directional indices for i-k plane
-                    qn   = kaf + north;
-                    qs   = kaf - south;
-                    qe   = iaf + east;
-                    qw   = iaf - west;
-                    nidx = idx3(ii + east, jaf, qn, nxv, nye, nze);
-                    sidx = idx3(ii + east, jaf, qs, nxv, nye, nze);
-                    eidx = idx3(qe, jaf, kk + north, nxe, nye, nzv);
-                    widx = idx3(qw, jaf, kk + north, nxe, nye, nzv);
-
-                    e2[q] = calc_edge_emf<Plane::IK, corner>(
-                        hri[widx],
-                        hri[eidx],
-                        fri[sidx],
-                        fri[nidx],
-                        prb,
-                        ii,
-                        jj,
-                        kk,
-                        txa,
-                        tya,
-                        tza,
-                        2,
-                        b3now[widx],
-                        b3now[eidx],
-                        b1now[sidx],
-                        b1now[nidx]
-                    );
-
-                    // calc directional indices for j-k plane
-                    qn   = kaf + north;
-                    qs   = kaf - south;
-                    qe   = jaf + east;
-                    qw   = jaf - west;
-                    nidx = idx3(iaf, jj + east, qn, nxe, nyv, nze);
-                    sidx = idx3(iaf, jj + east, qs, nxe, nyv, nze);
-                    eidx = idx3(iaf, qe, kk + north, nxe, nye, nzv);
-                    widx = idx3(iaf, qw, kk + north, nxe, nye, nzv);
-
-                    e1[q] = calc_edge_emf<Plane::JK, corner>(
-                        hri[widx],
-                        hri[eidx],
-                        gri[sidx],
-                        gri[nidx],
-                        prb,
-                        ii,
-                        jj,
-                        kk,
-                        txa,
-                        tya,
-                        tza,
-                        1,
-                        b3now[widx],
-                        b3now[eidx],
-                        b2now[sidx],
-                        b2now[nidx]
-                    );
-                }
+            e3[q] = calc_edge_emf<Plane::IJ, corner>(
+                gri[widx],
+                gri[eidx],
+                fri[sidx],
+                fri[nidx],
+                prb,
+                ii,
+                jj,
+                kk,
+                txa,
+                tya,
+                tza,
+                3,
+                b2const[widx],
+                b2const[eidx],
+                b1const[sidx],
+                b1const[nidx]
             );
 
-            auto& b1L = bstag1[xlf];
-            auto& b1R = bstag1[xrf];
-            auto& b2L = bstag2[ylf];
-            auto& b2R = bstag2[yrf];
-            auto& b3L = bstag3[zlf];
-            auto& b3R = bstag3[zrf];
-            auto& b1c = cons[aid].b1();
-            auto& b2c = cons[aid].b2();
-            auto& b3c = cons[aid].b3();
+            // calc directional indices for i-k plane
+            qn   = kaf + north;
+            qs   = kaf - south;
+            qe   = iaf + east;
+            qw   = iaf - west;
+            nidx = idx3(ii + east, jaf, qn, nxv, nye, nze);
+            sidx = idx3(ii + east, jaf, qs, nxv, nye, nze);
+            eidx = idx3(qe, jaf, kk + north, nxe, nye, nzv);
+            widx = idx3(qw, jaf, kk + north, nxe, nye, nzv);
 
-            b1L = b1now[xlf] - dt * step * curl_e(1, e2, e3, cell, 0);
-            b1R = b1now[xrf] - dt * step * curl_e(1, e2, e3, cell, 1);
+            e2[q] = calc_edge_emf<Plane::IK, corner>(
+                hri[widx],
+                hri[eidx],
+                fri[sidx],
+                fri[nidx],
+                prb,
+                ii,
+                jj,
+                kk,
+                txa,
+                tya,
+                tza,
+                2,
+                b3const[widx],
+                b3const[eidx],
+                b1const[sidx],
+                b1const[nidx]
+            );
 
-            b2L = b2now[ylf] - dt * step * curl_e(2, e3, e1, cell, 0);
-            b2R = b2now[yrf] - dt * step * curl_e(2, e3, e1, cell, 1);
+            // calc directional indices for j-k plane
+            qn   = kaf + north;
+            qs   = kaf - south;
+            qe   = jaf + east;
+            qw   = jaf - west;
+            nidx = idx3(iaf, jj + east, qn, nxe, nyv, nze);
+            sidx = idx3(iaf, jj + east, qs, nxe, nyv, nze);
+            eidx = idx3(iaf, qe, kk + north, nxe, nye, nzv);
+            widx = idx3(iaf, qw, kk + north, nxe, nye, nzv);
 
-            b3L = b3now[zlf] - dt * step * curl_e(3, e1, e2, cell, 0);
-            b3R = b3now[zrf] - dt * step * curl_e(3, e1, e2, cell, 1);
+            e1[q] = calc_edge_emf<Plane::JK, corner>(
+                hri[widx],
+                hri[eidx],
+                gri[sidx],
+                gri[nidx],
+                prb,
+                ii,
+                jj,
+                kk,
+                txa,
+                tya,
+                tza,
+                1,
+                b3const[widx],
+                b3const[eidx],
+                b2const[sidx],
+                b2const[nidx]
+            );
+        });
 
-            if constexpr (global::debug_mode) {
-                const auto divb = div_b(b1L, b1R, b2L, b2R, b3L, b3R, cell);
-                if (!goes_to_zero(divb)) {
-                    printf("========================================\n");
-                    printf("DIV.B: %.2e\n", divb);
-                    printf("========================================\n");
-                    printf(
-                        "[%" PRIu64 "] Divergence of B is not zero at: %" PRIu64
-                        ", %" PRIu64 ", %" PRIu64 "!\n",
-                        global_iter,
-                        ii,
-                        jj,
-                        kk
-                    );
-                    printf("B1L: %.2e, B1R: %.2e\n", b1L, b1R);
-                    printf("B2L: %.2e, B2R: %.2e\n", b2L, b2R);
-                    printf("B3L: %.2e, B3R: %.2e\n", b3L, b3R);
-                    printf("theta_mean: %.2e\n", cell.x2mean);
-                    printf("tL: %.2e, tR: %.2e\n", cell.x2L(), cell.x2R());
-                    std::cin.get();
-                }
+        auto& b1L = bstag1[xlf];
+        auto& b1R = bstag1[xrf];
+        auto& b2L = bstag2[ylf];
+        auto& b2R = bstag2[yrf];
+        auto& b3L = bstag3[zlf];
+        auto& b3R = bstag3[zrf];
+        auto& b1c = cons[aid].b1();
+        auto& b2c = cons[aid].b2();
+        auto& b3c = cons[aid].b3();
+
+        b1L = b1const[xlf] - dt * step * curl_e(1, e2, e3, cell, 0);
+        b1R = b1const[xrf] - dt * step * curl_e(1, e2, e3, cell, 1);
+
+        b2L = b2const[ylf] - dt * step * curl_e(2, e3, e1, cell, 0);
+        b2R = b2const[yrf] - dt * step * curl_e(2, e3, e1, cell, 1);
+
+        b3L = b3const[zlf] - dt * step * curl_e(3, e1, e2, cell, 0);
+        b3R = b3const[zrf] - dt * step * curl_e(3, e1, e2, cell, 1);
+
+        if constexpr (global::debug_mode) {
+            const auto divb = div_b(b1L, b1R, b2L, b2R, b3L, b3R, cell);
+            if (!goes_to_zero(divb)) {
+                printf("========================================\n");
+                printf("DIV.B: %.2e\n", divb);
+                printf("========================================\n");
+                printf(
+                    "[%" PRIu64 "] Divergence of B is not zero at: %" PRIu64
+                    ", %" PRIu64 ", %" PRIu64 "!\n",
+                    global_iter,
+                    ii,
+                    jj,
+                    kk
+                );
+                printf("B1L: %.2e, B1R: %.2e\n", b1L, b1R);
+                printf("B2L: %.2e, B2R: %.2e\n", b2L, b2R);
+                printf("B3L: %.2e, B3R: %.2e\n", b3L, b3R);
+                printf("theta_mean: %.2e\n", cell.x2mean);
+                printf("tL: %.2e, tR: %.2e\n", cell.x2L(), cell.x2R());
+                std::cin.get();
             }
-
-            b1c = static_cast<real>(0.5) * (b1R + b1L);
-            b2c = static_cast<real>(0.5) * (b2R + b2L);
-            b3c = static_cast<real>(0.5) * (b3R + b3L);
-
-            // TODO: implement functional source and gravity
-            const auto source_terms = hydro_sources(cell);
-
-            // Gravity
-            const auto gravity = gravity_sources(prb[tid], cell);
-
-            // geometric source terms
-            const auto geom_source = cell.geom_sources(prb[tid]);
-
-            cons[aid] -=
-                ((fri[xrf] * cell.a1R() - fri[xlf] * cell.a1L()) * cell.idV1() +
-                 (gri[yrf] * cell.a2R() - gri[ylf] * cell.a2L()) * cell.idV2() +
-                 (hri[zrf] * cell.a3R() - hri[zlf] * cell.a3L()) * cell.idV3() -
-                 source_terms - gravity - geom_source) *
-                dt * step;
         }
-    );
+
+        b1c = static_cast<real>(0.5) * (b1R + b1L);
+        b2c = static_cast<real>(0.5) * (b2R + b2L);
+        b3c = static_cast<real>(0.5) * (b3R + b3L);
+
+        // TODO: implement functional source and gravity
+        const auto source_terms = hydro_sources(cell);
+
+        // Gravity
+        const auto gravity = gravity_sources(prb[tid], cell);
+
+        // geometric source terms
+        const auto geom_source = cell.geom_sources(prb[tid]);
+
+        cons[aid] -=
+            ((fri[xrf] * cell.a1R() - fri[xlf] * cell.a1L()) * cell.idV1() +
+             (gri[yrf] * cell.a2R() - gri[ylf] * cell.a2L()) * cell.idV2() +
+             (hri[zrf] * cell.a3R() - hri[zlf] * cell.a3L()) * cell.idV3() -
+             source_terms - gravity - geom_source) *
+            dt * step;
+    });
+    // copy the current staggered bfields to the constant arrays
+    b1const = bstag1;
+    b2const = bstag2;
+    b3const = bstag3;
 }
 
 // //===================================================================================================================
@@ -2794,9 +2790,12 @@ void RMHD<dim>::simulate(
     hri.resize(nxe * nye * nzv);
 
     // set the staggered magnetic fields to ics
-    bstag1 = bfield[0];
-    bstag2 = bfield[1];
-    bstag3 = bfield[2];
+    bstag1  = bfield[0];
+    bstag2  = bfield[1];
+    bstag3  = bfield[2];
+    b1const = bfield[0];
+    b2const = bfield[1];
+    b3const = bfield[2];
 
     // deallocate the old magnetic field
     deallocate_staggered_field();
@@ -2818,7 +2817,6 @@ void RMHD<dim>::simulate(
     deallocate_state();
     offload();
     compute_bytes_and_strides<primitive_t>(dim);
-    print_shared_mem();
     init_riemann_solver();
     this->set_mesh_funcs();
 

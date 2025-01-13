@@ -48,7 +48,7 @@ class atomic_bool_gpu
     __host__ __device__ explicit operator bool() const { return load(); }
 };
 
-using atomic_bool_shared = atomic_bool_gpu;
+using shared_atomic_bool = atomic_bool_gpu;
 using atomic_bool        = atomic_bool_gpu;
 
 #define DEV    __device__
@@ -117,6 +117,23 @@ inline auto devMemcpyFromSymbol(void* dst, const void* symbol, size_t count)
     return cudaMemcpyFromSymbol(dst, symbol, count);
 };
 
+inline auto devMallocHost(void** ptr, size_t size)
+{
+    return cudaMallocHost(ptr, size);
+};
+
+inline auto devLaunchKernel(
+    const void* func,
+    dim3 grid,
+    dim3 block,
+    void** args,
+    size_t sharedMem,
+    cudaStream_t stream
+)
+{
+    return cudaLaunchKernel(func, grid, block, args, sharedMem, stream);
+};
+
 constexpr auto devMemcpy               = cudaMemcpy;
 constexpr auto devFree                 = cudaFree;
 constexpr auto devMemset               = cudaMemset;
@@ -138,13 +155,17 @@ constexpr auto devStreamWaitEvent      = cudaStreamWaitEvent;
 constexpr auto devStreamQuery          = cudaStreamQuery;
 constexpr auto devEnablePeerAccess     = cudaDeviceEnablePeerAccess;
 constexpr auto devGetDevice            = cudaGetDevice;
-constexpr auto devPeerCopyAsync        = cudaMemcpyPeerAsync;
+constexpr auto devMemcpyPeerAsync      = cudaMemcpyPeerAsync;
+constexpr auto devMemcpyAsync          = cudaMemcpyAsync;
+constexpr auto devHostRegister         = cudaHostRegister;
+constexpr auto devHostUnregister       = cudaHostUnregister;
+// constexpr auto devLaunchKernel         = cudaLaunchKernel;
 
-using devProp_t     = cudaDeviceProp;
-using devError_t    = cudaError_t;
-using devEvent_t    = cudaEvent_t;
-using simbiStream_t = cudaStream_t;
-
+using devProp_t       = cudaDeviceProp;
+using devError_t      = cudaError_t;
+using devEvent_t      = cudaEvent_t;
+using simbiStream_t   = cudaStream_t;
+using simbiMemcpyKind = cudaMemcpyKind;
 // tools for JIT compilation
 constexpr auto devCompileProgram    = nvrtcCompileProgram;
 constexpr auto devCreateProgram     = nvrtcCreateProgram;
@@ -152,11 +173,13 @@ constexpr auto devGetIRSize         = nvrtcGetPTXSize;
 constexpr auto devGetIR             = nvrtcGetPTX;
 constexpr auto devGetProgramLogSize = nvrtcGetProgramLogSize;
 constexpr auto devGetProgramLog     = nvrtcGetProgramLog;
+constexpr auto devDestroyProgram    = nvrtcDestroyProgram;
 constexpr auto devLoadModule        = cuModuleLoadData;
 constexpr auto devUnloadModule      = cuModuleUnload;
 constexpr auto devGetFunction       = cuModuleGetFunction;
-using devProgram_t                  = nvrtcProgram;
-using devContext_t                  = CUcontext;
-using devModule_t                   = CUmodule;
-using devDevice_t                   = CUdevice;
-using devFunction_t                 = CUfunction;
+
+using devProgram_t  = nvrtcProgram;
+using devContext_t  = CUcontext;
+using devModule_t   = CUmodule;
+using devDevice_t   = CUdevice;
+using devFunction_t = CUfunction;

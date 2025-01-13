@@ -75,11 +75,10 @@ namespace simbi {
         std::vector<std::vector<real>> bfield;
         std::vector<bool> object_cells;
 
-        luint xblockdim, yblockdim, zblockdim, sx, sy, sz;
-        luint xblockspace, yblockspace, zblockspace;
-        luint shBlockSpace, shBlockBytes;
+        luint sx, sy, sz;
         luint nxv, nyv, nzv, nxe, nye, nze, nv;
-        ExecutionPolicy<> fullP, activeP, xvertexP, yvertexP, zvertexP;
+        ExecutionPolicy<> fullPolicy, activePolicy, xvertexPolicy,
+            yvertexPolicy, zvertexPolicy;
 
         //=========================== GPU Threads Per Dimension
         std::string readGpuEnvVar(const std::string& key) const
@@ -134,7 +133,7 @@ namespace simbi {
             std::vector<std::vector<real>>().swap(state);
         }
 
-        void print_shared_mem() const
+        void print_shared_mem(const size_t shBlockBytes) const
         {
             if constexpr (global::on_sm) {
                 printf(
@@ -147,9 +146,9 @@ namespace simbi {
         template <typename P>
         void compute_bytes_and_strides(int dim)
         {
-            xblockdim = std::min(xag, gpu_block_dimx);
-            yblockdim = std::min(yag, gpu_block_dimy);
-            zblockdim = std::min(zag, gpu_block_dimz);
+            auto xblockdim = std::min(xag, gpu_block_dimx);
+            auto yblockdim = std::min(yag, gpu_block_dimy);
+            auto zblockdim = std::min(zag, gpu_block_dimz);
 
             if constexpr (global::on_gpu) {
                 if (xblockdim * yblockdim * zblockdim < global::WARP_SIZE) {
@@ -171,50 +170,44 @@ namespace simbi {
             sx   = (global::on_sm) ? xblockdim + 2 * radius : nx;
             sy = (dim < 2) ? 1 : (global::on_sm) ? yblockdim + 2 * radius : ny;
             sz = (dim < 3) ? 1 : (global::on_sm) ? zblockdim + 2 * radius : nz;
-            xblockspace  = xblockdim + 2 * radius;
-            yblockspace  = (dim < 2) ? 1 : yblockdim + 2 * radius;
-            zblockspace  = (dim < 3) ? 1 : zblockdim + 2 * radius;
-            shBlockSpace = xblockspace * yblockspace * zblockspace;
-            shBlockBytes = shBlockSpace * sizeof(P) * global::on_sm;
+            const auto xblockspace    = xblockdim + 2 * radius;
+            const auto yblockspace    = (dim < 2) ? 1 : yblockdim + 2 * radius;
+            const auto zblockspace    = (dim < 3) ? 1 : zblockdim + 2 * radius;
+            const size_t shBlockSpace = xblockspace * yblockspace * zblockspace;
+            const size_t shBlockBytes =
+                shBlockSpace * sizeof(P) * global::on_sm;
 
-            constexpr auto nStream = 0;
-            constexpr auto nDevice = 0;
-            fullP                  = simbi::ExecutionPolicy(
+            const simbiStream_t stream = nullptr;
+            fullPolicy                 = ExecutionPolicy(
                 {nx, ny, nz},
                 {xblockdim, yblockdim, zblockdim},
-                0,
-                {nStream},
-                nDevice
+                {.sharedMemBytes = 0, .streams = {stream}, .devices = {0}}
             );
-            activeP = simbi::ExecutionPolicy(
+            activePolicy = ExecutionPolicy(
                 {xag, yag, zag},
                 {xblockdim, yblockdim, zblockdim},
-                shBlockBytes,
-                {nStream},
-                nDevice
+                {.sharedMemBytes = shBlockBytes,
+                 .streams        = {stream},
+                 .devices        = {0}}
 
             );
-            xvertexP = simbi::ExecutionPolicy(
+            xvertexPolicy = ExecutionPolicy(
                 {nxv, yag, zag},
                 {xblockdim, yblockdim, zblockdim},
-                0,
-                {nStream},
-                nDevice
+                {.sharedMemBytes = 0, .streams = {stream}, .devices = {0}}
             );
-            yvertexP = simbi::ExecutionPolicy(
+            yvertexPolicy = ExecutionPolicy(
                 {xag, nyv, zag},
                 {xblockdim, yblockdim, zblockdim},
-                0,
-                {nStream},
-                nDevice
+                {.sharedMemBytes = 0, .streams = {stream}, .devices = {0}}
             );
-            zvertexP = simbi::ExecutionPolicy(
+            zvertexPolicy = ExecutionPolicy(
                 {xag, yag, nzv},
                 {xblockdim, yblockdim, zblockdim},
-                0,
-                {nStream},
-                nDevice
+                {.sharedMemBytes = 0, .streams = {stream}, .devices = {0}}
             );
+
+            print_shared_mem(0);
         }
 
       protected:
@@ -256,7 +249,8 @@ namespace simbi {
               quirk_smoothing(init_conditions.quirk_smoothing),
               constant_sources(init_conditions.constant_sources),
               total_zones(nx * ny * nz),
-              boundary_conditions(std::move(init_conditions.boundary_conditions)
+              boundary_conditions(
+                  std::move(init_conditions.boundary_conditions)
               ),
               sim_solver(helpers::solver_map.at(init_conditions.solver)),
               geometry(helpers::geometry_map.at(init_conditions.coord_system)),

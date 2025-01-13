@@ -104,6 +104,11 @@ namespace simbi {
         void cons2prim();
         void advance();
 
+        void update_mesh_motion(
+            std::function<real(real)> const& a,
+            std::function<real(real)> const& adot
+        );
+
         DUAL eigenvals_t calc_eigenvals(
             const primitive_t& primsL,
             const primitive_t& primsR,

@@ -456,7 +456,8 @@ struct anyConserved : generic_hydro::anyHydro<dim, anyConserved<dim, R>, R> {
 
         if constexpr (global::on_gpu) {
             printf("Invalid momentum %llu\n", nhat);
-            asm("trap;");
+            // asm("trap;");
+            return m1();
         }
         else {
             throw std::invalid_argument("Invalid momentum component");
@@ -494,7 +495,8 @@ struct anyConserved : generic_hydro::anyHydro<dim, anyConserved<dim, R>, R> {
 
         if constexpr (global::on_gpu) {
             printf("Invalid bcomponent %llu\n", nhat);
-            asm("trap;");
+            return b1();
+            // asm("trap;");
         }
         else {
             throw std::invalid_argument("Invalid bcomponent");

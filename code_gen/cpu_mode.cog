@@ -1,14 +1,17 @@
+#include <stdexcept>
 using sig_bool = std::atomic<bool>;
 #define SINGLE(kernel_name, ...)                    kernel_name(__VA_ARGS__);
 #define CALL(kernel_name, gridsize, blocksize, ...) kernel_name(__VA_ARGS__);
 
-using atomic_bool_shared =  std::atomic<bool>;
-using atomic_bool =  std::atomic<bool>;
+using shared_atomic_bool = std::atomic<bool>;
+using atomic_bool        = std::atomic<bool>;
 
-template<typename T>
-void store_atomic_bool(T& var, bool value) {
+template <typename T>
+void store_atomic_bool(T& var, bool value)
+{
     var.store(value);
 }
+
 namespace global {
     constexpr auto BuildPlatform = Platform::CPU;
     constexpr int WARP_SIZE      = 32;
@@ -30,29 +33,53 @@ namespace global {
 // Alias data types on host
 namespace simbi {
     struct dim3 {
-        ~dim3() = default;
-        dim3()  = default;
-        uint32_t x;
-        uint32_t y;
-        uint32_t z;
+        unsigned int x, y, z;
 
-        dim3(uint32_t x, uint32_t y, uint32_t z) : x(x), y(y), z(z) {}
+        dim3(unsigned int x = 1, unsigned int y = 1, unsigned int z = 1)
+            : x(x), y(y), z(z)
+        {
+        }
 
-        dim3(uint32_t x, uint32_t y) : x(x), y(y), z(1) {}
+        unsigned int volume() const { return x * y * z; }
 
-        dim3(uint32_t x) : x(x), y(1), z(1) {}
+        unsigned int& operator[](size_t index)
+        {
+            switch (index) {
+                case 0:
+                    return x;
+                case 1:
+                    return y;
+                case 2:
+                    return z;
+                default:
+                    throw std::out_of_range("Index out of range for dim3");
+            }
+        }
+
+        const unsigned int& operator[](size_t index) const
+        {
+            switch (index) {
+                case 0:
+                    return x;
+                case 1:
+                    return y;
+                case 2:
+                    return z;
+                default:
+                    throw std::out_of_range("Index out of range for dim3");
+            }
+        }
     };
 
-    using simbiStream_t = int;
+    using simbiStream_t   = void*;
     using simbiMemcpyKind = int;
-    using devError_t    = int;
-    using devProp_t     = int;
-    using devEvent_t    = std::chrono::high_resolution_clock::time_point;
-    using devModule_t   = void*;
-    using devFunction_t = int;
-    using devContext_t  = int;
-    using devProgram_t  = int;
-
+    using devError_t      = int;
+    using devProp_t       = int;
+    using devEvent_t      = std::chrono::high_resolution_clock::time_point;
+    using devModule_t     = void*;
+    using devFunction_t   = int;
+    using devContext_t    = int;
+    using devProgram_t    = int;
 
     inline dim3 blockIdx(1, 1, 1);
     inline dim3 blockDim(1, 1, 1);

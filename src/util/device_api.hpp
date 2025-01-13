@@ -122,13 +122,18 @@ namespace simbi {
             void streamCreate(simbiStream_t* stream);
             void streamDestroy(simbiStream_t stream);
             void streamSynchronize(simbiStream_t stream);
-            void streamWaitEvent(simbiStream_t stream, devEvent_t event);
+            void streamWaitEvent(
+                simbiStream_t stream,
+                devEvent_t event,
+                unsigned int flags = 0
+            );
             void streamQuery(simbiStream_t stream, int* status);
             void peerCopyAsync(
                 void* dst,
+                int dst_device,
                 const void* src,
+                int src_device,
                 size_t bytes,
-                simbiMemcpyKind kind,
                 simbiStream_t stream
             );
             void memcpyAsync(
@@ -138,7 +143,21 @@ namespace simbi {
                 simbiMemcpyKind kind,
                 simbiStream_t stream
             );
-            void enablePeerAccess(int device);
+            void enablePeerAccess(int device, unsigned int flags = 0);
+            void asyncCopyHostToDevice(
+                void* dst,
+                const void* src,
+                size_t bytes,
+                simbiStream_t stream
+            );
+            void asyncCopyDeviceToHost(
+                void* dst,
+                const void* src,
+                size_t bytes,
+                simbiStream_t stream
+            );
+            void hostRegister(void* ptr, size_t size, unsigned int flags);
+            void hostUnregister(void* ptr);
 
             // JIT compilation
             void createProgram(
@@ -158,7 +177,7 @@ namespace simbi {
             void getProgramLog(devProgram_t program, char* log);
             void getProgramIRSize(devProgram_t program, size_t* size);
             void getProgramIR(devProgram_t program, char* ir);
-            void destroyProgram(devProgram_t program);
+            void destroyProgram(devProgram_t* program);
             void moduleLoadData(devModule_t* module, const char* ir);
             void moduleUnload(devModule_t module);
             void loadModule(devModule_t* module, const char* ir);
@@ -167,7 +186,16 @@ namespace simbi {
                 devModule_t module,
                 const char* name
             );
-            void getIRSize(size_t* size, devModule_t module);
+            void getIRSize(size_t* size, devProgram_t module);
+            void alignedMalloc(void** ptr, size_t size);
+            void launchKernel(
+                devFunction_t function,
+                dim3 grid,
+                dim3 block,
+                void** args,
+                size_t shared_mem,
+                simbiStream_t stream
+            );
 
             DEV inline void synchronize()
             {
