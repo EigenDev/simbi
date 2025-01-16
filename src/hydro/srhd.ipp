@@ -377,7 +377,8 @@ template <int dim>
 template <TIMESTEP_TYPE dt_type>
 void SRHD<dim>::adapt_dt()
 {
-    auto calc_wave_speeds = [gamma = this->gamma](const Maybe<primitive_t>& prim
+    auto calc_wave_speeds = [gamma = this->gamma] DEV(
+                                const Maybe<primitive_t>& prim
                             ) -> WaveSpeeds {
         if constexpr (dt_type == TIMESTEP_TYPE::MINIMUM) {
             return WaveSpeeds{
@@ -405,7 +406,7 @@ void SRHD<dim>::adapt_dt()
         };
     };
     auto calc_local_dt =
-        [this](const WaveSpeeds& speeds, const auto& cell) -> real {
+        [this] DEV(const WaveSpeeds& speeds, const auto& cell) -> real {
         switch (geometry) {
             case Geometry::CARTESIAN:
                 if constexpr (dim == 1) {
@@ -502,7 +503,7 @@ void SRHD<dim>::adapt_dt()
     dt = prims
              .transform_parallel(
                  fullPolicy,
-                 [this, calc_wave_speeds, calc_local_dt](
+                 [this, calc_wave_speeds, calc_local_dt] DEV(
                      const Maybe<primitive_t>& prim,
                      const size_t gid
                  ) -> real {
@@ -515,8 +516,8 @@ void SRHD<dim>::adapt_dt()
              )
              .reduce(
                  fullPolicy,
-                 INFINITY,
-                 [](real a, real b) { return std::min(a, b); }
+                 static_cast<real>(INFINITY),
+                 [] DEV(real a, real b) { return std::min(a, b); }
              ) *
          cfl;
 }
@@ -1511,25 +1512,14 @@ void SRHD<dim>::simulate(
 
     config_ghosts(this);
     cons2prim();
-    if constexpr (global::on_gpu) {
-        adapt_dt<TIMESTEP_TYPE::MINIMUM>(fullPolicy);
-    }
-    else {
-        adapt_dt<TIMESTEP_TYPE::MINIMUM>();
-    }
+    adapt_dt<TIMESTEP_TYPE::MINIMUM>();
 
     // Simulate :)
     simbi::detail::logger::with_logger(*this, tend, [&] {
         advance();
         config_ghosts(this);
         cons2prim();
-
-        if constexpr (global::on_gpu) {
-            adapt_dt(fullPolicy);
-        }
-        else {
-            adapt_dt();
-        }
+        adapt_dt();
 
         t += step * dt;
         if (mesh_motion) {

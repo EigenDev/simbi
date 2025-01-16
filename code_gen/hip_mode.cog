@@ -164,7 +164,7 @@ inline auto devMallocHost(void** ptr, size_t size)
     return hipMallocHost(ptr, size);
 };
 
-__device__ __forceinline__ real atomicMinReal(real* addr, real value)
+__device__ __forceinline__ real devAtomicMinReal(real* addr, real value)
 {
     real old =
         __int_as_real(atomicMin((atomic_cast*) addr, __real_as_int(value)));
@@ -197,7 +197,6 @@ constexpr auto devMemcpyAsync          = hipMemcpyAsync;
 constexpr auto devHostRegister         = hipHostRegister;
 constexpr auto devHostUnregister       = hipHostUnregister;
 constexpr auto devLaunchKernel         = hipLaunchKernel;
-constexpr auto devAtomicMin            = atomicMinReal;
 
 using devProp_t     = hipDeviceProp_t;
 using devError_t    = hipError_t;

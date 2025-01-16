@@ -511,8 +511,11 @@ namespace simbi {
 
         // reductions
         template <typename U, typename BinaryOp>
-        U reduce(const ExecutionPolicy<>& policy, U init, BinaryOp binary_op)
-            const;
+        U reduce(
+            const ExecutionPolicy<>& policy,
+            U init,
+            BinaryOp binary_op
+        ) const;
 
         // Composed operations
         template <typename F, typename G>
@@ -542,17 +545,21 @@ namespace simbi {
         // transform_parallel method
         // only for functions that do not require index
         template <typename Func>
-        auto
-        transform_parallel(const ExecutionPolicy<>& policy, Func transform_op)
-            const -> std::enable_if_t<
+        auto transform_parallel(
+            const ExecutionPolicy<>& policy,
+            Func transform_op
+        ) const
+            -> std::enable_if_t<
                 !has_index_param<Func, const DT&>::value,
                 ndarray<std::invoke_result_t<Func, const DT&>, dim>>;
 
         // only for functions that require index
         template <typename Func>
-        auto
-        transform_parallel(const ExecutionPolicy<>& policy, Func transform_op)
-            const -> std::enable_if_t<
+        auto transform_parallel(
+            const ExecutionPolicy<>& policy,
+            Func transform_op
+        ) const
+            -> std::enable_if_t<
                 has_index_param<Func, const DT&>::value,
                 ndarray<std::invoke_result_t<Func, const DT&, size_type>, dim>>;
 
@@ -565,7 +572,8 @@ namespace simbi {
         // ) const;
 
         template <typename T, typename Func>
-        auto transform_parallel_with(
+        ndarray<std::invoke_result_t<Func, const DT&, const T&>, dim>
+        transform_parallel_with(
             const ExecutionPolicy<>& policy,
             ndarray<T>& other,
             Func transform_op
@@ -573,7 +581,7 @@ namespace simbi {
 
         // inplace stencil transform method
         template <typename T, typename Func>
-        auto transform_stencil_with(
+        void transform_stencil_with(
             const ExecutionPolicy<>& policy,
             const ndarray<T, dim>& stencil_array,
             size_type radius,

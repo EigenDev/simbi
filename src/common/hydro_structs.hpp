@@ -232,8 +232,7 @@ struct mag_four_vec {
     {
     }
 
-    template <>
-    DUAL mag_four_vec<Regime::RMHD>(const anyPrimitive<dim, Regime::RMHD>& prim)
+    DUAL mag_four_vec(const anyPrimitive<dim, Regime::RMHD>& prim)
         : lorentz(prim.lorentz_factor()),
           vdb(prim.vdotb()),
           zero(lorentz * vdb),

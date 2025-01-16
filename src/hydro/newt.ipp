@@ -33,8 +33,8 @@ template <int dim>
 void Newtonian<dim>::cons2prim()
 {
     shared_atomic_bool local_failure;
-    auto to_primitive = [gamma = this->gamma,
-                         loc   = &local_failure] DEV(const auto& cons
+    auto to_primitive = [gamma = this->gamma, loc = &local_failure] DEV(
+                            const auto& cons
                         ) -> Maybe<primitive_t> {
         const real rho = cons.dens();
         const real v1  = (cons.momentum(1) / rho);
@@ -218,7 +218,8 @@ DUAL Newtonian<dim>::eigenvals_t Newtonian<dim>::calc_eigenvals(
 template <int dim>
 void Newtonian<dim>::adapt_dt()
 {
-    auto calc_wave_speeds = [gamma = this->gamma](const Maybe<primitive_t>& prim
+    auto calc_wave_speeds = [gamma = this->gamma] DEV(
+                                const Maybe<primitive_t>& prim
                             ) -> WaveSpeeds {
         const real cs = std::sqrt(gamma * prim->p() / prim->rho());
         const real v1 = prim->vcomponent(1);
@@ -235,7 +236,7 @@ void Newtonian<dim>::adapt_dt()
         };
     };
     auto calc_local_dt =
-        [this](const WaveSpeeds& speeds, const auto& cell) -> real {
+        [this] DEV(const WaveSpeeds& speeds, const auto& cell) -> real {
         switch (geometry) {
             case Geometry::CARTESIAN:
                 if constexpr (dim == 1) {
@@ -332,7 +333,7 @@ void Newtonian<dim>::adapt_dt()
     dt = prims
              .transform_parallel(
                  fullPolicy,
-                 [this, calc_wave_speeds, calc_local_dt](
+                 [this, calc_wave_speeds, calc_local_dt] DEV(
                      const Maybe<primitive_t>& prim,
                      const size_t gid
                  ) -> real {
@@ -345,8 +346,8 @@ void Newtonian<dim>::adapt_dt()
              )
              .reduce(
                  fullPolicy,
-                 INFINITY,
-                 [](real a, real b) { return std::min(a, b); }
+                 static_cast<real>(INFINITY),
+                 [] DEV(real a, real b) { return std::min(a, b); }
              ) *
          cfl;
 
@@ -700,8 +701,8 @@ DUAL Newtonian<dim>::conserved_t Newtonian<dim>::calc_hllc_flux(
 //                                           SOURCE TERMS
 //===================================================================================================================
 template <int dim>
-DUAL Newtonian<dim>::conserved_t Newtonian<dim>::hydro_sources(const auto& cell
-) const
+DUAL Newtonian<dim>::conserved_t
+Newtonian<dim>::hydro_sources(const auto& cell) const
 {
     if (null_sources) {
         return conserved_t{};
@@ -1126,12 +1127,7 @@ void Newtonian<dim>::simulate(
     // this->set_mesh_funcs();
     config_ghosts(this);
     cons2prim();
-    if constexpr (global::on_gpu) {
-        adapt_dt(fullPolicy);
-    }
-    else {
-        adapt_dt();
-    }
+    adapt_dt();
 
     // Simulate :)
     simbi::detail::logger::with_logger(*this, tend, [&] {

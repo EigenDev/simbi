@@ -198,11 +198,11 @@ namespace simbi {
             );
 
             template <typename T>
-            void atomicMin(T* address, T val)
+            DEV T atomicMin(T* address, T val)
             {
 #if GPU_CODE
-                auto status = error::status_t(devAtomicMinReal(address, val));
-                error::check_err(status, "Failed to atomicMin");
+                return devAtomicMinReal(address, val);
+
 #endif
             };
 

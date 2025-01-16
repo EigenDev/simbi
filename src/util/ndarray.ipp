@@ -676,8 +676,8 @@ simbi::ndarray<DT, dim>& simbi::ndarray<DT, dim>::filter(UnaryPredicate pred)
 
 template <typename DT, int dim>
 template <typename UnaryPredicate>
-simbi::ndarray<DT, dim> simbi::ndarray<DT, dim>::filter(UnaryPredicate pred
-) const
+simbi::ndarray<DT, dim>
+simbi::ndarray<DT, dim>::filter(UnaryPredicate pred) const
 {
     simbi::ndarray<DT, dim> result;
     std::copy_if(
@@ -702,44 +702,55 @@ U simbi::ndarray<DT, dim>::reduce(
     if constexpr (global::on_gpu) {
         ndarray<U> result(1, init);
         result.copyToGpu();
-        auto result_ptr = result.dev_data();
+        auto result_ptr           = result.dev_data();
+        const auto in_ptr         = dev_arr.get();
+        const size_type num_items = sz;
 
-        const auto in_ptr          = dev_arr.get();
-        const size_type num_items  = sz;
-        const size_type block_size = policy.batch_size;
-        const size_type num_blocks = policy.get_num_batches(sz);
+        // Get 3D dimensions from policy
+        const dim3 grid                   = policy.gridSize;
+        const dim3 block                  = policy.blockSize;
+        const size_type total_blocks      = grid.x * grid.y * grid.z;
+        const size_type threads_per_block = block.x * block.y * block.z;
 
-        // Two-phase reduction
-        parallel_for(policy, num_blocks, [=] DEV(size_type bid) {
-            // Phase 1: Block reduction
-            SHARED U shared[256];   // Assuming max block size
+        parallel_for(policy, [=] DEV(size_type bid) {
+            // 3D block index
+            const unsigned int bx = bid % grid.x;
+            const unsigned int by = (bid / grid.x) % grid.y;
+            const unsigned int bz = bid / (grid.x * grid.y);
 
-            const int tid = threadIdx.z * blockDim.x * blockDim.y +
-                            threadIdx.y * blockDim.x + threadIdx.x;
-            const size_type start = bid * block_size + tid;
+            // 3D thread index
+            const unsigned int tx = threadIdx.x;
+            const unsigned int ty = threadIdx.y;
+            const unsigned int tz = threadIdx.z;
 
-            // Load and reduce within thread
+            // Global thread index (3D -> linear)
+            const size_type tid =
+                (bz * grid.y * grid.x + by * grid.x + bx) * threads_per_block +
+                (tz * block.y * block.x + ty * block.x + tx);
+
+            // Warp lane index
+            const unsigned int lane = tid % global::WARP_SIZE;
+
+            // Grid stride accounting for 3D grid
+            const size_type grid_stride = total_blocks * threads_per_block;
+
+            // Per-thread reduction with 3D grid stride
             U thread_sum = init;
-            for (size_type i = start; i < num_items;
-                 i += block_size * gridDim.x) {
+            for (size_type i = tid; i < num_items; i += grid_stride) {
                 thread_sum = binary_op(thread_sum, in_ptr[i]);
             }
 
-            // Store in shared memory
-            shared[tid] = thread_sum;
-            gpu::api::synchronize();
-
-            // Reduce within block
-            for (size_type s = block_size / 2; s > 0; s >>= 1) {
-                if (tid < s) {
-                    shared[tid] = binary_op(shared[tid], shared[tid + s]);
-                }
-                gpu::api::synchronize();
+            // Warp reduction
+            for (int offset = 16; offset > 0; offset >>= 1) {
+                thread_sum = binary_op(
+                    thread_sum,
+                    __shfl_down_sync(0xffffffff, thread_sum, offset)
+                );
             }
 
-            // Update global result
-            if (tid == 0) {
-                gpu::api::atomicMin(result_ptr, shared[0]);
+            // First thread in warp writes to result
+            if (lane == 0) {
+                result_ptr[lane] = gpu::api::atomicMin(result_ptr, thread_sum);
             }
         });
 
@@ -925,7 +936,8 @@ auto simbi::ndarray<DT, dim>::transform_parallel(
 
 template <typename DT, int dim>
 template <typename T, typename Func>
-auto simbi::ndarray<DT, dim>::transform_parallel_with(
+simbi::ndarray<std::invoke_result_t<Func, const DT&, const T&>, dim>
+simbi::ndarray<DT, dim>::transform_parallel_with(
     const ExecutionPolicy<>& policy,
     simbi::ndarray<T>& other,
     Func transform_op
@@ -968,7 +980,7 @@ auto simbi::ndarray<DT, dim>::transform_parallel_with(
 
 template <typename DT, int dim>
 template <typename T, typename Func>
-auto simbi::ndarray<DT, dim>::transform_stencil_with(
+void simbi::ndarray<DT, dim>::transform_stencil_with(
     const ExecutionPolicy<>& policy,
     const simbi::ndarray<T, dim>& stencil_array,
     size_type radius,
