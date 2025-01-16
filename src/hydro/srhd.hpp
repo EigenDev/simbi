@@ -25,6 +25,7 @@
 #include "common/hydro_structs.hpp"   // for Conserved, Primitive
 #include "common/mesh.hpp"            // for Mesh
 #include "util/exec_policy.hpp"       // for ExecutionPolicy
+#include "util/maybe.hpp"             // for Maybe
 #include "util/ndarray.hpp"           // for ndarray
 #include <dlfcn.h>                    // for dlopen, dlclose, dlsym
 #include <functional>                 // for function
@@ -44,10 +45,11 @@ namespace simbi {
         static constexpr int nvars               = dim + 3;
         static constexpr std::string_view regime = "srhd";
         // set the primitive and conservative types at compile time
-        using primitive_t = anyPrimitive<dim, Regime::SRHD>;
-        using conserved_t = anyConserved<dim, Regime::SRHD>;
-        using eigenvals_t = Eigenvals<dim, Regime::SRHD>;
-        using function_t  = typename helpers::real_func<dim>::type;
+        using primitive_t   = anyPrimitive<dim, Regime::SRHD>;
+        using conserved_t   = anyConserved<dim, Regime::SRHD>;
+        using eigenvals_t   = Eigenvals<dim, Regime::SRHD>;
+        using mag_fourvec_t = mag_four_vec<dim>;
+        using function_t    = typename helpers::real_func<dim>::type;
         template <typename T>
         using RiemannFuncPointer = conserved_t (T::*)(
             const primitive_t&,
@@ -62,8 +64,8 @@ namespace simbi {
         ndarray<function_t> gsources;   // gravity sources
 
         /* Shared Data Members */
-        ndarray<primitive_t> prims;
-        ndarray<conserved_t> cons;
+        ndarray<Maybe<primitive_t>, dim> prims;
+        ndarray<conserved_t, dim> cons;
         ndarray<real> pressure_guess, dt_min;
 
         // library handles
@@ -100,21 +102,21 @@ namespace simbi {
         void advance();
 
         DUAL eigenvals_t calc_eigenvals(
-            const primitive_t& primsL,
-            const primitive_t& primsR,
+            const auto& primsL,
+            const auto& primsR,
             const luint nhat
         ) const;
 
         DUAL conserved_t calc_hllc_flux(
-            const primitive_t& prL,
-            const primitive_t& prR,
+            const auto& prL,
+            const auto& prR,
             const luint nhat,
             const real vface = 0.0
         ) const;
 
         DUAL conserved_t calc_hlle_flux(
-            const primitive_t& prL,
-            const primitive_t& prR,
+            const auto& prL,
+            const auto& prR,
             const luint nhat,
             const real vface = 0.0
         ) const;
@@ -162,7 +164,7 @@ namespace simbi {
         DUAL conserved_t hydro_sources(const auto& cell) const;
 
         DUAL conserved_t
-        gravity_sources(const primitive_t& prims, const auto& cell) const;
+        gravity_sources(const auto& prims, const auto& cell) const;
 
         void load_functions()
         {

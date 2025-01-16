@@ -88,8 +88,9 @@ namespace simbi {
         std::vector<function_t> gsources;   // gravity sources
 
         /* Shared Data Members */
-        ndarray<primitive_t> prims;
-        ndarray<conserved_t> cons, fri, gri, hri;
+        ndarray<primitive_t, dim> prims;
+        ndarray<conserved_t, dim> cons;
+        ndarray<conserved_t> fri, gri, hri;
         ndarray<real> dt_min, bstag1, bstag2, bstag3;
         ndarray<real> b1const, b2const, b3const;
 
@@ -103,41 +104,41 @@ namespace simbi {
 
         /* Methods */
         void cons2prim();
-        DEV primitive_t cons2prim(const conserved_t& cons) const;
+        DEV auto cons2prim(const auto& cons) const;
         void set_flux_and_fields();
         void riemann_fluxes();
         void advance();
 
         DUAL auto
-        calc_max_wave_speeds(const primitive_t& prims, const luint nhat) const;
+        calc_max_wave_speeds(const auto& prims, const luint nhat) const;
 
         DUAL eigenvals_t calc_eigenvals(
-            const primitive_t& primsL,
-            const primitive_t& primsR,
+            const auto& primsL,
+            const auto& primsR,
             const luint nhat
         ) const;
 
-        DUAL conserved_t prims2cons(const primitive_t& prims) const;
+        DUAL conserved_t prims2cons(const auto& prims) const;
 
         DUAL conserved_t calc_hlle_flux(
-            const primitive_t& prL,
-            const primitive_t& prR,
+            const auto& prL,
+            const auto& prR,
             const luint nhat,
             const real vface,
             const real bface
         ) const;
 
         DUAL conserved_t calc_hllc_flux(
-            const primitive_t& prL,
-            const primitive_t& prR,
+            const auto& prL,
+            const auto& prR,
             const luint nhat,
             const real vface,
             const real bface
         ) const;
 
         DUAL conserved_t calc_hlld_flux(
-            const primitive_t& prL,
-            const primitive_t& prR,
+            const auto& prL,
+            const auto& prR,
             const luint nhat,
             const real vface,
             const real bface
@@ -173,8 +174,7 @@ namespace simbi {
             SINGLE(helpers::hybrid_set_riemann_solver, this);
         }
 
-        DUAL conserved_t
-        prims2flux(const primitive_t& prims, const luint nhat) const;
+        DUAL conserved_t prims2flux(const auto& prims, const luint nhat) const;
 
         template <TIMESTEP_TYPE dt_type = TIMESTEP_TYPE::ADAPTIVE>
         void adapt_dt();
@@ -198,11 +198,11 @@ namespace simbi {
          */
         template <Plane P, Corner C>
         DUAL real calc_edge_emf(
-            const conserved_t& fw,
-            const conserved_t& fe,
-            const conserved_t& fs,
-            const conserved_t& fn,
-            const primitive_t* prims,
+            const auto& fw,
+            const auto& fe,
+            const auto& fs,
+            const auto& fn,
+            const auto* prims,
             const luint ii,
             const luint jj,
             const luint kk,
@@ -241,15 +241,15 @@ namespace simbi {
             const real lam[2],
             const real bn,
             const luint nhat,
-            primitive_t& praL,
-            primitive_t& praR,
-            primitive_t& prC
+            auto& praL,
+            auto& praR,
+            auto& prC
         ) const;
 
         DUAL conserved_t hydro_sources(const auto& cell) const;
 
         DUAL conserved_t
-        gravity_sources(const primitive_t& prims, const auto& cell) const;
+        gravity_sources(const auto& prims, const auto& cell) const;
 
         void load_functions()
         {

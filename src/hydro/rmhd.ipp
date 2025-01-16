@@ -65,11 +65,11 @@ RMHD<dim>::~RMHD()
 template <int dim>
 template <Plane P, Corner C>
 DUAL real RMHD<dim>::calc_edge_emf(
-    const RMHD<dim>::conserved_t& fw,
-    const RMHD<dim>::conserved_t& fe,
-    const RMHD<dim>::conserved_t& fs,
-    const RMHD<dim>::conserved_t& fn,
-    const RMHD<dim>::primitive_t* prims,
+    const auto& fw,
+    const auto& fe,
+    const auto& fs,
+    const auto& fn,
+    const auto* prims,
     const luint ii,
     const luint jj,
     const luint kk,
@@ -454,7 +454,7 @@ void RMHD<dim>::cons2prim()
                 const auto ireal = get_real_idx(ii, radius, xag);
                 const auto jreal = get_real_idx(jj, radius, yag);
                 const auto kreal = get_real_idx(kk, radius, zag);
-                const auto cell  = this->cell_factors(ireal, jreal, kreal);
+                const auto cell  = this->cell_geometry(ireal, jreal, kreal);
                 const real dV    = cell.dV;
                 invdV            = 1.0 / dV;
             }
@@ -640,8 +640,7 @@ void RMHD<dim>::cons2prim()
  * @return none
  */
 template <int dim>
-DEV RMHD<dim>::primitive_t
-RMHD<dim>::cons2prim(const RMHD<dim>::conserved_t& cons) const
+DEV auto RMHD<dim>::cons2prim(const auto& cons) const
 {
     const real d    = cons.dens();
     const real m1   = cons.momentum(1);
@@ -800,10 +799,8 @@ RMHD<dim>::cons2prim(const RMHD<dim>::conserved_t& cons) const
 */
 
 template <int dim>
-DUAL auto RMHD<dim>::calc_max_wave_speeds(
-    const RMHD<dim>::primitive_t& prims,
-    const luint nhat
-) const
+DUAL auto
+RMHD<dim>::calc_max_wave_speeds(const auto& prims, const luint nhat) const
 {
     /*
     evaluate the full quartic if the simplifying conditions are not met.
@@ -938,8 +935,8 @@ DUAL auto RMHD<dim>::calc_max_wave_speeds(
 
 template <int dim>
 DUAL RMHD<dim>::eigenvals_t RMHD<dim>::calc_eigenvals(
-    const RMHD<dim>::primitive_t& primsL,
-    const RMHD<dim>::primitive_t& primsR,
+    const auto& primsL,
+    const auto& primsR,
     const luint nhat
 ) const
 {
@@ -958,8 +955,7 @@ DUAL RMHD<dim>::eigenvals_t RMHD<dim>::calc_eigenvals(
 //                              CALCULATE THE STATE ARRAY
 //-----------------------------------------------------------------------------------------
 template <int dim>
-DUAL RMHD<dim>::conserved_t
-RMHD<dim>::prims2cons(const RMHD<dim>::primitive_t& prims) const
+DUAL RMHD<dim>::conserved_t RMHD<dim>::prims2cons(const auto& prims) const
 {
     const real rho   = prims.rho();
     const real v1    = prims.vcomponent(1);
@@ -1063,7 +1059,7 @@ void RMHD<dim>::adapt_dt()
             v3m = 1.0;
         }
 
-        const auto cell = this->cell_factors(ii, jj, kk);
+        const auto cell = this->cell_geometry(ii, jj, kk);
         switch (geometry) {
             case simbi::Geometry::CARTESIAN: {
                 const real x1l = cell.x1L();
@@ -1118,10 +1114,8 @@ void RMHD<dim>::adapt_dt()
 //                                            FLUX CALCULATIONS
 //===================================================================================================================
 template <int dim>
-DUAL RMHD<dim>::conserved_t RMHD<dim>::prims2flux(
-    const RMHD<dim>::primitive_t& prims,
-    const luint nhat
-) const
+DUAL RMHD<dim>::conserved_t
+RMHD<dim>::prims2flux(const auto& prims, const luint nhat) const
 {
     const real rho   = prims.rho();
     const real v1    = prims.vcomponent(1);
@@ -1164,8 +1158,8 @@ DUAL RMHD<dim>::conserved_t RMHD<dim>::prims2flux(
 
 template <int dim>
 DUAL RMHD<dim>::conserved_t RMHD<dim>::calc_hlle_flux(
-    const RMHD<dim>::primitive_t& prL,
-    const RMHD<dim>::primitive_t& prR,
+    const auto& prL,
+    const auto& prR,
     const luint nhat,
     const real vface,
     const real bface
@@ -1257,8 +1251,8 @@ DUAL RMHD<dim>::conserved_t RMHD<dim>::calc_hlle_flux(
 
 template <int dim>
 DUAL RMHD<dim>::conserved_t RMHD<dim>::calc_hllc_flux(
-    const RMHD<dim>::primitive_t& prL,
-    const RMHD<dim>::primitive_t& prR,
+    const auto& prL,
+    const auto& prR,
     const luint nhat,
     const real vface,
     const real bface
@@ -1489,9 +1483,9 @@ DUAL real RMHD<dim>::hlld_vdiff(
     const real lam[2],
     const real bn,
     const luint nhat,
-    RMHD<dim>::primitive_t& praL,
-    RMHD<dim>::primitive_t& praR,
-    RMHD<dim>::primitive_t& prC
+    auto& praL,
+    auto& praR,
+    auto& prC
 ) const
 
 {
@@ -1666,8 +1660,8 @@ DUAL real RMHD<dim>::hlld_vdiff(
 
 template <int dim>
 DUAL RMHD<dim>::conserved_t RMHD<dim>::calc_hlld_flux(
-    const RMHD<dim>::primitive_t& prL,
-    const RMHD<dim>::primitive_t& prR,
+    const auto& prL,
+    const auto& prR,
     const luint nhat,
     const real vface,
     const real bface
@@ -2242,7 +2236,8 @@ void RMHD<dim>::riemann_fluxes()
         const bool object_x = false;
         ib_check<dim>(object_pos, iobj, jj, kk, xag, yag, 1);
 
-        const auto vface = this->cell_factors(ii, jj, kk).v1fL();
+        const auto vface =
+            this->cell_geometry(ii, jj, kk).template velocity<Side::X1L>();
         // active x1 flux perpendicular zone indices
         const auto jaf = jj + 1;
         const auto kaf = kk + 1;
@@ -2320,7 +2315,8 @@ void RMHD<dim>::riemann_fluxes()
         const bool object_y =
             ib_check<dim>(object_pos, ii, jobj, kk, xag, yag, 2);
 
-        const auto vface = this->cell_factors(ii, jj, kk).v2fL();
+        const auto vface =
+            this->cell_geometry(ii, jj, kk).template velocity<Side::X2L>();
         // active x2 flux perpendicular zone indices
         const auto iaf = ii + 1;
         const auto kaf = kk + 1;
@@ -2396,7 +2392,8 @@ void RMHD<dim>::riemann_fluxes()
         const bool object_z =
             ib_check<dim>(object_pos, ii, jj, kobj, xag, yag, 3);
 
-        const auto vface = this->cell_factors(ii, jj, kk).v3fL();
+        const auto vface =
+            this->cell_geometry(ii, jj, kk).template velocity<Side::X3L>();
         // active x3 flux perpendicular zone indices
         const auto iaf = ii + 1;
         const auto jaf = jj + 1;
@@ -2489,10 +2486,8 @@ DUAL RMHD<dim>::conserved_t RMHD<dim>::hydro_sources(const auto& cell) const
 }
 
 template <int dim>
-DUAL RMHD<dim>::conserved_t RMHD<dim>::gravity_sources(
-    const RMHD<dim>::primitive_t& prims,
-    const auto& cell
-) const
+DUAL RMHD<dim>::conserved_t
+RMHD<dim>::gravity_sources(const auto& prims, const auto& cell) const
 {
     if (null_gravity) {
         return conserved_t{};
@@ -2588,7 +2583,7 @@ void RMHD<dim>::advance()
         }
 
         // mesh factors
-        const auto cell = this->cell_factors(ii, jj, kk);
+        const auto cell = this->cell_geometry(ii, jj, kk);
 
         const auto xlf = idx3(ii + 0, jaf, kaf, nxv, nye, nze);
         const auto xrf = idx3(ii + 1, jaf, kaf, nxv, nye, nze);
@@ -2818,7 +2813,7 @@ void RMHD<dim>::simulate(
     offload();
     compute_bytes_and_strides<primitive_t>(dim);
     init_riemann_solver();
-    this->set_mesh_funcs();
+    // this->set_mesh_funcs();
 
     config_ghosts(this);
     cons2prim();

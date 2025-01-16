@@ -71,7 +71,7 @@ namespace simbi {
         PERIODIC,
     };
 
-    enum class WaveSpeeds {
+    enum class WaveSpeedEstimate {
         SCHNEIDER_ET_AL_93,
         MIGNONE_AND_BODO_05,
         HUBER_AND_KISSMANN_2021,
@@ -186,7 +186,7 @@ namespace simbi {
         RESET,
     };
 
-    constexpr auto comp_wave_speed    = WaveSpeeds::MIGNONE_AND_BODO_05;
+    constexpr auto comp_wave_speed    = WaveSpeedEstimate::MIGNONE_AND_BODO_05;
     constexpr auto comp_ct_type       = CTTYPE::CONTACT;
     constexpr auto comp_slope_limiter = LIMITER::VAN_LEER;
     constexpr auto comp_hllc_type     = HLLCTYPE::CLASSICAL;

@@ -77,7 +77,12 @@ namespace generic_hydro {
         // anyHydro() = default;
 
         // zero-argument constructor
-        DUAL anyHydro() : vals{0.0} {}
+        DUAL anyHydro()
+        {
+            for (luint qq = 0; qq < nmem; qq++) {
+                vals[qq] = 0.0;
+            }
+        }
 
         // Generic Constructor
         template <typename... Args>
@@ -221,7 +226,14 @@ struct mag_four_vec {
 
     ~mag_four_vec() = default;
 
-    DUAL mag_four_vec(const anyPrimitive<dim, Regime::RMHD>& prim)
+    template <Regime regime>
+    DUAL mag_four_vec(const anyPrimitive<dim, regime>& prims)
+        : zero(0.0), one(0.0), two(0.0), three(0.0)
+    {
+    }
+
+    template <>
+    DUAL mag_four_vec<Regime::RMHD>(const anyPrimitive<dim, Regime::RMHD>& prim)
         : lorentz(prim.lorentz_factor()),
           vdb(prim.vdotb()),
           zero(lorentz * vdb),
@@ -1241,6 +1253,10 @@ struct Eigenvals {
         }
         return static_cast<real>(0.0);
     }
+};
+
+struct WaveSpeeds {
+    real v1p, v1m, v2p, v2m, v3p, v3m;
 };
 
 //=======================================================

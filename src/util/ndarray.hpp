@@ -33,7 +33,7 @@ using size_type = std::size_t;
 
 namespace simbi {
     // Template class to create array of different data_type
-    template <typename DT>
+    template <typename DT, int dim = 1>
     class ndarray
     {
         using value_type = DT;
@@ -84,6 +84,144 @@ namespace simbi {
 
         unique_p<gpuDeleter> dev_arr;   // Device-side array
 
+        DUAL bool is_boundary_point(
+            size_type ii,
+            size_type jj,
+            size_type kk,
+            size_type nx,
+            size_type ny,
+            size_type nz,
+            size_type radius
+        ) const
+        {
+            if constexpr (dim == 1) {
+                return ii < radius || ii > nx - radius - 1;
+            }
+            else if constexpr (dim == 2) {
+                return ii < radius || jj < radius || ii > nx - radius - 1 ||
+                       jj > ny - radius - 1;
+            }
+            else {
+                return ii < radius || jj < radius || kk < radius ||
+                       ii > nx - radius - 1 || jj >= ny - radius - 1 ||
+                       kk > nz - radius - 1;
+            }
+        }
+
+        // view for boundary operations
+        class boundary_view
+        {
+            DT* data;
+            size_type nx, ny, nz, ii, jj, kk, radius;
+
+          public:
+            DUAL boundary_view(
+                DT* data,
+                size_type nx,
+                size_type ny,
+                size_type nz,
+                size_type ii,
+                size_type jj,
+                size_type kk,
+                size_type radius
+            )
+                : data(data),
+                  nx(nx),
+                  ny(ny),
+                  nz(nz),
+                  ii(ii),
+                  jj(jj),
+                  kk(kk),
+                  radius(radius)
+            {
+            }
+
+            DUAL DT& interior_value() const
+            {
+                return data[idx3(ii, jj, kk, nx, ny, nz)];
+            }
+
+            DUAL DT& reflecting_value() const
+            {
+                if constexpr (dim == 1) {
+                    return data[idx3(
+                        ii < radius         ? 2 * radius - ii - 1
+                        : ii >= nx - radius ? 2 * (nx - radius) - ii - 1
+                                            : ii,
+                        jj,
+                        kk,
+                        nx,
+                        ny,
+                        nz
+                    )];
+                }
+                else if constexpr (dim == 2) {
+                    return data[idx3(
+                        ii < radius         ? 2 * radius - ii - 1
+                        : ii >= nx - radius ? 2 * (nx - radius) - ii - 1
+                                            : ii,
+                        jj < radius         ? 2 * radius - jj - 1
+                        : jj >= ny - radius ? 2 * (ny - radius) - jj - 1
+                                            : jj,
+                        kk,
+                        nx,
+                        ny,
+                        nz
+                    )];
+                }
+                else {
+                    return data[idx3(
+                        ii < radius         ? 2 * radius - ii - 1
+                        : ii >= nx - radius ? 2 * (nx - radius) - ii - 1
+                                            : ii,
+                        jj < radius         ? 2 * radius - jj - 1
+                        : jj >= ny - radius ? 2 * (ny - radius) - jj - 1
+                                            : jj,
+                        kk < radius         ? 2 * radius - kk - 1
+                        : kk >= nz - radius ? 2 * (nz - radius) - kk - 1
+                                            : kk,
+                        nx,
+                        ny,
+                        nz
+                    )];
+                }
+            }
+
+            DUAL DT& periodic_value() const
+            {
+                return data[idx3(
+                    ii < radius         ? ii + nx - 2 * radius
+                    : ii >= nx - radius ? ii - nx + 2 * radius
+                                        : ii,
+                    jj < radius         ? jj + ny - 2 * radius
+                    : jj >= ny - radius ? jj - ny + 2 * radius
+                                        : jj,
+                    kk < radius         ? kk + nz - 2 * radius
+                    : kk >= nz - radius ? kk - nz + 2 * radius
+                                        : kk,
+                    nx,
+                    ny,
+                    nz
+                )];
+            }
+
+            DUAL auto position() const { return std::make_tuple(ii, jj, kk); }
+
+            DUAL bool is_lower_boundary(int dir) const
+            {
+                return dir == 0   ? ii < radius
+                       : dir == 1 ? jj < radius
+                                  : kk < radius;
+            }
+
+            DUAL bool is_upper_boundary(int dir) const
+            {
+                return dir == 0   ? ii >= nx - radius
+                       : dir == 1 ? jj >= ny - radius
+                                  : kk >= nz - radius;
+            }
+        };
+
       public:
         ndarray() noexcept
             : sz(0),
@@ -91,6 +229,7 @@ namespace simbi {
               dimensions(1),
               arr(nullptr),
               dev_arr(nullptr) {};
+
         ~ndarray() = default;
         // Assignment operator
         ndarray& operator=(ndarray rhs);
@@ -263,6 +402,61 @@ namespace simbi {
             }
         }
 
+        // Stencil view class for accessing neighboring elements
+        template <typename T = DT>
+        class stencil_view
+        {
+          private:
+            T* data;
+            size_type nx, ny, nz;   // Grid dimensions
+            size_type i, j, k;      // Center indices
+            size_type radius;       // Stencil radius
+
+          public:
+            DUAL stencil_view(
+                T* data,
+                size_type nx,
+                size_type ny,
+                size_type nz,
+                size_type i,
+                size_type j,
+                size_type k,
+                size_type radius
+            )
+                : data(data),
+                  nx(nx),
+                  ny(ny),
+                  nz(nz),
+                  i(i),
+                  j(j),
+                  k(k),
+                  radius(radius)
+            {
+            }
+
+            // Get neighboring value at offset
+            DUAL T& at(int di, int dj = 0, int dk = 0)
+            {
+                size_type idx = (k + dk) * nx * ny + (j + dj) * nx + (i + di);
+                return data[idx];
+            }
+
+            // const reference to neighboring value at offset
+            DUAL const T& at(int di, int dj = 0, int dk = 0) const
+            {
+                size_type idx = (k + dk) * nx * ny + (j + dj) * nx + (i + di);
+                return data[idx];
+            }
+
+            // Get center value
+            DUAL T& center() { return at(0, 0, 0); }
+
+            // const reference to center value
+            DUAL const T& center() const { return at(0, 0, 0); }
+
+            DUAL auto indices() const { return std::make_tuple(i, j, k); }
+        };
+
         // Begin iterator
         iterator begin() const;
 
@@ -315,37 +509,84 @@ namespace simbi {
         template <typename UnaryPredicate>
         DUAL ndarray filter(UnaryPredicate pred) const;
 
+        // reductions
+        template <typename U, typename BinaryOp>
+        U reduce(const ExecutionPolicy<>& policy, U init, BinaryOp binary_op)
+            const;
+
         // Composed operations
         template <typename F, typename G>
         auto compose(F f, G g) const;
 
         // Chain operations
-        template <typename... Fs>
-        auto then(Fs... fs) const;
+        template <typename... Funcs>
+        auto then(Funcs... fs) const;
 
         // Chain transformations and return new array
         template <typename... Transforms>
         ndarray transform_chain(Transforms... transforms) const;
 
         // Apply function to each element safely with bounds checking
-        template <typename F>
-        Maybe<ndarray> safe_map(F f) const;
+        template <typename Func>
+        Maybe<ndarray> safe_map(Func f) const;
 
         // Combine two arrays element-wise with a binary operation
-        template <typename F>
-        ndarray combine(const ndarray& other, F binary_op) const;
+        template <typename Func>
+        ndarray combine(const ndarray& other, Func binary_op) const;
 
         // Split array into chunks for parallel processing
-        template <typename F>
+        template <typename Func>
         ndarray
-        parallel_chunks(const ExecutionPolicy<>& policy, F chunk_op) const;
+        parallel_chunks(const ExecutionPolicy<>& policy, Func chunk_op) const;
 
         // transform_parallel method
-        template <typename NewType, typename F>
-        ndarray<NewType> transform_parallel(
+        // only for functions that do not require index
+        template <typename Func>
+        auto
+        transform_parallel(const ExecutionPolicy<>& policy, Func transform_op)
+            const -> std::enable_if_t<
+                !has_index_param<Func, const DT&>::value,
+                ndarray<std::invoke_result_t<Func, const DT&>, dim>>;
+
+        // only for functions that require index
+        template <typename Func>
+        auto
+        transform_parallel(const ExecutionPolicy<>& policy, Func transform_op)
+            const -> std::enable_if_t<
+                has_index_param<Func, const DT&>::value,
+                ndarray<std::invoke_result_t<Func, const DT&, size_type>, dim>>;
+
+        // transform parallel alongside another ndarray of arbitrary type
+        // template <typename T, typename Func>
+        // auto transform_parallel_with(
+        //     const ExecutionPolicy<>& policy,
+        //     const ndarray<T, dim>& other,
+        //     Func transform_op
+        // ) const;
+
+        template <typename T, typename Func>
+        auto transform_parallel_with(
             const ExecutionPolicy<>& policy,
-            F transform_op
+            ndarray<T>& other,
+            Func transform_op
         ) const;
+
+        // inplace stencil transform method
+        template <typename T, typename Func>
+        auto transform_stencil_with(
+            const ExecutionPolicy<>& policy,
+            const ndarray<T, dim>& stencil_array,
+            size_type radius,
+            Func stencil_op
+        );
+
+        // Boundary region operations
+        template <typename BoundaryOp>
+        void apply_to_boundaries(
+            const ExecutionPolicy<>& policy,
+            size_type radius,
+            BoundaryOp&& boundary_op
+        );
     };
 
 }   // namespace simbi

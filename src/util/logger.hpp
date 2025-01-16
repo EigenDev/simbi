@@ -201,7 +201,7 @@ namespace simbi {
                             const lint jreal = get_real_idx(jj, radius, yag);
                             const lint kreal = get_real_idx(kk, radius, zag);
                             const auto cell =
-                                sim_state.cell_factors(ireal, jreal, kreal);
+                                sim_state.cell_geometry(ireal, jreal, kreal);
                             real x1mean = cell.x1mean;
                             real x2mean = cell.x2mean;
                             real x3mean = cell.x3mean;
@@ -243,7 +243,7 @@ namespace simbi {
                     sim_state.prims.copyFromGpu();
                     sim_state.hasCrashed = true;
                     write_to_file(sim_state, table);
-                    emit_troubled_cells(sim_state, table);
+                    // emit_troubled_cells(sim_state, table);
                 }
 
                 // Print the benchmark results

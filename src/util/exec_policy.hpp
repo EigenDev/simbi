@@ -26,6 +26,7 @@ namespace simbi {
         T nzones;
         dim3 gridSize;
         dim3 blockSize;
+        dim3 stride;
         size_t sharedMemBytes;
         std::vector<simbiStream_t> streams;
         std::vector<int> devices;
@@ -37,40 +38,22 @@ namespace simbi {
         ~ExecutionPolicy() = default;
         ExecutionPolicy()  = default;
 
-        // Base constructor with config
-        ExecutionPolicy(
-            const T nzones,
-            const U blockSize,
-            const ExecutionPolicyConfig& config = {}
-        )
-            : blockSize(dim3(blockSize)),
-              sharedMemBytes(config.sharedMemBytes),
-              streams(config.streams),
-              devices(config.devices),
-              batch_size(config.batch_size),
-              min_elements_per_thread(config.min_elements_per_thread)
-        {
-            const T nBlocks = compute_blocks(nzones, blockSize);
-            this->gridSize  = dim3(nBlocks);
-            init_devices();
-            optimize_batch_size();
-        }
-
         // Vector constructor with config
         ExecutionPolicy(
-            const std::vector<T>& glist,
-            const std::vector<U>& blist,
+            const std::vector<T>& gridSizes,
+            const std::vector<U>& blockSizes,
+            const std::vector<U>& strides       = {},
             const ExecutionPolicyConfig& config = {}
         )
             : sharedMemBytes(config.sharedMemBytes),
               streams(config.streams),
               devices(config.devices)
         {
-            if (glist.size() != blist.size()) {
+            if (gridSizes.size() != blockSizes.size()) {
                 throw ExecutionException();
             }
             init_devices();
-            build_grid(glist, blist);
+            build_grid(gridSizes, blockSizes, strides);
         }
 
         T compute_blocks(const T nzones, const luint nThreads) const
@@ -108,7 +91,8 @@ namespace simbi {
         // build grid to handle multiple devices
         void build_grid(
             const std::vector<T> gridList,
-            const std::vector<U> blockList
+            const std::vector<U> blockList,
+            const std::vector<U> strideList
         )
         {
             // Calculate total zoness
@@ -130,17 +114,21 @@ namespace simbi {
             // Set block size based on input
             if (blockList.size() == 1) {
                 blockSize = dim3(blockList[0]);
+                stride    = dim3(strideList[0]);
             }
             else if (blockList.size() == 2) {
                 if constexpr (global::col_maj) {
                     blockSize = dim3(blockList[1], blockList[0]);
+                    stride    = dim3(strideList[1], strideList[0]);
                 }
                 else {
                     blockSize = dim3(blockList[0], blockList[1]);
+                    stride    = dim3(strideList[0], strideList[1]);
                 }
             }
             else if (blockList.size() == 3) {
                 blockSize = dim3(blockList[0], blockList[1], blockList[2]);
+                stride    = dim3(strideList[0], strideList[1], strideList[2]);
             }
 
             // Calculate grid size per device

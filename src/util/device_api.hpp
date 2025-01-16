@@ -197,6 +197,15 @@ namespace simbi {
                 simbiStream_t stream
             );
 
+            template <typename T>
+            void atomicMin(T* address, T val)
+            {
+#if GPU_CODE
+                auto status = error::status_t(devAtomicMinReal(address, val));
+                error::check_err(status, "Failed to atomicMin");
+#endif
+            };
+
             DEV inline void synchronize()
             {
 #if GPU_CODE

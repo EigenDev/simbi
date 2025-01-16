@@ -809,6 +809,31 @@ namespace simbi {
             return (idx - offset > 0) * (idx - offset);
         }
 
+        STATIC constexpr std::tuple<luint, luint, luint>
+        get_indices(const luint idx, const auto nx, const auto ny)
+        {
+            const auto kk = get_height(idx, nx, ny);
+            const auto jj = get_row(idx, nx, ny, kk);
+            const auto ii = get_column(idx, nx, ny, kk);
+            return {ii, jj, kk};
+        }
+
+        STATIC constexpr std::tuple<luint, luint, luint> get_real_indices(
+            const auto ii,
+            const auto jj,
+            const auto kk,
+            const auto nx,
+            const auto ny,
+            const auto offset
+        )
+        {
+            return {
+              get_real_idx(ii, offset, nx),
+              get_real_idx(jj, offset, ny),
+              get_real_idx(kk, offset, 1)
+            };
+        }
+
         /**
          * @brief calculate relativistic f & df/dp from Mignone and Bodo (2005)
          * @param gamma adiabatic index

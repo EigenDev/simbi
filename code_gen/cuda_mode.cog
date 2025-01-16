@@ -134,6 +134,13 @@ inline auto devLaunchKernel(
     return cudaLaunchKernel(func, grid, block, args, sharedMem, stream);
 };
 
+__device__ __forceinline__ real atomicMinReal(real* addr, real value)
+{
+    real old =
+        __int_as_real(atomicMin((atomic_cast*) addr, __real_as_int(value)));
+    return old;
+}
+
 constexpr auto devMemcpy               = cudaMemcpy;
 constexpr auto devFree                 = cudaFree;
 constexpr auto devMemset               = cudaMemset;
@@ -159,7 +166,8 @@ constexpr auto devMemcpyPeerAsync      = cudaMemcpyPeerAsync;
 constexpr auto devMemcpyAsync          = cudaMemcpyAsync;
 constexpr auto devHostRegister         = cudaHostRegister;
 constexpr auto devHostUnregister       = cudaHostUnregister;
-// constexpr auto devLaunchKernel         = cudaLaunchKernel;
+constexpr auto devAtomicMin            = atomicMinReal;
+;
 
 using devProp_t       = cudaDeviceProp;
 using devError_t      = cudaError_t;

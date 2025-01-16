@@ -271,6 +271,70 @@ namespace simbi {
             return thisValue;
         }
 
+        // Math overloads with scalar types
+        template <typename U>
+        DUAL constexpr Maybe<T> operator+(const U& rhs) const
+        {
+            if (valid) {
+                return Maybe<T>{thisValue + rhs};
+            }
+            return Maybe<T>{Nothing};
+        }
+
+        template <typename U>
+        DUAL constexpr Maybe<T> operator-(const U& rhs) const
+        {
+            if (valid) {
+                return Maybe<T>{thisValue - rhs};
+            }
+            return Maybe<T>{Nothing};
+        }
+
+        template <typename U>
+        DUAL constexpr Maybe<T> operator*(const U& rhs) const
+        {
+            if (valid) {
+                return Maybe<T>{thisValue * rhs};
+            }
+            return Maybe<T>{Nothing};
+        }
+
+        template <typename U>
+        DUAL constexpr Maybe<T> operator/(const U& rhs) const
+        {
+            if (valid) {
+                return Maybe<T>{thisValue / rhs};
+            }
+            return Maybe<T>{Nothing};
+        }
+
+        // subscript operator
+        DUAL constexpr T operator[](size_t idx) const
+        {
+            if (valid) {
+                return thisValue[idx];
+            }
+            return T{};
+        }
+
+        // subscript operator
+        DUAL constexpr T& operator[](size_t idx)
+        {
+            if (valid) {
+                return thisValue[idx];
+            }
+            return thisValue;
+        }
+
+        // implicit conversion to bool
+        DUAL constexpr explicit operator bool() const { return valid; }
+
+        // implicit conversion to T
+        DUAL constexpr operator T() const { return thisValue; }
+
+        // implicit conversion to T
+        // DUAL constexpr operator T() && { return std::move(thisValue); }
+
       private:
         bool valid;
         T thisValue;

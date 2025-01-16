@@ -181,11 +181,13 @@ namespace simbi {
             fullPolicy                 = ExecutionPolicy(
                 {nx, ny, nz},
                 {xblockdim, yblockdim, zblockdim},
+                {0, 0, 0},   // strides
                 {.sharedMemBytes = 0, .streams = {stream}, .devices = {0}}
             );
             activePolicy = ExecutionPolicy(
                 {xag, yag, zag},
                 {xblockdim, yblockdim, zblockdim},
+                {sx, sy, sz},
                 {.sharedMemBytes = shBlockBytes,
                  .streams        = {stream},
                  .devices        = {0}}
@@ -194,16 +196,19 @@ namespace simbi {
             xvertexPolicy = ExecutionPolicy(
                 {nxv, yag, zag},
                 {xblockdim, yblockdim, zblockdim},
+                {0, 0, 0},
                 {.sharedMemBytes = 0, .streams = {stream}, .devices = {0}}
             );
             yvertexPolicy = ExecutionPolicy(
                 {xag, nyv, zag},
                 {xblockdim, yblockdim, zblockdim},
+                {0, 0, 0},
                 {.sharedMemBytes = 0, .streams = {stream}, .devices = {0}}
             );
             zvertexPolicy = ExecutionPolicy(
                 {xag, yag, nzv},
                 {xblockdim, yblockdim, zblockdim},
+                {0, 0, 0},
                 {.sharedMemBytes = 0, .streams = {stream}, .devices = {0}}
             );
 
@@ -249,8 +254,7 @@ namespace simbi {
               quirk_smoothing(init_conditions.quirk_smoothing),
               constant_sources(init_conditions.constant_sources),
               total_zones(nx * ny * nz),
-              boundary_conditions(
-                  std::move(init_conditions.boundary_conditions)
+              boundary_conditions(std::move(init_conditions.boundary_conditions)
               ),
               sim_solver(helpers::solver_map.at(init_conditions.solver)),
               geometry(helpers::geometry_map.at(init_conditions.coord_system)),

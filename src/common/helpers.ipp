@@ -4,6 +4,42 @@
 #include "util/parallel_for.hpp"
 
 namespace simbi {
+    namespace boundary {
+        template <typename T>
+        DUAL T apply_reflecting(const T& val, int momentum_idx)
+        {
+            auto result = val;
+            result.momentum(momentum_idx) *= -1.0;
+            return result;
+        }
+
+        template <typename T>
+        DUAL T apply_periodic(const T& val)
+        {
+            return val;
+        }
+
+        template <typename T>
+        DUAL T apply_outflow(const T& val)
+        {
+            return val;
+        }
+
+        template <typename T>
+        DUAL T apply_dynamic(
+            const T& val,
+            const auto& source_fn,
+            const real x1,
+            const real x2,
+            const real x3,
+            const real t
+        )
+        {
+            return source_fn(val, x1, x2, x3, t);
+        }
+
+    }   // namespace boundary
+
     namespace helpers {
         template <typename... Args>
         std::string string_format(const std::string& format, Args... args)
@@ -415,7 +451,7 @@ namespace simbi {
 
                             if (sim_state->bcs[0] ==
                                 BoundaryCondition::DYNAMIC) {
-                                auto cell = sim_state->cell_factors(rr, jr);
+                                auto cell = sim_state->cell_geometry(rr, jr);
                                 if constexpr (sim_state_t::regime == "srmhd") {
                                     real sources[9];
                                     sim_state->bx1_inner_source(
@@ -461,7 +497,7 @@ namespace simbi {
                             if (sim_state->bcs[1] ==
                                 BoundaryCondition::DYNAMIC) {
                                 auto cell =
-                                    sim_state->cell_factors(nx - rs, jr);
+                                    sim_state->cell_geometry(nx - rs, jr);
                                 if constexpr (sim_state_t::regime == "srmhd") {
                                     real sources[9];
                                     sim_state->bx1_outer_source(
@@ -513,7 +549,7 @@ namespace simbi {
                             auto outg = idx2(ir, ny - rs, nx, ny);
                             if (sim_state->bcs[2] ==
                                 BoundaryCondition::DYNAMIC) {
-                                auto cell = sim_state->cell_factors(ir, rr);
+                                auto cell = sim_state->cell_geometry(ir, rr);
                                 if constexpr (sim_state_t::regime == "srmhd") {
                                     real sources[9];
                                     sim_state->bx2_inner_source(
@@ -558,7 +594,7 @@ namespace simbi {
                             if (sim_state->bcs[3] ==
                                 BoundaryCondition::DYNAMIC) {
                                 auto cell =
-                                    sim_state->cell_factors(ir, ny - rs);
+                                    sim_state->cell_geometry(ir, ny - rs);
                                 if constexpr (sim_state_t::regime == "srmhd") {
                                     real sources[9];
                                     sim_state->bx2_outer_source(
@@ -815,7 +851,7 @@ namespace simbi {
                                 auto outg = idx3(nx - rs, jr, kr, nx, ny, nz);
                                 if (bcxb == BoundaryCondition::DYNAMIC) {
                                     auto cell =
-                                        sim_state->cell_factors(rr, jr, kr);
+                                        sim_state->cell_geometry(rr, jr, kr);
                                     if constexpr (sim_state_t::regime ==
                                                   "srmhd") {
                                         real sources[9];
@@ -863,7 +899,7 @@ namespace simbi {
                                 }
 
                                 if (bcxe == BoundaryCondition::DYNAMIC) {
-                                    auto cell = sim_state->cell_factors(
+                                    auto cell = sim_state->cell_geometry(
                                         xe + rr,
                                         jr,
                                         kr
@@ -989,7 +1025,7 @@ namespace simbi {
                                 auto outg = idx3(ir, jr, nz - rs, nx, ny, nz);
                                 if (bczb == BoundaryCondition::DYNAMIC) {
                                     auto cell =
-                                        sim_state->cell_factors(ir, jr, rr);
+                                        sim_state->cell_geometry(ir, jr, rr);
                                     if constexpr (sim_state_t::regime ==
                                                   "srmhd") {
                                         real sources[9];
@@ -1036,7 +1072,7 @@ namespace simbi {
                                     );
                                 }
                                 if (bcxe == BoundaryCondition::DYNAMIC) {
-                                    auto cell = sim_state->cell_factors(
+                                    auto cell = sim_state->cell_geometry(
                                         ir,
                                         jr,
                                         ze + rr
@@ -1096,8 +1132,11 @@ namespace simbi {
                                         idx3(ir, ny - rs, kr, nx, ny, nz);
 
                                     if (bcyb == BoundaryCondition::DYNAMIC) {
-                                        auto cell =
-                                            sim_state->cell_factors(ir, rr, kr);
+                                        auto cell = sim_state->cell_geometry(
+                                            ir,
+                                            rr,
+                                            kr
+                                        );
                                         if constexpr (sim_state_t::regime ==
                                                       "srmhd") {
                                             real sources[9];
@@ -1151,7 +1190,7 @@ namespace simbi {
                                         );
                                     }
                                     if (bcye == BoundaryCondition::DYNAMIC) {
-                                        auto cell = sim_state->cell_factors(
+                                        auto cell = sim_state->cell_geometry(
                                             ir,
                                             ye + rr,
                                             kr
@@ -1239,18 +1278,93 @@ namespace simbi {
             );
         }
 
-        template <typename T>
-        void config_ghosts(T* sim_state)
+        // template <typename T>
+        // void config_ghosts(T* sim_state)
+        // {
+        //     if constexpr (T::dimensions == 1) {
+        //         config_ghosts1D(sim_state);
+        //     }
+        //     else if constexpr (T::dimensions == 2) {
+        //         config_ghosts2D(sim_state);
+        //     }
+        //     else if constexpr (T::dimensions == 3) {
+        //         config_ghosts3D(sim_state);
+        //     }
+        // }
+        template <typename sim_state_t>
+        void config_ghosts(sim_state_t* sim_state)
         {
-            if constexpr (T::dimensions == 1) {
-                config_ghosts1D(sim_state);
-            }
-            else if constexpr (T::dimensions == 2) {
-                config_ghosts2D(sim_state);
-            }
-            else if constexpr (T::dimensions == 3) {
-                config_ghosts3D(sim_state);
-            }
+            sim_state->cons.apply_to_boundaries(
+                sim_state->fullPolicy,
+                sim_state->radius,
+                [=] DEV(const auto& view, auto& boundary_val) {
+                    // const auto [ii, jj, kk] = view.position();
+
+                    // Determine which boundary we're on
+                    for (int dim = 0; dim < sim_state_t::dimensions; dim++) {
+                        if (view.is_lower_boundary(dim)) {
+                            switch (sim_state->bcs[dim * 2]) {
+                                case BoundaryCondition::REFLECTING:
+                                    boundary_val = boundary::apply_reflecting(
+                                        view.reflecting_value(),
+                                        dim + 1
+                                    );
+                                    break;
+                                case BoundaryCondition::PERIODIC:
+                                    boundary_val = boundary::apply_periodic(
+                                        view.periodic_value()
+                                    );
+                                    break;
+                                case BoundaryCondition::DYNAMIC:
+                                    // boundary_val =
+                                    // boundary::apply_dynamic(
+                                    //     boundary_val,
+                                    //     sim_state->boundary_source_fns[dim
+                                    //     * 2], view.x(), view.y(),
+                                    //     view.z(), sim_state->t
+                                    // );
+                                    break;
+                                default:   // OUTFLOW
+                                    boundary_val = boundary::apply_outflow(
+                                        view.interior_value()
+                                    );
+                            }
+                        }
+                    }
+
+                    // doing the same for upper boundary
+                    for (int dim = 0; dim < sim_state_t::dimensions; dim++) {
+                        if (view.is_upper_boundary(dim)) {
+                            switch (sim_state->bcs[dim * 2 + 1]) {
+                                case BoundaryCondition::REFLECTING:
+                                    boundary_val = boundary::apply_reflecting(
+                                        view.reflecting_value(),
+                                        dim + 1
+                                    );
+                                    break;
+                                case BoundaryCondition::PERIODIC:
+                                    boundary_val = boundary::apply_periodic(
+                                        view.periodic_value()
+                                    );
+                                    break;
+                                case BoundaryCondition::DYNAMIC:
+                                    // boundary_val =
+                                    // boundary::apply_dynamic(
+                                    //     boundary_val,
+                                    //     sim_state->boundary_source_fns[dim
+                                    //     * 2 + 1], view.x(), view.y(),
+                                    //     view.z(), sim_state->t
+                                    // );
+                                    break;
+                                default:   // OUTFLOW
+                                    boundary_val = boundary::apply_outflow(
+                                        view.interior_value()
+                                    );
+                            }
+                        }
+                    }
+                }
+            );
         }
 
         template <typename T, TIMESTEP_TYPE dt_type, typename U, typename V>
@@ -1286,7 +1400,7 @@ namespace simbi {
                     v1p            = std::abs(v + cs);
                     v1m            = std::abs(v - cs);
                 }
-                const auto cell   = self->cell_factors(ireal);
+                const auto cell   = self->cell_geometry(ireal);
                 const real x1l    = cell.x1L();
                 const real x1r    = cell.x1R();
                 const real dx1    = x1r - x1l;
@@ -1353,7 +1467,7 @@ namespace simbi {
                     v1m            = (v1 - cs);
                     v2m            = (v2 - cs);
                 }
-                const auto cell = self->cell_factors(ireal, jreal);
+                const auto cell = self->cell_geometry(ireal, jreal);
                 v1p             = std::abs(v1p);
                 v1m             = std::abs(v1m);
                 v2p             = std::abs(v2p);
@@ -1502,7 +1616,7 @@ namespace simbi {
                 const auto ireal = get_real_idx(ii, self->radius, self->xag);
                 const auto jreal = get_real_idx(jj, self->radius, self->yag);
                 const auto kreal = get_real_idx(kk, self->radius, self->zag);
-                const auto cell  = self->cell_factors(ireal, jreal, kreal);
+                const auto cell  = self->cell_geometry(ireal, jreal, kreal);
                 const auto x1l   = cell.x1L();
                 const auto x1r   = cell.x1R();
                 const auto dx1   = x1r - x1l;
@@ -1580,7 +1694,7 @@ namespace simbi {
                     v1m            = (v - cs);
                 }
                 const auto ireal = get_real_idx(ii, self->radius, self->xag);
-                const auto cell  = self->cell_factors(ireal);
+                const auto cell  = self->cell_geometry(ireal);
 
                 const real x1l    = cell.x1L();
                 const real x1r    = cell.x1R();
@@ -1646,7 +1760,7 @@ namespace simbi {
                     v2m            = (v2 - cs);
                 }
 
-                const auto cell = self->cell_factors(ireal, jreal);
+                const auto cell = self->cell_geometry(ireal, jreal);
                 v1p             = std::abs(v1p);
                 v1m             = std::abs(v1m);
                 v2p             = std::abs(v2p);
@@ -1770,7 +1884,7 @@ namespace simbi {
                     v3m = 1.0;
                 }
 
-                const auto cell = self->cell_factors(ireal, jreal, kreal);
+                const auto cell = self->cell_geometry(ireal, jreal, kreal);
                 switch (geometry) {
                     case Geometry::CARTESIAN:
                         cfl_dt = my_min3<real>(
@@ -3063,12 +3177,24 @@ namespace simbi {
                     hsize_t count[1]  = {1};
                     H5::DataSpace memspace(1, count);
                     dataspace.selectHyperslab(H5S_SELECT_SET, count, offset);
-                    dataset.write(
-                        &state.prims[i][member],
-                        real_type,
-                        memspace,
-                        dataspace
-                    );
+                    if constexpr (T::regime == "classical" ||
+                                  T::regime == "srhd") {
+                        // unwrap the Maybe<primitive> type
+                        dataset.write(
+                            &state.prims[i].value()[member],
+                            real_type,
+                            memspace,
+                            dataspace
+                        );
+                    }
+                    else {
+                        dataset.write(
+                            &state.prims[i][member],
+                            real_type,
+                            memspace,
+                            dataspace
+                        );
+                    }
                 }
                 dataset.close();
             };
@@ -3131,10 +3257,10 @@ namespace simbi {
             };
             write_prims("rho", hdataspace, 0);
             write_prims("v1", hdataspace, 1);
-            if (state.dimensions > 1) {
+            if constexpr (T::dimensions > 1) {
                 write_prims("v2", hdataspace, 2);
             }
-            if (state.dimensions > 2) {
+            if constexpr (T::dimensions > 2) {
                 write_prims("v3", hdataspace, 3);
             }
             write_prims("p", hdataspace, state.dimensions + 1);
@@ -3181,12 +3307,12 @@ namespace simbi {
                  {"geometry", state.coord_system.c_str()},
                  {"regime", regime.c_str()},
                  {"dimensions", &state.dimensions},
-                 {"x1_cell_spacing",
-                  cell2str.at(state.x1_cell_spacing).c_str()},
-                 {"x2_cell_spacing",
-                  cell2str.at(state.x2_cell_spacing).c_str()},
-                 {"x3_cell_spacing",
-                  cell2str.at(state.x3_cell_spacing).c_str()}};
+                 {"x1_cell_spacing", cell2str.at(state.x1_cell_spacing).c_str()
+                 },
+                 {"x2_cell_spacing", cell2str.at(state.x2_cell_spacing).c_str()
+                 },
+                 {"x3_cell_spacing", cell2str.at(state.x3_cell_spacing).c_str()}
+                };
 
             for (const auto& [name, value] : attributes) {
                 H5::DataType type;
