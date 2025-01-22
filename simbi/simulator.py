@@ -104,6 +104,8 @@ class Hydro:
         resolution = helpers.get_iterable(resolution)
         resolution = tuple(resolution)
 
+        if not helpers.tuple_of_tuples(geometry):
+            geometry = (geometry,) # type: ignore
         self.geometry = geometry
         self.resolution = resolution
         self.coord_system = coord_system
@@ -169,11 +171,6 @@ class Hydro:
 
         if nres < 3:
             self.resolution += (1,) * (3 - self.dimensionality)
-        # print("="*80)
-        # print("state constructed")
-        # snapshot = tracemalloc.take_snapshot()
-        # helpers.display_top(snapshot)
-        # zzz = input('')
 
     @classmethod
     def gen_from_setup(cls, setup: Any) -> Any:
