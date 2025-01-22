@@ -14,7 +14,7 @@ SpaceAfterCStyleCast: true
 # UseTab: Always
 # if (x) doStuff()  is not allowed, bad style
 AllowShortIfStatementsOnASingleLine: false
-# 
+AllowShortCaseLabelsOnASingleLine: true
 AlignTrailingComments: true
 AllowAllArgumentsOnNextLine: false
 AllowAllParametersOfDeclarationOnNextLine: false
