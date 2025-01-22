@@ -15,7 +15,7 @@ cdef extern from "util/pyobj_wrapper.hpp":
         PyObjWrapper(object py_func) except +
         
 cdef extern from "build_options.hpp":
-    cdef bool col_maj "COLUMN_MAJOR"
+    cdef bool col_major "COLUMN_MAJOR"
     ctypedef double real 
 
 cdef extern from "common/hydro_structs.hpp":
