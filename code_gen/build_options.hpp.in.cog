@@ -80,17 +80,18 @@ namespace global {
     const int MAX_ITER = 1000;
 }   // namespace global
 
-using luint = uint64_t;
+using size_type = std::size_t;
+using luint = std::size_t;
 using lint  = int64_t;
 
 namespace global {
 //======================== COLUMN MAJOR CHECK
 #if COLUMN_MAJOR
     // column major flag
-    constexpr bool col_maj = true;
+    constexpr bool col_major = true;
 #else
     // column major flag
-    constexpr bool col_maj = false;
+    constexpr bool col_major = false;
 #endif
 
     // Template function to get epsilon value
@@ -157,6 +158,7 @@ else:
 namespace global {
     // shorthand flag for gpu compilation check
     constexpr bool on_gpu = BuildPlatform == Platform::GPU;
+    constexpr bool using_four_velocity = VelocityType == Velocity::FourVelocity;
 
     template <typename T>
     DUAL void inline swap(T& a, T& b)
