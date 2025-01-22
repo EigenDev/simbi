@@ -6,19 +6,77 @@ from . import helpers
 from .slogger import logger
 from ..tools.utility import read_file
 from itertools import product, permutations
-from typing import Any
+from typing import Any, Sequence, Tuple, List, Optional
+from dataclasses import dataclass
+
+# alias nested array types
+nested_array = NDArray[numpy_float] | list[NDArray[numpy_float]] | list[float]
+
+@dataclass
+class ModelState:
+    nvars: int
+    u: NDArray[numpy_float]
+    bfield: Optional[List[NDArray[numpy_float]]] = None
 
 
+@dataclass
+class GeometryConfig:
+    geometry: Sequence[Tuple[float, ...]]
+    resolution: Sequence[int]
+    dimensionality: int
+
+    def _get_dimension_breaks(self, dim: int) -> List[float]:
+        """Extract all breakpoints for a given dimension"""
+        geom = self.geometry[dim]
+        return list(geom[2:]) if len(geom) > 2 else []
+
+    def _breaks_to_indices(self, breaks: List[float], dim: int) -> List[int]:
+        """Convert physical breakpoints to grid indices"""
+        if not breaks:
+            return [0, self.resolution[dim]]
+            
+        spacing = (self.geometry[dim][1] - self.geometry[dim][0]) / self.resolution[dim]
+        indices = [0]  # Start point
+        indices.extend(round(abs(x - self.geometry[dim][0]) / spacing) for x in breaks)
+        indices.append(self.resolution[dim])  # End point
+        return sorted(indices)
+
+    def calculate_partitions(self) -> List[Tuple[slice, ...]]:
+        """Generate all partition slices for N dimensions"""
+        # Get breaks for each dimension
+        slices_per_dim = []
+        for dim in range(self.dimensionality):
+            breaks = self._get_dimension_breaks(dim)
+            indices = self._breaks_to_indices(breaks, dim)
+            # Create slices between consecutive indices
+            dim_slices = [slice(start, end) for start, end in zip(indices[:-1], indices[1:])]
+            slices_per_dim.append(dim_slices)
+        
+
+        # Generate all combinations
+        # we invert the order of slices_per_dim to match the order of dimensions
+        return list(product(*slices_per_dim[::-1]))
+
+@dataclass
+class Partition:
+    indices: Tuple[slice, ...]
+    initial_state: NDArray[numpy_float]
+    
+    
 def check_valid_state(x: Any, name: str) -> None:
     if np.isnan(np.sum(x)):
         raise ValueError(f"Initial state: {name} contains NaNs")
 
-
-def dot_product(a: NDArray[Any], b: NDArray[Any]) -> Any:
+def dot_product(
+    a: nested_array,
+    b: nested_array,
+) -> Any:
+    if isinstance(a, list):
+        return sum([np.sum(a[i] * b[i]) for i in range(len(a))])
     return np.sum(a * b, axis=0)
 
 
-def calc_lorentz_factor(velocity: NDArray[Any], regime: str) -> FloatOrArray:
+def calc_lorentz_factor(velocity: nested_array, regime: str) -> FloatOrArray:
     vsquared = dot_product(velocity, velocity)
     if regime != "classical" and np.any(vsquared >= 1.0):
         raise ValueError("Lorentz factor is not real. Velocity exceeds speed of light.")
@@ -37,7 +95,7 @@ def calc_spec_enthalpy(
 
 
 def calc_labframe_density(
-    rho: FloatOrArray, velocity: NDArray[numpy_float], regime: str
+    rho: FloatOrArray, velocity: nested_array, regime: str
 ) -> FloatOrArray:
     return rho * calc_lorentz_factor(velocity, regime)
 
@@ -45,28 +103,36 @@ def calc_labframe_density(
 def calc_labframe_momentum(
     gamma: float,
     rho: FloatOrArray,
-    velocity: NDArray[numpy_float],
+    velocity: nested_array,
     pressure: FloatOrArray,
-    bfields: NDArray[numpy_float],
+    bfields: nested_array,
     regime: str,
 ) -> NDArray[numpy_float]:
     res: NDArray[numpy_float]
     vdb = dot_product(velocity, bfields) if np.any(bfields) else 0.0
     bsq = dot_product(bfields, bfields) if np.any(bfields) else 0.0
-    vdb_bvec = vdb * bfields if np.any(bfields) else 0.0
+    vdb_bvec = (
+        np.array([bn * vdb for bn in bfields])
+        if np.any(bfields)
+        else [0.0] * len(velocity)
+    )
 
     enthalpy = calc_spec_enthalpy(gamma, rho, pressure, regime)
     lorentz = calc_lorentz_factor(velocity, regime)
-    res = (rho * lorentz**2 * enthalpy + bsq) * velocity - vdb_bvec
-    return res
+    return np.array(
+        [
+            (rho * lorentz**2 * enthalpy + bsq) * velocity[i] - vdb_bvec[i]
+            for i in range(len(velocity))
+        ]
+    )
 
 
 def calc_labframe_energy(
     gamma: float,
     rho: FloatOrArray,
     pressure: FloatOrArray,
-    velocity: NDArray[numpy_float],
-    bfields: NDArray[numpy_float],
+    velocity: nested_array,
+    bfields: nested_array,
     regime: str,
 ) -> FloatOrArray:
     res: FloatOrArray
@@ -114,10 +180,20 @@ def load_checkpoint(model: Any, filename: str) -> None:
 
     dens = calc_labframe_density(fields["rho"], vel, setup["regime"])
     mom = calc_labframe_momentum(
-        setup["adiabatic_gamma"], fields["rho"], vel, fields["p"], bfields, setup["regime"]
+        setup["adiabatic_gamma"],
+        fields["rho"],
+        vel,
+        fields["p"],
+        bfields,
+        setup["regime"],
     )
     energy = calc_labframe_energy(
-        setup["adiabatic_gamma"], fields["rho"], fields["p"], vel, bfields, setup["regime"]
+        setup["adiabatic_gamma"],
+        fields["rho"],
+        fields["p"],
+        vel,
+        bfields,
+        setup["regime"],
     )
 
     check_valid_state(dens, "density")
@@ -154,13 +230,9 @@ def load_checkpoint(model: Any, filename: str) -> None:
     npad = ((0, 0),) + ((padwith, padwith),) * dim
     model.u = np.pad(model.u * volume_factor, npad, "edge")
     model.chkpt_idx = setup["chkpt_idx"]
-    
+
     if model.mhd:
-        model.bfield = [
-            fields["b1stag"],
-            fields["b2stag"],
-            fields["b3stag"]
-        ]
+        model.bfield = [fields["b1stag"], fields["b2stag"], fields["b3stag"]]
 
 
 @release_memory
@@ -181,129 +253,193 @@ def initializeModel(
     model.u = np.pad(model.u * volume_factor, npad, "edge")
 
 
-@release_memory
-def construct_the_state(model: Any, initial_state: NDArray[numpy_float]) -> None:
-    model.nvars = 3 + model.dimensionality if not model.mhd else 9
+def calculate_break_points(
+    geometry: Sequence[Tuple[float, ...]], resolution: Sequence[int], ndims: int
+) -> List[Tuple[None, int]]:
+    """Calculate partition indices from break points"""
+    break_points = [val[2] for val in geometry if len(val) == 3]
+    if len(break_points) > ndims:
+        raise ValueError("Too many break points for dimension")
 
+    spacings = [
+        (geometry[idx][1] - geometry[idx][0]) / resolution[idx]
+        for idx in range(len(geometry))
+    ]
+
+    return [
+        (None, round(abs(break_points[idx] - geometry[idx][0]) / spacings[idx]))
+        for idx in range(len(break_points))
+    ]
+
+
+def initialize_partition_state(
+    partition: NDArray[numpy_float],
+    state: NDArray[numpy_float] | list[float],
+    regime: str,
+    gamma: float,
+    ndims: int,
+) -> None:
+    """Initialize state variables for a partition"""
+    n_non_em = len(state) - 3 if "mhd" in regime else len(state)
+    rho, *velocity, pressure = state[:n_non_em]
+    mean_bfields = list(state[n_non_em:])
+
+    # Calculate lab frame quantities
+    dens = calc_labframe_density(rho, velocity, regime)
+    mom = calc_labframe_momentum(gamma, rho, velocity, pressure, mean_bfields, regime)
+    energy = calc_labframe_energy(gamma, rho, pressure, velocity, mean_bfields, regime)
+
+    # Validate
+    for name, val in [("density", dens), ("momentum", mom), ("energy", energy)]:
+        check_valid_state(val, name)
+
+    # Set values
+    state_vector = np.array([dens, *mom, energy, *mean_bfields])
+    if ndims == 1:
+        partition[...] = state_vector[:, None]
+    else:
+        partition[...] = (partition[...].transpose() + state_vector).transpose()
+
+
+def initialize_mhd_fields(
+    u: NDArray[numpy_float],
+    partitions: List[Partition],
+    initial_states: Sequence[Sequence[float]],
+) -> Tuple[NDArray[numpy_float], NDArray[numpy_float], NDArray[numpy_float]]:
+    """Initialize staggered MHD fields"""
+    b1 = np.zeros_like(u[0])
+    b2 = np.zeros_like(u[0])
+    b3 = np.zeros_like(u[0])
+
+    for part, state in zip(partitions, initial_states):
+        mean_bfields = state[-3:]  # Last 3 components are B-fields
+        b1[part.indices] = mean_bfields[0]
+        b2[part.indices] = mean_bfields[1]
+        b3[part.indices] = mean_bfields[2]
+    
+    # Pad the staggered fields along perpendicular and parallel directions
+    b1 = np.pad(b1, ((1, 1), (1, 1), (0, 1)), "edge")
+    b2 = np.pad(b2, ((1, 1), (0, 1), (1, 1)), "edge")
+    b3 = np.pad(b3, ((0, 1), (1, 1), (1, 1)), "edge")
+    
+    return b1, b2, b3
+
+
+def initialize_discontinuous_problem(model: Any) -> None:
+    """Main initialization function"""
+    if not model.discontinuity:
+        return
+
+    logger.info(f"Initializing {model.dimensionality}D Discontinuity...")
+
+    # Calculate partitions
+    geom_config = GeometryConfig(model.geometry, model.resolution, model.dimensionality)
+    partition_slices = geom_config.calculate_partitions()
+
+    # Create partition objects
+    partitions = [
+        Partition(indices=slices, initial_state=model.u[(..., *slices)])
+        for slices in partition_slices
+    ]
+
+    # Initialize each partition
+    for part, state in zip(partitions, model.initial_state):
+        initialize_partition_state(
+            part.initial_state, state, model.regime, model.gamma, model.dimensionality
+        )
+
+    # Handle MHD fields if needed
+    if model.mhd:
+        model.bfield = initialize_mhd_fields(model.u, partitions, model.initial_state)
+
+@release_memory
+def construct_the_state(
+    model: Any, initial_state: list[NDArray[numpy_float]] | list[list[float]]
+) -> None:
+    """Initialize model state for continuous or discontinuous problems"""
+
+    # Initialize model state
+    model.nvars = 3 + model.dimensionality if not model.mhd else 9
     model.u = np.zeros((model.nvars - 1, *np.asanyarray(model.resolution).flat[::-1]))
 
-    
     if model.discontinuity:
-        logger.info(
-            f"Initializing Problem With a {
-                str(model.dimensionality)}D Discontinuity..."
-        )
-
-        geom_tuple = (
-            (model.geometry,)
-            if len(model.geometry) == 3 and isinstance(model.geometry[0], (int, float))
-            else model.geometry
-        )
-
-        break_points = [val[2] for val in geom_tuple if len(val) == 3]
-        if len(break_points) > model.dimensionality:
-            raise ValueError(
-                "Number of break points must be less than or equal to the number of dimensions"
-            )
-
-        spacings = [
-            (geom_tuple[idx][1] - geom_tuple[idx][0]) / model.resolution[idx]
-            for idx in range(len(geom_tuple))
-        ]
-
-        pieces = [
-            (None, round(abs(break_points[idx] - geom_tuple[idx][0]) / spacings[idx]))
-            for idx in range(len(break_points))
-        ]
-
-        # partition the grid based on user-defined partition coordinates
-        partition_inds: list[Any] = list(product(*[permutations(x) for x in pieces]))
-        partition_inds = [tuple([slice(*y) for y in x]) for x in partition_inds]
-        partitions = [model.u[(..., *sector)] for sector in partition_inds]
-
-        for idx, part in enumerate(partitions):
-            state = initial_state[idx]
-            rho, *velocity, pressure = state[: model.number_of_non_em_terms]
-            velocity = np.asanyarray(velocity)
-            mean_bfields = state[model.number_of_non_em_terms :]
-
-            dens = calc_labframe_density(rho, velocity, model.regime)
-            mom = calc_labframe_momentum(
-                model.gamma, rho, velocity, pressure, mean_bfields, model.regime
-            )
-            energy = calc_labframe_energy(
-                model.gamma, rho, pressure, velocity, mean_bfields, model.regime
-            )
-
-            check_valid_state(dens, "density")
-            check_valid_state(mom, "momentum")
-            check_valid_state(energy, "energy")
-
-            if model.dimensionality == 1:
-                part[...] = np.array([dens, *mom, energy, *mean_bfields])[:, None]
-            else:
-                part[...] = (
-                    part[...].transpose()
-                    + np.array([dens, *mom, energy, *mean_bfields])
-                ).transpose()
-         
-         # if it's an MHD run, load the staggered fields
-        if model.mhd:
-            nxp, nyp, nzp = model.resolution
-            b1 = np.zeros(shape=(nzp + 0, nyp + 0, nxp + 1))
-            b2 = np.zeros(shape=(nzp + 0, nyp + 1, nxp + 0))
-            b3 = np.zeros(shape=(nzp + 1, nyp + 0, nxp + 0))
-
-            region_one = model.x1 < model.geometry[0][2]
-            region_two = np.logical_not(region_one)
-            xc = helpers.calc_centroid(
-                model.x1, coord_system=model.coord_system)
-            a = xc < model.geometry[0][2]
-            b = np.logical_not(a)
-            b1[..., region_one] = model.initial_state[0][5]
-            b1[..., region_two] = model.initial_state[1][5]
-            b2[..., a] = model.initial_state[0][6]
-            b2[..., b] = model.initial_state[1][6]
-            b3[..., a] = model.initial_state[0][7]
-            b3[..., b] = model.initial_state[1][7]
-            model.bfield = [
-                np.pad(b1, ((1, 1), (1, 1), (0, 0))),
-                np.pad(b2, ((1, 1), (0, 0), (1, 1))),
-                np.pad(b3, ((1, 1), (1, 1), (1, 1)))
-            ]
+        # initial_state = cast(list[list[float]], initial_state)
+        # _handle_discontinuous_state(model, initial_state)
+        initialize_discontinuous_problem(model)
     else:
-        rho, *velocity, pressure = initial_state[: model.number_of_non_em_terms]
-        velocity = np.asanyarray(velocity)
+        initial_state = cast(list[NDArray[numpy_float]], initial_state)
+        initialize_continuous_state(model, initial_state)
+
+
+def pad_mhd_fields(bfields: list[NDArray[numpy_float]]) -> List[NDArray[numpy_float]]:
+    # pad the mhd fields along perpendicular directions
+    b1, b2, b3 = bfields
+    b1 = np.pad(b1, ((1, 1), (1, 1), (0, 0)), "edge")
+    b2 = np.pad(b2, ((1, 1), (0, 0), (1, 1)), "edge")
+    b3 = np.pad(b3, ((0, 0), (1, 1), (1, 1)), "edge")
+    return [b1, b2, b3]
+
+
+def pad_staggered_fields(
+    bfields: list[NDArray[numpy_float]],
+) -> List[NDArray[numpy_float]]:
+    # pad the staggered fields along parallel directions
+    b1, b2, b3 = bfields
+    b1 = np.pad(b1, ((0, 0), (0, 0), (0, 1)), "edge")
+    b2 = np.pad(b2, ((0, 0), (0, 1), (0, 0)), "edge")
+    b3 = np.pad(b3, ((0, 1), (0, 0), (0, 0)), "edge")
+    return [b1, b2, b3]
+
+
+def calculate_mean_bfields(bfields: list[NDArray[numpy_float]]) -> list[NDArray[Any]]:
+    # calculate mean B-fields from staggered fields
+    b1, b2, b3 = bfields
+    return [
+        0.5 * (b1[..., :-1] + b1[..., 1:]),
+        0.5 * (b2[:, :-1, :] + b2[:, 1:, :]),
+        0.5 * (b3[:-1, ...] + b3[1:, ...]),
+    ]
+
+
+def update_mhd_fields(
+    bfields: list[NDArray[numpy_float]],
+    partition_inds: Tuple[slice, ...],
+    mean_bfields: list[NDArray[numpy_float]] | list[float],
+) -> None:
+    b1, b2, b3 = bfields
+    b1[partition_inds] = mean_bfields[0]
+    b2[partition_inds] = mean_bfields[1]
+    b3[partition_inds] = mean_bfields[2]
+
+
+def calculate_state_vector(
+    gamma: float,
+    rho: FloatOrArray,
+    velocity: list[NDArray[numpy_float]],
+    pressure: FloatOrArray,
+    mean_bfields: List[NDArray[numpy_float]],
+    regime: str,
+) -> NDArray[numpy_float]:
+    dens = calc_labframe_density(rho, velocity, regime)
+    mom = calc_labframe_momentum(gamma, rho, velocity, pressure, mean_bfields, regime)
+    energy = calc_labframe_energy(gamma, rho, pressure, velocity, mean_bfields, regime)
+    return np.array([dens, *mom, energy, *mean_bfields])
+
+
+def initialize_continuous_state(
+    model: Any, initial_state: list[NDArray[numpy_float]]
+) -> None:
+    """Handle initialization of continuous problems"""
+    rho, *velocity, pressure = initial_state[: model.number_of_non_em_terms]
+
+    if model.mhd:
         bfields_stag = initial_state[model.number_of_non_em_terms :]
-        mean_bfields = (
-            np.array(
-                [
-                    0.5 * (bfields_stag[0][..., 1:] + bfields_stag[0][..., :-1]),
-                    0.5 * (bfields_stag[1][:, 1:] + bfields_stag[1][:, :-1]),
-                    0.5 * (bfields_stag[2][1:] + bfields_stag[2][:-1]),
-                ], dtype=object
-            )
-            if bfields_stag.size
-            else []
-        )
+        mean_bfields = calculate_mean_bfields(bfields_stag)
+        model.bfield = pad_staggered_fields(bfields_stag)
+    else:
+        mean_bfields = []
 
-        dens = calc_labframe_density(rho, velocity, model.regime)
-        mom = calc_labframe_momentum(
-            model.gamma, rho, velocity, pressure, mean_bfields, model.regime
-        )
-        energy = calc_labframe_energy(
-            model.gamma, rho, pressure, velocity, mean_bfields, model.regime
-        )
-
-        check_valid_state(dens, "density")
-        check_valid_state(mom, "momentum")
-        check_valid_state(energy, "energy")
-        model.u[...] = np.array([dens, *mom, energy, *mean_bfields])
-        
-        if model.mhd:
-            model.bfield = [
-                np.pad(bfields_stag[0], ((1, 1), (1, 1), (0, 0))),
-                np.pad(bfields_stag[1], ((1, 1), (0, 0), (1, 1))),
-                np.pad(bfields_stag[2], ((0, 0), (1, 1), (1, 1)))
-            ]
-
+    state_vector = calculate_state_vector(
+        model.gamma, rho, velocity, pressure, mean_bfields, model.regime
+    )
+    model.u[...] = state_vector
