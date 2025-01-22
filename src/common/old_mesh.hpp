@@ -552,7 +552,7 @@ namespace simbi {
             //  * @return DUAL
             //  */
 
-            DUAL auto geom_sources_spherical_rmhd(const auto& prb) const
+            DUAL auto geometrical_sources_spherical_rmhd(const auto& prb) const
             {
 
                 const real sint = std::sin(x2mean);
@@ -604,7 +604,7 @@ namespace simbi {
              * @param kk
              * @return geometrical source terms struct
              */
-            DUAL auto geom_sources_spherical_nomhd(const auto& prb) const
+            DUAL auto geometrical_sources_spherical_nomhd(const auto& prb) const
             {
                 // Grab central primitives
                 const real pt    = prb.p();
@@ -653,7 +653,8 @@ namespace simbi {
                 }
             }
 
-            DUAL auto geom_sources_cylindrical_rmhd(const auto& prb) const
+            DUAL auto geometrical_sources_cylindrical_rmhd(const auto& prb
+            ) const
             {
                 // Grab central primitives
                 const real v1    = prb.get_v1();
@@ -681,7 +682,8 @@ namespace simbi {
                 };
             }
 
-            DUAL auto geom_sources_cylindrical_nomhd(const auto& prb) const
+            DUAL auto geometrical_sources_cylindrical_nomhd(const auto& prb
+            ) const
             {
                 // Grab central primitives
                 const real v1    = prb.get_v1();
@@ -721,7 +723,8 @@ namespace simbi {
                 }
             }
 
-            DUAL auto geom_sources_axis_cylindrical_nomhd(const auto& prb) const
+            DUAL auto geometrical_sources_axis_cylindrical_nomhd(const auto& prb
+            ) const
             {
                 // Grab central primitives
                 const real pt      = prb.total_pressure();
@@ -733,12 +736,12 @@ namespace simbi {
                 return typename Derived::conserved_t{};
             }
 
-            DUAL auto geom_sources_default(const auto& prb) const
+            DUAL auto geometrical_sources_default(const auto& prb) const
             {
                 return typename Derived::conserved_t{};
             }
 
-            DUAL auto geom_sources(const auto& prb) const
+            DUAL auto geometrical_sources(const auto& prb) const
             {
                 return (this->*(parent.geom_source_func))(prb);
             }
@@ -888,11 +891,12 @@ namespace simbi {
                 area_func     = &CellParams::calculate_areas_spherical;
                 centroid_func = &Mesh::get_cell_centroid_spherical;
                 if constexpr (Derived::regime == "srmhd") {
-                    geom_source_func = &CellParams::geom_sources_spherical_rmhd;
+                    geom_source_func =
+                        &CellParams::geometrical_sources_spherical_rmhd;
                 }
                 else {
                     geom_source_func =
-                        &CellParams::geom_sources_spherical_nomhd;
+                        &CellParams::geometrical_sources_spherical_nomhd;
                 }
             }
             else if (derived().geometry == Geometry::CYLINDRICAL) {
@@ -900,31 +904,31 @@ namespace simbi {
                 centroid_func = &Mesh::get_cell_centroid_cylindrical;
                 if constexpr (Derived::regime == "srmhd") {
                     geom_source_func =
-                        &CellParams::geom_sources_cylindrical_rmhd;
+                        &CellParams::geometrical_sources_cylindrical_rmhd;
                 }
                 else {
                     geom_source_func =
-                        &CellParams::geom_sources_cylindrical_nomhd;
+                        &CellParams::geometrical_sources_cylindrical_nomhd;
                 }
             }
             else if (derived().geometry == Geometry::PLANAR_CYLINDRICAL) {
                 area_func = &CellParams::calculate_areas_planar_cylindrical;
                 if constexpr (Derived::regime != "srmhd") {
                     geom_source_func =
-                        &CellParams::geom_sources_cylindrical_nomhd;
+                        &CellParams::geometrical_sources_cylindrical_nomhd;
                 }
             }
             else if (derived().geometry == Geometry::AXIS_CYLINDRICAL) {
                 area_func = &CellParams::calculate_area_axis_cylindrical;
                 if constexpr (Derived::regime != "srmhd") {
                     geom_source_func =
-                        &CellParams::geom_sources_axis_cylindrical_nomhd;
+                        &CellParams::geometrical_sources_axis_cylindrical_nomhd;
                 }
             }
             else {
                 area_func        = &CellParams::calculate_areas_default;
                 centroid_func    = &Mesh::get_cell_centroid_cartesian;
-                geom_source_func = &CellParams::geom_sources_default;
+                geom_source_func = &CellParams::geometrical_sources_default;
             }
 
             if (derived().geometry == Geometry::CARTESIAN) {

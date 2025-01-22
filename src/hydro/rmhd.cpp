@@ -28,7 +28,7 @@ namespace simbi {
         template <>
         void simulate<1, HydroRegime::RMHD>(
             std::vector<std::vector<real>>& state,
-            const InitialConditions& init_cond,
+            InitialConditions& init_cond,
             std::function<real(real)> const& scale_factor,
             std::function<real(real)> const& scale_factor_derivative
         )
@@ -40,7 +40,7 @@ namespace simbi {
         template <>
         void simulate<2, HydroRegime::RMHD>(
             std::vector<std::vector<real>>& state,
-            const InitialConditions& init_cond,
+            InitialConditions& init_cond,
             std::function<real(real)> const& scale_factor,
             std::function<real(real)> const& scale_factor_derivative
         )
@@ -52,7 +52,7 @@ namespace simbi {
         template <>
         void simulate<3, HydroRegime::RMHD>(
             std::vector<std::vector<real>>& state,
-            const InitialConditions& init_cond,
+            InitialConditions& init_cond,
             std::function<real(real)> const& scale_factor,
             std::function<real(real)> const& scale_factor_derivative
         )

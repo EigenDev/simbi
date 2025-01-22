@@ -26,7 +26,7 @@ namespace simbi {
         template <>
         void simulate<1>(
             std::vector<std::vector<real>>& state,
-            const InitialConditions& init_cond,
+            InitialConditions& init_cond,
             const std::string& regime,
             std::function<real(real)> const& scale_factor,
             std::function<real(real)> const& scale_factor_derivative
@@ -59,7 +59,7 @@ namespace simbi {
         template <>
         void simulate<2>(
             std::vector<std::vector<real>>& state,
-            const InitialConditions& init_cond,
+            InitialConditions& init_cond,
             const std::string& regime,
             std::function<real(real)> const& scale_factor,
             std::function<real(real)> const& scale_factor_derivative
@@ -91,7 +91,7 @@ namespace simbi {
         template <>
         void simulate<3>(
             std::vector<std::vector<real>>& state,
-            const InitialConditions& init_cond,
+            InitialConditions& init_cond,
             const std::string& regime,
             std::function<real(real)> const& scale_factor,
             std::function<real(real)> const& scale_factor_derivative

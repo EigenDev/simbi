@@ -238,9 +238,9 @@ namespace simbi {
                 )
                 {
                     table.postError(std::string("Exception: ") + err.what());
-                    sim_state.troubled_cells.copyFromGpu();
-                    sim_state.cons.copyFromGpu();
-                    sim_state.prims.copyFromGpu();
+                    sim_state.troubled_cells.sync_to_host();
+                    sim_state.cons.sync_to_host();
+                    sim_state.prims.sync_to_host();
                     sim_state.hasCrashed = true;
                     write_to_file(sim_state, table);
                     // emit_troubled_cells(sim_state, table);

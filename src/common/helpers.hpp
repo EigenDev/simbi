@@ -497,8 +497,8 @@ namespace simbi {
         template <typename sim_state_t>
         void config_ghosts3D(sim_state_t* sim_state);
 
-        template <typename T>
-        void config_ghosts(T* sim_state);
+        template <typename sim_state_t>
+        void config_ghosts(sim_state_t* sim_state);
 
         template <int dim, typename T>
         KERNEL void
@@ -740,7 +740,7 @@ namespace simbi {
             const luint nk
         )
         {
-            if constexpr (global::col_maj) {
+            if constexpr (global::col_major) {
                 return ii * nk * ny + jj * nk + kk;
             }
             return kk * nx * ny + jj * nx + ii;
@@ -770,7 +770,7 @@ namespace simbi {
         auto
         idx2(const luint ii, const luint jj, const luint nx, const luint ny)
         {
-            if constexpr (global::col_maj) {
+            if constexpr (global::col_major) {
                 return ii * ny + jj;
             }
             return jj * nx + ii;

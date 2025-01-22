@@ -18,20 +18,21 @@
 #ifndef SRHD_HPP
 #define SRHD_HPP
 
-#include "base.hpp"                   // for HydroBase
-#include "build_options.hpp"          // for real, HD, lint, luint
-#include "common/enums.hpp"           // for TIMESTEP_TYPE
-#include "common/helpers.hpp"         // for my_min, my_max, ...
-#include "common/hydro_structs.hpp"   // for Conserved, Primitive
-#include "common/mesh.hpp"            // for Mesh
-#include "util/exec_policy.hpp"       // for ExecutionPolicy
-#include "util/maybe.hpp"             // for Maybe
-#include "util/ndarray.hpp"           // for ndarray
-#include <dlfcn.h>                    // for dlopen, dlclose, dlsym
-#include <functional>                 // for function
-#include <optional>                   // for optional
-#include <type_traits>                // for conditional_t
-#include <vector>                     // for vector
+#include "base.hpp"             // for HydroBase
+#include "build_options.hpp"    // for real, HD, lint, luint
+#include "common/enums.hpp"     // for TIMESTEP_TYPE
+#include "common/helpers.hpp"   // for my_min, my_max, ...
+// #include "common/hydro_structs.hpp"   // for Conserved, Primitive
+#include "common/generic_structs.hpp"   // for Eigenvals, mag_four_vec
+#include "common/mesh.hpp"              // for Mesh
+#include "util/exec_policy.hpp"         // for ExecutionPolicy
+#include "util/maybe.hpp"               // for Maybe
+#include "util/ndarray.hpp"             // for ndarray
+#include <dlfcn.h>                      // for dlopen, dlclose, dlsym
+#include <functional>                   // for function
+#include <optional>                     // for optional
+#include <type_traits>                  // for conditional_t
+#include <vector>                       // for vector
 
 namespace simbi {
     template <int dim>
@@ -45,11 +46,10 @@ namespace simbi {
         static constexpr int nvars               = dim + 3;
         static constexpr std::string_view regime = "srhd";
         // set the primitive and conservative types at compile time
-        using primitive_t   = anyPrimitive<dim, Regime::SRHD>;
-        using conserved_t   = anyConserved<dim, Regime::SRHD>;
-        using eigenvals_t   = Eigenvals<dim, Regime::SRHD>;
-        using mag_fourvec_t = mag_four_vec<dim>;
-        using function_t    = typename helpers::real_func<dim>::type;
+        using primitive_t = anyPrimitive<dim, Regime::SRHD>;
+        using conserved_t = anyConserved<dim, Regime::SRHD>;
+        using eigenvals_t = Eigenvals<dim, Regime::SRHD>;
+        using function_t  = typename helpers::real_func<dim>::type;
         template <typename T>
         using RiemannFuncPointer = conserved_t (T::*)(
             const primitive_t&,
@@ -66,7 +66,7 @@ namespace simbi {
         /* Shared Data Members */
         ndarray<Maybe<primitive_t>, dim> prims;
         ndarray<conserved_t, dim> cons;
-        ndarray<real> pressure_guess, dt_min;
+        ndarray<real, dim> pressure_guess, dt_min;
 
         // library handles
         void* hsource_handle = nullptr;
@@ -93,7 +93,7 @@ namespace simbi {
         SRHD();
         SRHD(
             std::vector<std::vector<real>>& state,
-            const InitialConditions& init_conditions
+            InitialConditions& init_conditions
         );
         ~SRHD();
 
@@ -151,14 +151,14 @@ namespace simbi {
 
         void offload()
         {
-            cons.copyToGpu();
-            prims.copyToGpu();
-            pressure_guess.copyToGpu();
-            dt_min.copyToGpu();
+            cons.sync_to_device();
+            prims.sync_to_device();
+            pressure_guess.sync_to_device();
+            dt_min.sync_to_device();
             if constexpr (dim > 1) {
-                object_pos.copyToGpu();
+                object_pos.sync_to_device();
             }
-            bcs.copyToGpu();
+            bcs.sync_to_device();
         }
 
         DUAL conserved_t hydro_sources(const auto& cell) const;

@@ -12,7 +12,7 @@ void Driver::run(
     std::vector<std::vector<real>> state,
     const int dim,
     const std::string regime,
-    const InitialConditions& init_cond,
+    InitialConditions& init_cond,
     std::function<real(real)> const& scale_factor,
     std::function<real(real)> const& scale_factor_derivative
 )

@@ -19,19 +19,21 @@
 #ifndef RMHD_HPP
 #define RMHD_HPP
 
-#include "base.hpp"                   // for HydroBase
-#include "build_options.hpp"          // for real, HD, lint, luint
-#include "common/enums.hpp"           // for TIMESTEP_TYPE
-#include "common/helpers.hpp"         // for my_min, my_max, ...
-#include "common/hydro_structs.hpp"   // for Conserved, Primitive
-#include "common/mesh.hpp"            // for Mesh
-#include "util/exec_policy.hpp"       // for ExecutionPolicy
-#include "util/ndarray.hpp"           // for ndarray
-#include <dlfcn.h>                    // for dlopen, dlclose, dlsym
-#include <functional>                 // for function
-#include <optional>                   // for optional
-#include <type_traits>                // for conditional_t
-#include <vector>                     // for vector
+#include "base.hpp"             // for HydroBase
+#include "build_options.hpp"    // for real, HD, lint, luint
+#include "common/enums.hpp"     // for TIMESTEP_TYPE
+#include "common/helpers.hpp"   // for my_min, my_max, ...
+// #include "common/hydro_structs.hpp"   // for Conserved, Primitive
+#include "common/generic_structs.hpp"   // for Eigenvals, mag_four_vec
+#include "common/mesh.hpp"              // for Mesh
+#include "util/exec_policy.hpp"         // for ExecutionPolicy
+#include "util/maybe.hpp"               // for Maybe
+#include "util/ndarray.hpp"             // for ndarray
+#include <dlfcn.h>                      // for dlopen, dlclose, dlsym
+#include <functional>                   // for function
+#include <optional>                     // for optional
+#include <type_traits>                  // for conditional_t
+#include <vector>                       // for vector
 
 namespace simbi {
     template <int dim>
@@ -46,11 +48,10 @@ namespace simbi {
         static constexpr std::string_view regime = "srmhd";
 
         // set the primitive and conservative types at compile time
-        using primitive_t   = anyPrimitive<dim, Regime::RMHD>;
-        using conserved_t   = anyConserved<dim, Regime::RMHD>;
-        using eigenvals_t   = Eigenvals<dim, Regime::RMHD>;
-        using mag_fourvec_t = mag_four_vec<dim>;
-        using function_t    = typename helpers::real_func<dim>::type;
+        using primitive_t = anyPrimitive<dim, Regime::RMHD>;
+        using conserved_t = anyConserved<dim, Regime::RMHD>;
+        using eigenvals_t = Eigenvals<dim, Regime::RMHD>;
+        using function_t  = typename helpers::real_func<dim>::type;
 
         // hydrodynamic source functions
         function_t hydro_source;
@@ -88,16 +89,15 @@ namespace simbi {
         std::vector<function_t> gsources;   // gravity sources
 
         /* Shared Data Members */
-        ndarray<primitive_t, dim> prims;
+        ndarray<Maybe<primitive_t>, dim> prims;
         ndarray<conserved_t, dim> cons;
-        ndarray<conserved_t> fri, gri, hri;
-        ndarray<real> dt_min, bstag1, bstag2, bstag3;
-        ndarray<real> b1const, b2const, b3const;
+        ndarray<conserved_t, dim> fri, gri, hri;
+        ndarray<real> dt_min;
 
         RMHD();
         RMHD(
             std::vector<std::vector<real>>& state,
-            const InitialConditions& init_conditions
+            InitialConditions& init_conditions
         );
 
         ~RMHD();
@@ -108,6 +108,11 @@ namespace simbi {
         void set_flux_and_fields();
         void riemann_fluxes();
         void advance();
+        void advance_conserved();
+        void advance_magnetic_fields();
+
+        template <int nhat>
+        void update_magnetic_component(const ExecutionPolicy<>& policy);
 
         DUAL auto
         calc_max_wave_speeds(const auto& prims, const luint nhat) const;
@@ -216,23 +221,30 @@ namespace simbi {
             const real bn = 0.0
         ) const;
 
+        template <size_type i, size_type j>
+        DUAL void calc_emf_edges(
+            real ei[],
+            real ej[],
+            const auto& cell,
+            size_type ii,
+            size_type jj,
+            size_type kk
+        ) const;
+
         void offload()
         {
-            cons.copyToGpu();
-            prims.copyToGpu();
-            dt_min.copyToGpu();
-            object_pos.copyToGpu();
-            bcs.copyToGpu();
-            troubled_cells.copyToGpu();
-            bstag1.copyToGpu();
-            bstag2.copyToGpu();
-            bstag3.copyToGpu();
-            b1const.copyToGpu();
-            b2const.copyToGpu();
-            b3const.copyToGpu();
-            fri.copyToGpu();
-            gri.copyToGpu();
-            hri.copyToGpu();
+            cons.sync_to_device();
+            prims.sync_to_device();
+            dt_min.sync_to_device();
+            object_pos.sync_to_device();
+            bcs.sync_to_device();
+            troubled_cells.sync_to_device();
+            bstag1.sync_to_device();
+            bstag2.sync_to_device();
+            bstag3.sync_to_device();
+            fri.sync_to_device();
+            gri.sync_to_device();
+            hri.sync_to_device();
         }
 
         DUAL real hlld_vdiff(

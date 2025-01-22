@@ -22,6 +22,7 @@
 #include "enums.hpp"
 #include "traits.hpp"
 #include "util/tabulate.hpp"
+#include "util/vector.hpp"
 #include <cmath>
 #include <iostream>
 #include <vector>
@@ -57,6 +58,7 @@ struct InitialConditions {
 };
 
 namespace generic_hydro {
+
     // implementing curiously recurring template pattern (CRTP)
     template <int dim, typename Derived, Regime R>
     struct anyHydro {
@@ -1197,9 +1199,6 @@ struct anyPrimitive : generic_hydro::anyHydro<dim, anyPrimitive<dim, R>, R> {
     }
 };
 
-//=======================================================
-//                        NEWTONIAN
-//=======================================================
 template <int dim, Regime R>
 struct Eigenvals {
     constexpr static int nvals = 4 + 2 * (R == Regime::NEWTONIAN && dim > 1);

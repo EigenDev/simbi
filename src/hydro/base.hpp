@@ -56,6 +56,7 @@ namespace simbi {
         simbi::Geometry geometry;
         simbi::Cellspacing x1_cell_spacing, x2_cell_spacing, x3_cell_spacing;
         std::string data_directory;
+        ndarray<real> bstag1, bstag2, bstag3;
         ndarray<bool> object_pos;
         bool using_fourvelocity;
         std::string hydro_source_lib, gravity_source_lib, boundary_source_lib;
@@ -74,7 +75,6 @@ namespace simbi {
         ndarray<int> troubled_cells;
         luint blockSize, checkpoint_zones;
         std::vector<std::vector<real>> bfield;
-        std::vector<bool> object_cells;
 
         luint sx, sy, sz;
         luint nxv, nyv, nzv, nxe, nye, nze, nv;
@@ -142,6 +142,24 @@ namespace simbi {
                     static_cast<real>(shBlockBytes / 1024)
                 );
             }
+        }
+
+        void update_mesh_motion(
+            std::function<real(real)> const& a,
+            std::function<real(real)> const& adot
+        )
+        {
+            if (!mesh_motion) {
+                return;
+            }
+
+            auto update = [this](real x, real h) {
+                return x + step * dt * (homolog ? x * h : h);
+            };
+
+            hubble_param = adot(t) / a(t);
+            x1max        = update(x1max, hubble_param);
+            x1min        = update(x1min, hubble_param);
         }
 
         template <typename P>
@@ -218,6 +236,183 @@ namespace simbi {
             print_shared_mem(0);
         }
 
+        // void load_hydro_source_lib()
+        // {
+        //     // Load the symbol based on the dimension
+        //     using f2arg = void (*)(real, real, real[]);
+        //     using f3arg = void (*)(real, real, real, real[]);
+        //     using f4arg = void (*)(real, real, real, real, real[]);
+
+        //     //=================================================================
+        //     // Check if the hydro source library is set
+        //     //=================================================================
+        //     null_sources = true;
+        //     if (!hydro_source_lib.empty()) {
+        //         // Load the shared library
+        //         hsource_handle = dlopen(hydro_source_lib.c_str(), RTLD_LAZY);
+        //         if (!hsource_handle) {
+        //             std::cerr << "Cannot open library: " << dlerror() <<
+        //             '\n'; return;
+        //         }
+
+        //         // Clear any existing error
+        //         dlerror();
+
+        //         const std::vector<std::pair<const char*, function_t&>>
+        //         symbols =
+        //             {
+        //               {"hydro_source", hydro_source},
+        //             };
+
+        //         bool success = true;
+        //         for (const auto& [symbol, func] : symbols) {
+        //             void* source            = dlsym(hsource_handle, symbol);
+        //             const char* dlsym_error = dlerror();
+        //             // if can't load symbol, print error and
+        //             // set null_sources to true
+        //             if (dlsym_error) {
+        //                 std::cerr << "Cannot load symbol '" << symbol
+        //                           << "': " << dlsym_error << '\n';
+        //                 success = false;
+        //                 dlclose(hsource_handle);
+        //                 break;
+        //             }
+
+        //             // Assign the function pointer based on the dimension
+        //             if constexpr (dim == 1) {
+        //                 func = reinterpret_cast<f2arg>(source);
+        //             }
+        //             else if constexpr (dim == 2) {
+        //                 func = reinterpret_cast<f3arg>(source);
+        //             }
+        //             else if constexpr (dim == 3) {
+        //                 func = reinterpret_cast<f4arg>(source);
+        //             }
+        //         }
+        //         if (success) {
+        //             null_sources = false;
+        //         }
+        //     }
+        // }
+
+        // void load_gravity_source_lib()
+        // {
+        //     //=================================================================
+        //     // Check if the gravity source library is set
+        //     //=================================================================
+        //     null_gravity = true;
+        //     if (!gravity_source_lib.empty()) {
+        //         gsource_handle = dlopen(gravity_source_lib.c_str(),
+        //         RTLD_LAZY); if (!gsource_handle) {
+        //             std::cerr << "Cannot open library: " << dlerror() <<
+        //             '\n'; return;
+        //         }
+
+        //         // Clear any existing error
+        //         dlerror();
+
+        //         // Load the symbol based on the dimension
+        //         const std::vector<std::pair<const char*, function_t&>>
+        //             g_symbols = {
+        //               {"gravity_source", gravity_source},
+        //             };
+
+        //         bool success = true;
+        //         for (const auto& [symbol, func] : g_symbols) {
+        //             void* source            = dlsym(gsource_handle, symbol);
+        //             const char* dlsym_error = dlerror();
+        //             // if can't load symbol, print error
+        //             if (dlsym_error) {
+        //                 std::cerr << "Cannot load symbol '" << symbol
+        //                           << "': " << dlsym_error << '\n';
+        //                 success = false;
+        //                 dlclose(gsource_handle);
+        //                 break;
+        //             }
+
+        //             // Assign the function pointer based on the dimension
+        //             if constexpr (dim == 1) {
+        //                 func = reinterpret_cast<f2arg>(source);
+        //             }
+        //             else if constexpr (dim == 2) {
+        //                 func = reinterpret_cast<f3arg>(source);
+        //             }
+        //             else if constexpr (dim == 3) {
+        //                 func = reinterpret_cast<f4arg>(source);
+        //             }
+        //         }
+        //         if (success) {
+        //             null_gravity = false;
+        //         }
+        //     }
+        // }
+
+        // void load_boundary_source_lib()
+        // {
+        //     //=================================================================
+        //     // Check if the boundary source library is set
+        //     //=================================================================
+        //     if (!boundary_source_lib.empty()) {
+        //         bsource_handle = dlopen(boundary_source_lib.c_str(),
+        //         RTLD_LAZY); if (!bsource_handle) {
+        //             std::cerr << "Cannot open library: " << dlerror() <<
+        //             '\n'; return;
+        //         }
+
+        //         // Clear any existing error
+        //         dlerror();
+
+        //         // Load the symbol based on the dimension
+        //         const std::vector<std::pair<const char*, function_t&>>
+        //             b_symbols = {
+        //               {"bx1_inner_source", bx1_inner_source},
+        //               {"bx1_outer_source", bx1_outer_source},
+        //               {"bx2_inner_source", bx2_inner_source},
+        //               {"bx2_outer_source", bx2_outer_source},
+        //               {"bx3_inner_source", bx3_inner_source},
+        //               {"bx3_outer_source", bx3_outer_source},
+        //             };
+
+        //         for (const auto& [symbol, func] : b_symbols) {
+        //             void* source            = dlsym(bsource_handle, symbol);
+        //             const char* dlsym_error = dlerror();
+        //             // if can't load symbol, print error
+        //             if (dlsym_error) {
+        //                 // erro out  only  if the boundary
+        //                 // condition is set to dynamic
+        //                 for (int i = 0; i < 2 * dim; ++i) {
+        //                     if (symbol == b_symbols[i].first &&
+        //                         bcs[i] == BoundaryCondition::DYNAMIC) {
+        //                         std::cerr << "Cannot load symbol '" << symbol
+        //                                   << "': " << dlsym_error << '\n';
+        //                         bcs[i] = BoundaryCondition::OUTFLOW;
+        //                         dlclose(bsource_handle);
+        //                     }
+        //                 }
+        //             }
+        //             else {
+        //                 // Assign the function pointer based on the dimension
+        //                 if constexpr (dim == 1) {
+        //                     func = reinterpret_cast<f2arg>(source);
+        //                 }
+        //                 else if constexpr (dim == 2) {
+        //                     func = reinterpret_cast<f3arg>(source);
+        //                 }
+        //                 else if constexpr (dim == 3) {
+        //                     func = reinterpret_cast<f4arg>(source);
+        //                 }
+        //             }
+        //         }
+        //     }
+        // }
+
+        // void load_functions()
+        // {
+        //     load_hydro_source_lib();
+        //     load_gravity_source_lib();
+        //     load_boundary_source_lib();
+        // }
+
       protected:
         HydroBase() = default;
 
@@ -225,7 +420,7 @@ namespace simbi {
 
         HydroBase(
             std::vector<std::vector<real>> state,
-            const InitialConditions& init_conditions
+            InitialConditions& init_conditions
         )
             : state(std::move(state)),
               gamma(init_conditions.gamma),
@@ -236,9 +431,9 @@ namespace simbi {
               nx(init_conditions.nx),
               ny(init_conditions.ny),
               nz(init_conditions.nz),
-              x1(init_conditions.x1),
-              x2(init_conditions.x2),
-              x3(init_conditions.x3),
+              x1(std::move(init_conditions.x1)),
+              x2(std::move(init_conditions.x2)),
+              x3(std::move(init_conditions.x3)),
               gpu_block_dimx(get_block_dims("GPUXBLOCK_SIZE")),
               gpu_block_dimy(get_block_dims("GPUYBLOCK_SIZE")),
               gpu_block_dimz(get_block_dims("GPUZBLOCK_SIZE")),
@@ -257,8 +452,7 @@ namespace simbi {
               quirk_smoothing(init_conditions.quirk_smoothing),
               constant_sources(init_conditions.constant_sources),
               total_zones(nx * ny * nz),
-              boundary_conditions(
-                  std::move(init_conditions.boundary_conditions)
+              boundary_conditions(std::move(init_conditions.boundary_conditions)
               ),
               sim_solver(helpers::solver_map.at(init_conditions.solver)),
               geometry(helpers::geometry_map.at(init_conditions.coord_system)),
@@ -266,6 +460,9 @@ namespace simbi {
               x2_cell_spacing(str2cell.at(init_conditions.x2_cell_spacing)),
               x3_cell_spacing(str2cell.at(init_conditions.x3_cell_spacing)),
               data_directory(init_conditions.data_directory),
+              bstag1(std::move(init_conditions.bfield[0])),
+              bstag2(std::move(init_conditions.bfield[1])),
+              bstag3(std::move(init_conditions.bfield[2])),
               object_pos(std::move(init_conditions.object_cells)),
               using_fourvelocity(
                   global::VelocityType == global::Velocity::FourVelocity
@@ -283,7 +480,7 @@ namespace simbi {
             }
         }
 
-        void initialize(const InitialConditions& init_conditions)
+        void initialize(InitialConditions& init_conditions)
         {
             const bool pcm = (spatial_order == "pcm");
             radius         = pcm ? 1 : 2;
@@ -291,12 +488,12 @@ namespace simbi {
             xag = nx - 2 * radius;
             yag = (ny == 1) ? 1 : ny - 2 * radius;
             zag = (nz == 1) ? 1 : nz - 2 * radius;
-            nxv = xag + 1;
-            nyv = yag + 1;
-            nzv = zag + 1;
-            nxe = xag + 2;
-            nye = yag + 2;
-            nze = zag + 2;
+            nxv = (xag + 1) + 2 * radius;
+            nyv = (yag + 1) + 2 * radius;
+            nzv = (zag + 1) + 2 * radius;
+            nxe = xag + 2 * radius;
+            nye = yag + 2 * radius;
+            nze = zag + 2 * radius;
 
             nv           = nxv * nyv * nzv;
             idx_active   = pcm ? 1 : 2;

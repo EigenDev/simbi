@@ -63,7 +63,7 @@ namespace simbi {
 
         constexpr auto get_xextent() const
         {
-            if constexpr (global::col_maj) {
+            if constexpr (global::col_major) {
                 return blockSize.y;
             }
             return blockSize.x;
@@ -71,7 +71,7 @@ namespace simbi {
 
         constexpr auto get_yextent() const
         {
-            if constexpr (global::col_maj) {
+            if constexpr (global::col_major) {
                 return blockSize.x;
             }
             return blockSize.y;
@@ -117,7 +117,7 @@ namespace simbi {
                 stride    = dim3(strideList[0]);
             }
             else if (blockList.size() == 2) {
-                if constexpr (global::col_maj) {
+                if constexpr (global::col_major) {
                     blockSize = dim3(blockList[1], blockList[0]);
                     stride    = dim3(strideList[1], strideList[0]);
                 }
@@ -147,7 +147,7 @@ namespace simbi {
                         (gridList[0] + blockSize.x - 1) / blockSize.x;
                     luint nyBlocks =
                         (gridList[1] + blockSize.y - 1) / blockSize.y;
-                    if constexpr (global::col_maj) {
+                    if constexpr (global::col_major) {
                         device_gridSizes[dev] = dim3(nyBlocks, nxBlocks);
                     }
                     else {

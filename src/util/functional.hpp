@@ -18,7 +18,7 @@
 #ifndef FUNCTIONAL_HPP
 #define FUNCTIONAL_HPP
 
-#include "smrt_ptr.hpp"
+#include "smart_ptr.hpp"
 #include <exception>
 #include <functional>
 #include <memory>

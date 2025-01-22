@@ -1,1096 +1,799 @@
-#include <algorithm>
-#include <functional>
-#include <iostream>
-#include <memory>
-#include <stdexcept>
-#include <typeinfo>
-
-// Zero-initialize the array with defined size
-template <typename DT, int dim>
-simbi::ndarray<DT, dim>::ndarray(size_type size)
-    : sz(size), nd_capacity(size), dimensions(1)
-{
-    arr = util::make_unique<DT[]>(nd_capacity);
-}
-
-// Initialize the array with a given value
-template <typename DT, int dim>
-simbi::ndarray<DT, dim>::ndarray(size_type size, const DT val)
-    : sz(size), nd_capacity(size), dimensions(1)
-{
-    arr = util::make_unique<DT[]>(size);
-    std::fill(arr.get(), arr.get() + sz, val);
-
-    // if constexpr (is_ndarray<DT, dim>::value) {
-    //     dimensions += val.ndim();
-    // }
-}
-
-// Copy-constructor for array
-template <typename DT, int dim>
-simbi::ndarray<DT, dim>::ndarray(const ndarray& rhs)
-    : sz(rhs.sz), dimensions(rhs.dimensions), arr(new DT[rhs.sz])
-{
-    copyFromGpu();
-    std::copy(rhs.arr.get(), rhs.arr.get() + sz, arr.get());
-    copyToGpu();
-}
-
-// Move-constructor for array
-template <typename DT, int dim>
-simbi::ndarray<DT, dim>::ndarray(ndarray&& rhs) noexcept
-    : sz(rhs.sz),
-      nd_capacity(rhs.nd_capacity),
-      dimensions(rhs.dimensions),
-      arr(std::move(rhs.arr))
-{
-    rhs.sz          = 0;
-    rhs.nd_capacity = 0;
-    rhs.dimensions  = 0;
-}
-
-// Copy-constructor for vector
-template <typename DT, int dim>
-simbi::ndarray<DT, dim>::ndarray(const std::vector<DT>& rhs)
-    : sz(rhs.size()),
-      nd_capacity(rhs.capacity()),
-      dimensions(1),
-      arr(new DT[rhs.size()])
-{
-    std::copy(rhs.begin(), rhs.end(), arr.get());
-}
-
-// Move-constructor for vector
-template <typename DT, int dim>
-simbi::ndarray<DT, dim>::ndarray(std::vector<DT>&& rhs)
-    : sz(rhs.size()),
-      nd_capacity(rhs.capacity()),
-      dimensions(1),
-      arr(new DT[rhs.size()])
-{
-    std::move(rhs.begin(), rhs.end(), arr.get());
-}
-
-// Copy the arrays and deallocate the RHS
-template <typename DT, int dim>
-simbi::ndarray<DT, dim>& simbi::ndarray<DT, dim>::operator=(ndarray other)
-{
-    other.swap(*this);
-    return *this;
-}
-
-// Copy the arrays and deallocate the RHS
-template <typename DT, int dim>
-constexpr simbi::ndarray<DT, dim>&
-simbi::ndarray<DT, dim>::operator+=(const ndarray& other)
-{
-    simbi::ndarray<DT, dim> newArray(sz + other.sz);
-    std::copy(this->arr.get(), this->arr.get() + this->sz, newArray.arr.get());
-    std::copy(
-        other.arr.get(),
-        other.arr.get() + other.sz,
-        newArray.arr.get() + this->sz
-    );
-    newArray.swap(*this);
-    return *this;
-}
-
-template <typename DT, int dim>
-void simbi::ndarray<DT, dim>::swap(ndarray& other)
-{
-    std::swap(arr, other.arr);
-    std::swap(sz, other.sz);
-    std::swap(nd_capacity, other.nd_capacity);
-}
-
-// Template class to insert the element in array
-template <typename DT, int dim>
-constexpr simbi::ndarray<DT, dim>&
-simbi::ndarray<DT, dim>::push_back(const DT& data)
-{
-    if (sz == nd_capacity) {
-        resize(sz == 0 ? 1 : 2 * sz);
-    }
-    arr[sz++] = data;
-    return *this;
-}
-
-// Template class to return the popped element in array
-template <typename DT, int dim>
-constexpr simbi::ndarray<DT, dim>& simbi::ndarray<DT, dim>::pop_back()
-{
-    if (!empty()) {
-        arr[sz - 1].~DT();
-        --sz;
-    }
-    return *this;
-}
-
-template <typename DT, int dim>
-constexpr simbi::ndarray<DT, dim>&
-simbi::ndarray<DT, dim>::resize(size_type new_size)
-{
-    if (new_size > sz) {
-        auto new_arr = util::make_unique<DT[]>(new_size);
-        std::copy(arr.get(), arr.get() + sz, new_arr.get());
-        arr.swap(new_arr);
-    }
-    sz          = new_size;
-    nd_capacity = new_size;
-    return *this;
-}
-
-template <typename DT, int dim>
-constexpr simbi::ndarray<DT, dim>&
-simbi::ndarray<DT, dim>::resize(size_type new_size, const DT new_value)
-{
-    if (new_size > sz) {
-        auto new_arr = util::make_unique<DT[]>(new_size);
-        std::copy(arr.get(), arr.get() + sz, new_arr.get());
-        std::fill(new_arr.get() + sz, new_arr.get() + new_size, new_value);
-        arr.swap(new_arr);
-    }
-    sz          = new_size;
-    nd_capacity = new_size;
-    return *this;
-}
-
-// Template class to return the size of array
-template <typename DT, int dim>
-constexpr size_type simbi::ndarray<DT, dim>::size() const
-{
-    return sz;
-}
-
-// Template class to return the capacity of array
-template <typename DT, int dim>
-constexpr size_type simbi::ndarray<DT, dim>::capacity() const
-{
-    return nd_capacity;
-}
-
-// Template class to return the number of dimensions of array
-template <typename DT, int dim>
-constexpr size_type simbi::ndarray<DT, dim>::ndim() const
-{
-    return dimensions;
-}
-
-// Template class to return the element of array at given index
-template <typename DT, int dim>
-template <typename IndexType>
-DUAL constexpr DT& simbi::ndarray<DT, dim>::operator[](IndexType index)
-{
-    // if given index is greater than the size of array print Error
-    if ((size_t) index >= sz) {
-        printf(
-            "Error: array index %" PRIu64
-            " out of bounds for ndarray of size %" PRIu64 "\n",
-            (luint) index,
-            (luint) sz
-        );
-    }
-    // else return value at that index
-#ifdef __CUDA_ARCH__
-    return dev_arr[index];
-#else
-    return arr[index];
-#endif
-}
-
-// Template class to return the element of array at given index
-template <typename DT, int dim>
-template <typename IndexType>
-DUAL constexpr DT simbi::ndarray<DT, dim>::operator[](IndexType index) const
-{
-    // if given index is greater than the size of array print Error
-    if ((size_t) index >= sz) {
-        printf(
-            "Error: array index %" PRIu64
-            " out of bounds for ndarray of size %" PRIu64 "\n",
-            (luint) index,
-            (luint) sz
-        );
-    }
-    // else return value at that index
-#ifdef __CUDA_ARCH__
-    return dev_arr[index];
-#else
-    return arr[index];
-#endif
-}
-
-// Template class to scale the array by a factor
-template <typename DT, int dim>
-constexpr simbi::ndarray<DT, dim>&
-simbi::ndarray<DT, dim>::operator*(const real scale_factor)
-{
-    std::transform(
-        arr.get(),
-        arr.get() + sz,
-        arr.get(),
-        [scale_factor](DT& val) { return val * scale_factor; }
-    );
-    return *this;
-}
-
-// Template class to scale the array by a factor
-template <typename DT, int dim>
-constexpr simbi::ndarray<DT, dim>&
-simbi::ndarray<DT, dim>::operator*=(const real scale_factor)
-{
-    std::transform(
-        arr.get(),
-        arr.get() + sz,
-        arr.get(),
-        [scale_factor](DT& val) { return val * scale_factor; }
-    );
-    return *this;
-}
-
-// Template class to divide the array by a factor
-template <typename DT, int dim>
-constexpr simbi::ndarray<DT, dim>&
-simbi::ndarray<DT, dim>::operator/(const real scale_factor)
-{
-    std::transform(
-        arr.get(),
-        arr.get() + sz,
-        arr.get(),
-        [scale_factor](DT& val) { return val / scale_factor; }
-    );
-    return *this;
-}
-
-// Template class to divide the array by a factor
-template <typename DT, int dim>
-constexpr simbi::ndarray<DT, dim>&
-simbi::ndarray<DT, dim>::operator/=(const real scale_factor)
-{
-    std::transform(
-        arr.get(),
-        arr.get() + sz,
-        arr.get(),
-        [scale_factor](DT& val) { return val / scale_factor; }
-    );
-    return *this;
-}
-
-// Template class to return begin iterator
-template <typename DT, int dim>
-typename simbi::ndarray<DT, dim>::iterator
-simbi::ndarray<DT, dim>::begin() const
-{
-    return iterator(arr.get());
-}
-
-// Template class to return end iterator
-template <typename DT, int dim>
-typename simbi::ndarray<DT, dim>::iterator simbi::ndarray<DT, dim>::end() const
-{
-    return iterator(arr.get() + sz);
-}
-
-// Template class to return the last element
-template <typename DT, int dim>
-DT simbi::ndarray<DT, dim>::back() const
-{
-    if (empty()) {
-        throw std::out_of_range("Array is empty");
-    }
-    return arr[sz - 1];
-}
-
-// Template class to return the last element
-template <typename DT, int dim>
-DT& simbi::ndarray<DT, dim>::back()
-{
-    if (empty()) {
-        throw std::out_of_range("Array is empty");
-    }
-    return arr[sz - 1];
-}
-
-// Template class to return the first element
-template <typename DT, int dim>
-DT& simbi::ndarray<DT, dim>::front()
-{
-    if (empty()) {
-        throw std::out_of_range("Array is empty");
-    }
-    return arr[0];
-}
-
-// Template class to return the first element
-template <typename DT, int dim>
-DT simbi::ndarray<DT, dim>::front() const
-{
-    if (empty()) {
-        throw std::out_of_range("Array is empty");
-    }
-    return arr[0];
-}
-
-// Template class to check if the array is empty
-template <typename DT, int dim>
-bool simbi::ndarray<DT, dim>::empty() const
-{
-    return sz == 0;
-}
-
-// Template class to print the array
-template <typename DT, int dim>
-std::ostream& operator<<(std::ostream& out, const simbi::ndarray<DT, dim>& v)
-{
-    unsigned counter        = 1;
-    const int max_cols      = 10;
-    bool end_point          = false;
-    int nelems              = v.size();
-    static bool new_row     = false;
-    static bool new_aisle   = false;
-    static int cycle        = 0;
-    static const auto nrows = [&]() -> auto {
-        if constexpr (is_2darray<DT>::value) {
-            return v[0].size();
+// Full implementation file for new_ndarray.hpp
+namespace simbi {
+    //==========================================================================
+    // Memory Manager
+    //==========================================================================
+    template <typename T>
+    void memory_manager<T>::allocate(size_type size)
+    {
+        this->size_ = size;
+        host_data_  = util::make_unique<T[]>(size);
+        if constexpr (global::on_gpu) {
+            void* ptr;
+            gpu::api::malloc(&ptr, this->size_ * sizeof(T));
+            device_data_ = unique_ptr<T, gpuDeleter<T>>(ptr);
         }
-        return v.size();
-    }();
-    if (new_row) {
-        if (!new_aisle) {
-            out << "\b\b  ";
-        }
-        else {
-            out << "\b\b[";
-        }
-        new_row   = false;
-        new_aisle = false;
     }
-    static int ii          = 0;
-    static int kk          = 0;
-    static int idx         = 0;
-    static int aisle_count = 1;
-    out << "[";
-    for (auto i : v) {
-        out << i << ", ";
-        kk = idx / max_cols / nrows;
-        ii = (idx - kk * nrows * max_cols) % max_cols;
-        if (counter == max_cols) {
-            if (ii == nelems - 1) {
-                end_point = true;
+
+    template <typename T>
+    DUAL T* memory_manager<T>::data()
+    {
+        if constexpr (global::on_gpu) {
+            if (!is_synced_) {
+                sync_to_device();
             }
-            if (!end_point) {
-                if (v.ndim() == 1) {
-                    out << '\n';
-                    out << " ";
-                    counter = 0;
-                }
+            return device_data_.get();
+        }
+        return host_data_.get();
+    }
+
+    template <typename T>
+    DUAL T* memory_manager<T>::data() const
+    {
+        if constexpr (global::on_gpu) {
+            if (!is_synced_) {
+                sync_to_device();
+            }
+            return device_data_.get();
+        }
+        return host_data_.get();
+    }
+
+    template <typename T>
+    void memory_manager<T>::sync_to_device()
+    {
+        if constexpr (global::on_gpu) {
+            gpu::api::copyHostToDevice(
+                device_data_.get(),
+                host_data_.get(),
+                this->size_ * sizeof(T)
+            );
+            is_synced_ = true;
+        }
+    }
+
+    template <typename T>
+    void memory_manager<T>::sync_to_host()
+    {
+        if constexpr (global::on_gpu) {
+            gpu::api::copyDeviceToHost(
+                host_data_.get(),
+                device_data_.get(),
+                this->size_ * sizeof(T)
+            );
+            is_synced_ = true;
+        }
+    }
+
+    template <typename T>
+    void memory_manager<T>::ensure_device_synced()
+    {
+        if constexpr (global::on_gpu) {
+            if (!is_synced_) {
+                sync_to_device();
             }
         }
-        idx++;
-        counter++;
     }
-    out << "\b\b]";   // use two ANSI backspace characters '\b' to overwrite
-                      // final ", "
-    if (idx % max_cols == 0) {
-        new_row = true;
-        if (idx / (nrows * max_cols) == aisle_count) {
-            new_aisle = true;
-            aisle_count++;
+
+    //============================================================================
+    // Boundary Manager
+    //============================================================================
+    // private methods
+    template <typename T, size_type Dims>
+    size_type boundary_manager<T, Dims>::reflecting_idx(
+        size_type ii,
+        size_type ni,
+        size_type radius
+    )
+    {
+        if (ii < radius) {
+            return 2 * radius - ii - 1;
         }
-        else {
-            if (cycle == 0) {
-                out << "\n";
-                cycle++;
+        else if (ii >= ni + radius) {
+            printf("ii: %zu, ni: %zu, radius: %zu\n", ii, ni, radius);
+            return 2 * (ni + radius) - ii - 1;
+        }
+        return ii;
+    }
+
+    template <typename T, size_type Dims>
+    size_type boundary_manager<T, Dims>::periodic_idx(
+        size_type ii,
+        size_type ni,
+        size_type radius
+    )
+    {
+        if (ii < radius) {
+            return ni + ii;
+        }
+        else if (ii >= ni + radius) {
+            return ii - ni;
+        }
+        return ii;
+    }
+
+    template <typename T, size_type Dims>
+    size_type boundary_manager<T, Dims>::outflow_idx(
+        size_type ii,
+        size_type ni,
+        size_type radius
+    )
+    {
+        if (ii < radius) {
+            return radius;
+        }
+        else if (ii >= ni + radius) {
+            return ni + radius - 1;
+        }
+        return ii;
+    }
+
+    template <typename T, size_type Dims>
+    std::array<size_type, Dims> boundary_manager<T, Dims>::unravel_idx(
+        size_type idx,
+        const uarray<Dims>& shape
+    )
+    {
+        auto idx_shift = [&](const size_type ii) {
+            if constexpr (global::col_major) {
+                return ii;
             }
             else {
-                if (idx == cycle * nrows) {
-                    if (idx != 2 * nrows) {
-                        out << "\n\n";
-                    }
-                    cycle++;
-                }
-                else {
-                    out << "\n";
-                }
+                return -(ii + 1) % Dims;
             }
+        };
+        uarray<Dims> coordinates;
+        for (size_type ii = 0; ii < Dims; ++ii) {
+            coordinates[ii] = idx % shape[idx_shift(ii)];
+            idx /= shape[idx_shift(ii)];
         }
+        return coordinates;
     }
-    return out;
-}
 
-// Template class to copy data to GPU
-template <typename DT, int dim>
-void simbi::ndarray<DT, dim>::copyToGpu()
-{
-    if constexpr (global::on_gpu) {
-        if (arr && !is_gpu_synced) {
-            if (!dev_arr) {
-                dev_arr.reset((DT*) myGpuMalloc(sz * sizeof(DT)));
+    template <typename T, size_type Dims>
+    void boundary_manager<T, Dims>::sync_faces(
+        const ExecutionPolicy<>& policy,
+        ndarray<T, Dims>& full_array,
+        const array_view<T, Dims>& interior_view,
+        const ndarray<BoundaryCondition>& conditions
+    )
+    {
+        auto* data = full_array.data();
+        auto radii = [&]() {
+            uarray<Dims> rad;
+            for (size_type ii = 0; ii < Dims; ++ii) {
+                rad[ii] =
+                    (full_array.shape()[ii] - interior_view.shape()[ii]) / 2;
             }
-            if (current_stream) {
-                gpu::api::asyncCopyHostToDevice(
-                    dev_arr.get(),
-                    arr.get(),
-                    sz * sizeof(DT),
-                    current_stream
-                );
-            }
-            else {
-                gpu::api::copyHostToDevice(
-                    dev_arr.get(),
-                    arr.get(),
-                    sz * sizeof(DT)
-                );
-            }
-            is_gpu_synced = true;
-        }
-    }
-}
-
-// Template class to copy data from GPU
-template <typename DT, int dim>
-void simbi::ndarray<DT, dim>::copyFromGpu()
-{
-    if (dev_arr) {
-        gpu::api::copyDevToHost(arr.get(), dev_arr.get(), sz * sizeof(DT));
-    }
-}
-
-// Template class to copy data between GPUs
-template <typename DT, int dim>
-void simbi::ndarray<DT, dim>::copyBetweenGpu(const ndarray& rhs)
-{
-    if (dev_arr) {
-        gpu::api::copyDevToDev(
-            dev_arr.get(),
-            rhs.dev_arr.get(),
-            rhs.sz * sizeof(DT)
-        );
-    }
-}
-
-// Template class to return host data pointer
-template <typename DT, int dim>
-DT* simbi::ndarray<DT, dim>::host_data()
-{
-    return arr.get();
-}
-
-// Template class to return host data pointer
-template <typename DT, int dim>
-DT* simbi::ndarray<DT, dim>::host_data() const
-{
-    return arr.get();
-}
-
-// Template class to return device data pointer
-template <typename DT, int dim>
-DUAL DT* simbi::ndarray<DT, dim>::dev_data()
-{
-    return dev_arr.get();
-}
-
-// Template class to return device data pointer
-template <typename DT, int dim>
-DUAL DT* simbi::ndarray<DT, dim>::dev_data() const
-{
-    return dev_arr.get();
-}
-
-// Template class to return data pointer
-template <typename DT, int dim>
-DUAL DT* simbi::ndarray<DT, dim>::data()
-{
-    if (sz == 0) {
-        return nullptr;
-    }
-
-    if constexpr (global::on_gpu) {
-        return dev_arr.get();
-    }
-    else {
-        return arr.get();
-    }
-}
-
-// Template class to return data pointer
-template <typename DT, int dim>
-DT* simbi::ndarray<DT, dim>::data() const
-{
-    if (sz == 0) {
-        return nullptr;
-    }
-
-    if constexpr (global::on_gpu) {
-        return dev_arr.get();
-    }
-    else {
-        return arr.get();
-    }
-}
-
-template <typename DT, int dim>
-void simbi::ndarray<DT, dim>::clear()
-{
-    arr.reset();
-    dev_arr.reset();
-    sz = 0;
-}
-
-template <typename DT, int dim>
-void simbi::ndarray<DT, dim>::shrink_to_fit()
-{
-    if (sz < nd_capacity) {
-        auto new_arr = util::make_unique<DT[]>(sz);
-        std::copy(arr.get(), arr.get() + sz, new_arr.get());
-        arr.swap(new_arr);
-        nd_capacity = sz;
-    }
-}
-
-template <typename DT, int dim>
-void simbi::ndarray<DT, dim>::reserve(size_type new_capacity)
-{
-    if (new_capacity > nd_capacity) {
-        auto new_arr = util::make_unique<DT[]>(new_capacity);
-        std::copy(arr.get(), arr.get() + sz, new_arr.get());
-        arr.swap(new_arr);
-        nd_capacity = new_capacity;
-    }
-}
-
-template <typename DT, int dim>
-void simbi::ndarray<DT, dim>::unpin_memory()
-{
-    if (dev_arr) {
-        gpu::api::hostUnregister(arr.get());
-    }
-}
-
-template <typename DT, int dim>
-void simbi::ndarray<DT, dim>::pin_memory()
-{
-    if (dev_arr) {
-        gpu::api::hostRegister(arr.get(), sz * sizeof(DT), 0);
-    }
-}
-
-template <typename DT, int dim>
-void simbi::ndarray<DT, dim>::set_stream(simbiStream_t stream)
-{
-    current_stream = stream;
-}
-
-template <typename DT, int dim>
-void simbi::ndarray<DT, dim>::async_copy_to_gpu()
-{
-    if (!dev_arr) {
-        dev_arr.reset((DT*) myGpuMalloc(sz * sizeof(DT)));
-    }
-    if (current_stream) {
-        gpu::api::asyncCopyHostToDevice(
-            dev_arr.get(),
-            arr.get(),
-            sz * sizeof(DT),
-            current_stream
-        );
-    }
-}
-
-template <typename DT, int dim>
-void simbi::ndarray<DT, dim>::ensure_gpu_synced()
-{
-    if constexpr (global::on_gpu) {
-        if (needs_gpu_sync && !is_gpu_synced) {
-            copyToGpu();
-            is_gpu_synced  = true;
-            needs_gpu_sync = false;
-        }
-    }
-}
-
-template <typename DT, int dim>
-void* simbi::ndarray<DT, dim>::aligned_alloc(
-    size_type size,
-    size_type alignment
-)
-{
-    void* ptr;
-    if constexpr (global::on_gpu) {
-        gpu::api::alignedMalloc(&ptr, size);
-    }
-    else {
-        ptr = std::aligned_alloc(alignment, size);
-    }
-    return ptr;
-}
-
-//==============================================================================
-//                        Functional Operations
-//==============================================================================
-template <typename DT, int dim>
-template <typename UnaryFunction>
-simbi::ndarray<DT, dim>& simbi::ndarray<DT, dim>::map(UnaryFunction f)
-{
-    if constexpr (global::on_gpu) {
-        auto ptr = dev_arr.get();
-        gpu::api::launchKernel(
-            [ptr, f] DEV(size_type i) { ptr[i] = f(ptr[i]); },
-            sz,
-            256,
-            nullptr,
-            0,
-            nullptr
-        );
-    }
-    else {
-        std::transform(arr.get(), arr.get() + sz, arr.get(), f);
-    }
-    return *this;
-}
-
-template <typename DT, int dim>
-template <typename UnaryFunction>
-simbi::ndarray<DT, dim> simbi::ndarray<DT, dim>::map(UnaryFunction f) const
-{
-    simbi::ndarray<DT, dim> result;
-    std::transform(
-        arr.get(),
-        arr.get() + sz,
-        std::back_inserter(result.arr),
-        f
-    );
-    result.sz          = result.arr.size();
-    result.nd_capacity = result.sz;
-    return result;
-}
-
-template <typename DT, int dim>
-template <typename UnaryPredicate>
-simbi::ndarray<DT, dim>& simbi::ndarray<DT, dim>::filter(UnaryPredicate pred)
-{
-    auto new_end = std::remove_if(arr.get(), arr.get() + sz, pred);
-    sz           = new_end - arr.get();
-    return *this;
-}
-
-template <typename DT, int dim>
-template <typename UnaryPredicate>
-simbi::ndarray<DT, dim>
-simbi::ndarray<DT, dim>::filter(UnaryPredicate pred) const
-{
-    simbi::ndarray<DT, dim> result;
-    std::copy_if(
-        arr.get(),
-        arr.get() + sz,
-        std::back_inserter(result.arr),
-        pred
-    );
-    result.sz          = result.arr.size();
-    result.nd_capacity = result.sz;
-    return result;
-}
-
-template <typename DT, int dim>
-template <typename U, typename BinaryOp>
-U simbi::ndarray<DT, dim>::reduce(
-    const ExecutionPolicy<>& policy,
-    U init,
-    BinaryOp binary_op
-) const
-{
-    if constexpr (global::on_gpu) {
-        ndarray<U> result(1, init);
-        result.copyToGpu();
-        auto result_ptr           = result.dev_data();
-        const auto in_ptr         = dev_arr.get();
-        const size_type num_items = sz;
-
-        // Get 3D dimensions from policy
-        const dim3 grid                   = policy.gridSize;
-        const dim3 block                  = policy.blockSize;
-        const size_type total_blocks      = grid.x * grid.y * grid.z;
-        const size_type threads_per_block = block.x * block.y * block.z;
-
-        parallel_for(policy, [=] DEV(size_type bid) {
-            // 3D block index
-            const unsigned int bx = bid % grid.x;
-            const unsigned int by = (bid / grid.x) % grid.y;
-            const unsigned int bz = bid / (grid.x * grid.y);
-
-            // 3D thread index
-            const unsigned int tx = threadIdx.x;
-            const unsigned int ty = threadIdx.y;
-            const unsigned int tz = threadIdx.z;
-
-            // Global thread index (3D -> linear)
-            const size_type tid =
-                (bz * grid.y * grid.x + by * grid.x + bx) * threads_per_block +
-                (tz * block.y * block.x + ty * block.x + tx);
-
-            // Warp lane index
-            const unsigned int lane = tid % global::WARP_SIZE;
-
-            // Grid stride accounting for 3D grid
-            const size_type grid_stride = total_blocks * threads_per_block;
-
-            // Per-thread reduction with 3D grid stride
-            U thread_sum = init;
-            for (size_type i = tid; i < num_items; i += grid_stride) {
-                thread_sum = binary_op(thread_sum, in_ptr[i]);
-            }
-
-            // Warp reduction
-            for (int offset = 16; offset > 0; offset >>= 1) {
-                thread_sum = binary_op(
-                    thread_sum,
-                    __shfl_down_sync(0xffffffff, thread_sum, offset)
-                );
-            }
-
-            // First thread in warp writes to result
-            if (lane == 0) {
-                result_ptr[lane] = gpu::api::atomicMin(result_ptr, thread_sum);
-            }
-        });
-
-        result.copyFromGpu();
-        return result[0];
-    }
-    else {
-        // Existing CPU implementation
-        std::atomic<U> result(init);
-        parallel_for(policy, size(), [&](size_type i) {
-            U old_val = result.load();
-            U new_val = binary_op(old_val, arr[i]);
-            while (!result.compare_exchange_weak(old_val, new_val)) {
-                new_val = binary_op(old_val, arr[i]);
-            }
-        });
-        return result.load();
-    }
-}
-
-template <typename DT, int dim>
-template <typename F, typename G>
-auto simbi::ndarray<DT, dim>::compose(F f, G g) const
-{
-    return f(g(*this));
-}
-
-template <typename DT, int dim>
-template <typename... Funcs>
-auto simbi::ndarray<DT, dim>::then(Funcs... f) const
-{
-    return (... | f)(*this);
-}
-
-template <typename DT, int dim>
-template <typename... Transforms>
-simbi::ndarray<DT, dim>
-simbi::ndarray<DT, dim>::transform_chain(Transforms... transforms) const
-{
-    return (... | transforms)(*this);
-}
-
-template <typename DT, int dim>
-template <typename Func>
-Maybe<simbi::ndarray<DT, dim>> simbi::ndarray<DT, dim>::safe_map(Func f) const
-{
-    if (empty()) {
-        return Maybe<simbi::ndarray<DT, dim>>();
-    }
-    return Maybe<simbi::ndarray<DT, dim>>(map(f));
-}
-
-template <typename DT, int dim>
-template <typename Func>
-simbi::ndarray<DT, dim>
-simbi::ndarray<DT, dim>::combine(const ndarray& other, Func binary_op) const
-{
-    simbi::ndarray<DT, dim> result(size());
-    std::transform(begin(), end(), other.begin(), result.begin(), binary_op);
-    return result;
-}
-
-template <typename DT, int dim>
-template <typename Func>
-simbi::ndarray<DT, dim> simbi::ndarray<DT, dim>::parallel_chunks(
-    const ExecutionPolicy<>& policy,
-    Func chunk_op
-) const
-{
-    simbi::ndarray<DT, dim> result(size());
-    size_type batch_size  = policy.batch_size;
-    size_type num_batches = policy.get_num_batches(sz);
-    if constexpr (global::on_gpu) {
-        auto out_ptr = result.dev_data();
-        auto in_ptr  = dev_arr.get();
-
-        simbi::parallel_for(policy, num_batches, [=, this] DEV(size_t i) {
-            const size_t start = i * batch_size;
-            const size_t end   = my_min(start + batch_size, sz);
-            for (size_t j = start; j < end; j++) {
-                out_ptr[j] = chunk_op(in_ptr[j]);
-            }
-        });
-    }
-    else {
-        simbi::parallel_for(policy, num_batches, [&](size_t i) {
-            const size_t start = i * batch_size;
-            const size_t end   = std::min(start + batch_size, sz);
-            auto slice_view    = slice(start, end);
-            auto result_view   = result.slice(start, end);
-            for (size_t j = start; j < end; j++) {
-                result_view[j - start] = chunk_op(slice_view[j - start]);
-            }
-        });
-    }
-    return result;
-}
-
-template <typename DT, int dim>
-template <typename Func>
-auto simbi::ndarray<DT, dim>::transform_parallel(
-    const ExecutionPolicy<>& policy,
-    Func transform_op
-) const
-    -> std::enable_if_t<
-        !has_index_param<Func, const DT&>::value,
-        simbi::ndarray<std::invoke_result_t<Func, const DT&>, dim>>
-{
-    // using result_type = fn_result_t<Func>;
-    using result_type = std::invoke_result_t<Func, const DT&>;
-    simbi::ndarray<result_type, dim> result(size());
-    size_type batch_size  = policy.batch_size;
-    size_type num_batches = policy.get_num_batches(sz);
-
-    if constexpr (global::on_gpu) {
-        result.copyToGpu();
-        auto out_ptr = result.dev_data();
-        auto in_ptr  = dev_arr.get();
-
-        simbi::parallel_for(policy, num_batches, [=, this] DEV(size_type i) {
-            const size_type start = i * batch_size;
-            const size_type end   = my_min(start + batch_size, sz);
-            for (size_type j = start; j < end; j++) {
-                out_ptr[j] = transform_op(in_ptr[j]);
-            }
-        });
-    }
-    else {
-        simbi::parallel_for(policy, num_batches, [&](size_type i) {
-            const size_type start = i * batch_size;
-            const size_type end   = std::min(start + batch_size, sz);
-            const auto slice_view = slice(start, end);
-            auto result_view      = result.slice(start, end);
-            for (size_type j = start; j < end; j++) {
-                result_view[j - start] = transform_op(slice_view[j - start]);
-            }
-        });
-    }
-    return result;
-}
-
-template <typename DT, int dim>
-template <typename Func>
-auto simbi::ndarray<DT, dim>::transform_parallel(
-    const ExecutionPolicy<>& policy,
-    Func transform_op
-) const
-    -> std::enable_if_t<
-        has_index_param<Func, const DT&>::value,
-        simbi::ndarray<std::invoke_result_t<Func, const DT&, size_type>, dim>>
-{
-    using result_type = std::invoke_result_t<Func, const DT&, size_type>;
-    simbi::ndarray<result_type, dim> result(size());
-    size_type batch_size  = policy.batch_size;
-    size_type num_batches = policy.get_num_batches(sz);
-
-    if constexpr (global::on_gpu) {
-        result.copyToGpu();
-        auto out_ptr = result.dev_data();
-        auto in_ptr  = dev_arr.get();
-
-        simbi::parallel_for(policy, num_batches, [=, this] DEV(size_type i) {
-            const size_type start = i * batch_size;
-            const size_type end   = my_min(start + batch_size, sz);
-            for (size_type j = start; j < end; j++) {
-                out_ptr[j] = transform_op(in_ptr[j], j);
-            }
-        });
-    }
-    else {
-        simbi::parallel_for(policy, num_batches, [&](size_type i) {
-            const size_type start = i * batch_size;
-            const size_type end   = std::min(start + batch_size, sz);
-            const auto slice_view = slice(start, end);
-            auto result_view      = result.slice(start, end);
-            for (size_type j = start; j < end; j++) {
-                result_view[j - start] = transform_op(slice_view[j - start], j);
-            }
-        });
-    }
-    return result;
-}
-
-template <typename DT, int dim>
-template <typename T, typename Func>
-simbi::ndarray<std::invoke_result_t<Func, const DT&, const T&>, dim>
-simbi::ndarray<DT, dim>::transform_parallel_with(
-    const ExecutionPolicy<>& policy,
-    simbi::ndarray<T>& other,
-    Func transform_op
-) const
-{
-    using result_type = std::invoke_result_t<Func, const DT&, const T&>;
-    simbi::ndarray<result_type, dim> result(size());
-    size_type batch_size  = policy.batch_size;
-    size_type num_batches = policy.get_num_batches(sz);
-
-    if constexpr (global::on_gpu) {
-        result.copyToGpu();
-        auto out_ptr   = result.dev_data();
-        auto in_ptr    = dev_arr.get();
-        auto other_ptr = other.dev_data();
-
-        parallel_for(policy, num_batches, [=, this] DEV(size_type i) {
-            const size_type start = i * batch_size;
-            const size_type end   = my_min(start + batch_size, sz);
-            for (size_type j = start; j < end; j++) {
-                out_ptr[j] = transform_op(in_ptr[j], other_ptr[j]);
-            }
-        });
-    }
-    else {
-        parallel_for(policy, num_batches, [&](size_type i) {
-            const size_type start = i * batch_size;
-            const size_type end   = std::min(start + batch_size, sz);
-            const auto slice_view = slice(start, end);
-            auto other_view       = other.slice(start, end);
-            auto result_view      = result.slice(start, end);
-            for (size_type j = start; j < end; j++) {
-                result_view[j - start] =
-                    transform_op(slice_view[j - start], other_view[j - start]);
-            }
-        });
-    }
-    return result;
-}
-
-template <typename DT, int dim>
-template <typename T, typename Func>
-void simbi::ndarray<DT, dim>::transform_stencil_with(
-    const ExecutionPolicy<>& policy,
-    const simbi::ndarray<T, dim>& stencil_array,
-    size_type radius,
-    Func stencil_op
-)
-{
-    // active directional zone size
-    const size_type nx = policy.gridSize.x;
-    const size_type ny = policy.gridSize.y;
-    const size_type nz = policy.gridSize.z;
-
-    // directional strides
-    const size_type sx = policy.stride.x;
-    const size_type sy = policy.stride.y;
-    const size_type sz = policy.stride.z;
-
-    // full grid zone size
-    const size_type nxf = nx + 2 * radius;
-    const size_type nyf = ny + 2 * radius;
-    const size_type nzf = nz + 2 * radius;
-    if constexpr (global::on_gpu) {
-        auto data_ptr    = dev_data();
-        auto stencil_ptr = stencil_array.dev_data();
-
-        parallel_for(policy, [=] DEV(size_type idx) {
-            // Get 3D indices
-            const size_type kk =
-                axid<dim, BlkAx::K>(idx, nx, ny) + radius * (dim > 2);
-            const size_type jj =
-                axid<dim, BlkAx::J>(idx, nx, ny, kk) + radius * (dim > 1);
-            const size_type ii = axid<dim, BlkAx::I>(idx, nx, ny, kk) + radius;
-
-            // Skip ghost cells
-            if (ii >= nx || jj >= ny || kk >= nz) {
-                return;
-            }
-
-            // Create stencil view of input array
-            stencil_view<T> view(stencil_ptr, sx, sy, sz, ii, jj, kk, radius);
-
-            // Update array in-place
-            data_ptr[idx3(ii, jj, kk, nxf, nyf, nzf)] += stencil_op(view);
-        });
-    }
-    else {
-        parallel_for(policy, [&](size_type idx) {
-            const size_type kk =
-                axid<dim, BlkAx::K>(idx, nx, ny) + radius * (dim > 2);
-            const size_type jj =
-                axid<dim, BlkAx::J>(idx, nx, ny, kk) + radius * (dim > 1);
-            const size_type ii = axid<dim, BlkAx::I>(idx, nx, ny, kk) + radius;
-
-            stencil_view<T>
-                view(stencil_array.data(), sx, sy, sz, ii, jj, kk, radius);
-
-            arr[idx3(ii, jj, kk, nxf, nyf, nzf)] += stencil_op(view);
-        });
-    }
-}
-
-template <typename DT, int dim>
-template <typename BoundaryOp>
-void simbi::ndarray<DT, dim>::apply_to_boundaries(
-    const ExecutionPolicy<>& policy,
-    size_type radius,
-    BoundaryOp&& boundary_op
-)
-{
-    const size_type nx = policy.gridSize.x;
-    const size_type ny = policy.gridSize.y;
-    const size_type nz = policy.gridSize.z;
-    if constexpr (global::on_gpu) {
-        auto data_ptr = dev_data();
+            return rad;
+        }();
 
         parallel_for(policy, [=, this] DEV(size_type idx) {
-            // Calculate 3D indices
-            const size_type kk = axid<dim, BlkAx::K>(idx, nx, ny);
-            const size_type jj = axid<dim, BlkAx::J>(idx, nx, ny, kk);
-            const size_type ii = axid<dim, BlkAx::I>(idx, nx, ny, kk);
-
-            // Check if we're on any boundary
-            const bool is_boundary =
-                is_boundary_point(ii, jj, kk, nx, ny, nz, radius);
-            if (!is_boundary) {
-                return;
+            auto coordinates = unravel_idx(idx, full_array.shape());
+            auto rshape      = interior_view.shape();
+            // reverse shape if row major
+            if constexpr (!global::col_major) {
+                std::reverse(rshape.begin(), rshape.end());
             }
+            // For each dimension, check boundaries
+            for (size_type dim = 0; dim < Dims; ++dim) {
+                if (coordinates[dim] < radii[dim] ||
+                    coordinates[dim] >= rshape[dim] + radii[dim]) {
+                    // Get interior index and apply boundary condition
+                    const auto interior_idx = get_interior_idx(
+                        coordinates,
+                        dim,
+                        interior_view.shape(),
+                        full_array.strides(),
+                        radii,
+                        coordinates[dim] < radii[dim] ? conditions[2 * dim]
+                                                      :   // Lower boundary
+                            conditions[2 * dim + 1]       // Upper boundary
+                    );
+                    // printf("idx: %zu, interior_idx: %zu\n", idx,
+                    // interior_idx); std::cin.get();
 
-            // Create boundary view
-            boundary_view view(data_ptr, nx, ny, nz, ii, jj, kk, radius);
-
-            // Apply boundary operation
-            boundary_op(view, data_ptr[idx]);
+                    // Apply boundary condition
+                    switch (
+                        conditions
+                            [2 * dim + (coordinates[dim] < radii[dim] ? 0 : 1)]
+                    ) {
+                        case BoundaryCondition::REFLECTING:
+                            data[idx] =
+                                apply_reflecting(data[interior_idx], dim + 1);
+                            break;
+                        case BoundaryCondition::PERIODIC:
+                            data[idx] = apply_periodic(data[interior_idx]);
+                            break;
+                        default:   // OUTFLOW
+                            data[idx] = data[interior_idx];
+                    }
+                }
+            }
         });
     }
-    else {
-        // CPU version
-        parallel_for(policy, [&](size_type idx) {
-            const size_type kk = axid<dim, BlkAx::K>(idx, nx, ny);
-            const size_type jj = axid<dim, BlkAx::J>(idx, nx, ny, kk);
-            const size_type ii = axid<dim, BlkAx::I>(idx, nx, ny, kk);
 
-            const bool is_boundary =
-                is_boundary_point(ii, jj, kk, nx, ny, nz, radius);
-            if (!is_boundary) {
-                return;
+    template <typename T, size_type Dims>
+    void boundary_manager<T, Dims>::sync_corners(
+        const ExecutionPolicy<>& policy,
+        ndarray<T, Dims>& full_array,
+        const array_view<T, Dims>& interior_view,
+        const ndarray<BoundaryCondition>& conditions
+    )
+    {
+        auto* data = full_array.data();
+        auto radii = [&]() {
+            uarray<Dims> rad;
+            for (size_type ii = 0; ii < Dims; ++ii) {
+                rad[ii] =
+                    (full_array.shape()[ii] - interior_view.shape()[ii]) / 2;
             }
+            return rad;
+        }();
 
-            // printf("Boundary point: %zu, %zu, %zu\n", ii, jj, kk);
-            boundary_view view(arr.get(), nx, ny, nz, ii, jj, kk, radius);
-            boundary_op(view, arr[idx]);
+        // Use PlaneSequence to handle different dimensions
+        using planes = typename PlaneSequence<Dims>::type;
+
+        // Iterate through planes using index sequence
+        detail::for_sequence(planes{}, [&](auto plane_idx) {
+            constexpr Plane P = static_cast<Plane>(plane_idx());
+
+            // Get boundary condition pairs for this plane
+            constexpr auto& bc_pairs = PlaneInfo<P>::bc_pairs;
+
+            parallel_for(policy, [=, this] DEV(size_type idx) {
+                auto coords = unravel_idx(idx, full_array.shape());
+
+                // Check if we're at a corner
+                if (is_corner_point(coords, interior_view.shape(), radii)) {
+                    // For each corner configuration in this plane
+                    for (const auto& [bc1_idx, bc2_idx] : bc_pairs) {
+                        const auto bc1 = conditions[bc1_idx];
+                        const auto bc2 = conditions[bc2_idx];
+
+                        // Apply corner boundary conditions
+                        if constexpr (P == Plane::IJ) {
+                            helpers::handle_corner<T, Plane::IJ>(
+                                data,
+                                idx,
+                                coords[0],
+                                coords[1],
+                                coords[2],
+                                full_array.shape()[0],
+                                full_array.shape()[1],
+                                full_array.shape()[2],
+                                radii[0],
+                                bc1,
+                                bc2,
+                                1,
+                                2
+                            );
+                        }
+                        else if constexpr (P == Plane::IK) {
+                            helpers::handle_corner<T, Plane::IK>(
+                                data,
+                                idx,
+                                coords[0],
+                                coords[1],
+                                coords[2],
+                                full_array.shape()[0],
+                                full_array.shape()[1],
+                                full_array.shape()[2],
+                                radii[0],
+                                bc1,
+                                bc2,
+                                1,
+                                3
+                            );
+                        }
+                        else {   // Plane::JK
+                            helpers::handle_corner<T, Plane::JK>(
+                                data,
+                                idx,
+                                coords[0],
+                                coords[1],
+                                coords[2],
+                                full_array.shape()[0],
+                                full_array.shape()[1],
+                                full_array.shape()[2],
+                                radii[0],
+                                bc1,
+                                bc2,
+                                2,
+                                3
+                            );
+                        }
+                    }
+                }
+            });
         });
     }
-}
+
+    // public methods
+    template <typename T, size_type Dims>
+    void boundary_manager<T, Dims>::sync_boundaries(
+        const ExecutionPolicy<>& policy,
+        ndarray<T, Dims>& full_array,
+        const array_view<T, Dims>& interior_view,
+        const ndarray<BoundaryCondition>& conditions,
+        const bool need_corners
+    )
+    {
+        // Sync faces
+        sync_faces(policy, full_array, interior_view, conditions);
+
+        // Sync corners if needed
+        if (need_corners) {
+            sync_corners(policy, full_array, interior_view, conditions);
+        }
+    }
+
+    //==========================================================================
+    // Array View
+    //==========================================================================
+    template <typename T, size_type Dims>
+    array_view<T, Dims>::array_view(
+        T* data,
+        const uarray<Dims>& shape,
+        const uarray<Dims>& strides,
+        const uarray<Dims>& offsets
+    )
+        : array_properties<T, Dims>(
+              shape,
+              strides,
+              offsets,
+              this->compute_size(shape)
+          ),
+          data_(data, this->size_)
+    {
+    }
+
+    template <typename T, size_type Dims>
+    DUAL array_view<T, Dims>::value_type&
+    array_view<T, Dims>::operator[](size_type ii)
+    {
+        return access(data_[ii]);
+    }
+
+    template <typename T, size_type Dims>
+    DUAL array_view<T, Dims>::value_type&
+    array_view<T, Dims>::operator[](size_type ii) const
+    {
+        return access(data_[ii]);
+    }
+
+    template <typename T, size_type Dims>
+    template <typename... Indices>
+    T& array_view<T, Dims>::at(Indices... indices)
+    {
+        static_assert(sizeof...(Indices) == Dims, "invalid number of indices");
+
+        uarray<Dims> idx{static_cast<size_type>(indices)...};
+        size_type offset = 0;
+
+#pragma unroll
+        for (size_type ii = 0; ii < Dims; ++ii) {
+            if (idx[ii] >= this->shape_[ii]) {
+                // GPU-safe bounds check
+                // Return first element on invalid access
+                return data_[0];
+            }
+            offset += idx[ii] * this->strides_[ii];
+        }
+        return access(data_[offset]);
+    }
+
+    template <typename T, size_type Dims>
+    DUAL auto array_view<T, Dims>::data() -> T*
+    {
+        return data_.data();
+    }
+
+    template <typename T, size_type Dims>
+    DUAL auto& array_view<T, Dims>::access(T& val)
+    {
+        if constexpr (is_maybe_v<T>) {
+            return val.value();
+        }
+        else {
+            return val;
+        }
+    }
+
+    template <typename T, size_type Dims>
+    DUAL auto& array_view<T, Dims>::access(T& val) const
+    {
+        if constexpr (is_maybe_v<T>) {
+            return val.value();
+        }
+        else {
+            return val;
+        }
+    }
+
+    template <typename T, size_type Dims>
+    DUAL auto array_view<T, Dims>::data() const -> T*
+    {
+        return data_.data();
+    }
+
+    // function to print std::array elements
+    template <typename T, size_type N>
+    void print_array(const std::array<T, N>& arr)
+    {
+        for (const auto& elem : arr) {
+            std::cout << elem << " ";
+        }
+        std::cout << std::endl;
+    }
+
+    template <typename T, size_type Dims>
+    template <typename... DependentViews, typename F>
+    void array_view<T, Dims>::stencil_transform(
+        F op,
+        const ExecutionPolicy<>& policy,
+        const DependentViews&... arrays
+    )
+    {
+        if constexpr (global::on_gpu) {
+            // TODO: Implement GPU version
+        }
+        else {
+            parallel_for(policy, [=, this](size_type idx) {
+                // Get global coordinates
+                auto pos = this->get_local_coords(idx);
+
+                // Create centered view for main array
+                stencil_view
+                    center_view(data(), pos, this->shape(), this->strides());
+                auto all_views = std::make_tuple(
+                    center_view,
+                    stencil_view<typename array_raw_type<DependentViews>::type>(
+                        arrays.data(),
+                        arrays.get_local_coords(idx),
+                        arrays.shape(),
+                        arrays.strides()
+                    )...
+                );
+
+                // auto active_idx = global_linear_idx(idx);
+                // printf("idx: %zu, aidx: %zu\n", idx, active_idx);
+                // Create centered views for dependent arrays
+                center_view.value() = std::apply(op, all_views);
+            });
+        }
+    }
+
+    //==========================================================================
+    // NDArray
+    //==========================================================================
+
+    template <typename T, size_type Dims>
+    ndarray<T, Dims>::ndarray(
+        std::initializer_list<size_type> dims,
+        T fill_value
+    )
+    {
+        size_type size = 1;
+        for (auto dim : dims) {
+            size *= dim;
+        }
+        mem_.allocate(size);
+        this->shape_   = dims;
+        this->strides_ = this->compute_strides(this->shape_);
+        fill(fill_value);
+    }
+
+    template <typename T, size_type Dims>
+    ndarray<T, Dims>::ndarray(std::vector<T>&& data)
+    {
+        mem_.allocate(data.size());
+        std::copy(data.begin(), data.end(), mem_.data());
+        this->size_    = data.size();
+        this->shape_   = {data.size()};
+        this->strides_ = this->compute_strides(this->shape_);
+        // check values after copy
+        for (size_type ii = 0; ii < this->size(); ++ii) {
+            assert(mem_[ii] == data[ii]);
+        }
+        // clear and release the vector
+        data.clear();
+        data.shrink_to_fit();
+    }
+
+    template <typename T, size_type Dims>
+    void ndarray<T, Dims>::sync_to_device()
+    {
+        mem_.sync_to_device();
+    }
+
+    template <typename T, size_type Dims>
+    void ndarray<T, Dims>::sync_to_host()
+    {
+        mem_.sync_to_host();
+    }
+
+    template <typename T, size_type Dims>
+    auto& ndarray<T, Dims>::reshape(const collapsable<Dims>& new_shape)
+    {
+        // printf("reshaping\n");
+        // Verify total size matches
+        size_type new_size = this->compute_size(new_shape.vals);
+        assert(new_size == this->size_ && "New shape must match total size");
+
+        // Update shape and strides
+        this->shape_   = new_shape.vals;
+        this->strides_ = this->compute_strides(this->shape_);
+        return *this;
+    }
+
+    template <typename T, size_type Dims>
+    auto& ndarray<T, Dims>::reshape(
+        const collapsable<Dims>& new_shape,
+        const collapsable<Dims>& new_strides
+    )
+    {
+        // Verify total size matches
+        size_type new_size = this->compute_size(new_shape.vals);
+        assert(new_size == this->size_ && "New shape must match total size");
+
+        // Update shape and strides
+        this->shape_   = new_shape.vals;
+        this->strides_ = new_strides.vals;
+        return *this;
+    }
+
+    template <typename T, size_type Dims>
+    auto& ndarray<T, Dims>::resize(size_type size, T fill_value)
+    {
+        mem_.allocate(size);
+        this->size_ = size;
+        return *this;
+        // fill(fill_value);
+    }
+
+    template <typename T, size_type Dims>
+    auto ndarray<T, Dims>::data() -> T*
+    {
+        return mem_.data();
+    }
+
+    template <typename T, size_type Dims>
+    auto ndarray<T, Dims>::data() const -> const T*
+    {
+        return mem_.data();
+    }
+
+    template <typename T, size_type Dims>
+    auto ndarray<T, Dims>::fill(T value) -> void
+    {
+        if constexpr (global::on_gpu) {
+            mem_.ensure_device_synced();
+            parallel_for(
+                [=, this] DEV(size_type ii) { mem_[ii] = value; },
+                this->size()
+            );
+            mem_.sync_to_host();
+        }
+        else {
+            std::fill(mem_.data(), mem_.data() + this->size(), value);
+        }
+    }
+
+    template <typename T, size_type Dims>
+    template <typename... Indices>
+    DUAL T& ndarray<T, Dims>::at(Indices... indices)
+    {
+        static_assert(sizeof...(Indices) == Dims, "Invalid number of indices");
+
+        uarray<Dims> idx{static_cast<size_type>(indices)...};
+        size_type offset = 0;
+
+#pragma unroll
+        for (size_type ii = 0; ii < Dims; ++ii) {
+            if (idx[ii] >= this->shape_[ii]) {
+                // GPU-safe bounds check
+                // Return first element on invalid access
+                return mem_.data[0];
+            }
+            offset += idx[ii] * this->strides_[ii];
+        }
+        return access(mem_[offset]);
+    }
+
+    // contract dimensions uniformly
+    template <typename T, size_type Dims>
+    auto ndarray<T, Dims>::contract(size_type radius) -> array_view<T, Dims>
+    {
+        uarray<Dims> new_shape;
+        uarray<Dims> offsets;
+
+#pragma unroll
+        for (size_type ii = 0; ii < Dims; ++ii) {
+            new_shape[ii] = this->shape_[ii] - 2 * radius;
+            offsets[ii]   = radius;
+        }
+
+        return array_view<T, Dims>(
+            mem_.data() + this->compute_offset(offsets),
+            new_shape,
+            this->strides_,
+            offsets
+        );
+    }
+
+    template <typename T, size_type Dims>
+    auto ndarray<T, Dims>::view(const uarray<Dims>& ranges) const
+        -> array_view<T, Dims>
+    {
+        uarray<Dims> offsets;
+        for (size_type ii = 0; ii < Dims; ++ii) {
+            offsets[ii] = this->shape_[ii] - ranges[ii];
+        }
+        return array_view<T, Dims>(
+            mem_.data() + this->compute_offset(offsets),
+            this->shape_,
+            this->strides_,
+            offsets
+        );
+    }
+
+    template <typename T, size_type Dims>
+    template <typename F>
+    void ndarray<T, Dims>::transform(F op, const ExecutionPolicy<>& policy)
+    {
+        if constexpr (global::on_gpu) {
+            mem_.ensure_device_synced();
+            parallel_for(policy, [=, this] DEV(size_type ii) {
+                mem_[ii] = op(mem_[ii]);
+            });
+            policy.synchronize();
+        }
+        else {
+            parallel_for(policy, [=, this](size_type ii) {
+                mem_[ii] = op(mem_[ii]);
+            });
+        }
+    }
+
+    template <typename T, size_type Dims>
+    template <typename... DependentArrays, typename F>
+    void ndarray<T, Dims>::transform(
+        F op,
+        const ExecutionPolicy<>& policy,
+        const DependentArrays&... arrays
+    )
+    {
+        if constexpr (global::on_gpu) {
+            mem_.ensure_device_synced();
+            parallel_for(policy, [=, this] DEV(size_type ii) {
+                mem_[ii] = op(mem_[ii], arrays[ii]...);
+            });
+            policy.synchronize();
+        }
+        else {
+            parallel_for(policy, [=, this](size_type ii) {
+                mem_[ii] = op(mem_[ii], arrays[ii]...);
+            });
+        }
+    }
+
+    template <typename T, size_type Dims>
+    template <typename... DependentArrays, typename F>
+    void ndarray<T, Dims>::transform(
+        F op,
+        const ExecutionPolicy<>& policy,
+        DependentArrays&... arrays
+    )
+    {
+        if constexpr (global::on_gpu) {
+            mem_.ensure_device_synced();
+            parallel_for(policy, [=, this] DEV(size_type ii) {
+                mem_[ii] = op(mem_[ii], arrays[ii]...);
+            });
+            policy.synchronize();
+        }
+        else {
+            parallel_for(policy, [&](size_type ii) {
+                mem_[ii] = op(mem_[ii], arrays[ii]...);
+            });
+        }
+    }
+
+    // reduce with operation that takes a, b, and the index
+    template <typename T, size_type Dims>
+    template <typename U, typename F>
+    U ndarray<T, Dims>::reduce(
+        U init,
+        F reduce_op,
+        const ExecutionPolicy<>& policy
+    ) const
+    {
+        if constexpr (global::on_gpu) {
+            ndarray<U> result(1, init);
+            result.sync_to_device();
+            auto result_ptr = result.mem_.data();
+            auto arr        = mem_.data();
+
+            parallel_for(policy, [=, this] DEV(size_type idx) {
+                U current_min = result_ptr[0];
+                while (true) {
+                    U next_min = reduce_op(current_min, arr[idx], idx);
+                    if (result_ptr[0] == current_min) {
+                        result_ptr[0] = next_min;
+                        break;
+                    }
+                    current_min = result_ptr[0];
+                }
+            });
+
+            result.sync_to_host();
+            return result[0];
+        }
+        else {
+            std::atomic<U> result(init);
+            const size_type batch_size  = policy.batch_size;
+            const size_type num_batches = policy.get_num_batches(this->size());
+
+            parallel_for(policy, num_batches, [&](size_type bid) {
+                const size_type start = bid * batch_size;
+                const size_type end =
+                    std::min(start + batch_size, this->size());
+
+                // Thread-local reduction
+                U local_result = init;
+                for (size_type ii = start; ii < end; ii++) {
+                    local_result = reduce_op(local_result, mem_[ii], ii);
+                }
+
+                // Atomic reduction using actual array element
+                U current_min = result.load();
+                while (true) {
+                    U next_min = reduce_op(current_min, mem_[start], start);
+                    if (result.compare_exchange_weak(current_min, next_min)) {
+                        break;
+                    }
+                }
+            });
+
+            return result.load();
+        }
+    }
+
+    template <typename T, size_type Dims>
+    DUAL auto& ndarray<T, Dims>::access(T& val)
+    {
+        if constexpr (is_maybe_v<T>) {
+            return val.value();
+        }
+        else {
+            return val;
+        }
+    }
+
+    template <typename T, size_type Dims>
+    DUAL auto& ndarray<T, Dims>::access(T& val) const
+    {
+        if constexpr (is_maybe_v<T>) {
+            return val.value();
+        }
+        else {
+            return val;
+        }
+    }
+
+    template <typename T, size_type Dims>
+    DUAL ndarray<T, Dims>::value_type& ndarray<T, Dims>::operator[](size_type ii
+    )
+    {
+        return access(mem_[ii]);
+    }
+
+    template <typename T, size_type Dims>
+    DUAL ndarray<T, Dims>::value_type& ndarray<T, Dims>::operator[](size_type ii
+    ) const
+    {
+        return access(mem_[ii]);
+    }
+
+}   // namespace simbi

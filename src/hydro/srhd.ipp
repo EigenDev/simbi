@@ -16,7 +16,7 @@ SRHD<dim>::SRHD() = default;
 template <int dim>
 SRHD<dim>::SRHD(
     std::vector<std::vector<real>>& state,
-    const InitialConditions& init_conditions
+    InitialConditions& init_conditions
 )
     : HydroBase(state, init_conditions)
 {
@@ -29,248 +29,93 @@ SRHD<dim>::~SRHD() = default;
 //-----------------------------------------------------------------------------------------
 //                          Get The Primitive
 //-----------------------------------------------------------------------------------------
-// cons2prim using the functional paradigm instead
 template <int dim>
 void SRHD<dim>::cons2prim()
 {
     shared_atomic_bool local_failure;
-    auto to_primitive = [gamma = this->gamma, loc = &local_failure] DEV(
-                            const auto& cons,
-                            auto& pressure_guess
-                        ) -> Maybe<primitive_t> {
-        const real d    = cons.dens();
-        const real s1   = cons.momentum(1);
-        const real s2   = cons.momentum(2);
-        const real s3   = cons.momentum(3);
-        const real tau  = cons.nrg();
-        const real dchi = cons.chi();
-        const real s    = std::sqrt(s1 * s1 + s2 * s2 + s3 * s3);
+    prims.transform(
+        [gamma = this->gamma,
+         loc   = &local_failure] DEV(auto& prim, const auto& c, auto& pguess)
+            -> Maybe<primitive_t> {
+            const real d    = c.dens();
+            const real s1   = c.momentum(1);
+            const real s2   = c.momentum(2);
+            const real s3   = c.momentum(3);
+            const real tau  = c.nrg();
+            const real dchi = c.chi();
+            const real s    = std::sqrt(s1 * s1 + s2 * s2 + s3 * s3);
 
-        // Perform modified Newton Raphson based on
-        // https://www.sciencedirect.com/science/article/pii/S0893965913002930
-        // so far, the convergence rate is the same, but perhaps I need
-        // a slight tweak
-        int iter       = 0;
-        real peq       = pressure_guess;
-        const real tol = d * global::epsilon;
-        real dp;
-        do {
-            // compute x_[k+1]
-            auto [f, g] = newton_fg(gamma, tau, d, s, peq);
-            dp          = f / g;
-            peq -= dp;
+            // Perform modified Newton Raphson based on
+            // https://www.sciencedirect.com/science/article/pii/S0893965913002930
+            // so far, the convergence rate is the same, but perhaps I need
+            // a slight tweak
+            int iter       = 0;
+            real peq       = pguess;
+            const real tol = d * global::epsilon;
+            real dp;
+            do {
+                // compute x_[k+1]
+                auto [f, g] = newton_fg(gamma, tau, d, s, peq);
+                dp          = f / g;
+                peq -= dp;
 
-            if (iter >= global::MAX_ITER || !std::isfinite(peq)) {
+                if (iter >= global::MAX_ITER || !std::isfinite(peq)) {
+                    loc->store(true);
+                    return simbi::Nothing;
+                }
+                iter++;
+
+            } while (std::abs(dp) >= tol);
+
+            if (peq < 0) {
                 loc->store(true);
                 return simbi::Nothing;
             }
-            iter++;
 
-        } while (std::abs(dp) >= tol);
-
-        if (peq < 0) {
-            loc->store(true);
-            return simbi::Nothing;
-        }
-
-        const real inv_et = 1.0 / (tau + d + peq);
-        real v1           = s1 * inv_et;
-        pressure_guess    = peq;
-        if constexpr (dim == 1) {
-            const real w = 1.0 / std::sqrt(1.0 - v1 * v1);
-            if constexpr (global::VelocityType ==
-                          global::Velocity::FourVelocity) {
-                v1 *= w;
+            const real inv_et = 1.0 / (tau + d + peq);
+            real v1           = s1 * inv_et;
+            pguess            = peq;
+            if constexpr (dim == 1) {
+                const real w = 1.0 / std::sqrt(1.0 - v1 * v1);
+                if constexpr (global::VelocityType ==
+                              global::Velocity::FourVelocity) {
+                    v1 *= w;
+                }
+                return primitive_t{d / w, v1, peq, dchi / d};
             }
-            return primitive_t{d / w, v1, peq, dchi / d};
-        }
-        else if constexpr (dim == 2) {
-            real v2      = s2 * inv_et;
-            const real w = 1.0 / std::sqrt(1.0 - (v1 * v1 + v2 * v2));
-            if constexpr (global::VelocityType ==
-                          global::Velocity::FourVelocity) {
-                v1 *= w;
-                v2 *= w;
+            else if constexpr (dim == 2) {
+                real v2      = s2 * inv_et;
+                const real w = 1.0 / std::sqrt(1.0 - (v1 * v1 + v2 * v2));
+                if constexpr (global::VelocityType ==
+                              global::Velocity::FourVelocity) {
+                    v1 *= w;
+                    v2 *= w;
+                }
+                return primitive_t{d / w, v1, v2, peq, dchi / d};
             }
-            return primitive_t{d / w, v1, v2, peq, dchi / d};
-        }
-        else {
-            real v2      = s2 * inv_et;
-            real v3      = s3 * inv_et;
-            const real w = 1.0 / std::sqrt(1.0 - (v1 * v1 + v2 * v2 + v3 * v3));
-            if constexpr (global::VelocityType ==
-                          global::Velocity::FourVelocity) {
-                v1 *= w;
-                v2 *= w;
-                v3 *= w;
+            else {
+                real v2 = s2 * inv_et;
+                real v3 = s3 * inv_et;
+                const real w =
+                    1.0 / std::sqrt(1.0 - (v1 * v1 + v2 * v2 + v3 * v3));
+                if constexpr (global::VelocityType ==
+                              global::Velocity::FourVelocity) {
+                    v1 *= w;
+                    v2 *= w;
+                    v3 *= w;
+                }
+                return primitive_t{d / w, v1, v2, v3, peq, dchi / d};
             }
-            return primitive_t{d / w, v1, v2, v3, peq, dchi / d};
-        }
-    };
-
-    prims = cons.template transform_parallel_with<real>(
+        },
         fullPolicy,
-        pressure_guess,
-        to_primitive
+        cons,
+        pressure_guess
     );
 
     if (local_failure.load()) {
         inFailureState.store(true);
     }
 }
-
-/**
- * Return the primitive
- * variables density , three-velocity, pressure
- *
- * @param  p execution policy class
- * @return none
- */
-// template <int dim>
-// void SRHD<dim>::cons2prim()
-// {
-//     const auto* const cons_data = cons.data();
-//     simbi::parallel_for(
-//         fullPolicy,
-//         total_zones,
-//         [cons_data, this] DEV(luint gid) {
-//             bool workLeftToDo = true;
-//             shared_atomic_bool found_failure;
-
-//             if constexpr (global::on_gpu) {
-//                 auto tid = get_threadId();
-//                 if (tid == 0) {
-//                     found_failure.store(inFailureState.load());
-//                 }
-//                 simbi::gpu::api::synchronize();
-//             }
-//             else {
-//                 found_failure.store(inFailureState.load());
-//             }
-
-//             real invdV = 1.0;
-//             while (!found_failure && workLeftToDo) {
-//                 if (homolog) {
-//                     if constexpr (dim == 1) {
-//                         const auto ireal =
-//                             get_real_idx(gid, radius, active_zones);
-//                         const auto cell = this->cell_geometry(ireal);
-//                         const real dV   = cell.dV;
-//                         invdV           = 1.0 / dV;
-//                     }
-//                     else if constexpr (dim == 2) {
-//                         const luint ii   = gid % nx;
-//                         const luint jj   = gid / nx;
-//                         const auto ireal = get_real_idx(ii, radius, xag);
-//                         const auto jreal = get_real_idx(jj, radius, yag);
-//                         const auto cell  = this->cell_geometry(ireal, jreal);
-//                         const real dV    = cell.dV;
-//                         invdV            = 1.0 / dV;
-//                     }
-//                     else {
-//                         const luint kk   = get_height(gid, xag, yag);
-//                         const luint jj   = get_row(gid, xag, yag, kk);
-//                         const luint ii   = get_column(gid, xag, yag, kk);
-//                         const auto ireal = get_real_idx(ii, radius, xag);
-//                         const auto jreal = get_real_idx(jj, radius, yag);
-//                         const auto kreal = get_real_idx(kk, radius, zag);
-//                         const auto cell =
-//                             this->cell_geometry(ireal, jreal, kreal);
-//                         const real dV = cell.dV;
-//                         invdV         = 1.0 / dV;
-//                     }
-//                 }
-
-//                 const real d    = cons_data[gid].dens() * invdV;
-//                 const real s1   = cons_data[gid].momentum(1) * invdV;
-//                 const real s2   = cons_data[gid].momentum(2) * invdV;
-//                 const real s3   = cons_data[gid].momentum(3) * invdV;
-//                 const real tau  = cons_data[gid].nrg() * invdV;
-//                 const real dchi = cons_data[gid].chi() * invdV;
-//                 const real s    = std::sqrt(s1 * s1 + s2 * s2 + s3 * s3);
-
-//                 // Perform modified Newton Raphson based on
-//                 //
-//                 https://www.sciencedirect.com/science/article/pii/S0893965913002930
-//                 // so far, the convergence rate is the same, but perhaps I
-//                 need
-//                 // a slight tweak
-
-//                 // compute f(x_0)
-//                 // f = newton_f(gamma, tau, d, S, peq);
-//                 int iter       = 0;
-//                 real peq       = pressure_guess[gid];
-//                 const real tol = d * global::epsilon;
-//                 real dp;
-//                 do {
-//                     // compute x_[k+1]
-//                     auto [f, g] = newton_fg(gamma, tau, d, s, peq);
-//                     dp          = f / g;
-//                     peq -= dp;
-
-//                     // compute x*_k
-//                     // f     = newton_f(gamma, tau, d, S, peq);
-//                     // pstar = peq - f / g;
-
-//                     if (iter >= global::MAX_ITER || !std::isfinite(peq)) {
-//                         troubled_cells[gid] = 1;
-//                         dt                  = INFINITY;
-//                         inFailureState.store(true);
-//                         found_failure.store(true);
-//                         break;
-//                     }
-//                     iter++;
-
-//                 } while (std::abs(dp) >= tol);
-
-//                 const real inv_et   = 1.0 / (tau + d + peq);
-//                 real v1             = s1 * inv_et;
-//                 pressure_guess[gid] = peq;
-//                 if constexpr (dim == 1) {
-//                     const real w = 1.0 / std::sqrt(1.0 - v1 * v1);
-//                     if constexpr (global::VelocityType ==
-//                                   global::Velocity::FourVelocity) {
-//                         v1 *= w;
-//                     }
-//                     prims[gid] = primitive_t{d / w, v1, peq, dchi / d};
-//                 }
-//                 else if constexpr (dim == 2) {
-//                     real v2      = s2 * inv_et;
-//                     const real w = 1.0 / std::sqrt(1.0 - (v1 * v1 + v2 *
-//                     v2)); if constexpr (global::VelocityType ==
-//                                   global::Velocity::FourVelocity) {
-//                         v1 *= w;
-//                         v2 *= w;
-//                     }
-//                     prims[gid] = primitive_t{d / w, v1, v2, peq, dchi / d};
-//                 }
-//                 else {
-//                     real v2        = s2 * inv_et;
-//                     real v3        = s3 * inv_et;
-//                     const real vsq = v1 * v1 + v2 * v2 + v3 * v3;
-//                     const real w   = 1.0 / std::sqrt(1.0 - vsq);
-//                     if constexpr (global::VelocityType ==
-//                                   global::Velocity::FourVelocity) {
-//                         v1 *= w;
-//                         v2 *= w;
-//                         v3 *= w;
-//                     }
-//                     prims[gid] = primitive_t{d / w, v1, v2, v3, peq, dchi /
-//                     d};
-//                 }
-//                 workLeftToDo = false;
-
-//                 if (peq < 0) {
-//                     troubled_cells[gid] = 1;
-//                     inFailureState.store(true);
-//                     found_failure.store(true);
-//                     dt = INFINITY;
-//                 }
-//                 simbi::gpu::api::synchronize();
-//             }
-//         }
-//     );
-// }
 
 //----------------------------------------------------------------------------------------------------------
 //                              EIGENVALUE CALCULATIONS
@@ -377,8 +222,8 @@ template <int dim>
 template <TIMESTEP_TYPE dt_type>
 void SRHD<dim>::adapt_dt()
 {
-    auto calc_wave_speeds = [gamma = this->gamma] DEV(
-                                const Maybe<primitive_t>& prim
+    auto calc_wave_speeds = [gamma =
+                                 this->gamma] DEV(const Maybe<primitive_t>& prim
                             ) -> WaveSpeeds {
         if constexpr (dt_type == TIMESTEP_TYPE::MINIMUM) {
             return WaveSpeeds{
@@ -500,192 +345,20 @@ void SRHD<dim>::adapt_dt()
         }
     };
 
-    dt = prims
-             .transform_parallel(
-                 fullPolicy,
-                 [this, calc_wave_speeds, calc_local_dt] DEV(
-                     const Maybe<primitive_t>& prim,
-                     const size_t gid
-                 ) -> real {
-                     // get indices, speeds, and cell parameters
-                     const auto [ii, jj, kk] = get_indices(gid, nx, ny);
-                     const auto speeds       = calc_wave_speeds(prim);
-                     const auto cell         = this->cell_geometry(ii, jj, kk);
-                     return calc_local_dt(speeds, cell);
-                 }
-             )
-             .reduce(
-                 fullPolicy,
-                 static_cast<real>(INFINITY),
-                 [] DEV(real a, real b) { return std::min(a, b); }
-             ) *
+    dt = prims.reduce(
+             static_cast<real>(INFINITY),
+             [calc_wave_speeds,
+              calc_local_dt,
+              this](const auto& acc, const auto& prim, const luint gid) {
+                 const auto [ii, jj, kk] = get_indices(gid, nx, ny);
+                 const auto speeds       = calc_wave_speeds(prim);
+                 const auto cell         = this->cell_geometry(ii, jj, kk);
+                 const auto local_dt     = calc_local_dt(speeds, cell);
+                 return std::min(acc, local_dt);
+             },
+             fullPolicy
+         ) *
          cfl;
-}
-
-// Adapt the cfl conditional time step
-// template <int dim>
-// template <TIMESTEP_TYPE dt_type>
-// void SRHD<dim>::adapt_dt()
-// {
-//     std::atomic<real> min_dt = INFINITY;
-//     pooling::getThreadPool().parallel_for(total_zones, [&](luint gid) {
-//         real v1p, v1m, v2p, v2m, v3p, v3m, cfl_dt;
-//         const luint kk    = axid<dim, BlkAx::K>(gid, nx, ny);
-//         const luint jj    = axid<dim, BlkAx::J>(gid, nx, ny, kk);
-//         const luint ii    = axid<dim, BlkAx::I>(gid, nx, ny, kk);
-//         const luint ireal = get_real_idx(ii, radius, xag);
-//         const luint jreal = get_real_idx(jj, radius, yag);
-//         const luint kreal = get_real_idx(kk, radius, zag);
-//         // Left/Right wave speeds
-//         if constexpr (dt_type == TIMESTEP_TYPE::ADAPTIVE) {
-//             const real rho = prims[gid].rho();
-//             const real v1  = prims[gid].vcomponent(1);
-//             const real v2  = prims[gid].vcomponent(2);
-//             const real v3  = prims[gid].vcomponent(3);
-//             const real pre = prims[gid].p();
-//             const real h   = prims[gid].enthalpy(gamma);
-//             const real cs  = std::sqrt(gamma * pre / (rho * h));
-//             v1p            = std::abs(v1 + cs) / (1.0 + v1 * cs);
-//             v1m            = std::abs(v1 - cs) / (1.0 - v1 * cs);
-//             if constexpr (dim > 1) {
-//                 v2p = std::abs(v2 + cs) / (1.0 + v2 * cs);
-//                 v2m = std::abs(v2 - cs) / (1.0 - v2 * cs);
-//             }
-//             if constexpr (dim > 2) {
-//                 v3p = std::abs(v3 + cs) / (1.0 + v3 * cs);
-//                 v3m = std::abs(v3 - cs) / (1.0 - v3 * cs);
-//             }
-//         }
-//         else {
-//             v1p = 1.0;
-//             v1m = 1.0;
-//             if constexpr (dim > 1) {
-//                 v2p = 1.0;
-//                 v2m = 1.0;
-//             }
-//             if constexpr (dim > 2) {
-//                 v3p = 1.0;
-//                 v3m = 1.0;
-//             }
-//         }
-
-//         const auto cell = this->cell_geometry(ireal, jreal, kreal);
-//         const real x1l  = cell.x1L();
-//         const real x1r  = cell.x1R();
-//         const real dx1  = x1r - x1l;
-//         switch (geometry) {
-//             case simbi::Geometry::CARTESIAN:
-//                 if constexpr (dim == 1) {
-//                     cfl_dt = std::min({dx1 / (std::max(v1p, v1m))});
-//                 }
-//                 else if constexpr (dim == 2) {
-//                     cfl_dt = std::min(
-//                         {dx1 / (std::max(v1p, v1m)), dx2 / (std::max(v2p,
-//                         v2m))}
-//                     );
-//                 }
-//                 else {
-//                     cfl_dt = std::min(
-//                         {dx1 / (std::max(v1p, v1m)),
-//                          dx2 / (std::max(v2p, v2m)),
-//                          dx3 / (std::max(v3p, v3m))}
-//                     );
-//                 }
-//                 break;
-
-//             case simbi::Geometry::SPHERICAL: {
-//                 if constexpr (dim == 1) {
-//                     cfl_dt = std::min({dx1 / (std::max(v1p, v1m))});
-//                 }
-//                 else if constexpr (dim == 2) {
-//                     const real rmean = cell.x1mean;
-//                     cfl_dt           = std::min(
-//                         {dx1 / (std::max(v1p, v1m)),
-//                                    rmean * dx2 / (std::max(v2p, v2m))}
-//                     );
-//                 }
-//                 else {
-//                     const real x2l   = cell.x2L();
-//                     const real x2r   = cell.x2R();
-//                     const real rmean = cell.x1mean;
-//                     const real th    = 0.5 * (x2r + x2l);
-//                     const real rproj = rmean * std::sin(th);
-//                     cfl_dt           = std::min(
-//                         {dx1 / (std::max(v1p, v1m)),
-//                                    rmean * dx2 / (std::max(v2p, v2m)),
-//                                    rproj * dx3 / (std::max(v3p, v3m))}
-//                     );
-//                 }
-//                 break;
-//             }
-//             default: {
-//                 if constexpr (dim == 1) {
-//                     cfl_dt = std::min({dx1 / (std::max(v1p, v1m))});
-//                 }
-//                 else if constexpr (dim == 2) {
-//                     switch (geometry) {
-//                         case Geometry::AXIS_CYLINDRICAL: {
-//                             cfl_dt = std::min(
-//                                 {dx1 / (std::max(v1p, v1m)),
-//                                  dx2 / (std::max(v2p, v2m))}
-//                             );
-//                             break;
-//                         }
-
-//                         default: {
-//                             const real rmean = cell.x1mean;
-//                             cfl_dt           = std::min(
-//                                 {dx1 / (std::max(v1p, v1m)),
-//                                            rmean * dx2 / (std::max(v2p,
-//                                            v2m))}
-//                             );
-//                             break;
-//                         }
-//                     }
-//                 }
-//                 else {
-//                     const real rmean = cell.x1mean;
-//                     cfl_dt           = std::min(
-//                         {dx1 / (std::max(v1p, v1m)),
-//                                    rmean * dx2 / (std::max(v2p, v2m)),
-//                                    dx3 / (std::max(v3p, v3m))}
-//                     );
-//                 }
-//                 break;
-//             }
-//         }
-//         pooling::update_minimum(min_dt, cfl_dt);
-//     });
-//     dt = cfl * min_dt;
-// };
-
-template <int dim>
-template <TIMESTEP_TYPE dt_type>
-void SRHD<dim>::adapt_dt(const ExecutionPolicy<>& p)
-{
-#if GPU_CODE
-    if constexpr (dim == 1) {
-        // LAUNCH_ASYNC((compute_dt<primitive_t,dt_type>),
-        // p.gridSize, p.blockSize, this, prims.data(), dt_min.data());
-        compute_dt<primitive_t, dt_type>
-            <<<p.gridSize, p.blockSize>>>(this, prims.data(), dt_min.data());
-    }
-    else {
-        // LAUNCH_ASYNC((compute_dt<primitive_t,dt_type>),
-        // p.gridSize, p.blockSize, this, prims.data(), dt_min.data(),
-        // geometry);
-        compute_dt<primitive_t, dt_type><<<p.gridSize, p.blockSize>>>(
-            this,
-            prims.data(),
-            dt_min.data(),
-            geometry
-        );
-    }
-    // LAUNCH_ASYNC((deviceReduceWarpAtomicKernel<dim>), p.gridSize,
-    // p.blockSize, this, dt_min.data(), active_zones);
-    deviceReduceWarpAtomicKernel<dim>
-        <<<p.gridSize, p.blockSize>>>(this, dt_min.data(), total_zones);
-#endif
 }
 
 //===================================================================================================================
@@ -1123,13 +796,12 @@ DUAL SRHD<dim>::conserved_t SRHD<dim>::hydro_sources(const auto& cell) const
 
 template <int dim>
 DUAL SRHD<dim>::conserved_t
-SRHD<dim>::gravity_sources(const auto& maybe_prims, const auto& cell) const
+SRHD<dim>::gravity_sources(const auto& prims, const auto& cell) const
 {
     if (null_gravity) {
         return conserved_t{};
     }
-    const auto prims = maybe_prims.value();
-    const auto x1c   = cell.x1mean;
+    const auto x1c = cell.x1mean;
 
     conserved_t res;
     // gravity only changes the momentum and energy
@@ -1166,7 +838,7 @@ void SRHD<dim>::advance()
                                 const auto& hri,
                                 const auto& source_terms,
                                 const auto& gravity,
-                                const auto& geom_source,
+                                const auto& geometrical_sources,
                                 const auto& cell
                             ) -> conserved_t {
         conserved_t res;
@@ -1184,27 +856,27 @@ void SRHD<dim>::advance()
 
         res += source_terms;
         res += gravity;
-        res += geom_source;
+        res += geometrical_sources;
 
         return res * step * dt;
     };
 
-    auto calc_flux = [this, update_conserved] DEV(const auto& stencil) {
+    auto calc_flux = [this, update_conserved] DEV(auto& con, const auto& prim) {
         conserved_t fri[2], gri[2], hri[2];
 
         // Calculate fluxes using stencil
         for (int q = 0; q < 2; q++) {
             // X-direction flux
-            const auto& pL = stencil.at(q - 1, 0, 0);
-            const auto& pR = stencil.at(q - 0, 0, 0);
+            const auto& pL = prim.at(q - 1, 0, 0);
+            const auto& pR = prim.at(q - 0, 0, 0);
             if (!use_pcm) {
-                const auto& pLL = stencil.at(q - 2, 0, 0);
-                const auto& pRR = stencil.at(q + 1, 0, 0);
+                const auto& pLL = prim.at(q - 2, 0, 0);
+                const auto& pRR = prim.at(q + 1, 0, 0);
                 // compute the reconstructed states
                 const auto pLr =
-                    pL + plm_gradient(*pL, *pLL, *pR, plm_theta) * 0.5;
+                    pL + plm_gradient(pL, pLL, pR, plm_theta) * 0.5;
                 const auto pRr =
-                    pR - plm_gradient(*pR, *pL, *pRR, plm_theta) * 0.5;
+                    pR - plm_gradient(pR, pL, pRR, plm_theta) * 0.5;
                 fri[q] = (this->*riemann_solve)(pLr, pRr, 1, 0);
             }
             else {
@@ -1213,17 +885,15 @@ void SRHD<dim>::advance()
 
             if constexpr (dim > 1) {
                 // Y-direction flux
-                const auto& pL_y = stencil.at(0, q - 1, 0);
-                const auto& pR_y = stencil.at(0, q - 0, 0);
+                const auto& pL_y = prim.at(0, q - 1, 0);
+                const auto& pR_y = prim.at(0, q - 0, 0);
                 if (!use_pcm) {
-                    const auto& pLL_y = stencil.at(0, q - 2, 0);
-                    const auto& pRR_y = stencil.at(0, q + 1, 0);
+                    const auto& pLL_y = prim.at(0, q - 2, 0);
+                    const auto& pRR_y = prim.at(0, q + 1, 0);
                     const auto pLr_y =
-                        pL_y +
-                        plm_gradient(*pL_y, *pLL_y, *pR_y, plm_theta) * 0.5;
+                        pL_y + plm_gradient(pL_y, pLL_y, pR_y, plm_theta) * 0.5;
                     const auto pRr_y =
-                        pR_y -
-                        plm_gradient(*pR_y, *pL_y, *pRR_y, plm_theta) * 0.5;
+                        pR_y - plm_gradient(pR_y, pL_y, pRR_y, plm_theta) * 0.5;
                     gri[q] = (this->*riemann_solve)(pLr_y, pRr_y, 2, 0);
                 }
                 else {
@@ -1232,17 +902,17 @@ void SRHD<dim>::advance()
 
                 if constexpr (dim > 2) {
                     // Z-direction flux
-                    const auto& pL_z = stencil.at(0, 0, q - 1);
-                    const auto& pR_z = stencil.at(0, 0, q - 0);
+                    const auto& pL_z = prim.at(0, 0, q - 1);
+                    const auto& pR_z = prim.at(0, 0, q - 0);
                     if (!use_pcm) {
-                        const auto& pLL_z = stencil.at(0, 0, q - 2);
-                        const auto& pRR_z = stencil.at(0, 0, q + 1);
+                        const auto& pLL_z = prim.at(0, 0, q - 2);
+                        const auto& pRR_z = prim.at(0, 0, q + 1);
                         const auto pLr_z =
                             pL_z +
-                            plm_gradient(*pL_z, *pLL_z, *pR_z, plm_theta) * 0.5;
+                            plm_gradient(pL_z, pLL_z, pR_z, plm_theta) * 0.5;
                         const auto pRr_z =
                             pR_z -
-                            plm_gradient(*pR_z, *pL_z, *pRR_z, plm_theta) * 0.5;
+                            plm_gradient(pR_z, pL_z, pRR_z, plm_theta) * 0.5;
                         hri[q] = (this->*riemann_solve)(pLr_z, pRr_z, 3, 0);
                     }
                     else {
@@ -1253,215 +923,28 @@ void SRHD<dim>::advance()
         }
 
         // Calculate sources
-        const auto [ii, jj, kk] = stencil.indices();
-        const auto cell         = this->cell_geometry(ii, jj, kk);
-        const auto source_terms = hydro_sources(cell);
-        const auto gravity      = gravity_sources(stencil.center(), cell);
-        const auto geom_source  = cell.geom_sources(stencil.center());
+        const auto [ii, jj, kk]        = con.position();
+        const auto cell                = this->cell_geometry(ii, jj, kk);
+        const auto source_terms        = hydro_sources(cell);
+        const auto gravity             = gravity_sources(prim.value(), cell);
+        const auto geometrical_sources = cell.geometrical_sources(prim.value());
 
         // Return updated conserved values
-        return update_conserved(
-            fri,
-            gri,
-            hri,
-            source_terms,
-            gravity,
-            geom_source,
-            cell
-        );
+        return con.value() + update_conserved(
+                                 fri,
+                                 gri,
+                                 hri,
+                                 source_terms,
+                                 gravity,
+                                 geometrical_sources,
+                                 cell
+                             );
     };
 
     // Transform using stencil operations
-    cons.template transform_stencil_with<Maybe<primitive_t>>(
-        activePolicy,
-        prims,
-        radius,
-        calc_flux
-    );
+    cons.contract(2)
+        .stencil_transform(calc_flux, activePolicy, prims.contract(2));
 }
-
-// template <int dim>
-// void SRHD<dim>::advance()
-// {
-//     const auto prim_dat = prims.data();
-//     simbi::parallel_for(activePolicy, [prim_dat, this] DEV(const luint idx) {
-//         conserved_t fri[2], gri[2], hri[2];
-//         primitive_t pL, pLL, pR, pRR;
-
-//         // primitive buffer that returns dynamic shared array
-//         // if working with shared memory on GPU, identity otherwise
-//         const auto prb = sm_or_identity(prim_dat);
-
-//         const luint kk = axid<dim, BlkAx::K>(idx, xag, yag);
-//         const luint jj = axid<dim, BlkAx::J>(idx, xag, yag, kk);
-//         const luint ii = axid<dim, BlkAx::I>(idx, xag, yag, kk);
-
-//         if constexpr (global::on_gpu) {
-//             if constexpr (dim == 1) {
-//                 if (ii >= xag) {
-//                     return;
-//                 }
-//             }
-//             else if constexpr (dim == 2) {
-//                 if ((ii >= xag) || (jj >= yag)) {
-//                     return;
-//                 }
-//             }
-//             else {
-//                 if ((ii >= xag) || (jj >= yag) || (kk >= zag)) {
-//                     return;
-//                 }
-//             }
-//         }
-//         const luint ia  = ii + radius;
-//         const luint ja  = dim < 2 ? 0 : jj + radius;
-//         const luint ka  = dim < 3 ? 0 : kk + radius;
-//         const luint tx  = (global::on_sm) ? threadIdx.x : 0;
-//         const luint ty  = dim < 2 ? 0 : (global::on_sm) ? threadIdx.y : 0;
-//         const luint tz  = dim < 3 ? 0 : (global::on_sm) ? threadIdx.z : 0;
-//         const luint txa = (global::on_sm) ? tx + radius : ia;
-//         const luint tya = dim < 2 ? 0 : (global::on_sm) ? ty + radius : ja;
-//         const luint tza = dim < 3 ? 0 : (global::on_sm) ? tz + radius : ka;
-//         const luint aid = idx3(ia, ja, ka, nx, ny, nz);
-//         const luint tid = idx3(txa, tya, tza, sx, sy, sz);
-
-//         if constexpr (global::on_sm) {
-//             load_shared_buffer<dim>(
-//                 activePolicy,
-//                 prb,
-//                 prim_dat,
-//                 nx,
-//                 ny,
-//                 nz,
-//                 sx,
-//                 sy,
-//                 tx,
-//                 ty,
-//                 tz,
-//                 txa,
-//                 tya,
-//                 tza,
-//                 ia,
-//                 ja,
-//                 ka,
-//                 radius
-//             );
-//         }
-
-//         const auto cell   = this->cell_geometry(ii, jj, kk);
-//         const real vfs[2] = {
-//           cell.template velocity<Side::X1L>(),
-//           cell.template velocity<Side::X1R>()
-//         };
-
-//         const auto il = get_real_idx(ii - 1, 0, xag);
-//         const auto ir = get_real_idx(ii + 1, 0, xag);
-//         const auto jl = get_real_idx(jj - 1, 0, yag);
-//         const auto jr = get_real_idx(jj + 1, 0, yag);
-//         const auto kl = get_real_idx(kk - 1, 0, zag);
-//         const auto kr = get_real_idx(kk + 1, 0, zag);
-
-//         // object to left or right? (x1-direction)
-//         const bool object_x[2] = {
-//           ib_check<dim>(object_pos, il, jj, kk, xag, yag, 1),
-//           ib_check<dim>(object_pos, ir, jj, kk, xag, yag, 1)
-//         };
-
-//         // object in front or behind? (x2-direction)
-//         const bool object_y[2] = {
-//           ib_check<dim>(object_pos, ii, jl, kk, xag, yag, 2),
-//           ib_check<dim>(object_pos, ii, jr, kk, xag, yag, 2)
-//         };
-
-//         // object above or below? (x3-direction)
-//         const bool object_z[2] = {
-//           ib_check<dim>(object_pos, ii, jj, kl, xag, yag, 3),
-//           ib_check<dim>(object_pos, ii, jj, kr, xag, yag, 3)
-//         };
-
-//         // // Calc Rimeann Flux at all interfaces
-//         for (int q = 0; q < 2; q++) {
-//             // fluxes in i direction
-//             pL = prb[idx3(txa + q - 1, tya, tza, sx, sy, sz)];
-//             pR = prb[idx3(txa + q + 0, tya, tza, sx, sy, sz)];
-
-//             if (!use_pcm) {
-//                 pLL = prb[idx3(txa + q - 2, tya, tza, sx, sy, sz)];
-//                 pRR = prb[idx3(txa + q + 1, tya, tza, sx, sy, sz)];
-
-//                 pL = pL + plm_gradient(pL, pLL, pR, plm_theta) * 0.5;
-//                 pR = pR - plm_gradient(pR, pL, pRR, plm_theta) * 0.5;
-//             }
-//             ib_modify<dim>(pR, pL, object_x[q], 1);
-//             fri[q] = (this->*riemann_solve)(pL, pR, 1, vfs[q]);
-
-//             if constexpr (dim > 1) {
-//                 // fluxes in j direction
-//                 pL = prb[idx3(txa, tya + q - 1, tza, sx, sy, sz)];
-//                 pR = prb[idx3(txa, tya + q + 0, tza, sx, sy, sz)];
-
-//                 if (!use_pcm) {
-//                     pLL = prb[idx3(txa, tya + q - 2, tza, sx, sy, sz)];
-//                     pRR = prb[idx3(txa, tya + q + 1, tza, sx, sy, sz)];
-
-//                     pL = pL + plm_gradient(pL, pLL, pR, plm_theta) * 0.5;
-//                     pR = pR - plm_gradient(pR, pL, pRR, plm_theta) * 0.5;
-//                 }
-//                 ib_modify<dim>(pR, pL, object_y[q], 2);
-//                 gri[q] = (this->*riemann_solve)(pL, pR, 2, 0);
-
-//                 if constexpr (dim > 2) {
-//                     // fluxes in k direction
-//                     pL = prb[idx3(txa, tya, tza + q - 1, sx, sy, sz)];
-//                     pR = prb[idx3(txa, tya, tza + q + 0, sx, sy, sz)];
-
-//                     if (!use_pcm) {
-//                         pLL = prb[idx3(txa, tya, tza + q - 2, sx, sy, sz)];
-//                         pRR = prb[idx3(txa, tya, tza + q + 1, sx, sy, sz)];
-
-//                         pL = pL + plm_gradient(pL, pLL, pR, plm_theta) * 0.5;
-//                         pR = pR - plm_gradient(pR, pL, pRR, plm_theta) * 0.5;
-//                     }
-//                     ib_modify<dim>(pR, pL, object_z[q], 3);
-//                     hri[q] = (this->*riemann_solve)(pL, pR, 3, 0);
-//                 }
-//             }
-//         }
-
-//         // TODO: implement functional source and gravity
-//         const auto source_terms = hydro_sources(cell);
-//         // Gravity
-//         const auto gravity = gravity_sources(prb[tid], cell);
-
-//         // geometric source terms
-//         const auto geom_source = cell.geom_sources(prb[tid]);
-
-//         if constexpr (dim == 1) {
-//             cons[aid] -=
-//                 ((fri[RF] * cell.a1R() - fri[LF] * cell.a1L()) * cell.idV1()
-//                 -
-//                  source_terms - gravity - geom_source) *
-//                 dt * step;
-//         }
-//         else if constexpr (dim == 2) {
-//             cons[aid] -=
-//                 ((fri[RF] * cell.a1R() - fri[LF] * cell.a1L()) * cell.idV1()
-//                 +
-//                  (gri[RF] * cell.a2R() - gri[LF] * cell.a2L()) * cell.idV2()
-//                  - source_terms - gravity - geom_source) *
-//                 dt * step;
-//         }
-//         else {
-//             cons[aid] -=
-//                 ((fri[RF] * cell.a1R() - fri[LF] * cell.a1L()) * cell.idV1()
-//                 +
-//                  (gri[RF] * cell.a2R() - gri[LF] * cell.a2L()) * cell.idV2()
-//                  + (hri[RF] * cell.a3R() - hri[LF] * cell.a3L()) *
-//                  cell.idV3() - source_terms - gravity - geom_source) *
-//                 dt * step;
-//         }
-//     });
-// }
 
 // //===================================================================================================================
 // //                                            SIMULATE
@@ -1483,11 +966,10 @@ void SRHD<dim>::simulate(
     }
     load_functions();
 
-    cons.resize(total_zones);
-    prims.resize(total_zones);
-    troubled_cells.resize(total_zones, 0);
-    dt_min.resize(total_zones);
-    pressure_guess.resize(total_zones);
+    cons.resize(total_zones).reshape({nz, ny, nx});
+    prims.resize(total_zones).reshape({nz, ny, nx});
+    // dt_min.reshape({nz, ny, nx});
+    pressure_guess.resize(total_zones).reshape({nz, ny, nx});
 
     // Copy the state array into real & profile variables
     for (size_t i = 0; i < total_zones; i++) {
@@ -1508,27 +990,21 @@ void SRHD<dim>::simulate(
     offload();
     compute_bytes_and_strides<primitive_t>(dim);
     init_riemann_solver();
-    // this->set_mesh_funcs();
 
-    config_ghosts(this);
+    // create boundary manager
+    boundary_manager<conserved_t, dim> bman;
+    bman.sync_boundaries(fullPolicy, cons, cons.contract(2), bcs);
     cons2prim();
     adapt_dt<TIMESTEP_TYPE::MINIMUM>();
 
     // Simulate :)
     simbi::detail::logger::with_logger(*this, tend, [&] {
         advance();
-        config_ghosts(this);
+        bman.sync_boundaries(fullPolicy, cons, cons.contract(2), bcs);
         cons2prim();
         adapt_dt();
 
         t += step * dt;
-        if (mesh_motion) {
-            // update x1 endpoints
-            const real vmin = (homolog) ? x1min * hubble_param : hubble_param;
-            const real vmax = (homolog) ? x1max * hubble_param : hubble_param;
-            x1max += step * dt * vmax;
-            x1min += step * dt * vmin;
-            hubble_param = adot(t) / a(t);
-        }
+        update_mesh_motion(a, adot);
     });
 };

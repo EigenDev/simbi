@@ -17,7 +17,7 @@ namespace simbi {
 #endif
             }
 
-            void copyDevToHost(void* to, const void* from, size_t bytes)
+            void copyDeviceToHost(void* to, const void* from, size_t bytes)
             {
 #if GPU_CODE
                 auto status = simbi::gpu::error::status_t(

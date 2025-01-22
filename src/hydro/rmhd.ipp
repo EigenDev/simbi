@@ -17,7 +17,7 @@ RMHD<dim>::RMHD() = default;
 template <int dim>
 RMHD<dim>::RMHD(
     std::vector<std::vector<real>>& state,
-    const InitialConditions& init_conditions
+    InitialConditions& init_conditions
 )
     : HydroBase(state, init_conditions)
 {
@@ -101,10 +101,10 @@ DUAL real RMHD<dim>::calc_edge_emf(
     const auto nep = prims[neidx];
 
     // get mean e-fields
-    const real esw        = swp.ecomponent(nhat);
-    const real ese        = sep.ecomponent(nhat);
-    const real enw        = nwp.ecomponent(nhat);
-    const real ene        = nep.ecomponent(nhat);
+    const real esw        = swp->ecomponent(nhat);
+    const real ese        = sep->ecomponent(nhat);
+    const real enw        = nwp->ecomponent(nhat);
+    const real ene        = nep->ecomponent(nhat);
     const real one_eighth = static_cast<real>(0.125);
     const real eavg       = static_cast<real>(0.25) * (ew + ee + es + en);
 
@@ -427,46 +427,21 @@ DUAL real RMHD<dim>::curl_e(
 template <int dim>
 void RMHD<dim>::cons2prim()
 {
-    // const auto gr = gamma / (gamma - 1.0);
-    simbi::parallel_for(fullPolicy, total_zones, [this] DEV(luint gid) {
-        bool workLeftToDo = true;
-
-        shared_atomic_bool found_failure;
-        if constexpr (global::on_gpu) {
-            auto tid = get_threadId();
-            if (tid == 0) {
-                found_failure.store(inFailureState.load());
-            }
-            simbi::gpu::api::synchronize();
-        }
-        else {
-            found_failure.store(inFailureState.load());
-        }
-        // shared_atomic_bool found_failure(inFailureState.load());
-        // simbi::gpu::api::synchronize();
-
-        real invdV = 1.0;
-        while (!found_failure && workLeftToDo) {
-            if (homolog) {
-                const luint kk   = get_height(gid, xag, yag);
-                const luint jj   = get_row(gid, xag, yag, kk);
-                const luint ii   = get_column(gid, xag, yag, kk);
-                const auto ireal = get_real_idx(ii, radius, xag);
-                const auto jreal = get_real_idx(jj, radius, yag);
-                const auto kreal = get_real_idx(kk, radius, zag);
-                const auto cell  = this->cell_geometry(ireal, jreal, kreal);
-                const real dV    = cell.dV;
-                invdV            = 1.0 / dV;
-            }
-            const real d    = cons[gid].dens() * invdV;
-            const real m1   = cons[gid].momentum(1) * invdV;
-            const real m2   = cons[gid].momentum(2) * invdV;
-            const real m3   = cons[gid].momentum(3) * invdV;
-            const real tau  = cons[gid].nrg() * invdV;
-            const real b1   = cons[gid].bcomponent(1) * invdV;
-            const real b2   = cons[gid].bcomponent(2) * invdV;
-            const real b3   = cons[gid].bcomponent(3) * invdV;
-            const real dchi = cons[gid].chi() * invdV;
+    // functional-style implementation
+    shared_atomic_bool local_failure;
+    prims.transform(
+        [gamma = this->gamma,
+         loc   = &local_failure] DEV(auto& prim, const auto& c)
+            -> Maybe<primitive_t> {
+            const real d    = c.dens();
+            const real m1   = c.momentum(1);
+            const real m2   = c.momentum(2);
+            const real m3   = c.momentum(3);
+            const real tau  = c.nrg();
+            const real b1   = c.bcomponent(1);
+            const real b2   = c.bcomponent(2);
+            const real b3   = c.bcomponent(3);
+            const real dchi = c.chi();
 
             //==================================================================
             // ATTEMPT TO RECOVER PRIMITIVES USING KASTAUN ET AL. 2021
@@ -533,11 +508,8 @@ void RMHD<dim>::cons2prim()
                     }
 
                     if (iter >= global::MAX_ITER || !std::isfinite(f)) {
-                        troubled_cells[gid] = 1;
-                        dt                  = INFINITY;
-                        inFailureState.store(true);
-                        found_failure.store(true);
-                        break;
+                        loc->store(true);
+                        return simbi::Nothing;
                     }
                     iter++;
                 } while (std::abs(y1 - y2) > global::epsilon &&
@@ -568,18 +540,20 @@ void RMHD<dim>::cons2prim()
                     f2 = f;
                 }
                 if (iter >= global::MAX_ITER || !std::isfinite(f)) {
-                    troubled_cells[gid] = 1;
-                    dt                  = INFINITY;
-                    inFailureState.store(true);
-                    found_failure.store(true);
-                    break;
+                    loc->store(true);
+                    return simbi::Nothing;
                 }
                 iter++;
             } while (std::abs(y1 - y2) > global::epsilon &&
                      std::abs(f) > global::epsilon);
 
-            // Ok, we have the roots. Now we can compute the primitive variables
-            // Equation (26)
+            if (!std::isfinite(yy)) {
+                loc->store(true);
+                return simbi::Nothing;
+            }
+
+            // Ok, we have the roots. Now we can compute the primitive
+            // variables Equation (26)
             const real x = 1.0 / (1.0 + yy * beesq);
 
             // Equation (38)
@@ -615,21 +589,229 @@ void RMHD<dim>::cons2prim()
                 v3 *= w;
             }
 
-            prims[gid] =
-                primitive_t{rhohat, v1, v2, v3, pg, b1, b2, b3, dchi / d};
+            return primitive_t{rhohat, v1, v2, v3, pg, b1, b2, b3, dchi / d};
+        },
+        fullPolicy,
+        cons
+    );
 
-            workLeftToDo = false;
-
-            if (!std::isfinite(yy)) {
-                troubled_cells[gid] = 1;
-                inFailureState.store(true);
-                found_failure.store(true);
-                dt = INFINITY;
-            }
-            simbi::gpu::api::synchronize();
-        }
-    });
+    if (local_failure.load()) {
+        inFailureState.store(true);
+    }
 }
+
+/**
+ * Return the primitive
+ * variables density , three-velocity, pressure
+ *
+ * @param  p execution policy class
+ * @return none
+ */
+// template <int dim>
+// void RMHD<dim>::cons2prim()
+// {
+//     simbi::parallel_for(fullPolicy, total_zones, [this] DEV(luint gid) {
+//         bool workLeftToDo = true;
+
+//         shared_atomic_bool found_failure;
+//         if constexpr (global::on_gpu) {
+//             auto tid = get_threadId();
+//             if (tid == 0) {
+//                 found_failure.store(inFailureState.load());
+//             }
+//             simbi::gpu::api::synchronize();
+//         }
+//         else {
+//             found_failure.store(inFailureState.load());
+//         }
+//         // shared_atomic_bool found_failure(inFailureState.load());
+//         // simbi::gpu::api::synchronize();
+
+//         real invdV = 1.0;
+//         while (!found_failure && workLeftToDo) {
+//             if (homolog) {
+//                 const luint kk   = get_height(gid, xag, yag);
+//                 const luint jj   = get_row(gid, xag, yag, kk);
+//                 const luint ii   = get_column(gid, xag, yag, kk);
+//                 const auto ireal = get_real_idx(ii, radius, xag);
+//                 const auto jreal = get_real_idx(jj, radius, yag);
+//                 const auto kreal = get_real_idx(kk, radius, zag);
+//                 const auto cell  = this->cell_geometry(ireal, jreal, kreal);
+//                 const real dV    = cell.dV;
+//                 invdV            = 1.0 / dV;
+//             }
+//             const real d    = cons[gid].dens() * invdV;
+//             const real m1   = cons[gid].momentum(1) * invdV;
+//             const real m2   = cons[gid].momentum(2) * invdV;
+//             const real m3   = cons[gid].momentum(3) * invdV;
+//             const real tau  = cons[gid].nrg() * invdV;
+//             const real b1   = cons[gid].bcomponent(1) * invdV;
+//             const real b2   = cons[gid].bcomponent(2) * invdV;
+//             const real b3   = cons[gid].bcomponent(3) * invdV;
+//             const real dchi = cons[gid].chi() * invdV;
+
+//             //==================================================================
+//             // ATTEMPT TO RECOVER PRIMITIVES USING KASTAUN ET AL. 2021
+//             //==================================================================
+
+//             //======= rescale the variables Eqs. (22) - (25)
+//             const real invd   = 1.0 / d;
+//             const real isqrtd = std::sqrt(invd);
+//             const real q      = tau * invd;
+//             const real r1     = m1 * invd;
+//             const real r2     = m2 * invd;
+//             const real r3     = m3 * invd;
+//             const real rsq    = r1 * r1 + r2 * r2 + r3 * r3;
+//             const real rmag   = std::sqrt(rsq);
+//             const real h1     = b1 * isqrtd;
+//             const real h2     = b2 * isqrtd;
+//             const real h3     = b3 * isqrtd;
+//             const real beesq  = h1 * h1 + h2 * h2 + h3 * h3 +
+//             global::epsilon; const real rdb    = r1 * h1 + r2 * h2 + r3 * h3;
+//             const real rdbsq  = rdb * rdb;
+//             // r-parallel Eq. (25.a)
+//             const real rp1 = (rdb / beesq) * h1;
+//             const real rp2 = (rdb / beesq) * h2;
+//             const real rp3 = (rdb / beesq) * h3;
+//             // r-perpendicular, Eq. (25.b)
+//             const real rq1 = r1 - rp1;
+//             const real rq2 = r2 - rp2;
+//             const real rq3 = r3 - rp3;
+
+//             const real rparr = std::sqrt(rp1 * rp1 + rp2 * rp2 + rp3 * rp3);
+//             const real rq    = std::sqrt(rq1 * rq1 + rq2 * rq2 + rq3 * rq3);
+
+//             // We use the false position method to solve for the roots
+//             real y1 = 0.0;
+//             real y2 = 1.0;
+//             real f1 = kkc_fmu49(y1, beesq, rdbsq, rmag);
+//             real f2 = kkc_fmu49(y2, beesq, rdbsq, rmag);
+
+//             bool good_guesses = false;
+//             // if good guesses, use them
+//             if (std::abs(f1) + std::abs(f2) < 2.0 * global::epsilon) {
+//                 good_guesses = true;
+//             }
+
+//             int iter = 0.0;
+//             // compute yy in case the initial bracket is not good
+//             real yy = static_cast<real>(0.5) * (y1 + y2);
+//             real f;
+//             if (!good_guesses) {
+//                 do {
+//                     yy = (y1 * f2 - y2 * f1) / (f2 - f1);
+//                     f  = kkc_fmu49(yy, beesq, rdbsq, rmag);
+//                     if (f * f2 < 0.0) {
+//                         y1 = y2;
+//                         f1 = f2;
+//                         y2 = yy;
+//                         f2 = f;
+//                     }
+//                     else {
+//                         // use Illinois algorithm to avoid stagnation
+//                         f1 = 0.5 * f1;
+//                         y2 = yy;
+//                         f2 = f;
+//                     }
+
+//                     if (iter >= global::MAX_ITER || !std::isfinite(f)) {
+//                         troubled_cells[gid] = 1;
+//                         dt                  = INFINITY;
+//                         inFailureState.store(true);
+//                         found_failure.store(true);
+//                         break;
+//                     }
+//                     iter++;
+//                 } while (std::abs(y1 - y2) > global::epsilon &&
+//                          std::abs(f) > global::epsilon);
+//             }
+
+//             // We found good brackets. Now we can solve for the roots
+//             y1 = 0.0;
+//             y2 = yy;
+
+//             // Evaluate the master function (Eq. 44) at the roots
+//             f1   = kkc_fmu44(y1, rmag, rparr, rq, beesq, rdbsq, q, d, gamma);
+//             f2   = kkc_fmu44(y2, rmag, rparr, rq, beesq, rdbsq, q, d, gamma);
+//             iter = 0.0;
+//             do {
+//                 yy = (y1 * f2 - y2 * f1) / (f2 - f1);
+//                 f  = kkc_fmu44(yy, rmag, rparr, rq, beesq, rdbsq, q, d,
+//                 gamma); if (f * f2 < 0.0) {
+//                     y1 = y2;
+//                     f1 = f2;
+//                     y2 = yy;
+//                     f2 = f;
+//                 }
+//                 else {
+//                     // use Illinois algorithm to avoid stagnation
+//                     f1 = 0.5 * f1;
+//                     y2 = yy;
+//                     f2 = f;
+//                 }
+//                 if (iter >= global::MAX_ITER || !std::isfinite(f)) {
+//                     troubled_cells[gid] = 1;
+//                     dt                  = INFINITY;
+//                     inFailureState.store(true);
+//                     found_failure.store(true);
+//                     break;
+//                 }
+//                 iter++;
+//             } while (std::abs(y1 - y2) > global::epsilon &&
+//                      std::abs(f) > global::epsilon);
+
+//             // Ok, we have the roots. Now we can compute the primitive
+//             // variables Equation (26)
+//             const real x = 1.0 / (1.0 + yy * beesq);
+
+//             // Equation (38)
+//             const real rbar_sq = rsq * x * x + yy * x * (1.0 + x) * rdbsq;
+
+//             // Equation (39)
+//             const real qbar =
+//                 q - 0.5 * (beesq + yy * yy * x * x * beesq * rq * rq);
+
+//             // Equation (32) inverted and squared
+//             const real vsq  = yy * yy * rbar_sq;
+//             const real gbsq = vsq / std::abs(1.0 - vsq);
+//             const real w    = std::sqrt(1.0 + gbsq);
+
+//             // Equation (41)
+//             const real rhohat = d / w;
+
+//             // Equation (42)
+//             const real epshat = w * (qbar - yy * rbar_sq) + gbsq / (1.0 + w);
+
+//             // Equation (43)
+//             const real pg = (gamma - 1.0) * rhohat * epshat;
+
+//             // velocities Eq. (68)
+//             real v1 = yy * x * (r1 + h1 * rdb * yy);
+//             real v2 = yy * x * (r2 + h2 * rdb * yy);
+//             real v3 = yy * x * (r3 + h3 * rdb * yy);
+
+//             if constexpr (global::VelocityType ==
+//                           global::Velocity::FourVelocity) {
+//                 v1 *= w;
+//                 v2 *= w;
+//                 v3 *= w;
+//             }
+
+//             prims[gid] =
+//                 primitive_t{rhohat, v1, v2, v3, pg, b1, b2, b3, dchi / d};
+
+//             workLeftToDo = false;
+
+//             if (!std::isfinite(yy)) {
+//                 troubled_cells[gid] = 1;
+//                 inFailureState.store(true);
+//                 found_failure.store(true);
+//                 dt = INFINITY;
+//             }
+//             simbi::gpu::api::synchronize();
+//         }
+//     });
+// }
 
 /**
  * Return the primitive
@@ -839,7 +1021,7 @@ RMHD<dim>::calc_max_wave_speeds(const auto& prims, const luint nhat) const
     const real rho   = prims.rho();
     const real h     = prims.enthalpy(gamma);
     const real cs2   = (gamma * prims.p() / (rho * h));
-    const auto bmu   = mag_fourvec_t(prims);
+    const auto bmu   = prins.bfield().as_fourvec(velocity(), lorentz_factor());
     const real bmusq = bmu.inner_product();
     const real bn    = prims.bcomponent(nhat);
     const real bn2   = bn * bn;
@@ -994,120 +1176,221 @@ template <int dim>
 template <TIMESTEP_TYPE dt_type>
 void RMHD<dim>::adapt_dt()
 {
-#if GPU_CODE
-    if constexpr (dim == 1) {
-        // LAUNCH_ASYNC((compute_dt<primitive_t,dt_type>),
-        // p.gridSize, p.blockSize, this, prims.data(), dt_min.data());
-        compute_dt<primitive_t, dt_type>
-            <<<activePolicy.gridSize, activePolicy.blockSize>>>(
-                this,
-                prims.data(),
-                dt_min.data()
-            );
-    }
-    else {
-        // LAUNCH_ASYNC((compute_dt<primitive_t,dt_type>),
-        // p.gridSize, p.blockSize, this, prims.data(), dt_min.data(),
-        // geometry);
-        compute_dt<primitive_t, dt_type>
-            <<<activePolicy.gridSize, activePolicy.blockSize>>>(
-                this,
-                prims.data(),
-                dt_min.data(),
-                geometry
-            );
-    }
-    // LAUNCH_ASYNC((deviceReduceWarpAtomicKernel<dim>), p.gridSize,
-    // p.blockSize, this, dt_min.data(), active_zones);
-
-    deviceReduceWarpAtomicKernel<dim>
-        <<<activePolicy.gridSize, activePolicy.blockSize>>>(
-            this,
-            dt_min.data(),
-            total_zones
-        );
-    gpu::api::deviceSynch();
-#else
-    std::atomic<real> min_dt = INFINITY;
-    pooling::getThreadPool().parallel_for(active_zones, [&](luint gid) {
-        real v1p, v1m, v2p, v2m, v3p, v3m, cfl_dt;
-        const luint kk  = axid<dim, BlkAx::K>(gid, xag, yag);
-        const luint jj  = axid<dim, BlkAx::J>(gid, xag, yag, kk);
-        const luint ii  = axid<dim, BlkAx::I>(gid, xag, yag, kk);
-        const luint ia  = ii + radius;
-        const luint ja  = jj + radius;
-        const luint ka  = kk + radius;
-        const luint aid = idx3(ia, ja, ka, nx, ny, nz);
-        // Left/Right wave speeds
-        if constexpr (dt_type == TIMESTEP_TYPE::ADAPTIVE) {
-            std::tie(v1m, v1p) = calc_max_wave_speeds(prims[aid], 1);
-            v1p                = std::abs(v1p);
-            v1m                = std::abs(v1m);
-            std::tie(v2m, v2p) = calc_max_wave_speeds(prims[aid], 2);
-            v2p                = std::abs(v2p);
-            v2m                = std::abs(v2m);
-            std::tie(v3m, v3p) = calc_max_wave_speeds(prims[aid], 3);
-            v3p                = std::abs(v3p);
-            v3m                = std::abs(v3m);
-        }
-        else {
-            v1p = 1.0;
-            v1m = 1.0;
-            v2p = 1.0;
-            v2m = 1.0;
-            v3p = 1.0;
-            v3m = 1.0;
+    auto calc_wave_speeds = [this] DEV(const auto& prims) {
+        if constexpr (dt_type == TIMESTEP_TYPE::MINIMUM) {
+            return WaveSpeeds{
+              .v1p = 1.0,
+              .v1m = 1.0,
+              .v2p = 1.0,
+              .v2m = 1.0,
+              .v3p = 1.0,
+              .v3m = 1.0
+            };
         }
 
-        const auto cell = this->cell_geometry(ii, jj, kk);
+        const auto [v1m, v1p] = this->calc_max_wave_speeds(prims.value(), 1);
+        const auto [v2m, v2p] = this->calc_max_wave_speeds(prims.value(), 2);
+        const auto [v3m, v3p] = this->calc_max_wave_speeds(prims.value(), 3);
+        return WaveSpeeds{
+          .v1p = v1p,
+          .v1m = v1m,
+          .v2p = v2p,
+          .v2m = v2m,
+          .v3p = v3p,
+          .v3m = v3m
+        };
+    };
+
+    auto calc_local_dt =
+        [this] DEV(const WaveSpeeds& speeds, const auto& cell) -> real {
         switch (geometry) {
-            case simbi::Geometry::CARTESIAN: {
-                const real x1l = cell.x1L();
-                const real x1r = cell.x1R();
-                const real dx1 = x1r - x1l;
-
-                const real x2l = cell.x1L();
-                const real x2r = cell.x1R();
-                const real dx2 = x2r - x2l;
-
-                cfl_dt = std ::min(
-                    {dx1 / (std::max(v1p, v1m)),
-                     dx2 / (std::max(v2p, v2m)),
-                     dx3 / (std::max(v3p, v3m))}
-                );
-
-                break;
+            case Geometry::CARTESIAN:
+                if constexpr (dim == 1) {
+                    return (cell.x1R() - cell.x1L()) /
+                           (std::max(speeds.v1p, speeds.v1m));
+                }
+                else if constexpr (dim == 2) {
+                    return std::min(
+                        (cell.x1R() - cell.x1L()) /
+                            (std::max(speeds.v1p, speeds.v1m)),
+                        (cell.x2R() - cell.x2L()) /
+                            (std::max(speeds.v2p, speeds.v2m))
+                    );
+                }
+                else {
+                    return std::min(
+                        {(cell.x1R() - cell.x1L()) /
+                             (std::max(speeds.v1p, speeds.v1m)),
+                         (cell.x2R() - cell.x2L()) /
+                             (std::max(speeds.v2p, speeds.v3m)),
+                         (cell.x3R() - cell.x3L()) /
+                             (std::max(speeds.v3p, speeds.v3m))}
+                    );
+                }
+            case Geometry::SPHERICAL: {
+                if constexpr (dim == 1) {
+                    return (cell.x1R() - cell.x1L()) /
+                           (std::max(speeds.v1p, speeds.v1m));
+                }
+                else if constexpr (dim == 2) {
+                    const real rmean = cell.x1mean;
+                    return std::min(
+                        {(cell.x1R() - cell.x1L()) /
+                             (std::max(speeds.v1p, speeds.v1m)),
+                         rmean * (cell.x2R() - cell.x2L()) /
+                             (std::max(speeds.v2p, speeds.v2m))}
+                    );
+                }
+                else {
+                    const real rmean = cell.x1mean;
+                    const real th    = 0.5 * (cell.x2R() + cell.x2L());
+                    const real rproj = rmean * std::sin(th);
+                    return std::min(
+                        {(cell.x1R() - cell.x1L()) /
+                             (std::max(speeds.v1p, speeds.v1m)),
+                         rmean * (cell.x2R() - cell.x2L()) /
+                             (std::max(speeds.v2p, speeds.v2m)),
+                         rproj * (cell.x3R() - cell.x3L()) /
+                             (std::max(speeds.v3p, speeds.v3m))}
+                    );
+                }
             }
+            default:
+                if constexpr (dim == 1) {
+                    return (cell.x1R() - cell.x1L()) /
+                           (std::max(speeds.v1p, speeds.v1m));
+                }
+                else if constexpr (dim == 2) {
+                    switch (geometry) {
+                        case Geometry::AXIS_CYLINDRICAL: {
+                            return std::min(
+                                (cell.x1R() - cell.x1L()) /
+                                    (std::max(speeds.v1p, speeds.v1m)),
+                                (cell.x2R() - cell.x2L()) /
+                                    (std::max(speeds.v2p, speeds.v2m))
+                            );
+                        }
 
-            case simbi::Geometry::SPHERICAL: {
-                const real rproj = cell.x1mean * std::sin(cell.x2mean);
-
-                cfl_dt = std::min(
-                    {(cell.x1R() - cell.x1L()) / (std::max(v1p, v1m)),
-                     cell.x1mean * (cell.x2R() - cell.x2L()) /
-                         (std::max(v2p, v2m)),
-                     rproj * (cell.x3R() - cell.x3L()) / (std::max(v3p, v3m))}
-                );
-                break;
-            }
-            default: {
-                const real x1l = cell.x1L();
-                const real x1r = cell.x1R();
-                const real dx1 = x1r - x1l;
-
-                const real rmean = cell.x1mean;
-                cfl_dt           = std::min(
-                    {dx1 / (std::max(v1p, v1m)),
-                               rmean * dx2 / (std::max(v2p, v2m)),
-                               dx3 / (std::max(v3p, v3m))}
-                );
-                break;
-            }
+                        default: {
+                            const real rmean = cell.x1mean;
+                            return std::min(
+                                {(cell.x1R() - cell.x1L()) /
+                                     (std::max(speeds.v1p, speeds.v1m)),
+                                 rmean * (cell.x2R() - cell.x2L()) /
+                                     (std::max(speeds.v2p, speeds.v2m))}
+                            );
+                        }
+                    }
+                }
+                else {
+                    const real rmean = cell.x1mean;
+                    return std::min(
+                        {(cell.x1R() - cell.x1L()) /
+                             (std::max(speeds.v1p, speeds.v1m)),
+                         rmean * (cell.x2R() - cell.x2L()) /
+                             (std::max(speeds.v2p, speeds.v2m)),
+                         (cell.x3R() - cell.x3L()) /
+                             (std::max(speeds.v3p, speeds.v3m))}
+                    );
+                }
         }
-        pooling::update_minimum(min_dt, cfl_dt);
-    });
-    dt = cfl * min_dt;
-#endif
+    };
+
+    dt = prims.reduce(
+             static_cast<real>(INFINITY),
+             [calc_wave_speeds,
+              calc_local_dt,
+              this](const auto& acc, const auto& prim, const luint gid) {
+                 const auto [ii, jj, kk] = get_indices(gid, nx, ny);
+                 const auto speeds       = calc_wave_speeds(prim);
+                 const auto cell         = this->cell_geometry(ii, jj, kk);
+                 const auto local_dt     = calc_local_dt(speeds, cell);
+                 return std::min(acc, local_dt);
+             },
+             fullPolicy
+         ) *
+         cfl;
+
+    // std::atomic<real> min_dt = INFINITY;
+    // pooling::getThreadPool().parallel_for(active_zones, [&](luint gid) {
+    //     real v1p, v1m, v2p, v2m, v3p, v3m, cfl_dt;
+    //     const luint kk  = axid<dim, BlkAx::K>(gid, xag, yag);
+    //     const luint jj  = axid<dim, BlkAx::J>(gid, xag, yag, kk);
+    //     const luint ii  = axid<dim, BlkAx::I>(gid, xag, yag, kk);
+    //     const luint ia  = ii + radius;
+    //     const luint ja  = jj + radius;
+    //     const luint ka  = kk + radius;
+    //     const luint aid = idx3(ia, ja, ka, nx, ny, nz);
+    //     // Left/Right wave speeds
+    //     if constexpr (dt_type == TIMESTEP_TYPE::ADAPTIVE) {
+    //         std::tie(v1m, v1p) = calc_max_wave_speeds(*prims[aid], 1);
+    //         v1p                = std::abs(v1p);
+    //         v1m                = std::abs(v1m);
+    //         std::tie(v2m, v2p) = calc_max_wave_speeds(*prims[aid], 2);
+    //         v2p                = std::abs(v2p);
+    //         v2m                = std::abs(v2m);
+    //         std::tie(v3m, v3p) = calc_max_wave_speeds(*prims[aid], 3);
+    //         v3p                = std::abs(v3p);
+    //         v3m                = std::abs(v3m);
+    //     }
+    //     else {
+    //         v1p = 1.0;
+    //         v1m = 1.0;
+    //         v2p = 1.0;
+    //         v2m = 1.0;
+    //         v3p = 1.0;
+    //         v3m = 1.0;
+    //     }
+
+    //     const auto cell = this->cell_geometry(ii, jj, kk);
+    //     switch (geometry) {
+    //         case simbi::Geometry::CARTESIAN: {
+    //             const real x1l = cell.x1L();
+    //             const real x1r = cell.x1R();
+    //             const real dx1 = x1r - x1l;
+
+    //             const real x2l = cell.x1L();
+    //             const real x2r = cell.x1R();
+    //             const real dx2 = x2r - x2l;
+
+    //             cfl_dt = std ::min(
+    //                 {dx1 / (std::max(v1p, v1m)),
+    //                  dx2 / (std::max(v2p, v2m)),
+    //                  dx3 / (std::max(v3p, v3m))}
+    //             );
+
+    //             break;
+    //         }
+
+    //         case simbi::Geometry::SPHERICAL: {
+    //             const real rproj = cell.x1mean * std::sin(cell.x2mean);
+
+    //             cfl_dt = std::min(
+    //                 {(cell.x1R() - cell.x1L()) / (std::max(v1p, v1m)),
+    //                  cell.x1mean * (cell.x2R() - cell.x2L()) /
+    //                      (std::max(v2p, v2m)),
+    //                  rproj * (cell.x3R() - cell.x3L()) / (std::max(v3p,
+    //                  v3m))}
+    //             );
+    //             break;
+    //         }
+    //         default: {
+    //             const real x1l = cell.x1L();
+    //             const real x1r = cell.x1R();
+    //             const real dx1 = x1r - x1l;
+
+    //             const real rmean = cell.x1mean;
+    //             cfl_dt           = std::min(
+    //                 {dx1 / (std::max(v1p, v1m)),
+    //                            rmean * dx2 / (std::max(v2p, v2m)),
+    //                            dx3 / (std::max(v3p, v3m))}
+    //             );
+    //             break;
+    //         }
+    //     }
+    //     pooling::update_minimum(min_dt, cfl_dt);
+    // });
+    // dt = cfl * min_dt;
 };
 
 //===================================================================================================================
@@ -1397,19 +1680,8 @@ DUAL RMHD<dim>::conserved_t RMHD<dim>::calc_hllc_flux(
             us.bcomponent(np2)  = bp2;
         }
 
-        const auto hllc_flux = f + (us - u) * ws - us * vface;
-        // check if any of the hllc_flux components are nan
-        // for (int qq = 0; qq < conserved_t::nmem; qq++) {
-        //     if (std::isnan(hllc_flux[qq])) {
-        //         printf("HLLC Flux component %d is NaN\n", qq);
-        //         printf("pL: % .2e, pR: % .2e\n", prL[qq], prR[qq]);
-        //         printf("aLm: % .2e, aRp: % .2e, aS: %.2e\n", aLm, aRp, aS);
-        //         // std::cin.get();
-        //     }
-        // }
-
-        return hllc_flux;
-        // return f + (us - u) * ws - us * vface;
+        //------Return the HLLC flux
+        return f + (us - u) * ws - us * vface;
     }();
     // upwind the concentration
     if (net_flux.dens() < 0.0) {
@@ -2236,8 +2508,7 @@ void RMHD<dim>::riemann_fluxes()
         const bool object_x = false;
         ib_check<dim>(object_pos, iobj, jj, kk, xag, yag, 1);
 
-        const auto vface =
-            this->cell_geometry(ii, jj, kk).template velocity<Side::X1L>();
+        const auto vface = this->cell_geometry(ii, jj, kk).velocity(Side::X1L);
         // active x1 flux perpendicular zone indices
         const auto jaf = jj + 1;
         const auto kaf = kk + 1;
@@ -2251,8 +2522,8 @@ void RMHD<dim>::riemann_fluxes()
             const auto pLL = prb[idx3(txa - 2, tya, tza, sx, sy, sz)];
             const auto pRR = prb[idx3(txa + 1, tya, tza, sx, sy, sz)];
 
-            pL = pL + plm_gradient(pL, pLL, pR, plm_theta) * 0.5;
-            pR = pR - plm_gradient(pR, pL, pRR, plm_theta) * 0.5;
+            pL = pL + plm_gradient(*pL, *pLL, *pR, plm_theta) * 0.5;
+            pR = pR - plm_gradient(*pR, *pL, *pRR, plm_theta) * 0.5;
         }
         ib_modify<dim>(pR, pL, object_x, 1);
         fri[xf] = (this->*riemann_solve)(pL, pR, 1, vface, bstag1[xf]);
@@ -2315,8 +2586,7 @@ void RMHD<dim>::riemann_fluxes()
         const bool object_y =
             ib_check<dim>(object_pos, ii, jobj, kk, xag, yag, 2);
 
-        const auto vface =
-            this->cell_geometry(ii, jj, kk).template velocity<Side::X2L>();
+        const auto vface = this->cell_geometry(ii, jj, kk).velocity(Side::X2L);
         // active x2 flux perpendicular zone indices
         const auto iaf = ii + 1;
         const auto kaf = kk + 1;
@@ -2329,8 +2599,8 @@ void RMHD<dim>::riemann_fluxes()
             const auto pLL = prb[idx3(txa, tya - 2, tza, sx, sy, sz)];
             const auto pRR = prb[idx3(txa, tya + 1, tza, sx, sy, sz)];
 
-            pL = pL + plm_gradient(pL, pLL, pR, plm_theta) * 0.5;
-            pR = pR - plm_gradient(pR, pL, pRR, plm_theta) * 0.5;
+            pL = pL + plm_gradient(*pL, *pLL, *pR, plm_theta) * 0.5;
+            pR = pR - plm_gradient(*pR, *pL, *pRR, plm_theta) * 0.5;
         }
         ib_modify<dim>(pR, pL, object_y, 2);
         gri[yf] = (this->*riemann_solve)(pL, pR, 2, vface, bstag2[yf]);
@@ -2392,8 +2662,7 @@ void RMHD<dim>::riemann_fluxes()
         const bool object_z =
             ib_check<dim>(object_pos, ii, jj, kobj, xag, yag, 3);
 
-        const auto vface =
-            this->cell_geometry(ii, jj, kk).template velocity<Side::X3L>();
+        const auto vface = this->cell_geometry(ii, jj, kk).velocity(Side::X3L);
         // active x3 flux perpendicular zone indices
         const auto iaf = ii + 1;
         const auto jaf = jj + 1;
@@ -2407,8 +2676,8 @@ void RMHD<dim>::riemann_fluxes()
             const auto pLL = prb[idx3(txa, tya, tza - 2, sx, sy, sz)];
             const auto pRR = prb[idx3(txa, tya, tza + 1, sx, sy, sz)];
 
-            pL = pL + plm_gradient(pL, pLL, pR, plm_theta) * 0.5;
-            pR = pR - plm_gradient(pR, pL, pRR, plm_theta) * 0.5;
+            pL = pL + plm_gradient(*pL, *pLL, *pR, plm_theta) * 0.5;
+            pR = pR - plm_gradient(*pR, *pL, *pRR, plm_theta) * 0.5;
         }
         ib_modify<dim>(pR, pL, object_z, 3);
         hri[zf] = (this->*riemann_solve)(pL, pR, 3, vface, bstag3[zf]);
@@ -2521,243 +2790,515 @@ RMHD<dim>::gravity_sources(const auto& prims, const auto& cell) const
 //                                            UDOT CALCULATIONS
 //===================================================================================================================
 template <int dim>
-void RMHD<dim>::advance()
+template <size_type i, size_type j>
+DUAL void RMHD<dim>::calc_emf_edges(
+    real ei[],
+    real ej[],
+    const auto& cell,
+    size_type ii,
+    size_type jj,
+    size_type kk
+) const
 {
-    const auto prim_dat = prims.data();
-    simbi::parallel_for(activePolicy, [prim_dat, this] DEV(const luint idx) {
-        // e1, e2, e3 values at cell edges
-        real e1[4], e2[4], e3[4];
+    // auto get_flux_info = [&] DEV(size_type dir) {
+    //     if (dir == 1) {
+    //         return std::make_tuple(fri, bstag1, nxv, nye, nze);
+    //     }
+    //     if (dir == 2) {
+    //         return std::make_tuple(gri, bstag2, nxe, nyv, nze);
+    //     }
+    //     return std::make_tuple(hri, bstag3, nxe, nye, nzv);
+    // };
 
-        // primitive buffer that returns dynamic shared array
-        // if working with shared memory on GPU, identity otherwise
-        const auto prb = sm_or_identity(prim_dat);
+    // // Get active flux indices
+    // const auto iaf = ii + 1;
+    // const auto jaf = jj + 1;
+    // const auto kaf = kk + 1;
 
-        const luint kk = axid<dim, BlkAx::K>(idx, xag, yag);
-        const luint jj = axid<dim, BlkAx::J>(idx, xag, yag, kk);
-        const luint ii = axid<dim, BlkAx::I>(idx, xag, yag, kk);
+    // // process each corner
+    // detail::for_sequence(detail::make_index_sequence<4>(), [&](auto qidx) {
+    //     constexpr auto q      = static_cast<size_type>(qidx);
+    //     constexpr auto corner = static_cast<Corner>(q);
+    //     // Calculate appropriate EMF components for this edge
+    //     // Based on staggered grid formulation
+    //     // ...EMF calculation logic specific to components i,j
 
-        if constexpr (global::on_gpu) {
-            if ((ii >= xag) || (jj >= yag) || (kk >= zag)) {
-                return;
+    //     // Compute shifted indices for this corner
+    //     auto north = corner == Corner::NE || corner == Corner::NW;
+    //     auto east  = corner == Corner::NE || corner == Corner::SE;
+    //     auto south = !north;
+    //     auto west  = !east;
+
+    //     // Get staggered field components
+    //     auto [flux_i, bstag_i, nx_i, ny_i, nz_i] = get_flux_info(i);
+    //     auto [flux_j, bstag_j, nx_j, ny_j, nz_j] = get_flux_info(j);
+
+    //     if constexpr (i == 2 && j == 3) {
+    //         // x2-x3 plane
+    //         auto qn = kaf + north;
+    //         auto qs = kaf - south;
+    //         auto qe = jaf + east;
+    //         auto qw = jaf - west;
+
+    //         auto nidx = idx3(iaf, jj + east, qn, nx_i, ny_i, nz_i);
+    //         auto sidx = idx3(iaf, jj + east, qs, nx_i, ny_i, nz_i);
+    //         auto eidx = idx3(iaf, qe, kk + north, nx_j, ny_j, nz_j);
+    //         auto widx = idx3(iaf, qw, kk + north, nx_j, ny_j, nz_j);
+
+    //         ei[q] = calc_edge_emf<Plane::JK, corner>(
+    //             flux_j[widx],
+    //             flux_j[eidx],
+    //             flux_i[sidx],
+    //             flux_i[nidx],
+    //             prims.data(),
+    //             ii,
+    //             jj,
+    //             kk,
+    //             txa,
+    //             tya,
+    //             tza,
+    //             i,
+    //             bstag_j[widx],
+    //             bstag_j[eidx],
+    //             bstag_i[sidx],
+    //             bstag_i[nidx]
+    //         );
+    //     }
+    //     else if constexpr (i == 3 && j == 1) {
+    //         // x3-x1 plane
+    //         auto qn = jaf + north;
+    //         auto qs = jaf - south;
+    //         auto qe = iaf + east;
+    //         auto qw = iaf - west;
+
+    //         auto nidx = idx3(iaf, jj + north, qn, nx_i, ny_i, nz_i);
+    //         auto sidx = idx3(iaf, jj + north, qs, nx_i, ny_i, nz_i);
+    //         auto eidx = idx3(qe, jj + north, kk + east, nx_j, ny_j, nz_j);
+    //         auto widx = idx3(qw, jj + north, kk + east, nx_j, ny_j, nz_j);
+
+    //         ei[q] = calc_edge_emf<Plane::IK, corner>(
+    //             flux_i[widx],
+    //             flux_i[eidx],
+    //             flux_j[sidx],
+    //             flux_j[nidx],
+    //             prims.data(),
+    //             ii,
+    //             jj,
+    //             kk,
+    //             txa,
+    //             tya,
+    //             tza,
+    //             i,
+    //             bstag_i[widx],
+    //             bstag_i[eidx],
+    //             bstag_j[sidx],
+    //             bstag_j[nidx]
+    //         );
+    //     }
+    //     else {
+    //         // x1-x2 plane
+    //         auto qn = iaf + north;
+    //         auto qs = iaf - south;
+    //         auto qe = jaf + east;
+    //         auto qw = jaf - west;
+
+    //         auto nidx = idx3(qn, jj + east, kk + north, nx_i, ny_i, nz_i);
+    //         auto sidx = idx3(qs, jj + east, kk + north, nx_i, ny_i, nz_i);
+    //         auto eidx = idx3(qe, jj + east, kk + north, nx_j, ny_j, nz_j);
+    //         auto widx = idx3(qw, jj + east, kk + north, nx_j, ny_j, nz_j);
+
+    //         ei[q] = calc_edge_emf<Plane::IJ, corner>(
+    //             flux_i[widx],
+    //             flux_i[eidx],
+    //             flux_j[sidx],
+    //             flux_j[nidx],
+    //             prims.data(),
+    //             ii,
+    //             jj,
+    //             kk,
+    //             txa,
+    //             tya,
+    //             tza,
+    //             i,
+    //             bstag_i[widx],
+    //             bstag_i[eidx],
+    //             bstag_j[sidx],
+    //             bstag_j[nidx]
+    //         );
+    //     }
+    // });
+}
+
+template <int dim>
+template <int nhat>
+void RMHD<dim>::update_magnetic_component(const ExecutionPolicy<>& policy)
+{
+    const auto& b_stag = (nhat == 1) ? bstag1 : (nhat == 2) ? bstag2 : bstag3;
+
+    // Create contracted views for EMF calculation
+    // auto magnetic_update = [this] DEV(auto& b_view, const auto& coord) {
+    //     // Get local coordinates for EMF calculation
+    //     const auto [ii, jj, kk] = b_view.position();
+    //     const auto cell         = this->cell_geometry(ii, jj, kk);
+
+    //     // Calculate EMF components based on nhat
+    //     real ei[4], ej[4];
+
+    //     if constexpr (nhat == 1) {
+    //         calc_emf_edges<2, 3>(ei, ej, cell, ii, jj, kk);
+    //         // Update B1 using e2,e3
+    //         return b_view.value() -
+    //                dt * step * curl_e(1, ei, ej, cell, coord.side());
+    //     }
+    //     else if constexpr (nhat == 2) {
+    //         calc_emf_edges<3, 1>(ei, ej, cell, ii, jj, kk);
+    //         // Update B2 using e3,e1
+    //         return b_view.value() -
+    //                dt * step * curl_e(2, ei, ej, cell, coord.side());
+    //     }
+    //     else {
+    //         calc_emf_edges<1, 2>(ei, ej, cell, ii, jj, kk);
+    //         // Update B3 using e1,e2
+    //         return b_view.value() -
+    //                dt * step * curl_e(3, ei, ej, cell, coord.side());
+    //     }
+    // };
+
+    // Transform using stencil view
+    // b_stag.contract(radius).stencil_transform(magnetic_update, policy);
+}
+
+template <int dim>
+void RMHD<dim>::advance_magnetic_fields()
+{
+    // update the magnetic field components
+    update_magnetic_component<1>(xvertexPolicy);
+    update_magnetic_component<2>(yvertexPolicy);
+    update_magnetic_component<3>(zvertexPolicy);
+}
+
+template <int dim>
+void RMHD<dim>::advance_conserved()
+{
+    auto dcons = [this] DEV(
+                     const auto& fr,
+                     const auto& gr,
+                     const auto& hr,
+                     const auto& source_terms,
+                     const auto& gravity,
+                     const auto& geometrical_sources,
+                     const auto& cell
+                 ) -> conserved_t {
+        conserved_t res;
+        for (int q = 1; q > -1; q--) {
+            // q = 0 is L, q = 1 is R
+            const auto sign = (q == 1) ? 1 : -1;
+            res -= fr.at(q - 1, 0, 0) * cell.idV1() * cell.area(0 + q) * sign;
+            if constexpr (dim > 1) {
+                res -=
+                    gr.at(0, q - 1, 0) * cell.idV2() * cell.area(2 + q) * sign;
+                if constexpr (dim > 2) {
+                    res -= hr.at(0, 0, q - 1) * cell.idV3() * cell.area(4 + q) *
+                           sign;
+                }
             }
         }
 
-        // active zones for primitive variables
-        const luint ia = ii + radius;
-        const luint ja = jj + radius;
-        const luint ka = kk + radius;
-        // active zones for fluxes
-        const luint iaf = ii + 1;
-        const luint jaf = jj + 1;
-        const luint kaf = kk + 1;
-        const luint tx  = (global::on_sm) ? threadIdx.x : 0;
-        const luint ty  = (global::on_sm) ? threadIdx.y : 0;
-        const luint tz  = (global::on_sm) ? threadIdx.z : 0;
-        const luint txa = (global::on_sm) ? tx + radius : ia;
-        const luint tya = (global::on_sm) ? ty + radius : ja;
-        const luint tza = (global::on_sm) ? tz + radius : ka;
-        const luint aid = idx3(ia, ja, ka, nx, ny, nz);
-        const luint tid = idx3(txa, tya, tza, sx, sy, sz);
+        res += source_terms;
+        res += gravity;
+        res += geometrical_sources;
 
-        if constexpr (global::on_sm) {
-            load_shared_buffer<dim>(
-                activePolicy,
-                prb,
-                prims,
-                nx,
-                ny,
-                nz,
-                sx,
-                sy,
-                tx,
-                ty,
-                tz,
-                txa,
-                tya,
-                tza,
-                ia,
-                ja,
-                ka,
-                radius
-            );
-        }
+        return res * step * dt;
+    };
 
+    auto update_conserved = [this, dcons] DEV(
+                                auto& con,
+                                const auto& prim,
+                                const auto& fr,
+                                const auto& gr,
+                                const auto& hr
+                            ) {
+        const auto [ii, jj, kk] = con.position();
         // mesh factors
         const auto cell = this->cell_geometry(ii, jj, kk);
 
-        const auto xlf = idx3(ii + 0, jaf, kaf, nxv, nye, nze);
-        const auto xrf = idx3(ii + 1, jaf, kaf, nxv, nye, nze);
-        const auto ylf = idx3(iaf, jj + 0, kaf, nxe, nyv, nze);
-        const auto yrf = idx3(iaf, jj + 1, kaf, nxe, nyv, nze);
-        const auto zlf = idx3(iaf, jaf, kk + 0, nxe, nye, nzv);
-        const auto zrf = idx3(iaf, jaf, kk + 1, nxe, nye, nzv);
+        // compute the change in conserved variables
+        const auto dc = dcons(
+            fr,
+            gr,
+            hr,
+            hydro_sources(cell),
+            gravity_sources(prim.value(), cell),
+            cell.geometrical_sources(prim.value()),
+            cell
+        );
 
-        // compute edge emfs in clockwise direction wrt cell plane
-        detail::for_sequence(detail::make_index_sequence<4>(), [&](auto qidx) {
-            constexpr auto q      = static_cast<luint>(qidx);
-            constexpr auto corner = static_cast<Corner>(q);
+        // update conserved variables
+        return con.value() + dc;
+    };
 
-            // calc directional indices for i-j plane
-            auto north = corner == Corner::NE || corner == Corner::NW;
-            auto east  = corner == Corner::NE || corner == Corner::SE;
-            auto south = !north;
-            auto west  = !east;
-
-            auto qn = jaf + north;
-            auto qs = jaf - south;
-            auto qe = iaf + east;
-            auto qw = iaf - west;
-
-            auto nidx = idx3(ii + east, qn, kaf, nxv, nye, nze);
-            auto sidx = idx3(ii + east, qs, kaf, nxv, nye, nze);
-            auto eidx = idx3(qe, jj + north, kaf, nxe, nyv, nze);
-            auto widx = idx3(qw, jj + north, kaf, nxe, nyv, nze);
-
-            e3[q] = calc_edge_emf<Plane::IJ, corner>(
-                gri[widx],
-                gri[eidx],
-                fri[sidx],
-                fri[nidx],
-                prb,
-                ii,
-                jj,
-                kk,
-                txa,
-                tya,
-                tza,
-                3,
-                b2const[widx],
-                b2const[eidx],
-                b1const[sidx],
-                b1const[nidx]
-            );
-
-            // calc directional indices for i-k plane
-            qn   = kaf + north;
-            qs   = kaf - south;
-            qe   = iaf + east;
-            qw   = iaf - west;
-            nidx = idx3(ii + east, jaf, qn, nxv, nye, nze);
-            sidx = idx3(ii + east, jaf, qs, nxv, nye, nze);
-            eidx = idx3(qe, jaf, kk + north, nxe, nye, nzv);
-            widx = idx3(qw, jaf, kk + north, nxe, nye, nzv);
-
-            e2[q] = calc_edge_emf<Plane::IK, corner>(
-                hri[widx],
-                hri[eidx],
-                fri[sidx],
-                fri[nidx],
-                prb,
-                ii,
-                jj,
-                kk,
-                txa,
-                tya,
-                tza,
-                2,
-                b3const[widx],
-                b3const[eidx],
-                b1const[sidx],
-                b1const[nidx]
-            );
-
-            // calc directional indices for j-k plane
-            qn   = kaf + north;
-            qs   = kaf - south;
-            qe   = jaf + east;
-            qw   = jaf - west;
-            nidx = idx3(iaf, jj + east, qn, nxe, nyv, nze);
-            sidx = idx3(iaf, jj + east, qs, nxe, nyv, nze);
-            eidx = idx3(iaf, qe, kk + north, nxe, nye, nzv);
-            widx = idx3(iaf, qw, kk + north, nxe, nye, nzv);
-
-            e1[q] = calc_edge_emf<Plane::JK, corner>(
-                hri[widx],
-                hri[eidx],
-                gri[sidx],
-                gri[nidx],
-                prb,
-                ii,
-                jj,
-                kk,
-                txa,
-                tya,
-                tza,
-                1,
-                b3const[widx],
-                b3const[eidx],
-                b2const[sidx],
-                b2const[nidx]
-            );
-        });
-
-        auto& b1L = bstag1[xlf];
-        auto& b1R = bstag1[xrf];
-        auto& b2L = bstag2[ylf];
-        auto& b2R = bstag2[yrf];
-        auto& b3L = bstag3[zlf];
-        auto& b3R = bstag3[zrf];
-        auto& b1c = cons[aid].b1();
-        auto& b2c = cons[aid].b2();
-        auto& b3c = cons[aid].b3();
-
-        b1L = b1const[xlf] - dt * step * curl_e(1, e2, e3, cell, 0);
-        b1R = b1const[xrf] - dt * step * curl_e(1, e2, e3, cell, 1);
-
-        b2L = b2const[ylf] - dt * step * curl_e(2, e3, e1, cell, 0);
-        b2R = b2const[yrf] - dt * step * curl_e(2, e3, e1, cell, 1);
-
-        b3L = b3const[zlf] - dt * step * curl_e(3, e1, e2, cell, 0);
-        b3R = b3const[zrf] - dt * step * curl_e(3, e1, e2, cell, 1);
-
-        if constexpr (global::debug_mode) {
-            const auto divb = div_b(b1L, b1R, b2L, b2R, b3L, b3R, cell);
-            if (!goes_to_zero(divb)) {
-                printf("========================================\n");
-                printf("DIV.B: %.2e\n", divb);
-                printf("========================================\n");
-                printf(
-                    "[%" PRIu64 "] Divergence of B is not zero at: %" PRIu64
-                    ", %" PRIu64 ", %" PRIu64 "!\n",
-                    global_iter,
-                    ii,
-                    jj,
-                    kk
-                );
-                printf("B1L: %.2e, B1R: %.2e\n", b1L, b1R);
-                printf("B2L: %.2e, B2R: %.2e\n", b2L, b2R);
-                printf("B3L: %.2e, B3R: %.2e\n", b3L, b3R);
-                printf("theta_mean: %.2e\n", cell.x2mean);
-                printf("tL: %.2e, tR: %.2e\n", cell.x2L(), cell.x2R());
-                std::cin.get();
-            }
-        }
-
-        b1c = static_cast<real>(0.5) * (b1R + b1L);
-        b2c = static_cast<real>(0.5) * (b2R + b2L);
-        b3c = static_cast<real>(0.5) * (b3R + b3L);
-
-        // TODO: implement functional source and gravity
-        const auto source_terms = hydro_sources(cell);
-
-        // Gravity
-        const auto gravity = gravity_sources(prb[tid], cell);
-
-        // geometric source terms
-        const auto geom_source = cell.geom_sources(prb[tid]);
-
-        cons[aid] -=
-            ((fri[xrf] * cell.a1R() - fri[xlf] * cell.a1L()) * cell.idV1() +
-             (gri[yrf] * cell.a2R() - gri[ylf] * cell.a2L()) * cell.idV2() +
-             (hri[zrf] * cell.a3R() - hri[zlf] * cell.a3L()) * cell.idV3() -
-             source_terms - gravity - geom_source) *
-            dt * step;
-    });
-    // copy the current staggered bfields to the constant arrays
-    b1const = bstag1;
-    b2const = bstag2;
-    b3const = bstag3;
+    // Transform using stencil operations
+    cons.contract(radius).stencil_transform(
+        update_conserved,
+        activePolicy,
+        prims.contract(radius),
+        fri.contract(radius),
+        gri.contract(radius),
+        hri.contract(radius)
+    );
 }
+
+template <int dim>
+void RMHD<dim>::advance()
+{
+    advance_magnetic_fields();
+    advance_conserved();
+}
+
+// void old_advance()
+// {
+//     const auto prim_dat = prims.data();
+//     const auto b1const  = bstag1;
+//     const auto b2const  = bstag2;
+//     const auto b3const  = bstag3;
+//     simbi::parallel_for(
+//         activePolicy,
+//         [prim_dat, b1const, b2const, b3const, this] DEV(const luint idx) {
+//             // e1, e2, e3 values at cell edges
+//             real e1[4], e2[4], e3[4];
+
+//             // primitive buffer that returns dynamic shared array
+//             // if working with shared memory on GPU, identity otherwise
+//             const auto prb = sm_or_identity(prim_dat);
+
+//             const luint kk = axid<dim, BlkAx::K>(idx, xag, yag);
+//             const luint jj = axid<dim, BlkAx::J>(idx, xag, yag, kk);
+//             const luint ii = axid<dim, BlkAx::I>(idx, xag, yag, kk);
+
+//             if constexpr (global::on_gpu) {
+//                 if ((ii >= xag) || (jj >= yag) || (kk >= zag)) {
+//                     return;
+//                 }
+//             }
+
+//             // active zones for primitive variables
+//             const luint ia = ii + radius;
+//             const luint ja = jj + radius;
+//             const luint ka = kk + radius;
+//             // active zones for fluxes
+//             const luint iaf = ii + 1;
+//             const luint jaf = jj + 1;
+//             const luint kaf = kk + 1;
+//             const luint tx  = (global::on_sm) ? threadIdx.x : 0;
+//             const luint ty  = (global::on_sm) ? threadIdx.y : 0;
+//             const luint tz  = (global::on_sm) ? threadIdx.z : 0;
+//             const luint txa = (global::on_sm) ? tx + radius : ia;
+//             const luint tya = (global::on_sm) ? ty + radius : ja;
+//             const luint tza = (global::on_sm) ? tz + radius : ka;
+//             const luint aid = idx3(ia, ja, ka, nx, ny, nz);
+//             const luint tid = idx3(txa, tya, tza, sx, sy, sz);
+
+//             if constexpr (global::on_sm) {
+//                 load_shared_buffer<dim>(
+//                     activePolicy,
+//                     prb,
+//                     prims,
+//                     nx,
+//                     ny,
+//                     nz,
+//                     sx,
+//                     sy,
+//                     tx,
+//                     ty,
+//                     tz,
+//                     txa,
+//                     tya,
+//                     tza,
+//                     ia,
+//                     ja,
+//                     ka,
+//                     radius
+//                 );
+//             }
+
+//             // mesh factors
+//             const auto cell = this->cell_geometry(ii, jj, kk);
+
+//             const auto xlf = idx3(ii + 0, jaf, kaf, nxv, nye, nze);
+//             const auto xrf = idx3(ii + 1, jaf, kaf, nxv, nye, nze);
+//             const auto ylf = idx3(iaf, jj + 0, kaf, nxe, nyv, nze);
+//             const auto yrf = idx3(iaf, jj + 1, kaf, nxe, nyv, nze);
+//             const auto zlf = idx3(iaf, jaf, kk + 0, nxe, nye, nzv);
+//             const auto zrf = idx3(iaf, jaf, kk + 1, nxe, nye, nzv);
+
+//             // compute edge emfs in clockwise direction wrt cell plane
+//             detail::for_sequence(
+//                 detail::make_index_sequence<4>(),
+//                 [&](auto qidx) {
+//                     constexpr auto q      = static_cast<luint>(qidx);
+//                     constexpr auto corner = static_cast<Corner>(q);
+
+//                     // calc directional indices for i-j plane
+//                     auto north = corner == Corner::NE || corner ==
+//                     Corner::NW; auto east  = corner == Corner::NE || corner
+//                     == Corner::SE; auto south = !north; auto west  = !east;
+
+//                     auto qn = jaf + north;
+//                     auto qs = jaf - south;
+//                     auto qe = iaf + east;
+//                     auto qw = iaf - west;
+
+//                     auto nidx = idx3(ii + east, qn, kaf, nxv, nye, nze);
+//                     auto sidx = idx3(ii + east, qs, kaf, nxv, nye, nze);
+//                     auto eidx = idx3(qe, jj + north, kaf, nxe, nyv, nze);
+//                     auto widx = idx3(qw, jj + north, kaf, nxe, nyv, nze);
+
+//                     e3[q] = calc_edge_emf<Plane::IJ, corner>(
+//                         gri[widx],
+//                         gri[eidx],
+//                         fri[sidx],
+//                         fri[nidx],
+//                         prb,
+//                         ii,
+//                         jj,
+//                         kk,
+//                         txa,
+//                         tya,
+//                         tza,
+//                         3,
+//                         b2const[widx],
+//                         b2const[eidx],
+//                         b1const[sidx],
+//                         b1const[nidx]
+//                     );
+
+//                     // calc directional indices for i-k plane
+//                     qn   = kaf + north;
+//                     qs   = kaf - south;
+//                     qe   = iaf + east;
+//                     qw   = iaf - west;
+//                     nidx = idx3(ii + east, jaf, qn, nxv, nye, nze);
+//                     sidx = idx3(ii + east, jaf, qs, nxv, nye, nze);
+//                     eidx = idx3(qe, jaf, kk + north, nxe, nye, nzv);
+//                     widx = idx3(qw, jaf, kk + north, nxe, nye, nzv);
+
+//                     e2[q] = calc_edge_emf<Plane::IK, corner>(
+//                         hri[widx],
+//                         hri[eidx],
+//                         fri[sidx],
+//                         fri[nidx],
+//                         prb,
+//                         ii,
+//                         jj,
+//                         kk,
+//                         txa,
+//                         tya,
+//                         tza,
+//                         2,
+//                         b3const[widx],
+//                         b3const[eidx],
+//                         b1const[sidx],
+//                         b1const[nidx]
+//                     );
+
+//                     // calc directional indices for j-k plane
+//                     qn   = kaf + north;
+//                     qs   = kaf - south;
+//                     qe   = jaf + east;
+//                     qw   = jaf - west;
+//                     nidx = idx3(iaf, jj + east, qn, nxe, nyv, nze);
+//                     sidx = idx3(iaf, jj + east, qs, nxe, nyv, nze);
+//                     eidx = idx3(iaf, qe, kk + north, nxe, nye, nzv);
+//                     widx = idx3(iaf, qw, kk + north, nxe, nye, nzv);
+
+//                     e1[q] = calc_edge_emf<Plane::JK, corner>(
+//                         hri[widx],
+//                         hri[eidx],
+//                         gri[sidx],
+//                         gri[nidx],
+//                         prb,
+//                         ii,
+//                         jj,
+//                         kk,
+//                         txa,
+//                         tya,
+//                         tza,
+//                         1,
+//                         b3const[widx],
+//                         b3const[eidx],
+//                         b2const[sidx],
+//                         b2const[nidx]
+//                     );
+//                 }
+//             );
+
+//             auto& b1L = bstag1[xlf];
+//             auto& b1R = bstag1[xrf];
+//             auto& b2L = bstag2[ylf];
+//             auto& b2R = bstag2[yrf];
+//             auto& b3L = bstag3[zlf];
+//             auto& b3R = bstag3[zrf];
+//             auto& b1c = cons[aid].b1();
+//             auto& b2c = cons[aid].b2();
+//             auto& b3c = cons[aid].b3();
+
+//             b1L = b1const[xlf] - dt * step * curl_e(1, e2, e3, cell, 0);
+//             b1R = b1const[xrf] - dt * step * curl_e(1, e2, e3, cell, 1);
+
+//             b2L = b2const[ylf] - dt * step * curl_e(2, e3, e1, cell, 0);
+//             b2R = b2const[yrf] - dt * step * curl_e(2, e3, e1, cell, 1);
+
+//             b3L = b3const[zlf] - dt * step * curl_e(3, e1, e2, cell, 0);
+//             b3R = b3const[zrf] - dt * step * curl_e(3, e1, e2, cell, 1);
+
+//             if constexpr (global::debug_mode) {
+//                 const auto divb = div_b(b1L, b1R, b2L, b2R, b3L, b3R, cell);
+//                 if (!goes_to_zero(divb)) {
+//                     printf("========================================\n");
+//                     printf("DIV.B: %.2e\n", divb);
+//                     printf("========================================\n");
+//                     printf(
+//                         "[%" PRIu64 "] Divergence of B is not zero at: %"
+//                         PRIu64
+//                         ", %" PRIu64 ", %" PRIu64 "!\n",
+//                         global_iter,
+//                         ii,
+//                         jj,
+//                         kk
+//                     );
+//                     printf("B1L: %.2e, B1R: %.2e\n", b1L, b1R);
+//                     printf("B2L: %.2e, B2R: %.2e\n", b2L, b2R);
+//                     printf("B3L: %.2e, B3R: %.2e\n", b3L, b3R);
+//                     printf("theta_mean: %.2e\n", cell.x2mean);
+//                     printf("tL: %.2e, tR: %.2e\n", cell.x2L(), cell.x2R());
+//                     std::cin.get();
+//                 }
+//             }
+
+//             b1c = static_cast<real>(0.5) * (b1R + b1L);
+//             b2c = static_cast<real>(0.5) * (b2R + b2L);
+//             b3c = static_cast<real>(0.5) * (b3R + b3L);
+
+//             const auto source_terms = hydro_sources(cell);
+
+//             // Gravity
+//             const auto gravity = gravity_sources(prb[tid], cell);
+
+//             // geometric source terms
+//             const auto geometrical_sources =
+//             cell.geometrical_sources(prb[tid]);
+
+//             cons[aid] -=
+//                 ((fri[xrf] * cell.a1R() - fri[xlf] * cell.a1L()) *
+//                 cell.idV1() +
+//                  (gri[yrf] * cell.a2R() - gri[ylf] * cell.a2L()) *
+//                  cell.idV2() + (hri[zrf] * cell.a3R() - hri[zlf] *
+//                  cell.a3L()) * cell.idV3() - source_terms - gravity -
+//                  geometrical_sources) *
+//                 dt * step;
+//         }
+//     );
+// }
 
 // //===================================================================================================================
 // //                                            SIMULATE
@@ -2780,26 +3321,17 @@ void RMHD<dim>::simulate(
     load_functions();
 
     // allocate space for Riemann fluxes
-    fri.resize(nxv * nye * nze);
-    gri.resize(nxe * nyv * nze);
-    hri.resize(nxe * nye * nzv);
-
-    // set the staggered magnetic fields to ics
-    bstag1  = bfield[0];
-    bstag2  = bfield[1];
-    bstag3  = bfield[2];
-    b1const = bfield[0];
-    b2const = bfield[1];
-    b3const = bfield[2];
+    fri.resize(nze * nye * nxv).reshape({nze, nye, nxv});
+    gri.resize(nze * nyv * nxe).reshape({nze, nyv, nxe});
+    hri.resize(nzv * nye * nxe).reshape({nzv, nye, nxe});
 
     // deallocate the old magnetic field
     deallocate_staggered_field();
     // allocate space for volume-average quantities
-    cons.resize(total_zones);
-    prims.resize(total_zones);
-    troubled_cells.resize(total_zones, 0);
+    cons.reshape({nz, ny, nx});
+    prims.reshape({nz, ny, nx});
     if constexpr (global::on_gpu) {
-        dt_min.resize(active_zones);
+        dt_min.reshape({nz, ny, nx});
     }
 
     // Copy the state array into real & profile variables
@@ -2815,7 +3347,9 @@ void RMHD<dim>::simulate(
     init_riemann_solver();
     // this->set_mesh_funcs();
 
-    config_ghosts(this);
+    boundary_manager<conserved_t, dim> bman;
+    // true = sync corners too
+    bman.sync_boundaries(fullPolicy, cons, cons.contract(2), bcs, true);
     cons2prim();
     adapt_dt<TIMESTEP_TYPE::MINIMUM>();
 
@@ -2824,7 +3358,7 @@ void RMHD<dim>::simulate(
         riemann_fluxes();
         set_flux_and_fields();
         advance();
-        config_ghosts(this);
+        bman.sync_boundaries(fullPolicy, cons, cons.contract(2), bcs, true);
         cons2prim();
         adapt_dt();
 

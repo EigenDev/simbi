@@ -103,7 +103,7 @@ namespace simbi {
 
         namespace api {
             void copyHostToDevice(void* to, const void* from, size_t bytes);
-            void copyDevToHost(void* to, const void* from, size_t bytes);
+            void copyDeviceToHost(void* to, const void* from, size_t bytes);
             void copyDevToDev(void* to, const void* from, size_t bytes);
             void malloc(void* obj, size_t bytes);
             void mallocManaged(void* obj, size_t bytes);
@@ -244,7 +244,7 @@ namespace simbi {
     STATIC
     unsigned int get_ii_in2D()
     {
-        if constexpr (global::col_maj) {
+        if constexpr (global::col_major) {
             return blockDim.y * blockIdx.y + threadIdx.y;
         }
         return blockDim.x * blockIdx.x + threadIdx.x;
@@ -253,7 +253,7 @@ namespace simbi {
     STATIC
     unsigned int get_jj_in2D()
     {
-        if constexpr (global::col_maj) {
+        if constexpr (global::col_major) {
             return blockDim.x * blockIdx.x + threadIdx.x;
         }
         return blockDim.y * blockIdx.y + threadIdx.y;
@@ -263,7 +263,7 @@ namespace simbi {
     STATIC unsigned int get_tx()
     {
         if constexpr (P == global::Platform::GPU) {
-            if constexpr (global::col_maj) {
+            if constexpr (global::col_major) {
                 return threadIdx.y;
             }
             return threadIdx.x;
@@ -277,7 +277,7 @@ namespace simbi {
     STATIC unsigned int get_ty()
     {
         if constexpr (P == global::Platform::GPU) {
-            if constexpr (global::col_maj) {
+            if constexpr (global::col_major) {
                 return threadIdx.x;
             }
             return threadIdx.y;

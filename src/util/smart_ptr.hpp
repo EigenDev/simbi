@@ -1,6 +1,6 @@
 /**
  * ***********************(C) COPYRIGHT 2024 Marcus DuPont**********************
- * @file       smrt_ptr.hpp
+ * @file       smart_ptr.hpp
  * @brief
  *
  * @note adapted from:

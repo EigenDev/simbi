@@ -19,18 +19,20 @@
 #ifndef NEWT_HPP
 #define NEWT_HPP
 
-#include "base.hpp"                   // for HydroBase
-#include "build_options.hpp"          // for real, DUAL, lint, luint
-#include "common/helpers.hpp"         // for my_min, my_max, ...
-#include "common/hydro_structs.hpp"   // for Conserved, Primitive
-#include "common/mesh.hpp"            // for Mesh
-#include "util/exec_policy.hpp"       // for ExecutionPolicy
-#include "util/ndarray.hpp"           // for ndarray
-#include <dlfcn.h>                    // for dlopen, dlclose, dlsym
-#include <functional>                 // for function
-#include <optional>                   // for optional
-#include <type_traits>                // for conditional_t
-#include <vector>                     // for vector
+#include "base.hpp"             // for HydroBase
+#include "build_options.hpp"    // for real, DUAL, lint, luint
+#include "common/helpers.hpp"   // for my_min, my_max, ...
+// #include "common/hydro_structs.hpp"   // for Conserved, Primitive
+#include "common/generic_structs.hpp"   // for Eigenvals, mag_four_vec
+#include "common/mesh.hpp"              // for Mesh
+#include "util/exec_policy.hpp"         // for ExecutionPolicy
+#include "util/maybe.hpp"               // for Maybe
+#include "util/ndarray.hpp"             // for ndarray
+#include <dlfcn.h>                      // for dlopen, dlclose, dlsym
+#include <functional>                   // for function
+#include <optional>                     // for optional
+#include <type_traits>                  // for conditional_t
+#include <vector>                       // for vector
 
 namespace simbi {
     template <int dim>
@@ -44,11 +46,10 @@ namespace simbi {
         static constexpr int nvars               = dim + 3;
         static constexpr std::string_view regime = "classical";
         // set the primitive and conservative types at compile time
-        using primitive_t   = anyPrimitive<dim, Regime::NEWTONIAN>;
-        using conserved_t   = anyConserved<dim, Regime::NEWTONIAN>;
-        using eigenvals_t   = Eigenvals<dim, Regime::NEWTONIAN>;
-        using mag_fourvec_t = mag_four_vec<dim>;
-        using function_t    = typename helpers::real_func<dim>::type;
+        using primitive_t = anyPrimitive<dim, Regime::NEWTONIAN>;
+        using conserved_t = anyConserved<dim, Regime::NEWTONIAN>;
+        using eigenvals_t = Eigenvals<dim, Regime::NEWTONIAN>;
+        using function_t  = typename helpers::real_func<dim>::type;
         template <typename T>
         using RiemannFuncPointer = conserved_t (T::*)(
             const primitive_t&,
@@ -95,7 +96,7 @@ namespace simbi {
         // Overloaded Constructor
         Newtonian(
             std::vector<std::vector<real>>& state,
-            const InitialConditions& init_conditions
+            InitialConditions& init_conditions
         );
 
         // Destructor
@@ -104,11 +105,6 @@ namespace simbi {
         /* Methods */
         void cons2prim();
         void advance();
-
-        void update_mesh_motion(
-            std::function<real(real)> const& a,
-            std::function<real(real)> const& adot
-        );
 
         DUAL eigenvals_t calc_eigenvals(
             const auto& primsL,
@@ -157,14 +153,14 @@ namespace simbi {
 
         void offload()
         {
-            cons.copyToGpu();
-            prims.copyToGpu();
-            dt_min.copyToGpu();
+            cons.sync_to_device();
+            prims.sync_to_device();
+            dt_min.sync_to_device();
             if constexpr (dim > 1) {
-                object_pos.copyToGpu();
+                object_pos.sync_to_device();
             }
-            bcs.copyToGpu();
-            troubled_cells.copyToGpu();
+            bcs.sync_to_device();
+            troubled_cells.sync_to_device();
         }
 
         void load_functions()

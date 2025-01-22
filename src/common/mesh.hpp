@@ -75,10 +75,10 @@ namespace simbi {
 
         static constexpr void calculate_areas(auto* areas, const auto& cell)
         {
-            const auto rr   = cell.template normal<Side::X1R>();
-            const auto rl   = cell.template normal<Side::X1L>();
-            const auto tr   = cell.template normal<Side::X2R>();
-            const auto tl   = cell.template normal<Side::X2L>();
+            const auto rr   = cell.normal(Side::X1R);
+            const auto rl   = cell.normal(Side::X1L);
+            const auto tr   = cell.normal(Side::X2R);
+            const auto tl   = cell.normal(Side::X2L);
             const auto dcos = get_differential<GridDirection::X2>(cell);
             const auto dphi = get_differential<GridDirection::X3>(cell);
             areas[0]        = rl * rl * dcos * dphi;
@@ -104,71 +104,34 @@ namespace simbi {
             const real cot  = std::cos(cell.x2mean) / sint;
 
             // Grab central primitives
-            if constexpr (Derived::regime == "classical" ||
-                          Derived::regime == "srhd") {
-                const real v1    = prims->get_v1();
-                const real v2    = prims->get_v2();
-                const real v3    = prims->get_v3();
-                const real pt    = prims->total_pressure();
-                const auto bmu   = typename Derived::mag_fourvec_t(*prims);
-                const real wt    = prims->enthalpy_density(gamma);
-                const real gam2  = prims->lorentz_factor_squared();
-                const real wgam2 = wt * gam2;
+            const real v1    = prims.get_v1();
+            const real v2    = prims.get_v2();
+            const real v3    = prims.get_v3();
+            const real pt    = prims.total_pressure();
+            const auto bmu   = typename Derived::mag_fourvec_t(prims);
+            const real wt    = prims.enthalpy_density(gamma);
+            const real gam2  = prims.lorentz_factor_squared();
+            const real wgam2 = wt * gam2;
 
-                // geometric source terms in momentum
-                for (int qq = 0; qq < dim; qq++) {
-                    if (qq == 0) {
-                        cons[qq + 1] =
-                            pt * (cell.a1R() - cell.a1L()) / cell.dV +
-                            wgam2 * (v2 * v2 + v3 * v3) / cell.x1mean -
-                            (bmu.two * bmu.two + bmu.three * bmu.three) /
-                                cell.x1mean;
-                    }
-                    else if (qq == 1) {
-                        cons[qq + 1] =
-                            pt * (cell.a2R() - cell.a2L()) / cell.dV -
-                            wgam2 * (v2 * v1 - v3 * v3 * cot) / cell.x1mean +
-                            (bmu.two * bmu.one - bmu.three * bmu.three * cot) /
-                                cell.x1mean;
-                    }
-                    else {
-                        cons[qq + 1] =
-                            -wgam2 * v3 * (v1 + cot * v2) / cell.x1mean +
-                            bmu.three * (bmu.one + cot * bmu.two) / cell.x1mean;
-                    }
+            // geometric source terms in momentum
+            for (int qq = 0; qq < dim; qq++) {
+                if (qq == 0) {
+                    cons[qq + 1] = pt * (cell.a1R() - cell.a1L()) / cell.dV +
+                                   wgam2 * (v2 * v2 + v3 * v3) / cell.x1mean -
+                                   (bmu.two * bmu.two + bmu.three * bmu.three) /
+                                       cell.x1mean;
                 }
-            }
-            else {
-                const real v1    = prims.get_v1();
-                const real v2    = prims.get_v2();
-                const real v3    = prims.get_v3();
-                const real pt    = prims.total_pressure();
-                const auto bmu   = typename Derived::mag_fourvec_t(prims);
-                const real wt    = prims.enthalpy_density(gamma);
-                const real gam2  = prims.lorentz_factor_squared();
-                const real wgam2 = wt * gam2;
-
-                // geometric source terms in momentum
-                for (int qq = 0; qq < dim; qq++) {
-                    if (qq == 0) {
-                        cons[qq + 1] =
-                            pt * (cell.a1R() - cell.a1L()) / cell.dV +
-                            wgam2 * (v2 * v2 + v3 * v3) / cell.x1mean -
-                            (bmu.two * bmu.two + bmu.three * bmu.three) /
-                                cell.x1mean;
-                    }
-                    else if (qq == 1) {
-                        cons[qq + 1] =
-                            pt * (cell.a2R() - cell.a2L()) / cell.dV -
-                            wgam2 * (v2 * v1 - v3 * v3 * cot) / cell.x1mean +
-                            (bmu.two * bmu.one - bmu.three * bmu.three * cot) /
-                                cell.x1mean;
-                    }
-                    else {
-                        cons[qq + 1] =
-                            -wgam2 * v3 * (v1 + cot * v2) / cell.x1mean +
-                            bmu.three * (bmu.one + cot * bmu.two) / cell.x1mean;
-                    }
+                else if (qq == 1) {
+                    cons[qq + 1] =
+                        pt * (cell.a2R() - cell.a2L()) / cell.dV -
+                        wgam2 * (v2 * v1 - v3 * v3 * cot) / cell.x1mean +
+                        (bmu.two * bmu.one - bmu.three * bmu.three * cot) /
+                            cell.x1mean;
+                }
+                else {
+                    cons[qq + 1] =
+                        -wgam2 * v3 * (v1 + cot * v2) / cell.x1mean +
+                        bmu.three * (bmu.one + cot * bmu.two) / cell.x1mean;
                 }
             }
         }
@@ -210,8 +173,8 @@ namespace simbi {
 
         static constexpr void calculate_areas(auto* areas, const auto& cell)
         {
-            const auto rr   = cell.template normal<Side::X1R>();
-            const auto rl   = cell.template normal<Side::X1L>();
+            const auto rr   = cell.normal(Side::X1R);
+            const auto rl   = cell.normal(Side::X1L);
             const auto dphi = get_differential<GridDirection::X2>(cell);
             const auto dz   = get_differential<GridDirection::X3>(cell);
             areas[0]        = rl * dz * dphi;
@@ -234,47 +197,22 @@ namespace simbi {
             auto gamma
         )
         {
-            if constexpr (Derived::regime == "classical" ||
-                          Derived::regime == "srhd") {
-                const real v1    = prims->get_v1();
-                const real v2    = prims->get_v2();
-                const real pt    = prims->total_pressure();
-                const auto bmu   = typename Derived::mag_fourvec_t(*prims);
-                const real wt    = prims->enthalpy_density(gamma);
-                const real gam2  = prims->lorentz_factor_squared();
-                const real wgam2 = wt * gam2;
+            const real v1    = prims.get_v1();
+            const real v2    = prims.get_v2();
+            const real pt    = prims.total_pressure();
+            const auto bmu   = typename Derived::mag_fourvec_t(prims);
+            const real wt    = prims.enthalpy_density(gamma);
+            const real gam2  = prims.lorentz_factor_squared();
+            const real wgam2 = wt * gam2;
 
-                for (int qq = 0; qq < dim; qq++) {
-                    if (qq == 0) {
-                        cons[qq + 1] =
-                            (wgam2 * v2 * v2 - bmu.two * bmu.two + pt) /
-                            cell.x1mean;
-                    }
-                    else if (qq == 1) {
-                        cons[qq + 1] = -(wgam2 * v1 * v2 - bmu.one * bmu.two) /
-                                       cell.x1mean;
-                    }
+            for (int qq = 0; qq < dim; qq++) {
+                if (qq == 0) {
+                    cons[qq + 1] = (wgam2 * v2 * v2 - bmu.two * bmu.two + pt) /
+                                   cell.x1mean;
                 }
-            }
-            else {
-                const real v1    = prims.get_v1();
-                const real v2    = prims.get_v2();
-                const real pt    = prims.total_pressure();
-                const auto bmu   = typename Derived::mag_fourvec_t(prims);
-                const real wt    = prims.enthalpy_density(gamma);
-                const real gam2  = prims.lorentz_factor_squared();
-                const real wgam2 = wt * gam2;
-
-                for (int qq = 0; qq < dim; qq++) {
-                    if (qq == 0) {
-                        cons[qq + 1] =
-                            (wgam2 * v2 * v2 - bmu.two * bmu.two + pt) /
-                            cell.x1mean;
-                    }
-                    else if (qq == 1) {
-                        cons[qq + 1] = -(wgam2 * v1 * v2 - bmu.one * bmu.two) /
-                                       cell.x1mean;
-                    }
+                else if (qq == 1) {
+                    cons[qq + 1] =
+                        -(wgam2 * v1 * v2 - bmu.one * bmu.two) / cell.x1mean;
                 }
             }
         }
@@ -380,7 +318,7 @@ namespace simbi {
             }
         }
 
-        DUAL auto geom_sources(const auto& prims) const
+        DUAL auto geometrical_sources(const auto& prims) const
         {
             auto cons = typename Derived::conserved_t{};
             switch (parent.derived().geometry) {
@@ -472,15 +410,6 @@ namespace simbi {
         }
 
         // Unified accessor methods
-        template <int norm>
-        DUAL real area() const
-        {
-            if constexpr (norm < DimensionTraits<dim>::area_count) {
-                return areas[norm];
-            }
-            return 0.0;
-        }
-
         DUAL real area(const int norm) const
         {
             if (norm < DimensionTraits<dim>::area_count) {
@@ -489,21 +418,18 @@ namespace simbi {
             return 0.0;
         }
 
-        template <Side Fc>
-        DUAL real normal() const
+        DUAL real normal(Side s) const
         {
-            if constexpr (static_cast<int>(Fc) <
-                          DimensionTraits<dim>::normal_count) {
-                return normals[static_cast<int>(Fc)];
+            if (static_cast<int>(s) < DimensionTraits<dim>::normal_count) {
+                return normals[static_cast<int>(s)];
             }
             return 0.0;
         }
 
-        template <Side Fc>
-        DUAL real velocity() const
+        DUAL real velocity(Side s) const
         {
-            if constexpr (static_cast<int>(Fc) <= 2 * dim - 1) {
-                const real x = normals[static_cast<int>(Fc)];
+            if (static_cast<int>(s) <= 2 * dim - 1) {
+                const real x = normals[static_cast<int>(s)];
                 return parent.derived().homolog
                            ? x * parent.derived().hubble_param
                            : parent.derived().hubble_param;

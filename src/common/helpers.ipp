@@ -1,45 +1,10 @@
 
 #include "H5Cpp.h"
 #include "util/device_api.hpp"
+#include "util/idx_sequence.hpp"
 #include "util/parallel_for.hpp"
 
 namespace simbi {
-    namespace boundary {
-        template <typename T>
-        DUAL T apply_reflecting(const T& val, int momentum_idx)
-        {
-            auto result = val;
-            result.momentum(momentum_idx) *= -1.0;
-            return result;
-        }
-
-        template <typename T>
-        DUAL T apply_periodic(const T& val)
-        {
-            return val;
-        }
-
-        template <typename T>
-        DUAL T apply_outflow(const T& val)
-        {
-            return val;
-        }
-
-        template <typename T>
-        DUAL T apply_dynamic(
-            const T& val,
-            const auto& source_fn,
-            const real x1,
-            const real x2,
-            const real x3,
-            const real t
-        )
-        {
-            return source_fn(val, x1, x2, x3, t);
-        }
-
-    }   // namespace boundary
-
     namespace helpers {
         template <typename... Args>
         std::string string_format(const std::string& format, Args... args)
@@ -60,12 +25,12 @@ namespace simbi {
         template <typename Sim_type>
         void write_to_file(Sim_type& sim_state, PrettyTable& table)
         {
-            sim_state.prims.copyFromGpu();
-            sim_state.cons.copyFromGpu();
+            sim_state.prims.sync_to_host();
+            sim_state.cons.sync_to_host();
             if constexpr (Sim_type::regime == "srmhd") {
-                sim_state.bstag1.copyFromGpu();
-                sim_state.bstag2.copyFromGpu();
-                sim_state.bstag3.copyFromGpu();
+                sim_state.bstag1.sync_to_host();
+                sim_state.bstag2.sync_to_host();
+                sim_state.bstag3.sync_to_host();
             }
             static auto data_directory      = sim_state.data_directory;
             static auto step                = sim_state.init_chkpt_idx;
@@ -264,7 +229,7 @@ namespace simbi {
                 if (bc2 == BoundaryCondition::REFLECTING) {
                     cons[idx].momentum(momentum_idx2) *= -1.0;
                 }
-                if constexpr (T::regime == "srmhd") {
+                if constexpr (is_relativistic_mhd<T>::value) {
                     if (bc1 == BoundaryCondition::REFLECTING) {
                         cons[idx].bcomponent(momentum_idx1) *= -1.0;
                     }
@@ -1278,93 +1243,151 @@ namespace simbi {
             );
         }
 
-        // template <typename T>
-        // void config_ghosts(T* sim_state)
+        // template <typename sim_state_t>
+        // void config_ghosts(sim_state_t* sim_state)
         // {
-        //     if constexpr (T::dimensions == 1) {
+        //     if constexpr (sim_state_t::dimensions == 1) {
         //         config_ghosts1D(sim_state);
         //     }
-        //     else if constexpr (T::dimensions == 2) {
+        //     else if constexpr (sim_state_t::dimensions == 2) {
         //         config_ghosts2D(sim_state);
         //     }
-        //     else if constexpr (T::dimensions == 3) {
+        //     else if constexpr (sim_state_t::dimensions == 3) {
         //         config_ghosts3D(sim_state);
         //     }
         // }
+
         template <typename sim_state_t>
         void config_ghosts(sim_state_t* sim_state)
         {
-            sim_state->cons.apply_to_boundaries(
-                sim_state->fullPolicy,
-                sim_state->radius,
-                [=] DEV(const auto& view, auto& boundary_val) {
-                    // const auto [ii, jj, kk] = view.position();
+            // sim_state->cons.apply_to_boundaries(
+            //     sim_state->fullPolicy,
+            //     sim_state->radius,
+            //     [=] DEV(const auto& view, auto& boundary_val) {
+            //         // Determine which boundary we're on
+            //         for (int dim = 0; dim < sim_state_t::dimensions; dim++) {
+            //             if (view.is_lower_boundary(dim)) {
+            //                 switch (sim_state->bcs[dim * 2]) {
+            //                     case BoundaryCondition::REFLECTING:
+            //                         boundary_val =
+            //                         boundary::apply_reflecting(
+            //                             view.reflecting_value(),
+            //                             dim + 1
+            //                         );
+            //                         break;
+            //                     case BoundaryCondition::PERIODIC:
+            //                         boundary_val = boundary::apply_periodic(
+            //                             view.periodic_value()
+            //                         );
+            //                         break;
+            //                     case BoundaryCondition::DYNAMIC:
+            //                         // boundary_val =
+            //                         // boundary::apply_dynamic(
+            //                         //     boundary_val,
+            //                         //     sim_state->boundary_source_fns[dim
+            //                         //     * 2], view.x(), view.y(),
+            //                         //     view.z(), sim_state->t
+            //                         // );
+            //                         break;
+            //                     default:   // OUTFLOW
+            //                         boundary_val = boundary::apply_outflow(
+            //                             view.interior_value()
+            //                         );
+            //                         break;
+            //                 }
+            //             }
+            //         }
 
-                    // Determine which boundary we're on
-                    for (int dim = 0; dim < sim_state_t::dimensions; dim++) {
-                        if (view.is_lower_boundary(dim)) {
-                            switch (sim_state->bcs[dim * 2]) {
-                                case BoundaryCondition::REFLECTING:
-                                    boundary_val = boundary::apply_reflecting(
-                                        view.reflecting_value(),
-                                        dim + 1
-                                    );
-                                    break;
-                                case BoundaryCondition::PERIODIC:
-                                    boundary_val = boundary::apply_periodic(
-                                        view.periodic_value()
-                                    );
-                                    break;
-                                case BoundaryCondition::DYNAMIC:
-                                    // boundary_val =
-                                    // boundary::apply_dynamic(
-                                    //     boundary_val,
-                                    //     sim_state->boundary_source_fns[dim
-                                    //     * 2], view.x(), view.y(),
-                                    //     view.z(), sim_state->t
-                                    // );
-                                    break;
-                                default:   // OUTFLOW
-                                    boundary_val = boundary::apply_outflow(
-                                        view.interior_value()
-                                    );
-                            }
-                        }
-                    }
+            //         // doing the same for upper boundary
+            //         for (int dim = 0; dim < sim_state_t::dimensions; dim++) {
+            //             if (view.is_upper_boundary(dim)) {
+            //                 switch (sim_state->bcs[dim * 2 + 1]) {
+            //                     case BoundaryCondition::REFLECTING:
+            //                         boundary_val =
+            //                         boundary::apply_reflecting(
+            //                             view.reflecting_value(),
+            //                             dim + 1
+            //                         );
+            //                         break;
+            //                     case BoundaryCondition::PERIODIC:
+            //                         boundary_val = boundary::apply_periodic(
+            //                             view.periodic_value()
+            //                         );
+            //                         break;
+            //                     case BoundaryCondition::DYNAMIC:
+            //                         // boundary_val =
+            //                         // boundary::apply_dynamic(
+            //                         //     boundary_val,
+            //                         //     sim_state->boundary_source_fns[dim
+            //                         //     * 2 + 1], view.x(), view.y(),
+            //                         //     view.z(), sim_state->t
+            //                         // );
+            //                         break;
+            //                     default:   // OUTFLOW
+            //                         boundary_val = boundary::apply_outflow(
+            //                             view.interior_value()
+            //                         );
+            //                         break;
+            //                 }
+            //             }
+            //         }
+            //     }
+            // );
 
-                    // doing the same for upper boundary
-                    for (int dim = 0; dim < sim_state_t::dimensions; dim++) {
-                        if (view.is_upper_boundary(dim)) {
-                            switch (sim_state->bcs[dim * 2 + 1]) {
-                                case BoundaryCondition::REFLECTING:
-                                    boundary_val = boundary::apply_reflecting(
-                                        view.reflecting_value(),
-                                        dim + 1
-                                    );
-                                    break;
-                                case BoundaryCondition::PERIODIC:
-                                    boundary_val = boundary::apply_periodic(
-                                        view.periodic_value()
-                                    );
-                                    break;
-                                case BoundaryCondition::DYNAMIC:
-                                    // boundary_val =
-                                    // boundary::apply_dynamic(
-                                    //     boundary_val,
-                                    //     sim_state->boundary_source_fns[dim
-                                    //     * 2 + 1], view.x(), view.y(),
-                                    //     view.z(), sim_state->t
-                                    // );
-                                    break;
-                                default:   // OUTFLOW
-                                    boundary_val = boundary::apply_outflow(
-                                        view.interior_value()
-                                    );
-                            }
-                        }
-                    }
-                }
-            );
+            // Handle corners for MHD runs
+            // if constexpr (sim_state_t::regime.find("mhd") !=
+            //                   std::string::npos &&
+            //               comp_ct_type != CTTYPE::MdZ) {
+
+            //     using planes = typename boundary::PlaneSequence<
+            //         sim_state_t::dimensions>::type;
+
+            //     // iterate through planes using index sequence
+            //     detail::for_sequence(planes{}, [&](auto plane_idx) {
+            //         constexpr Plane P = static_cast<Plane>(plane_idx());
+
+            //         // get boundary condition indices based on plane
+            //         constexpr auto& bc_pairs =
+            //         boundary::PlaneInfo<P>::bc_pairs;
+
+            //         for (const auto& [bc1_idx, bc2_idx] : bc_pairs) {
+            //             // apply corner operations for this plane
+            //             sim_state->cons.template apply_to_corners<P>(
+            //                 sim_state->fullPolicy,
+            //                 sim_state->radius,
+            //                 sim_state->bcs[bc1_idx],
+            //                 sim_state->bcs[bc2_idx],
+            //                 bc1_idx / 2 + 1,
+            //                 bc2_idx / 2 + 1,
+            //                 [=] DEV(const auto& view, auto& corner_val) {
+            //                     auto [bc1, bc2] = view.boundary_conditions();
+            //                     auto [midx1, midx2] =
+            //                     view.momentum_indices();
+
+            //                     if (bc1 == BoundaryCondition::REFLECTING ||
+            //                         bc2 == BoundaryCondition::REFLECTING) {
+
+            //                         corner_val = view.value();
+
+            //                         if (bc1 == BoundaryCondition::REFLECTING)
+            //                         {
+            //                             corner_val.momentum(midx1) *= -1.0;
+            //                             corner_val.bcomponent(midx1) *= -1.0;
+            //                         }
+            //                         if (bc2 == BoundaryCondition::REFLECTING)
+            //                         {
+            //                             corner_val.momentum(midx2) *= -1.0;
+            //                             corner_val.bcomponent(midx2) *= -1.0;
+            //                         }
+            //                     }
+            //                     else {
+            //                         corner_val = view.value();
+            //                     }
+            //                 }
+            //             );
+            //         }
+            //     });
+            // }
         }
 
         template <typename T, TIMESTEP_TYPE dt_type, typename U, typename V>
@@ -2731,16 +2754,16 @@ namespace simbi {
         DUAL void ib_modify(T& lhs, const T& rhs, const bool ib, const idx side)
         {
             if (ib) {
-                lhs.rho() = rhs.rho();
-                lhs.v1()  = (1 - 2 * (side == 1)) * rhs.v1();
+                lhs->rho() = rhs->rho();
+                lhs->v1()  = (1 - 2 * (side == 1)) * rhs->v1();
                 if constexpr (dim > 1) {
-                    lhs.v2() = (1 - 2 * (side == 2)) * rhs.v2();
+                    lhs->v2() = (1 - 2 * (side == 2)) * rhs->v2();
                 }
                 if constexpr (dim > 2) {
-                    lhs.v3() = (1 - 2 * (side == 3)) * rhs.v3();
+                    lhs->v3() = (1 - 2 * (side == 3)) * rhs->v3();
                 }
-                lhs.p()   = rhs.p();
-                lhs.chi() = rhs.chi();
+                lhs->p()   = rhs->p();
+                lhs->chi() = rhs->chi();
             }
         }
 
@@ -3177,24 +3200,13 @@ namespace simbi {
                     hsize_t count[1]  = {1};
                     H5::DataSpace memspace(1, count);
                     dataspace.selectHyperslab(H5S_SELECT_SET, count, offset);
-                    if constexpr (T::regime == "classical" ||
-                                  T::regime == "srhd") {
-                        // unwrap the Maybe<primitive> type
-                        dataset.write(
-                            &state.prims[i].value()[member],
-                            real_type,
-                            memspace,
-                            dataspace
-                        );
-                    }
-                    else {
-                        dataset.write(
-                            &state.prims[i][member],
-                            real_type,
-                            memspace,
-                            dataspace
-                        );
-                    }
+                    // unwrap the Maybe<primitive> type
+                    dataset.write(
+                        &state.prims[i].value()[member],
+                        real_type,
+                        memspace,
+                        dataspace
+                    );
                 }
                 dataset.close();
             };

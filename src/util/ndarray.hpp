@@ -1,644 +1,661 @@
-/**
- * ***********************(C) COPYRIGHT 2024 Marcus DuPont**********************
- * @file       ndarray.hpp
- * @brief      implementation of custom cpu-gpu translatable array class
- *
- * @note
- * @history:
- *   Version   Date            Author          Modification    Email
- *   V0.8.0    Dec-03-2023     Marcus DuPont marcus.dupont@princeton.edu
- *
- * @verbatim
- * ==============================================================================
- *
- * ==============================================================================
- * @endverbatim
- * ***********************(C) COPYRIGHT 2024 Marcus DuPont**********************
- */
 #ifndef NDARRAY_HPP
 #define NDARRAY_HPP
 
-#include "build_options.hpp"   // for Platform, global::BuildPlatform
-#include "device_api.hpp"      // for gpuFree, gpuMalloc, gpuMallocManaged
-#include "maybe.hpp"           // for maybe
-#include "parallel_for.hpp"    // for parallel_for
-#include "smrt_ptr.hpp"        // for smart_ptr
-#include <cstddef>             // for size_t
-#include <initializer_list>    // for initializer_list
-#include <iterator>            // for forward_iterator_tag
-#include <memory>              // for unique_ptr
-#include <vector>              // for vector
-
-using size_type = std::size_t;
+#include "build_options.hpp"      // for global::on_gpu, rea;
+#include "common/enums.hpp"       // for BoundaryCondition
+#include "common/traits.hpp"      // for is_maybe
+#include "parallel_for.hpp"       // for parallel_for
+#include "util/exec_policy.hpp"   // for ExecutionPolicy
+#include "util/maybe.hpp"         // for Maybe
+#include "util/smart_ptr.hpp"     // for smart_ptr<T[]>
+#include <array>                  // for array
+#include <cassert>                // for assert
+#include <span>                   // for span
 
 namespace simbi {
-    // Template class to create array of different data_type
-    template <typename DT, int dim = 1>
-    class ndarray
+    template <size_type T>
+    using uarray = std::array<size_type, T>;
+
+    template <size_type T>
+    using iarray = std::array<lint, T>;
+
+    template <typename T, typename Deleter>
+    using unique_ptr = util::smart_ptr<T[], Deleter>;
+
+    template <typename T>
+    struct gpuDeleter {
+        void operator()(T* ptr) { gpu::api::free(ptr); }
+    };
+
+    template <typename T, size_type Dims = 1>
+    class ndarray;
+
+    template <typename T, size_type Dims>
+    class array_view;
+
+    template <typename T, size_type Dims>
+    class value_array_view;
+
+    struct range {
+        size_type start;
+        size_type end;
+        size_type step;
+    };
+
+    // Correct index for
+    template <size_type Dims>
+    DUAL static size_type corrected_idx(size_type ii)
     {
-        using value_type = DT;
-        template <typename Deleter>
-        using unique_p = util::smart_ptr<DT[], Deleter>;
+        if constexpr (global::col_major) {
+            return ii;
+        }
+        else {
+            return -(ii + 1) % Dims;
+        }
+    }
 
-      private:
-        size_type sz;            // Variable to store the size of the array
-        size_type nd_capacity;   // Variable to store the current capacity of
-                                 // the array
-        size_type dimensions;    // Number of dimensions
-        util::smart_ptr<DT[]> arr;   // Host-side array
-
-        bool is_gpu_synced           = false;
-        bool needs_gpu_sync          = false;
-        simbiStream_t current_stream = nullptr;
-
-        // Device-side array allocation
-        void* myGpuMalloc(size_type size)
+    template <typename T, size_type Dims>
+    struct array_properties {
+        // Ctor
+        array_properties(
+            const uarray<Dims>& shape,
+            const uarray<Dims>& strides,
+            const uarray<Dims>& offsets,
+            size_type size
+        )
+            : shape_(shape), strides_(strides), offsets_(offsets), size_(size)
         {
-            if constexpr (global::on_gpu) {
-                void* ptr;
-                gpu::api::malloc(&ptr, size);
-                return ptr;
-            }
-            return nullptr;
         }
 
-        // Device-side managed array allocation
-        void* myGpuMallocManaged(size_type size)
+        // default ctor
+        array_properties() = default;
+
+        // copy ctor
+        array_properties(const array_properties&) = default;
+        // move ctor
+        array_properties(array_properties&&) = default;
+
+        // // copy assignment
+        array_properties& operator=(const array_properties&) = default;
+
+        // helper to compute local coordinates from linear index
+        DUAL uarray<Dims> get_local_coords(size_type idx) const
         {
-            if constexpr (global::on_gpu) {
-                void* ptr;
-                gpu::api::mallocManaged(&ptr, size);
-                return ptr;
+            uarray<Dims> coords;
+            // return the indices as [ii, jj, kk] for both
+            // column major or row major ordering
+            for (size_type ii = 0; ii < Dims; ii++) {
+                coords[ii] = idx % shape_[corrected_idx<Dims>(ii)];
+                idx /= shape_[corrected_idx<Dims>(ii)];
             }
-            return nullptr;
+            return coords;
         }
 
-        struct gpuDeleter {
-            void operator()(DT* ptr)
-            {
-                if constexpr (global::on_gpu) {
-                    gpu::api::free(ptr);
+        DUAL static size_type compute_size(const uarray<Dims>& dims)
+        {
+            size_type size = 1;
+#pragma unroll
+            for (size_type ii = 0; ii < Dims; ++ii) {
+                size *= dims[ii];
+            }
+            return size;
+        }
+
+        DUAL static auto compute_strides(const uarray<Dims>& dims)
+            -> std::array<size_t, Dims>
+        {
+            uarray<Dims> strides;
+
+            if constexpr (global::col_major) {
+                // Column-major layout: leftmost dimension has stride 1
+                strides[0] = 1;
+#pragma unroll
+                for (size_type ii = 1; ii < Dims; ++ii) {
+                    strides[ii] = strides[ii - 1] * dims[ii - 1];
                 }
-            }
-        };
-
-        unique_p<gpuDeleter> dev_arr;   // Device-side array
-
-        DUAL bool is_boundary_point(
-            size_type ii,
-            size_type jj,
-            size_type kk,
-            size_type nx,
-            size_type ny,
-            size_type nz,
-            size_type radius
-        ) const
-        {
-            if constexpr (dim == 1) {
-                return ii < radius || ii > nx - radius - 1;
-            }
-            else if constexpr (dim == 2) {
-                return ii < radius || jj < radius || ii > nx - radius - 1 ||
-                       jj > ny - radius - 1;
             }
             else {
-                return ii < radius || jj < radius || kk < radius ||
-                       ii > nx - radius - 1 || jj >= ny - radius - 1 ||
-                       kk > nz - radius - 1;
-            }
-        }
+                // Row-major layout: rightmost dimension has stride 1
+                strides[Dims - 1] = 1;
 
-        // view for boundary operations
-        class boundary_view
-        {
-            DT* data;
-            size_type nx, ny, nz, ii, jj, kk, radius;
-
-          public:
-            DUAL boundary_view(
-                DT* data,
-                size_type nx,
-                size_type ny,
-                size_type nz,
-                size_type ii,
-                size_type jj,
-                size_type kk,
-                size_type radius
-            )
-                : data(data),
-                  nx(nx),
-                  ny(ny),
-                  nz(nz),
-                  ii(ii),
-                  jj(jj),
-                  kk(kk),
-                  radius(radius)
-            {
-            }
-
-            DUAL DT& interior_value() const
-            {
-                return data[idx3(ii, jj, kk, nx, ny, nz)];
-            }
-
-            DUAL DT& reflecting_value() const
-            {
-                if constexpr (dim == 1) {
-                    return data[idx3(
-                        ii < radius         ? 2 * radius - ii - 1
-                        : ii >= nx - radius ? 2 * (nx - radius) - ii - 1
-                                            : ii,
-                        jj,
-                        kk,
-                        nx,
-                        ny,
-                        nz
-                    )];
-                }
-                else if constexpr (dim == 2) {
-                    return data[idx3(
-                        ii < radius         ? 2 * radius - ii - 1
-                        : ii >= nx - radius ? 2 * (nx - radius) - ii - 1
-                                            : ii,
-                        jj < radius         ? 2 * radius - jj - 1
-                        : jj >= ny - radius ? 2 * (ny - radius) - jj - 1
-                                            : jj,
-                        kk,
-                        nx,
-                        ny,
-                        nz
-                    )];
-                }
-                else {
-                    return data[idx3(
-                        ii < radius         ? 2 * radius - ii - 1
-                        : ii >= nx - radius ? 2 * (nx - radius) - ii - 1
-                                            : ii,
-                        jj < radius         ? 2 * radius - jj - 1
-                        : jj >= ny - radius ? 2 * (ny - radius) - jj - 1
-                                            : jj,
-                        kk < radius         ? 2 * radius - kk - 1
-                        : kk >= nz - radius ? 2 * (nz - radius) - kk - 1
-                                            : kk,
-                        nx,
-                        ny,
-                        nz
-                    )];
+// Each dimension's stride is product of all dimensions to its right
+#pragma unroll
+                for (int ii = Dims - 1; ii > 0; --ii) {
+                    strides[ii - 1] = strides[ii] * dims[ii];
                 }
             }
-
-            DUAL DT& periodic_value() const
-            {
-                return data[idx3(
-                    ii < radius         ? ii + nx - 2 * radius
-                    : ii >= nx - radius ? ii - nx + 2 * radius
-                                        : ii,
-                    jj < radius         ? jj + ny - 2 * radius
-                    : jj >= ny - radius ? jj - ny + 2 * radius
-                                        : jj,
-                    kk < radius         ? kk + nz - 2 * radius
-                    : kk >= nz - radius ? kk - nz + 2 * radius
-                                        : kk,
-                    nx,
-                    ny,
-                    nz
-                )];
-            }
-
-            DUAL auto position() const { return std::make_tuple(ii, jj, kk); }
-
-            DUAL bool is_lower_boundary(int dir) const
-            {
-                return dir == 0   ? ii < radius
-                       : dir == 1 ? jj < radius
-                                  : kk < radius;
-            }
-
-            DUAL bool is_upper_boundary(int dir) const
-            {
-                return dir == 0   ? ii >= nx - radius
-                       : dir == 1 ? jj >= ny - radius
-                                  : kk >= nz - radius;
-            }
+            return strides;
         };
 
+        DUAL size_type compute_offset(const uarray<Dims>& offsets) const
+        {
+            size_type offset = 0;
+#pragma unroll
+            for (size_type ii = 0; ii < Dims; ++ii) {
+                offset += offsets[ii] * strides_[ii];
+            }
+            return offset;
+        }
+
+        DUAL auto strides() const -> uarray<Dims> { return strides_; };
+
+        DUAL auto offsets() const -> uarray<Dims> { return offsets_; };
+
+        DUAL auto shape() const -> uarray<Dims> { return shape_; };
+
+        DUAL auto size() const -> size_type { return size_; };
+
+      protected:
+        uarray<Dims> shape_;
+        uarray<Dims> strides_;
+        uarray<Dims> offsets_;
+        size_type size_{0};
+    };
+
+    template <size_type Dims>
+    struct collapsable {
+
+        uarray<Dims> vals;
+
+        collapsable(std::initializer_list<size_type> init)
+        {
+            // fill from the back of the initialize list, since we
+            // are in general inputting shapes like (nk, nj, ni)
+            auto init_size = std::distance(init.begin(), init.end());
+            auto start     = init.begin();
+            if (init_size > Dims) {
+                std::advance(start, init_size - Dims);
+            }
+            for (size_type i = 0; i < Dims && start != init.end();
+                 ++i, ++start) {
+                vals[i] = *start;
+            }
+        }
+    };
+
+    template <typename T>
+    class memory_manager
+
+    {
       public:
-        ndarray() noexcept
-            : sz(0),
-              nd_capacity(0),
-              dimensions(1),
-              arr(nullptr),
-              dev_arr(nullptr) {};
+        void allocate(size_type size);
+        DUAL T* data();
+        DUAL T* data() const;
 
-        ~ndarray() = default;
-        // Assignment operator
-        ndarray& operator=(ndarray rhs);
-        // Zeri-initialize the array with defined size
-        ndarray(size_type size);
-        ndarray(
-            size_type size,
-            const DT val
-        );   // Fill-initialize the array with defined size
-        ndarray(const ndarray& rhs);           // Copy-constructor for array
-        ndarray(const std::vector<DT>& rhs);   // Copy-constructor for vector
-        ndarray(ndarray&& rhs) noexcept;       // Move-constructor for array
-        ndarray(std::vector<DT>&& rhs);        // Move-constructor for vector
-        void swap(ndarray& rhs);               // Swap function
+        void sync_to_device();
+        void sync_to_host();
+        void ensure_device_synced();
 
-        // Function that returns the number of elements in array after pushing
-        // the data
-        constexpr ndarray& push_back(const DT&);
+        // access operators
+        DUAL T& operator[](size_type ii) { return data()[ii]; }
 
-        // Function that returns the popped element
-        constexpr ndarray& pop_back();
+        DUAL T& operator[](size_type ii) const { return data()[ii]; }
 
-        // Function to resize ndarray
-        constexpr ndarray& resize(size_type new_size);
-        constexpr ndarray& resize(size_type new_size, const DT new_value);
+        // host data accessors
+        DUAL T* host_data() { return host_data_.get(); }
 
-        // Function that returns the size of array
-        constexpr size_type size() const;
-        constexpr size_type capacity() const;
-        constexpr size_type ndim() const;
+        DUAL T* host_data() const { return host_data_.get(); }
 
-        // Access operator (mutable)
-        template <typename IndexType>
-        DUAL constexpr DT& operator[](IndexType);
+      private:
+        util::smart_ptr<T[]> host_data_;
+        unique_ptr<T, gpuDeleter<T>> device_data_;
+        bool is_synced_{true};
+        size_type size_{0};
+    };
 
-        // Const-access operator (read-only)
-        template <typename IndexType>
-        DUAL constexpr DT operator[](IndexType) const;
+    template <typename T, size_type Dims>
+    class array_view : public array_properties<T, Dims>
+    {
+      public:
+        using raw_type = T;
+        using value_type =
+            typename std::conditional_t<is_maybe_v<T>, get_value_type_t<T>, T>;
+        DUAL array_view(
+            T* data,
+            const uarray<Dims>& shape,
+            const uarray<Dims>& strides,
+            const uarray<Dims>& offsets
+        );
+        DUAL value_type& operator[](size_type ii);
+        DUAL value_type& operator[](size_type ii) const;
+        template <typename... Indices>
+        DUAL T& at(Indices... idx);
+        DUAL auto data() const -> T*;
+        DUAL auto data() -> T*;
+        DUAL auto& access(T& val);
+        DUAL auto& access(T& val) const;
 
-        // Some math operator overloads
-        constexpr ndarray& operator*(real);
-        constexpr ndarray& operator*=(real);
-        constexpr ndarray& operator/(real);
-        constexpr ndarray& operator/=(real);
-        constexpr ndarray& operator+=(const ndarray& rhs);
+        // transform using stencil views of dependent ndarrays views
+        template <typename... DependentViews, typename F>
+        void stencil_transform(
+            F op,
+            const ExecutionPolicy<>& policy,
+            const DependentViews&... arrays
+        );
 
-        // Check if ndarray is empty
-        bool empty() const;
+        // Position-aware element that can do relative indexing
+        template <typename DT = T>
+        class stencil_view
+        {
+          public:
+            DUAL stencil_view(
+                DT* data,
+                const uarray<Dims>& center_pos,
+                const uarray<Dims>& shape,
+                const uarray<Dims>& strides
+            )
+                : data_(data),
+                  center_(center_pos),
+                  shape_(shape),
+                  strides_(strides)
+            {
+            }
 
-        // Get pointers to underlying data ambiguously, on host, or on gpu
-        DUAL DT* data();
-        DT* host_data();
-        DUAL DT* dev_data();
+            // Relative indexing from center
+            DUAL get_value_type_t<DT>& at(int i, int j = 0, int k = 0) const
+            {
+                iarray<Dims> offset;
+                if constexpr (Dims >= 1) {
+                    offset[0] = center_[0] + i;
+                }
+                if constexpr (Dims >= 2) {
+                    offset[1] = center_[1] + j;
+                }
+                if constexpr (Dims >= 3) {
+                    offset[2] = center_[2] + k;
+                }
 
-        DUAL DT* data() const;
-        DT* host_data() const;
-        DUAL DT* dev_data() const;
+                size_type idx = 0;
+                for (size_type d = 0; d < Dims; ++d) {
+                    idx += offset[d] * strides_[corrected_idx<Dims>(d)];
+                }
+                return access(data_[idx]);
+            }
 
-        // Iterator Class
+            // Get center position
+            DUAL const auto position() const
+            {
+                uarray<3> pos3d = {0, 0, 0};
+                pos3d[0]        = center_[0];
+                if constexpr (Dims > 1) {
+                    pos3d[1] = center_[1];
+                }
+                if constexpr (Dims > 2) {
+                    pos3d[2] = center_[2];
+                }
+                return pos3d;
+            }
+
+            // Direct value access at center
+            DUAL get_value_type_t<DT>& value() const
+            {
+                size_type idx = 0;
+                for (size_type d = 0; d < Dims; ++d) {
+                    idx += center_[d] * strides_[corrected_idx<Dims>(d)];
+                }
+                return access(data_[idx]);
+            }
+
+            // structured binding support
+            template <size_type I>
+            DUAL auto get() const
+            {
+                if constexpr (I < Dims) {
+                    return position()[I];
+                }
+                else {
+                    throw size_type{0};
+                }
+            }
+
+            // we also need special access method in case we get maybe type
+            DUAL auto& access(DT& val) const
+            {
+                if constexpr (has_value_type<DT>::value) {
+                    return val.value();
+                }
+                else {
+                    return val;
+                }
+            }
+
+          private:
+            DT* data_;
+            uarray<Dims> center_;
+            uarray<Dims> shape_;
+            uarray<Dims> strides_;
+        };
+
+      protected:
+        std::span<T> data_;   // view into data
+    };
+
+    template <typename T, size_type Dims>
+    class boundary_manager
+    {
+      public:
+        void sync_boundaries(
+            const ExecutionPolicy<>& policy,
+            ndarray<T, Dims>& full_array,
+            const array_view<T, Dims>& interior_view,
+            const ndarray<BoundaryCondition>& conditions,
+            const bool need_corners = false
+        );
+
+      private:
+        size_type reflecting_idx(size_type ii, size_type ni, size_type radius);
+        size_type periodic_idx(size_type ii, size_type ni, size_type radius);
+        size_type outflow_idx(size_type ii, size_type ni, size_type radius);
+        uarray<Dims> unravel_idx(size_type idx, const uarray<Dims>& shape);
+        void sync_faces(
+            const ExecutionPolicy<>& policy,
+            ndarray<T, Dims>& full_array,
+            const array_view<T, Dims>& interior_view,
+            const ndarray<BoundaryCondition>& conditions
+        );
+        void sync_corners(
+            const ExecutionPolicy<>& policy,
+            ndarray<T, Dims>& full_array,
+            const array_view<T, Dims>& interior_view,
+            const ndarray<BoundaryCondition>& conditions
+        );
+
+        DUAL static bool is_boundary_point(
+            const uarray<Dims>& coordinates,
+            const uarray<Dims>& shape,
+            const uarray<Dims>& radii
+        )
+        {
+            auto tshape = shape;
+            // get inverted copy of shape if we are in row major
+            if constexpr (!global::col_major) {
+                std::reverse(tshape.begin(), tshape.end());
+            }
+            for (size_type ii = 0; ii < Dims; ++ii) {
+                if (coordinates[ii] < radii[ii] ||
+                    coordinates[ii] >= tshape[ii] + radii[ii]) {
+                    return true;
+                }
+            }
+            return false;
+        }
+
+        DUAL static bool is_corner_point(
+            const uarray<Dims>& coordinates,
+            const uarray<Dims>& shape,
+            const uarray<Dims>& radii
+        )
+        {
+            size_type boundary_count = 0;
+
+            // Count how many dimensions are at boundaries
+            for (size_type ii = 0; ii < Dims; ++ii) {
+                if (coordinates[ii] < radii[ii] ||
+                    coordinates[ii] >= shape[ii] + radii[ii]) {
+                    boundary_count++;
+                }
+                if (boundary_count >= 2) {
+                    return true;   // We're at a corner when 2+ dimensions are
+                                   // at boundaries
+                }
+            }
+            return false;
+        }
+
+        DUAL size_type get_interior_idx(
+            const uarray<Dims>& coords,
+            size_type dim,
+            const uarray<Dims>& shape,
+            const uarray<Dims>& strides,
+            const uarray<Dims>& radii,
+            BoundaryCondition bc
+        )
+        {
+            // Copy coordinates
+            auto int_coords = coords;
+
+            auto tshape   = shape;
+            auto tstrides = strides;
+            // get inverted copy of shape if we are in row major
+            if constexpr (!global::col_major) {
+                std::reverse(tshape.begin(), tshape.end());
+                std::reverse(tstrides.begin(), tstrides.end());
+            }
+
+            // Adjust coordinate based on boundary condition
+            switch (bc) {
+                case BoundaryCondition::REFLECTING:
+                    int_coords[dim] =
+                        (coords[dim] < radii[dim])
+                            ? 2 * radii[dim] - coords[dim] - 1
+                            : 2 * (tshape[dim] + radii[dim]) - coords[dim] - 1;
+                    break;
+
+                case BoundaryCondition::PERIODIC:
+                    int_coords[dim] = (coords[dim] < radii[dim])
+                                          ? tshape[dim] + coords[dim]
+                                          : coords[dim] - tshape[dim];
+                    break;
+
+                default:   // OUTFLOW
+                    int_coords[dim] = (coords[dim] < radii[dim])
+                                          ? radii[dim]
+                                          : tshape[dim] + radii[dim] - 1;
+            }
+
+            // Calculate linear index directly
+            size_type idx = 0;
+            for (size_type i = 0; i < Dims; i++) {
+                idx += int_coords[i] * tstrides[i];
+            }
+            return idx;
+        }
+
+        template <typename U>
+        DUAL static U apply_reflecting(const U& val, int momentum_idx)
+        {
+            auto result = val;
+            result.momentum(momentum_idx) *= -1.0;
+            return result;
+        }
+
+        template <typename U>
+        DUAL static U apply_periodic(const U& val)
+        {
+            return val;
+        }
+
+        template <typename U>
+        DUAL static U apply_outflow(const U& val)
+        {
+            return val;
+        }
+
+        template <typename U>
+        DUAL static U apply_dynamic(
+            const U& val,
+            const auto& source_fn,
+            const real x1,
+            const real x2,
+            const real x3,
+            const real t
+        )
+        {
+            return source_fn(val, x1, x2, x3, t);
+        }
+
+        // Add plane sequence helper
+        template <int num_dims>
+        struct PlaneSequence {
+            using type = typename std::conditional_t<
+                num_dims == 1,
+                detail::index_sequence<int>,
+                typename std::conditional_t<
+                    num_dims == 2,
+                    detail::index_sequence<int, static_cast<int>(Plane::IJ)>,
+                    detail::index_sequence<
+                        int,
+                        static_cast<int>(Plane::IJ),
+                        static_cast<int>(Plane::IK),
+                        static_cast<int>(Plane::JK)>>>;
+        };
+
+        template <Plane P>
+        struct PlaneInfo {
+            static constexpr std::array<std::pair<int, int>, 4> bc_pairs = [] {
+                if constexpr (P == Plane::IJ) {
+                    return std::array{
+                      std::make_pair(0, 2),   // (min_i, min_j)
+                      std::make_pair(0, 3),   // (min_i, max_j)
+                      std::make_pair(1, 2),   // (max_i, min_j)
+                      std::make_pair(1, 3)    // (max_i, max_j)
+                    };
+                }
+                else if constexpr (P == Plane::IK) {
+                    return std::array{
+                      std::make_pair(0, 4),   // (min_i, min_k)
+                      std::make_pair(0, 5),   // (min_i, max_k)
+                      std::make_pair(1, 4),   // (max_i, min_k)
+                      std::make_pair(1, 5)    // (max_i, max_k)
+                    };
+                }
+                else {   // Plane::JK
+                    return std::array{
+                      std::make_pair(2, 4),   // (min_j, min_k)
+                      std::make_pair(2, 5),   // (min_j, max_k)
+                      std::make_pair(3, 4),   // (max_j, min_k)
+                      std::make_pair(3, 5)    // (max_j, max_k)
+                    };
+                }
+            }();
+        };
+    };
+
+    template <typename T, size_type Dims>
+    class ndarray : public array_properties<T, Dims>
+    {
+      public:
+        using value_type =
+            typename std::conditional_t<is_maybe_v<T>, get_value_type_t<T>, T>;
+        ndarray() = default;
+        explicit ndarray(
+            std::initializer_list<size_type> dims,
+            T fill_value = T()
+        );
+        ndarray(const ndarray&)     = default;
+        ndarray(ndarray&&) noexcept = default;
+        explicit ndarray(std::vector<T>&& data);
+
+        auto data() -> T*;
+        auto data() const -> const T*;
+        auto fill(T value) -> void;
+
+        template <typename... Indices>
+        DUAL T& at(Indices... idx);
+        DUAL auto& access(T& val);
+        DUAL auto& access(T& val) const;
+
+        // contraction method for viewing subarrays
+        auto contract(const size_type radius) -> array_view<T, Dims>;
+        auto view(const uarray<Dims>& ranges) const -> array_view<T, Dims>;
+
+        template <typename F>
+        void transform(F op, const ExecutionPolicy<>& policy);
+
+        // transform with variadic dependent ndarrays
+        template <typename... DependentArrays, typename F>
+        void transform(
+            F op,
+            const ExecutionPolicy<>& policy,
+            const DependentArrays&... arrays
+        );
+
+        // transform with variadic dependent ndarrays
+        // that are mutable
+        template <typename... DependentArrays, typename F>
+        void transform(
+            F op,
+            const ExecutionPolicy<>& policy,
+            DependentArrays&... arrays
+        );
+
+        template <typename U, typename F>
+        U reduce(U init, F reduce_op, const ExecutionPolicy<>& policy) const;
+
+        // access operators
+        DUAL value_type& operator[](size_type i);
+        DUAL value_type& operator[](size_type i) const;
+
+        void sync_to_device();
+        void sync_to_host();
+        auto& reshape(const collapsable<Dims>& new_shape);
+        auto& reshape(
+            const collapsable<Dims>& new_shape,
+            const collapsable<Dims>& new_strides
+        );
+        auto& resize(size_type size, T fill_value = T());
+
+        T* host_data() { return mem_.host_data(); }
+
+        T* host_data() const { return mem_.host_data(); }
+
         class iterator
         {
-          private:
-            DT* ptr;   // Dynamic array using pointers
-
           public:
             using iterator_category = std::forward_iterator_tag;
-            using value_type        = DT;
-            using difference_type   = void;
-            using pointer           = void;
-            using reference         = void;
+            using value_type        = typename ndarray::value_type;
+            using difference_type   = std::ptrdiff_t;
+            using pointer           = value_type*;
+            using reference         = value_type&;
 
-            DUAL explicit iterator() : ptr(nullptr) {}
-
-            DUAL explicit iterator(DT* p) : ptr(p) {}
-
-            DUAL bool operator==(const iterator& rhs) const
+            DUAL iterator(ndarray& arr, size_type pos = 0)
+                : array_(arr), pos_(pos)
             {
-                return ptr == rhs.ptr;
             }
 
-            DUAL bool operator!=(const iterator& rhs) const
-            {
-                return !(*this == rhs);
-            }
-
-            DT operator*() const { return *ptr; }
+            DUAL reference operator*() { return array_[pos_]; }
 
             DUAL iterator& operator++()
             {
-                ++ptr;
+                ++pos_;
                 return *this;
             }
 
             DUAL iterator operator++(int)
             {
-                iterator temp(*this);
-                ++*this;
-                return temp;
+                iterator tmp = *this;
+                ++pos_;
+                return tmp;
             }
-        };
 
-        // GPU-compatible slice view
-        class slice_view
-        {
+            DUAL bool operator!=(const iterator& other) const
+            {
+                return pos_ != other.pos_;
+            }
+
+            DUAL bool operator==(const iterator& other) const
+            {
+                return pos_ == other.pos_;
+            }
+
           private:
-            DT* data;
-            size_type view_size;
-            size_type offset;
-            bool on_device;
-
-          public:
-            DUAL slice_view(DT* data, size_type start, size_type end)
-                : data(data),
-                  view_size(end - start),
-                  offset(start),
-                  on_device(global::on_gpu)
-            {
-            }
-
-            DUAL DT& operator[](size_type i)
-            {
-                if constexpr (global::on_gpu) {
-                    return data[offset + i];
-                }
-                else {
-                    return data[offset + i];
-                }
-            }
-
-            DUAL const DT& operator[](size_type i) const
-            {
-                if constexpr (global::on_gpu) {
-                    return data[offset + i];
-                }
-                else {
-                    return data[offset + i];
-                }
-            }
-
-            DUAL size_type size() const { return view_size; }
-
-            DUAL size_type index() const { return offset; }
+            ndarray& array_;
+            size_type pos_;
         };
 
-        DUAL slice_view slice(size_type start, size_type end)
-        {
-            if (start > end || end > sz) {
-                // GPU-safe error handling
-                return slice_view(nullptr, 0, 0);
-            }
-            if constexpr (global::on_gpu) {
-                return slice_view(dev_arr.get(), start, end);
-            }
-            else {
-                return slice_view(arr.get(), start, end);
-            }
-        }
+        // Add iterator support
+        DUAL iterator begin() { return iterator(*this); }
 
-        DUAL slice_view slice(size_type start, size_type end) const
-        {
-            if (start > end || end > sz) {
-                // GPU-safe error handling
-                return slice_view(nullptr, 0, 0);
-            }
-            if constexpr (global::on_gpu) {
-                return slice_view(dev_arr.get(), start, end);
-            }
-            else {
-                return slice_view(arr.get(), start, end);
-            }
-        }
+        DUAL iterator end() { return iterator(*this, this->size_); }
 
-        // Stencil view class for accessing neighboring elements
-        template <typename T = DT>
-        class stencil_view
-        {
-          private:
-            T* data;
-            size_type nx, ny, nz;   // Grid dimensions
-            size_type i, j, k;      // Center indices
-            size_type radius;       // Stencil radius
+        DUAL auto cbegin() const { return iterator(*this); }
 
-          public:
-            DUAL stencil_view(
-                T* data,
-                size_type nx,
-                size_type ny,
-                size_type nz,
-                size_type i,
-                size_type j,
-                size_type k,
-                size_type radius
-            )
-                : data(data),
-                  nx(nx),
-                  ny(ny),
-                  nz(nz),
-                  i(i),
-                  j(j),
-                  k(k),
-                  radius(radius)
-            {
-            }
+        DUAL auto cend() const { return iterator(*this, this->size_); }
 
-            // Get neighboring value at offset
-            DUAL T& at(int di, int dj = 0, int dk = 0)
-            {
-                size_type idx = (k + dk) * nx * ny + (j + dj) * nx + (i + di);
-                return data[idx];
-            }
-
-            // const reference to neighboring value at offset
-            DUAL const T& at(int di, int dj = 0, int dk = 0) const
-            {
-                size_type idx = (k + dk) * nx * ny + (j + dj) * nx + (i + di);
-                return data[idx];
-            }
-
-            // Get center value
-            DUAL T& center() { return at(0, 0, 0); }
-
-            // const reference to center value
-            DUAL const T& center() const { return at(0, 0, 0); }
-
-            DUAL auto indices() const { return std::make_tuple(i, j, k); }
-        };
-
-        // Begin iterator
-        iterator begin() const;
-
-        // End iterator
-        iterator end() const;
-
-        // Back of container
-        DT back() const;
-        DT& back();
-        DT front() const;
-        DT& front();
-
-        // GPU memory copy helpers
-        void copyToGpu();
-        void copyFromGpu();
-        void copyBetweenGpu(const ndarray& rhs);
-
-        // Additional utility methods
-        void clear();
-        void shrink_to_fit();
-        void reserve(size_type new_capacity);
-
-        // Memory management methods
-        void pin_memory();
-        void unpin_memory();
-
-        // Stream support
-        void set_stream(simbiStream_t stream);
-        void async_copy_to_gpu();
-
-        // Memory optimization helpers
-        void ensure_gpu_synced();
-
-        // Aligned memory allocation
-        void* aligned_alloc(size_type size, size_type alignment = 32);
-
-        //======================================================================
-        // Functional methods
-        //======================================================================
-        // Map method
-        template <typename UnaryFunction>
-        DUAL ndarray& map(UnaryFunction f);
-
-        template <typename UnaryFunction>
-        DUAL ndarray map(UnaryFunction f) const;
-        // Filter method
-        template <typename UnaryPredicate>
-        DUAL ndarray& filter(UnaryPredicate pred);
-
-        template <typename UnaryPredicate>
-        DUAL ndarray filter(UnaryPredicate pred) const;
-
-        // reductions
-        template <typename U, typename BinaryOp>
-        U reduce(
-            const ExecutionPolicy<>& policy,
-            U init,
-            BinaryOp binary_op
-        ) const;
-
-        // Composed operations
-        template <typename F, typename G>
-        auto compose(F f, G g) const;
-
-        // Chain operations
-        template <typename... Funcs>
-        auto then(Funcs... fs) const;
-
-        // Chain transformations and return new array
-        template <typename... Transforms>
-        ndarray transform_chain(Transforms... transforms) const;
-
-        // Apply function to each element safely with bounds checking
-        template <typename Func>
-        Maybe<ndarray> safe_map(Func f) const;
-
-        // Combine two arrays element-wise with a binary operation
-        template <typename Func>
-        ndarray combine(const ndarray& other, Func binary_op) const;
-
-        // Split array into chunks for parallel processing
-        template <typename Func>
-        ndarray
-        parallel_chunks(const ExecutionPolicy<>& policy, Func chunk_op) const;
-
-        // transform_parallel method
-        // only for functions that do not require index
-        template <typename Func>
-        auto transform_parallel(
-            const ExecutionPolicy<>& policy,
-            Func transform_op
-        ) const
-            -> std::enable_if_t<
-                !has_index_param<Func, const DT&>::value,
-                ndarray<std::invoke_result_t<Func, const DT&>, dim>>;
-
-        // only for functions that require index
-        template <typename Func>
-        auto transform_parallel(
-            const ExecutionPolicy<>& policy,
-            Func transform_op
-        ) const
-            -> std::enable_if_t<
-                has_index_param<Func, const DT&>::value,
-                ndarray<std::invoke_result_t<Func, const DT&, size_type>, dim>>;
-
-        // transform parallel alongside another ndarray of arbitrary type
-        // template <typename T, typename Func>
-        // auto transform_parallel_with(
-        //     const ExecutionPolicy<>& policy,
-        //     const ndarray<T, dim>& other,
-        //     Func transform_op
-        // ) const;
-
-        template <typename T, typename Func>
-        ndarray<std::invoke_result_t<Func, const DT&, const T&>, dim>
-        transform_parallel_with(
-            const ExecutionPolicy<>& policy,
-            ndarray<T>& other,
-            Func transform_op
-        ) const;
-
-        // inplace stencil transform method
-        template <typename T, typename Func>
-        void transform_stencil_with(
-            const ExecutionPolicy<>& policy,
-            const ndarray<T, dim>& stencil_array,
-            size_type radius,
-            Func stencil_op
-        );
-
-        // Boundary region operations
-        template <typename BoundaryOp>
-        void apply_to_boundaries(
-            const ExecutionPolicy<>& policy,
-            size_type radius,
-            BoundaryOp&& boundary_op
-        );
+      private:
+        memory_manager<T> mem_;
     };
-
 }   // namespace simbi
-
-// Type trait
-template <typename T>
-struct is_ndarray {
-    static constexpr bool value = false;
-};
-
-template <typename T>
-struct is_2darray {
-    static constexpr bool value = false;
-};
-
-template <typename T>
-struct is_3darray {
-    static constexpr bool value = false;
-};
-
-template <typename T>
-struct is_1darray {
-    static constexpr bool value = false;
-};
-
-template <typename U>
-struct is_ndarray<simbi::ndarray<U>> {
-    static constexpr bool value = true;
-};
-
-template <typename U>
-struct is_1darray<simbi::ndarray<U>> {
-    static constexpr bool value = true;
-};
-
-template <typename U>
-struct is_2darray<simbi::ndarray<simbi::ndarray<U>>> {
-    static constexpr bool value = true;
-};
-
-template <typename U>
-struct is_3darray<simbi::ndarray<simbi::ndarray<simbi::ndarray<U>>>> {
-    static constexpr bool value = true;
-};
 
 #include "ndarray.ipp"
 #endif
