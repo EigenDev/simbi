@@ -30,7 +30,6 @@
 #include <format>                   // for format
 #include <iostream>                 // for operator<<, char_traits, basic_ost...
 #include <memory>                   // for allocator
-#include <ranges>                   // for range
 #include <type_traits>              // for conditional_t
 
 using namespace std::chrono;
