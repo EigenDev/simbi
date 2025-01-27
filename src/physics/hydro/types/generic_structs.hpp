@@ -694,7 +694,7 @@ namespace simbi {
 
         DUAL auto calc_magnetic_four_vector() const
         {
-            if constexpr (R != Regime::SRHD) {
+            if constexpr (R != Regime::RMHD) {
                 return magnetic_four_vector_t{0.0, 0.0, 0.0, 0.0};
             }
             return bfield().as_fourvec(velocity(), lorentz_factor());
