@@ -872,6 +872,58 @@ namespace simbi {
                 }
             }
         }
+
+        // output the hydro state
+        void error_at(
+            const luint ii,
+            const luint jj,
+            const luint kk,
+            const real x1,
+            const real x2,
+            const real x3,
+            PrettyTable& table
+        ) const
+        {
+            std::ostringstream oss;
+            oss << "Primitives in non-physical state.\n";
+            if constexpr (Dims == 1) {
+                oss << "Primitive Variables at (" << x1 << "): \n";
+            }
+            else if constexpr (Dims == 2) {
+                if (x2 == INFINITY) {   // an effective 1D run
+                    oss << "Primitive Variables at (" << x1 << "): \n";
+                    oss << "[" << ii << "]\n";
+                }
+                else {
+                    oss << "Primitive Variables at (" << x1 << ", " << x2
+                        << "): \n";
+                    oss << "[" << ii << ", " << jj << "]\n";
+                }
+            }
+            else {
+                if (x2 == INFINITY) {   // an effective 1D run
+                    oss << "Primitive Variables at (" << x1 << "): \n";
+                    oss << "[" << ii << "]\n";
+                }
+                else if (x3 == INFINITY) {
+                    oss << "Primitive Variables at (" << x1 << ", " << x2
+                        << "): \n";
+                    oss << "[" << ii << ", " << jj << "]\n";
+                }
+                else {
+                    oss << "Primitive Variables at (" << x1 << ", " << x2
+                        << ", " << x3 << "): \n";
+                    oss << "[" << ii << ", " << jj << ", " << kk << "]\n";
+                }
+            }
+            oss << "Density: " << rho() << "\n";
+            oss << "Pressure: " << press() << "\n";
+            oss << "Velocity: " << velocity() << "\n";
+            if constexpr (R == Regime::RMHD) {
+                oss << "Magnetic Field: " << bfield() << "\n";
+            }
+            table.postError(oss.str());
+        }
     };
 
     struct WaveSpeeds {

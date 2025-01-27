@@ -30,6 +30,7 @@
 #include <format>                   // for format
 #include <iostream>                 // for operator<<, char_traits, basic_ost...
 #include <memory>                   // for allocator
+#include <ranges>                   // for range
 #include <type_traits>              // for conditional_t
 
 using namespace std::chrono;
@@ -182,51 +183,40 @@ namespace simbi {
                 void
                 emit_troubled_cells(sim_state_t& sim_state, PrettyTable& table)
                 {
-                    const luint nx             = sim_state.nx;
-                    const luint ny             = sim_state.ny;
-                    const luint nz             = sim_state.nz;
-                    const luint radius         = sim_state.radius;
-                    const luint xag            = sim_state.xag;
-                    const luint yag            = sim_state.yag;
-                    const luint zag            = sim_state.zag;
-                    const luint total_zones    = nx * ny * nz;
-                    const auto& troubled_cells = sim_state.troubled_cells;
-                    auto& prims                = sim_state.prims;
-                    for (luint gid = 0; gid < total_zones; gid++) {
-                        if (troubled_cells[gid] != 0) {
-                            const luint kk   = get_height(gid, nx, ny);
-                            const luint jj   = get_row(gid, nx, ny, kk);
-                            const luint ii   = get_column(gid, nx, ny, kk);
-                            const lint ireal = get_real_idx(ii, radius, xag);
-                            const lint jreal = get_real_idx(jj, radius, yag);
-                            const lint kreal = get_real_idx(kk, radius, zag);
-                            const auto cell =
-                                sim_state.cell_geometry(ireal, jreal, kreal);
-                            real x1mean = cell.x1mean;
-                            real x2mean = cell.x2mean;
-                            real x3mean = cell.x3mean;
-                            // check if effectivelt 1D or 2D, even
-                            // if doing a 3D run
-                            if constexpr (sim_state_t::dimensions == 3) {
-                                if (yag == 1) {   // 1D Run
-                                    x2mean = INFINITY;
-                                    x3mean = INFINITY;
-                                }
-                                else if (zag == 1) {
-                                    x3mean = INFINITY;
-                                }
-                            }
+                    auto unwravel_idx = [&](luint idx,
+                                            std::vector<luint>& shape) {
+                        std::vector<luint> coords(3);
+                        for (luint ii = 0; ii < shape.size(); ++ii) {
+                            coords.push_back(idx % shape[ii]);
+                            idx /= shape[ii];
+                        }
+                        if (!global::col_major) {
+                            std::reverse(coords.begin(), coords.end());
+                        }
+                        return std::make_tuple(coords[0], coords[1], coords[2]);
+                    };
 
-                            prims[gid].error_at(
+                    for (size_t idx = 0; const auto& prim : sim_state.prims) {
+                        prim.unwrap_or_else([&]() {
+                            std::vector<luint> shape;
+                            shape.push_back(sim_state.nz);
+                            shape.push_back(sim_state.ny);
+                            shape.push_back(sim_state.nx);
+                            // unravel the index
+                            auto [ii, jj, kk] = unwravel_idx(idx, shape);
+                            auto cell = sim_state.cell_geometry(ii, jj, kk);
+                            prim->error_at(
                                 ii,
                                 jj,
                                 kk,
-                                x1mean,
-                                x2mean,
-                                x3mean,
+                                cell.x1mean,
+                                cell.x2mean,
+                                cell.x3mean,
                                 table
                             );
-                        }
+                            return typename sim_state_t::primitive_t{};
+                        });
+                        ++idx;
                     }
                 }
 
@@ -243,7 +233,7 @@ namespace simbi {
                     sim_state.prims.sync_to_host();
                     sim_state.hasCrashed = true;
                     write_to_file(sim_state, table);
-                    // emit_troubled_cells(sim_state, table);
+                    emit_troubled_cells(sim_state, table);
                 }
 
                 // Print the benchmark results
