@@ -1,5 +1,5 @@
 /**
- * ***********************(C) COPYRIGHT 2024 Marcus DuPont**********************
+ * ***********************(C) COPYRIGHT 2025 Marcus DuPont**********************
  * @file       driver.hpp
  * @brief      the key driver for any simulation in any regime, dimensions
  *
@@ -13,7 +13,7 @@
  *
  * ==============================================================================
  * @endverbatim
- * ***********************(C) COPYRIGHT 2024 Marcus DuPont**********************
+ * ***********************(C) COPYRIGHT 2025 Marcus DuPont**********************
  */
 #ifndef DRIVER_HPP
 #define DRIVER_HPP

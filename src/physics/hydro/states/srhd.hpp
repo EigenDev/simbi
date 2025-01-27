@@ -1,5 +1,5 @@
 /**
- * ***********************(C) COPYRIGHT 2024 Marcus DuPont**********************
+ * ***********************(C) COPYRIGHT 2025 Marcus DuPont**********************
  * @file       srhd.hpp
  * @brief      single header for 1,2, and 3D SRHD calculations
  *
@@ -13,7 +13,7 @@
  *
  * ==============================================================================
  * @endverbatim
- * ***********************(C) COPYRIGHT 2024 Marcus DuPont**********************
+ * ***********************(C) COPYRIGHT 2025 Marcus DuPont**********************
  */
 #ifndef SRHD_HPP
 #define SRHD_HPP

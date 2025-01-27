@@ -1,5 +1,5 @@
 /**
- * ***********************(C) COPYRIGHT 2024 Marcus DuPont**********************
+ * ***********************(C) COPYRIGHT 2025 Marcus DuPont**********************
  * @file       thread_pool.hpp
  * @brief      Implements a custom thread pool using STL
  *
@@ -13,7 +13,7 @@
  *
  * ==============================================================================
  * @endverbatim
- * ***********************(C) COPYRIGHT 2024 Marcus DuPont**********************
+ * ***********************(C) COPYRIGHT 2025 Marcus DuPont**********************
  */
 #ifndef THREAD_POOL_HPP
 #define THREAD_POOL_HPP

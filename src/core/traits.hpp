@@ -1,5 +1,5 @@
 /**
- * ***********************(C) COPYRIGHT 2024 Marcus DuPont**********************
+ * ***********************(C) COPYRIGHT 2025 Marcus DuPont**********************
  * @file       traits.hpp
  * @brief      home of all type traits
  *
@@ -13,7 +13,7 @@
  *
  * ==============================================================================
  * @endverbatim
- * ***********************(C) COPYRIGHT 2024 Marcus DuPont**********************
+ * ***********************(C) COPYRIGHT 2025 Marcus DuPont**********************
  */
 #ifndef TRAITS_HPP
 #define TRAITS_HPP

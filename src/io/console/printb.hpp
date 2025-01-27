@@ -1,5 +1,5 @@
 /**
- * ***********************(C) COPYRIGHT 2024 Marcus DuPont**********************
+ * ***********************(C) COPYRIGHT 2025 Marcus DuPont**********************
  * @file       printb.hpp
  * @brief      implementation of custom rust-like print functions w/ formatting
  *
@@ -13,7 +13,7 @@
  *
  * ==============================================================================
  * @endverbatim
- * ***********************(C) COPYRIGHT 2024 Marcus DuPont**********************
+ * ***********************(C) COPYRIGHT 2025 Marcus DuPont**********************
  */
 #ifndef PRINTB_HPP
 #define PRINTB_HPP

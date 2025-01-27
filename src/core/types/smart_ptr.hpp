@@ -1,5 +1,5 @@
 /**
- * ***********************(C) COPYRIGHT 2024 Marcus DuPont**********************
+ * ***********************(C) COPYRIGHT 2025 Marcus DuPont**********************
  * @file       smart_ptr.hpp
  * @brief
  *
@@ -7,14 +7,14 @@
  * https://www.experts-exchange.com/articles/1959/C-Smart-pointers.html
  * @history:
  *   Version   Date            Author          Modification    Email
- *   V0.8.0    Jun-26-2024     Marcus DuPont marcus.dupont@princeton.edu
+ *   V0.8.0    Jun-26-2025     Marcus DuPont marcus.dupont@princeton.edu
  *
  * @verbatim
  * ==============================================================================
  *
  * ==============================================================================
  * @endverbatim
- * ***********************(C) COPYRIGHT 2024 Marcus DuPont**********************
+ * ***********************(C) COPYRIGHT 2025 Marcus DuPont**********************
  */
 #ifndef SMRT_PTR_HPP
 #define SMRT_PTR_HPP
