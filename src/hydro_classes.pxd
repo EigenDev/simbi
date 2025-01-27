@@ -2,14 +2,7 @@ from libcpp.vector cimport vector
 from libcpp cimport bool
 from libcpp.string cimport string 
 
-# adapted from: https://stackoverflow.com/a/39052204/13874039
-# cdef extern from "util/pyobj_wrapper.hpp":
-#     cdef cppclass PyObjWrapper:
-#         PyObjWrapper()
-#         PyObjWrapper(object) # define a constructor that takes a Python object
-#                              # note - doesn't match c++ signature - that's fine!
-
-cdef extern from "util/pyobj_wrapper.hpp":
+cdef extern from "core/cython/pyobj_wrapper.hpp":
     cdef cppclass PyObjWrapper:
         PyObjWrapper() except +
         PyObjWrapper(object py_func) except +
@@ -18,7 +11,7 @@ cdef extern from "build_options.hpp":
     cdef bool col_major "COLUMN_MAJOR"
     ctypedef double real 
 
-cdef extern from "common/hydro_structs.hpp":
+cdef extern from "core/types/init_conditions.hpp":
     cdef cppclass InitialConditions:
         real tstart, chkpt_interval, dlogt, plm_theta, engine_duration, gamma, cfl, tend
         int nx, ny, nz, chkpt_idx
@@ -33,7 +26,7 @@ cdef extern from "common/hydro_structs.hpp":
         vector[vector[real]] boundary_sources
         vector[real] x1, x2, x3
 
-cdef extern from "hydro/driver.hpp" namespace "simbi":
+cdef extern from "core/cython/driver.hpp" namespace "simbi":
     cdef cppclass Driver:
         Driver() except +
 

@@ -976,7 +976,7 @@ class Visualizer:
                     var = (enthalpy - 1.0) * dV * util.e_scale.value
                 elif self.mass:
                     var = dV * fields["W"] * fields["rho"] * util.mass_scale.value
-                elif self.momentum:
+                elif self.mcomponent:
                     mass = dV * fields["W"] * fields["rho"] * util.mass_scale.value
                     var = mass * (1 - 1 / fields["W"] ** 2) ** (0.5) * util.c.value
                 else:
@@ -1127,7 +1127,7 @@ class Visualizer:
                 ylabel = r"$E_{k,\rm iso}(> \Gamma\beta) [\rm erg]$"
             elif self.mass:
                 ylabel = r"$M_{\rm iso}(> \Gamma\beta) [\rm g]$"
-            elif self.momentum:
+            elif self.mcomponent:
                 ylabel = r"$dP/d\Omega(> \Gamma\beta) [\rm g~cm~s^{-1}]$"
             else:
                 ylabel = r"$E_{\rm iso}(> \Gamma\beta) [\rm g]$"
