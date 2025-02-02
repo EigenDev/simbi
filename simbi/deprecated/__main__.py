@@ -7,8 +7,8 @@ import tracemalloc
 import importlib
 from pathlib import Path
 from typing import Optional, Sequence
-from . import Hydro, logger
-from .detail import get_subparser, bcolors, max_thread_count
+from .. import Hydro, logger
+from ..detail import get_subparser, bcolors, max_thread_count
 
 try:
     from rich_argparse import RichHelpFormatter
@@ -542,8 +542,8 @@ def plot_checkpoints(
     args: argparse.Namespace,
     argv: list) -> None:
     
-    from .tools.plot import main
-    main(parser, args, argv)
+    from .plot import visual
+    visual.visualize(parser, args, argv)
 
 def calc_afterglow(
     parser: argparse.ArgumentParser,
@@ -559,7 +559,7 @@ def generate_a_setup(
     *_) -> None:
 
     parser.parse_args()
-    from . import clone 
+    from .. import clone 
     clone.generate(args.clone_name)
     
 def main():

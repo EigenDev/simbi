@@ -1,13 +1,12 @@
 import argparse
 import sys
 import matplotlib.pyplot as plt
-import importlib
-from . import visual
-from typing import Optional
-from .utility import (
+from . import old_visual
+from ..tools import visual
+from typing import Optional, Any
+from ..tools.utility import (
     BIGGER_SIZE,
     DEFAULT_SIZE,
-    SMALL_SIZE,
     get_dimensionality,
     get_file_list,
 )
@@ -15,9 +14,11 @@ from ..detail import get_subparser, ParseKVAction
 from pathlib import Path
 
 tool_src = Path(__file__).resolve().parent / "tools"
+VALID_PLOT_TYPES= ["line", "multidim", "temporal", "histogram"]
 
 
 def colorbar_limits(c):
+    """Parse the colorbar limits from the command line"""
     try:
         vmin, vmax = map(float, c.split(","))
         if vmin > vmax:
@@ -30,9 +31,41 @@ def colorbar_limits(c):
 
 
 def nullable_string(val: str) -> Optional[str]:
+    """If a user passes an empty string to this argument, return None"""
     if not val:
         return None
     return val
+
+
+class PlotStyleAction(argparse.Action):
+    """Custom action to set plot style from flag or direct argument"""
+
+    def __init__(
+        self,
+        option_strings: list[str],
+        dest: str,
+        nargs: Optional[int] = None,
+        **kwargs: Any,
+    ):
+        if nargs is not None:
+            raise ValueError("nargs not allowed")
+        super().__init__(option_strings, dest, nargs=0, **kwargs)
+    
+    def __call__(
+        self,
+        parser: argparse.ArgumentParser,
+        namespace: argparse.Namespace,
+        values: Any,
+        option_string: Optional[str] = None
+    ) -> None:
+        if option_string == '--plot-type':
+            if values not in VALID_PLOT_TYPES:
+                raise ValueError(f'Invalid plot style: {values}')
+            setattr(namespace, self.dest, values)
+        else:
+            # Convert flag to style name (e.g. --line -> "line")
+            style = option_string.replace('--', '')
+            setattr(namespace, self.dest, style)
 
 
 def parse_plotting_arguments(
@@ -48,7 +81,19 @@ def parse_plotting_arguments(
         default=["rho"],
         nargs="+",
         help="the name of the field variable",
-        choices=visual.field_choices,
+        choices=old_visual.field_choices,
+    )
+    plot_parser.add_argument(
+        "--ndim",
+        default=1,
+        type=int,
+        help="the dimensionality of the data",
+    )
+    plot_parser.add_argument(
+        "--cartesian",
+        default=False,
+        action="store_true",
+        help="flag for cartesian plotting",
     )
     plot_parser.add_argument(
         "--xmax",
@@ -75,28 +120,11 @@ def parse_plotting_arguments(
         help="logarithmic plotting scale for y-axis",
     )
     plot_parser.add_argument(
-        "--kinetic",
-        default=False,
-        action="store_true",
-        help="plot the kinetic energy on the histogram",
-    )
-    plot_parser.add_argument(
-        "--enthalpy",
-        default=False,
-        action="store_true",
-        help="plot the enthalpy on the histogram",
-    )
-    plot_parser.add_argument(
-        "--hist", default=False, action="store_true", help="convert plot to histogram"
-    )
-    plot_parser.add_argument(
-        "--mass", default=False, action="store_true", help="compute mass histogram"
-    )
-    plot_parser.add_argument(
-        "--momentum",
-        default=False,
-        action="store_true",
-        help="compute momentum histogram",
+        "--plot-type",
+        default=None,
+        type=str,
+        help="plot type",
+        choices=["line", "multidim", "temmporal", "histogram"],
     )
     plot_parser.add_argument(
         "--ax-anchor",
@@ -242,7 +270,7 @@ def parse_plotting_arguments(
         "--weight",
         help="plot weighted avg of desired var as function of time",
         default=None,
-        choices=visual.field_choices + visual.derived,
+        choices=old_visual.field_choices + old_visual.derived,
         type=str,
     )
     plot_parser.add_argument(
@@ -290,22 +318,10 @@ def parse_plotting_arguments(
         metavar="KEY=VALUE",
     )
     plot_parser.add_argument(
-        "--broken-ax",
-        action="store_true",
-        default=False,
-        help="flag to break bounds on dx-domega plot",
-    )
-    plot_parser.add_argument(
         "--frame-rate",
         type=int,
         default=10,
         help="frame rate in ms",
-    )
-    plot_parser.add_argument(
-        "--shock-coord",
-        action="store_true",
-        default=False,
-        help="flag for plotting in shock coordinate xi",
     )
     plot_parser.add_argument(
         "--font-color",
@@ -327,6 +343,15 @@ def parse_plotting_arguments(
         help="Set the y-scale to start plt.fill_between",
     )
 
+    for style in VALID_PLOT_TYPES:
+        plot_parser.add_argument(
+            f"--{style}",
+            action=PlotStyleAction,
+            dest="plot_type",
+            const=style,
+            help=f"Set plot style to {style}",
+        )
+        
     return parser, parser.parse_known_args(
         args=None if sys.argv[2:] else ["plot", "--help"]
     )

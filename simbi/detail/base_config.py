@@ -17,7 +17,7 @@ from typing import (
     Union,
     Sequence,
     cast,
-    final
+    final,
 )
 from numpy.typing import NDArray
 from numpy import float64 as numpy_float
@@ -64,7 +64,7 @@ class simbi_property(Generic[T]):
             return self
         if self.fget is None:
             raise ValueError("Property has no getter")
-        return cast(T, self.type_converter(self.fget(obj))) #type: ignore
+        return cast(T, self.type_converter(self.fget(obj)))  # type: ignore
 
     @staticmethod
     def type_converter(input_obj: Any) -> Any:
@@ -288,7 +288,7 @@ class BaseConfig(metaclass=abc.ABCMeta):
     def engine_duration(self) -> float:
         return 0.0
 
-    @classmethod 
+    @classmethod
     def _compile_source_terms(cls) -> None:
         libdir = Path(__file__).resolve().parent.parent.parent / "src" / "libs"
         libdir.mkdir(parents=True, exist_ok=True)
@@ -309,20 +309,28 @@ class BaseConfig(metaclass=abc.ABCMeta):
                     cls.gravity_source_lib = str(so_file)
                 elif source_name == "boundary":
                     cls.boundary_source_lib = str(so_file)
-                
 
-                with open(cpp_file, 'w+') as f:
+                with open(cpp_file, "w+") as f:
                     f.write(textwrap.dedent(source_code))
-                    
+
                 try:
                     subprocess.run(
-                    ["c++", "-shared", "-std=c++20", "-O3", "-fPIC", "-o", so_file, cpp_file],
-                    check=True,
+                        [
+                            "c++",
+                            "-shared",
+                            "-std=c++20",
+                            "-O3",
+                            "-fPIC",
+                            "-o",
+                            so_file,
+                            cpp_file,
+                        ],
+                        check=True,
                     )
                 except subprocess.CalledProcessError as e:
                     print(e)
                     sys.exit(1)
-            
+
     @classmethod
     def _find_dynamic_args(cls) -> None:
         members = [
@@ -349,14 +357,13 @@ class BaseConfig(metaclass=abc.ABCMeta):
 
     @final
     @classmethod
-    def _parse_args(cls, parser: argparse.ArgumentParser) -> None:
+    def _parse_args(
+        cls, main_parser: argparse.ArgumentParser, run_parser: argparse.ArgumentParser
+    ) -> None:
         if not cls.dynamic_args:
             cls._find_dynamic_args()
 
-        run_parser = get_subparser(parser, 0)
-        problem_args = run_parser.add_argument_group(
-            f"{cls.__name__}", f"simulation options specific to {cls.__name__} config"
-        )
+        problem_args = getattr(run_parser, "problem_args")
         for member in cls.dynamic_args:
             try:
                 if type(member.value) == bool:
@@ -378,7 +385,7 @@ class BaseConfig(metaclass=abc.ABCMeta):
             except argparse.ArgumentError:
                 pass
 
-        args = parser.parse_args()
+        args = main_parser.parse_args()
 
         for var in cls.dynamic_args:
             var.name = var.name.replace("-", "_")
@@ -436,11 +443,11 @@ class BaseConfig(metaclass=abc.ABCMeta):
                     val = round(val, 3)
                 val = str(val)
                 logger.info(f"{member.name:.<30} {val:<15} {member.help}")
-        
+
         # check if problem variable dictionary is not empty
         if cls.problem_var_dict:
             for key, value in cls.problem_var_dict.items():
-                val  = value[0]
+                val = value[0]
                 help = value[1]
                 if isinstance(val, float):
                     if order_of_mag(abs(val)) > 3:
@@ -449,7 +456,6 @@ class BaseConfig(metaclass=abc.ABCMeta):
                     val = round(val, 3)
                 val = str(val)
                 logger.info(f"{key.replace("_", " "):.<30} {val:<15} {help}")
-            
 
     @final
     def __del__(self) -> None:

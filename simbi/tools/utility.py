@@ -4,12 +4,14 @@ import astropy.constants as const
 import matplotlib
 import astropy.units as units
 import numpy as np
-import argparse
 import matplotlib.pyplot as plt
 from typing import Union, Any, Callable, Optional, no_type_check
 from numpy.typing import NDArray
 from numpy import float64 as numpy_float
 from ..detail.helpers import find_nearest
+from dataclasses import dataclass, field
+from typing import Union, List, Dict, Any
+from enum import Enum
 
 # FONT SIZES
 SMALL_SIZE = 6
@@ -37,6 +39,126 @@ ell_scale = (e_scale_bmk / rho_scale_bmk / const.c.cgs**2) ** (1 / 3)
 t_scale = const.c.cgs * ell_scale
 
 
+class FieldType(Enum):
+    DENSITY = "density"
+    ENERGY = "energy"
+    VELOCITY = "velocity"
+    TEMPERATURE = "temperature"
+    MAGNETIC = "magnetic"
+    OTHER = "other"
+
+
+FIELD_MAP: Dict[str, str] = {
+    "rho": r"\rho",
+    "D": "D",
+    "gamma_beta": r"$\Gamma \beta$",
+    "u": r"$\Gamma \beta$",
+    "gamma_beta_1": r"$\Gamma \beta_1$",
+    "u1": r"$\Gamma \beta_1$",
+    "gamma_beta_2": r"$\Gamma \beta_2$",
+    "u2": r"$\Gamma \beta_2$",
+    "gamma_beta_3": r"$\Gamma \beta_3$",
+    "u3": r"$\Gamma \beta_3$",
+    "energy": r"\tau",
+    "p": r"p",
+    "energy_rst": r"$E$",
+    "chi": r"$\chi$",
+    "chi_dens": r"$\rho \cdot \chi$",
+    "T_eV": "T [eV]",
+    "temperature": "T",
+    "mach": "M",
+    "v1": r"$v_1 / v_0$",
+    "v": r"$v_1 / v_0$",
+    "v2": r"$v_2 / v_0$",
+    "v3": r"$v_3 / v_0$",
+    "tau-s": r"$\tau_s$",
+    "pmag": r"$p_{\rm mag}$",
+    "ptot": r"$p_{\rm tot}$",
+    "sigma": r"$\sigma$",
+    "enthalpy_density": r"$w$",
+}
+
+UNITS: Dict[str, str] = {
+    "energy": r"\rm erg \ cm^{-3}",
+    "density": r"\rm g \ cm^{-3}",
+}
+
+
+@dataclass
+class FieldMapper:
+    """Maps field names to LaTeX strings"""
+
+    field_map: Dict[str, str] = field(default_factory=lambda: FIELD_MAP)
+    units: Dict[str, str] = field(default_factory=lambda: UNITS)
+
+    def get_field_str(
+        self,
+        fields: Union[str, List[str], Dict[str, Any]],
+        units: bool = False,
+        normalized: bool = True,
+    ) -> Union[str, List[str]]:
+        """Get LaTeX string for field(s)"""
+        field_list = self._normalize_fields(fields)
+        field_strings = [self._format_field(f, units, normalized) for f in field_list]
+        return field_strings[0] if len(field_strings) == 1 else field_strings
+
+    def _normalize_fields(
+        self, fields: Union[str, List[str], Dict[str, Any]]
+    ) -> List[str]:
+        """Convert input to list of field names"""
+        if isinstance(fields, str):
+            return [fields]
+        if isinstance(fields, dict):
+            return list(fields.keys())
+        return fields
+
+    def _format_field(self, field: str, units: bool, normalized: bool) -> str:
+        """Format single field with optional units"""
+        if field not in self.field_map:
+            return self._format_unknown_field(field)
+
+        var = self.field_map[field]
+        field_type = self._get_field_type(field)
+
+        return self._format_by_type(var, field_type, units, normalized)
+
+    def _get_field_type(self, field: str) -> FieldType:
+        """Determine field type"""
+        if field in ["rho", "D"]:
+            return FieldType.DENSITY
+        if field in ["energy", "p"]:
+            return FieldType.ENERGY
+        if field == "temperature":
+            return FieldType.TEMPERATURE
+        if field.startswith("b"):
+            return FieldType.MAGNETIC
+        return FieldType.OTHER
+
+    def _format_by_type(
+        self, var: str, field_type: FieldType, units: bool, normalized: bool
+    ) -> str:
+        """Format field based on its type"""
+        if field_type in [FieldType.DENSITY, FieldType.ENERGY]:
+            if units:
+                return f"{var} [{self.units[field_type.value]}]"
+            elif normalized:
+                return f"${var} / {var}_0$"
+            else:
+                return f"${var}$"
+        return var
+
+
+# Usage remains the same
+def get_field_str(
+    fields: Union[str, List[str], Dict[str, Any]],
+    units: bool = False,
+    normalized: bool = True,
+) -> Union[str, List[str]]:
+    """Get LaTeX string for field(s)"""
+    mapper = FieldMapper()
+    return mapper.get_field_str(fields, units, normalized)
+
+
 def calc_enthalpy(fields: dict[str, NDArray[numpy_float]]) -> Any:
     return 1.0 + fields["p"] * fields["ad_gamma"] / (
         fields["rho"] * (fields["ad_gamma"] - 1.0)
@@ -50,70 +172,6 @@ def calc_lorentz_factor(fields: dict[str, NDArray[numpy_float]]) -> Any:
 def calc_beta(fields: dict[str, NDArray[numpy_float]]) -> Any:
     W = calc_lorentz_factor(fields)
     return (1.0 - 1.0 / W**2) ** 0.5
-
-
-def get_field_str(args: argparse.Namespace) -> Union[str, list[str]]:
-    field_map = {
-        "rho": r"\rho",
-        "D": "D",
-        "gamma_beta": r"$\Gamma \beta$",
-        "u": r"$\Gamma \beta$",
-        "gamma_beta_1": r"$\Gamma \beta_1$",
-        "u1": r"$\Gamma \beta_1$",
-        "gamma_beta_2": r"$\Gamma \beta_2$",
-        "u2": r"$\Gamma \beta_2$",
-        "gamma_beta_3": r"$\Gamma \beta_3$",
-        "u3": r"$\Gamma \beta_3$",
-        "energy": r"\tau",
-        "p": r"p",
-        "energy_rst": r"$E$",
-        "chi": r"$\chi$",
-        "chi_dens": r"$\rho \cdot \chi$",
-        "T_eV": "T [eV]",
-        "temperature": "T",
-        "mach": "M",
-        "v1": r"$v_1 / v_0$",
-        "v": r"$v_1 / v_0$",
-        "v2": r"$v_2 / v_0$",
-        "v3": r"$v_3 / v_0$",
-        "tau-s": r"$\tau_s$",
-        "pmag": r"$p_{\rm mag}$",
-        "ptot": r"$p_{\rm tot}$",
-        "sigma": r"$\sigma$",
-    }
-
-    energy_unit = r"\rm erg \ cm^{-3}"
-    density_unit = r"\rm g \ cm^{-3}"
-
-    field_str_list = []
-    for field in args.fields:
-        if field in field_map:
-            var = field_map[field]
-            if field in ["rho", "D"]:
-                if args.units:
-                    field_str_list.append(r"${} [{}]$]".format(var, density_unit))
-                else:
-                    field_str_list.append(r"${}/{}_0$".format(var, var))
-            elif field in ["energy", "p"]:
-                if args.units:
-                    field_str_list.append(r"${} [{}]$".format(var, energy_unit))
-                else:
-                    field_str_list.append(r"${}/{}_0$".format(var, var))
-            elif field == "energy_rst":
-                if args.units:
-                    field_str_list.append(r"${} \  [{}]$".format(var, energy_unit))
-                else:
-                    field_str_list.append(r"${} / {}_0$".format(var, var))
-            elif field == "temperature":
-                field_str_list.append("T [K]" if args.units else "T")
-            else:
-                field_str_list.append(var)
-        elif field in ["b1", "b2", "b3"]:
-            field_str_list.append(rf"$B_{field[1]}$")
-        else:
-            field_str_list.append(rf"${field}$")
-
-    return field_str_list if len(args.fields) > 1 else field_str_list[0]
 
 
 def unpad(arr: NDArray[numpy_float], pad_width: tuple[tuple[Any, ...], ...]) -> Any:
@@ -156,8 +214,11 @@ def get_dimensionality(files: Union[list[str], dict[int, list[str]]]) -> int:
 
     return ndim
 
+
 @no_type_check
-def read_file(filename: str, return_staggered_field: bool = False) -> tuple[dict[str, Any], dict[str, Any], dict[str, Any]]:
+def read_file(
+    filename: str, return_staggered_field: bool = False
+) -> tuple[dict[str, Any], dict[str, Any], dict[str, Any]]:
     with h5py.File(filename, "r") as hf:
         ds = dict(hf.get("sim_info").attrs)
         ndim: int = ds["dimensions"]
@@ -200,23 +261,35 @@ def read_file(filename: str, return_staggered_field: bool = False) -> tuple[dict
                     name: str, shape: tuple[int, ...]
                 ) -> NDArray[numpy_float]:
                     return hf.get(name)[:].reshape(shape)
-                
+
                 b1 = read_bfield(
                     "b1",
-                    (ds["zactive_zones"] + 2, ds["yactive_zones"] + 2, ds["xactive_zones"] + 1),
+                    (
+                        ds["zactive_zones"] + 2,
+                        ds["yactive_zones"] + 2,
+                        ds["xactive_zones"] + 1,
+                    ),
                 )
                 b2 = read_bfield(
                     "b2",
-                    (ds["zactive_zones"] + 2, ds["yactive_zones"] + 1, ds["xactive_zones"] + 2),
+                    (
+                        ds["zactive_zones"] + 2,
+                        ds["yactive_zones"] + 1,
+                        ds["xactive_zones"] + 2,
+                    ),
                 )
                 b3 = read_bfield(
                     "b3",
-                    (ds["zactive_zones"] + 1, ds["yactive_zones"] + 2, ds["xactive_zones"] + 2),
+                    (
+                        ds["zactive_zones"] + 1,
+                        ds["yactive_zones"] + 2,
+                        ds["xactive_zones"] + 2,
+                    ),
                 )
-                
+
                 if return_staggered_field:
                     fields.update({"b1stag": b1, "b2stag": b2, "b3stag": b3})
-                    
+
                 # unpad from ghost zones from the fields in the orthogonal directions
                 b1 = unpad(b1, ((1, 1), (1, 1), (0, 0)))
                 b2 = unpad(b2, ((1, 1), (0, 0), (1, 1)))
@@ -367,6 +440,14 @@ def prims2var(fields: dict[str, NDArray[numpy_float]], var: str) -> Any:
         except KeyError:
             raise KeyError("The simulation data is not from an MHD run")
         return sigma
+    elif var == "enthalpy_density":
+        gas_enthalpy_density = fields["rho"] * h
+        magnetic_enthalpy_density = 0.5 * (
+            fields.get("b1", 0.0) ** 2
+            + fields.get("b2", 0.0) ** 2
+            + fields.get("b3", 0.0) ** 2
+        )
+        return gas_enthalpy_density + 2.0 * magnetic_enthalpy_density
     else:
         raise NotImplementedError("derived variable {var} not implemented")
 

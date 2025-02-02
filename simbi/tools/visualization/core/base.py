@@ -1,0 +1,72 @@
+import numpy as np
+import matplotlib.pyplot as plt
+from abc import ABC, abstractmethod
+from typing import Optional, Any, List
+from matplotlib.animation import FuncAnimation
+from matplotlib.figure import Figure
+from matplotlib.axes import Axes
+
+try:
+    import cmasher as cmr
+except ImportError:
+    cmr = None
+
+
+class BasePlotter(ABC):
+    def __init__(self, config: dict[str, Any]):
+        self.config = config
+        self.frames: List[Any] = []
+        self.fig: Optional[Figure] = None
+        self.axes: Optional[List[Axes]] = None
+
+    @abstractmethod
+    def create_figure(self) -> None:
+        """Create and setup figure"""
+        pass
+
+    @abstractmethod
+    def plot(self) -> None:
+        """Main plotting method"""
+        pass
+
+    def setup(self) -> None:
+        """Setup plotting environment"""
+        self.create_figure()
+        if not self.fig or not self.axes:
+            raise RuntimeError("Figure and axes must be created")
+
+    def save(self, path: str) -> None:
+        """Save figure or animation"""
+        if not self.fig:
+            raise RuntimeError("No figure to save")
+
+        if hasattr(self, "animation"):
+            self.animation.save(
+                f"{path}.mp4",
+                dpi=self.config.style.dpi,
+                progress_callback=lambda i, n: print(
+                    f"Saving frame {i} of {n}", end="\r"
+                ),
+            )
+        else:
+            self.fig.savefig(
+                path,
+                dpi=self.config.style.dpi,
+                bbox_inches="tight",
+                transparent=self.config.style.transparent,
+            )
+
+    def show(self) -> None:
+        """Display plot"""
+        if not self.fig:
+            raise RuntimeError("No figure to display")
+        plt.show()
+
+    def __enter__(self):
+        """Context manager entry"""
+        self.setup()
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        """Context manager exit"""
+        plt.close(self.fig)

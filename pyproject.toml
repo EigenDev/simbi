@@ -42,7 +42,7 @@ extras = [
 ]
 
 [project.scripts]
-simbi = "simbi.__main__:main"
+simbi = "simbi.cli.__main__:main"
 
 [options]
 zip_safe = false
