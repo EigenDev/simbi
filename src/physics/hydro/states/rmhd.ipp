@@ -2800,173 +2800,172 @@ DUAL void RMHD<dim>::calc_emf_edges(
     size_type kk
 ) const
 {
-    // auto get_flux_info = [&] DEV(size_type dir) {
-    //     if (dir == 1) {
-    //         return std::make_tuple(fri, bstag1, nxv, nye, nze);
-    //     }
-    //     if (dir == 2) {
-    //         return std::make_tuple(gri, bstag2, nxe, nyv, nze);
-    //     }
-    //     return std::make_tuple(hri, bstag3, nxe, nye, nzv);
-    // };
+    auto get_flux_info = [&] DEV(size_type dir) {
+        if (dir == 1) {
+            return std::make_tuple(fri, bstag1, nxv, nye, nze);
+        }
+        if (dir == 2) {
+            return std::make_tuple(gri, bstag2, nxe, nyv, nze);
+        }
+        return std::make_tuple(hri, bstag3, nxe, nye, nzv);
+    };
 
-    // // Get active flux indices
-    // const auto iaf = ii + 1;
-    // const auto jaf = jj + 1;
-    // const auto kaf = kk + 1;
+    // Get active flux indices
+    const auto iaf = ii + 1;
+    const auto jaf = jj + 1;
+    const auto kaf = kk + 1;
 
-    // // process each corner
-    // detail::for_sequence(detail::make_index_sequence<4>(), [&](auto qidx) {
-    //     constexpr auto q      = static_cast<size_type>(qidx);
-    //     constexpr auto corner = static_cast<Corner>(q);
-    //     // Calculate appropriate EMF components for this edge
-    //     // Based on staggered grid formulation
-    //     // ...EMF calculation logic specific to components i,j
+    // process each corner
+    detail::for_sequence(detail::make_index_sequence<4>(), [&](auto qidx) {
+        constexpr auto q      = static_cast<size_type>(qidx);
+        constexpr auto corner = static_cast<Corner>(q);
+        // Calculate appropriate EMF components for this edge
+        // Based on staggered grid formulation
+        // ...EMF calculation logic specific to components i,j
 
-    //     // Compute shifted indices for this corner
-    //     auto north = corner == Corner::NE || corner == Corner::NW;
-    //     auto east  = corner == Corner::NE || corner == Corner::SE;
-    //     auto south = !north;
-    //     auto west  = !east;
+        // Compute shifted indices for this corner
+        auto north = corner == Corner::NE || corner == Corner::NW;
+        auto east  = corner == Corner::NE || corner == Corner::SE;
+        auto south = !north;
+        auto west  = !east;
 
-    //     // Get staggered field components
-    //     auto [flux_i, bstag_i, nx_i, ny_i, nz_i] = get_flux_info(i);
-    //     auto [flux_j, bstag_j, nx_j, ny_j, nz_j] = get_flux_info(j);
+        // Get staggered field components
+        auto [flux_i, bstag_i, nx_i, ny_i, nz_i] = get_flux_info(i);
+        auto [flux_j, bstag_j, nx_j, ny_j, nz_j] = get_flux_info(j);
 
-    //     if constexpr (i == 2 && j == 3) {
-    //         // x2-x3 plane
-    //         auto qn = kaf + north;
-    //         auto qs = kaf - south;
-    //         auto qe = jaf + east;
-    //         auto qw = jaf - west;
+        if constexpr (i == 2 && j == 3) {
+            // x2-x3 plane
+            auto qn = kaf + north;
+            auto qs = kaf - south;
+            auto qe = jaf + east;
+            auto qw = jaf - west;
 
-    //         auto nidx = idx3(iaf, jj + east, qn, nx_i, ny_i, nz_i);
-    //         auto sidx = idx3(iaf, jj + east, qs, nx_i, ny_i, nz_i);
-    //         auto eidx = idx3(iaf, qe, kk + north, nx_j, ny_j, nz_j);
-    //         auto widx = idx3(iaf, qw, kk + north, nx_j, ny_j, nz_j);
+            auto nidx = idx3(iaf, jj + east, qn, nx_i, ny_i, nz_i);
+            auto sidx = idx3(iaf, jj + east, qs, nx_i, ny_i, nz_i);
+            auto eidx = idx3(iaf, qe, kk + north, nx_j, ny_j, nz_j);
+            auto widx = idx3(iaf, qw, kk + north, nx_j, ny_j, nz_j);
 
-    //         ei[q] = calc_edge_emf<Plane::JK, corner>(
-    //             flux_j[widx],
-    //             flux_j[eidx],
-    //             flux_i[sidx],
-    //             flux_i[nidx],
-    //             prims.data(),
-    //             ii,
-    //             jj,
-    //             kk,
-    //             txa,
-    //             tya,
-    //             tza,
-    //             i,
-    //             bstag_j[widx],
-    //             bstag_j[eidx],
-    //             bstag_i[sidx],
-    //             bstag_i[nidx]
-    //         );
-    //     }
-    //     else if constexpr (i == 3 && j == 1) {
-    //         // x3-x1 plane
-    //         auto qn = jaf + north;
-    //         auto qs = jaf - south;
-    //         auto qe = iaf + east;
-    //         auto qw = iaf - west;
+            ei[q] = calc_edge_emf<Plane::JK, corner>(
+                flux_j[widx],
+                flux_j[eidx],
+                flux_i[sidx],
+                flux_i[nidx],
+                prims.data(),
+                ii,
+                jj,
+                kk,
+                txa,
+                tya,
+                tza,
+                i,
+                bstag_j[widx],
+                bstag_j[eidx],
+                bstag_i[sidx],
+                bstag_i[nidx]
+            );
+        }
+        else if constexpr (i == 3 && j == 1) {
+            // x3-x1 plane
+            auto qn = jaf + north;
+            auto qs = jaf - south;
+            auto qe = iaf + east;
+            auto qw = iaf - west;
 
-    //         auto nidx = idx3(iaf, jj + north, qn, nx_i, ny_i, nz_i);
-    //         auto sidx = idx3(iaf, jj + north, qs, nx_i, ny_i, nz_i);
-    //         auto eidx = idx3(qe, jj + north, kk + east, nx_j, ny_j, nz_j);
-    //         auto widx = idx3(qw, jj + north, kk + east, nx_j, ny_j, nz_j);
+            auto nidx = idx3(iaf, jj + north, qn, nx_i, ny_i, nz_i);
+            auto sidx = idx3(iaf, jj + north, qs, nx_i, ny_i, nz_i);
+            auto eidx = idx3(qe, jj + north, kk + east, nx_j, ny_j, nz_j);
+            auto widx = idx3(qw, jj + north, kk + east, nx_j, ny_j, nz_j);
 
-    //         ei[q] = calc_edge_emf<Plane::IK, corner>(
-    //             flux_i[widx],
-    //             flux_i[eidx],
-    //             flux_j[sidx],
-    //             flux_j[nidx],
-    //             prims.data(),
-    //             ii,
-    //             jj,
-    //             kk,
-    //             txa,
-    //             tya,
-    //             tza,
-    //             i,
-    //             bstag_i[widx],
-    //             bstag_i[eidx],
-    //             bstag_j[sidx],
-    //             bstag_j[nidx]
-    //         );
-    //     }
-    //     else {
-    //         // x1-x2 plane
-    //         auto qn = iaf + north;
-    //         auto qs = iaf - south;
-    //         auto qe = jaf + east;
-    //         auto qw = jaf - west;
+            ei[q] = calc_edge_emf<Plane::IK, corner>(
+                flux_i[widx],
+                flux_i[eidx],
+                flux_j[sidx],
+                flux_j[nidx],
+                prims.data(),
+                ii,
+                jj,
+                kk,
+                txa,
+                tya,
+                tza,
+                i,
+                bstag_i[widx],
+                bstag_i[eidx],
+                bstag_j[sidx],
+                bstag_j[nidx]
+            );
+        }
+        else {
+            // x1-x2 plane
+            auto qn = iaf + north;
+            auto qs = iaf - south;
+            auto qe = jaf + east;
+            auto qw = jaf - west;
 
-    //         auto nidx = idx3(qn, jj + east, kk + north, nx_i, ny_i, nz_i);
-    //         auto sidx = idx3(qs, jj + east, kk + north, nx_i, ny_i, nz_i);
-    //         auto eidx = idx3(qe, jj + east, kk + north, nx_j, ny_j, nz_j);
-    //         auto widx = idx3(qw, jj + east, kk + north, nx_j, ny_j, nz_j);
+            auto nidx = idx3(qn, jj + east, kk + north, nx_i, ny_i, nz_i);
+            auto sidx = idx3(qs, jj + east, kk + north, nx_i, ny_i, nz_i);
+            auto eidx = idx3(qe, jj + east, kk + north, nx_j, ny_j, nz_j);
+            auto widx = idx3(qw, jj + east, kk + north, nx_j, ny_j, nz_j);
 
-    //         ei[q] = calc_edge_emf<Plane::IJ, corner>(
-    //             flux_i[widx],
-    //             flux_i[eidx],
-    //             flux_j[sidx],
-    //             flux_j[nidx],
-    //             prims.data(),
-    //             ii,
-    //             jj,
-    //             kk,
-    //             txa,
-    //             tya,
-    //             tza,
-    //             i,
-    //             bstag_i[widx],
-    //             bstag_i[eidx],
-    //             bstag_j[sidx],
-    //             bstag_j[nidx]
-    //         );
-    //     }
-    // });
+            ei[q] = calc_edge_emf<Plane::IJ, corner>(
+                flux_i[widx],
+                flux_i[eidx],
+                flux_j[sidx],
+                flux_j[nidx],
+                prims.data(),
+                ii,
+                jj,
+                kk,
+                txa,
+                tya,
+                tza,
+                i,
+                bstag_i[widx],
+                bstag_i[eidx],
+                bstag_j[sidx],
+                bstag_j[nidx]
+            );
+        }
+    });
 }
 
 template <int dim>
 template <int nhat>
 void RMHD<dim>::update_magnetic_component(const ExecutionPolicy<>& policy)
 {
-    // const auto& b_stag = (nhat == 1) ? bstag1 : (nhat == 2) ? bstag2 :
-    // bstag3;
+    const auto& b_stag = (nhat == 1) ? bstag1 : (nhat == 2) ? bstag2 : bstag3;
 
     // Create contracted views for EMF calculation
-    // auto magnetic_update = [this] DEV(auto& b_view, const auto& coord) {
-    //     // Get local coordinates for EMF calculation
-    //     const auto [ii, jj, kk] = b_view.position();
-    //     const auto cell         = this->cell_geometry(ii, jj, kk);
+    auto magnetic_update = [this] DEV(auto& b_view, const auto& coord) {
+        // Get local coordinates for EMF calculation
+        const auto [ii, jj, kk] = b_view.position();
+        const auto cell         = this->cell_geometry(ii, jj, kk);
 
-    //     // Calculate EMF components based on nhat
-    //     real ei[4], ej[4];
+        // Calculate EMF components based on nhat
+        real ei[4], ej[4];
 
-    //     if constexpr (nhat == 1) {
-    //         calc_emf_edges<2, 3>(ei, ej, cell, ii, jj, kk);
-    //         // Update B1 using e2,e3
-    //         return b_view.value() -
-    //                dt * step * curl_e(1, ei, ej, cell, coord.side());
-    //     }
-    //     else if constexpr (nhat == 2) {
-    //         calc_emf_edges<3, 1>(ei, ej, cell, ii, jj, kk);
-    //         // Update B2 using e3,e1
-    //         return b_view.value() -
-    //                dt * step * curl_e(2, ei, ej, cell, coord.side());
-    //     }
-    //     else {
-    //         calc_emf_edges<1, 2>(ei, ej, cell, ii, jj, kk);
-    //         // Update B3 using e1,e2
-    //         return b_view.value() -
-    //                dt * step * curl_e(3, ei, ej, cell, coord.side());
-    //     }
-    // };
+        if constexpr (nhat == 1) {
+            calc_emf_edges<2, 3>(ei, ej, cell, ii, jj, kk);
+            // Update B1 using e2,e3
+            return b_view.value() -
+                   dt * step * curl_e(1, ei, ej, cell, coord.side());
+        }
+        else if constexpr (nhat == 2) {
+            calc_emf_edges<3, 1>(ei, ej, cell, ii, jj, kk);
+            // Update B2 using e3,e1
+            return b_view.value() -
+                   dt * step * curl_e(2, ei, ej, cell, coord.side());
+        }
+        else {
+            calc_emf_edges<1, 2>(ei, ej, cell, ii, jj, kk);
+            // Update B3 using e1,e2
+            return b_view.value() -
+                   dt * step * curl_e(3, ei, ej, cell, coord.side());
+        }
+    };
 
     // Transform using stencil view
-    // b_stag.contract(radius).stencil_transform(magnetic_update, policy);
+    b_stag.contract(radius).stencil_transform(magnetic_update, policy);
 }
 
 template <int dim>

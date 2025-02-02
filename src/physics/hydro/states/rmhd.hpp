@@ -25,6 +25,7 @@
 #include "core/types/maybe.hpp"     // for Maybe
 #include "core/types/ndarray.hpp"   // for ndarray
 #include "geometry/mesh.hpp"        // for Mesh
+#include "physics/hydro/schemes/contrainted_transport.hpp"   // for anyPrimitive
 #include "physics/hydro/types/generic_structs.hpp"   // for Eigenvals, mag_four_vec
 #include "util/parallel/exec_policy.hpp"             // for ExecutionPolicy
 #include "util/tools/helpers.hpp"                    // for my_min, my_max, ...
