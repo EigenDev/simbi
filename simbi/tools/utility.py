@@ -76,6 +76,9 @@ FIELD_MAP: Dict[str, str] = {
     "ptot": r"$p_{\rm tot}$",
     "sigma": r"$\sigma$",
     "enthalpy_density": r"$w$",
+    "b1": r"$B_1$",
+    "b2": r"$B_2$",
+    "b3": r"$B_3$",
 }
 
 UNITS: Dict[str, str] = {
@@ -121,6 +124,10 @@ class FieldMapper:
         field_type = self._get_field_type(field)
 
         return self._format_by_type(var, field_type, units, normalized)
+
+    def _format_unknown_field(self, field: str) -> str:
+        """Format unknown field"""
+        return f"${field}$"
 
     def _get_field_type(self, field: str) -> FieldType:
         """Determine field type"""

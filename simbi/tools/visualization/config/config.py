@@ -66,6 +66,7 @@ class StyleGroup:
     split_into_subplots: bool = False
     xlabel: str = "x"
     ylabel: str = "y"
+    dpi: int = 300
 
 
 @dataclass

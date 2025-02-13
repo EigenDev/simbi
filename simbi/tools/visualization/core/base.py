@@ -35,25 +35,30 @@ class BasePlotter(ABC):
         if not self.fig or not self.axes:
             raise RuntimeError("Figure and axes must be created")
 
-    def save(self, path: str) -> None:
+    def save(self) -> None:
         """Save figure or animation"""
+        path = self.config['plot'].save_as
         if not self.fig:
             raise RuntimeError("No figure to save")
 
         if hasattr(self, "animation"):
             self.animation.save(
                 f"{path}.mp4",
-                dpi=self.config.style.dpi,
+                dpi=self.config['style'].dpi,
                 progress_callback=lambda i, n: print(
                     f"Saving frame {i} of {n}", end="\r"
                 ),
             )
         else:
+            if self.config['plot'].plot_type == "multidim":
+                path = path + ".png"
+            else:
+                path = path + ".pdf"
             self.fig.savefig(
                 path,
-                dpi=self.config.style.dpi,
+                dpi=self.config['style'].dpi,
                 bbox_inches="tight",
-                transparent=self.config.style.transparent,
+                transparent=self.config['style'].transparent,
             )
 
     def show(self) -> None:

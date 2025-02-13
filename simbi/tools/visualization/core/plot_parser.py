@@ -144,6 +144,7 @@ class PlottingArgumentBuilder:
             ),
             (["--xmax"], {"default": None, "help": "the domain range", "type": float}),
             (["--save-as"], {"default": None, "help": "Save the fig with some name"}),
+            (["--dpi"], {"default": 300, "help": "dpi of the saved fig", "type": int}),
             (
                 ["--kind"],
                 {
@@ -580,6 +581,7 @@ class PlottingArgumentBuilder:
                 kind=args["kind"],
                 powerfit=args["powerfit"],
                 weight=args["weight"],
+                save_as=args["save_as"],
             ),
             "style": StyleGroup(
                 color_maps=args["cmap"],
@@ -604,6 +606,7 @@ class PlottingArgumentBuilder:
                 semilogy=args["semilogy"],
                 bbox_kind=args["bbox_kind"],
                 transparent=args["transparent"],
+                dpi=args["dpi"],
                 # extra_args=args.get("extra_args"),
                 font_color=args["font_color"],
                 show_colorbar=args["cbar"],

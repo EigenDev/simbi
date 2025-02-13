@@ -65,7 +65,10 @@ class AnimationMixin:
         setup_name = self.config["plot"].setup
         title = rf"{setup_name} t = {time:.1f}"
         if setup["is_cartesian"] or self.config['multidim'].slice_along:
-            self.axes.set_title(title)
+            if isinstance(self.axes, list):
+                self.axes[0].set_title(title)
+            else:
+                self.axes.set_title(title)
         else:
             kwargs = {
                 "y": 0.95 if setup["x2max"] == np.pi else 0.8,
@@ -89,7 +92,7 @@ class AnimationMixin:
                 mesh[f"{self.config['multidim'].slice_along}v"],
                 setup[f"{self.config['multidim'].slice_along}_cell_spacing"],
             )
-            sliced_var = self.get_slice_data(var, mesh)
+            sliced_var = self.get_slice_data(var, mesh, setup)
             self.frames[idx].set_data(x, sliced_var)
         else:
             # vmin, vmax = np.nanmin(var), np.nanmax(var)
@@ -99,7 +102,6 @@ class AnimationMixin:
                 #     drawing.norm = mcolors.LogNorm(vmin=vmin, vmax=vmax)
                 # else:
                 #     drawing.norm = mcolors.Normalize(vmin=vmin, vmax=vmax)
-                print(drawing)
                 drawing.set_array(var.ravel())
 
 
@@ -152,8 +154,8 @@ class CoordinatesMixin:
         self, mesh: dict[str, NDArray[np.float64]], setup: dict[str, Any]
     ) -> tuple:
         """Get indices for slice through higher dimensions"""
-        for xkcoord in map(float, self.config["plot"].coords["xk"].split(",")):
-            for xjcoord in map(float, self.config["plot"].coords["xj"].split(",")):
+        for xkcoord in map(float, self.config["multidim"].coords["xk"].split(",")):
+            for xjcoord in map(float, self.config["multidim"].coords["xj"].split(",")):
                 if setup["coord_system"] == "spherical":
                     xjcoord = np.deg2rad(xjcoord)
                     xkcoord = np.deg2rad(xkcoord)
