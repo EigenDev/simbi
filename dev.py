@@ -163,7 +163,7 @@ def parse_the_arguments(
     build_parser.add_argument(
         "--dev-arch",
         type=int,
-        default=86,
+        default=0,
         help="SM architecture specification for gpu compilation")
     build_parser.add_argument(
         "--verbose",
