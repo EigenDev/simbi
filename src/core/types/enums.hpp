@@ -81,7 +81,7 @@ namespace simbi {
         CHARGES,
     };
 
-    enum class BlkAx {
+    enum class BlockAx {
         K,
         J,
         I

@@ -56,7 +56,6 @@ namespace simbi {
         simbi::Geometry geometry;
         simbi::Cellspacing x1_cell_spacing, x2_cell_spacing, x3_cell_spacing;
         std::string data_directory;
-        ndarray<real> bstag1, bstag2, bstag3;
         ndarray<bool> object_pos;
         bool using_fourvelocity;
         std::string hydro_source_lib, gravity_source_lib, boundary_source_lib;
@@ -74,12 +73,13 @@ namespace simbi {
         ndarray<simbi::BoundaryCondition> bcs;
         ndarray<int> troubled_cells;
         luint blockSize, checkpoint_zones;
-        std::vector<std::vector<real>> bfield;
 
         luint sx, sy, sz;
         luint nxv, nyv, nzv, nxe, nye, nze, nv;
-        ExecutionPolicy<> fullPolicy, activePolicy, xvertexPolicy,
-            yvertexPolicy, zvertexPolicy;
+        ExecutionPolicy<> fullPolicy, activePolicy;
+        ExecutionPolicy<> xvertexPolicy, yvertexPolicy, zvertexPolicy;
+        ExecutionPolicy<> fullxvertexPolicy, fullyvertexPolicy,
+            fullzvertexPolicy;
 
         //=========================== GPU Threads Per Dimension
         std::string readGpuEnvVar(const std::string& key) const
@@ -122,11 +122,6 @@ namespace simbi {
         void define_chkpt_idx(int chkpt_idx)
         {
             init_chkpt_idx = chkpt_idx + (chkpt_idx > 0);
-        }
-
-        void deallocate_staggered_field()
-        {
-            std::vector<std::vector<real>>().swap(bfield);
         }
 
         void deallocate_state()
@@ -196,24 +191,49 @@ namespace simbi {
             const size_t shBlockBytes =
                 shBlockSpace * sizeof(P) * global::on_sm;
 
-            const simbiStream_t stream = nullptr;
-            fullPolicy                 = ExecutionPolicy(
+            constexpr auto nvertex_ghosts = 2;
+            const simbiStream_t stream    = nullptr;
+
+            fullPolicy = ExecutionPolicy(
                 {nx, ny, nz},
                 {xblockdim, yblockdim, zblockdim},
                 {0, 0, 0},   // strides
                 {.sharedMemBytes = shBlockBytes,
-                                 .streams        = {stream},
-                                 .devices        = {0}}
-            );
-            activePolicy = ExecutionPolicy(
-                {xag, yag, zag},
-                {xblockdim, yblockdim, zblockdim},
-                {sx, sy, sz},
-                {.sharedMemBytes = shBlockBytes,
                  .streams        = {stream},
                  .devices        = {0}}
-
             );
+            fullxvertexPolicy = ExecutionPolicy(
+                {nxv, yag + nvertex_ghosts, zag + nvertex_ghosts},
+                {xblockdim, yblockdim, zblockdim},
+                {0, 0, 0},
+                {.sharedMemBytes = 0, .streams = {stream}, .devices = {0}}
+            );
+            fullyvertexPolicy = ExecutionPolicy(
+                {xag + nvertex_ghosts, nyv, zag + nvertex_ghosts},
+                {xblockdim, yblockdim, zblockdim},
+                {0, 0, 0},
+                {.sharedMemBytes = 0, .streams = {stream}, .devices = {0}}
+            );
+            fullzvertexPolicy = ExecutionPolicy(
+                {xag + nvertex_ghosts, yag + nvertex_ghosts, nzv},
+                {xblockdim, yblockdim, zblockdim},
+                {0, 0, 0},
+                {.sharedMemBytes = 0, .streams = {stream}, .devices = {0}}
+            );
+            activePolicy = fullPolicy.contract(radius);
+            // xvertexPolicy = fullxvertexPolicy.contract({0, 1, 1});
+            // yvertexPolicy = fullyvertexPolicy.contract({1, 0, 1});
+            // zvertexPolicy = fullzvertexPolicy.contract({1, 1, 0});
+
+            // activePolicy = ExecutionPolicy(
+            //     {xag, yag, zag},
+            //     {xblockdim, yblockdim, zblockdim},
+            //     {sx, sy, sz},
+            //     {.sharedMemBytes = shBlockBytes,
+            //      .streams        = {stream},
+            //      .devices        = {0}}
+
+            // );
             xvertexPolicy = ExecutionPolicy(
                 {nxv, yag, zag},
                 {xblockdim, yblockdim, zblockdim},
@@ -460,9 +480,6 @@ namespace simbi {
               x2_cell_spacing(str2cell.at(init_conditions.x2_cell_spacing)),
               x3_cell_spacing(str2cell.at(init_conditions.x3_cell_spacing)),
               data_directory(init_conditions.data_directory),
-              bstag1(std::move(init_conditions.bfield[0])),
-              bstag2(std::move(init_conditions.bfield[1])),
-              bstag3(std::move(init_conditions.bfield[2])),
               object_pos(std::move(init_conditions.object_cells)),
               using_fourvelocity(
                   global::VelocityType == global::Velocity::FourVelocity
@@ -491,9 +508,9 @@ namespace simbi {
             nxv            = xag + 1;
             nyv            = yag + 1;
             nzv            = zag + 1;
-            nxe            = xag + nhalos;
-            nye            = yag + nhalos;
-            nze            = zag + nhalos;
+            nxe            = xag + 2;
+            nye            = yag + 2;
+            nze            = zag + 2;
 
             nv           = nxv * nyv * nzv;
             idx_active   = pcm ? 1 : 2;
@@ -507,8 +524,6 @@ namespace simbi {
                 dx1 = (x1[nxv - 1] - x1[0]) / (nxv - 1);
             }
             invdx1 = 1.0 / dx1;
-
-            bfield = std::move(init_conditions.bfield);
 
             if (ny > 1) {   // 2D check
                 x2min = x2[0];

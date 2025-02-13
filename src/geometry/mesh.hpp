@@ -328,10 +328,16 @@ namespace simbi {
         alignas(32) real normals[DimensionTraits<dim>::normal_count];
         alignas(32) real widths[DimensionTraits<dim>::width_count];
         real dV, x1mean, x2mean, x3mean;
+        Geometry geometry;
         static constexpr real POLAR_TOL = 1.e-10;
 
         DUAL CellParams(const child_t& parent)
-            : parent(parent), dV(0.0), x1mean(0.0), x2mean(0.0), x3mean(0.0)
+            : parent(parent),
+              dV(0.0),
+              x1mean(0.0),
+              x2mean(0.0),
+              x3mean(0.0),
+              geometry(parent.derived().geometry)
         {
         }
 

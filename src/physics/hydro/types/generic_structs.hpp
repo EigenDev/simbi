@@ -27,8 +27,13 @@
 #include <vector>
 
 namespace simbi {
-    template <Regime R>
-    concept MHD = R == Regime::RMHD;
+    namespace sim_type {
+        template <Regime R>
+        concept MHD = R == Regime::RMHD;
+
+        template <Regime R>
+        concept Relativistic = R == Regime::SRHD || R == Regime::RMHD;
+    }   // namespace sim_type
 
     template <typename T>
     concept VectorLike = requires(T t) {
@@ -115,7 +120,7 @@ namespace simbi {
 
                 // Copy vectors
                 std::copy_n(velocity.data(), Dims, vals_ + Offsets::velocity);
-                if constexpr (R == Regime::RMHD) {
+                if constexpr (sim_type::MHD<R>) {
                     std::copy_n(bfield.data(), 3, vals_ + Offsets::bfield);
                 }
             }
@@ -217,68 +222,71 @@ namespace simbi {
 
             // generic accessors
             // Magnetic field for MHD runs
-            DUAL const auto bfield() const
+            DUAL auto bfield() const
             {
-                // if constexpr (R == Regime::RMHD) {
-                //     return magnetic_vector_view_t(vals_ + Offsets::bfield, 3)
-                //         .cache();
-                // }
-                // else {
-                return magnetic_vector_t<real, 3>{0.0, 0.0, 0.0};
-                // }
+                if constexpr (sim_type::MHD<R>) {
+                    return const_magnetic_vector_view_t<real, 3>(
+                        vals_ + Offsets::bfield
+                    );
+                }
+                else {
+                    static const ZeroMagneticVectorView zero_view;
+                    return zero_view;
+                    // return magnetic_vector_t<real, 3>{0.0, 0.0, 0.0};
+                }
             }
 
-            DUAL auto& bfield()
-                requires MHD<R>
+            DUAL auto bfield()
+                requires sim_type::MHD<R>
             {
                 return magnetic_vector_view_t<real, 3>(vals_ + Offsets::bfield);
             }
 
             // Individual magnetic field component
             DUAL real& b1()
-                requires MHD<R>
+                requires sim_type::MHD<R>
             {
                 return vals_[Offsets::b1];
             }
 
             DUAL real& b2()
-                requires MHD<R>
+                requires sim_type::MHD<R>
             {
                 return vals_[Offsets::b2];
             }
 
             DUAL real& b3()
-                requires MHD<R>
+                requires sim_type::MHD<R>
             {
                 return vals_[Offsets::b3];
             }
 
             DUAL const real& b1() const
-                requires MHD<R>
+                requires sim_type::MHD<R>
             {
                 return vals_[Offsets::b1];
             }
 
             DUAL const real& b2() const
-                requires MHD<R>
+                requires sim_type::MHD<R>
             {
                 return vals_[Offsets::b2];
             }
 
             DUAL const real& b3() const
-                requires MHD<R>
+                requires sim_type::MHD<R>
             {
                 return vals_[Offsets::b3];
             }
 
             DUAL const real& bcomponent(const luint nhat) const
-                requires MHD<R>
+                requires sim_type::MHD<R>
             {
                 return (nhat == 1) ? b1() : (nhat == 2) ? b2() : b3();
             }
 
             DUAL real& bcomponent(const luint nhat)
-                requires MHD<R>
+                requires sim_type::MHD<R>
             {
                 return (nhat == 1) ? b1() : (nhat == 2) ? b2() : b3();
             }
@@ -295,6 +303,26 @@ namespace simbi {
                     std::cout << vals_[i] << " ";
                 }
                 std::cout << std::endl;
+            }
+
+            DUAL bool is_valid() const
+            {
+                for (luint i = 0; i < nmem; i++) {
+                    if (std::isnan(vals_[i])) {
+                        return false;
+                    }
+                }
+                return true;
+            }
+
+            // overload the ostream operator
+            DUAL friend std::ostream&
+            operator<<(std::ostream& os, const anyHydro& hydro)
+            {
+                for (luint i = 0; i < nmem; i++) {
+                    os << hydro.vals_[i] << " ";
+                }
+                return os;
             }
 
           protected:
@@ -434,20 +462,20 @@ namespace simbi {
         }
 
         DUAL real magnetic_energy() const
-            requires MHD<R>
+            requires sim_type::MHD<R>
         {
             return 0.5 * bfield().dot(bfield());
         }
 
         DUAL real magnetic_magnitude_squared() const
-            requires MHD<R>
+            requires sim_type::MHD<R>
         {
             return bfield().dot(bfield());
         }
 
         DUAL real total_energy() const
         {
-            if constexpr (R == Regime::RMHD || R == Regime::SRHD) {
+            if constexpr (sim_type::Relativistic<R>) {
                 return nrg() + dens();
             }
             else {
@@ -455,55 +483,9 @@ namespace simbi {
             }
         }
 
-        // override the + and - operators to ignore
-        // the magnetic field componeents if detecting an MHD
-        // run
-        DUAL anyConserved<Dims, R> operator-(const anyConserved<Dims, R>& other
-        ) const
-        {
-            if constexpr (R == Regime::RMHD) {
-                return {
-                  dens() - other.dens(),
-                  momentum() - other.momentum(),
-                  nrg() - other.nrg(),
-                  chi() - other.chi(),
-                  bfield()
-                };
-            }
-            else {
-                return anyConserved<Dims, R>{
-                  dens() - other.dens(),
-                  momentum() - other.momentum(),
-                  nrg() - other.nrg(),
-                  chi() - other.chi()
-                };
-            }
-        }
-
-        DUAL anyConserved<Dims, R> operator+(const anyConserved<Dims, R>& other
-        ) const
-        {
-            if constexpr (R == Regime::RMHD) {
-                return {
-                  dens() + other.dens(),
-                  momentum() + other.momentum(),
-                  nrg() + other.nrg(),
-                  chi() + other.chi(),
-                  bfield()
-                };
-            }
-            else {
-                return anyConserved<Dims, R>{
-                  dens() + other.dens(),
-                  momentum() + other.momentum(),
-                  nrg() + other.nrg(),
-                  chi() + other.chi()
-                };
-            }
-        }
-
-        DUAL anyConserved<Dims, R> operator+=(const anyConserved<Dims, R>& other
-        )
+        DUAL anyConserved<Dims, R>
+        increment_gas_terms(const anyConserved<Dims, R>& other)
+            requires sim_type::MHD<R>
         {
             dens() += other.dens();
             momentum() += other.momentum();
@@ -512,8 +494,9 @@ namespace simbi {
             return *this;
         }
 
-        DUAL anyConserved<Dims, R> operator-=(const anyConserved<Dims, R>& other
-        )
+        DUAL anyConserved<Dims, R>
+        decrement_gas_terms(const anyConserved<Dims, R>& other)
+            requires sim_type::MHD<R>
         {
             dens() -= other.dens();
             momentum() -= other.momentum();
@@ -525,15 +508,40 @@ namespace simbi {
         // in MHD runs, the magnetic componeents are actually the EMF fluxes
         // so we add a method to get the electric field which is simply - nhat x
         // F
-        DUAL auto calc_electric_field(const unit_vector_t<Dims>& nhat) const
-            requires MHD<R>
+        DUAL auto calc_electric_field(
+            const unit_vector_t<Dims>& nhat,
+            const luint ehat = 1
+        )
+            requires sim_type::MHD<R>
         {
+            // since the flux vector magnetic field components are actually
+            // the electric field components, but in a different order, we
+            // we compute the cross product with the unit vector direction
+            // and store it back into the magnetic field for later electric
+            // field retrieval
             if constexpr (Dims == 3) {
-                return -bfield().cross(nhat);
+                const auto efield = -nhat.cross(bfield());
+                // if (ehat == 1) {
+                //     std::cout << "Bfield: " << bfield() << std::endl;
+                //     std::cout << "Efield: " << efield << std::endl;
+                //     std::cout << "========================" << std::endl;
+                // }
+
+                // std::cin.get();
+                this->b1() = efield[0];
+                this->b2() = efield[1];
+                this->b3() = efield[2];
             }
-            else {
-                return magnetic_vector_t<real, 3>{0.0, 0.0, 0.0};
-            }
+        }
+
+        DUAL auto ecomponent(const luint nhat) const
+            requires sim_type::MHD<R>
+        {
+            // when calling this function in the conserved_t
+            // struct, we are actually just grabbing the electric
+            // field components computed from the Riemann problem
+            // so we just return the magnetic field components
+            return this->bcomponent(nhat);
         }
     };
 
@@ -660,18 +668,6 @@ namespace simbi {
         }
 
         // Physics
-        // EMF calculations for MHD runs
-        DUAL auto calc_emf(const anyPrimitive<Dims, R>& prim) const
-            requires MHD<R>
-        {
-            if constexpr (Dims == 3) {
-                return prim.velocity().cross(bfield());
-            }
-            else {
-                return magnetic_vector_t<real, 3>{0.0, 0.0, 0.0};
-            }
-        }
-
         DUAL general_vector_t<real, Dims> spatial_momentum(const real gamma
         ) const
         {
@@ -695,14 +691,15 @@ namespace simbi {
         DUAL auto calc_magnetic_four_vector() const
         {
             if constexpr (R != Regime::RMHD) {
-                return magnetic_four_vector_t{0.0, 0.0, 0.0, 0.0};
+                static const ZeroMagneticFourVectorView zero_view;
+                return zero_view.cache();
             }
             return bfield().as_fourvec(velocity(), lorentz_factor());
         }
 
         DUAL constexpr real lorentz_factor() const
         {
-            if constexpr (R == Regime::RMHD || R == Regime::SRHD) {
+            if constexpr (sim_type::Relativistic<R>) {
                 if constexpr (global::using_four_velocity) {
                     return std::sqrt(1.0 + vsquared());
                 }
@@ -715,7 +712,7 @@ namespace simbi {
 
         DUAL constexpr real lorentz_factor_squared() const
         {
-            if constexpr (R == Regime::RMHD || R == Regime::SRHD) {
+            if constexpr (sim_type::Relativistic<R>) {
                 if constexpr (global::using_four_velocity) {
                     return 1.0 + vsquared();
                 }
@@ -728,7 +725,7 @@ namespace simbi {
 
         DUAL constexpr real enthalpy(const real gamma) const
         {
-            if constexpr (R == Regime::RMHD || R == Regime::SRHD) {
+            if constexpr (sim_type::Relativistic<R>) {
                 return 1.0 + gamma * press() / (rho() * (gamma - 1.0));
             }
             else {
@@ -745,7 +742,7 @@ namespace simbi {
 
         DUAL constexpr real vdotb() const
         {
-            if constexpr (R == Regime::RMHD) {
+            if constexpr (sim_type::MHD<R>) {
                 return velocity().dot(bfield());
             }
             else {
@@ -755,8 +752,8 @@ namespace simbi {
 
         DUAL constexpr real total_pressure() const
         {
-            if constexpr (R == Regime::RMHD) {
-                return press() + 0.5 * bsquared();
+            if constexpr (sim_type::MHD<R>) {
+                return press() + bpressure();
             }
             else {
                 return press();
@@ -765,7 +762,7 @@ namespace simbi {
 
         DUAL constexpr real bpressure() const
         {
-            if constexpr (R == Regime::RMHD) {
+            if constexpr (sim_type::MHD<R>) {
                 return 0.5 * bsquared();
             }
             else {
@@ -775,7 +772,7 @@ namespace simbi {
 
         DUAL constexpr real enthalpy_density(const real gamma) const
         {
-            if constexpr (R == Regime::RMHD) {
+            if constexpr (sim_type::MHD<R>) {
                 return rho() * enthalpy(gamma) + 2.0 * bpressure();
             }
             else {
@@ -800,18 +797,36 @@ namespace simbi {
             else {
                 return rho() * lorentz_factor_squared() * enthalpy(gamma) -
                        press() - rho() * lorentz_factor() +
-                       0.5 * (bsquared() + bsquared() +
-                              vsquared() * bsquared() - vdotb() * vdotb());
+                       0.5 * (bsquared() + vsquared() * bsquared() -
+                              vdotb() * vdotb());
             }
         }
 
         DUAL constexpr auto pkdelta(const unit_vector_t<Dims>& nhat) const
         {
-            if constexpr (R == Regime::RMHD) {
+            if constexpr (sim_type::MHD<R>) {
                 return nhat * total_pressure();
             }
             else {
                 return nhat * press();
+            }
+        }
+
+        DUAL constexpr auto electric_field() const
+            requires sim_type::MHD<R>
+        {
+            return -velocity().cross(bfield());
+        }
+
+        DUAL constexpr real ecomponent(const luint nhat) const
+            requires sim_type::MHD<R>
+        {
+            // Convert views to vectors before operations
+            if constexpr (Dims == 3) {
+                return (electric_field())[nhat - 1];
+            }
+            else {
+                return 0.0;
             }
         }
 
@@ -830,9 +845,9 @@ namespace simbi {
         DUAL anyConserved<Dims, R>
         to_flux(const real gamma, const unit_vector_t<Dims>& nhat) const
         {
-            auto vnorm = velocity().dot(nhat);
-            auto mom   = spatial_momentum(gamma);
-            auto mnorm = mom.dot(nhat);
+            const auto vnorm = velocity().dot(nhat);
+            const auto mom   = spatial_momentum(gamma);
+            const auto mnorm = mom.dot(nhat);
             if constexpr (R == Regime::NEWTONIAN) {
                 return {
                   mnorm,
@@ -842,7 +857,7 @@ namespace simbi {
                 };
             }
             else if constexpr (R == Regime::SRHD) {
-                auto d = labframe_density();
+                const auto d = labframe_density();
                 return {
                   d * vnorm,
                   mom * vnorm + pkdelta(nhat),
@@ -852,16 +867,15 @@ namespace simbi {
             }
             else {
                 if constexpr (Dims == 3) {
-                    auto bnorm     = bfield().dot(nhat);
-                    auto induction = -nhat.cross(velocity().cross(bfield()));
-                    auto bmu =
+                    const auto bnorm     = bfield().dot(nhat);
+                    const auto induction = nhat.cross(electric_field());
+                    const auto bmu =
                         bfield().as_fourvec(velocity(), lorentz_factor());
-                    auto bmu_contr =
-                        bmu.spatial_part() * bnorm / lorentz_factor();
-                    auto d = labframe_density();
+                    const auto d = labframe_density();
                     return {
                       d * vnorm,
-                      mom * vnorm + pkdelta(nhat) - bmu_contr,
+                      mom * vnorm + pkdelta(nhat) -
+                          bmu.spatial_part() * bnorm / lorentz_factor(),
                       mnorm - vnorm * d,
                       chi() * d * vnorm,
                       induction.as_magnetic()
@@ -916,12 +930,12 @@ namespace simbi {
                     oss << "[" << ii << ", " << jj << ", " << kk << "]\n";
                 }
             }
-            oss << "Density: " << rho() << "\n";
-            oss << "Pressure: " << press() << "\n";
-            oss << "Velocity: " << velocity() << "\n";
-            if constexpr (R == Regime::RMHD) {
-                oss << "Magnetic Field: " << bfield() << "\n";
-            }
+            // oss << "Density: " << rho() << "\n";
+            // oss << "Pressure: " << press() << "\n";
+            // oss << "Velocity: " << velocity() << "\n";
+            // if constexpr (R == Regime::RMHD) {
+            //     oss << "Magnetic Field: " << bfield() << "\n";
+            // }
             table.postError(oss.str());
         }
     };
@@ -1069,5 +1083,17 @@ struct is_3D_primitive<simbi::anyPrimitive<3, simbi::Regime::NEWTONIAN>>
 template <>
 struct is_3D_primitive<simbi::anyPrimitive<3, simbi::Regime::SRHD>>
     : std::true_type {
+};
+
+// Partial specialization for anyPrimitive
+template <size_type Dims, simbi::Regime R>
+struct is_primitive<simbi::anyPrimitive<Dims, R>> {
+    static const bool value = true;
+};
+
+// Partial specialization for anyConserved
+template <size_type Dims, simbi::Regime R>
+struct is_conserved<simbi::anyConserved<Dims, R>> {
+    static const bool value = true;
 };
 #endif

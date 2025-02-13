@@ -1080,10 +1080,10 @@ simbi::ndarray<DT, dim>::transform_with(
 //         parallel_for(policy, [=] DEV(size_type idx) {
 //             // Get 3D indices
 //             const size_type kk =
-//                 axid<dim, BlkAx::K>(idx, nx, ny) + radius * (dim > 2);
+//                 axid<dim, BlockAx::K>(idx, nx, ny) + radius * (dim > 2);
 //             const size_type jj =
-//                 axid<dim, BlkAx::J>(idx, nx, ny, kk) + radius * (dim > 1);
-//             const size_type ii = axid<dim, BlkAx::I>(idx, nx, ny, kk) +
+//                 axid<dim, BlockAx::J>(idx, nx, ny, kk) + radius * (dim > 1);
+//             const size_type ii = axid<dim, BlockAx::I>(idx, nx, ny, kk) +
 //             radius;
 
 //             // Skip ghost cells
@@ -1102,10 +1102,10 @@ simbi::ndarray<DT, dim>::transform_with(
 //     else {
 //         parallel_for(policy, [&](size_type idx) {
 //             const size_type kk =
-//                 axid<dim, BlkAx::K>(idx, nx, ny) + radius * (dim > 2);
+//                 axid<dim, BlockAx::K>(idx, nx, ny) + radius * (dim > 2);
 //             const size_type jj =
-//                 axid<dim, BlkAx::J>(idx, nx, ny, kk) + radius * (dim > 1);
-//             const size_type ii = axid<dim, BlkAx::I>(idx, nx, ny, kk) +
+//                 axid<dim, BlockAx::J>(idx, nx, ny, kk) + radius * (dim > 1);
+//             const size_type ii = axid<dim, BlockAx::I>(idx, nx, ny, kk) +
 //             radius;
 
 //             stencil_view<T>
@@ -1146,9 +1146,9 @@ void simbi::ndarray<DT, dim>::transform_stencil_with(
 
         parallel_for(policy, [=] DEV(size_type idx) {
             // Get 3D indices
-            const size_type kk = axid<dim, BlkAx::K>(idx, nx, ny);
-            const size_type jj = axid<dim, BlkAx::J>(idx, nx, ny, kk);
-            const size_type ii = axid<dim, BlkAx::I>(idx, nx, ny, kk);
+            const size_type kk = axid<dim, BlockAx::K>(idx, nx, ny);
+            const size_type jj = axid<dim, BlockAx::J>(idx, nx, ny, kk);
+            const size_type ii = axid<dim, BlockAx::I>(idx, nx, ny, kk);
 
             // Skip ghost cells
             if (ii >= nx || jj >= ny || kk >= nz) {
@@ -1177,9 +1177,9 @@ void simbi::ndarray<DT, dim>::transform_stencil_with(
     }
     else {
         parallel_for(policy, [&](size_type idx) {
-            const size_type kk = axid<dim, BlkAx::K>(idx, nx, ny);
-            const size_type jj = axid<dim, BlkAx::J>(idx, nx, ny, kk);
-            const size_type ii = axid<dim, BlkAx::I>(idx, nx, ny, kk);
+            const size_type kk = axid<dim, BlockAx::K>(idx, nx, ny);
+            const size_type jj = axid<dim, BlockAx::J>(idx, nx, ny, kk);
+            const size_type ii = axid<dim, BlockAx::I>(idx, nx, ny, kk);
 
             auto stencil_views = std::make_tuple(
                 stencil_vew<typename array_value_type<MatchingStencil>::type>(
@@ -1223,9 +1223,9 @@ void simbi::ndarray<DT, dim>::apply_to_boundaries(
 
         parallel_for(policy, [=, this] DEV(size_type idx) {
             // Calculate 3D indices
-            const size_type kk = axid<dim, BlkAx::K>(idx, nx, ny);
-            const size_type jj = axid<dim, BlkAx::J>(idx, nx, ny, kk);
-            const size_type ii = axid<dim, BlkAx::I>(idx, nx, ny, kk);
+            const size_type kk = axid<dim, BlockAx::K>(idx, nx, ny);
+            const size_type jj = axid<dim, BlockAx::J>(idx, nx, ny, kk);
+            const size_type ii = axid<dim, BlockAx::I>(idx, nx, ny, kk);
 
             // Check if we're on any boundary
             const bool is_boundary =
@@ -1244,9 +1244,9 @@ void simbi::ndarray<DT, dim>::apply_to_boundaries(
     else {
         // CPU version
         parallel_for(policy, [&](size_type idx) {
-            const size_type kk = axid<dim, BlkAx::K>(idx, nx, ny);
-            const size_type jj = axid<dim, BlkAx::J>(idx, nx, ny, kk);
-            const size_type ii = axid<dim, BlkAx::I>(idx, nx, ny, kk);
+            const size_type kk = axid<dim, BlockAx::K>(idx, nx, ny);
+            const size_type jj = axid<dim, BlockAx::J>(idx, nx, ny, kk);
+            const size_type ii = axid<dim, BlockAx::I>(idx, nx, ny, kk);
 
             const bool is_boundary =
                 is_boundary_point(ii, jj, kk, nx, ny, nz, radius);
@@ -1281,9 +1281,9 @@ void simbi::ndarray<DT, dim>::apply_to_corners(
 
         parallel_for(policy, [=, this] DEV(size_type idx) {
             // Calculate 3D indices
-            const size_type kk = axid<dim, BlkAx::K>(idx, nx, ny);
-            const size_type jj = axid<dim, BlkAx::J>(idx, nx, ny, kk);
-            const size_type ii = axid<dim, BlkAx::I>(idx, nx, ny, kk);
+            const size_type kk = axid<dim, BlockAx::K>(idx, nx, ny);
+            const size_type jj = axid<dim, BlockAx::J>(idx, nx, ny, kk);
+            const size_type ii = axid<dim, BlockAx::I>(idx, nx, ny, kk);
 
             // Check if we're on any boundary
             if (!is_corner_point(ii, jj, kk, nx, ny, nz, radius)) {
@@ -1313,9 +1313,9 @@ void simbi::ndarray<DT, dim>::apply_to_corners(
     else {
         // CPU version
         parallel_for(policy, [&](size_type idx) {
-            const size_type kk = axid<dim, BlkAx::K>(idx, nx, ny);
-            const size_type jj = axid<dim, BlkAx::J>(idx, nx, ny, kk);
-            const size_type ii = axid<dim, BlkAx::I>(idx, nx, ny, kk);
+            const size_type kk = axid<dim, BlockAx::K>(idx, nx, ny);
+            const size_type jj = axid<dim, BlockAx::J>(idx, nx, ny, kk);
+            const size_type ii = axid<dim, BlockAx::I>(idx, nx, ny, kk);
 
             if (!is_corner_point(ii, jj, kk, nx, ny, nz, radius)) {
                 return;

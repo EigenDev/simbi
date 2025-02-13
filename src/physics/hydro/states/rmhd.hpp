@@ -25,7 +25,7 @@
 #include "core/types/maybe.hpp"     // for Maybe
 #include "core/types/ndarray.hpp"   // for ndarray
 #include "geometry/mesh.hpp"        // for Mesh
-#include "physics/hydro/schemes/contrainted_transport.hpp"   // for anyPrimitive
+#include "physics/hydro/schemes/ct/ct_calculator.hpp"   // for anyPrimitive
 #include "physics/hydro/types/generic_structs.hpp"   // for Eigenvals, mag_four_vec
 #include "util/parallel/exec_policy.hpp"             // for ExecutionPolicy
 #include "util/tools/helpers.hpp"                    // for my_min, my_max, ...
@@ -52,6 +52,10 @@ namespace simbi {
         using conserved_t = anyConserved<dim, Regime::RMHD>;
         using eigenvals_t = Eigenvals<dim, Regime::RMHD>;
         using function_t  = typename helpers::real_func<dim>::type;
+        using ct_scheme_t = std::conditional_t<
+            comp_ct_type == CTTYPE::MdZ,
+            ct::CTMdZ,
+            ct::CTContact>;
 
         // hydrodynamic source functions
         function_t hydro_source;
@@ -92,6 +96,7 @@ namespace simbi {
         ndarray<Maybe<primitive_t>, dim> prims;
         ndarray<conserved_t, dim> cons;
         ndarray<conserved_t, dim> fri, gri, hri;
+        ndarray<real, dim> bstag1, bstag2, bstag3;
         ndarray<real> dt_min;
 
         RMHD();
@@ -105,14 +110,18 @@ namespace simbi {
         /* Methods */
         void cons2prim();
         DEV auto cons2prim(const auto& cons) const;
-        void set_flux_and_fields();
+        void sync_flux_boundaries(const auto& flux_man);
+        void sync_magnetic_boundaries(const auto& bfield_man);
         void riemann_fluxes();
-        void advance();
+        void advance(const auto& man, const auto& bfield_man);
         void advance_conserved();
         void advance_magnetic_fields();
 
         template <int nhat>
-        void update_magnetic_component(const ExecutionPolicy<>& policy);
+        void update_magnetic_component(
+            const ExecutionPolicy<>& policy,
+            const auto& prim_region
+        );
 
         DUAL auto
         calc_max_wave_speeds(const auto& prims, const luint nhat) const;
@@ -122,8 +131,6 @@ namespace simbi {
             const auto& primsR,
             const luint nhat
         ) const;
-
-        DUAL conserved_t prims2cons(const auto& prims) const;
 
         DUAL conserved_t calc_hlle_flux(
             const auto& prL,
@@ -178,8 +185,6 @@ namespace simbi {
         {
             SINGLE(helpers::hybrid_set_riemann_solver, this);
         }
-
-        DUAL conserved_t prims2flux(const auto& prims, const luint nhat) const;
 
         template <TIMESTEP_TYPE dt_type = TIMESTEP_TYPE::ADAPTIVE>
         void adapt_dt();

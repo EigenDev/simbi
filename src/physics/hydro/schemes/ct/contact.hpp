@@ -23,10 +23,13 @@ namespace simbi {
             {
                 // south, north, east, west electric fields
                 // from Riemann fluxes
-                const auto es = fs.ecomponent(nhat);
-                const auto en = fn.ecomponent(nhat);
-                const auto ew = fw.ecomponent(nhat);
-                const auto ee = fe.ecomponent(nhat);
+                const auto es   = fs.ecomponent(nhat);
+                const auto en   = fn.ecomponent(nhat);
+                const auto ew   = fw.ecomponent(nhat);
+                const auto ee   = fe.ecomponent(nhat);
+                const auto eavg = static_cast<real>(0.25) * (es + en + ew + ee);
+                const auto one_eighth = static_cast<real>(0.125);
+
                 // j + 1/4
                 const real de_dqjL = [&] {
                     if (fw.dens() > 0.0) {

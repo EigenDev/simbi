@@ -95,6 +95,11 @@ namespace simbi {
             const std::vector<U> strideList
         )
         {
+            // store original grid dimensions
+            this->gridList   = gridList;
+            this->strideList = strideList;
+            this->blockList  = blockList;
+
             // Calculate total zoness
             if (gridList.size() == 1) {
                 nzones = gridList[0];
@@ -222,7 +227,53 @@ namespace simbi {
             return (sz + batch_size - 1) / batch_size;
         }
 
+        ExecutionPolicy contract(size_type radius) const
+        {
+            std::vector<T> newGridSizes;
+            for (auto&& g : gridList) {
+                newGridSizes.push_back(g - 2 * radius * (g > 1));
+            }
+
+            // keep same config
+            ExecutionPolicyConfig config{
+              sharedMemBytes,
+              streams,
+              devices,
+              batch_size,
+              min_elements_per_thread
+            };
+
+            return ExecutionPolicy(newGridSizes, blockList, strideList, config);
+        }
+
+        // similar contraction as before, but now we denote how much we want
+        // to conrtact each dimension
+        ExecutionPolicy contract(const std::vector<T>& radii) const
+        {
+            std::vector<T> newGridSizes;
+            for (size_t ii = 0; ii < gridList.size(); ii++) {
+                newGridSizes.push_back(
+                    gridList[ii] - 2 * radii[ii] * (gridList[ii] > 1)
+                );
+            }
+
+            // keep same config
+            ExecutionPolicyConfig config{
+              sharedMemBytes,
+              streams,
+              devices,
+              batch_size,
+              min_elements_per_thread
+            };
+
+            return ExecutionPolicy(newGridSizes, blockList, strideList, config);
+        }
+
       private:
+        std::vector<T> gridList;
+        std::vector<U> strideList;
+        std::vector<U> blockList;
+
         void init_devices()
         {
             if (devices.empty()) {

@@ -588,7 +588,7 @@ namespace simbi {
             const int side
         );
 
-        template <int dim, BlkAx axis, typename T>
+        template <int dim, BlockAx axis, typename T>
         DUAL T axid(T idx, T ni, T nj, T kk = T(0));
 
         template <typename T>

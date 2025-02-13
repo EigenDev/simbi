@@ -394,8 +394,8 @@ namespace simbi {
                  ye,
                  m2outer,
                  m2inner] DEV(const luint gid) {
-                    const luint jj = axid<2, BlkAx::J>(gid, xag, yag);
-                    const luint ii = axid<2, BlkAx::I>(gid, xag, yag);
+                    const luint jj = axid<2, BlockAx::J>(gid, xag, yag);
+                    const luint ii = axid<2, BlockAx::I>(gid, xag, yag);
 
                     if constexpr (global::on_gpu) {
                         if ((ii >= xag) || (jj >= yag)) {
@@ -655,9 +655,9 @@ namespace simbi {
                  ze,
                  m2inner,
                  m2outer] DEV(const luint gid) {
-                    const luint kk = axid<3, BlkAx::K>(gid, xag, yag);
-                    const luint jj = axid<3, BlkAx::J>(gid, xag, yag, kk);
-                    const luint ii = axid<3, BlkAx::I>(gid, xag, yag, kk);
+                    const luint kk = axid<3, BlockAx::K>(gid, xag, yag);
+                    const luint jj = axid<3, BlockAx::J>(gid, xag, yag, kk);
+                    const luint ii = axid<3, BlockAx::I>(gid, xag, yag, kk);
 
                     if (global::on_gpu) {
                         if ((ii >= xag) || (jj >= yag) ||
@@ -2487,23 +2487,23 @@ namespace simbi {
 #endif
         }
 
-        template <int dim, BlkAx axis, typename T>
+        template <int dim, BlockAx axis, typename T>
         DUAL T axid(T idx, T ni, T nj, T kk)
         {
             if constexpr (dim == 1) {
-                if constexpr (axis != BlkAx::I) {
+                if constexpr (axis != BlockAx::I) {
                     return 0;
                 }
                 return idx;
             }
             else if constexpr (dim == 2) {
-                if constexpr (axis == BlkAx::I) {
+                if constexpr (axis == BlockAx::I) {
                     if constexpr (global::on_gpu) {
                         return blockDim.x * blockIdx.x + threadIdx.x;
                     }
                     return idx % ni;
                 }
-                else if constexpr (axis == BlkAx::J) {
+                else if constexpr (axis == BlockAx::J) {
                     if constexpr (global::on_gpu) {
                         return blockDim.y * blockIdx.y + threadIdx.y;
                     }
@@ -2514,13 +2514,13 @@ namespace simbi {
                 }
             }
             else {
-                if constexpr (axis == BlkAx::I) {
+                if constexpr (axis == BlockAx::I) {
                     if constexpr (global::on_gpu) {
                         return blockDim.x * blockIdx.x + threadIdx.x;
                     }
                     return get_column(idx, ni, nj, kk);
                 }
-                else if constexpr (axis == BlkAx::J) {
+                else if constexpr (axis == BlockAx::J) {
                     if constexpr (global::on_gpu) {
                         return blockDim.y * blockIdx.y + threadIdx.y;
                     }

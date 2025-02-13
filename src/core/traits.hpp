@@ -17,6 +17,8 @@
  */
 #ifndef TRAITS_HPP
 #define TRAITS_HPP
+
+#include "core/types/enums.hpp"   // for Regime
 #include <type_traits>
 
 // template <int dim>
@@ -134,6 +136,22 @@ template <typename Array>
 struct array_raw_type {
     using type = typename std::decay_t<Array>::raw_type;
 };
+
+template <typename T>
+struct is_primitive {
+    static const bool value = false;
+};
+
+template <typename T>
+inline constexpr bool is_primitive_v = is_primitive<T>::value;
+
+template <typename T>
+struct is_conserved {
+    static const bool value = false;
+};
+
+template <typename T>
+inline constexpr bool is_conserved_v = is_conserved<T>::value;
 
 // Solver traits
 // template <typename T>

@@ -278,8 +278,11 @@ namespace simbi {
         }
 
         // cross product
-        template <typename U, VectorType OtherType>
-        DUAL auto cross(const Vector<U, Dims, OtherType>& other) const
+        template <
+            template <typename, size_type, VectorType> class Vec_t,
+            typename U,
+            VectorType OtherType>
+        DUAL auto cross(const Vec_t<U, Dims, OtherType>& other) const
             requires(Dims == 3)
         {
             using result_type = promote_t<T, U>;
@@ -287,8 +290,8 @@ namespace simbi {
                 Type == OtherType ? Type : VectorType::GENERAL;
             return Vector<result_type, Dims, result_vectype>{
               (*this)[1] * other[2] - (*this)[2] * other[1],
-              (*this)[2] * other[1] - (*this)[1] * other[2],
               (*this)[2] * other[0] - (*this)[0] * other[2],
+              (*this)[0] * other[1] - (*this)[1] * other[0]
             };
         }
 
@@ -347,19 +350,30 @@ namespace simbi {
             }
         }
 
-        DUAL constexpr Vector(std::initializer_list<T> values)
-            : VectorOps<T, Dims, Type>{storage_, owned}, storage_{}
+        // DUAL constexpr Vector(std::initializer_list<T> values)
+        //     : VectorOps<T, Dims, Type>{storage_, owned},
+        //       storage_{values.begin(), values.end()}
+        // {
+        //     //  if const T is passed, skip this
+        //     if constexpr (std::is_same_v<T, const T>) {
+        //         this->data_ = storage_;
+        //     }
+        //     else {
+        //         size_type ii = 0;
+        //         for (const auto& value : values) {
+        //             this->data_[ii++] = value;
+        //         }
+        //     }
+        // }
+
+        // Variadic constructor for direct element initialization
+        template <typename... Args>
+        DUAL constexpr Vector(Args... args)
+            requires(sizeof...(Args) == Dims)
+            : VectorOps<T, Dims, Type>{storage_, owned},
+              storage_{static_cast<T>(args)...}
         {
-            // if const T is passed, skip this
-            if constexpr (std::is_same_v<T, const T>) {
-                return;
-            }
-            else {
-                size_type ii = 0;
-                for (const auto& value : values) {
-                    this->data_[ii++] = value;
-                }
-            }
+            this->data_ = storage_;
         }
 
         // construct from raw memory
@@ -429,7 +443,7 @@ namespace simbi {
 
         // Specialized operations for RMHD Magnetic four-vectors
         // get a view of the spatial part of the magnetic four-vector
-        DUAL auto spatial_part()
+        DUAL auto spatial_part() const
             requires MagneticFour<Type>
         {
             return Vector<T, 3, VectorType::MAGNETIC>{this->data_ + 1};
@@ -484,6 +498,21 @@ namespace simbi {
         {
             return Vector<const T, Dims, Type>{this->data_};
         }
+
+        DUAL auto as_fourvec(const auto& vel, const auto lorentz) const
+            requires Magnetic<Type>
+        {
+            const auto vdB = vel.dot(*this);
+            const auto b0  = lorentz * vdB;
+            const auto bs  = (*this) * (1.0 / lorentz) + vel * lorentz * vdB;
+
+            return Vector<const T, 4, VectorType::MAGNETIC_FOUR>{
+              b0,
+              bs[0],
+              bs[1],
+              bs[2]
+            };
+        }
     };
 
     // Specialization helpers
@@ -520,6 +549,34 @@ namespace simbi {
     template <typename T, size_type Dims>
     using const_magnetic_vector_view_t =
         ConstVectorView<T, Dims, VectorType::MAGNETIC>;
+    template <typename T>
+    using const_magnetic_four_vector_view_t =
+        ConstVectorView<T, 4, VectorType::MAGNETIC_FOUR>;
+
+    class ZeroMagneticVectorView : public const_magnetic_vector_view_t<real, 3>
+    {
+      private:
+        static constexpr real zero_storage[3] = {0.0, 0.0, 0.0};
+
+      public:
+        ZeroMagneticVectorView()
+            : const_magnetic_vector_view_t<real, 3>(zero_storage)
+        {
+        }
+    };
+
+    class ZeroMagneticFourVectorView
+        : public const_magnetic_four_vector_view_t<real>
+    {
+      private:
+        static constexpr real zero_storage[4] = {0.0, 0.0, 0.0, 0.0};
+
+      public:
+        ZeroMagneticFourVectorView()
+            : const_magnetic_four_vector_view_t<real>(zero_storage)
+        {
+        }
+    };
 
     // set of unit vectors in the x1, x2, x3 directions
     namespace unit_vectors {

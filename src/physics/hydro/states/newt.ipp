@@ -160,7 +160,7 @@ void Newtonian<dim>::adapt_dt()
         auto dt = INFINITY;
         for (size_type ii = 0; ii < dim; ++ii) {
             auto dx    = cell.dx(ii);
-            auto dt_dx = dx / std::min(speeds[2 * dim], speeds[2 * dim + 1]);
+            auto dt_dx = dx / std::min(speeds[2 * ii], speeds[2 * ii + 1]);
             dt         = std::min<real>(dt, dt_dx);
         }
         return dt;
@@ -597,14 +597,14 @@ void Newtonian<dim>::simulate(
     init_riemann_solver();
 
     boundary_manager<conserved_t, dim> bman;
-    bman.sync_boundaries(fullPolicy, cons, cons.contract(2), bcs);
+    bman.sync_boundaries(fullPolicy, cons, cons.contract(radius), bcs);
     cons2prim();
     adapt_dt();
 
     // Simulate :)
     simbi::detail::logger::with_logger(*this, tend, [&] {
         advance();
-        bman.sync_boundaries(fullPolicy, cons, cons.contract(2), bcs);
+        bman.sync_boundaries(fullPolicy, cons, cons.contract(radius), bcs);
         cons2prim();
         adapt_dt();
 

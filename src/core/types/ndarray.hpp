@@ -21,6 +21,21 @@ namespace simbi {
     template <size_type T>
     using iarray = std::array<lint, T>;
 
+    // overload ostream to print std::array
+    template <typename T, size_type N>
+    std::ostream& operator<<(std::ostream& os, const std::array<T, N>& arr)
+    {
+        os << "[";
+        for (size_type ii = 0; ii < N; ++ii) {
+            os << arr[ii];
+            if (ii < N - 1) {
+                os << ", ";
+            }
+        }
+        os << "]";
+        return os;
+    }
+
     template <typename T, typename Deleter>
     using unique_ptr = util::smart_ptr<T[], Deleter>;
 
@@ -44,16 +59,31 @@ namespace simbi {
         size_type step;
     };
 
-    // Correct index for
     template <size_type Dims>
-    DUAL static size_type corrected_idx(size_type ii)
+    DUAL static auto
+    memory_layout_coordinates(auto idx, const uarray<Dims>& shape)
+        -> uarray<Dims>
     {
+        uarray<Dims> coords;
+        auto stride = 1;
         if constexpr (global::col_major) {
-            return ii;
+            // Column major: shape=(nk,nj,ni)
+            // Want [k,j,i] where i is fastest
+            for (size_type ii = 0; ii < Dims; ++ii) {
+                coords[Dims - 1 - ii] = (idx / stride) % shape[Dims - 1 - ii];
+                stride *= shape[Dims - 1 - ii];
+            }
         }
         else {
-            return -(ii + 1) % Dims;
+            // Row major: shape=(nk,nj,ni)
+            // Want [i,j,k] where i is fastest
+            for (size_type ii = Dims - 1; ii < Dims; --ii) {
+                coords[Dims - 1 - ii] = (idx / stride) % shape[ii];
+                stride *= shape[ii];
+            }
         }
+
+        return coords;
     }
 
     template <typename T, size_type Dims>
@@ -83,14 +113,13 @@ namespace simbi {
         // helper to compute local coordinates from linear index
         DUAL uarray<Dims> get_local_coords(size_type idx) const
         {
-            uarray<Dims> coords;
-            // return the indices as [ii, jj, kk] for both
-            // column major or row major ordering
-            for (size_type ii = 0; ii < Dims; ii++) {
-                coords[ii] = idx % shape_[corrected_idx<Dims>(ii)];
-                idx /= shape_[corrected_idx<Dims>(ii)];
-            }
-            return coords;
+            return memory_layout_coordinates<Dims>(idx, shape_);
+        }
+
+        DUAL uarray<Dims>
+        get_local_coords(size_type idx, const auto shape) const
+        {
+            return memory_layout_coordinates<Dims>(idx, shape);
         }
 
         DUAL static size_type compute_size(const uarray<Dims>& dims)
@@ -109,23 +138,24 @@ namespace simbi {
             uarray<Dims> strides;
 
             if constexpr (global::col_major) {
-                // Column-major layout: leftmost dimension has stride 1
-                strides[0] = 1;
-#pragma unroll
-                for (size_type ii = 1; ii < Dims; ++ii) {
-                    strides[ii] = strides[ii - 1] * dims[ii - 1];
+                // Column major (i,j,k): k fastest
+                strides[Dims - 1] = 1;   // k stride
+                for (size_type ii = Dims - 2; ii >= 0; --ii) {
+                    strides[ii] = strides[ii + 1] * dims[ii + 1];
                 }
+                // Result: strides = {nj*nk, nk, 1}
+                // For (i,j,k) input order
             }
             else {
-                // Row-major layout: rightmost dimension has stride 1
-                strides[Dims - 1] = 1;
-
-// Each dimension's stride is product of all dimensions to its right
-#pragma unroll
-                for (int ii = Dims - 1; ii > 0; --ii) {
-                    strides[ii - 1] = strides[ii] * dims[ii];
+                // Row major (i,j,k): i fastest
+                strides[0] = 1;   // i stride
+                for (size_type ii = 1; ii < Dims; ++ii) {
+                    strides[ii] = strides[ii - 1] * dims[Dims - ii];
                 }
+                // Result: strides = {1, ni, ni*nj}
+                // For (i,j,k) input order
             }
+
             return strides;
         };
 
@@ -159,7 +189,9 @@ namespace simbi {
 
         uarray<Dims> vals;
 
-        collapsable(std::initializer_list<size_type> init)
+        constexpr collapsable() = default;
+
+        constexpr collapsable(std::initializer_list<size_type> init)
         {
             // fill from the back of the initialize list, since we
             // are in general inputting shapes like (nk, nj, ni)
@@ -173,6 +205,14 @@ namespace simbi {
                 vals[i] = *start;
             }
         }
+
+        // accesor to get the value at index
+        constexpr size_type operator[](size_type ii) const { return vals[ii]; }
+
+        // implicit conversion to uarray
+        constexpr operator uarray<Dims>() const { return vals; }
+
+        constexpr ~collapsable() = default;
     };
 
     template <typename T>
@@ -213,11 +253,17 @@ namespace simbi {
         using value_type =
             typename std::conditional_t<is_maybe_v<T>, get_value_type_t<T>, T>;
         DUAL array_view(
+            const ndarray<T, Dims>& source,
             T* data,
             const uarray<Dims>& shape,
             const uarray<Dims>& strides,
             const uarray<Dims>& offsets
         );
+
+        // Allow copying but track source
+        array_view(const array_view&)            = default;
+        array_view& operator=(const array_view&) = default;
+
         DUAL value_type& operator[](size_type ii);
         DUAL value_type& operator[](size_type ii) const;
         template <typename... Indices>
@@ -235,42 +281,65 @@ namespace simbi {
             const DependentViews&... arrays
         );
 
+        DUAL auto source_size() const { return data_.size(); }
+
+        DUAL auto source_shape() const { return source_->shape(); }
+
         // Position-aware element that can do relative indexing
         template <typename DT = T>
         class stencil_view
         {
           public:
             DUAL stencil_view(
-                DT* data,
+                std::span<DT> data,
                 const uarray<Dims>& center_pos,
                 const uarray<Dims>& shape,
-                const uarray<Dims>& strides
+                const uarray<Dims>& strides,
+                const uarray<Dims>& offsets
             )
                 : data_(data),
                   center_(center_pos),
                   shape_(shape),
-                  strides_(strides)
+                  strides_(strides),
+                  offsets_(offsets)
             {
             }
 
             // Relative indexing from center
             DUAL get_value_type_t<DT>& at(int i, int j = 0, int k = 0) const
             {
-                iarray<Dims> offset;
-                if constexpr (Dims >= 1) {
-                    offset[0] = center_[0] + i;
+                iarray<Dims> coords;
+                size_type idx = 0;
+
+                // center_ is in interior coordinates, convert to global by
+                // adding offset
+                if constexpr (global::col_major) {
+                    // Column major: (i,j,k) -> k fastest
+                    // Add offset to get global position
+                    coords[0] = center_[0] + offsets_[0] + i;
+                    if constexpr (Dims >= 2) {
+                        coords[1] = center_[1] + offsets_[1] + j;
+                    }
+                    if constexpr (Dims >= 3) {
+                        coords[2] = center_[2] + offsets_[2] + k;
+                    }
                 }
-                if constexpr (Dims >= 2) {
-                    offset[1] = center_[1] + j;
-                }
-                if constexpr (Dims >= 3) {
-                    offset[2] = center_[2] + k;
+                else {
+                    // Row major: (i,j,k) -> i fastest
+                    coords[0] = center_[0] + offsets_[Dims - 1] + i;
+                    if constexpr (Dims >= 2) {
+                        coords[1] = center_[1] + offsets_[Dims - 2] + j;
+                    }
+                    if constexpr (Dims >= 3) {
+                        coords[2] = center_[2] + offsets_[Dims - 3] + k;
+                    }
                 }
 
-                size_type idx = 0;
+                // Calculate global linear index
                 for (size_type d = 0; d < Dims; ++d) {
-                    idx += offset[d] * strides_[corrected_idx<Dims>(d)];
+                    idx += coords[d] * strides_[d];
                 }
+
                 return access(data_[idx]);
             }
 
@@ -288,15 +357,22 @@ namespace simbi {
                 return pos3d;
             }
 
-            // Direct value access at center
-            DUAL get_value_type_t<DT>& value() const
+            // get global position
+            DUAL const auto global_position() const
             {
-                size_type idx = 0;
-                for (size_type d = 0; d < Dims; ++d) {
-                    idx += center_[d] * strides_[corrected_idx<Dims>(d)];
+                uarray<3> pos3d = {0, 0, 0};
+                pos3d[0]        = center_[0] + offsets_[Dims - 1];
+                if constexpr (Dims > 1) {
+                    pos3d[1] = center_[1] + offsets_[Dims - 2];
                 }
-                return access(data_[idx]);
+                if constexpr (Dims > 2) {
+                    pos3d[2] = center_[2] + offsets_[Dims - 3];
+                }
+                return pos3d;
             }
+
+            // Direct value access at center
+            DUAL get_value_type_t<DT>& value() const { return at(0); }
 
             // structured binding support
             template <size_type I>
@@ -322,14 +398,19 @@ namespace simbi {
             }
 
           private:
-            DT* data_;
+            // DT* data_;
+            std::span<DT> data_;
             uarray<Dims> center_;
             uarray<Dims> shape_;
             uarray<Dims> strides_;
+            uarray<Dims> offsets_;
         };
 
       protected:
-        std::span<T> data_;   // view into data
+        // non-owning pointer to source data
+        const ndarray<T, Dims>* source_;
+        // view into data
+        std::span<T> data_;
     };
 
     template <typename T, size_type Dims>
@@ -342,25 +423,29 @@ namespace simbi {
             const array_view<T, Dims>& interior_view,
             const ndarray<BoundaryCondition>& conditions,
             const bool need_corners = false
-        );
+        ) const;
 
       private:
-        size_type reflecting_idx(size_type ii, size_type ni, size_type radius);
-        size_type periodic_idx(size_type ii, size_type ni, size_type radius);
-        size_type outflow_idx(size_type ii, size_type ni, size_type radius);
-        uarray<Dims> unravel_idx(size_type idx, const uarray<Dims>& shape);
+        size_type
+        reflecting_idx(size_type ii, size_type ni, size_type radius) const;
+        size_type
+        periodic_idx(size_type ii, size_type ni, size_type radius) const;
+        size_type
+        outflow_idx(size_type ii, size_type ni, size_type radius) const;
+        uarray<Dims>
+        unravel_idx(size_type idx, const uarray<Dims>& shape) const;
         void sync_faces(
             const ExecutionPolicy<>& policy,
             ndarray<T, Dims>& full_array,
             const array_view<T, Dims>& interior_view,
             const ndarray<BoundaryCondition>& conditions
-        );
+        ) const;
         void sync_corners(
             const ExecutionPolicy<>& policy,
             ndarray<T, Dims>& full_array,
             const array_view<T, Dims>& interior_view,
             const ndarray<BoundaryCondition>& conditions
-        );
+        ) const;
 
         DUAL static bool is_boundary_point(
             const uarray<Dims>& coordinates,
@@ -368,18 +453,16 @@ namespace simbi {
             const uarray<Dims>& radii
         )
         {
-            auto tshape = shape;
-            // get inverted copy of shape if we are in row major
-            if constexpr (!global::col_major) {
-                std::reverse(tshape.begin(), tshape.end());
-            }
+            int boundary_count = 0;
             for (size_type ii = 0; ii < Dims; ++ii) {
                 if (coordinates[ii] < radii[ii] ||
-                    coordinates[ii] >= tshape[ii] + radii[ii]) {
-                    return true;
+                    coordinates[ii] >= shape[ii] + radii[ii]) {
+                    boundary_count++;
                 }
             }
-            return false;
+
+            // True only if exactly one dimension is at a boundary
+            return boundary_count == 1;
         }
 
         DUAL static bool is_corner_point(
@@ -397,8 +480,8 @@ namespace simbi {
                     boundary_count++;
                 }
                 if (boundary_count >= 2) {
-                    return true;   // We're at a corner when 2+ dimensions are
-                                   // at boundaries
+                    return true;   // We're at a corner when 2+ dimensions
+                                   // are at boundaries
                 }
             }
             return false;
@@ -411,17 +494,15 @@ namespace simbi {
             const uarray<Dims>& strides,
             const uarray<Dims>& radii,
             BoundaryCondition bc
-        )
+        ) const
         {
             // Copy coordinates
             auto int_coords = coords;
 
-            auto tshape   = shape;
-            auto tstrides = strides;
+            auto tshape = shape;
             // get inverted copy of shape if we are in row major
             if constexpr (!global::col_major) {
                 std::reverse(tshape.begin(), tshape.end());
-                std::reverse(tstrides.begin(), tstrides.end());
             }
 
             // Adjust coordinate based on boundary condition
@@ -448,7 +529,7 @@ namespace simbi {
             // Calculate linear index directly
             size_type idx = 0;
             for (size_type i = 0; i < Dims; i++) {
-                idx += int_coords[i] * tstrides[i];
+                idx += int_coords[i] * strides[i];
             }
             return idx;
         }
@@ -457,7 +538,9 @@ namespace simbi {
         DUAL static U apply_reflecting(const U& val, int momentum_idx)
         {
             auto result = val;
-            result.mcomponent(momentum_idx) *= -1.0;
+            if constexpr (is_conserved_v<T>) {
+                result.mcomponent(momentum_idx) *= -1.0;
+            }
             return result;
         }
 
@@ -554,12 +637,15 @@ namespace simbi {
 
         template <typename... Indices>
         DUAL T& at(Indices... idx);
+        template <typename... Indices>
+        DUAL T& at(Indices... idx) const;
         DUAL auto& access(T& val);
         DUAL auto& access(T& val) const;
 
         // contraction method for viewing subarrays
         auto contract(const size_type radius) -> array_view<T, Dims>;
-        auto view(const uarray<Dims>& ranges) const -> array_view<T, Dims>;
+        auto contract(const collapsable<Dims>& radii) -> array_view<T, Dims>;
+        auto view(const collapsable<Dims>& ranges) const -> array_view<T, Dims>;
 
         template <typename F>
         void transform(F op, const ExecutionPolicy<>& policy);

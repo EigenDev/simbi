@@ -28,7 +28,7 @@ namespace simbi {
                 const auto en = fn.ecomponent(nhat);
                 const auto ew = fw.ecomponent(nhat);
                 const auto ee = fe.ecomponent(nhat);
-                return static_cast<real>(0.5) * (es + en + ew + ee) -
+                return static_cast<real>(0.50) * (es + en + ew + ee) -
                        static_cast<real>(0.25) * (esw + enw + ese + ene);
             }
         };

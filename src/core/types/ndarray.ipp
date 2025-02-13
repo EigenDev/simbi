@@ -84,13 +84,12 @@ namespace simbi {
         size_type ii,
         size_type ni,
         size_type radius
-    )
+    ) const
     {
         if (ii < radius) {
             return 2 * radius - ii - 1;
         }
         else if (ii >= ni + radius) {
-            printf("ii: %zu, ni: %zu, radius: %zu\n", ii, ni, radius);
             return 2 * (ni + radius) - ii - 1;
         }
         return ii;
@@ -101,7 +100,7 @@ namespace simbi {
         size_type ii,
         size_type ni,
         size_type radius
-    )
+    ) const
     {
         if (ii < radius) {
             return ni + ii;
@@ -117,7 +116,7 @@ namespace simbi {
         size_type ii,
         size_type ni,
         size_type radius
-    )
+    ) const
     {
         if (ii < radius) {
             return radius;
@@ -132,22 +131,9 @@ namespace simbi {
     std::array<size_type, Dims> boundary_manager<T, Dims>::unravel_idx(
         size_type idx,
         const uarray<Dims>& shape
-    )
+    ) const
     {
-        auto idx_shift = [&](const size_type ii) {
-            if constexpr (global::col_major) {
-                return ii;
-            }
-            else {
-                return -(ii + 1) % Dims;
-            }
-        };
-        uarray<Dims> coordinates;
-        for (size_type ii = 0; ii < Dims; ++ii) {
-            coordinates[ii] = idx % shape[idx_shift(ii)];
-            idx /= shape[idx_shift(ii)];
-        }
-        return coordinates;
+        return memory_layout_coordinates<Dims>(idx, shape);
     }
 
     template <typename T, size_type Dims>
@@ -156,7 +142,96 @@ namespace simbi {
         ndarray<T, Dims>& full_array,
         const array_view<T, Dims>& interior_view,
         const ndarray<BoundaryCondition>& conditions
-    )
+    ) const
+    {
+        auto* data = full_array.data();
+        auto radii = [&]() {
+            uarray<Dims> rad;
+            for (size_type ii = 0; ii < Dims; ++ii) {
+                if constexpr (global::col_major) {
+                    rad[ii] =
+                        (full_array.shape()[ii] - interior_view.shape()[ii]) /
+                        2;
+                }
+                else {
+                    rad[ii] = (full_array.shape()[Dims - (ii + 1)] -
+                               interior_view.shape()[Dims - (ii + 1)]) /
+                              2;
+                }
+            }
+            return rad;
+        }();
+
+        parallel_for(policy, [=, this] DEV(size_type idx) {
+            auto coordinates = unravel_idx(idx, full_array.shape());
+            auto rshape      = interior_view.shape();
+            // reverse shape if row major
+            if constexpr (!global::col_major) {
+                std::reverse(rshape.begin(), rshape.end());
+            }
+
+            // Only process boundary points (automatically excludes corners)
+            if (!is_boundary_point(coordinates, rshape, radii)) {
+                return;
+            }
+
+            // Find which dimension's boundary we're on
+            int boundary_dim = -1;
+            bool is_lower    = false;
+            for (size_type dim = 0; dim < Dims; ++dim) {
+                if (coordinates[dim] < radii[dim]) {
+                    boundary_dim = dim;
+                    is_lower     = true;
+                    break;
+                }
+                if (coordinates[dim] >= rshape[dim] + radii[dim]) {
+                    boundary_dim = dim;
+                    is_lower     = false;
+                    break;
+                }
+            }
+
+            // Process boundary point
+            if (boundary_dim >= 0) {
+                size_t bc_idx           = 2 * boundary_dim + (is_lower ? 0 : 1);
+                const auto interior_idx = get_interior_idx(
+                    coordinates,
+                    boundary_dim,
+                    interior_view.shape(),
+                    full_array.strides(),
+                    radii,
+                    conditions[bc_idx]
+                );
+
+                // convert interior index into coordinates
+                // auto interior_coords =
+                // unravel_idx(interior_idx, full_array.shape());
+
+                // Apply boundary condition
+                switch (conditions[bc_idx]) {
+                    case BoundaryCondition::REFLECTING:
+                        data[idx] = apply_reflecting(
+                            data[interior_idx],
+                            boundary_dim + 1
+                        );
+                        break;
+                    case BoundaryCondition::PERIODIC:
+                        data[idx] = apply_periodic(data[interior_idx]);
+                        break;
+                    default:   // OUTFLOW
+                        data[idx] = data[interior_idx];
+                }
+            }
+        });
+    }
+
+    template <typename T, size_type Dims>
+    void boundary_manager<T, Dims>::sync_corners(
+        const ExecutionPolicy<>& policy,
+        ndarray<T, Dims>& full_array,
+        const array_view<T, Dims>& interior_view,
+        const ndarray<BoundaryCondition>& conditions
+    ) const
     {
         auto* data = full_array.data();
         auto radii = [&]() {
@@ -169,143 +244,88 @@ namespace simbi {
         }();
 
         parallel_for(policy, [=, this] DEV(size_type idx) {
-            auto coordinates = unravel_idx(idx, full_array.shape());
-            auto rshape      = interior_view.shape();
+            auto coords = unravel_idx(idx, full_array.shape());
+            auto rshape = interior_view.shape();
             // reverse shape if row major
             if constexpr (!global::col_major) {
                 std::reverse(rshape.begin(), rshape.end());
             }
-            // For each dimension, check boundaries
+
+            // Only process corner points
+            if (!is_corner_point(coords, rshape, radii)) {
+                return;
+            }
+
+            // Find which dimensions are at boundaries
+            std::array<std::pair<int, bool>, Dims> boundary_dims;
+            int num_boundaries = 0;
+
             for (size_type dim = 0; dim < Dims; ++dim) {
-                if (coordinates[dim] < radii[dim] ||
-                    coordinates[dim] >= rshape[dim] + radii[dim]) {
-                    // Get interior index and apply boundary condition
-                    const auto interior_idx = get_interior_idx(
-                        coordinates,
-                        dim,
-                        interior_view.shape(),
-                        full_array.strides(),
-                        radii,
-                        coordinates[dim] < radii[dim] ? conditions[2 * dim]
-                                                      :   // Lower boundary
-                            conditions[2 * dim + 1]       // Upper boundary
-                    );
-                    // printf("idx: %zu, interior_idx: %zu\n", idx,
-                    // interior_idx); std::cin.get();
+                if (coords[dim] < radii[dim]) {
+                    boundary_dims[num_boundaries++] = {
+                      dim,
+                      true
+                    };   // true = lower bound
+                }
+                else if (coords[dim] >= rshape[dim] + radii[dim]) {
+                    boundary_dims[num_boundaries++] = {
+                      dim,
+                      false
+                    };   // false = upper bound
+                }
+            }
 
-                    // Apply boundary condition
-                    switch (
-                        conditions
-                            [2 * dim + (coordinates[dim] < radii[dim] ? 0 : 1)]
-                    ) {
-                        case BoundaryCondition::REFLECTING:
-                            data[idx] =
-                                apply_reflecting(data[interior_idx], dim + 1);
-                            break;
-                        case BoundaryCondition::PERIODIC:
-                            data[idx] = apply_periodic(data[interior_idx]);
-                            break;
-                        default:   // OUTFLOW
-                            data[idx] = data[interior_idx];
+            // Get interior indices for each boundary dimension
+            size_type interior_idx = 0;
+            auto int_coords        = coords;
+
+            for (int i = 0; i < num_boundaries; ++i) {
+                auto [dim, is_lower] = boundary_dims[i];
+                const auto bc_idx    = 2 * dim + (is_lower ? 0 : 1);
+                const auto bc        = conditions[bc_idx];
+
+                // Update coordinate based on boundary condition
+                switch (bc) {
+                    case BoundaryCondition::REFLECTING:
+                        int_coords[dim] = (is_lower)
+                                              ? 2 * radii[dim] - coords[dim] - 1
+                                              : 2 * (rshape[dim] + radii[dim]) -
+                                                    coords[dim] - 1;
+                        break;
+                    case BoundaryCondition::PERIODIC:
+                        int_coords[dim] = (is_lower)
+                                              ? rshape[dim] + coords[dim]
+                                              : coords[dim] - rshape[dim];
+                        break;
+                    default:   // OUTFLOW
+                        int_coords[dim] = (is_lower)
+                                              ? radii[dim]
+                                              : rshape[dim] + radii[dim] - 1;
+                }
+            }
+
+            // Calculate interior linear index
+            for (size_type d = 0; d < Dims; d++) {
+                interior_idx += int_coords[d] * full_array.strides()[d];
+            }
+            // std::cout << coords << " -> " << int_coords << std::endl;
+
+            // Apply boundary conditions
+            data[idx] = data[interior_idx];
+
+            // Handle reflecting conditions for momentum/magnetic components
+            if constexpr (is_conserved_v<T>) {
+                for (int i = 0; i < num_boundaries; ++i) {
+                    auto [dim, is_lower] = boundary_dims[i];
+                    const auto bc_idx    = 2 * dim + (is_lower ? 0 : 1);
+                    if (conditions[bc_idx] == BoundaryCondition::REFLECTING) {
+                        data[idx].mcomponent(dim + 1) *= -1.0;
+                        if constexpr (is_relativistic_mhd<T>::value) {
+                            data[idx].bcomponent(dim + 1) *= -1.0;
+                        }
                     }
                 }
             }
-        });
-    }
-
-    template <typename T, size_type Dims>
-    void boundary_manager<T, Dims>::sync_corners(
-        const ExecutionPolicy<>& policy,
-        ndarray<T, Dims>& full_array,
-        const array_view<T, Dims>& interior_view,
-        const ndarray<BoundaryCondition>& conditions
-    )
-    {
-        auto* data = full_array.data();
-        auto radii = [&]() {
-            uarray<Dims> rad;
-            for (size_type ii = 0; ii < Dims; ++ii) {
-                rad[ii] =
-                    (full_array.shape()[ii] - interior_view.shape()[ii]) / 2;
-            }
-            return rad;
-        }();
-
-        // Use PlaneSequence to handle different dimensions
-        using planes = typename PlaneSequence<Dims>::type;
-
-        // Iterate through planes using index sequence
-        detail::for_sequence(planes{}, [&](auto plane_idx) {
-            constexpr Plane P = static_cast<Plane>(plane_idx());
-
-            // Get boundary condition pairs for this plane
-            constexpr auto& bc_pairs = PlaneInfo<P>::bc_pairs;
-
-            parallel_for(policy, [=, this] DEV(size_type idx) {
-                auto coords = unravel_idx(idx, full_array.shape());
-
-                // Check if we're at a corner
-                if (is_corner_point(coords, interior_view.shape(), radii)) {
-                    // For each corner configuration in this plane
-                    for (const auto& [bc1_idx, bc2_idx] : bc_pairs) {
-                        const auto bc1 = conditions[bc1_idx];
-                        const auto bc2 = conditions[bc2_idx];
-
-                        // Apply corner boundary conditions
-                        if constexpr (P == Plane::IJ) {
-                            helpers::handle_corner<T, Plane::IJ>(
-                                data,
-                                idx,
-                                coords[0],
-                                coords[1],
-                                coords[2],
-                                full_array.shape()[0],
-                                full_array.shape()[1],
-                                full_array.shape()[2],
-                                radii[0],
-                                bc1,
-                                bc2,
-                                1,
-                                2
-                            );
-                        }
-                        else if constexpr (P == Plane::IK) {
-                            helpers::handle_corner<T, Plane::IK>(
-                                data,
-                                idx,
-                                coords[0],
-                                coords[1],
-                                coords[2],
-                                full_array.shape()[0],
-                                full_array.shape()[1],
-                                full_array.shape()[2],
-                                radii[0],
-                                bc1,
-                                bc2,
-                                1,
-                                3
-                            );
-                        }
-                        else {   // Plane::JK
-                            helpers::handle_corner<T, Plane::JK>(
-                                data,
-                                idx,
-                                coords[0],
-                                coords[1],
-                                coords[2],
-                                full_array.shape()[0],
-                                full_array.shape()[1],
-                                full_array.shape()[2],
-                                radii[0],
-                                bc1,
-                                bc2,
-                                2,
-                                3
-                            );
-                        }
-                    }
-                }
-            });
         });
     }
 
@@ -317,14 +337,18 @@ namespace simbi {
         const array_view<T, Dims>& interior_view,
         const ndarray<BoundaryCondition>& conditions,
         const bool need_corners
-    )
+    ) const
     {
         // Sync faces
         sync_faces(policy, full_array, interior_view, conditions);
 
         // Sync corners if needed
-        if (need_corners) {
-            sync_corners(policy, full_array, interior_view, conditions);
+        if constexpr (comp_ct_type != CTTYPE::MdZ) {
+            if constexpr (is_conserved_v<T>) {
+                if (need_corners) {
+                    sync_corners(policy, full_array, interior_view, conditions);
+                }
+            }
         }
     }
 
@@ -333,6 +357,7 @@ namespace simbi {
     //==========================================================================
     template <typename T, size_type Dims>
     array_view<T, Dims>::array_view(
+        const ndarray<T, Dims>& source,
         T* data,
         const uarray<Dims>& shape,
         const uarray<Dims>& strides,
@@ -344,7 +369,8 @@ namespace simbi {
               offsets,
               this->compute_size(shape)
           ),
-          data_(data, this->size_)
+          source_(&source),
+          data_(data, source.size())
     {
     }
 
@@ -352,33 +378,41 @@ namespace simbi {
     DUAL array_view<T, Dims>::value_type&
     array_view<T, Dims>::operator[](size_type ii)
     {
-        return access(data_[ii]);
+        return access(data_[ii] + this->compute_offset(this->offsets_));
     }
 
     template <typename T, size_type Dims>
     DUAL array_view<T, Dims>::value_type&
     array_view<T, Dims>::operator[](size_type ii) const
     {
-        return access(data_[ii]);
+        return access(data_[ii] + this->compute_offset(this->offsets_));
     }
 
     template <typename T, size_type Dims>
     template <typename... Indices>
     T& array_view<T, Dims>::at(Indices... indices)
     {
-        static_assert(sizeof...(Indices) == Dims, "invalid number of indices");
-
+        static_assert(sizeof...(Indices) == Dims);
         uarray<Dims> idx{static_cast<size_type>(indices)...};
         size_type offset = 0;
 
-#pragma unroll
-        for (size_type ii = 0; ii < Dims; ++ii) {
-            if (idx[ii] >= this->shape_[ii]) {
-                // GPU-safe bounds check
-                // Return first element on invalid access
-                return data_[0];
+        if constexpr (global::col_major) {
+            // Column major (k,j,i)
+            for (size_type d = 0; d < Dims; ++d) {
+                if (idx[d] >= this->shape_[d]) {
+                    return data_[0];   // bounds check
+                }
+                offset += idx[d] * this->strides_[d];
             }
-            offset += idx[ii] * this->strides_[ii];
+        }
+        else {
+            // Row major (i,j,k)
+            for (size_type d = Dims - 1; d >= 0; --d) {
+                if (idx[d] >= this->shape_[d]) {
+                    return data_[0];   // bounds check
+                }
+                offset += idx[d] * this->strides_[d];
+            }
         }
         return access(data_[offset]);
     }
@@ -443,23 +477,35 @@ namespace simbi {
                 // Get global coordinates
                 auto pos = this->get_local_coords(idx);
 
-                // Create centered view for main array
-                stencil_view
-                    center_view(data(), pos, this->shape(), this->strides());
+                // Create span from data pointer
+                std::span<T> data_span(this->data(), this->source_size());
+                stencil_view center_view(
+                    data_span,
+                    pos,
+                    this->shape(),
+                    this->strides(),
+                    this->offsets()
+                );
+
                 auto all_views = std::make_tuple(
                     center_view,
                     stencil_view<typename array_raw_type<DependentViews>::type>(
-                        arrays.data(),
+                        std::span<
+                            typename array_raw_type<DependentViews>::type>(
+                            arrays.data(),
+                            arrays.source_size()
+                        ),
                         arrays.get_local_coords(idx),
                         arrays.shape(),
-                        arrays.strides()
+                        arrays.strides(),
+                        arrays.offsets()
                     )...
                 );
+                // center_view.value();
+                // std::apply(op, all_views);
 
-                // auto active_idx = global_linear_idx(idx);
-                // printf("idx: %zu, aidx: %zu\n", idx, active_idx);
-                // Create centered views for dependent arrays
                 center_view.value() = std::apply(op, all_views);
+                // data_[idx] = std::apply(op, all_views);
             });
         }
     }
@@ -516,7 +562,6 @@ namespace simbi {
     template <typename T, size_type Dims>
     auto& ndarray<T, Dims>::reshape(const collapsable<Dims>& new_shape)
     {
-        // printf("reshaping\n");
         // Verify total size matches
         size_type new_size = this->compute_size(new_shape.vals);
         assert(new_size == this->size_ && "New shape must match total size");
@@ -584,19 +629,24 @@ namespace simbi {
     template <typename... Indices>
     DUAL T& ndarray<T, Dims>::at(Indices... indices)
     {
-        static_assert(sizeof...(Indices) == Dims, "Invalid number of indices");
-
-        uarray<Dims> idx{static_cast<size_type>(indices)...};
+        collapsable<Dims> idx{static_cast<size_type>(indices)...};
         size_type offset = 0;
 
-#pragma unroll
-        for (size_type ii = 0; ii < Dims; ++ii) {
-            if (idx[ii] >= this->shape_[ii]) {
-                // GPU-safe bounds check
-                // Return first element on invalid access
-                return mem_.data[0];
-            }
-            offset += idx[ii] * this->strides_[ii];
+        for (size_type d = 0; d < Dims; ++d) {
+            offset += idx[d] * this->strides_[d];
+        }
+        return access(mem_[offset]);
+    }
+
+    template <typename T, size_type Dims>
+    template <typename... Indices>
+    DUAL T& ndarray<T, Dims>::at(Indices... indices) const
+    {
+        collapsable<Dims> idx{static_cast<size_type>(indices)...};
+        size_type offset = 0;
+
+        for (size_type d = 0; d < Dims; ++d) {
+            offset += idx[d] * this->strides_[d];
         }
         return access(mem_[offset]);
     }
@@ -615,7 +665,8 @@ namespace simbi {
         }
 
         return array_view<T, Dims>(
-            mem_.data() + this->compute_offset(offsets),
+            *this,
+            mem_.data(),
             new_shape,
             this->strides_,
             offsets
@@ -623,18 +674,55 @@ namespace simbi {
     }
 
     template <typename T, size_type Dims>
-    auto ndarray<T, Dims>::view(const uarray<Dims>& ranges) const
+    auto ndarray<T, Dims>::contract(const collapsable<Dims>& radii)
+        -> array_view<T, Dims>
+    {
+        uarray<Dims> new_shape;
+        uarray<Dims> offsets;
+
+#pragma unroll
+        for (size_type ii = 0; ii < Dims; ++ii) {
+            // Only contract dimensions with non-zero radius
+            new_shape[ii] = radii.vals[ii] > 0
+                                ? this->shape_[ii] - 2 * radii.vals[ii]
+                                : this->shape_[ii];
+
+            offsets[ii] = radii.vals[ii];   // Zero for uncontracted dimensions
+        }
+
+        return array_view<T, Dims>(
+            *this,
+            mem_.data(),
+            new_shape,
+            this->strides_,
+            offsets
+        );
+    }
+
+    template <typename T, size_type Dims>
+    auto ndarray<T, Dims>::view(const collapsable<Dims>& ranges) const
         -> array_view<T, Dims>
     {
         uarray<Dims> offsets;
+        // Verify ranges are valid
+        // for (size_type ii = 0; ii < Dims; ++ii) {
+        //     if (ranges.vals[ii] > this->shape_[ii]) {
+        //         throw std::runtime_error("View range exceeds array
+        //         dimensions");
+        //     }
+        // }
+
         for (size_type ii = 0; ii < Dims; ++ii) {
-            offsets[ii] = this->shape_[ii] - ranges[ii];
+            // Offset is 0 for each dimension being viewed
+            offsets[ii] = 0;
         }
+
         return array_view<T, Dims>(
-            mem_.data() + this->compute_offset(offsets),
-            this->shape_,
-            this->strides_,
-            offsets
+            *this,
+            mem_.data(),      // Start at beginning
+            ranges.vals,      // New shape is the ranges
+            this->strides_,   // Strides stay the same
+            offsets           // Start at 0 offset
         );
     }
 
@@ -740,23 +828,26 @@ namespace simbi {
                 const size_type end =
                     std::min(start + batch_size, this->size());
 
-                // Thread-local reduction
+                // Local reduction: (accumulator, element, index)
                 U local_result = init;
                 for (size_type ii = start; ii < end; ii++) {
                     local_result = reduce_op(local_result, mem_[ii], ii);
                 }
 
-                // Atomic reduction using actual array element
-                U current_min = result.load();
-                while (true) {
-                    U next_min = reduce_op(current_min, mem_[start], start);
-                    if (result.compare_exchange_weak(current_min, next_min)) {
-                        break;
-                    }
-                }
+                // Global merge: (accumulator, element, index)
+                bool success;
+                do {
+                    U expected = result.load(std::memory_order_relaxed);
+                    success    = result.compare_exchange_weak(
+                        expected,
+                        reduce_op(expected, mem_[start], start),
+                        std::memory_order_release,
+                        std::memory_order_relaxed
+                    );
+                } while (!success);
             });
 
-            return result.load();
+            return result.load(std::memory_order_acquire);
         }
     }
 
