@@ -67,6 +67,10 @@ def _setup_logging(config: BaseConfig, args: Namespace) -> None:
         )
     config.trace_memory = args.trace_mem
 
+def use_arg_or_default(arg_value, config_value):
+    """Use arg value if provided, otherwise fallback to config value"""
+    return arg_value if arg_value is not None else config_value
+
 def _build_kwargs_dict(config: BaseConfig, args: Namespace) -> Dict[str, Any]:
     """Build kwargs dictionary for simulation"""
     if config.order_of_integration == "first" or args.order == "first":
@@ -80,29 +84,28 @@ def _build_kwargs_dict(config: BaseConfig, args: Namespace) -> Dict[str, Any]:
 
     # Compile user defined functions if present
     config._compile_source_terms()
-
     return {
         'spatial_order': config.spatial_order,
         'time_order': config.time_order,
-        'cfl': config.cfl_number,
-        'chkpt_interval': config.check_point_interval,
-        'tstart': config.default_start_time,
-        'tend': config.default_end_time,
-        'solver': config.solver,
+        'cfl': use_arg_or_default(args.cfl, config.cfl_number),
+        'chkpt_interval': args.chkpt_interval or config.check_point_interval,
+        'tstart': use_arg_or_default(args.tstart, config.default_start_time),
+        'tend': use_arg_or_default(args.tend, config.default_end_time),
+        'solver': use_arg_or_default(args.solver, config.solver),
         'boundary_conditions': config.boundary_conditions,
-        'plm_theta': config.plm_theta,
+        'plm_theta': use_arg_or_default(args.plm_theta, config.plm_theta),
         'dlogt': config.dlogt,
-        'data_directory': config.data_directory,
+        'data_directory': use_arg_or_default(args.data_directory, config.data_directory),
         'x1_cell_spacing': config.x1_cell_spacing,
         'x2_cell_spacing': config.x2_cell_spacing,
         'x3_cell_spacing': config.x3_cell_spacing,
         'passive_scalars': config.passive_scalars,
         'scale_factor': config.scale_factor,
         'scale_factor_derivative': config.scale_factor_derivative,
-        'quirk_smoothing': config.use_quirk_smoothing,
+        'quirk_smoothing': use_arg_or_default(args.quirk_smoothing, config.use_quirk_smoothing),
         'constant_sources': config.constant_sources,
         'object_positions': config.object_zones,
-        'engine_duration': config.engine_duration,
+        'engine_duration': use_arg_or_default(args.engine_duration, config.engine_duration),
         'hdir': config.hydro_source_lib,
         'gdir': config.gravity_source_lib,
         'bdir': config.boundary_source_lib,
