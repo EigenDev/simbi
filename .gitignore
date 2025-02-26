@@ -9,7 +9,6 @@ movies/
 scripts/
 simbi/tools/extras/*
 version.py
-.vscode/
 *.in
 *.h5
 *.pdf
