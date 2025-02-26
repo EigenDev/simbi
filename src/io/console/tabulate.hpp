@@ -71,11 +71,21 @@ namespace simbi {
 using namespace simbi::helpers;
 
 namespace simbi {
-    enum class BorderStyle {
-        Simple,
-        Double,
-        Dashed
+    enum class Alignment {
+        Left,
+        Center,
+        Right
     };
+
+    enum class BorderStyle {
+        Simple,   // +---+---+
+        Double,   // ╔═╗║╚═╝
+        Fancy,    // ╔═══╗║╚═══╝
+        Round,    // ╭─╮│╰─╯
+        Thick,    // ┏━┓┃┗━┛
+        Elegant   // ⎡⎺⎤⎢⎣⎯⎦
+    };
+
     enum class LogLevel {
         Info,
         Error
@@ -87,26 +97,62 @@ namespace simbi {
         Spinner,
         Arrow,
         Dots,
-        Mixed
+        Mixed,
+        Gradient
     };
 
     struct Intializers {
         BorderStyle style              = BorderStyle::Double;
         int pad                        = 2;
-        bool showProgress              = true;
-        ProgressBarStyle progressStyle = ProgressBarStyle::Bar;
-        Color progressColor            = Color::WHITE;
+        bool showProgress              = global::progress_bar_enabled;
+        ProgressBarStyle progressStyle = ProgressBarStyle::Block;
+        Color progressColor            = Color::LIGHT_YELLOW;
         Color textColor                = Color::WHITE;
-        Color separatorColor           = Color::WHITE;
+        Color separatorColor           = Color::BOLD;
         Color infoColor                = Color::WHITE;
         Color errorColor               = Color::RED;
-        Color titleColor               = Color::WHITE;
-        Color messageBoardColor        = Color::WHITE;
+        Color titleColor               = Color::BOLD;
+        Color messageBoardColor        = Color::LIGHT_CYAN;
+    };
+
+    struct CellFormat {
+        Color fg_color = Color::DEFAULT;
+        Color bg_color = Color::DEFAULT;
+        bool bold      = false;
+        bool italic    = false;
+        bool underline = false;
+    };
+
+    enum class TableTheme {
+        Default,
+        Classic,
+        Modern,
+        Minimal,
+        Cyberpunk
+    };
+
+    struct BorderCharacters {
+        std::string top_left;
+        std::string top_right;
+        std::string bottom_left;
+        std::string bottom_right;
+        std::string horizontal;
+        std::string vertical;
+        std::string t_down;    // ╤
+        std::string t_up;      // ╧
+        std::string t_left;    // ╣
+        std::string t_right;   // ╠
+        std::string cross;     // ╬
     };
 
     class PrettyTable
     {
       private:
+        bool has_header{false};
+        Color header_color{Color::WHITE};
+        std::vector<Alignment> column_alignments;
+        TableTheme current_theme{TableTheme::Classic};
+
         std::vector<std::vector<std::string>> table;
         std::vector<int> columnWidths;
         BorderStyle borderStyle;
@@ -125,6 +171,119 @@ namespace simbi {
         Color errorColor;
         Color messageBoardColor;
         Color titleColor;
+        std::vector<std::vector<CellFormat>> cell_formats;
+        BorderCharacters current_border;
+
+        // Add this method to set border characters based on style
+        void updateBorderCharacters()
+        {
+            switch (borderStyle) {
+                case BorderStyle::Simple:
+                    current_border = {
+                      "+",
+                      "+",
+                      "+",
+                      "+",   // corners
+                      "-",
+                      "|",   // lines
+                      "+",
+                      "+",
+                      "+",
+                      "+",   // T-joints
+                      "+"    // cross
+                    };
+                    break;
+                case BorderStyle::Double:
+                    current_border = {
+                      "╔",
+                      "╗",
+                      "╚",
+                      "╝",   // corners
+                      "═",
+                      "║",   // lines
+                      "╤",
+                      "╧",
+                      "╣",
+                      "╠",   // T-joints
+                      "╬"    // cross
+                    };
+                    break;
+                case BorderStyle::Round:
+                    current_border = {
+                      "╭",
+                      "╮",
+                      "╰",
+                      "╯",   // corners
+                      "─",
+                      "│",   // lines
+                      "┬",
+                      "┴",
+                      "┤",
+                      "├",   // T-joints
+                      "┼"    // cross
+                    };
+                    break;
+                case BorderStyle::Thick:
+                    current_border = {
+                      "┏",
+                      "┓",
+                      "┗",
+                      "┛",   // corners
+                      "━",
+                      "┃",   // lines
+                      "┳",
+                      "┻",
+                      "┫",
+                      "┣",   // T-joints
+                      "╋"    // cross
+                    };
+                    break;
+                case BorderStyle::Elegant:
+                    current_border = {
+                      "⎡",
+                      "⎤",
+                      "⎣",
+                      "⎦",   // corners
+                      "⎯",
+                      "⎢",   // lines
+                      "⎯",
+                      "⎯",
+                      "⎥",
+                      "⎢",   // T-joints
+                      "⎯"    // cross
+                    };
+                    break;
+                case BorderStyle::Fancy:
+                    current_border = {
+                      "╔",
+                      "╗",
+                      "╚",
+                      "╝",   // corners
+                      "═",
+                      "║",   // lines
+                      "╦",
+                      "╩",
+                      "╣",
+                      "╠",   // T-joints
+                      "╬"    // cross
+                    };
+                    break;
+                default:
+                    current_border = {
+                      "┌",
+                      "┐",
+                      "└",
+                      "┘",   // corners
+                      "─",
+                      "│",   // lines
+                      "┬",
+                      "┴",
+                      "┤",
+                      "├",   // T-joints
+                      "┼"    // cross
+                    };
+            }
+        }
 
         void saveCursorPosition()
         {
@@ -154,31 +313,64 @@ namespace simbi {
             }
         }
 
-        void printSeparator() const
+        void printSeparator(
+            bool isTop        = false,
+            bool isBottom     = false,
+            bool include_t_up = true,
+            bool at_middle    = false
+        ) const
         {
-            std::string corner, horizontal;
-            switch (borderStyle) {
-                case BorderStyle::Simple:
-                    corner     = "+";
-                    horizontal = "-";
-                    break;
-                case BorderStyle::Double:
-                    corner     = "╬";
-                    horizontal = "=";
-                    break;
-                case BorderStyle::Dashed:
-                    corner     = "+";
-                    horizontal = "-";
-                    break;
-            }
             std::cout << getColorCode(separatorColor);
-            for (const auto& width : columnWidths) {
-                std::cout << corner;
-                std::cout
-                    << std::string(width + 2 * padding + 2, horizontal[0]);
+
+            // Choose the correct corner to start with
+            if (isTop && !at_middle) {
+                std::cout << current_border.top_left;
             }
-            std::cout << corner << std::endl;
-            std::cout << getColorCode(Color::DEFAULT);   // Reset color
+            else if (isBottom && !at_middle) {
+                std::cout << current_border.bottom_left;
+            }
+            else {
+                std::cout << current_border.t_right;   // middle left T-joint
+            }
+
+            // Print horizontal lines and T-joints/crosses
+            for (size_t i = 0; i < columnWidths.size(); ++i) {
+                for (int j = 0; j < columnWidths[i] + 2 * padding + 2; ++j) {
+                    std::cout << current_border.horizontal;
+                }
+
+                if (i < columnWidths.size() - 1) {
+                    // Print internal joints
+                    if (isTop) {
+                        std::cout << current_border.t_down;
+                    }
+                    else if (isBottom) {
+                        if (include_t_up) {
+                            std::cout << current_border.t_up;
+                        }
+                        else {
+                            std::cout << current_border.horizontal;
+                        }
+                    }
+                    else {
+                        std::cout << current_border.cross;
+                    }
+                }
+            }
+
+            // Choose the correct corner to end with
+            if (isTop && !at_middle) {
+                std::cout << current_border.top_right;
+            }
+            else if (isBottom && !at_middle) {
+                std::cout << current_border.bottom_right;
+            }
+            else {
+                std::cout << current_border.t_left;   // middle right T-joint
+            }
+
+            std::cout << std::endl;
+            std::cout << getColorCode(Color::DEFAULT);
         }
 
         void printMessageBoard() const
@@ -276,7 +468,17 @@ namespace simbi {
                 columnWidths.size() * (2 * padding + 3) + 1;
             int barWidth = totalWidth - 2;
             int pos      = barWidth * progress / 100;
-            std::cout << getColorCode(separatorColor) << "║";
+
+            // Print separator before progress bar
+            std::cout << getColorCode(separatorColor);
+            std::cout << current_border.t_right;   // Left T-joint
+            for (int i = 0; i < totalWidth - 2; ++i) {
+                std::cout << current_border.horizontal;
+            }
+            std::cout << current_border.t_left << std::endl;   // Right T-joint
+
+            // Print progress bar
+            std::cout << current_border.vertical;
             std::cout << getColorCode(progressBarColor);
             switch (progressBarStyle) {
                 case ProgressBarStyle::Bar:
@@ -291,7 +493,6 @@ namespace simbi {
                             std::cout << " ";
                         }
                     }
-                    std::cout << "] " << progress << " %\n";
                     break;
                 case ProgressBarStyle::Block:
                     for (int i = 0; i < barWidth; ++i) {
@@ -305,15 +506,10 @@ namespace simbi {
                             std::cout << " ";
                         }
                     }
-                    std::cout << getColorCode(Color::DEFAULT);
-                    std::cout << getColorCode(separatorColor) << "║ "
-                              << getColorCode(Color::DEFAULT) << progress
-                              << " %\n";
                     break;
                 case ProgressBarStyle::Spinner:
                     static const char spinnerChars[] = {'|', '/', '-', '\\'};
-                    std::cout << spinnerChars[progress % 4] << " " << progress
-                              << " %\n";
+                    std::cout << spinnerChars[progress % 4];
                     break;
                 case ProgressBarStyle::Arrow:
                     for (int i = 0; i < barWidth; ++i) {
@@ -324,10 +520,6 @@ namespace simbi {
                             std::cout << " ";
                         }
                     }
-                    std::cout << getColorCode(Color::DEFAULT);
-                    std::cout << getColorCode(separatorColor) << "║ "
-                              << getColorCode(Color::DEFAULT) << progress
-                              << " %\n";
                     break;
                 case ProgressBarStyle::Dots:
                     std::cout << "[";
@@ -339,10 +531,6 @@ namespace simbi {
                             std::cout << " ";
                         }
                     }
-                    std::cout << getColorCode(Color::DEFAULT);
-                    std::cout << getColorCode(separatorColor) << "║ "
-                              << getColorCode(Color::DEFAULT) << progress
-                              << " %\n";
                     break;
                 case ProgressBarStyle::Mixed:
                     std::cout << "[";
@@ -357,24 +545,33 @@ namespace simbi {
                             std::cout << " ";
                         }
                     }
-                    std::cout << getColorCode(Color::DEFAULT);
-                    std::cout << getColorCode(separatorColor) << "║ "
-                              << getColorCode(Color::DEFAULT) << progress
-                              << " %\n";
+                    break;
+                case ProgressBarStyle::Gradient:
+                    for (int i = 0; i < barWidth; ++i) {
+                        if (i < pos) {
+                            // Gradient from red to green
+                            float ratio = static_cast<float>(i) / pos;
+                            std::cout << "\033[38;2;"
+                                      << static_cast<int>(255 * (1 - ratio))
+                                      << ";" << static_cast<int>(255 * ratio)
+                                      << ";0m█";
+                        }
+                        else {
+                            std::cout << " ";
+                        }
+                    }
                     break;
             }
-            // print bottom separator
-            std::cout << getColorCode(separatorColor) << "╚";
-            for (int i = 0; i < totalWidth - 2; ++i) {
-                std::cout << "═";
-            }
-            std::cout << "╝" << std::endl;
+            std::cout << getColorCode(Color::DEFAULT)
+                      << getColorCode(separatorColor) << current_border.vertical
+                      << getColorCode(Color::DEFAULT) << progress << " %"
+                      << std::endl;
 
             std::cout << getColorCode(Color::DEFAULT);   // Reset color
         }
 
       public:
-        PrettyTable(Intializers init)
+        PrettyTable(Intializers init = {})
             : borderStyle(init.style),
               padding(init.pad),
               progress(0),
@@ -388,6 +585,7 @@ namespace simbi {
               messageBoardColor(init.messageBoardColor),
               titleColor(init.titleColor)
         {
+            updateBorderCharacters();
         }
 
         void setTitle(const std::string& tableTitle) { title = tableTitle; }
@@ -448,10 +646,65 @@ namespace simbi {
 
         void setErrorColor(Color color) { errorColor = color; }
 
+        void setTheme(TableTheme theme)
+        {
+            current_theme = theme;
+            updateBorderCharacters();
+            switch (theme) {
+                case TableTheme::Cyberpunk:
+                    borderStyle      = BorderStyle::Thick;
+                    progressBarColor = Color::CYAN;
+                    textColor        = Color::LIGHT_YELLOW;
+                    separatorColor   = Color::BOLD;
+                    header_color     = Color::LIGHT_YELLOW;
+                    progressBarStyle = ProgressBarStyle::Gradient;
+                    break;
+                case TableTheme::Modern:
+                    borderStyle      = BorderStyle::Round;
+                    progressBarColor = Color::BLUE;
+                    textColor        = Color::WHITE;
+                    separatorColor   = Color::LIGHT_GREY;
+                    break;
+                case TableTheme::Minimal:
+                    borderStyle      = BorderStyle::Simple;
+                    progressBarColor = Color::GREEN;
+                    textColor        = Color::WHITE;
+                    separatorColor   = Color::WHITE;
+                    break;
+                case TableTheme::Classic:
+                    borderStyle      = BorderStyle::Double;
+                    progressBarColor = Color::WHITE;
+                    textColor        = Color::WHITE;
+                    separatorColor   = Color::WHITE;
+                    break;
+                default: break;
+            }
+        }
+
+        void setHeader(const std::vector<std::string>& header)
+        {
+            has_header = true;
+            if (!table.empty()) {
+                table.insert(table.begin(), header);
+            }
+            else {
+                table.push_back(header);
+            }
+            updateColumnWidths(header);
+        }
+
+        void setColumnAlignment(size_t col, Alignment align)
+        {
+            if (col >= column_alignments.size()) {
+                column_alignments.resize(col + 1, Alignment::Left);
+            }
+            column_alignments[col] = align;
+        }
+
         void print()
         {
             std::lock_guard<std::mutex> lock(mtx);
-            std::cout << "\033[H\033[J";   // Move cursor to home position
+            std::cout << "\033[H\033[J";   // move cursor to home position
                                            // and clear screen
             if (!title.empty()) {
                 int totalWidth = std::accumulate(
@@ -464,19 +717,61 @@ namespace simbi {
                           << getColorCode(titleColor) << title
                           << getColorCode(Color::DEFAULT) << std::endl;
             }
-            printSeparator();
-            for (const auto& row : table) {
+            printSeparator(true);   // top border
+
+            for (size_t row_idx = 0; row_idx < table.size(); ++row_idx) {
+                const auto& row = table[row_idx];
+                // left broder
+                std::cout << current_border.vertical;
                 for (size_t i = 0; i < row.size(); ++i) {
-                    std::cout << getColorCode(textColor) << "| "
+                    // apply padding and cell content
+                    std::cout << std::string(padding, ' ')
+                              << getColorCode(
+                                     row_idx == 0 && has_header ? header_color
+                                                                : textColor
+                                 )
                               << std::setw(columnWidths[i] + padding)
                               << std::left << row[i]
-                              << std::string(padding, ' ') << " ";
+                              << std::string(padding, ' ')
+                              << getColorCode(Color::DEFAULT);
+
+                    // add column separator if not last column
+                    if (i < row.size() - 1) {
+                        std::cout << current_border.vertical;
+                    }
                 }
-                std::cout << "|" << std::endl;
-                printSeparator();
+
+                // right border
+                std::cout << current_border.vertical << std::endl;
+
+                // print separator unless it's the last row
+                if (row_idx < table.size() - 1) {
+                    printSeparator(false, false);   // Middle separator
+                }
+                else {
+                    if (showProgressBar) {
+                        printSeparator(
+                            false,
+                            true,
+                            true,
+                            true
+                        );   // Middle separator w/ t up enabled
+                    }
+                }
             }
-            printProgressBar();
-            printMessageBoard();
+
+            if (showProgressBar) {
+                printProgressBar();
+                printSeparator(false, true, false);
+            }
+            else {
+                // print final bottom border
+                printSeparator(false, true);
+            }
+
+            if (messages.size() > 0) {
+                printMessageBoard();
+            }
         }
     };
 }   // namespace simbi

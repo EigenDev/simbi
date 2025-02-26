@@ -331,19 +331,8 @@ namespace simbi {
                 anyDisplayProps();
 
                 // use pretty table to print the results
-                PrettyTable table(
-                    {.style             = BorderStyle::Double,
-                     .pad               = 2,
-                     .showProgress      = global::progress_bar_enabled,
-                     .progressStyle     = ProgressBarStyle::Block,
-                     .progressColor     = Color::LIGHT_YELLOW,
-                     .textColor         = Color::WHITE,
-                     .separatorColor    = Color::BOLD,
-                     .infoColor         = Color::WHITE,
-                     .errorColor        = Color::RED,
-                     .titleColor        = Color::BOLD,
-                     .messageBoardColor = Color::LIGHT_CYAN}
-                );
+                PrettyTable table;
+                table.setTheme(TableTheme::Cyberpunk);
                 table.setTitle("Simulation Benchmarks");
                 table.setMessageBoardTitle("Simulation Messages");
                 table.addRow(
