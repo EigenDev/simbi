@@ -378,25 +378,57 @@ namespace simbi {
             int totalWidth =
                 std::accumulate(columnWidths.begin(), columnWidths.end(), 0) +
                 columnWidths.size() * (2 * padding + 3) + 1;
-            std::cout << getColorCode(separatorColor) << "╔";
+
+            // Top border
+            std::cout << getColorCode(separatorColor)
+                      << current_border.top_left;
             for (int i = 0; i < totalWidth - 2; ++i) {
-                std::cout << "═";
+                std::cout << current_border.horizontal;
             }
-            std::cout << "╗" << std::endl;
+            std::cout << current_border.top_right << std::endl;
+
+            // Title row
             std::cout
-                << "║ " << getColorCode(messageBoardColor)
+                << current_border.vertical << " "
+                << getColorCode(messageBoardColor)
                 << std::setw((totalWidth - 4 + messageBoardTitle.size()) / 2)
                 << std::right << messageBoardTitle
                 << std::setw((totalWidth + 5 - messageBoardTitle.size()) / 2)
                 << getColorCode(Color::DEFAULT) << getColorCode(separatorColor)
-                << " ║" << std::endl;
-            std::cout << "╠";
-            for (int i = 0; i < totalWidth - 2; ++i) {
-                std::cout << "═";
-            }
-            std::cout << "╣" << std::endl;
-            std::cout << getColorCode(Color::DEFAULT);   // Reset color
+                << " " << current_border.vertical << std::endl;
 
+            // Separator after title
+            std::cout << current_border.t_right;
+            for (int i = 0; i < totalWidth - 2; ++i) {
+                std::cout << current_border.horizontal;
+            }
+            std::cout << current_border.t_left << std::endl;
+            std::cout << getColorCode(Color::DEFAULT);
+
+            // Helper method for printing message lines
+            auto printMessage = [&](const std::string& message, Color color) {
+                std::istringstream stream(message);
+                std::string line;
+                while (std::getline(stream, line)) {
+                    std::cout << getColorCode(separatorColor)
+                              << current_border.vertical << " "
+                              << getColorCode(color)
+                              << std::setw(totalWidth - 4) << std::left << line
+                              << getColorCode(Color::DEFAULT)
+                              << getColorCode(separatorColor) << " "
+                              << current_border.vertical
+                              << getColorCode(Color::DEFAULT) << std::endl;
+                }
+            };
+
+            // Print info messages
+            for (const auto& message : messages) {
+                if (message.first == LogLevel::Info) {
+                    printMessage(message.second, infoColor);
+                }
+            }
+
+            // Handle error messages
             bool hasErrors = false;
             for (const auto& message : messages) {
                 if (message.first == LogLevel::Error) {
@@ -405,43 +437,27 @@ namespace simbi {
                 }
             }
 
-            auto printMessage = [&](const std::string& message, Color color) {
-                std::istringstream stream(message);
-                std::string line;
-                while (std::getline(stream, line)) {
-                    std::cout << getColorCode(separatorColor) << "║ "
-                              << getColorCode(color)
-                              << std::setw(totalWidth - 4) << std::left << line
-                              << getColorCode(Color::DEFAULT)
-                              << getColorCode(separatorColor) << " ║"
-                              << getColorCode(Color::DEFAULT) << std::endl;
-                }
-            };
-
-            for (const auto& message : messages) {
-                if (message.first == LogLevel::Info) {
-                    printMessage(message.second, infoColor);
-                }
-            }
-
             if (hasErrors) {
-                std::cout << getColorCode(separatorColor) << "╠";
+                // Separator before errors
+                std::cout << getColorCode(separatorColor)
+                          << current_border.t_right;
                 for (int i = 0; i < totalWidth - 2; ++i) {
-                    std::cout << "═";
+                    std::cout << current_border.horizontal;
                 }
-                std::cout << "╣" << std::endl;
-                std::cout << getColorCode(Color::DEFAULT);   // Reset color
+                std::cout << current_border.t_left << std::endl;
+                std::cout << getColorCode(Color::DEFAULT);
 
                 bool firstError = true;
                 for (const auto& message : messages) {
                     if (message.first == LogLevel::Error) {
                         if (!firstError) {
-                            std::cout << getColorCode(separatorColor) << "╠";
+                            // Separator between errors
+                            std::cout << getColorCode(separatorColor)
+                                      << current_border.t_right;
                             for (int i = 0; i < totalWidth - 2; ++i) {
-                                std::cout << "═";
+                                std::cout << current_border.horizontal;
                             }
-                            std::cout << "╣" << std::endl;
-                            // Reset color
+                            std::cout << current_border.t_left << std::endl;
                             std::cout << getColorCode(Color::DEFAULT);
                         }
                         firstError = false;
@@ -450,12 +466,14 @@ namespace simbi {
                 }
             }
 
-            std::cout << getColorCode(separatorColor) << "╚";
+            // Bottom border
+            std::cout << getColorCode(separatorColor)
+                      << current_border.bottom_left;
             for (int i = 0; i < totalWidth - 2; ++i) {
-                std::cout << "═";
+                std::cout << current_border.horizontal;
             }
-            std::cout << "╝" << std::endl;
-            std::cout << getColorCode(Color::DEFAULT);   // Reset color
+            std::cout << current_border.bottom_right << std::endl;
+            std::cout << getColorCode(Color::DEFAULT);
         }
 
         void printProgressBar() const
@@ -649,7 +667,6 @@ namespace simbi {
         void setTheme(TableTheme theme)
         {
             current_theme = theme;
-            updateBorderCharacters();
             switch (theme) {
                 case TableTheme::Cyberpunk:
                     borderStyle      = BorderStyle::Thick;
@@ -679,6 +696,7 @@ namespace simbi {
                     break;
                 default: break;
             }
+            updateBorderCharacters();
         }
 
         void setHeader(const std::vector<std::string>& header)
