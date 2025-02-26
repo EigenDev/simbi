@@ -64,11 +64,11 @@ struct ExecutionException : public std::exception {
 namespace simbi {
 
     struct ExecutionPolicyConfig {
-        size_t shared_mem_bytes            = 0;
+        size_type shared_mem_bytes         = 0;
         std::vector<simbiStream_t> streams = {};
         std::vector<int> devices           = {0};   // Default to device 0
-        size_t batch_size                  = 1024;
-        size_t min_elements_per_thread     = 1;
+        size_type batch_size               = 1024;
+        size_type min_elements_per_thread  = 1;
     };
 
     template <typename T = luint, typename U = luint>
@@ -76,13 +76,13 @@ namespace simbi {
         T nzones;
         dim3 grid_size;
         dim3 block_size;
-        size_t shared_mem_bytes;
+        size_type shared_mem_bytes;
         std::vector<simbiStream_t> streams;
         std::vector<int> devices;
         T nzones_per_device;
         std::vector<dim3> device_grid_sizes;
-        size_t batch_size;
-        size_t min_elements_per_thread;
+        size_type batch_size;
+        size_type min_elements_per_thread;
 
         ~ExecutionPolicy() = default;
         ExecutionPolicy()  = default;
@@ -95,7 +95,9 @@ namespace simbi {
         )
             : shared_mem_bytes(config.shared_mem_bytes),
               streams(config.streams),
-              devices(config.devices)
+              devices(config.devices),
+              batch_size(config.batch_size),
+              min_elements_per_thread(config.min_elements_per_thread)
         {
             if (grid_sizes.size() != block_sizes.size()) {
                 throw ExecutionException();
@@ -266,7 +268,7 @@ namespace simbi {
             }
         }
 
-        size_t get_num_batches(size_t sz) const
+        size_type get_num_batches(size_type sz) const
         {
             return (sz + batch_size - 1) / batch_size;
         }
