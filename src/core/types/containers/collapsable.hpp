@@ -4,7 +4,7 @@
  *  *=============================================================================
  *  *
  *  * @file            collapsable.hpp
- *  * @brief
+ *  * @brief           provides a collapsable array class for fixed-size arrays
  *  * @details
  *  *
  *  * @version         0.8.0

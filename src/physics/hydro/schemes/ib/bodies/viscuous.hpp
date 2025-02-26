@@ -4,7 +4,7 @@
  *  *=============================================================================
  *  *
  *  * @file            viscuous.hpp
- *  * @brief
+ *  * @brief           Viscuous Immersed Body Implementation
  *  * @details
  *  *
  *  * @version         0.8.0

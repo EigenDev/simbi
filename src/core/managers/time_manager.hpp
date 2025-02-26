@@ -4,7 +4,7 @@
  *  *=============================================================================
  *  *
  *  * @file            time_manager.hpp
- *  * @brief
+ *  * @brief           a helper struct to manage time info in the simulation
  *  * @details
  *  *
  *  * @version         0.8.0

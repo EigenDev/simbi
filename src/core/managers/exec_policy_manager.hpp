@@ -4,7 +4,7 @@
  *  *=============================================================================
  *  *
  *  * @file            exec_policy_manager.hpp
- *  * @brief
+ *  * @brief           a helper struct to manage execution policies for sim
  *  * @details
  *  *
  *  * @version         0.8.0

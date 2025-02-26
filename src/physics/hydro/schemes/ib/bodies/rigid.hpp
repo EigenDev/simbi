@@ -4,7 +4,7 @@
  *  *=============================================================================
  *  *
  *  * @file            rigid.hpp
- *  * @brief
+ *  * @brief           Rigid Immersed Body Implementation
  *  * @details
  *  *
  *  * @version         0.8.0

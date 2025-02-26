@@ -4,7 +4,7 @@
  *  *=============================================================================
  *  *
  *  * @file            sink.hpp
- *  * @brief
+ *  * @brief           Sink Immersed Body Implementation
  *  * @details
  *  *
  *  * @version         0.8.0

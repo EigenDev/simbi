@@ -4,7 +4,7 @@
  *  *=============================================================================
  *  *
  *  * @file            geometry_manager.hpp
- *  * @brief
+ *  * @brief           manages the grid geometry and mesh data and mesh motion
  *  * @details
  *  *
  *  * @version         0.8.0

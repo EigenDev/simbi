@@ -3,8 +3,8 @@
  *  *           SIMBI - Special Relativistic Magnetohydrodynamics Code
  *  *=============================================================================
  *  *
- *  * @file            using_decl.hpp
- *  * @brief
+ *  * @file            alias.hpp
+ *  * @brief           home for most type aliases
  *  * @details
  *  *
  *  * @version         0.8.0

@@ -4,7 +4,7 @@
  *  *=============================================================================
  *  *
  *  * @file            elastic.hpp
- *  * @brief
+ *  * @brief           Elastic Immersed Body Implementation
  *  * @details
  *  *
  *  * @version         0.8.0

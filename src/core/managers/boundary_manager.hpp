@@ -4,7 +4,7 @@
  *  *=============================================================================
  *  *
  *  * @file            boundary_manager.hpp
- *  * @brief
+ *  * @brief           a helper struct to manage boundary conditions for ndarray
  *  * @details
  *  *
  *  * @version         0.8.0

@@ -4,11 +4,11 @@
  *  *=============================================================================
  *  *
  *  * @file            grid_manager.hpp
- *  * @brief
+ *  * @brief           provides generic grid information for mesh
  *  * @details
  *  *
  *  * @version         0.8.0
- *  * @date            2025-02-21
+ *  * @date            2025-02-26
  *  * @author          Marcus DuPont
  *  * @email           marcus.dupont@princeton.edu
  *  *
@@ -40,7 +40,7 @@
  *  *==============================================================================
  *  * @history        Version History
  *  *==============================================================================
- *  * 2025-02-21      v0.8.0      Initial implementation
+ *  * 2025-02-26      v0.8.0      Initial implementation
  *  *
  *  *==============================================================================
  *  * @copyright (C) 2025 Marcus DuPont. All rights reserved.

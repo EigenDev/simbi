@@ -4,7 +4,7 @@
  *  *=============================================================================
  *  *
  *  * @file            gravitational.hpp
- *  * @brief
+ *  * @brief           Gravitational Immersed Body Implementation
  *  * @details
  *  *
  *  * @version         0.8.0

@@ -4,7 +4,8 @@
  *  *=============================================================================
  *  *
  *  * @file            geometry_traits.hpp
- *  * @brief
+ *  * @brief           provides geometry info (volume, area, etc) for mesh
+ * geometry
  *  * @details
  *  *
  *  * @version         0.8.0

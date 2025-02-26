@@ -4,7 +4,7 @@
  *  *=============================================================================
  *  *
  *  * @file            io_manager.hpp
- *  * @brief
+ *  * @brief           I/O manager for HDF5 file I/O and JIT compilation
  *  * @details
  *  *
  *  * @version         0.8.0

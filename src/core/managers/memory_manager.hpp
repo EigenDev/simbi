@@ -4,7 +4,7 @@
  *  *=============================================================================
  *  *
  *  * @file            memory_manager.hpp
- *  * @brief
+ *  * @brief           a helper struct to manage memory on the GPU and CPU
  *  * @details
  *  *
  *  * @version         0.8.0

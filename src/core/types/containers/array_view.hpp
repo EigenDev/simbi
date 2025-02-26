@@ -4,7 +4,7 @@
  *  *=============================================================================
  *  *
  *  * @file            array_view.hpp
- *  * @brief
+ *  * @brief           array view for ndarray data, similar to numpy
  *  * @details
  *  *
  *  * @version         0.8.0

@@ -4,7 +4,7 @@
  *  *=============================================================================
  *  *
  *  * @file            cell.hpp
- *  * @brief
+ *  * @brief           a cell class with face, normal, and centroid information
  *  * @details
  *  *
  *  * @version         0.8.0

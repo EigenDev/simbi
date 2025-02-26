@@ -1,20 +1,51 @@
 /**
- * ***********************(C) COPYRIGHT 2025 Marcus DuPont**********************
- * @file       smart_ptr.hpp
- * @brief
- *
- * @note adapted from:
+ *  *=============================================================================
+ *  *           SIMBI - Special Relativistic Magnetohydrodynamics Code
+ *  *=============================================================================
+ *  *
+ *  * @file            smart_ptr.hpp
+ *  * @brief           a custom implementation of smart pointers for GPU/CPU
+ *  * @details
+ *  *
+ *  * @version         0.8.0
+ *  * @date            2025-02-26
+ *  * @author          Marcus DuPont
+ *  * @email           marcus.dupont@princeton.edu
+ *  *
+ *  *==============================================================================
+ *  * @build           Requirements & Dependencies
+ *  *==============================================================================
+ *  * @requires        C++20
+ *  * @depends         CUDA >= 11.0, HDF5 >= 1.12, OpenMP >= 4.5
+ *  * @platform        Linux, MacOS
+ *  * @parallel        GPU (CUDA, HIP), CPU (OpenMP)
+ *  *
+ *  *==============================================================================
+ *  * @documentation   Reference & Notes
+ *  *==============================================================================
+ *  * @usage
+ *  * @note adapted from:
  * https://www.experts-exchange.com/articles/1959/C-Smart-pointers.html
- * @history:
- *   Version   Date            Author          Modification    Email
- *   V0.8.0    Jun-26-2025     Marcus DuPont marcus.dupont@princeton.edu
- *
- * @verbatim
- * ==============================================================================
- *
- * ==============================================================================
- * @endverbatim
- * ***********************(C) COPYRIGHT 2025 Marcus DuPont**********************
+ *  * @warning
+ *  * @todo
+ *  * @bug
+ *  * @performance
+ *  *
+ *  *==============================================================================
+ *  * @testing        Quality Assurance
+ *  *==============================================================================
+ *  * @test
+ *  * @benchmark
+ *  * @validation
+ *  *
+ *  *==============================================================================
+ *  * @history        Version History
+ *  *==============================================================================
+ *  * 2025-02-26      v0.8.0      Initial implementation
+ *  *
+ *  *==============================================================================
+ *  * @copyright (C) 2025 Marcus DuPont. All rights reserved.
+ *  *==============================================================================
  */
 #ifndef SMRT_PTR_HPP
 #define SMRT_PTR_HPP

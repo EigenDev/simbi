@@ -4,7 +4,7 @@
  *  *=============================================================================
  *  *
  *  * @file            orbital.hpp
- *  * @brief
+ *  * @brief           Orbital Immersed Body System Implementation
  *  * @details
  *  *
  *  * @version         0.8.0

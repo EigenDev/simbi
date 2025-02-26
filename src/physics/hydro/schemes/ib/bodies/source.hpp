@@ -4,7 +4,7 @@
  *  *=============================================================================
  *  *
  *  * @file            source.hpp
- *  * @brief
+ *  * @brief           Source Immersed Body Implementation
  *  * @details
  *  *
  *  * @version         0.8.0

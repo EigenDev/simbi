@@ -4,7 +4,7 @@
  *  *=============================================================================
  *  *
  *  * @file            array_props.hpp
- *  * @brief
+ *  * @brief           a struct to hold properties of an array-type
  *  * @details
  *  *
  *  * @version         0.8.0

@@ -4,7 +4,7 @@
  *  *=============================================================================
  *  *
  *  * @file            array_t.hpp
- *  * @brief
+ *  * @brief           provides a simple array class for fixed-size arrays
  *  * @details
  *  *
  *  * @version         0.8.0

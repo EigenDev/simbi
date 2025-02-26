@@ -1,34 +1,56 @@
 /**
- * ***********************(C) COPYRIGHT 2025 Marcus DuPont**********************
- * @file       traits.hpp
- * @brief      home of all type traits
- *
- * @note
- * @history:
- *   Version   Date            Author          Modification    Email
- *   V0.8.0    Dec-03-2023     Marcus DuPont marcus.dupont@princeton.edu
- *
- * @verbatim
- * ==============================================================================
- *
- * ==============================================================================
- * @endverbatim
- * ***********************(C) COPYRIGHT 2025 Marcus DuPont**********************
+ *  *=============================================================================
+ *  *           SIMBI - Special Relativistic Magnetohydrodynamics Code
+ *  *=============================================================================
+ *  *
+ *  * @file            traits.hpp
+ *  * @brief           provides type traits for primitive and custom types
+ *  * @details
+ *  *
+ *  * @version         0.8.0
+ *  * @date            2025-02-26
+ *  * @author          Marcus DuPont
+ *  * @email           marcus.dupont@princeton.edu
+ *  *
+ *  *==============================================================================
+ *  * @build           Requirements & Dependencies
+ *  *==============================================================================
+ *  * @requires        C++20
+ *  * @depends         CUDA >= 11.0, HDF5 >= 1.12, OpenMP >= 4.5
+ *  * @platform        Linux, MacOS
+ *  * @parallel        GPU (CUDA, HIP), CPU (OpenMP)
+ *  *
+ *  *==============================================================================
+ *  * @documentation   Reference & Notes
+ *  *==============================================================================
+ *  * @usage
+ *  * @note
+ *  * @warning
+ *  * @todo
+ *  * @bug
+ *  * @performance
+ *  *
+ *  *==============================================================================
+ *  * @testing        Quality Assurance
+ *  *==============================================================================
+ *  * @test
+ *  * @benchmark
+ *  * @validation
+ *  *
+ *  *==============================================================================
+ *  * @history        Version History
+ *  *==============================================================================
+ *  * 2025-02-26      v0.8.0      Initial implementation
+ *  *
+ *  *==============================================================================
+ *  * @copyright (C) 2025 Marcus DuPont. All rights reserved.
+ *  *==============================================================================
  */
 #ifndef TRAITS_HPP
 #define TRAITS_HPP
 
 #include "core/types/utility/enums.hpp"   // for Regime
 #include <type_traits>
-
-// template <int dim>
-// struct SRHD;
-
-// template <int dim>
-// struct RMHD;
-
-// template <int dim>
-// struct NEWTONIAN;
 
 //==========================================================================
 //                  PRIMITIVE TYPE TRAITS
@@ -152,21 +174,5 @@ struct is_conserved {
 
 template <typename T>
 inline constexpr bool is_conserved_v = is_conserved<T>::value;
-
-// Solver traits
-// template <typename T>
-// struct solver_traits;
-
-// template <int dim>
-// struct solver_traits<RMHD<dim>> {
-//     static constexpr bool is_relativistic     = true;
-//     static constexpr bool has_magnetic_fields = true;
-// };
-
-// template <int dim>
-// struct solver_traits<SRHD<dim>> {
-//     static constexpr bool is_relativistic     = true;
-//     static constexpr bool has_magnetic_fields = false;
-// };
 
 #endif

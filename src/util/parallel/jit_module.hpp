@@ -1,20 +1,51 @@
 /**
- * ***********************(C) COPYRIGHT 2025 Marcus DuPont**********************
- * @file       jit_compile.hpp
- * @brief      a header file for the JIT compiler that turns the source code
- * into ptx (nvidia) or LLVM IR (amd) code
- *
- * @note
- * @history:
- *   Version   Date            Author          Modification    Email
- *   V0.8.0    Jan-06-2025     Marcus DuPont marcus.dupont@princeton.edu
- *
- * @verbatim
- * ==============================================================================
- *
- * ==============================================================================
- * @endverbatim
- * ***********************(C) COPYRIGHT 2025 Marcus DuPont**********************
+ *  *=============================================================================
+ *  *           SIMBI - Special Relativistic Magnetohydrodynamics Code
+ *  *=============================================================================
+ *  *
+ *  * @file            jit_module.hpp
+ *  * @brief           a header file for the JIT compiler that turns the source
+ * code into ptx (nvidia) or LLVM IR (amd) code
+ *  * @details
+ *  *
+ *  * @version         0.8.0
+ *  * @date            2025-02-26
+ *  * @author          Marcus DuPont
+ *  * @email           marcus.dupont@princeton.edu
+ *  *
+ *  *==============================================================================
+ *  * @build           Requirements & Dependencies
+ *  *==============================================================================
+ *  * @requires        C++20
+ *  * @depends         CUDA >= 11.0, HDF5 >= 1.12, OpenMP >= 4.5
+ *  * @platform        Linux, MacOS
+ *  * @parallel        GPU (CUDA, HIP), CPU (OpenMP)
+ *  *
+ *  *==============================================================================
+ *  * @documentation   Reference & Notes
+ *  *==============================================================================
+ *  * @usage
+ *  * @note
+ *  * @warning
+ *  * @todo
+ *  * @bug
+ *  * @performance
+ *  *
+ *  *==============================================================================
+ *  * @testing        Quality Assurance
+ *  *==============================================================================
+ *  * @test
+ *  * @benchmark
+ *  * @validation
+ *  *
+ *  *==============================================================================
+ *  * @history        Version History
+ *  *==============================================================================
+ *  * 2025-02-26      v0.8.0      Initial implementation
+ *  *
+ *  *==============================================================================
+ *  * @copyright (C) 2025 Marcus DuPont. All rights reserved.
+ *  *==============================================================================
  */
 #ifndef JIT_MODULE_HPP
 #define JIT_MODULE_HPP
