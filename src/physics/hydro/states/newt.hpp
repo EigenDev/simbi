@@ -72,8 +72,7 @@ namespace simbi {
         using base_t = HydroBase<Newtonian<dim>, dim, Regime::NEWTONIAN>;
 
       protected:
-        // type alias
-        using base_t::cfl;
+        // type aliases
         using base_t::gamma;
         using base_t::hllc_z;
 

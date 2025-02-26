@@ -127,16 +127,15 @@ namespace simbi {
               io_manager_(solver_config_, init_conditions),
               // protected references to commonly used values
               gamma(gamma_),
-              cfl(cfl_),
               hllc_z(hllc_z_)
 
         {
-            // if (std::getenv("USE_OMP")) {
-            //     global::use_omp = true;
-            //     if (const char* omp_tnum = std::getenv("OMP_NUM_THREADS")) {
-            //         omp_set_num_threads(std::stoi(omp_tnum));
-            //     }
-            // }
+            if (std::getenv("USE_OMP")) {
+                global::use_omp = true;
+                if (const char* omp_tnum = std::getenv("OMP_NUM_THREADS")) {
+                    omp_set_num_threads(std::stoi(omp_tnum));
+                }
+            }
         }
 
         DUAL conserved_t hydro_sources(const auto& cell) const
@@ -238,8 +237,6 @@ namespace simbi {
             auto& derived = static_cast<Derived&>(*this);
             cons_.resize(this->total_zones()).reshape({nz(), ny(), nx()});
             prims_.resize(this->total_zones()).reshape({nz(), ny(), nx()});
-            std::cout << "Simulating with " << this->total_zones()
-                      << " zones\n";
 
             // Copy the state array into real& profile variables
             for (size_type ii = 0; ii < this->total_zones(); ii++) {
@@ -282,7 +279,6 @@ namespace simbi {
 
         // protected references to commonly used values
         const real& gamma;
-        const real& cfl;
         const real& hllc_z;
 
       public:

@@ -74,7 +74,6 @@ namespace simbi {
 
       protected:
         // type alias
-        using base_t::cfl;
         using base_t::gamma;
 
       public:
