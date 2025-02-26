@@ -582,7 +582,7 @@ namespace simbi {
             }
             std::cout << getColorCode(Color::DEFAULT)
                       << getColorCode(separatorColor) << current_border.vertical
-                      << getColorCode(Color::DEFAULT) << progress << " %"
+                      << getColorCode(Color::DEFAULT) << " " << progress << " %"
                       << std::endl;
 
             std::cout << getColorCode(Color::DEFAULT);   // Reset color
