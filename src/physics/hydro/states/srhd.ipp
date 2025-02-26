@@ -535,7 +535,8 @@ void SRHD<dim>::init_simulation()
         this->cons_.contract(this->halo_radius()),
         this->bcs()
     );
-    pressure_guesses_.resize(this->cons_.size()).rehspae(this->cons_.shape());
+    pressure_guesses_.resize(this->cons_.size())
+        .reshape(this->get_shape(this->full_policy()));
     pressure_guesses_.transform(
         [](auto& p, const auto& cons) {
             const auto d = cons.dens();
