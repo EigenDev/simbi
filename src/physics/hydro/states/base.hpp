@@ -257,7 +257,7 @@ namespace simbi {
                 advance_system();
 
                 // Update time
-                time_manager_.advance();
+                time_manager_.advance(step());
 
                 // move the mesh if needed
                 mesh_.geometry_state().move_grid(a, adot, time(), time_step());

@@ -77,7 +77,7 @@ namespace simbi {
         real checkpoint_interval() const { return checkpoint_interval_; }
 
         // simple mutators
-        void advance() { t_ += dt_; }
+        void advance(const real step) { t_ += step * dt_; }
         void set_dt(real dt) { dt_ = dt; }
         void update_next_checkpoint_time()
         {
