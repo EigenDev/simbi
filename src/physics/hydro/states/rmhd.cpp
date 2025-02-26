@@ -4,26 +4,6 @@
 
 // Explicit instantiation of RMHD class
 namespace simbi {
-
-    // Explicit instantiation of Mesh class
-    template struct Mesh<
-        simbi::RMHD<1>,
-        1,
-        anyConserved<1, simbi::Regime::RMHD>,
-        anyPrimitive<1, simbi::Regime::RMHD>>;
-
-    template struct Mesh<
-        simbi::RMHD<2>,
-        2,
-        anyConserved<2, simbi::Regime::RMHD>,
-        anyPrimitive<2, simbi::Regime::RMHD>>;
-
-    template struct Mesh<
-        simbi::RMHD<3>,
-        3,
-        anyConserved<3, simbi::Regime::RMHD>,
-        anyPrimitive<3, simbi::Regime::RMHD>>;
-
     namespace hydrostate {
         template <>
         void simulate<1, HydroRegime::RMHD>(
@@ -34,7 +14,7 @@ namespace simbi {
         )
         {
             auto self = std::make_unique<RMHD<1>>(state, init_cond);
-            self->simulate(scale_factor, scale_factor_derivative);
+            self->run(scale_factor, scale_factor_derivative);
         }
 
         template <>
@@ -46,7 +26,7 @@ namespace simbi {
         )
         {
             auto self = std::make_unique<RMHD<2>>(state, init_cond);
-            self->simulate(scale_factor, scale_factor_derivative);
+            self->run(scale_factor, scale_factor_derivative);
         }
 
         template <>
@@ -58,7 +38,7 @@ namespace simbi {
         )
         {
             auto self = std::make_unique<RMHD<3>>(state, init_cond);
-            self->simulate(scale_factor, scale_factor_derivative);
+            self->run(scale_factor, scale_factor_derivative);
         }
     }   // namespace hydrostate
 

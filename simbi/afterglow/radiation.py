@@ -329,7 +329,7 @@ def run(parser: argparse.ArgumentParser,
                     mesh=mesh,
                     qscales=scales_dict,
                     sim_info=sim_info,
-                    chkpt_idx=idx,
+                    checkpoint_idx=idx,
                     data_dim=dim
                 )
             else:

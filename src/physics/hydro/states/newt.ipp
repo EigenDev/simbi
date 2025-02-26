@@ -1,6 +1,5 @@
-#include "io/console/logger.hpp"       // for logger
-#include "util/tools/device_api.hpp"   // for syncrohonize, devSynch, ...
-#include <cmath>                       // for max, min
+#include "core/managers/boundary_manager.hpp"
+#include <cmath>   // for max, min
 
 using namespace simbi;
 using namespace simbi::util;
@@ -16,7 +15,7 @@ Newtonian<dim>::Newtonian(
     std::vector<std::vector<real>>& state,
     InitialConditions& init_conditions
 )
-    : HydroBase(state, init_conditions)
+    : HydroBase<Newtonian<dim>, dim, Regime::NEWTONIAN>(state, init_conditions)
 {
 }
 
@@ -28,16 +27,13 @@ Newtonian<dim>::~Newtonian() = default;
 //                          Get The Primitive
 //-----------------------------------------------------------------------------------------
 template <int dim>
-void Newtonian<dim>::cons2prim()
+void Newtonian<dim>::cons2prim_impl()
 {
     shared_atomic_bool local_failure;
-    prims.transform(
+    this->prims_.transform(
         [gamma = this->gamma,
          loc   = &local_failure] DEV(auto& prim, const auto& cons_var)
             -> Maybe<primitive_t> {
-            //==
-            // old way
-            //==
             const auto& rho = cons_var.dens();
             const auto vel  = cons_var.momentum() / rho;
             const auto& chi = cons_var.chi();
@@ -52,11 +48,11 @@ void Newtonian<dim>::cons2prim()
 
             return primitive_t{rho, vel, pre, chi};
         },
-        fullPolicy,
-        cons
+        this->full_policy(),
+        this->cons_
     );
     if (local_failure.load()) {
-        inFailureState.store(true);
+        this->set_failure_state(true);
     }
 }
 
@@ -80,7 +76,7 @@ DUAL Newtonian<dim>::eigenvals_t Newtonian<dim>::calc_eigenvals(
 
     const real csR = std::sqrt(gamma * pR / rhoR);
     const real csL = std::sqrt(gamma * pL / rhoL);
-    switch (sim_solver) {
+    switch (this->solver_type()) {
         case Solver::HLLC: {
             // const real cbar   = 0.5 * (csL + csR);
             // const real rhoBar = 0.5 * (rhoL + rhoR);
@@ -129,59 +125,6 @@ DUAL Newtonian<dim>::eigenvals_t Newtonian<dim>::calc_eigenvals(
             return {aL, aR};
         }
     }
-};
-
-//---------------------------------------------------------------------
-//                  ADAPT THE TIMESTEP
-//---------------------------------------------------------------------
-// Adapt the cfl conditional timestep
-template <int dim>
-void Newtonian<dim>::adapt_dt()
-{
-    auto calc_wave_speeds = [gamma =
-                                 this->gamma] DEV(const Maybe<primitive_t>& prim
-                            ) -> WaveSpeeds {
-        const real cs = std::sqrt(gamma * prim->press() / prim->rho());
-        const real v1 = prim->vcomponent(1);
-        const real v2 = prim->vcomponent(2);
-        const real v3 = prim->vcomponent(3);
-
-        return WaveSpeeds{
-          .v1p = std::abs(v1 + cs),
-          .v1m = std::abs(v1 - cs),
-          .v2p = std::abs(v2 + cs),
-          .v2m = std::abs(v2 - cs),
-          .v3p = std::abs(v3 + cs),
-          .v3m = std::abs(v3 - cs),
-        };
-    };
-    auto calc_local_dt =
-        [] DEV(const WaveSpeeds& speeds, const auto& cell) -> real {
-        auto dt = INFINITY;
-        for (size_type ii = 0; ii < dim; ++ii) {
-            auto dx    = cell.dx(ii);
-            auto dt_dx = dx / std::min(speeds[2 * ii], speeds[2 * ii + 1]);
-            dt         = std::min<real>(dt, dt_dx);
-        }
-        return dt;
-    };
-
-    // Single-pass reduction that combines fold and reduce
-    dt = prims.reduce(
-             static_cast<real>(INFINITY),
-             [calc_wave_speeds,
-              calc_local_dt,
-              this](const auto& acc, const auto& prim, const luint gid) {
-                 const auto [ii, jj, kk] = get_indices(gid, nx, ny);
-                 const auto speeds       = calc_wave_speeds(prim);
-                 const auto cell         = this->cell_geometry(ii, jj, kk);
-                 const auto local_dt     = calc_local_dt(speeds, cell);
-
-                 return std::min(acc, local_dt);
-             },
-             fullPolicy
-         ) *
-         cfl;
 };
 
 //===================================================================================================================
@@ -384,70 +327,10 @@ DUAL Newtonian<dim>::conserved_t Newtonian<dim>::calc_hllc_flux(
 };
 
 //===================================================================================================================
-//                                           SOURCE TERMS
-//===================================================================================================================
-template <int dim>
-DUAL Newtonian<dim>::conserved_t Newtonian<dim>::hydro_sources(const auto& cell
-) const
-{
-    if (null_sources) {
-        return conserved_t{};
-    }
-    const auto x1c = cell.x1mean;
-    const auto x2c = cell.x2mean;
-    const auto x3c = cell.x3mean;
-
-    conserved_t res;
-    if constexpr (dim == 1) {
-        hydro_source(x1c, t, res);
-    }
-    else if constexpr (dim == 2) {
-        hydro_source(x1c, x2c, t, res);
-    }
-    else {
-        hydro_source(x1c, x2c, x3c, t, res);
-    }
-
-    return res;
-}
-
-template <int dim>
-DUAL Newtonian<dim>::conserved_t
-Newtonian<dim>::gravity_sources(const auto& prims, const auto& cell) const
-{
-    if (null_gravity) {
-        return conserved_t{};
-    }
-    const auto x1c = cell.x1mean;
-
-    conserved_t res;
-    // gravity only changes the momentum and energy
-    if constexpr (dim > 1) {
-        const auto x2c = cell.x2mean;
-        if constexpr (dim > 2) {
-            const auto x3c = cell.x3mean;
-            gravity_source(x1c, x2c, x3c, t, res);
-            res[dimensions + 1] =
-                res[1] * prims[1] + res[2] * prims[2] + res[3] * prims[3];
-        }
-        else {
-            gravity_source(x1c, x2c, t, res);
-            res[dimensions + 1] = res[1] * prims[1] + res[2] * prims[2];
-        }
-    }
-    else {
-        gravity_source(x1c, t, res);
-        res[dimensions + 1] = res[1] * prims[1];
-    }
-
-    return res;
-}
-
-//===================================================================================================================
 //                                            UDOT CALCULATIONS
 //===================================================================================================================
 template <int dim>
-void Newtonian<dim>::advance()
+void Newtonian<dim>::advance_impl()
 {
     auto dcons = [this] DEV(
                      const auto& fri,
@@ -462,11 +345,13 @@ void Newtonian<dim>::advance()
         for (int q = 1; q > -1; q--) {
             // q = 0 is L, q = 1 is R
             const auto sign = (q == 1) ? 1 : -1;
-            res -= fri[q] * cell.idV1() * cell.area(0 + q) * sign;
+            res -= fri[q] * cell.inverse_volume(0) * cell.area(0 + q) * sign;
             if constexpr (dim > 1) {
-                res -= gri[q] * cell.idV2() * cell.area(2 + q) * sign;
+                res -=
+                    gri[q] * cell.inverse_volume(1) * cell.area(2 + q) * sign;
                 if constexpr (dim > 2) {
-                    res -= hri[q] * cell.idV3() * cell.area(4 + q) * sign;
+                    res -= hri[q] * cell.inverse_volume(2) * cell.area(4 + q) *
+                           sign;
                 }
             }
         }
@@ -474,7 +359,7 @@ void Newtonian<dim>::advance()
         res += gravity;
         res += geometrical_sources;
 
-        return res * step * dt;
+        return res * this->time_step();
     };
 
     auto calc_flux = [this, dcons] DEV(auto& con, const auto& prim) {
@@ -486,14 +371,14 @@ void Newtonian<dim>::advance()
             const auto& pL = prim.at(q - 1, 0, 0);
             const auto& pR = prim.at(q - 0, 0, 0);
 
-            if (!use_pcm) {
+            if (!this->using_pcm()) {
                 const auto& pLL = prim.at(q - 2, 0, 0);
                 const auto& pRR = prim.at(q + 1, 0, 0);
                 // compute the reconstructed states
                 const auto pLr =
-                    pL + plm_gradient(pL, pLL, pR, plm_theta) * 0.5;
+                    pL + plm_gradient(pL, pLL, pR, this->plm_theta()) * 0.5;
                 const auto pRr =
-                    pR - plm_gradient(pR, pL, pRR, plm_theta) * 0.5;
+                    pR - plm_gradient(pR, pL, pRR, this->plm_theta()) * 0.5;
                 fri[q] = (this->*riemann_solve)(pLr, pRr, 1, 0);
             }
             else {
@@ -504,13 +389,17 @@ void Newtonian<dim>::advance()
                 // Y-direction flux
                 const auto& pL_y = prim.at(0, q - 1, 0);
                 const auto& pR_y = prim.at(0, q - 0, 0);
-                if (!use_pcm) {
+                if (!this->using_pcm()) {
                     const auto& pLL_y = prim.at(0, q - 2, 0);
                     const auto& pRR_y = prim.at(0, q + 1, 0);
                     const auto pLr_y =
-                        pL_y + plm_gradient(pL_y, pLL_y, pR_y, plm_theta) * 0.5;
+                        pL_y +
+                        plm_gradient(pL_y, pLL_y, pR_y, this->plm_theta()) *
+                            0.5;
                     const auto pRr_y =
-                        pR_y - plm_gradient(pR_y, pL_y, pRR_y, plm_theta) * 0.5;
+                        pR_y -
+                        plm_gradient(pR_y, pL_y, pRR_y, this->plm_theta()) *
+                            0.5;
                     gri[q] = (this->*riemann_solve)(pLr_y, pRr_y, 2, 0);
                 }
                 else {
@@ -521,15 +410,17 @@ void Newtonian<dim>::advance()
                     // Z-direction flux
                     const auto& pL_z = prim.at(0, 0, q - 1);
                     const auto& pR_z = prim.at(0, 0, q - 0);
-                    if (!use_pcm) {
+                    if (!this->using_pcm()) {
                         const auto& pLL_z = prim.at(0, 0, q - 2);
                         const auto& pRR_z = prim.at(0, 0, q + 1);
                         const auto pLr_z =
                             pL_z +
-                            plm_gradient(pL_z, pLL_z, pR_z, plm_theta) * 0.5;
+                            plm_gradient(pL_z, pLL_z, pR_z, this->plm_theta()) *
+                                0.5;
                         const auto pRr_z =
                             pR_z -
-                            plm_gradient(pR_z, pL_z, pRR_z, plm_theta) * 0.5;
+                            plm_gradient(pR_z, pL_z, pRR_z, this->plm_theta()) *
+                                0.5;
                         hri[q] = (this->*riemann_solve)(pLr_z, pRr_z, 3, 0);
                     }
                     else {
@@ -541,15 +432,15 @@ void Newtonian<dim>::advance()
 
         // Calculate sources
         const auto [ii, jj, kk] = con.position();
-        const auto cell         = this->cell_geometry(ii, jj, kk);
+        const auto cell = this->mesh().get_cell_from_indices(ii, jj, kk);
 
         const auto delta_con = dcons(
             fri,
             gri,
             hri,
-            hydro_sources(cell),
-            gravity_sources(prim.value(), cell),
-            cell.geometrical_sources(prim.value()),
+            this->hydro_sources(cell),
+            this->gravity_sources(prim.value(), cell),
+            cell.geometrical_sources(prim.value(), gamma),
             cell
         );
         // Return updated conserved values
@@ -557,58 +448,36 @@ void Newtonian<dim>::advance()
     };
 
     // Transform using stencil operations
-    cons.contract(radius)
-        .stencil_transform(calc_flux, activePolicy, prims.contract(radius));
+    this->cons_.contract(this->halo_radius())
+        .stencil_transform(
+            calc_flux,
+            this->interior_policy(),
+            this->prims_.contract(this->halo_radius())
+        );
+
+    // set the boundaries
+    this->conserved_boundary_manager().sync_boundaries(
+        this->full_policy(),
+        this->cons_,
+        this->cons_.contract(this->halo_radius()),
+        this->bcs()
+    );
 }
 
 //===================================================================================================================
 //                                            SIMULATE
 //===================================================================================================================
 template <int dim>
-void Newtonian<dim>::simulate(
-    std::function<real(real)> const& a,
-    std::function<real(real)> const& adot
-)
+void Newtonian<dim>::init_simulation()
 {
-    // Stuff for moving mesh
-    this->hubble_param = adot(t) / a(t);
-    this->mesh_motion  = (hubble_param != 0);
-    this->homolog      = mesh_motion && geometry != simbi::Geometry::CARTESIAN;
-
-    bcs.resize(dim * 2);
-    for (int i = 0; i < 2 * dim; i++) {
-        this->bcs[i] = boundary_cond_map.at(boundary_conditions[i]);
-    }
-    load_functions();
-    cons.resize(nz * ny * nx).reshape({nz, ny, nx});
-    prims.resize(nz * ny * nx).reshape({nz, ny, nx});
-    // dt_min.resize(total_zones);
-
-    // Copy the state array into real & profile variables
-    for (size_type i = 0; i < total_zones; i++) {
-        for (int q = 0; q < conserved_t::nmem; q++) {
-            cons[i][q] = state[q][i];
-        }
-    }
-    // Deallocate duplicate memory and setup the system
-    deallocate_state();
-    offload();
-    compute_bytes_and_strides<primitive_t>(dim);
+    // load_functions();
     init_riemann_solver();
-
-    boundary_manager<conserved_t, dim> bman;
-    bman.sync_boundaries(fullPolicy, cons, cons.contract(radius), bcs);
-    cons2prim();
-    adapt_dt();
-
-    // Simulate :)
-    simbi::detail::logger::with_logger(*this, tend, [&] {
-        advance();
-        bman.sync_boundaries(fullPolicy, cons, cons.contract(radius), bcs);
-        cons2prim();
-        adapt_dt();
-
-        t += step * dt;
-        update_mesh_motion(a, adot);
-    });
+    this->conserved_boundary_manager().sync_boundaries(
+        this->full_policy(),
+        this->cons_,
+        this->cons_.contract(this->halo_radius()),
+        this->bcs()
+    );
+    // use parent's sync to device method
+    this->sync_to_device();
 };

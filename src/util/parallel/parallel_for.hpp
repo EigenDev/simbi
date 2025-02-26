@@ -2,7 +2,7 @@
 #define PARALLEL_FOR_HPP
 
 #include "build_options.hpp"   // for global::BuildPlatform, DEV, Platform ...
-#include "core/types/range.hpp"            // for range
+#include "core/types/utility/range.hpp"    // for range
 #include "util/parallel/exec_policy.hpp"   // for ExecutionPolicy
 #include "util/parallel/launch.hpp"        // for launch
 #include "util/parallel/thread_pool.hpp"   // for (anonymous), ThreadPool, get_nthreads

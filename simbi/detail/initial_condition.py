@@ -67,14 +67,21 @@ def check_valid_state(x: Any, name: str) -> None:
     if np.isnan(np.sum(x)):
         raise ValueError(f"Initial state: {name} contains NaNs")
 
+def elemental_multiply(
+    a: nested_array,
+    b: nested_array
+) -> Any:
+    if isinstance(a, list):
+        return np.array([a[i] * b[i] for i in range(len(a))])
+    return a * b
+
 def dot_product(
     a: nested_array,
     b: nested_array,
 ) -> Any:
     if isinstance(a, list):
-        return sum([np.sum(a[i] * b[i]) for i in range(len(a))])
+        return np.sum([a[i] * b[i] for i in range(len(a))], axis=0)
     return np.sum(a * b, axis=0)
-
 
 def calc_lorentz_factor(velocity: nested_array, regime: str) -> FloatOrArray:
     vsquared = dot_product(velocity, velocity)
@@ -108,7 +115,6 @@ def calc_labframe_momentum(
     bfields: nested_array,
     regime: str,
 ) -> NDArray[numpy_float]:
-    res: NDArray[numpy_float]
     vdb = dot_product(velocity, bfields) if np.any(bfields) else 0.0
     bsq = dot_product(bfields, bfields) if np.any(bfields) else 0.0
     vdb_bvec = (
@@ -229,7 +235,7 @@ def load_checkpoint(model: Any, filename: str) -> None:
     padwith = (setup["spatial_order"] != "pcm") + 1
     npad = ((0, 0),) + ((padwith, padwith),) * dim
     model.u = np.pad(model.u * volume_factor, npad, "edge")
-    model.chkpt_idx = setup["chkpt_idx"]
+    model.checkpoint_idx = setup["checkpoint_idx"]
 
     if model.mhd:
         model.bfield = [fields["b1stag"], fields["b2stag"], fields["b3stag"]]
@@ -385,9 +391,9 @@ def pad_staggered_fields(
 ) -> List[NDArray[numpy_float]]:
     # pad the staggered fields along parallel directions
     b1, b2, b3 = bfields
-    b1 = np.pad(b1, ((0, 0), (0, 0), (0, 1)), "edge")
-    b2 = np.pad(b2, ((0, 0), (0, 1), (0, 0)), "edge")
-    b3 = np.pad(b3, ((0, 1), (0, 0), (0, 0)), "edge")
+    b1 = np.pad(b1, ((1, 1), (1, 1), (0, 0)), "edge")
+    b2 = np.pad(b2, ((1, 1), (0, 0), (1, 1)), "edge")
+    b3 = np.pad(b3, ((0, 0), (1, 1), (1, 1)), "edge")
     return [b1, b2, b3]
 
 

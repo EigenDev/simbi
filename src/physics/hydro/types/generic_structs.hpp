@@ -20,8 +20,8 @@
 
 #include "build_options.hpp"
 #include "core/traits.hpp"
-#include "core/types/enums.hpp"
-#include "core/types/vector.hpp"
+#include "core/types/containers/vector.hpp"
+#include "core/types/utility/enums.hpp"
 #include <cmath>
 #include <iostream>
 #include <vector>
@@ -467,7 +467,7 @@ namespace simbi {
             return 0.5 * bfield().dot(bfield());
         }
 
-        DUAL real magnetic_magnitude_squared() const
+        DUAL real magnetic_norm_squared() const
             requires sim_type::MHD<R>
         {
             return bfield().dot(bfield());
@@ -548,6 +548,7 @@ namespace simbi {
     template <size_type Dims, Regime R>
     struct anyPrimitive
         : public generic_hydro::anyHydro<Dims, anyPrimitive<Dims, R>, R> {
+        using counterpart_t = anyConserved<Dims, R>;
         using generic_hydro::anyHydro<Dims, anyPrimitive<Dims, R>, R>::anyHydro;
         using Base = generic_hydro::anyHydro<Dims, anyPrimitive<Dims, R>, R>;
         using Base::bfield;
@@ -668,6 +669,15 @@ namespace simbi {
         }
 
         // Physics
+        DUAL auto sound_speed(real gamma) const
+        {
+            return std::sqrt(gamma * press() / (rho() * enthalpy(gamma)));
+        }
+
+        DUAL auto sound_speed_squared(real gamma) const
+        {
+            return gamma * press() / (rho() * enthalpy(gamma));
+        }
         DUAL general_vector_t<real, Dims> spatial_momentum(const real gamma
         ) const
         {
@@ -818,12 +828,17 @@ namespace simbi {
             return -velocity().cross(bfield());
         }
 
+        DUAL constexpr auto electric_field(luint ehat) const
+        {
+            return -velocity().cross(ehat - 1, bfield());
+        }
+
         DUAL constexpr real ecomponent(const luint nhat) const
             requires sim_type::MHD<R>
         {
             // Convert views to vectors before operations
             if constexpr (Dims == 3) {
-                return (electric_field())[nhat - 1];
+                return (electric_field(nhat));
             }
             else {
                 return 0.0;
@@ -869,13 +884,14 @@ namespace simbi {
                 if constexpr (Dims == 3) {
                     const auto bnorm     = bfield().dot(nhat);
                     const auto induction = nhat.cross(electric_field());
-                    const auto bmu =
-                        bfield().as_fourvec(velocity(), lorentz_factor());
+                    const auto bmu_spatial =
+                        bfield() / lorentz_factor() +
+                        velocity() * lorentz_factor() * vdotb();
                     const auto d = labframe_density();
                     return {
                       d * vnorm,
                       mom * vnorm + pkdelta(nhat) -
-                          bmu.spatial_part() * bnorm / lorentz_factor(),
+                          bmu_spatial * bnorm / lorentz_factor(),
                       mnorm - vnorm * d,
                       chi() * d * vnorm,
                       induction.as_magnetic()
@@ -901,32 +917,30 @@ namespace simbi {
             std::ostringstream oss;
             oss << "Primitives in non-physical state.\n";
             if constexpr (Dims == 1) {
-                oss << "Primitive Variables at (" << x1 << "): \n";
+                oss << "location: (" << x1 << "): \n";
             }
             else if constexpr (Dims == 2) {
                 if (x2 == INFINITY) {   // an effective 1D run
-                    oss << "Primitive Variables at (" << x1 << "): \n";
+                    oss << "location: (" << x1 << "): \n";
                     oss << "[" << ii << "]\n";
                 }
                 else {
-                    oss << "Primitive Variables at (" << x1 << ", " << x2
-                        << "): \n";
+                    oss << "location: (" << x1 << ", " << x2 << "): \n";
                     oss << "[" << ii << ", " << jj << "]\n";
                 }
             }
             else {
                 if (x2 == INFINITY) {   // an effective 1D run
-                    oss << "Primitive Variables at (" << x1 << "): \n";
+                    oss << "location: (" << x1 << "): \n";
                     oss << "[" << ii << "]\n";
                 }
                 else if (x3 == INFINITY) {
-                    oss << "Primitive Variables at (" << x1 << ", " << x2
-                        << "): \n";
+                    oss << "location: (" << x1 << ", " << x2 << "): \n";
                     oss << "[" << ii << ", " << jj << "]\n";
                 }
                 else {
-                    oss << "Primitive Variables at (" << x1 << ", " << x2
-                        << ", " << x3 << "): \n";
+                    oss << "location: (" << x1 << ", " << x2 << ", " << x3
+                        << "): \n";
                     oss << "[" << ii << ", " << jj << ", " << kk << "]\n";
                 }
             }

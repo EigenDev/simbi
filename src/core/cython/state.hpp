@@ -18,12 +18,12 @@
 #ifndef STATE_HPP
 #define STATE_HPP
 
-#include "build_options.hpp"           // for real, DUAL, lint, luint
-#include "core/types/functional.hpp"   // for simbi::function
-#include <functional>                  // for std::function
-#include <optional>                    // for optional
-#include <string>                      // for string
-#include <vector>                      // for vector
+#include "build_options.hpp"                   // for real, DUAL, lint, luint
+#include "core/types/utility/functional.hpp"   // for simbi::function
+#include <functional>                          // for std::function
+#include <optional>                            // for optional
+#include <string>                              // for string
+#include <vector>                              // for vector
 
 struct InitialConditions;
 

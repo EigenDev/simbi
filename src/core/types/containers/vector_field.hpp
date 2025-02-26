@@ -2,7 +2,7 @@
 #define VECTOR_FIELD_HPP
 
 #include "build_options.hpp"
-#include "core/types/vector.hpp"
+#include "core/types/containers/vector.hpp"
 
 namespace simbi {
     namespace vector_field {

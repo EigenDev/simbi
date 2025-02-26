@@ -20,8 +20,8 @@
 
 #include "build_options.hpp"
 #include "core/traits.hpp"
-#include "core/types/enums.hpp"
-#include "core/types/vector.hpp"
+#include "core/types/containers/vector.hpp"
+#include "core/types/utility/enums.hpp"
 #include "io/console/tabulate.hpp"
 #include <cmath>
 #include <iostream>
@@ -43,9 +43,9 @@ constexpr unsigned int kdelta(luint i, luint j) { return (i == j); }
 //  HELPER-GLOBAL-STRUCTS
 //---------------------------------------------------------------------------------------------------------
 struct InitialConditions {
-    real tstart, chkpt_interval, dlogt;
+    real tstart, checkpoint_interval, dlogt;
     real plm_theta, engine_duration, gamma, cfl, tend;
-    luint nx, ny, nz, chkpt_idx;
+    luint nx, ny, nz, checkpoint_idx;
     bool quirk_smoothing, constant_sources;
     std::vector<std::vector<real>> sources, gsources, osources, bfield;
     std::vector<bool> object_cells;

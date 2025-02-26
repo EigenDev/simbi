@@ -404,7 +404,7 @@ namespace simbi {
             DUAL constexpr real get_x1face(const lint ii, const int side) const
             {
                 switch (parent.derived().x1_cell_spacing) {
-                    case simbi::Cellspacing::LINSPACE: {
+                    case simbi::Cellspacing::LINEAR: {
                         const real x1l = my_max<real>(
                             parent.derived().x1min +
                                 (ii - 0.5) * parent.derived().dx1,
@@ -449,7 +449,7 @@ namespace simbi {
             DUAL constexpr real get_x2face(const lint ii, const int side) const
             {
                 switch (parent.derived().x2_cell_spacing) {
-                    case simbi::Cellspacing::LINSPACE: {
+                    case simbi::Cellspacing::LINEAR: {
                         const real x2l = my_max<real>(
                             parent.derived().x2min +
                                 (ii - 0.5) * parent.derived().dx2,
@@ -490,7 +490,7 @@ namespace simbi {
             DUAL constexpr real get_x3face(const lint ii, const int side) const
             {
                 switch (parent.derived().x3_cell_spacing) {
-                    case simbi::Cellspacing::LINSPACE: {
+                    case simbi::Cellspacing::LINEAR: {
                         const real x3l = my_max<real>(
                             parent.derived().x3min +
                                 (ii - 0.5) * parent.derived().dx3,
@@ -948,7 +948,7 @@ namespace simbi {
             cell.calculate_normals(ii, jj, kk);
             cell.calculate_areas(ii, jj, kk);
             cell.calculate_means();
-            cell.dV = cell.get_cell_volume(ii, jj, kk);
+            cell.volume() = cell.get_cell_volume(ii, jj, kk);
 
             return cell;
         }

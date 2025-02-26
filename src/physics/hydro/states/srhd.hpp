@@ -18,37 +18,47 @@
 #ifndef SRHD_HPP
 #define SRHD_HPP
 
-#include "build_options.hpp"        // for real, HD, lint, luint
-#include "core/base.hpp"            // for HydroBase
-#include "core/types/enums.hpp"     // for TIMESTEP_TYPE
-#include "core/types/maybe.hpp"     // for Maybe
-#include "core/types/ndarray.hpp"   // for ndarray
-#include "geometry/mesh.hpp"        // for Mesh
+#include "base.hpp"                            // for HydroBase
+#include "build_options.hpp"                   // for real, HD, lint, luint
+#include "core/types/containers/ndarray.hpp"   // for ndarray
+#include "core/types/monad/maybe.hpp"          // for Maybe
+#include "core/types/utility/enums.hpp"        // for TIMESTEP_TYPE
+#include "geometry/mesh/mesh.hpp"              // for Mesh
 #include "physics/hydro/types/generic_structs.hpp"   // for Eigenvals, mag_four_vec
 #include "util/parallel/exec_policy.hpp"             // for ExecutionPolicy
 #include "util/tools/helpers.hpp"                    // for my_min, my_max, ...
-#include <dlfcn.h>       // for dlopen, dlclose, dlsym
-#include <functional>    // for function
-#include <optional>      // for optional
-#include <type_traits>   // for conditional_t
-#include <vector>        // for vector
+#include <functional>                                // for function
+#include <optional>                                  // for optional
+#include <type_traits>                               // for conditional_t
+#include <vector>                                    // for vector
 
 namespace simbi {
     template <int dim>
-    struct SRHD : public HydroBase,
-                  public Mesh<
-                      SRHD<dim>,
-                      dim,
-                      anyConserved<dim, Regime::SRHD>,
-                      anyPrimitive<dim, Regime::SRHD>> {
+    class SRHD : public HydroBase<SRHD<dim>, dim, Regime::SRHD>
+    {
+      private:
+        using base_t = HydroBase<SRHD<dim>, dim, Regime::SRHD>;
+        ndarray<real, dim> pressure_guesses_;
+
+      protected:
+        // type alias
+        using base_t::cfl;
+        using base_t::gamma;
+
+      public:
+        using typename base_t::conserved_t;
+        using typename base_t::eigenvals_t;
+        using typename base_t::function_t;
+        using typename base_t::primitive_t;
+
         static constexpr int dimensions          = dim;
         static constexpr int nvars               = dim + 3;
         static constexpr std::string_view regime = "srhd";
         // set the primitive and conservative types at compile time
-        using primitive_t = anyPrimitive<dim, Regime::SRHD>;
-        using conserved_t = anyConserved<dim, Regime::SRHD>;
-        using eigenvals_t = Eigenvals<dim, Regime::SRHD>;
-        using function_t  = typename helpers::real_func<dim>::type;
+        // using primitive_t = anyPrimitive<dim, Regime::SRHD>;
+        // using conserved_t = anyConserved<dim, Regime::SRHD>;
+        // using eigenvals_t = Eigenvals<dim, Regime::SRHD>;
+        // using function_t  = typename helpers::real_func<dim>::type;
         template <typename T>
         using RiemannFuncPointer = conserved_t (T::*)(
             const primitive_t&,
@@ -61,16 +71,6 @@ namespace simbi {
         ndarray<function_t> bsources;   // boundary sources
         ndarray<function_t> hsources;   // hydro sources
         ndarray<function_t> gsources;   // gravity sources
-
-        /* Shared Data Members */
-        ndarray<Maybe<primitive_t>, dim> prims;
-        ndarray<conserved_t, dim> cons;
-        ndarray<real, dim> pressure_guess, dt_min;
-
-        // library handles
-        void* hsource_handle = nullptr;
-        void* gsource_handle = nullptr;
-        void* bsource_handle = nullptr;
 
         // hydrodynamic source functions
         function_t hydro_source;
@@ -96,10 +96,6 @@ namespace simbi {
         );
         ~SRHD();
 
-        void cons2prim();
-
-        void advance();
-
         DUAL eigenvals_t calc_eigenvals(
             const auto& primsL,
             const auto& primsR,
@@ -122,7 +118,7 @@ namespace simbi {
 
         DUAL void set_riemann_solver()
         {
-            switch (sim_solver) {
+            switch (this->solver_type()) {
                 case Solver::HLLE:
                     this->riemann_solve = &SRHD<dim>::calc_hlle_flux;
                     break;
@@ -137,195 +133,12 @@ namespace simbi {
             SINGLE(helpers::hybrid_set_riemann_solver, this);
         }
 
-        template <TIMESTEP_TYPE dt_type = TIMESTEP_TYPE::ADAPTIVE>
-        void adapt_dt();
+        void init_simulation();
 
-        template <TIMESTEP_TYPE dt_type = TIMESTEP_TYPE::ADAPTIVE>
-        void adapt_dt(const ExecutionPolicy<>& p);
-
-        void simulate(
-            std::function<real(real)> const& a,
-            std::function<real(real)> const& adot
-        );
-
-        void offload()
+        void sync_all_to_device()
         {
-            cons.sync_to_device();
-            prims.sync_to_device();
-            pressure_guess.sync_to_device();
-            dt_min.sync_to_device();
-            if constexpr (dim > 1) {
-                object_pos.sync_to_device();
-            }
-            bcs.sync_to_device();
-        }
-
-        DUAL conserved_t hydro_sources(const auto& cell) const;
-
-        DUAL conserved_t
-        gravity_sources(const auto& prims, const auto& cell) const;
-
-        void load_functions()
-        {
-            // Load the symbol based on the dimension
-            using f2arg = void (*)(real, real, real[]);
-            using f3arg = void (*)(real, real, real, real[]);
-            using f4arg = void (*)(real, real, real, real, real[]);
-
-            //=================================================================
-            // Check if the hydro source library is set
-            //=================================================================
-            null_sources = true;
-            if (!hydro_source_lib.empty()) {
-                // Load the shared library
-                hsource_handle = dlopen(hydro_source_lib.c_str(), RTLD_LAZY);
-                if (!hsource_handle) {
-                    std::cerr << "Cannot open library: " << dlerror() << '\n';
-                    return;
-                }
-
-                // Clear any existing error
-                dlerror();
-
-                const std::vector<std::pair<const char*, function_t&>> symbols =
-                    {
-                      {"hydro_source", hydro_source},
-                    };
-
-                bool success = true;
-                for (const auto& [symbol, func] : symbols) {
-                    void* source            = dlsym(hsource_handle, symbol);
-                    const char* dlsym_error = dlerror();
-                    // if can't load symbol, print error and
-                    // set null_sources to true
-                    if (dlsym_error) {
-                        std::cerr << "Cannot load symbol '" << symbol
-                                  << "': " << dlsym_error << '\n';
-                        success = false;
-                        dlclose(hsource_handle);
-                        break;
-                    }
-
-                    // Assign the function pointer based on the dimension
-                    if constexpr (dim == 1) {
-                        func = reinterpret_cast<f2arg>(source);
-                    }
-                    else if constexpr (dim == 2) {
-                        func = reinterpret_cast<f3arg>(source);
-                    }
-                    else if constexpr (dim == 3) {
-                        func = reinterpret_cast<f4arg>(source);
-                    }
-                }
-                if (success) {
-                    null_sources = false;
-                }
-            }
-
-            //=================================================================
-            // Check if the gravity source library is set
-            //=================================================================
-            null_gravity = true;
-            if (!gravity_source_lib.empty()) {
-                gsource_handle = dlopen(gravity_source_lib.c_str(), RTLD_LAZY);
-                if (!gsource_handle) {
-                    std::cerr << "Cannot open library: " << dlerror() << '\n';
-                    return;
-                }
-
-                // Clear any existing error
-                dlerror();
-
-                // Load the symbol based on the dimension
-                const std::vector<std::pair<const char*, function_t&>>
-                    g_symbols = {
-                      {"gravity_source", gravity_source},
-                    };
-
-                bool success = true;
-                for (const auto& [symbol, func] : g_symbols) {
-                    void* source            = dlsym(gsource_handle, symbol);
-                    const char* dlsym_error = dlerror();
-                    // if can't load symbol, print error
-                    if (dlsym_error) {
-                        std::cerr << "Cannot load symbol '" << symbol
-                                  << "': " << dlsym_error << '\n';
-                        success = false;
-                        dlclose(gsource_handle);
-                        break;
-                    }
-
-                    // Assign the function pointer based on the dimension
-                    if constexpr (dim == 1) {
-                        func = reinterpret_cast<f2arg>(source);
-                    }
-                    else if constexpr (dim == 2) {
-                        func = reinterpret_cast<f3arg>(source);
-                    }
-                    else if constexpr (dim == 3) {
-                        func = reinterpret_cast<f4arg>(source);
-                    }
-                }
-                if (success) {
-                    null_gravity = false;
-                }
-            }
-
-            //=================================================================
-            // Check if the boundary source library is set
-            //=================================================================
-            if (!boundary_source_lib.empty()) {
-                bsource_handle = dlopen(boundary_source_lib.c_str(), RTLD_LAZY);
-                if (!bsource_handle) {
-                    std::cerr << "Cannot open library: " << dlerror() << '\n';
-                    return;
-                }
-
-                // Clear any existing error
-                dlerror();
-
-                // Load the symbol based on the dimension
-                const std::vector<std::pair<const char*, function_t&>>
-                    b_symbols = {
-                      {"bx1_inner_source", bx1_inner_source},
-                      {"bx1_outer_source", bx1_outer_source},
-                      {"bx2_inner_source", bx2_inner_source},
-                      {"bx2_outer_source", bx2_outer_source},
-                      {"bx3_inner_source", bx3_inner_source},
-                      {"bx3_outer_source", bx3_outer_source},
-                    };
-
-                for (const auto& [symbol, func] : b_symbols) {
-                    void* source            = dlsym(bsource_handle, symbol);
-                    const char* dlsym_error = dlerror();
-                    // if can't load symbol, print error
-                    if (dlsym_error) {
-                        // erro out  only  if the boundary
-                        // condition is set to dynamic
-                        for (int i = 0; i < 2 * dim; ++i) {
-                            if (symbol == b_symbols[i].first &&
-                                bcs[i] == BoundaryCondition::DYNAMIC) {
-                                std::cerr << "Cannot load symbol '" << symbol
-                                          << "': " << dlsym_error << '\n';
-                                bcs[i] = BoundaryCondition::OUTFLOW;
-                                dlclose(bsource_handle);
-                            }
-                        }
-                    }
-                    else {
-                        // Assign the function pointer based on the dimension
-                        if constexpr (dim == 1) {
-                            func = reinterpret_cast<f2arg>(source);
-                        }
-                        else if constexpr (dim == 2) {
-                            func = reinterpret_cast<f3arg>(source);
-                        }
-                        else if constexpr (dim == 3) {
-                            func = reinterpret_cast<f4arg>(source);
-                        }
-                    }
-                }
-            }
+            this->sync_to_device();
+            pressure_guesses_.sync_to_device();
         }
 
         auto calc_star_state(
@@ -385,6 +198,46 @@ namespace simbi {
                                   ? prR.chi() * hllc_flux.dens()
                                   : prL.chi() * hllc_flux.dens();
             return hllc_flux;
+        }
+
+      public:
+        template <TIMESTEP_TYPE dt_type = TIMESTEP_TYPE::ADAPTIVE>
+        DUAL auto get_wave_speeds(const Maybe<primitive_t>& prim) const
+            -> WaveSpeeds
+        {
+            if constexpr (dt_type == TIMESTEP_TYPE::MINIMUM) {
+                return WaveSpeeds{
+                  .v1p = 1.0,
+                  .v1m = 1.0,
+                  .v2p = 1.0,
+                  .v2m = 1.0,
+                  .v3p = 1.0,
+                  .v3m = 1.0
+                };
+            }
+            const real cs = prim->sound_speed(gamma);
+            const real v1 = prim->vcomponent(1);
+            const real v2 = prim->vcomponent(2);
+            const real v3 = prim->vcomponent(3);
+
+            return WaveSpeeds{
+              .v1p = std::abs(v1 + cs / (1 + v1 * cs)),
+              .v1m = std::abs(v1 - cs / (1 - v1 * cs)),
+              .v2p = std::abs(v2 + cs / (1 + v2 * cs)),
+              .v2m = std::abs(v2 - cs / (1 - v2 * cs)),
+              .v3p = std::abs(v3 + cs / (1 + v3 * cs)),
+              .v3m = std::abs(v3 - cs / (1 - v3 * cs)),
+            };
+        }
+
+        void cons2prim_impl();
+        void advance_impl();
+
+        void
+        run(const std::function<real(real)>& scale_factor,
+            const std::function<real(real)>& scale_factor_derivative)
+        {
+            this->simulate(scale_factor, scale_factor_derivative);
         }
     };
 }   // namespace simbi

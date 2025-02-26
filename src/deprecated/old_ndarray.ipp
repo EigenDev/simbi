@@ -714,8 +714,8 @@ U simbi::ndarray<DT, dim>::reduce(
         const size_type num_items = sz;
 
         // Get 3D dimensions from policy
-        const dim3 grid                   = policy.gridSize;
-        const dim3 block                  = policy.blockSize;
+        const dim3 grid                   = policy.grid_size;
+        const dim3 block                  = policy.block_size;
         const size_type total_blocks      = grid.x * grid.y * grid.z;
         const size_type threads_per_block = block.x * block.y * block.z;
         const size_type grid_stride       = total_blocks * threads_per_block;
@@ -814,8 +814,8 @@ U simbi::ndarray<DT, dim>::reduce(
 //         const size_type num_items = sz;
 
 //         // Get 3D dimensions from policy
-//         const dim3 grid                   = policy.gridSize;
-//         const dim3 block                  = policy.blockSize;
+//         const dim3 grid                   = policy.grid_size;
+//         const dim3 block                  = policy.block_size;
 //         const size_type total_blocks      = grid.x * grid.y * grid.z;
 //         const size_type threads_per_block = block.x * block.y * block.z;
 
@@ -1060,9 +1060,9 @@ simbi::ndarray<DT, dim>::transform_with(
 // {
 //     using T = typename array_value_type<StencilArray>::type;
 //     // active directional zone size
-//     const size_type nx = policy.gridSize.x;
-//     const size_type ny = policy.gridSize.y;
-//     const size_type nz = policy.gridSize.z;
+//     const size_type nx = policy.grid_size.x;
+//     const size_type ny = policy.grid_size.y;
+//     const size_type nz = policy.grid_size.z;
 
 //     // directional strides
 //     const size_type sx = policy.stride.x;
@@ -1127,9 +1127,9 @@ void simbi::ndarray<DT, dim>::transform_stencil_with(
 )
 {
     // active directional zone size
-    const size_type nx = policy.gridSize.x;
-    const size_type ny = policy.gridSize.y;
-    const size_type nz = policy.gridSize.z;
+    const size_type nx = policy.grid_size.x;
+    const size_type ny = policy.grid_size.y;
+    const size_type nz = policy.grid_size.z;
 
     // directional strides
     const size_type sx = policy.stride.x;
@@ -1215,9 +1215,9 @@ void simbi::ndarray<DT, dim>::apply_to_boundaries(
     BoundaryOp&& boundary_op
 )
 {
-    const size_type nx = policy.gridSize.x;
-    const size_type ny = policy.gridSize.y;
-    const size_type nz = policy.gridSize.z;
+    const size_type nx = policy.grid_size.x;
+    const size_type ny = policy.grid_size.y;
+    const size_type nz = policy.grid_size.z;
     if constexpr (global::on_gpu) {
         auto data_ptr = dev_data();
 
@@ -1273,9 +1273,9 @@ void simbi::ndarray<DT, dim>::apply_to_corners(
     CornerOp&& corner_op
 )
 {
-    const size_type nx = policy.gridSize.x;
-    const size_type ny = policy.gridSize.y;
-    const size_type nz = policy.gridSize.z;
+    const size_type nx = policy.grid_size.x;
+    const size_type ny = policy.grid_size.y;
+    const size_type nz = policy.grid_size.z;
     if constexpr (global::on_gpu) {
         auto data_ptr = dev_data();
 

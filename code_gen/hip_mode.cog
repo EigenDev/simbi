@@ -171,6 +171,13 @@ __device__ __forceinline__ real devAtomicMinReal(real* addr, real value)
     return old;
 }
 
+__device__ __forceinline__ real devAtomicAddReal(real* addr, real value)
+{
+    real old =
+        __int_as_real(atomicAdd((atomic_cast*) addr, __real_as_int(value)));
+    return old;
+}
+
 constexpr auto devMemcpy               = hipMemcpy;
 constexpr auto devFree                 = hipFree;
 constexpr auto devMemset               = hipMemset;

@@ -10,7 +10,7 @@ def py_calc_fnu(
     mesh:           dict, 
     qscales:        dict, 
     sim_info:       dict,
-    chkpt_idx:      int,
+    checkpoint_idx:      int,
     data_dim:       int,
 ):
     """
@@ -24,7 +24,7 @@ def py_calc_fnu(
     mesh:       a dictionary for the mesh central zones
     qscales:    a dictionary for the physical quantitiy scales in the problem
     sim_info:   a dictionary for the importnat simulation information like time, dt_chckpt, etc
-    chkpt_idx:  the checkpoint index value
+    checkpoint_idx:  the checkpoint index value
     data_dim:   the dimensions of the checkpoint data
     """
     flattened_mesh = np.asanyarray(
@@ -65,7 +65,7 @@ def py_calc_fnu(
         flattened_mesh,
         tbin_edges / (1 + sim_info['z']),
         fnu, 
-        chkpt_idx,
+        checkpoint_idx,
         data_dim
     )
     flux_array[:] = np.ascontiguousarray(fnu)

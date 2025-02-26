@@ -21,8 +21,8 @@
 
 namespace simbi {
     enum class Cellspacing {
-        LINSPACE,
-        LOGSPACE,
+        LINEAR,
+        LOG,
     };
 
     enum class Regime {

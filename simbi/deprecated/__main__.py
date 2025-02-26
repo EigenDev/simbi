@@ -234,7 +234,7 @@ def parse_run_arguments(parser: argparse.ArgumentParser):
         choices=['hllc', 'hlle', 'hlld'],
     )
     overridable.add_argument(
-        '--chkpt-interval',
+        '--checkpoint-interval',
         help='checkpoint interval spacing in simulation time units',
         default=None,
         type=float)
@@ -298,7 +298,7 @@ def parse_run_arguments(parser: argparse.ArgumentParser):
             'gpu'],
         dest='compute_mode')
     onthefly.add_argument(
-        '--chkpt',
+        '--checkpoint',
         help='checkpoint file to restart computation from',
         default=None,
         type=str)
@@ -463,7 +463,7 @@ def configure_state(
             'spatial_order': config.spatial_order,
             'time_order': config.time_order,
             'cfl': config.cfl_number,
-            'chkpt_interval': config.check_point_interval,
+            'checkpoint_interval': config.check_point_interval,
             'tstart': config.default_start_time,
             'tend': config.default_end_time,
             'solver': config.solver,

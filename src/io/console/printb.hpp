@@ -18,10 +18,10 @@
 #ifndef PRINTB_HPP
 #define PRINTB_HPP
 
-#include "core/types/enums.hpp"   // for Color
-#include <iomanip>                // for scientific, precision
-#include <iostream>               // for operator <<
-#include <map>                    // for allocator, map
+#include "core/types/utility/enums.hpp"   // for Color
+#include <iomanip>                        // for scientific, precision
+#include <iostream>                       // for operator <<
+#include <map>                            // for allocator, map
 #include <mutex>
 #include <sstream>   // for operator>>, ws, basic_istream, basic_istringstream
 #include <string>    // for string

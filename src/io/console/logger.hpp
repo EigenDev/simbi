@@ -23,6 +23,7 @@
 #include "io/console/printb.hpp"       // for writeln, writefl
 #include "io/console/tabulate.hpp"     // for PrettyTable
 #include "io/exceptions.hpp"           // for SimulationFailureException
+#include "io/hdf5/checkpoint.hpp"      // for write_to_file
 #include "util/tools/device_api.hpp"   // for gpuEventCreate, gpuEventDestroy
 #include "util/tools/helpers.hpp"   // for get_real_idx, catch_signals, Inter...
 #include <chrono>                   // for time_point, high_resolution_clock
@@ -195,22 +196,24 @@ namespace simbi {
                         return std::make_tuple(coords[0], coords[1], coords[2]);
                     };
 
-                    for (size_t idx = 0; const auto& prim : sim_state.prims) {
+                    for (size_t idx = 0;
+                         const auto& prim : sim_state.primitives()) {
                         prim.unwrap_or_else([&]() {
                             std::vector<luint> shape;
-                            shape.push_back(sim_state.nz);
-                            shape.push_back(sim_state.ny);
-                            shape.push_back(sim_state.nx);
+                            shape.push_back(sim_state.nz());
+                            shape.push_back(sim_state.ny());
+                            shape.push_back(sim_state.nx());
                             // unravel the index
                             auto [ii, jj, kk] = unwravel_idx(idx, shape);
-                            auto cell = sim_state.cell_geometry(ii, jj, kk);
+                            auto cell         = sim_state.mesh()
+                                            .get_cell_from_indices(ii, jj, kk);
                             prim->error_at(
                                 ii,
                                 jj,
                                 kk,
-                                cell.x1mean,
-                                cell.x2mean,
-                                cell.x3mean,
+                                cell.centroid_coordinate(0),
+                                cell.centroid_coordinate(1),
+                                cell.centroid_coordinate(2),
                                 table
                             );
                             return typename sim_state_t::primitive_t{};
@@ -227,11 +230,9 @@ namespace simbi {
                 )
                 {
                     table.postError(std::string("Exception: ") + err.what());
-                    sim_state.troubled_cells.sync_to_host();
-                    sim_state.cons.sync_to_host();
-                    sim_state.prims.sync_to_host();
-                    sim_state.hasCrashed = true;
-                    write_to_file(sim_state, table);
+                    sim_state.sync_to_host();
+                    sim_state.has_crashed();
+                    io::write_to_file(sim_state, table);
                     emit_troubled_cells(sim_state, table);
                 }
 
@@ -251,7 +252,7 @@ namespace simbi {
                     const auto elapsed_seconds =
                         duration_cast<seconds>(elapsed_time).count();
                     const auto estimated_time_left = static_cast<int>(
-                        elapsed_seconds * (end_time / sim_state.t - 1)
+                        elapsed_seconds * (end_time / sim_state.time() - 1)
                     );
 
                     auto format_time = [](int total_seconds) {
@@ -268,14 +269,14 @@ namespace simbi {
                     table.updateRow(
                         1,
                         {std::to_string(n),
-                         std::format("{:.2e}", sim_state.t),
-                         std::format("{:.2e}", sim_state.dt),
+                         std::format("{:.2e}", sim_state.time()),
+                         std::format("{:.2e}", sim_state.dt()),
                          std::format("{:.2e}", speed),
                          format_time(elapsed_seconds),
                          format_time(estimated_time_left)}
                     );
                     table.setProgress(
-                        static_cast<int>((sim_state.t / end_time) * 100.0)
+                        static_cast<int>((sim_state.time() / end_time) * 100.0)
                     );
                     table.print();
                 };
@@ -327,24 +328,24 @@ namespace simbi {
                 // if at the very beginning of the simulation
                 // write the initial state to a file
                 try {
-                    if (sim_state.t == 0 || sim_state.init_chkpt_idx == 0) {
-                        if (sim_state.inFailureState) {
+                    if (sim_state.is_in_initial_state()) {
+                        if (sim_state.is_in_failure_state()) {
                             throw exception::SimulationFailureException();
                         }
-                        helpers::write_to_file(sim_state, table);
+                        io::write_to_file(sim_state, table);
                     }
                 }
                 catch (exception::SimulationFailureException& e) {
-                    sim_state.inFailureState.store(true);
-                    sim_state.hasCrashed = true;
+                    sim_state.has_failed();
+                    sim_state.has_crashed();
                     logger.emit_exception(sim_state, e, table);
                 }
 
-                while ((sim_state.t < end_time) && (!sim_state.inFailureState)
-                ) {
+                while ((sim_state.time() < end_time) &&
+                       (!sim_state.is_in_failure_state())) {
                     try {
                         //============== Compute benchmarks
-                        if (sim_state.use_rk1) {
+                        if (sim_state.using_rk1()) {
                             timer.startTimer();
                             f();
                             delta_t = timer.get_duration();
@@ -355,10 +356,11 @@ namespace simbi {
                             f();
                             delta_t = timer.get_duration();
                         }
+
                         //=================== Record Benchmarks
                         if (n % nfold == 0) {
                             ncheck += 1;
-                            speed = sim_state.total_zones / delta_t;
+                            speed = sim_state.total_zones() / delta_t;
                             zu_avg += speed;
                             logger.emit_benchmarks(
                                 table,
@@ -371,33 +373,26 @@ namespace simbi {
                             );
                         }
                         n++;
-                        sim_state.global_iter = n;
+                        sim_state.io().increment_iter();
 
-                        if (sim_state.inFailureState) {
+                        if (sim_state.is_in_failure_state()) {
                             throw exception::SimulationFailureException();
                         }
                         // Write to a file at every checkpoint interval
-                        if (sim_state.t >= sim_state.t_interval &&
-                            sim_state.t != INFINITY) {
+                        if (sim_state.time_to_write_checkpoint()) {
                             table.setProgress(static_cast<int>(
-                                (sim_state.t / end_time) * 100.0
+                                (sim_state.time() / end_time) * 100.0
                             ));
-                            helpers::write_to_file(sim_state, table);
-                            if (sim_state.dlogt != 0) {
-                                sim_state.t_interval *=
-                                    std::pow(10.0, sim_state.dlogt);
-                            }
-                            else {
-                                sim_state.t_interval +=
-                                    sim_state.chkpt_interval;
-                            }
+                            io::write_to_file(sim_state, table);
+                            sim_state.time_manager()
+                                .update_next_checkpoint_time();
                         }
                         // Listen to kill signals
                         helpers::catch_signals();
                     }
                     catch (exception::InterruptException& e) {
-                        sim_state.inFailureState.store(true);
-                        sim_state.wasInterrupted = true;
+                        sim_state.has_failed();
+                        sim_state.was_interrupted();
                         logger.emit_exception(sim_state, e, table);
                     }
                     catch (exception::SimulationFailureException& e) {

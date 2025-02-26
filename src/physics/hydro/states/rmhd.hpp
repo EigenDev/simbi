@@ -19,39 +19,48 @@
 #ifndef RMHD_HPP
 #define RMHD_HPP
 
-#include "build_options.hpp"        // for real, HD, lint, luint
-#include "core/base.hpp"            // for HydroBase
-#include "core/types/enums.hpp"     // for TIMESTEP_TYPE
-#include "core/types/maybe.hpp"     // for Maybe
-#include "core/types/ndarray.hpp"   // for ndarray
-#include "geometry/mesh.hpp"        // for Mesh
+#include "base.hpp"                            // for HydroBase
+#include "build_options.hpp"                   // for real, HD, lint, luint
+#include "core/types/containers/ndarray.hpp"   // for ndarray
+#include "core/types/monad/maybe.hpp"          // for Maybe
+#include "core/types/utility/enums.hpp"        // for TIMESTEP_TYPE
+#include "geometry/mesh/mesh.hpp"              // for Mesh
 #include "physics/hydro/schemes/ct/ct_calculator.hpp"   // for anyPrimitive
 #include "physics/hydro/types/generic_structs.hpp"   // for Eigenvals, mag_four_vec
 #include "util/parallel/exec_policy.hpp"             // for ExecutionPolicy
 #include "util/tools/helpers.hpp"                    // for my_min, my_max, ...
-#include <dlfcn.h>       // for dlopen, dlclose, dlsym
-#include <functional>    // for function
-#include <optional>      // for optional
-#include <type_traits>   // for conditional_t
-#include <vector>        // for vector
+#include <functional>                                // for function
+#include <optional>                                  // for optional
+#include <type_traits>                               // for conditional_t
+#include <vector>                                    // for vector
 
 namespace simbi {
     template <int dim>
-    struct RMHD : public HydroBase,
-                  public Mesh<
-                      RMHD<dim>,
-                      dim,
-                      anyConserved<dim, Regime::RMHD>,
-                      anyPrimitive<dim, Regime::RMHD>> {
+    class RMHD : public HydroBase<RMHD<dim>, dim, Regime::RMHD>
+    {
+      private:
+        using base_t = HydroBase<RMHD<dim>, dim, Regime::RMHD>;
+
+      protected:
+        // type alias
+        using base_t::cfl;
+        using base_t::gamma;
+
+      public:
+        using typename base_t::conserved_t;
+        using typename base_t::eigenvals_t;
+        using typename base_t::function_t;
+        using typename base_t::primitive_t;
+
         static constexpr int dimensions          = dim;
         static constexpr int nvars               = dim + 3;
         static constexpr std::string_view regime = "srmhd";
 
         // set the primitive and conservative types at compile time
-        using primitive_t = anyPrimitive<dim, Regime::RMHD>;
-        using conserved_t = anyConserved<dim, Regime::RMHD>;
-        using eigenvals_t = Eigenvals<dim, Regime::RMHD>;
-        using function_t  = typename helpers::real_func<dim>::type;
+        // using primitive_t = anyPrimitive<dim, Regime::RMHD>;
+        // using conserved_t = anyConserved<dim, Regime::RMHD>;
+        // using eigenvals_t = Eigenvals<dim, Regime::RMHD>;
+        // using function_t  = typename helpers::real_func<dim>::type;
         using ct_scheme_t = std::conditional_t<
             comp_ct_type == CTTYPE::MdZ,
             ct::CTMdZ,
@@ -73,11 +82,6 @@ namespace simbi {
         function_t bx3_inner_source;
         function_t bx3_outer_source;
 
-        // library handles
-        void* hsource_handle = nullptr;
-        void* gsource_handle = nullptr;
-        void* bsource_handle = nullptr;
-
         template <typename T>
         using RiemannFuncPointer = conserved_t (T::*)(
             const primitive_t&,
@@ -93,11 +97,8 @@ namespace simbi {
         std::vector<function_t> gsources;   // gravity sources
 
         /* Shared Data Members */
-        ndarray<Maybe<primitive_t>, dim> prims;
-        ndarray<conserved_t, dim> cons;
         ndarray<conserved_t, dim> fri, gri, hri;
         ndarray<real, dim> bstag1, bstag2, bstag3;
-        ndarray<real> dt_min;
 
         RMHD();
         RMHD(
@@ -108,20 +109,16 @@ namespace simbi {
         ~RMHD();
 
         /* Methods */
-        void cons2prim();
-        DEV auto cons2prim(const auto& cons) const;
-        void sync_flux_boundaries(const auto& flux_man);
+
+        DEV auto cons2prim_single(const auto& cons) const;
+        void sync_flux_boundaries();
         void sync_magnetic_boundaries(const auto& bfield_man);
         void riemann_fluxes();
-        void advance(const auto& man, const auto& bfield_man);
         void advance_conserved();
         void advance_magnetic_fields();
 
         template <int nhat>
-        void update_magnetic_component(
-            const ExecutionPolicy<>& policy,
-            const auto& prim_region
-        );
+        void update_magnetic_component(const ExecutionPolicy<>& policy);
 
         DUAL auto
         calc_max_wave_speeds(const auto& prims, const luint nhat) const;
@@ -168,7 +165,7 @@ namespace simbi {
 
         DUAL void set_riemann_solver()
         {
-            switch (sim_solver) {
+            switch (this->solver_type()) {
                 case Solver::HLLE:
                     this->riemann_solve = &RMHD<dim>::calc_hlle_flux;
                     break;
@@ -186,64 +183,11 @@ namespace simbi {
             SINGLE(helpers::hybrid_set_riemann_solver, this);
         }
 
-        template <TIMESTEP_TYPE dt_type = TIMESTEP_TYPE::ADAPTIVE>
-        void adapt_dt();
+        void init_simulation();
 
-        void simulate(
-            std::function<real(real)> const& a,
-            std::function<real(real)> const& adot
-        );
-
-        DUAL real curl_e(
-            const luint nhat,
-            const real ej[4],
-            const real ek[4],
-            const auto& cell,
-            const int side
-        ) const;
-
-        /**
-         * @brief
-         * @retval
-         */
-        template <Plane P, Corner C>
-        DUAL real calc_edge_emf(
-            const auto& fw,
-            const auto& fe,
-            const auto& fs,
-            const auto& fn,
-            const auto* prims,
-            const luint ii,
-            const luint jj,
-            const luint kk,
-            const luint ia,
-            const luint ja,
-            const luint ka,
-            const luint nhat,
-            const real bw = 0.0,
-            const real be = 0.0,
-            const real bs = 0.0,
-            const real bn = 0.0
-        ) const;
-
-        template <size_type i, size_type j>
-        DUAL void calc_emf_edges(
-            real ei[],
-            real ej[],
-            const auto& cell,
-            size_type ii,
-            size_type jj,
-            size_type kk
-        ) const;
-
-        void offload()
+        void sync_all_to_device()
         {
-            cons.sync_to_device();
-            prims.sync_to_device();
-            dt_min.sync_to_device();
-            object_pos.sync_to_device();
-            bcs.sync_to_device();
-            troubled_cells.sync_to_device();
+            this->sync_to_device();
             bstag1.sync_to_device();
             bstag2.sync_to_device();
             bstag3.sync_to_device();
@@ -263,172 +207,44 @@ namespace simbi {
             auto& prC
         ) const;
 
-        DUAL conserved_t hydro_sources(const auto& cell) const;
+      public:
+        void cons2prim_impl();
+        void advance_impl();
 
-        DUAL conserved_t
-        gravity_sources(const auto& prims, const auto& cell) const;
-
-        void load_functions()
+        template <TIMESTEP_TYPE dt_type = TIMESTEP_TYPE::ADAPTIVE>
+        DUAL auto get_wave_speeds(const Maybe<primitive_t>& prim) const
+            -> WaveSpeeds
         {
-            // Load the symbol based on the dimension
-            using f2arg = void (*)(real, real, real[]);
-            using f3arg = void (*)(real, real, real, real[]);
-            using f4arg = void (*)(real, real, real, real, real[]);
-
-            //=================================================================
-            // Check if the hydro source library is set
-            //=================================================================
-            null_sources = true;
-            if (!hydro_source_lib.empty()) {
-                // Load the shared library
-                hsource_handle = dlopen(hydro_source_lib.c_str(), RTLD_LAZY);
-                if (!hsource_handle) {
-                    std::cerr << "Cannot open library: " << dlerror() << '\n';
-                    return;
-                }
-
-                // Clear any existing error
-                dlerror();
-
-                const std::vector<std::pair<const char*, function_t&>> symbols =
-                    {
-                      {"hydro_source", hydro_source},
-                    };
-
-                bool success = true;
-                for (const auto& [symbol, func] : symbols) {
-                    void* source            = dlsym(hsource_handle, symbol);
-                    const char* dlsym_error = dlerror();
-                    // if can't load symbol, print error and
-                    // set null_sources to true
-                    if (dlsym_error) {
-                        std::cerr << "Cannot load symbol '" << symbol
-                                  << "': " << dlsym_error << '\n';
-                        success = false;
-                        dlclose(hsource_handle);
-                        break;
-                    }
-
-                    // Assign the function pointer based on the dimension
-                    if constexpr (dim == 1) {
-                        func = reinterpret_cast<f2arg>(source);
-                    }
-                    else if constexpr (dim == 2) {
-                        func = reinterpret_cast<f3arg>(source);
-                    }
-                    else if constexpr (dim == 3) {
-                        func = reinterpret_cast<f4arg>(source);
-                    }
-                }
-                if (success) {
-                    null_sources = false;
-                }
+            if constexpr (dt_type == TIMESTEP_TYPE::MINIMUM) {
+                return WaveSpeeds{
+                  .v1p = 1.0,
+                  .v1m = 1.0,
+                  .v2p = 1.0,
+                  .v2m = 1.0,
+                  .v3p = 1.0,
+                  .v3m = 1.0
+                };
             }
+            const real cs = prim->sound_speed(gamma);
+            const real v1 = prim->vcomponent(1);
+            const real v2 = prim->vcomponent(2);
+            const real v3 = prim->vcomponent(3);
 
-            //=================================================================
-            // Check if the gravity source library is set
-            //=================================================================
-            null_gravity = true;
-            if (!gravity_source_lib.empty()) {
-                gsource_handle = dlopen(gravity_source_lib.c_str(), RTLD_LAZY);
-                if (!gsource_handle) {
-                    std::cerr << "Cannot open library: " << dlerror() << '\n';
-                    return;
-                }
+            return WaveSpeeds{
+              .v1p = std::abs(v1 + cs / (1 + v1 * cs)),
+              .v1m = std::abs(v1 - cs / (1 - v1 * cs)),
+              .v2p = std::abs(v2 + cs / (1 + v2 * cs)),
+              .v2m = std::abs(v2 - cs / (1 - v2 * cs)),
+              .v3p = std::abs(v3 + cs / (1 + v3 * cs)),
+              .v3m = std::abs(v3 - cs / (1 - v3 * cs)),
+            };
+        }
 
-                // Clear any existing error
-                dlerror();
-
-                // Load the symbol based on the dimension
-                const std::vector<std::pair<const char*, function_t&>>
-                    g_symbols = {
-                      {"gravity_source", gravity_source},
-                    };
-
-                bool success = true;
-                for (const auto& [symbol, func] : g_symbols) {
-                    void* source            = dlsym(gsource_handle, symbol);
-                    const char* dlsym_error = dlerror();
-                    // if can't load symbol, print error
-                    if (dlsym_error) {
-                        std::cerr << "Cannot load symbol '" << symbol
-                                  << "': " << dlsym_error << '\n';
-                        success = false;
-                        dlclose(gsource_handle);
-                        break;
-                    }
-
-                    // Assign the function pointer based on the dimension
-                    if constexpr (dim == 1) {
-                        func = reinterpret_cast<f2arg>(source);
-                    }
-                    else if constexpr (dim == 2) {
-                        func = reinterpret_cast<f3arg>(source);
-                    }
-                    else if constexpr (dim == 3) {
-                        func = reinterpret_cast<f4arg>(source);
-                    }
-                }
-                if (success) {
-                    null_gravity = false;
-                }
-            }
-
-            //=================================================================
-            // Check if the boundary source library is set
-            //=================================================================
-            if (!boundary_source_lib.empty()) {
-                bsource_handle = dlopen(boundary_source_lib.c_str(), RTLD_LAZY);
-                if (!bsource_handle) {
-                    std::cerr << "Cannot open library: " << dlerror() << '\n';
-                    return;
-                }
-
-                // Clear any existing error
-                dlerror();
-
-                // Load the symbol based on the dimension
-                const std::vector<std::pair<const char*, function_t&>>
-                    b_symbols = {
-                      {"bx1_inner_source", bx1_inner_source},
-                      {"bx1_outer_source", bx1_outer_source},
-                      {"bx2_inner_source", bx2_inner_source},
-                      {"bx2_outer_source", bx2_outer_source},
-                      {"bx3_inner_source", bx3_inner_source},
-                      {"bx3_outer_source", bx3_outer_source},
-                    };
-
-                for (const auto& [symbol, func] : b_symbols) {
-                    void* source            = dlsym(bsource_handle, symbol);
-                    const char* dlsym_error = dlerror();
-                    // if can't load symbol, print error
-                    if (dlsym_error) {
-                        // erro out  only  if the boundary
-                        // condition is set to dynamic
-                        for (int i = 0; i < 6; ++i) {
-                            if (symbol == b_symbols[i].first &&
-                                bcs[i] == BoundaryCondition::DYNAMIC) {
-                                std::cerr << "Cannot load symbol '" << symbol
-                                          << "': " << dlsym_error << '\n';
-                                bcs[i] = BoundaryCondition::OUTFLOW;
-                                dlclose(bsource_handle);
-                            }
-                        }
-                    }
-                    else {
-                        // Assign the function pointer based on the dimension
-                        if constexpr (dim == 1) {
-                            func = reinterpret_cast<f2arg>(source);
-                        }
-                        else if constexpr (dim == 2) {
-                            func = reinterpret_cast<f3arg>(source);
-                        }
-                        else if constexpr (dim == 3) {
-                            func = reinterpret_cast<f4arg>(source);
-                        }
-                    }
-                }
-            }
+        void
+        run(const std::function<real(real)>& scale_factor,
+            const std::function<real(real)>& scale_factor_derivative)
+        {
+            this->simulate(scale_factor, scale_factor_derivative);
         }
     };
 }   // namespace simbi

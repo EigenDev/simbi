@@ -2,9 +2,9 @@
 #define EMF_FIELD_HPP
 
 #include "build_options.hpp"
-#include "core/types/enums.hpp"
-#include "core/types/vector_field.hpp"
-#include "geometry/mesh.hpp"
+#include "core/types/containers/vector_field.hpp"
+#include "core/types/utility/enums.hpp"
+#include "geometry/mesh/mesh.hpp"
 #include "physics/hydro/schemes/ct/ct_calculator.hpp"
 
 namespace simbi {

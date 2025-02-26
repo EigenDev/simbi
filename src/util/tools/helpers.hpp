@@ -18,30 +18,24 @@
 #ifndef HELPERS_HIP_HPP
 #define HELPERS_HIP_HPP
 
-#include "build_options.hpp"      // for real, STATIC, luint, lint
-#include "core/traits.hpp"        // for is_1D_primitive, is_2D_primitive
-#include "core/types/enums.hpp"   // for Geometry, BoundaryCondition, Solver
-#include "core/types/functional.hpp"       // for Function
-#include "io/console/tabulate.hpp"         // for PrettyTable
-#include "util/parallel/exec_policy.hpp"   // for ExecutionPolicy
-#include <cmath>                           // for sqrt, exp, INFINITY
-#include <cstdlib>                         // for abs, size_t
-#include <exception>                       // for exception
-#include <map>                             // for map
-#include <string>                          // for string, operator<=>
-#include <type_traits>                     // for enable_if
-#include <unordered_map>                   // for unordered_map
-
-std::unordered_map<std::string, simbi::Cellspacing> const str2cell = {
-  {"log", simbi::Cellspacing::LOGSPACE},
-  {"linear", simbi::Cellspacing::LINSPACE}
-  // {"log-linear",Cellspacing},
-  // {"linear-log",Cellspacing},
-};
+#include "build_options.hpp"            // for real, STATIC, luint, lint
+#include "core/traits.hpp"              // for is_1D_primitive, is_2D_primitive
+#include "core/types/alias/alias.hpp"   // for uarray
+#include "core/types/utility/enums.hpp"   // for Geometry, BoundaryCondition, Solver
+#include "core/types/utility/functional.hpp"   // for Function
+#include "io/console/tabulate.hpp"             // for PrettyTable
+#include "util/parallel/exec_policy.hpp"       // for ExecutionPolicy
+#include <cmath>                               // for sqrt, exp, INFINITY
+#include <cstdlib>                             // for abs, size_t
+#include <exception>                           // for exception
+#include <map>                                 // for map
+#include <string>                              // for string, operator<=>
+#include <type_traits>                         // for enable_if
+#include <unordered_map>                       // for unordered_map
 
 std::unordered_map<simbi::Cellspacing, std::string> const cell2str = {
-  {simbi::Cellspacing::LOGSPACE, "log"},
-  {simbi::Cellspacing::LINSPACE, "linear"}
+  {simbi::Cellspacing::LOG, "log"},
+  {simbi::Cellspacing::LINEAR, "linear"}
   // {"log-linear",Cellspacing},
   // {"linear-log",Cellspacing},
 };
@@ -201,30 +195,6 @@ namespace simbi {
             return (a < b) ? (a < c ? a : c) : b < c ? b : c;
         }
 
-        // map geometry string to simbi::Geometry enum class
-        const std::map<std::string, simbi::Geometry> geometry_map = {
-          {"spherical", simbi::Geometry::SPHERICAL},
-          {"cartesian", simbi::Geometry::CARTESIAN},
-          {"planar_cylindrical", simbi::Geometry::PLANAR_CYLINDRICAL},
-          {"axis_cylindrical", simbi::Geometry::AXIS_CYLINDRICAL},
-          {"cylindrical", simbi::Geometry::CYLINDRICAL}
-        };
-
-        // map boundary condition string to simbi::BoundaryCondition enum class
-        const std::map<std::string, simbi::BoundaryCondition>
-            boundary_cond_map = {
-              {"dynamic", simbi::BoundaryCondition::DYNAMIC},
-              {"outflow", simbi::BoundaryCondition::OUTFLOW},
-              {"reflecting", simbi::BoundaryCondition::REFLECTING},
-              {"periodic", simbi::BoundaryCondition::PERIODIC}
-        };
-
-        // map solver string to simbi::Solver enum class
-        const std::map<std::string, simbi::Solver> solver_map = {
-          {"hllc", simbi::Solver::HLLC},
-          {"hlle", simbi::Solver::HLLE},
-          {"hlld", simbi::Solver::HLLD}
-        };
         //---------------------------------------------------------------------------------------------------------
         //  HELPER-TEMPLATES
         //---------------------------------------------------------------------------------------------------------
@@ -246,45 +216,8 @@ namespace simbi {
             return (T(0) < val) - (val < T(0));
         }
 
-        /**
-         * @brief function template for writing checkpoint to hdf5 file
-         *
-         * @tparam Prim_type
-         * @tparam Ndim
-         * @tparam Sim_type
-         * @param sim_state_host the host-side simulation state
-         * @param setup the setup struct
-         * @param t the current time in the simulation
-         * @param t_interval the current time interval in the simulation
-         * @param chkpt_interval the current checkpoint interval
-         * @param chkpt_zone_label the zone label for the checkpoint
-         * <zone>.chkpt.<time>.h5
-         */
-        template <typename Sim_type>
-        void write_to_file(Sim_type& sim_state, PrettyTable& table);
-
         //---------------------------------------------------------------------------------------------------------
         //  HELPER-METHODS
-        //---------------------------------------------------------------------------------------------------------
-        //----------------Define Methods-------------------------------
-
-        /**
-         * @brief write to the hdf5 file (serial)
-         *
-         * @param data_directory
-         * @param filename
-         * @param prims
-         * @param system
-         * @param dim
-         * @param size
-         */
-        template <typename T>
-        void write_hdf5(
-            const std::string data_directory,
-            const std::string filename,
-            const T& state,
-            PrettyTable& table
-        );
 
         /**
          * @brief set the riemann solver function pointer on
@@ -348,157 +281,9 @@ namespace simbi {
             return result;
         }
 
-        //======================================
-        //          GPU TEMPLATES
-        //======================================
-        // compute the discrete dts for 1D primitive array
-        template <
-            typename T,
-            TIMESTEP_TYPE dt_type = TIMESTEP_TYPE::ADAPTIVE,
-            typename U,
-            typename V>
-        KERNEL typename std::enable_if<is_1D_primitive<T>::value>::type
-        compute_dt(U* s, const V* prim_buffer, real* dt_min);
-
-        // compute the discrete dts for 2D primitive array
-        template <
-            typename T,
-            TIMESTEP_TYPE dt_type = TIMESTEP_TYPE::ADAPTIVE,
-            typename U,
-            typename V>
-        KERNEL typename std::enable_if<is_2D_primitive<T>::value>::type
-        compute_dt(
-            U* s,
-            const V* prim_buffer,
-            real* dt_min,
-            const simbi::Geometry geometry
-        );
-
-        // compute the discrete dts for 3D primitive array
-        template <
-            typename T,
-            TIMESTEP_TYPE dt_type = TIMESTEP_TYPE::ADAPTIVE,
-            typename U,
-            typename V>
-        KERNEL typename std::enable_if<is_3D_primitive<T>::value>::type
-        compute_dt(
-            U* s,
-            const V* prim_buffer,
-            real* dt_min,
-            const simbi::Geometry geometry
-        );
-
-        // compute the discrete dts for 1D MHD primitive array
-        template <
-            typename T,
-            TIMESTEP_TYPE dt_type = TIMESTEP_TYPE::ADAPTIVE,
-            typename U,
-            typename V>
-        KERNEL typename std::enable_if<is_1D_mhd_primitive<T>::value>::type
-        compute_dt(U* s, const V* prim_buffer, real* dt_min);
-
-        // compute the discrete dts for 2D MHD primitive array
-        template <
-            typename T,
-            TIMESTEP_TYPE dt_type = TIMESTEP_TYPE::ADAPTIVE,
-            typename U,
-            typename V>
-        KERNEL typename std::enable_if<is_2D_mhd_primitive<T>::value>::type
-        compute_dt(
-            U* s,
-            const V* prim_buffer,
-            real* dt_min,
-            const simbi::Geometry geometry
-        );
-
-        // compute the discrete dts for 3D MHD primitive array
-        template <
-            typename T,
-            TIMESTEP_TYPE dt_type = TIMESTEP_TYPE::ADAPTIVE,
-            typename U,
-            typename V>
-        KERNEL typename std::enable_if<is_3D_mhd_primitive<T>::value>::type
-        compute_dt(
-            U* s,
-            const V* prim_buffer,
-            real* dt_min,
-            const simbi::Geometry geometry
-        );
-
-        //======================================
+        //=========================================================================
         //              HELPER OVERLOADS
-        //======================================
-
-        /**
-         * @brief           get the index of the direction neighbor
-         * @param[in/out/in,out]ii:
-         * @param[in/out/in,out]jj:
-         * @param[in/out/in,out]kk:
-         * @param[in/out/in,out]ni:
-         * @param[in/out/in,out]nj:
-         * @param[in/out/in,out]nk:
-         * @return
-         * @retval
-         */
-        template <Plane P, Corner C, Dir s>
-        DUAL lint cidx(lint ii, lint jj, lint kk, luint ni, luint nj, luint nk);
-
-        /**
-         * @brief check if a value is within a range
-         *
-         * @tparam IndexType
-         * @param val
-         * @param lower
-         * @param upper
-         * @return bool
-         */
-        template <class IndexType>
-        DUAL bool in_range(IndexType val, IndexType lower, IndexType upper);
-
-        // Helper function to apply boundary conditions
-        template <typename T>
-        DEV void apply_boundary_conditions(
-            auto& cons,
-            luint idx,
-            luint real_idx,
-            luint reflect_idx,
-            luint wrap_idx,
-            BoundaryCondition bc,
-            int momentum_idx
-        );
-
-        // Helper function to handle corners
-        template <typename T, Plane P>
-        DEV void handle_corner(
-            auto& cons,
-            luint idx,
-            lint ii,
-            lint jj,
-            lint kk,
-            lint nx,
-            lint ny,
-            lint nz,
-            lint radius,
-            BoundaryCondition bc1,
-            BoundaryCondition bc2,
-            int momentum_idx1,
-            int momentum_idx2
-        );
-
-        // configure the ghost zones in 1D hydro
-        template <typename sim_state_t>
-        void config_ghosts1D(sim_state_t* sim_state);
-
-        // configure the ghost zones in 2D hydro
-        template <typename sim_state_t>
-        void config_ghosts2D(sim_state_t* sim_state);
-
-        // configure the ghost zones in 3D hydro
-        template <typename sim_state_t>
-        void config_ghosts3D(sim_state_t* sim_state);
-
-        template <typename sim_state_t>
-        void config_ghosts(sim_state_t* sim_state);
+        //==========================================================================
 
         template <int dim, typename T>
         KERNEL void
@@ -552,10 +337,6 @@ namespace simbi {
         template <typename T>
         DUAL int solve_quartic(T b, T c, T d, T e, T res[4]);
 
-        // swap any two values
-        template <typename T>
-        DUAL void swap(T& a, T& b);
-
         // Partition the array and return the pivot index
         template <typename T, typename index_type>
         DUAL index_type partition(T arr[], index_type low, index_type high);
@@ -567,27 +348,6 @@ namespace simbi {
         template <typename T, typename index_type>
         DUAL void iterativeQuickSort(T arr[], index_type low, index_type high);
 
-        template <typename T, typename U>
-        SHARED T* sm_proxy(const U object);
-
-        template <typename T>
-        SHARED auto sm_or_identity(const T* object);
-
-        template <int dim, typename T, typename idx>
-        DUAL void
-        ib_modify(T& lhs, const T& rhs, const bool ib, const idx side);
-
-        template <int dim, typename T, typename idx>
-        DUAL bool ib_check(
-            T& arr,
-            const idx ii,
-            const idx jj,
-            const idx kk,
-            const idx ni,
-            const idx nj,
-            const int side
-        );
-
         template <int dim, BlockAx axis, typename T>
         DUAL T axid(T idx, T ni, T nj, T kk = T(0));
 
@@ -596,28 +356,6 @@ namespace simbi {
         {
             return (val * val) < global::epsilon;
         }
-
-        template <int dim, typename T, typename U, typename V>
-        DEV void load_shared_buffer(
-            const ExecutionPolicy<>& p,
-            T& buffer,
-            const U& data,
-            const V ni,
-            const V nj,
-            const V nk,
-            const V sx,
-            const V sy,
-            const V tx,
-            const V ty,
-            const V tz,
-            const V txa,
-            const V tya,
-            const V tza,
-            const V ia,
-            const V ja,
-            const V ka,
-            const V radius
-        );
 
         std::string getColorCode(Color color);
 
@@ -639,8 +377,8 @@ namespace simbi {
 #if __CUDA_ARCH__ >= 700
             mask = __match_any_sync(__activemask(), val);
 #else
-            const int tid = threadIdx.z * blockDim.x * blockDim.y +
-                            threadIdx.y * blockDim.x + threadIdx.x;
+            const int tid = threadIdx.z * block_dim.x * block_dim.y +
+                            threadIdx.y * block_dim.x + threadIdx.x;
             unsigned tmask = __activemask();
             for (int i = 0; i < global::WARP_SIZE; i++) {
                 unsigned long long tval =
@@ -680,9 +418,9 @@ namespace simbi {
             static __shared__ real
                 shared[global::WARP_SIZE];   // Shared mem for 32 (Nvidia) / 64
                                              // (AMD) partial mins
-            const int tid = threadIdx.z * blockDim.x * blockDim.y +
-                            threadIdx.y * blockDim.x + threadIdx.x;
-            const int bsz = blockDim.x * blockDim.y * blockDim.z;
+            const int tid = threadIdx.z * block_dim.x * block_dim.y +
+                            threadIdx.y * block_dim.x + threadIdx.x;
+            const int bsz = block_dim.x * block_dim.y * block_dim.z;
             int lane      = tid % global::WARP_SIZE;
             int wid       = tid / global::WARP_SIZE;
 
@@ -717,6 +455,32 @@ namespace simbi {
         {
             return ((nhat - 1) + step) % 3 + 1;
         };
+
+        template <size_type Dims>
+        DUAL constexpr auto unravel_idx(const luint idx, const auto& shape)
+        {
+            uarray<Dims> coords;
+            auto stride = 1;
+            if constexpr (global::col_major) {
+                // Column major: shape=(nk,nj,ni)
+                // Want [k,j,i] where i is fastest
+                for (size_type ii = 0; ii < Dims; ++ii) {
+                    coords[Dims - 1 - ii] =
+                        (idx / stride) % shape[Dims - 1 - ii];
+                    stride *= shape[Dims - 1 - ii];
+                }
+            }
+            else {
+                // Row major: shape=(nk,nj,ni)
+                // Want [i,j,k] where i is fastest
+                for (size_type ii = Dims - 1; ii < Dims; --ii) {
+                    coords[Dims - 1 - ii] = (idx / stride) % shape[ii];
+                    stride *= shape[ii];
+                }
+            }
+
+            return coords;
+        }
 
         /**
          * @brief Get the 3D idx object depending on row-major or column-major
@@ -938,6 +702,11 @@ namespace simbi {
          * @return std::string
          */
         std::string format_real(real value);
+
+        template <size_type Dims>
+        DUAL static auto
+        memory_layout_coordinates(auto idx, const uarray<Dims>& shape)
+            -> uarray<Dims>;
 
     }   // namespace helpers
 }   // namespace simbi

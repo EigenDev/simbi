@@ -142,7 +142,7 @@ namespace simbi {
         static constexpr VectorType vec_type = Type;
 
         // Basic operations
-        DUAL auto magnitude() const
+        DUAL constexpr auto norm() const
         {
             auto mag = zero;
             for (size_type ii = 0; ii < Dims; ++ii) {
@@ -151,7 +151,7 @@ namespace simbi {
             return std::sqrt(mag);
         }
 
-        DUAL auto magnitude_squared() const
+        DUAL constexpr auto norm_squared() const
         {
             auto mag = zero;
             for (size_type ii = 0; ii < Dims; ++ii) {
@@ -160,9 +160,9 @@ namespace simbi {
             return mag;
         }
 
-        DUAL auto normalize() const
+        DUAL constexpr auto normalize() const
         {
-            auto mag = magnitude();
+            auto mag = norm();
             if (mag > zero) {
                 for (size_type ii = 0; ii < Dims; ++ii) {
                     (*this)[ii] /= mag;
@@ -171,9 +171,9 @@ namespace simbi {
             return *this;
         }
 
-        DUAL auto unit() const
+        DUAL constexpr auto unit() const
         {
-            auto mag = magnitude();
+            auto mag = norm();
             if (mag > zero) {
                 for (size_type ii = 0; ii < Dims; ++ii) {
                     (*this)[ii] /= mag;
@@ -184,7 +184,8 @@ namespace simbi {
 
         // vector-to-vector operations w/ type promotions
         template <typename U, size_type OtherDims, VectorType OtherType>
-        DUAL auto dot(const VectorOps<U, OtherDims, OtherType>& other) const
+        DUAL constexpr auto dot(const VectorOps<U, OtherDims, OtherType>& other
+        ) const
         {
             using result_type = promote_t<T, U>;
             result_type sum{0};
@@ -196,8 +197,8 @@ namespace simbi {
 
         // binary operations w/ type promotions
         template <typename U, size_type OtherDims, VectorType OtherType>
-        DUAL auto operator+(const VectorOps<U, OtherDims, OtherType>& other
-        ) const
+        DUAL constexpr auto
+        operator+(const VectorOps<U, OtherDims, OtherType>& other) const
         {
             using result_type = promote_t<T, U>;
             constexpr auto result_vectype =
@@ -210,8 +211,8 @@ namespace simbi {
         }
 
         template <typename U, size_type OtherDims, VectorType OtherType>
-        DUAL auto operator-(const VectorOps<U, OtherDims, OtherType>& other
-        ) const
+        DUAL constexpr auto
+        operator-(const VectorOps<U, OtherDims, OtherType>& other) const
         {
             using result_type = promote_t<T, U>;
             constexpr auto result_vectype =
@@ -246,7 +247,7 @@ namespace simbi {
         }
 
         template <typename U>
-        DUAL auto operator*(const U scalar) const
+        DUAL constexpr auto operator*(const U scalar) const
         {
             using result_type = promote_t<T, U>;
             Vector<result_type, Dims, Type> result;
@@ -257,7 +258,7 @@ namespace simbi {
         }
 
         template <typename U>
-        DUAL auto operator/(const U scalar) const
+        DUAL constexpr auto operator/(const U scalar) const
         {
             using result_type = promote_t<T, U>;
             Vector<result_type, Dims, Type> result;
@@ -268,7 +269,7 @@ namespace simbi {
         }
 
         // unary operations
-        DUAL auto operator-() const
+        DUAL constexpr auto operator-() const
         {
             Vector<T, Dims, Type> result;
             for (size_type ii = 0; ii < Dims; ++ii) {
@@ -282,7 +283,7 @@ namespace simbi {
             template <typename, size_type, VectorType> class Vec_t,
             typename U,
             VectorType OtherType>
-        DUAL auto cross(const Vec_t<U, Dims, OtherType>& other) const
+        DUAL constexpr auto cross(const Vec_t<U, Dims, OtherType>& other) const
             requires(Dims == 3)
         {
             using result_type = promote_t<T, U>;
@@ -293,6 +294,26 @@ namespace simbi {
               (*this)[2] * other[0] - (*this)[0] * other[2],
               (*this)[0] * other[1] - (*this)[1] * other[0]
             };
+        }
+
+        // component-specific cross product
+        template <
+            template <typename, size_type, VectorType> class Vec_t,
+            typename U,
+            VectorType OtherType>
+        DUAL constexpr auto
+        cross(size_type ii, const Vec_t<U, Dims, OtherType>& other) const
+            requires(Dims == 3)
+        {
+            if (ii == 0) {
+                return (*this)[1] * other[2] - (*this)[2] * other[1];
+            }
+            else if (ii == 1) {
+                return (*this)[2] * other[0] - (*this)[0] * other[2];
+            }
+            else {
+                return (*this)[0] * other[1] - (*this)[1] * other[0];
+            }
         }
 
         // Implicit conversion to general vector type
@@ -335,6 +356,9 @@ namespace simbi {
       private:
         alignas(alignof(T)) T storage_[Dims];
         static constexpr bool owned = true;
+        // Static zero value for out-of-bounds access in
+        // structured binding access
+        static inline T zero_value_{};
 
       public:
         DUAL constexpr Vector()
@@ -405,6 +429,58 @@ namespace simbi {
             other.data_ = nullptr;   // Null out moved-from object
         }
 
+        // structured binding support
+        template <size_t I>
+        DUAL constexpr T& get() &
+        {
+            if constexpr (I >= Dims) {
+                return zero_value_;
+            }
+            else {
+                return this->data_[I];
+            }
+        }
+
+        template <size_t I>
+        DUAL constexpr const T& get() const&
+        {
+            if constexpr (I >= Dims) {
+                return zero_value_;
+            }
+            else {
+                return this->data_[I];
+            }
+        }
+
+        template <size_t I>
+        DUAL constexpr T&& get() &&
+        {
+            if constexpr (I >= Dims) {
+                return std::move(zero_value_);
+            }
+            else {
+                return std::move(this->data_[I]);
+            }
+        }
+
+        template <size_t I>
+        friend DUAL constexpr decltype(auto) get(Vector& v)
+        {
+            return v.template get<I>();
+        }
+
+        template <size_t I>
+        friend DUAL constexpr decltype(auto) get(const Vector& v)
+        {
+            return v.template get<I>();
+        }
+
+        template <size_t I>
+        friend DUAL constexpr decltype(auto) get(Vector&& v)
+        {
+            return std::move(v).template get<I>();
+        }
+
         // assignment operators
         DUAL constexpr Vector& operator=(const Vector& other)
         {
@@ -427,7 +503,8 @@ namespace simbi {
             return *this;
         }
 
-        DUAL auto as_fourvec(const auto& vel, const auto lorentz) const
+        DUAL constexpr auto
+        as_fourvec(const auto& vel, const auto lorentz) const
             requires Magnetic<Type>
         {
             const auto vdB = vel.dot(*this);
@@ -443,20 +520,20 @@ namespace simbi {
 
         // Specialized operations for RMHD Magnetic four-vectors
         // get a view of the spatial part of the magnetic four-vector
-        DUAL auto spatial_part() const
+        DUAL constexpr auto spatial_part() const
             requires MagneticFour<Type>
         {
             return Vector<T, 3, VectorType::MAGNETIC>{this->data_ + 1};
         }
 
-        DUAL auto inner_product(const auto& other) const
+        DUAL constexpr auto inner_product(const auto& other) const
             requires MagneticFour<Type>
         {
             return -this->data_[0] * other[0] + this->data_[1] * other[1] +
                    this->data_[2] * other[2] + this->data_[3] * other[3];
         }
 
-        DUAL auto spatial_dot(const auto& other) const
+        DUAL constexpr auto spatial_dot(const auto& other) const
             requires MagneticFour<Type>
         {
             return this->data_[1] * other[0] + this->data_[2] * other[1] +
@@ -480,7 +557,10 @@ namespace simbi {
         DUAL constexpr bool valid() const { return valid_; }
 
         // cache the data into memory-owning vector
-        DUAL auto cache() const { return Vector<T, Dims, Type>{this->data_}; }
+        DUAL constexpr auto cache() const
+        {
+            return Vector<T, Dims, Type>{this->data_};
+        }
     };
 
     // const vector view
@@ -494,12 +574,13 @@ namespace simbi {
         }
 
         // cache the data into memory-owning vector
-        DUAL auto cache() const
+        DUAL constexpr auto cache() const
         {
             return Vector<const T, Dims, Type>{this->data_};
         }
 
-        DUAL auto as_fourvec(const auto& vel, const auto lorentz) const
+        DUAL constexpr auto
+        as_fourvec(const auto& vel, const auto lorentz) const
             requires Magnetic<Type>
         {
             const auto vdB = vel.dot(*this);
@@ -609,5 +690,17 @@ namespace simbi {
     }   // namespace unit_vectors
 
 }   // namespace simbi
+
+namespace std {
+    template <typename T, size_type Dims, simbi::VectorType Type>
+    struct tuple_size<simbi::Vector<T, Dims, Type>>
+        : integral_constant<size_type, Dims> {
+    };
+
+    template <size_type I, typename T, size_type Dims, simbi::VectorType Type>
+    struct tuple_element<I, simbi::Vector<T, Dims, Type>> {
+        using type = T;
+    };
+}   // namespace std
 
 #endif

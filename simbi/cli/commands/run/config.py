@@ -88,7 +88,7 @@ def _build_kwargs_dict(config: BaseConfig, args: Namespace) -> Dict[str, Any]:
         'spatial_order': config.spatial_order,
         'time_order': config.time_order,
         'cfl': use_arg_or_default(args.cfl, config.cfl_number),
-        'chkpt_interval': args.chkpt_interval or config.check_point_interval,
+        'checkpoint_interval': args.checkpoint_interval or config.check_point_interval,
         'tstart': use_arg_or_default(args.tstart, config.default_start_time),
         'tend': use_arg_or_default(args.tend, config.default_end_time),
         'solver': use_arg_or_default(args.solver, config.solver),

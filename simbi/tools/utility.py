@@ -256,6 +256,16 @@ def read_file(
         )
 
         vsqr = np.sum(v**2, axis=0)
+        xactive_zones = ds["nx"] - 2 * padwidth
+        yactive_zones = ds["ny"] - 2 * padwidth
+        zactive_zones = ds["nz"] - 2 * padwidth
+        grid = {
+            "x{}_active_zones".format(i): x
+            for x, i in zip(
+                [xactive_zones, yactive_zones, zactive_zones], range(1, ndim + 1)
+            )
+        }
+
         if ds["regime"] in ["srhd", "srmhd"]:
             W = (1 + vsqr) ** 0.5 if ds["using_gamma_beta"] else (1 - vsqr) ** (-0.5)
             if ds["using_gamma_beta"]:
@@ -272,25 +282,25 @@ def read_file(
                 b1 = read_bfield(
                     "b1",
                     (
-                        ds["zactive_zones"] + 2,
-                        ds["yactive_zones"] + 2,
-                        ds["xactive_zones"] + 1,
+                        zactive_zones + 2,
+                        yactive_zones + 2,
+                        zactive_zones + 1,
                     ),
                 )
                 b2 = read_bfield(
                     "b2",
                     (
-                        ds["zactive_zones"] + 2,
-                        ds["yactive_zones"] + 1,
-                        ds["xactive_zones"] + 2,
+                        zactive_zones + 2,
+                        yactive_zones + 1,
+                        xactive_zones + 2,
                     ),
                 )
                 b3 = read_bfield(
                     "b3",
                     (
-                        ds["zactive_zones"] + 1,
-                        ds["yactive_zones"] + 2,
-                        ds["xactive_zones"] + 2,
+                        zactive_zones + 1,
+                        yactive_zones + 2,
+                        xactive_zones + 2,
                     ),
                 )
 
@@ -327,7 +337,10 @@ def read_file(
             )
             for x in ["x1", "x2", "x3"]
         ]
-        mesh = {f"x{i+1}v": hf[f"x{i+1}"][:] for i in range(ndim)}
+        mesh = {
+            f"x{i}v": funcs[i - 1](ds[f"x{i}min"], ds[f"x{i}max"], grid[f"x{i}_active_zones"] + 1)
+            for i in range(1, ndim + 1)
+        }
 
         ds.update(
             {

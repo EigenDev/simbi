@@ -21,7 +21,7 @@
 #include "build_options.hpp"           // for Platform, global::BuildPlatform
 #include "util/tools/device_api.hpp"   // for gpuFree, gpuMalloc, gpuMallocManaged
 #include "util/tools/parallel_for.hpp"   // for parallel_for
-#include "util/types/maybe.hpp"          // for maybe
+#include "util/types/monad/maybe.hpp"    // for maybe
 #include "util/types/smrt_ptr.hpp"       // for smart_ptr
 #include <cstddef>                       // for size_t
 #include <initializer_list>              // for initializer_list

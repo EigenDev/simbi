@@ -315,7 +315,7 @@ namespace sogbo_rad {
      * calculartions
      * @param flux_array a flattened 1D array in which the summed frequencies in
      * each bin will live
-     * @param chkpt_idx  the integer index of the checkpoint file
+     * @param checkpoint_idx  the integer index of the checkpoint file
      *
      * @return the summed fluxes in each frequency / time bin declared
      */
@@ -326,7 +326,7 @@ namespace sogbo_rad {
         std::vector<std::vector<double>>& mesh,
         std::vector<double>& tbin_edges,
         std::vector<double>& flux_array,
-        const int chkpt_idx,
+        const int checkpoint_idx,
         const int data_dim
     )
     {
@@ -515,8 +515,9 @@ namespace sogbo_rad {
                                 // must be accounted for
                                 const auto dt_day = dt * constants::sec2day;
                                 const auto dt_obs = t2 - t1;
-                                const double trat =
-                                    (chkpt_idx > 0) ? dt_day / dt_obs : 1.0;
+                                const double trat = (checkpoint_idx > 0)
+                                                        ? dt_day / dt_obs
+                                                        : 1.0;
 
                                 // Sum the fluxes in the given time bin
                                 flux_array[fidx * (nt - 1) + tidx] +=

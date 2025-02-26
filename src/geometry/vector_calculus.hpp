@@ -1,8 +1,8 @@
 #ifndef VECTOR_CALCULUS_HPP
 #define VECTOR_CALCULUS_HPP
 
-#include "build_options.hpp"             // for real, DUAL
-#include "core/types/vector_field.hpp"   // for Vector, VectorField
+#include "build_options.hpp"                        // for real, DUAL
+#include "core/types/containers/vector_field.hpp"   // for Vector, VectorField
 
 using namespace simbi::vector_field;
 
@@ -19,12 +19,18 @@ namespace simbi {
         curl_cartesian(const auto& cell, const VectorField<real, 3>& vec_field)
         {
             return general_vector_t<real, 3>{
-              cell.idx2() * (vec_field.right()[2] - vec_field.left()[2]) -
-                  cell.idx3() * (vec_field.right()[1] - vec_field.left()[1]),
-              cell.idx3() * (vec_field.right()[0] - vec_field.left()[0]) -
-                  cell.idx1() * (vec_field.right()[2] - vec_field.left()[2]),
-              cell.idx1() * (vec_field.right()[1] - vec_field.left()[1]) -
-                  cell.idx2() * (vec_field.right()[0] - vec_field.left()[0]),
+              (1.0 / cell.width(1)) *
+                      (vec_field.right()[2] - vec_field.left()[2]) -
+                  (1.0 / cell.width(2)) *
+                      (vec_field.right()[1] - vec_field.left()[1]),
+              (1.0 / cell.width(2)) *
+                      (vec_field.right()[0] - vec_field.left()[0]) -
+                  (1.0 / cell.width(0)) *
+                      (vec_field.right()[2] - vec_field.left()[2]),
+              (1.0 / cell.width(0)) *
+                      (vec_field.right()[1] - vec_field.left()[1]) -
+                  (1.0 / cell.width(1)) *
+                      (vec_field.right()[0] - vec_field.left()[0]),
             };
         }
 
@@ -33,16 +39,17 @@ namespace simbi {
             const VectorField<real, 3>& vec_field
         )
         {
-            const auto dr   = cell.x1R() - cell.x1L();
-            const auto dphi = cell.x2R() - cell.x2L();
-            const auto dz   = cell.x3R() - cell.x3L();
+            const auto x1mean = cell.centroid_coordinate(0);
+            const auto dr     = cell.x1R() - cell.x1L();
+            const auto dphi   = cell.x2R() - cell.x2L();
+            const auto dz     = cell.x3R() - cell.x3L();
             return general_vector_t<real, 3>{
-              (1.0 / cell.x1mean / dphi) *
+              (1.0 / x1mean / dphi) *
                       (vec_field.right()[2] - vec_field.left()[2]) -
                   (1.0 / dz) * (vec_field.right()[1] - vec_field.left()[1]),
               (1.0 / dz) * (vec_field.right()[0] - vec_field.left()[0]) -
                   (1.0 / dr) * (vec_field.right()[2] - vec_field.left()[2]),
-              (1.0 / cell.x1mean) *
+              (1.0 / x1mean) *
                   ((vec_field.right()[1] * cell.x1R() -
                     vec_field.left()[1] * cell.x1L()) /
                        dr -
@@ -53,8 +60,8 @@ namespace simbi {
         DUAL general_vector_t<real, 3>
         curl_spherical(const auto& cell, const VectorField<real, 3>& vec_field)
         {
-            const auto r      = cell.x1mean;
-            const auto sint   = std::sin(cell.x2mean);
+            const auto r      = cell.centroid_coordinate(0);
+            const auto sint   = std::sin(cell.centroid_coordinate(1));
             const auto dr     = cell.x1R() - cell.x1L();
             const auto dtheta = cell.x2R() - cell.x2L();
             const auto dphi   = cell.x3R() - cell.x3L();
@@ -81,7 +88,7 @@ namespace simbi {
         DUAL general_vector_t<real, 3>
         curl(auto& cell, VectorField<real, 3>& vec_field)
         {
-            switch (cell.geometry) {
+            switch (cell.geometry()) {
                 case Geometry::CARTESIAN:
                     return curl_cartesian(cell, vec_field);
                 case Geometry::CYLINDRICAL:
@@ -100,21 +107,21 @@ namespace simbi {
         )
         {
             if constexpr (C == CurlComponent::X1) {
-                return cell.idx2() *
+                return (1.0 / cell.width(1)) *
                            (vec_field.right()[2] - vec_field.left()[2]) -
-                       cell.idx3() *
+                       (1.0 / cell.width(2)) *
                            (vec_field.right()[1] - vec_field.left()[1]);
             }
             else if constexpr (C == CurlComponent::X2) {
-                return cell.idx3() *
+                return (1.0 / cell.width(2)) *
                            (vec_field.right()[0] - vec_field.left()[0]) -
-                       cell.idx1() *
+                       (1.0 / cell.width(0)) *
                            (vec_field.right()[2] - vec_field.left()[2]);
             }
             else {
-                return cell.idx1() *
+                return (1.0 / cell.width(0)) *
                            (vec_field.right()[1] - vec_field.left()[1]) -
-                       cell.idx2() *
+                       (1.0 / cell.width(1)) *
                            (vec_field.right()[0] - vec_field.left()[0]);
             }
         }
@@ -125,11 +132,12 @@ namespace simbi {
             const VectorField<real, 3>& vec_field
         )
         {
+            const auto r    = cell.centroid_coordinate(0);
             const auto dr   = cell.x1R() - cell.x1L();
             const auto dphi = cell.x2R() - cell.x2L();
             const auto dz   = cell.x3R() - cell.x3L();
             if constexpr (C == CurlComponent::X1) {
-                return (1.0 / cell.x1mean / dphi) *
+                return (1.0 / r / dphi) *
                            (vec_field.right()[2] - vec_field.left()[2]) -
                        (1.0 / dz) *
                            (vec_field.right()[1] - vec_field.left()[1]);
@@ -141,7 +149,7 @@ namespace simbi {
                            (vec_field.right()[2] - vec_field.left()[2]);
             }
             else {
-                return (1.0 / cell.x1mean) *
+                return (1.0 / r) *
                        ((vec_field.right()[1] * cell.x1R() -
                          vec_field.left()[1] * cell.x1L()) /
                             dr -
@@ -155,8 +163,8 @@ namespace simbi {
             const VectorField<real, 3>& vec_field
         )
         {
-            const auto r      = cell.x1mean;
-            const auto sint   = std::sin(cell.x2mean);
+            const auto r      = cell.centroid_coordinate(0);
+            const auto sint   = std::sin(cell.centroid_coordinate(1));
             const auto dr     = cell.x1R() - cell.x1L();
             const auto dtheta = cell.x2R() - cell.x2L();
             const auto dphi   = cell.x3R() - cell.x3L();
@@ -188,7 +196,7 @@ namespace simbi {
         DUAL real
         curl_component(const auto& cell, VectorField<real, 3>& vec_field)
         {
-            switch (cell.geometry) {
+            switch (cell.geometry()) {
                 case Geometry::CARTESIAN:
                     return curl_cartesian_component<
                         static_cast<CurlComponent>(nhat - 1)>(cell, vec_field);

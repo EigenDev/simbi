@@ -18,11 +18,11 @@
 #ifndef DRIVER_HPP
 #define DRIVER_HPP
 
-#include "build_options.hpp"                // for real
-#include "core/types/init_conditions.hpp"   // for InitialConditions
-#include <functional>                       // for function
-#include <string>                           // for string
-#include <vector>                           // for vector
+#include "build_options.hpp"                        // for real
+#include "core/types/utility/init_conditions.hpp"   // for InitialConditions
+#include <functional>                               // for function
+#include <string>                                   // for string
+#include <vector>                                   // for vector
 
 namespace simbi {
     struct Driver {

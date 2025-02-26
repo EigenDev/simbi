@@ -1,38 +1,48 @@
 #ifndef STENCIL_HPP
 #define STENCIL_HPP
 
-#include "build_options.hpp"      // for global::on_gpu
-#include "core/types/enums.hpp"   // for Dir, Plane
+#include "build_options.hpp"              // for global::on_gpu
+#include "core/types/utility/enums.hpp"   // for Dir, Plane
 
 namespace simbi {
     // map the corners to strings
-    static const std::map<Corner, std::string> corner_map{
-      {Corner::SW, "SW"},
-      {Corner::SE, "SE"},
-      {Corner::NW, "NW"},
-      {Corner::NE, "NE"}
-    };
+    // static const std::map<Corner, std::string> corner_map{
+    //   {Corner::SW, "SW"},
+    //   {Corner::SE, "SE"},
+    //   {Corner::NW, "NW"},
+    //   {Corner::NE, "NE"}
+    // };
 
-    // map the block axes to strings
-    static const std::map<BlockAx, std::string> blk_ax_map{
-      {BlockAx::I, "I"},
-      {BlockAx::J, "J"},
-      {BlockAx::K, "K"}
-    };
+    // // map the block axes to strings
+    // static const std::map<BlockAx, std::string> blk_ax_map{
+    //   {BlockAx::I, "I"},
+    //   {BlockAx::J, "J"},
+    //   {BlockAx::K, "K"}
+    // };
 
-    // map the direction to strings
-    static const std::map<Dir, std::string> dir_map{
-      {Dir::N, "N"},
-      {Dir::S, "S"},
-      {Dir::E, "E"},
-      {Dir::W, "W"},
-      {Dir::NE, "NE"},
-      {Dir::SE, "SE"},
-      {Dir::SW, "SW"},
-      {Dir::NW, "NW"}
-    };
+    // // map the direction to strings
+    // static const std::map<Dir, std::string> dir_map{
+    //   {Dir::N, "N"},
+    //   {Dir::S, "S"},
+    //   {Dir::E, "E"},
+    //   {Dir::W, "W"},
+    //   {Dir::NE, "NE"},
+    //   {Dir::SE, "SE"},
+    //   {Dir::SW, "SW"},
+    //   {Dir::NW, "NW"}
+    // };
 
     namespace ct {
+        struct DirectionPattern {
+            int di;
+            int dj;
+            int dk;
+
+            constexpr DirectionPattern(int i, int j, int k)
+                : di(i), dj(j), dk(k)
+            {
+            }
+        };
 
         template <
             BlockAx B,
@@ -57,20 +67,20 @@ namespace simbi {
             }
 
             // Get flux at stencil point based on plane-aware directions
-            DUAL auto vertical_flux(Dir dir) const
+            DUAL constexpr auto vertical_flux(Dir dir) const
             {
                 auto [di, dj, dk] = get_vertical_offsets(dir, coordinates);
                 return v_flux_.at(di, dj, dk);
             }
 
-            DUAL auto horizontal_flux(Dir dir) const
+            DUAL constexpr auto horizontal_flux(Dir dir) const
             {
                 auto [di, dj, dk] = get_horizontal_offsets(dir, coordinates);
                 return h_flux_.at(di, dj, dk);
             }
 
             // Get primitive at stencil point
-            DUAL auto prim(Dir dir) const
+            DUAL constexpr auto prim(Dir dir) const
             {
                 auto [di, dj, dk] = get_plane_offsets(dir);
                 if constexpr (P == Plane::IJ) {
@@ -85,26 +95,43 @@ namespace simbi {
             }
 
           private:
-            static constexpr bool is_compound_dir(Dir dir)
-            {
-                return dir == Dir::NE || dir == Dir::SE || dir == Dir::SW ||
-                       dir == Dir::NW;
-            }
+            // static constexpr auto PLANE_PATTERNS = []() {
+            //     std::array<DirectionPattern, 4> patterns;
+            //     if constexpr (P == Plane::IJ) {
+            //         patterns = {
+            //           DirectionPattern{1, 0, 0},    // E
+            //           DirectionPattern{-1, 0, 0},   // W
+            //           DirectionPattern{0, 1, 0},    // N
+            //           DirectionPattern{0, -1, 0}    // S
+            //         };
+            //     }
+            //     else if constexpr (P == Plane::JK) {
+            //         patterns = {
+            //           DirectionPattern{0, 0, 1},    // N
+            //           DirectionPattern{0, 0, -1},   // S
+            //           DirectionPattern{0, 1, 0},    // E
+            //           DirectionPattern{0, -1, 0}    // W
+            //         };
+            //     }
+            //     else {   // IK plane
+            //         patterns = {
+            //           DirectionPattern{1, 0, 0},    // E
+            //           DirectionPattern{-1, 0, 0},   // W
+            //           DirectionPattern{0, 0, 1},    // N
+            //           DirectionPattern{0, 0, -1}    // S
+            //         };
+            //     }
+            // }();
 
             // Get offsets for each direction based on plane
             static constexpr auto get_plane_offsets(Dir dir)
             {
-                // Corner defines base position
-                constexpr bool is_north = (C == Corner::NW || C == Corner::NE);
-                constexpr bool is_east  = (C == Corner::NE || C == Corner::SE);
-
                 // Base indices for cell-centers relative to corner
-                constexpr int base_i = (is_east ? 0 : -1) + (B == BlockAx::I);
+                constexpr int base_i = (is_east ? 0 : -1);
                 constexpr int base_j =
                     ((P == Plane::JK) ? (is_east ? 0 : -1) : (is_north ? 0 : -1)
-                    ) +
-                    (B == BlockAx::J);
-                constexpr int base_k = (is_north ? 0 : -1) + (B == BlockAx::K);
+                    );
+                constexpr int base_k = (is_north ? 0 : -1);
 
                 if constexpr (P == Plane::IJ) {
                     // Handle cell-centered quantities
@@ -147,9 +174,6 @@ namespace simbi {
             static constexpr auto
             get_vertical_offsets(Dir dir, const auto& coordinates)
             {
-                // Corner defines base position
-                constexpr bool is_north = (C == Corner::NW || C == Corner::NE);
-                constexpr bool is_east  = (C == Corner::NE || C == Corner::SE);
                 constexpr int ghost_offset = 1;
 
                 // Face indices (-1/2 face = 0, +1/2 face = 1)
@@ -191,9 +215,6 @@ namespace simbi {
             static constexpr auto
             get_horizontal_offsets(Dir dir, const auto& coordinates)
             {
-                // Corner defines base position
-                constexpr bool is_north = (C == Corner::NW || C == Corner::NE);
-                constexpr bool is_east  = (C == Corner::NE || C == Corner::SE);
                 constexpr int ghost_offset = 1;
 
                 // Face indices (-1/2 face = 0, +1/2 face = 1)
@@ -233,10 +254,15 @@ namespace simbi {
                 }
             }
 
-            const Flux& v_flux_;
-            const Flux& h_flux_;
-            const Primitive& prims_;
-            const uarray<3> coordinates;
+            alignas(64) const Flux& v_flux_;
+            alignas(64) const Flux& h_flux_;
+            alignas(64) const Primitive& prims_;
+            alignas(64) const uarray<3> coordinates;
+
+            static constexpr bool is_north =
+                (C == Corner::NW || C == Corner::NE);
+            static constexpr bool is_east =
+                (C == Corner::NE || C == Corner::SE);
         };
 
         // type deduction guide

@@ -18,7 +18,7 @@ cdef extern from "rad_units.hpp" namespace "sogbo_rad":
         vector[vector[double]] &mesh,
         vector[double] &tbin_edges,
         vector[double] &flux_array, 
-        int chkpt_idx,
+        int checkpoint_idx,
         int data_dim
     )
 

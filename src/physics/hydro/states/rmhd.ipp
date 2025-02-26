@@ -1,10 +1,7 @@
-#include "core/types/idx_sequence.hpp"   // for for_sequence, make_index_sequence
-#include "geometry/vector_calculus.hpp"   // for cidx, Dir, Plane, Corner
-#include "io/console/logger.hpp"          // for logger
+#include "core/managers/boundary_manager.hpp"       // for BoundaryManager
+#include "geometry/vector_calculus.hpp"             // for curl_component
 #include "physics/hydro/schemes/ct/emf_field.hpp"   // for EMField
-#include "util/parallel/parallel_for.hpp"           // for parallel_for
-#include "util/tools/device_api.hpp"   // for syncrohonize, devSynch, ...
-#include <cmath>                       // for max, min
+#include <cmath>                                    // for max, min
 
 using namespace simbi;
 using namespace simbi::util;
@@ -21,7 +18,7 @@ RMHD<dim>::RMHD(
     std::vector<std::vector<real>>& state,
     InitialConditions& init_conditions
 )
-    : HydroBase(state, init_conditions),
+    : HydroBase<RMHD<dim>, dim, Regime::RMHD>(state, init_conditions),
       bstag1(std::move(init_conditions.bfield[0])),
       bstag2(std::move(init_conditions.bfield[1])),
       bstag3(std::move(init_conditions.bfield[2]))
@@ -30,20 +27,7 @@ RMHD<dim>::RMHD(
 
 // Destructor
 template <int dim>
-RMHD<dim>::~RMHD()
-{
-    if (hsource_handle) {
-        dlclose(hsource_handle);
-    }
-
-    if (gsource_handle) {
-        dlclose(gsource_handle);
-    }
-
-    if (bsource_handle) {
-        dlclose(bsource_handle);
-    }
-};
+RMHD<dim>::~RMHD() = default;
 
 //-----------------------------------------------------------------------------------------
 //                          Get The Primitive
@@ -56,11 +40,11 @@ RMHD<dim>::~RMHD()
  * @return none
  */
 template <int dim>
-void RMHD<dim>::cons2prim()
+void RMHD<dim>::cons2prim_impl()
 {
     // functional-style implementation
     shared_atomic_bool local_failure;
-    prims.transform(
+    this->prims_.transform(
         [gamma = this->gamma,
          loc   = &local_failure] DEV(auto& prim, const auto& c)
             -> Maybe<primitive_t> {
@@ -222,12 +206,12 @@ void RMHD<dim>::cons2prim()
 
             return primitive_t{rhohat, v1, v2, v3, pg, b1, b2, b3, dchi / d};
         },
-        fullPolicy,
-        cons
+        this->full_policy(),
+        this->cons_
     );
 
     if (local_failure.load()) {
-        inFailureState.store(true);
+        this->set_failure_state(true);
     }
 }
 
@@ -240,7 +224,7 @@ void RMHD<dim>::cons2prim()
  * @return none
  */
 template <int dim>
-DEV auto RMHD<dim>::cons2prim(const auto& cons) const
+DEV auto RMHD<dim>::cons2prim_single(const auto& cons) const
 {
     const real d    = cons.dens();
     const real m1   = cons.mcomponent(1);
@@ -551,147 +535,6 @@ DUAL RMHD<dim>::eigenvals_t RMHD<dim>::calc_eigenvals(
     return {aL, aR};
 };
 
-//---------------------------------------------------------------------
-//                  ADAPT THE TIMESTEP
-//---------------------------------------------------------------------
-// Adapt the cfl conditional timestep
-template <int dim>
-template <TIMESTEP_TYPE dt_type>
-void RMHD<dim>::adapt_dt()
-{
-    auto calc_wave_speeds = [this] DEV(const auto& prims) {
-        if constexpr (dt_type == TIMESTEP_TYPE::MINIMUM) {
-            return WaveSpeeds{
-              .v1p = 1.0,
-              .v1m = 1.0,
-              .v2p = 1.0,
-              .v2m = 1.0,
-              .v3p = 1.0,
-              .v3m = 1.0
-            };
-        }
-
-        const auto [v1m, v1p] = this->calc_max_wave_speeds(prims.value(), 1);
-        const auto [v2m, v2p] = this->calc_max_wave_speeds(prims.value(), 2);
-        const auto [v3m, v3p] = this->calc_max_wave_speeds(prims.value(), 3);
-        return WaveSpeeds{
-          .v1p = std::abs(v1p),
-          .v1m = std::abs(v1m),
-          .v2p = std::abs(v2p),
-          .v2m = std::abs(v2m),
-          .v3p = std::abs(v3p),
-          .v3m = std::abs(v3m)
-        };
-    };
-
-    auto calc_local_dt =
-        [] DEV(const WaveSpeeds& speeds, const auto& cell) -> real {
-        auto dt = INFINITY;
-        for (size_type ii = 0; ii < dim; ++ii) {
-            auto dx    = cell.dx(ii);
-            auto dt_dx = dx / std::min(speeds[2 * ii], speeds[2 * ii + 1]);
-            dt         = std::min<real>(dt, dt_dx);
-        }
-        return dt;
-    };
-
-    dt = prims.reduce(
-             static_cast<real>(INFINITY),
-             [calc_wave_speeds,
-              calc_local_dt,
-              this](const auto& acc, const auto& prim, const luint gid) {
-                 const auto [ii, jj, kk] = get_indices(gid, nx, ny);
-                 const auto speeds       = calc_wave_speeds(prim);
-                 const auto cell         = this->cell_geometry(ii, jj, kk);
-                 const auto local_dt     = calc_local_dt(speeds, cell);
-                 return std::min(acc, local_dt);
-             },
-             fullPolicy
-         ) *
-         cfl;
-
-    // std::atomic<real> min_dt = INFINITY;
-    // pooling::getThreadPool().parallel_for(active_zones, [&](luint gid) {
-    //     real v1p, v1m, v2p, v2m, v3p, v3m, cfl_dt;
-    //     const luint kk  = axid<dim, BlockAx::K>(gid, xag, yag);
-    //     const luint jj  = axid<dim, BlockAx::J>(gid, xag, yag, kk);
-    //     const luint ii  = axid<dim, BlockAx::I>(gid, xag, yag, kk);
-    //     const luint ia  = ii + radius;
-    //     const luint ja  = jj + radius;
-    //     const luint ka  = kk + radius;
-    //     const luint aid = idx3(ia, ja, ka, nx, ny, nz);
-    //     // Left/Right wave speeds
-    //     if constexpr (dt_type == TIMESTEP_TYPE::ADAPTIVE) {
-    //         std::tie(v1m, v1p) = calc_max_wave_speeds(*prims[aid], 1);
-    //         v1p                = std::abs(v1p);
-    //         v1m                = std::abs(v1m);
-    //         std::tie(v2m, v2p) = calc_max_wave_speeds(*prims[aid], 2);
-    //         v2p                = std::abs(v2p);
-    //         v2m                = std::abs(v2m);
-    //         std::tie(v3m, v3p) = calc_max_wave_speeds(*prims[aid], 3);
-    //         v3p                = std::abs(v3p);
-    //         v3m                = std::abs(v3m);
-    //     }
-    //     else {
-    //         v1p = 1.0;
-    //         v1m = 1.0;
-    //         v2p = 1.0;
-    //         v2m = 1.0;
-    //         v3p = 1.0;
-    //         v3m = 1.0;
-    //     }
-
-    //     const auto cell = this->cell_geometry(ii, jj, kk);
-    //     switch (geometry) {
-    //         case simbi::Geometry::CARTESIAN: {
-    //             const real x1l = cell.x1L();
-    //             const real x1r = cell.x1R();
-    //             const real dx1 = x1r - x1l;
-
-    //             const real x2l = cell.x1L();
-    //             const real x2r = cell.x1R();
-    //             const real dx2 = x2r - x2l;
-
-    //             cfl_dt = std ::min(
-    //                 {dx1 / (std::max(v1p, v1m)),
-    //                  dx2 / (std::max(v2p, v2m)),
-    //                  dx3 / (std::max(v3p, v3m))}
-    //             );
-
-    //             break;
-    //         }
-
-    //         case simbi::Geometry::SPHERICAL: {
-    //             const real rproj = cell.x1mean * std::sin(cell.x2mean);
-
-    //             cfl_dt = std::min(
-    //                 {(cell.x1R() - cell.x1L()) / (std::max(v1p, v1m)),
-    //                  cell.x1mean * (cell.x2R() - cell.x2L()) /
-    //                      (std::max(v2p, v2m)),
-    //                  rproj * (cell.x3R() - cell.x3L()) / (std::max(v3p,
-    //                  v3m))}
-    //             );
-    //             break;
-    //         }
-    //         default: {
-    //             const real x1l = cell.x1L();
-    //             const real x1r = cell.x1R();
-    //             const real dx1 = x1r - x1l;
-
-    //             const real rmean = cell.x1mean;
-    //             cfl_dt           = std::min(
-    //                 {dx1 / (std::max(v1p, v1m)),
-    //                            rmean * dx2 / (std::max(v2p, v2m)),
-    //                            dx3 / (std::max(v3p, v3m))}
-    //             );
-    //             break;
-    //         }
-    //     }
-    //     pooling::update_minimum(min_dt, cfl_dt);
-    // });
-    // dt = cfl * min_dt;
-};
-
 //===================================================================================================================
 //                                            FLUX CALCULATIONS
 //===================================================================================================================
@@ -826,7 +669,8 @@ DUAL RMHD<dim>::conserved_t RMHD<dim>::calc_hllc_flux(
         const auto hll_flux =
             (fL * aRp - fR * aLm + (uR - uL) * aRp * aLm) / (aRp - aLm);
 
-        if (quirk_smoothing && quirk_strong_shock(prL.press(), prR.press())) {
+        if (this->quirk_smoothing() &&
+            quirk_strong_shock(prL.press(), prR.press())) {
             return hll_flux - hll_state * vface;
         }
 
@@ -1225,7 +1069,7 @@ DUAL RMHD<dim>::conserved_t RMHD<dim>::calc_hlld_flux(
         const auto hll_flux =
             (fL * aRp - fR * aLm + (uR - uL) * aRp * aLm) * afac;
 
-        if (quirk_smoothing) {
+        if (this->quirk_smoothing()) {
             if (quirk_strong_shock(prL.press(), prR.press())) {
                 return hll_flux - hll_state * vface;
             }
@@ -1247,7 +1091,7 @@ DUAL RMHD<dim>::conserved_t RMHD<dim>::calc_hlld_flux(
         // Iteratively solve for the pressure
         //------------------------------------
         //------------ initial pressure guess
-        auto p0 = cons2prim(hll_state).total_pressure();
+        auto p0 = cons2prim_single(hll_state).total_pressure();
 
         // params to smoothen secant method if HLLD fails
         constexpr real feps          = global::epsilon;
@@ -1463,37 +1307,49 @@ DUAL RMHD<dim>::conserved_t RMHD<dim>::calc_hlld_flux(
 };
 
 template <int dim>
-void RMHD<dim>::sync_flux_boundaries(const auto& flux_man)
+void RMHD<dim>::sync_flux_boundaries()
 {
     // sync only in perpendicular directions
-    flux_man
-        .sync_boundaries(fullxvertexPolicy, fri, fri.contract({1, 1, 0}), bcs);
-    flux_man
-        .sync_boundaries(fullyvertexPolicy, gri, gri.contract({1, 0, 1}), bcs);
-    flux_man
-        .sync_boundaries(fullzvertexPolicy, hri, hri.contract({0, 1, 1}), bcs);
+    this->conserved_boundary_manager().sync_boundaries(
+        this->full_xvertex_policy(),
+        fri,
+        fri.contract({1, 1, 0}),
+        this->bcs()
+    );
+    this->conserved_boundary_manager().sync_boundaries(
+        this->full_yvertex_policy(),
+        gri,
+        gri.contract({1, 0, 1}),
+        this->bcs()
+    );
+    this->conserved_boundary_manager().sync_boundaries(
+        this->full_zvertex_policy(),
+        hri,
+        hri.contract({0, 1, 1}),
+        this->bcs()
+    );
 }
 
 template <int dim>
 void RMHD<dim>::sync_magnetic_boundaries(const auto& bfield_man)
 {
     bfield_man.sync_boundaries(
-        fullxvertexPolicy,
+        this->full_xvertex_policy(),
         bstag1,
         bstag1.contract({1, 1, 0}),
-        bcs
+        this->bcs()
     );
     bfield_man.sync_boundaries(
-        fullyvertexPolicy,
+        this->full_yvertex_policy(),
         bstag2,
         bstag2.contract({1, 0, 1}),
-        bcs
+        this->bcs()
     );
     bfield_man.sync_boundaries(
-        fullzvertexPolicy,
+        this->full_zvertex_policy(),
         bstag3,
         bstag3.contract({0, 1, 1}),
-        bcs
+        this->bcs()
     );
 }
 
@@ -1503,76 +1359,75 @@ void RMHD<dim>::riemann_fluxes()
     fri.contract({1, 1, 0}).stencil_transform(
         [this] DEV(auto& fr, const auto& prim, const auto& bface) {
             // fluxes in i direction, centered at i-1/2
-            const auto& pL = prim.at(+0, 0, 0);
-            const auto& pR = prim.at(+1, 0, 0);
+            const auto& pL = prim.at(-1, 0, 0);
+            const auto& pR = prim.at(+0, 0, 0);
 
-            if (!use_pcm) {
-                const auto& pLL = prim.at(-1, 0, 0);
-                const auto& pRR = prim.at(+2, 0, 0);
+            if (!this->using_pcm()) {
+                const auto& pLL = prim.at(-2, 0, 0);
+                const auto& pRR = prim.at(+1, 0, 0);
 
                 const auto pLr =
-                    pL + plm_gradient(pL, pLL, pR, plm_theta) * 0.5;
+                    pL + plm_gradient(pL, pLL, pR, this->plm_theta()) * 0.5;
                 const auto pRr =
-                    pR - plm_gradient(pR, pL, pRR, plm_theta) * 0.5;
+                    pR - plm_gradient(pR, pL, pRR, this->plm_theta()) * 0.5;
                 return (this->*riemann_solve)(pLr, pRr, 1, 0.0, bface.value());
             }
             else {
                 return (this->*riemann_solve)(pL, pR, 1, 0.0, bface.value());
             }
         },
-        xvertexPolicy,
-        prims.contract({radius, radius, radius - 1}),
+        this->xvertex_policy(),
+        this->prims_.contract(this->halo_radius()),
         bstag1.contract({1, 1, 0})
     );
 
     gri.contract({1, 0, 1}).stencil_transform(
         [this] DEV(auto& gr, const auto& prim, const auto& bface) {
             // fluxes in j direction, centered at j-1/2
-            const auto& pL = prim.at(0, +0, 0);
-            const auto& pR = prim.at(0, +1, 0);
-            // std::cout << "J-Flux pL: " << pL << std::endl;
-            // std::cout << "J-Flux pR: " << pR << std::endl;
+            const auto& pL = prim.at(0, -1, 0);
+            const auto& pR = prim.at(0, +0, 0);
 
-            if (!use_pcm) {
-                const auto& pLL = prim.at(0, -1, 0);
-                const auto& pRR = prim.at(0, +2, 0);
+            if (!this->using_pcm()) {
+                const auto& pLL = prim.at(0, -2, 0);
+                const auto& pRR = prim.at(0, +1, 0);
 
                 const auto pLr =
-                    pL + plm_gradient(pL, pLL, pR, plm_theta) * 0.5;
+                    pL + plm_gradient(pL, pLL, pR, this->plm_theta()) * 0.5;
                 const auto pRr =
-                    pR - plm_gradient(pR, pL, pRR, plm_theta) * 0.5;
+                    pR - plm_gradient(pR, pL, pRR, this->plm_theta()) * 0.5;
                 return (this->*riemann_solve)(pLr, pRr, 2, 0.0, bface.value());
             }
             else {
                 return (this->*riemann_solve)(pL, pR, 2, 0.0, bface.value());
             }
         },
-        yvertexPolicy,
-        prims.contract({radius, radius - 1, radius}),
+        this->yvertex_policy(),
+        this->prims_.contract(this->halo_radius()),
         bstag2.contract({1, 0, 1})
     );
 
     hri.contract({0, 1, 1}).stencil_transform(
         [this] DEV(auto& hr, const auto& prim, const auto& bface) {
             // fluxes in k direction, centered at k-1/2
-            const auto& pL = prim.at(0, 0, +0);
-            const auto& pR = prim.at(0, 0, +1);
-            if (!use_pcm) {
-                const auto& pLL = prim.at(0, 0, -1);
-                const auto& pRR = prim.at(0, 0, +2);
+            const auto& pL = prim.at(0, 0, -1);
+            const auto& pR = prim.at(0, 0, +0);
+
+            if (!this->using_pcm()) {
+                const auto& pLL = prim.at(0, 0, -2);
+                const auto& pRR = prim.at(0, 0, +1);
 
                 const auto pLr =
-                    pL + plm_gradient(pL, pLL, pR, plm_theta) * 0.5;
+                    pL + plm_gradient(pL, pLL, pR, this->plm_theta()) * 0.5;
                 const auto pRr =
-                    pR - plm_gradient(pR, pL, pRR, plm_theta) * 0.5;
+                    pR - plm_gradient(pR, pL, pRR, this->plm_theta()) * 0.5;
                 return (this->*riemann_solve)(pLr, pRr, 3, 0.0, bface.value());
             }
             else {
                 return (this->*riemann_solve)(pL, pR, 3, 0.0, bface.value());
             }
         },
-        zvertexPolicy,
-        prims.contract({radius - 1, radius, radius}),
+        this->zvertex_policy(),
+        this->prims_.contract(this->halo_radius()),
         bstag3.contract({0, 1, 1})
     );
 }
@@ -1580,70 +1435,67 @@ void RMHD<dim>::riemann_fluxes()
 //===================================================================================================================
 //                                           SOURCE TERMS
 //===================================================================================================================
-template <int dim>
-DUAL RMHD<dim>::conserved_t RMHD<dim>::hydro_sources(const auto& cell) const
-{
-    if (null_sources) {
-        return conserved_t{};
-    }
-    const auto x1c = cell.x1mean;
-    const auto x2c = cell.x2mean;
-    const auto x3c = cell.x3mean;
+// template <int dim>
+// DUAL RMHD<dim>::conserved_t RMHD<dim>::hydro_sources(const auto& cell) const
+// {
+//     if (null_sources) {
+//         return conserved_t{};
+//     }
+//     const auto x1c = cell.centroid_coordinate(0);
+//     const auto x2c = cell.centroid_coordinate(1);
+//     const auto x3c = cell.centroid_coordinate(2);
 
-    conserved_t res;
-    if constexpr (dim == 1) {
-        hydro_source(x1c, t, res);
-    }
-    else if constexpr (dim == 2) {
-        hydro_source(x1c, x2c, t, res);
-    }
-    else {
-        hydro_source(x1c, x2c, x3c, t, res);
-    }
-    return res;
-}
+//     conserved_t res;
+//     if constexpr (dim == 1) {
+//         hydro_source(x1c, t, res);
+//     }
+//     else if constexpr (dim == 2) {
+//         hydro_source(x1c, x2c, t, res);
+//     }
+//     else {
+//         hydro_source(x1c, x2c, x3c, t, res);
+//     }
+//     return res;
+// }
 
-template <int dim>
-DUAL RMHD<dim>::conserved_t
-RMHD<dim>::gravity_sources(const auto& prims, const auto& cell) const
-{
-    if (null_gravity) {
-        return conserved_t{};
-    }
-    const auto x1c = cell.x1mean;
+// template <int dim>
+// DUAL RMHD<dim>::conserved_t
+// RMHD<dim>::this->gravity_sources(const auto& prims, const auto& cell) const
+// {
+//     if (null_gravity) {
+//         return conserved_t{};
+//     }
+//     const auto x1c = cell.centroid_coordinate(0);
 
-    conserved_t res;
-    // gravity only changes the momentum and energy
-    if constexpr (dim > 1) {
-        const auto x2c = cell.x2mean;
-        if constexpr (dim > 2) {
-            const auto x3c = cell.x3mean;
-            gravity_source(x1c, x2c, x3c, t, res);
-            res[dimensions + 1] =
-                res[1] * prims[1] + res[2] * prims[2] + res[3] * prims[3];
-        }
-        else {
-            gravity_source(x1c, x2c, t, res);
-            res[dimensions + 1] = res[1] * prims[1] + res[2] * prims[2];
-        }
-    }
-    else {
-        gravity_source(x1c, t, res);
-        res[dimensions + 1] = res[1] * prims[1];
-    }
+//     conserved_t res;
+//     // gravity only changes the momentum and energy
+//     if constexpr (dim > 1) {
+//         const auto x2c = cell.centroid_coordinate(1);
+//         if constexpr (dim > 2) {
+//             const auto x3c = cell.centroid_coordinate(2);
+//             gravity_source(x1c, x2c, x3c, t, res);
+//             res[dimensions + 1] =
+//                 res[1] * prims[1] + res[2] * prims[2] + res[3] * prims[3];
+//         }
+//         else {
+//             gravity_source(x1c, x2c, t, res);
+//             res[dimensions + 1] = res[1] * prims[1] + res[2] * prims[2];
+//         }
+//     }
+//     else {
+//         gravity_source(x1c, t, res);
+//         res[dimensions + 1] = res[1] * prims[1];
+//     }
 
-    return res;
-}
+//     return res;
+// }
 
 //===================================================================================================================
 //                                            UDOT CALCULATIONS
 //===================================================================================================================
 template <int dim>
 template <int nhat>
-void RMHD<dim>::update_magnetic_component(
-    const ExecutionPolicy<>& policy,
-    const auto& prim_region
-)
+void RMHD<dim>::update_magnetic_component(const ExecutionPolicy<>& policy)
 {
     auto& b_stag = (nhat == 1) ? bstag1 : (nhat == 2) ? bstag2 : bstag3;
     constexpr auto inner_region = [&]() {
@@ -1662,7 +1514,7 @@ void RMHD<dim>::update_magnetic_component(
     // all staggered fields are center at the {i,j,k}-1/2 location
     auto magnetic_update = [this] DEV(auto& b_view, const auto& prim) -> real {
         const auto [ii, jj, kk] = b_view.position();
-        const auto cell         = this->cell_geometry(ii, jj, kk);
+        const auto cell = this->mesh().get_cell_from_indices(ii, jj, kk);
         ct::EMField<ct_scheme_t> efield;
 
         // Configure edges based on component
@@ -1672,12 +1524,17 @@ void RMHD<dim>::update_magnetic_component(
             hri,
             prim
         );
-        return b_view.value() - dt * step * curl_component<nhat>(cell, efield);
+        return b_view.value() -
+               this->time_step() * curl_component<nhat>(cell, efield);
     };
 
     // Transform using stencil view
     b_stag.contract(inner_region)
-        .stencil_transform(magnetic_update, policy, prim_region);
+        .stencil_transform(
+            magnetic_update,
+            policy,
+            this->prims_.contract(this->halo_radius())
+        );
 }
 
 template <int dim>
@@ -1690,18 +1547,9 @@ void RMHD<dim>::advance_magnetic_fields()
     // or, if going by cyclic permutation, EJ = E2, EK = E3
     // which require the IK planar fluxes for EJ aqnd IJ
     // planar fluxes for EK
-    update_magnetic_component<1>(
-        xvertexPolicy,
-        prims.contract({radius, radius, radius - 1})
-    );
-    update_magnetic_component<2>(
-        yvertexPolicy,
-        prims.contract({radius, radius - 1, radius})
-    );
-    update_magnetic_component<3>(
-        zvertexPolicy,
-        prims.contract({radius - 1, radius, radius})
-    );
+    update_magnetic_component<1>(this->xvertex_policy());
+    update_magnetic_component<2>(this->yvertex_policy());
+    update_magnetic_component<3>(this->zvertex_policy());
 }
 
 template <int dim>
@@ -1720,12 +1568,14 @@ void RMHD<dim>::advance_conserved()
         for (int q = 1; q > -1; q--) {
             // q = 0 is L, q = 1 is R
             const auto sign = (q == 1) ? 1 : -1;
-            res -= fr.at(q, 0, 0) * cell.idV1() * cell.area(0 + q) * sign;
+            res -= fr.at(q, 0, 0) * cell.inverse_volume(0) * cell.area(0 + q) *
+                   sign;
             if constexpr (dim > 1) {
-                res -= gr.at(0, q, 0) * cell.idV2() * cell.area(2 + q) * sign;
+                res -= gr.at(0, q, 0) * cell.inverse_volume(1) *
+                       cell.area(2 + q) * sign;
                 if constexpr (dim > 2) {
-                    res -=
-                        hr.at(0, 0, q) * cell.idV3() * cell.area(4 + q) * sign;
+                    res -= hr.at(0, 0, q) * cell.inverse_volume(2) *
+                           cell.area(4 + q) * sign;
                 }
             }
         }
@@ -1734,7 +1584,7 @@ void RMHD<dim>::advance_conserved()
         res += gravity;
         res += geometrical_sources;
 
-        return res * step * dt;
+        return res * this->time_step();
     };
 
     auto update_conserved = [this, dcons] DEV(
@@ -1749,16 +1599,16 @@ void RMHD<dim>::advance_conserved()
                             ) {
         const auto [ii, jj, kk] = con.position();
         // mesh factors
-        const auto cell = this->cell_geometry(ii, jj, kk);
+        const auto cell = this->mesh().get_cell_from_indices(ii, jj, kk);
 
         // compute the change in conserved variables
         const auto dc = dcons(
             fr,
             gr,
             hr,
-            hydro_sources(cell),
-            gravity_sources(prim.value(), cell),
-            cell.geometrical_sources(prim.value()),
+            this->hydro_sources(cell),
+            this->gravity_sources(prim.value(), cell),
+            cell.geometrical_sources(prim.value(), gamma),
             cell
         );
 
@@ -1774,88 +1624,63 @@ void RMHD<dim>::advance_conserved()
     };
 
     // Transform using stencil operations
-    cons.contract(radius).stencil_transform(
-        update_conserved,
-        activePolicy,
-        prims.contract(radius),
-        fri.contract({1, 1, 0}),
-        gri.contract({1, 0, 1}),
-        hri.contract({0, 1, 1}),
-        bstag1.contract({1, 1, 0}),
-        bstag2.contract({1, 0, 1}),
-        bstag3.contract({0, 1, 1})
-    );
+    this->cons_.contract(this->halo_radius())
+        .stencil_transform(
+            update_conserved,
+            this->interior_policy(),
+            this->prims_.contract(this->halo_radius()),
+            fri.contract({1, 1, 0}),
+            gri.contract({1, 0, 1}),
+            hri.contract({0, 1, 1}),
+            bstag1.contract({1, 1, 0}),
+            bstag2.contract({1, 0, 1}),
+            bstag3.contract({0, 1, 1})
+        );
 }
 
 template <int dim>
-void RMHD<dim>::advance(const auto& bman, const auto& bfield_man)
+void RMHD<dim>::advance_impl()
 {
+    static auto bfield_man = boundary_manager<real, dim>{};
     riemann_fluxes();
-    sync_flux_boundaries(bman);
+    sync_flux_boundaries();
     advance_magnetic_fields();
     sync_magnetic_boundaries(bfield_man);
     advance_conserved();
-    bman.sync_boundaries(fullPolicy, cons, cons.contract(radius), bcs, true);
+    this->conserved_boundary_manager().sync_boundaries(
+        this->full_policy(),
+        this->cons_,
+        this->cons_.contract(this->halo_radius()),
+        this->bcs(),
+        true
+    );
 }
 
-// //===================================================================================================================
-// //                                            SIMULATE
-// //===================================================================================================================
+//===================================================================================================================
+//                                            SIMULATE
+//===================================================================================================================
 template <int dim>
-void RMHD<dim>::simulate(
-    std::function<real(real)> const& a,
-    std::function<real(real)> const& adot
-)
+void RMHD<dim>::init_simulation()
 {
-    // Stuff for moving mesh
-    this->hubble_param = adot(t) / a(t);
-    this->mesh_motion  = (hubble_param != 0);
-    this->homolog      = mesh_motion && geometry != simbi::Geometry::CARTESIAN;
-
-    bcs.resize(dim * 2);
-    for (int i = 0; i < 2 * dim; i++) {
-        this->bcs[i] = boundary_cond_map.at(boundary_conditions[i]);
-    }
-    load_functions();
-
-    // allocate space for Riemann fluxes
-    fri.resize(nze * nye * nxv).reshape({nze, nye, nxv});
-    gri.resize(nze * nyv * nxe).reshape({nze, nyv, nxe});
-    hri.resize(nzv * nye * nxe).reshape({nzv, nye, nxe});
-
-    bstag1.reshape({nze, nye, nxv});
-    bstag2.reshape({nze, nyv, nxe});
-    bstag3.reshape({nzv, nye, nxe});
-
-    // allocate space for volume-average quantities
-    cons.resize(total_zones).reshape({nz, ny, nx});
-    prims.resize(total_zones).reshape({nz, ny, nx});
-
-    // Copy the state array into real & profile variables
-    for (size_t i = 0; i < total_zones; i++) {
-        for (int q = 0; q < conserved_t::nmem; q++) {
-            cons[i][q] = state[q][i];
-        }
-    }
-    // set up the problem and release old state from memory
-    deallocate_state();
-    offload();
-    compute_bytes_and_strides<primitive_t>(dim);
+    // load_functions();
     init_riemann_solver();
+    const auto& xP = this->full_xvertex_policy();
+    const auto& yP = this->full_yvertex_policy();
+    const auto& zP = this->full_zvertex_policy();
+    // allocate space for Riemann fluxes
+    fri.resize(xP.get_real_extent()).reshape(this->get_shape(xP));
+    gri.resize(yP.get_real_extent()).reshape(this->get_shape(yP));
+    hri.resize(zP.get_real_extent()).reshape(this->get_shape(zP));
 
-    boundary_manager<conserved_t, dim> bman;
-    boundary_manager<real, dim> bfield_man;
-    bman.sync_boundaries(fullPolicy, cons, cons.contract(radius), bcs, true);
-    cons2prim();
-    adapt_dt<TIMESTEP_TYPE::MINIMUM>();
+    bstag1.reshape(this->get_shape(xP));
+    bstag2.reshape(this->get_shape(yP));
+    bstag3.reshape(this->get_shape(zP));
 
-    // Simulate :)
-    simbi::detail::logger::with_logger(*this, tend, [&] {
-        advance(bman, bfield_man);
-        cons2prim();
-        adapt_dt();
-
-        t += step * dt;
-        // TODO: update mesh motion
-    });
+    this->conserved_boundary_manager().sync_boundaries(
+        this->full_policy(),
+        this->cons_,
+        this->cons_.contract(this->halo_radius()),
+        this->bcs()
+    );
+    sync_all_to_device();
 };

@@ -1,7 +1,7 @@
 #ifndef TABULATE_HPP
 #define TABULATE_HPP
 
-#include "core/types/enums.hpp"   // for Color
+#include "core/types/utility/enums.hpp"   // for Color
 #include <algorithm>
 #include <chrono>
 #include <functional>

@@ -2,9 +2,11 @@
 #define EXEC_POLICY_HPP
 
 #include "build_options.hpp"   // for dim3, luint, global::col_maj, simbiStream_t
-#include "util/tools/device_api.hpp"   // for api::setDevice
-#include <exception>                   // for exception
+#include "core/types/containers/array.hpp"   // for array
+#include "util/tools/device_api.hpp"         // for api::setDevice
+#include <exception>                         // for exception
 #include <iostream>   // for operator<<, char_traits, basic_ostream
+#include <ranges>     // for ranges::views::transform
 #include <vector>     // for vector
 
 struct ExecutionException : public std::exception {
@@ -14,7 +16,7 @@ struct ExecutionException : public std::exception {
 namespace simbi {
 
     struct ExecutionPolicyConfig {
-        size_t sharedMemBytes              = 0;
+        size_t shared_mem_bytes            = 0;
         std::vector<simbiStream_t> streams = {};
         std::vector<int> devices           = {0};   // Default to device 0
         size_t batch_size                  = 1024;
@@ -24,14 +26,13 @@ namespace simbi {
     template <typename T = luint, typename U = luint>
     struct ExecutionPolicy {
         T nzones;
-        dim3 gridSize;
-        dim3 blockSize;
-        dim3 stride;
-        size_t sharedMemBytes;
+        dim3 grid_size;
+        dim3 block_size;
+        size_t shared_mem_bytes;
         std::vector<simbiStream_t> streams;
         std::vector<int> devices;
         T nzones_per_device;
-        std::vector<dim3> device_gridSizes;
+        std::vector<dim3> device_grid_sizes;
         size_t batch_size;
         size_t min_elements_per_thread;
 
@@ -40,20 +41,19 @@ namespace simbi {
 
         // Vector constructor with config
         ExecutionPolicy(
-            const std::vector<T>& gridSizes,
-            const std::vector<U>& blockSizes,
-            const std::vector<U>& strides       = {},
+            const simbi::array_t<T, 3>& grid_sizes,
+            const simbi::array_t<U, 3>& block_sizes,
             const ExecutionPolicyConfig& config = {}
         )
-            : sharedMemBytes(config.sharedMemBytes),
+            : shared_mem_bytes(config.shared_mem_bytes),
               streams(config.streams),
               devices(config.devices)
         {
-            if (gridSizes.size() != blockSizes.size()) {
+            if (grid_sizes.size() != block_sizes.size()) {
                 throw ExecutionException();
             }
             init_devices();
-            build_grid(gridSizes, blockSizes, strides);
+            build_grid(grid_sizes, block_sizes);
         }
 
         T compute_blocks(const T nzones, const luint nThreads) const
@@ -64,51 +64,51 @@ namespace simbi {
         constexpr auto get_xextent() const
         {
             if constexpr (global::col_major) {
-                return blockSize.y;
+                return block_size.y;
             }
-            return blockSize.x;
+            return block_size.x;
         }
 
         constexpr auto get_yextent() const
         {
             if constexpr (global::col_major) {
-                return blockSize.x;
+                return block_size.x;
             }
-            return blockSize.y;
+            return block_size.y;
         }
 
         constexpr auto get_full_extent() const
         {
             if constexpr (global::on_gpu) {
-                return blockSize.z * gridSize.z * blockSize.x * blockSize.y *
-                       gridSize.x * gridSize.y;
+                return block_size.z * grid_size.z * block_size.x *
+                       block_size.y * grid_size.x * grid_size.y;
             }
             else {
                 return nzones;
             }
         }
 
+        constexpr auto get_real_extent() const { return nzones; }
+
         // build grid to handle multiple devices
         void build_grid(
-            const std::vector<T> gridList,
-            const std::vector<U> blockList,
-            const std::vector<U> strideList
+            const simbi::array_t<T, 3> grid_list,
+            const simbi::array_t<U, 3> block_list
         )
         {
             // store original grid dimensions
-            this->gridList   = gridList;
-            this->strideList = strideList;
-            this->blockList  = blockList;
+            this->grid_list  = grid_list;
+            this->block_list = block_list;
 
             // Calculate total zoness
-            if (gridList.size() == 1) {
-                nzones = gridList[0];
+            if (grid_list.size() == 1) {
+                nzones = grid_list[0];
             }
-            else if (gridList.size() == 2) {
-                nzones = gridList[0] * gridList[1];
+            else if (grid_list.size() == 2) {
+                nzones = grid_list[0] * grid_list[1];
             }
-            else if (gridList.size() == 3) {
-                nzones = gridList[0] * gridList[1] * gridList[2];
+            else if (grid_list.size() == 3) {
+                nzones = grid_list[0] * grid_list[1] * grid_list[2];
             }
 
             const int numDevices = devices.size();
@@ -117,23 +117,19 @@ namespace simbi {
             nzones_per_device = (nzones + numDevices - 1) / numDevices;
 
             // Set block size based on input
-            if (blockList.size() == 1) {
-                blockSize = dim3(blockList[0]);
-                stride    = dim3(strideList[0]);
+            if (block_list.size() == 1) {
+                block_size = dim3(block_list[0]);
             }
-            else if (blockList.size() == 2) {
+            else if (block_list.size() == 2) {
                 if constexpr (global::col_major) {
-                    blockSize = dim3(blockList[1], blockList[0]);
-                    stride    = dim3(strideList[1], strideList[0]);
+                    block_size = dim3(block_list[1], block_list[0]);
                 }
                 else {
-                    blockSize = dim3(blockList[0], blockList[1]);
-                    stride    = dim3(strideList[0], strideList[1]);
+                    block_size = dim3(block_list[0], block_list[1]);
                 }
             }
-            else if (blockList.size() == 3) {
-                blockSize = dim3(blockList[0], blockList[1], blockList[2]);
-                stride    = dim3(strideList[0], strideList[1], strideList[2]);
+            else if (block_list.size() == 3) {
+                block_size = dim3(block_list[0], block_list[1], block_list[2]);
             }
 
             // Calculate grid size per device
@@ -142,43 +138,43 @@ namespace simbi {
                                   ? (nzones - dev * nzones_per_device)
                                   : nzones_per_device;
 
-                if (gridList.size() == 1) {
-                    device_gridSizes[dev] =
-                        dim3((dev_zones + blockSize.x - 1) / blockSize.x);
+                if (grid_list.size() == 1) {
+                    device_grid_sizes[dev] =
+                        dim3((dev_zones + block_size.x - 1) / block_size.x);
                 }
-                else if (gridList.size() == 2) {
+                else if (grid_list.size() == 2) {
                     // Handle 2D case considering column/row major ordering
                     luint nxBlocks =
-                        (gridList[0] + blockSize.x - 1) / blockSize.x;
+                        (grid_list[0] + block_size.x - 1) / block_size.x;
                     luint nyBlocks =
-                        (gridList[1] + blockSize.y - 1) / blockSize.y;
+                        (grid_list[1] + block_size.y - 1) / block_size.y;
                     if constexpr (global::col_major) {
-                        device_gridSizes[dev] = dim3(nyBlocks, nxBlocks);
+                        device_grid_sizes[dev] = dim3(nyBlocks, nxBlocks);
                     }
                     else {
-                        device_gridSizes[dev] = dim3(nxBlocks, nyBlocks);
+                        device_grid_sizes[dev] = dim3(nxBlocks, nyBlocks);
                     }
                 }
-                else if (gridList.size() == 3) {
+                else if (grid_list.size() == 3) {
                     // Handle 3D case
                     luint nxBlocks =
-                        (gridList[0] + blockSize.x - 1) / blockSize.x;
+                        (grid_list[0] + block_size.x - 1) / block_size.x;
                     luint nyBlocks =
-                        (gridList[1] + blockSize.y - 1) / blockSize.y;
+                        (grid_list[1] + block_size.y - 1) / block_size.y;
                     luint nzBlocks =
-                        (gridList[2] + blockSize.z - 1) / blockSize.z;
-                    device_gridSizes[dev] = dim3(nxBlocks, nyBlocks, nzBlocks);
+                        (grid_list[2] + block_size.z - 1) / block_size.z;
+                    device_grid_sizes[dev] = dim3(nxBlocks, nyBlocks, nzBlocks);
                 }
             }
 
             // Set default grid size to first device's grid size
-            this->gridSize = device_gridSizes[0];
+            this->grid_size = device_grid_sizes[0];
         }
 
-        dim3 get_device_gridSize(int device) const
+        dim3 get_device_grid_size(int device) const
         {
-            if (device < device_gridSizes.size()) {
-                return device_gridSizes[device];
+            if (device < device_grid_sizes.size()) {
+                return device_grid_sizes[device];
             }
             return dim3(0);
         }
@@ -187,7 +183,7 @@ namespace simbi {
         {
             if (device < devices.size()) {
                 gpu::api::setDevice(device);
-                // this->gridSize = device_gridSizes[device];
+                // this->grid_size = device_grid_sizes[device];
                 return true;
             }
             return false;
@@ -217,7 +213,7 @@ namespace simbi {
         {
             if constexpr (global::on_gpu) {
                 const size_t threads_per_block =
-                    blockSize.x * blockSize.y * blockSize.z;
+                    block_size.x * block_size.y * block_size.z;
                 batch_size = threads_per_block * min_elements_per_thread;
             }
         }
@@ -229,50 +225,49 @@ namespace simbi {
 
         ExecutionPolicy contract(size_type radius) const
         {
-            std::vector<T> newGridSizes;
-            for (auto&& g : gridList) {
-                newGridSizes.push_back(g - 2 * radius * (g > 1));
+            simbi::array_t<T, 3> new_grid_sizes;
+            for (size_t ii = 0; ii < grid_list.size(); ii++) {
+                new_grid_sizes[ii] =
+                    grid_list[ii] - 2 * radius * (grid_list[ii] > 1);
             }
 
             // keep same config
             ExecutionPolicyConfig config{
-              sharedMemBytes,
+              shared_mem_bytes,
               streams,
               devices,
               batch_size,
               min_elements_per_thread
             };
 
-            return ExecutionPolicy(newGridSizes, blockList, strideList, config);
+            return ExecutionPolicy(new_grid_sizes, block_list, config);
         }
 
         // similar contraction as before, but now we denote how much we want
         // to conrtact each dimension
         ExecutionPolicy contract(const std::vector<T>& radii) const
         {
-            std::vector<T> newGridSizes;
-            for (size_t ii = 0; ii < gridList.size(); ii++) {
-                newGridSizes.push_back(
-                    gridList[ii] - 2 * radii[ii] * (gridList[ii] > 1)
-                );
+            simbi::array_t<T, 3> new_grid_sizes;
+            for (size_t ii = 0; ii < grid_list.size(); ii++) {
+                new_grid_sizes[ii] =
+                    grid_list[ii] - 2 * radii[ii] * (grid_list[ii] > 1);
             }
 
             // keep same config
             ExecutionPolicyConfig config{
-              sharedMemBytes,
+              shared_mem_bytes,
               streams,
               devices,
               batch_size,
               min_elements_per_thread
             };
 
-            return ExecutionPolicy(newGridSizes, blockList, strideList, config);
+            return ExecutionPolicy(new_grid_sizes, block_list, config);
         }
 
       private:
-        std::vector<T> gridList;
-        std::vector<U> strideList;
-        std::vector<U> blockList;
+        simbi::array_t<T, 3> grid_list;
+        simbi::array_t<U, 3> block_list;
 
         void init_devices()
         {
@@ -280,7 +275,7 @@ namespace simbi {
                 devices = {0};
             }
             // Initialize per-device resources
-            device_gridSizes.resize(devices.size());
+            device_grid_sizes.resize(devices.size());
             nzones_per_device = (nzones + devices.size() - 1) / devices.size();
 
             // Set initial device

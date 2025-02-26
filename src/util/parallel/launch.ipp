@@ -22,16 +22,16 @@ namespace simbi {
         // If streams are specified, use them
         if (!policy.streams.empty()) {
             Kernel<<<
-                policy.get_device_gridSize(device),
-                policy.blockSize,
-                policy.sharedMemBytes,
+                policy.get_device_grid_size(device),
+                policy.block_size,
+                policy.shared_mem_bytes,
                 policy.streams[device % policy.streams.size()]>>>(f, args...);
         }
         else {
             Kernel<<<
-                policy.get_device_gridSize(device),
-                policy.blockSize,
-                policy.sharedMemBytes>>>(f, args...);
+                policy.get_device_grid_size(device),
+                policy.block_size,
+                policy.shared_mem_bytes>>>(f, args...);
         }
 #else
         f(args...);

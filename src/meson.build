@@ -11,7 +11,7 @@ sources = files(
 
 headers = files(
     'util/tools/helpers.hpp',
-    'core/types/enums.hpp',
+    'core/types/utility/enums.hpp',
     'physics/hydro/types/generic_structs.hpp',
     'core/traits.hpp',
     'physics/hydro/states/srhd.hpp',
@@ -22,11 +22,11 @@ headers = files(
     'util/parallel/kernel.hpp',
     'util/parallel/launch.hpp',
     'io/console/logger.hpp',
-    'core/types/managed.hpp',
-    'core/types/ndarray.hpp',
+    'core/types/utility/managed.hpp',
+    'core/types/containers/ndarray.hpp',
     'util/parallel/parallel_for.hpp',
     'io/console/printb.hpp',
-    'core/types/range.hpp'
+    'core/types/utility/range.hpp'
 )
 
 templates = files(
@@ -34,6 +34,5 @@ templates = files(
     'physics/hydro/states/srhd.ipp',
     'physics/hydro/states/newt.ipp',
     'physics/hydro/states/rmhd.ipp',
-    'core/types/ndarray.ipp',
     'io/console/printb.ipp'
 )

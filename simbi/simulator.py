@@ -46,9 +46,9 @@ class Hydro:
     scale_factor: CallableOrNone = None
     scale_factor_derivative: CallableOrNone = None
     discontinuity: bool = False
-    x1: Any = []
-    x2: Any = []
-    x3: Any = []
+    x1bounds: Any = []
+    x2bounds: Any = []
+    x3bounds: Any = []
     boundary_conditions: list[str]
     coord_system: str
     regime: str
@@ -255,39 +255,6 @@ class Hydro:
 
         logger.info("=" * 80)
 
-    def _generate_the_grid(
-        self, x1_cell_spacing: str, x2_cell_spacing: str, x3_cell_spacing: str
-    ) -> None:
-        dim = self.dimensionality
-        vfunc = {
-            "log": np.geomspace,
-            "linear": np.linspace,
-        }
-
-        csp = [x1_cell_spacing, x2_cell_spacing, x3_cell_spacing]
-        verts = [
-            self.resolution[0] + 1,
-            2 if dim < 2 else self.resolution[1] + 1,
-            2 if dim < 3 else self.resolution[2] + 1,
-        ]
-
-        cgeom = [tuple(g[:2]) if isinstance(g, (list, tuple))
-                 else g for g in self.geometry]
-        if not helpers.tuple_of_tuples(cgeom):
-            cgeom = [cgeom] * dim
-
-        for didx, dir in zip(range(dim), [self.x1, self.x2, self.x3]):
-            if not any(dir):
-                dir[:] = vfunc[csp[didx]](
-                    *cgeom[didx][:2], verts[didx])  # type: ignore
-            elif len(dir) != verts[didx]:
-                raise ValueError(
-                    f"x{didx + 1} vertices do not match the x{didx + 1}-resolution + 1"
-                )
-
-        self.x1, self.x2, self.x3 = map(
-            np.asanyarray, [self.x1, self.x2, self.x3])
-
     def _check_boundary_conditions(
         self, boundary_conditions: Union[Sequence[str], str, NDArray[numpy_string]]
     ) -> None:
@@ -358,8 +325,8 @@ class Hydro:
         cfl: float = 0.4,
         passive_scalars: Optional[Union[NDArray[Any], int]] = None,
         solver: str = "hllc",
-        chkpt: Optional[str] = None,
-        chkpt_interval: float = 0.1,
+        checkpoint: Optional[str] = None,
+        checkpoint_interval: float = 0.1,
         data_directory: str = "data/",
         boundary_conditions: Union[Sequence[str], str] = "outflow",
         engine_duration: float = 10.0,
@@ -389,8 +356,8 @@ class Hydro:
             cfl (float): The CFL number for minimum adaptive timestep.
             passive_scalars (Optional[Union[NDArray[Any], int]]): The array of passive scalars.
             solver (str): The solver to use for the simulation (e.g., "hllc", "hlld").
-            chkpt (Optional[str]): The path to the checkpoint file to read into the simulation.
-            chkpt_interval (float): The interval at which to save the checkpoints.
+            checkpoint (Optional[str]): The path to the checkpoint file to read into the simulation.
+            checkpoint_interval (float): The interval at which to save the checkpoints.
             data_directory (str): The directory at which to save the checkpoint files.
             boundary_conditions (Union[Sequence[str], str]): The outer conditions at the domain boundaries.
             engine_duration (float): The duration the source terms will last in the simulation.
@@ -426,13 +393,9 @@ class Hydro:
                 f"cell spacing for x3 should be one of: {available_cellspacings}")
 
         self.start_time: float = 0.0
-        self.chkpt_idx: int = 0
+        self.checkpoint_idx: int = 0
         scale_factor = scale_factor or (lambda t: 1.0)
         scale_factor_derivative = scale_factor_derivative or (lambda t: 0.0)
-        self._generate_the_grid(
-            x1_cell_spacing,
-            x2_cell_spacing,
-            x3_cell_spacing)
         mesh_motion = scale_factor_derivative(
             tstart) / scale_factor(tstart) != 0
         volume_factor: Union[float, NDArray[Any]] = 1.0
@@ -451,12 +414,12 @@ class Hydro:
 
         self._check_boundary_conditions(boundary_conditions)
         self._check_curvilinear_boundary_conditions()
-        if not chkpt:
+        if not checkpoint:
             simbi_ic.initializeModel(
                 self, spatial_order, volume_factor, passive_scalars
             )
         else:
-            simbi_ic.load_checkpoint(self, chkpt)
+            simbi_ic.load_checkpoint(self, checkpoint)
         if self.dimensionality == 1 and self.coord_system in [
             "planar_cylindrical",
             "axis_cylindrical",
@@ -559,6 +522,17 @@ class Hydro:
         self.ny = nyp + extra_edges * (self.dimensionality > 1)
         self.nz = nzp + extra_edges * (self.dimensionality > 2)
 
+        x1bounds = self.geometry[0]
+        if self.dimensionality > 1:
+            x2bounds = self.geometry[1]
+        else:
+            x2bounds = [0.0, 1.0]
+        
+        if self.dimensionality > 2:
+            x3bounds = self.geometry[2]
+        else:
+            x3bounds = [0.0, 1.0]
+            
         init_conditions = {
             "gamma": self.gamma,
             "tstart": self.start_time,
@@ -567,8 +541,8 @@ class Hydro:
             "dlogt": dlogt,
             "plm_theta": plm_theta,
             "engine_duration": engine_duration,
-            "chkpt_interval": chkpt_interval,
-            "chkpt_idx": self.chkpt_idx,
+            "checkpoint_interval": checkpoint_interval,
+            "checkpoint_idx": self.checkpoint_idx,
             "data_directory": cython_data_directory,
             "boundary_conditions": cython_boundary_conditions,
             "spatial_order": spatial_order.encode("utf-8"),
@@ -580,9 +554,9 @@ class Hydro:
             "constant_sources": constant_sources,
             "coord_system": cython_coordinates,
             "quirk_smoothing": quirk_smoothing,
-            "x1": self.x1,
-            "x2": self.x2,
-            "x3": self.x3,
+            "x1bounds": x1bounds[:2],
+            "x2bounds": x2bounds[:2],
+            "x3bounds": x3bounds[:2],
             "nx": self.nx,
             "ny": self.ny,
             "nz": self.nz,

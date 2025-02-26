@@ -41,7 +41,12 @@ class SolverBase
 
         // Simulation loop setup
         boundary_manager<typename Derived::conserved_t, Derived::dim> bman;
-        bman.sync_boundaries(d.fullPolicy, d.cons, d.cons.contract(2), d.bcs);
+        bman.sync_boundaries(
+            d.this->full_policy(),
+            d.cons,
+            d.cons.contract(2),
+            d.bcs
+        );
 
         // Main simulation loop
         d.cons2prim();
@@ -50,7 +55,7 @@ class SolverBase
         simbi::detail::logger::with_logger(d, d.tend, [&] {
             d.advance();
             bman.sync_boundaries(
-                d.fullPolicy,
+                d.this->full_policy(),
                 d.cons,
                 d.cons.contract(2),
                 d.bcs
@@ -59,7 +64,7 @@ class SolverBase
             d.adapt_dt();
 
             d.t += d.step * d.dt;
-            d.update_mesh_motion(a, adot);
+            d.update_mesh_motion(scale_factor, scale_factor_derivative);
         });
     }
 
@@ -88,7 +93,7 @@ class SolverBase
                        const auto local_dt     = calc_local_dt(speeds, cell);
                        return std::min(acc, local_dt);
                    },
-                   d.fullPolicy
+                   d.this->full_policy()
                ) *
                d.cfl;
     }
@@ -99,7 +104,12 @@ class SolverBase
     {
         auto& d = derived();
         boundary_manager<typename Derived::conserved_t, Derived::dim> bman;
-        bman.sync_boundaries(d.fullPolicy, d.cons, d.cons.contract(2), d.bcs);
+        bman.sync_boundaries(
+            d.this->full_policy(),
+            d.cons,
+            d.cons.contract(2),
+            d.bcs
+        );
     }
 };
 #endif

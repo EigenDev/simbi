@@ -80,7 +80,7 @@ def _add_overridable_args(parser: ArgumentParser) -> None:
         choices=["hllc", "hlle", "hlld"],
     )
     parser.add_argument(
-        "--chkpt-interval",
+        "--checkpoint-interval",
         help="checkpoint interval spacing in simulation time units",
         default=None,
         type=float,
@@ -206,7 +206,7 @@ def _add_onthefly_args(parser: ArgumentParser) -> None:
         dest="compute_mode",
     )
     parser.add_argument(
-        "--chkpt",
+        "--checkpoint",
         help="checkpoint file to restart computation from",
         default=None,
         type=str,

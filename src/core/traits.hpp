@@ -18,7 +18,7 @@
 #ifndef TRAITS_HPP
 #define TRAITS_HPP
 
-#include "core/types/enums.hpp"   // for Regime
+#include "core/types/utility/enums.hpp"   // for Regime
 #include <type_traits>
 
 // template <int dim>
