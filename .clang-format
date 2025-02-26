@@ -33,7 +33,7 @@ AlignOperands: true
 # IndentCaseBlocks: true
 IndentCaseLabels: true
 SortIncludes: true
-SeparateDefinitionBlocks: Always
+SeparateDefinitionBlocks: Leave
 ReflowComments: true
 PointerAlignment: Left
 PackConstructorInitializers: NextLine
