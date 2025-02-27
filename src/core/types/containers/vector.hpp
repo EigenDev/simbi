@@ -397,6 +397,19 @@ namespace simbi {
         }
     };
 
+    // allow vector types to be operated on by scalars from the right
+    template <typename T, size_type Dims, VectorType Type, typename U>
+    DUAL constexpr auto operator*(U scalar, const VectorOps<T, Dims, Type>& vec)
+    {
+        return vec * scalar;
+    }
+
+    template <typename T, size_type Dims, VectorType Type, typename U>
+    DUAL constexpr auto operator/(U scalar, const VectorOps<T, Dims, Type>& vec)
+    {
+        return vec / scalar;
+    }
+
     // Main vector class, memory owned
     template <typename T, size_type Dims, VectorType Type>
     class Vector : public VectorOps<T, Dims, Type>
