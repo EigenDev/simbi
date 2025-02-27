@@ -568,6 +568,8 @@ class Hydro:
             "hydro_source_lib": hdir.encode("utf-8"),
             "gravity_source_lib": gdir.encode("utf-8"),
             "boundary_source_lib": bdir.encode("utf-8"),
+            "mesh_motion": mesh_motion,
+            "homologous": mesh_motion and self.coord_system == "spherical",
         }   
 
         lambdas: dict[str, Optional[float]] = {
