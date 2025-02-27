@@ -52,16 +52,21 @@ class MartiMuller(BaseConfig):
 #     @simbi_classproperty
 #     def boundary_sources(self) -> str:
 #         return f"""
+#     #include <cmath>
 # extern "C" {{
 #     void bx1_outer_source(double x, double t, double arr[]){{
 #         double rho_ambient = 0.1;
 #         double v_ambient   = 0.0;
+#         double lorentz     = 1.0 / std::sqrt(1.0 - v_ambient * v_ambient);
 #         double pressure    = 1.e-10;
 #         double enthalpy    = 1.0 + {self.ad_gamma} * pressure / rho_ambient / ({self.ad_gamma} - 1.0);
-#         arr[0] = rho_ambient;                     // density
-#         arr[1] = 0.0;                             // x1-momentum
-#         arr[2] = rho_ambient * enthalpy - pressure - rho_ambient; // energy
-#         arr[3] = 0.0;                             // scalar concentration
+#         double d = rho_ambient * lorentz;
+#         double m = d * lorentz * v_ambient * enthalpy;
+#         double e = d * lorentz * enthalpy - pressure - d;
+#         arr[0] = d;   // density
+#         arr[1] = m;   // x1-momentum
+#         arr[2] = e;   // energy
+#         arr[3] = 0.0; // scalar concentration
 #     }}
 # }}
 #         """
