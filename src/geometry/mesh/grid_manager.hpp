@@ -65,6 +65,9 @@ namespace simbi {
         size_type active_zones_;      // Total active cells
 
       public:
+        // Constructors
+        constexpr GridManager() = default;
+
         DUAL constexpr GridManager(const InitialConditions& init)
             : nx_(init.nx),
               ny_(init.ny),
