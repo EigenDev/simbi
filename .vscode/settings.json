@@ -65,7 +65,13 @@
         "__config": "cpp",
         "span": "cpp",
         "ranges": "cpp",
-        "type_traits": "cpp"
+        "type_traits": "cpp",
+        "__debug": "cpp",
+        "__string": "cpp",
+        "__tuple": "cpp",
+        "compare": "cpp",
+        "concepts": "cpp",
+        "exception": "cpp"
     },
     "C_Cpp.default.configurationProvider": "mesonbuild.mesonbuild",
     "C_Cpp.default.compileCommands": "/Users/marcusdupont/research/simbi/builddir/compile_commands.json",
