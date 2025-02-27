@@ -64,10 +64,8 @@ cdef class SimState:
         sim_cond.hydro_source_lib    = <string>sim_info.get('hydro_source_lib', "".encode("utf-8"))
         sim_cond.gravity_source_lib  = <string>sim_info.get('gravity_source_lib', "".encode("utf-8"))
         sim_cond.boundary_source_lib = <string>sim_info.get('boundary_source_lib', "".encode("utf-8"))
-        # if dim > 1:
-        #     sim_cond.x2 = <vector[real]>sim_info.get('x2', [0.0, 1.0])
-        # if dim > 2:
-        #     sim_cond.x3 = <vector[real]>sim_info.get('x3', [0.0, 1.0])
+        sim_cond.mesh_motion         = <bool>sim_info.get('mesh_motion', False)
+        sim_cond.homologous         = <bool>sim_info.get('homologous', False)
 
         cdef PyObjWrapper a_cpp = PyObjWrapper(a)
         cdef PyObjWrapper adot_cpp = PyObjWrapper(adot)

@@ -16,7 +16,7 @@ cdef extern from "core/types/utility/init_conditions.hpp":
     cdef cppclass InitialConditions:
         real time, checkpoint_interval, dlogt, plm_theta, engine_duration, gamma, cfl, tend
         int nx, ny, nz, checkpoint_idx
-        bool quirk_smoothing, constant_sources
+        bool quirk_smoothing, mesh_motion, homologous
         vector[vector[real]] sources, bfield
         string data_directory, coord_system, solver
         string x1_cell_spacing, x2_cell_spacing, x3_cell_spacing
