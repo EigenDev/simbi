@@ -84,11 +84,7 @@ namespace simbi {
         static constexpr int dimensions          = dim;
         static constexpr int nvars               = dim + 3;
         static constexpr std::string_view regime = "srhd";
-        // set the primitive and conservative types at compile time
-        // using primitive_t = anyPrimitive<dim, Regime::SRHD>;
-        // using conserved_t = anyConserved<dim, Regime::SRHD>;
-        // using eigenvals_t = Eigenvals<dim, Regime::SRHD>;
-        // using function_t  = typename helpers::real_func<dim>::type;
+
         template <typename T>
         using RiemannFuncPointer = conserved_t (T::*)(
             const primitive_t&,
@@ -97,26 +93,6 @@ namespace simbi {
             const real
         ) const;
         RiemannFuncPointer<SRHD<dim>> riemann_solve;
-
-        ndarray<function_t> bsources;   // boundary sources
-        ndarray<function_t> hsources;   // hydro sources
-        ndarray<function_t> gsources;   // gravity sources
-
-        // hydrodynamic source functions
-        function_t hydro_source;
-
-        // gravity source functions
-        function_t gravity_source;
-
-        // boundary source functions at x1 boundaries
-        function_t bx1_inner_source;
-        function_t bx1_outer_source;
-        // boundary source functions at x2 boundaries
-        function_t bx2_inner_source;
-        function_t bx2_outer_source;
-        // boundary source functions at x3 boundaries
-        function_t bx3_inner_source;
-        function_t bx3_outer_source;
 
         /* Methods */
         SRHD();

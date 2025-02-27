@@ -55,7 +55,6 @@
 #include "core/types/containers/ndarray.hpp"   // for ndarray
 #include "core/types/monad/maybe.hpp"          // for Maybe
 #include "geometry/mesh/mesh.hpp"              // for Mesh
-#include "physics/hydro/schemes/ib/systems/orbital.hpp"   // for OrbitalSystem
 #include "physics/hydro/types/generic_structs.hpp"   // for Eigenvals, mag_four_vec
 #include "util/parallel/exec_policy.hpp"             // for ExecutionPolicy
 #include "util/tools/helpers.hpp"                    // for my_min, my_max, ...
@@ -86,11 +85,6 @@ namespace simbi {
         static constexpr int nvars               = dim + 3;
         static constexpr std::string_view regime = "classical";
 
-        // set the primitive and conservative types at compile time
-        // using primitive_t = anyPrimitive<dim, Regime::NEWTONIAN>;
-        // using conserved_t = anyConserved<dim, Regime::NEWTONIAN>;
-        // using eigenvals_t = Eigenvals<dim, Regime::NEWTONIAN>;
-        // using function_t  = typename helpers::real_func<dim>::type;
         template <typename T>
         using RiemannFuncPointer = conserved_t (T::*)(
             const primitive_t&,
@@ -99,27 +93,6 @@ namespace simbi {
             const real
         ) const;
         RiemannFuncPointer<Newtonian<dim>> riemann_solve;
-
-        // boundary condition functions for mesh motion
-        ndarray<function_t> bsources;   // boundary sources
-        ndarray<function_t> hsources;   // hydro sources
-        ndarray<function_t> gsources;   // gravity sources
-
-        // hydrodynamic source functions
-        function_t hydro_source;
-
-        // gravity source functions
-        function_t gravity_source;
-
-        // boundary source functions at x1 boundaries
-        function_t bx1_inner_source;
-        function_t bx1_outer_source;
-        // boundary source functions at x2 boundaries
-        function_t bx2_inner_source;
-        function_t bx2_outer_source;
-        // boundary source functions at x3 boundaries
-        function_t bx3_inner_source;
-        function_t bx3_outer_source;
 
         // Constructors
         Newtonian();
@@ -225,30 +198,6 @@ namespace simbi {
         {
             this->simulate(scale_factor, scale_factor_derivative);
         }
-
-        // void setup_binary_system(
-        //     const spatial_vector_t<real, dim>& pos1,
-        //     const spatial_vector_t<real, dim>& pos2,
-        //     const real mass1,
-        //     const real mass2,
-        //     const real grav_strength
-        // )
-        // {
-        //     orbital_system_ =
-        //         std::make_unique <
-        //         ibsystem::OrbitalSystem<
-        //             real,
-        //             dim,
-        //             Mesh<
-        //                 Newtonian<dim>,
-        //                 dim,
-        //                 anyConserved<dim, Regime::NEWTONIAN>,
-        //                 anyPrimitive<dim, Regime::NEWTONIAN>>>(mesh_);
-        //     orbital_system_
-        //         ->add_sink(pos1, vel1, mass1, radius1, grav_strength);
-        //     orbital_system_
-        //         ->add_sink(pos2, vel2, mass2, radius2, grav_strength);
-        // }
     };
 }   // namespace simbi
 

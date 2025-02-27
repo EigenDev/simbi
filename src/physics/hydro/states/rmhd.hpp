@@ -86,31 +86,10 @@ namespace simbi {
         static constexpr int nvars               = dim + 3;
         static constexpr std::string_view regime = "srmhd";
 
-        // set the primitive and conservative types at compile time
-        // using primitive_t = anyPrimitive<dim, Regime::RMHD>;
-        // using conserved_t = anyConserved<dim, Regime::RMHD>;
-        // using eigenvals_t = Eigenvals<dim, Regime::RMHD>;
-        // using function_t  = typename helpers::real_func<dim>::type;
         using ct_scheme_t = std::conditional_t<
             comp_ct_type == CTTYPE::MdZ,
             ct::CTMdZ,
             ct::CTContact>;
-
-        // hydrodynamic source functions
-        function_t hydro_source;
-
-        // gravity source functions
-        function_t gravity_source;
-
-        // boundary source functions at x1 boundaries
-        function_t bx1_inner_source;
-        function_t bx1_outer_source;
-        // boundary source functions at x2 boundaries
-        function_t bx2_inner_source;
-        function_t bx2_outer_source;
-        // boundary source functions at x3 boundaries
-        function_t bx3_inner_source;
-        function_t bx3_outer_source;
 
         template <typename T>
         using RiemannFuncPointer = conserved_t (T::*)(
