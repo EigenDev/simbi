@@ -148,19 +148,19 @@ namespace simbi {
             }
 
             conserved_t res;
+            const auto iof = io_manager_.get();
             if constexpr (Dims == 1) {
                 const auto x1c = cell.centroid()[0];
-                io().call_hydro_source(x1c, time(), res.data());
+                iof->call_hydro_source(x1c, time(), res.data());
             }
             else if constexpr (Dims == 2) {
                 const auto [x1c, x2c] = cell.centroid();
-                io().call_hydro_source(x1c, x2c, time(), res.data());
+                iof->call_hydro_source(x1c, x2c, time(), res.data());
             }
             else {
                 const auto [x1c, x2c, x3c] = cell.centroid();
-                io().call_hydro_source(x1c, x2c, x3c, time(), res.data());
+                iof->call_hydro_source(x1c, x2c, x3c, time(), res.data());
             }
-
             return res;
         }
 
@@ -173,9 +173,10 @@ namespace simbi {
             const auto c = cell.centroid();
 
             conserved_t gravity;
+            const auto iof = io_manager_.get();
             if constexpr (Dims > 1) {
                 if constexpr (Dims > 2) {
-                    io().call_gravity_source(
+                    iof->call_gravity_source(
                         c[0],
                         c[1],
                         c[2],
@@ -184,7 +185,7 @@ namespace simbi {
                     );
                 }
                 else {
-                    io().call_gravity_source(
+                    iof->call_gravity_source(
                         c[0],
                         c[1],
                         time(),
@@ -193,7 +194,7 @@ namespace simbi {
                 }
             }
             else {
-                io().call_gravity_source(c[0], time(), gravity.data());
+                iof->call_gravity_source(c[0], time(), gravity.data());
             }
 
             // gravity source term is rho * g_vec for momentum and
@@ -280,6 +281,9 @@ namespace simbi {
             derived.init_simulation();
             derived.cons2prim_impl();
             adapt_dt();
+
+            std::cout << "Starting simulation" << std::endl;
+            std::cin.get();
 
             // Main simulation loop
             detail::logger::with_logger(derived, tend(), [&] {

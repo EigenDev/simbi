@@ -166,6 +166,65 @@ namespace simbi {
                 return rad;
             }();
 
+            // validate io_manager before kernel launch
+            if (!io_manager &&
+                std::any_of(conditions.begin(), conditions.end(), [](auto bc) {
+                    return bc == BoundaryCondition::DYNAMIC;
+                })) {
+                throw std::runtime_error(
+                    "IO Manager required for dynamic boundary conditions"
+                );
+            }
+
+            // copy necessary data to avoid pointer issues
+            const auto handle_dynamic_bc = [=] DEV(
+                                               const auto& coords,
+                                               const BoundaryFace face,
+                                               T& result
+                                           ) {
+                if constexpr (is_conserved_v<T>) {
+                    return [=] DEV(
+                               const auto& coords,
+                               const BoundaryFace face,
+                               T& result
+                           ) {
+                        const auto physical_coords =
+                            mesh->retrieve_cell(coords).centroid();
+                        if constexpr (Dims == 1) {
+                            io_manager->call_boundary_source(
+                                face,
+                                physical_coords[0],
+                                time,
+                                result.data()
+                            );
+                        }
+                        else if constexpr (Dims == 2) {
+                            io_manager->call_boundary_source(
+                                face,
+                                physical_coords[0],
+                                physical_coords[1],
+                                time,
+                                result.data()
+                            );
+                        }
+                        else {
+                            io_manager->call_boundary_source(
+                                face,
+                                physical_coords[0],
+                                physical_coords[1],
+                                physical_coords[2],
+                                time,
+                                result.data()
+                            );
+                        }
+                    };
+                }
+                else {
+                    // Return a no-op lambda when T is not conserved
+                    return [](const auto&, const BoundaryFace, auto&) {};
+                }
+            };
+
             parallel_for(policy, [=, this] DEV(size_type idx) {
                 auto coordinates = unravel_idx(idx, full_array.shape());
                 auto rshape      = interior_view.shape();
@@ -211,38 +270,12 @@ namespace simbi {
                     switch (conditions[bc_idx]) {
                         case BoundaryCondition::DYNAMIC: {
                             if constexpr (is_conserved_v<T>) {
-                                // Get coordinates for this point
-                                const auto physical_coords =
-                                    mesh->retrieve_cell(coordinates).centroid();
-
                                 T result;
-                                if constexpr (Dims == 1) {
-                                    io_manager->call_boundary_source(
-                                        static_cast<BoundaryFace>(bc_idx),
-                                        physical_coords[0],
-                                        time,
-                                        result.data()
-                                    );
-                                }
-                                else if constexpr (Dims == 2) {
-                                    io_manager->call_boundary_source(
-                                        static_cast<BoundaryFace>(bc_idx),
-                                        physical_coords[0],
-                                        physical_coords[1],
-                                        time,
-                                        result.data()
-                                    );
-                                }
-                                else {
-                                    io_manager->call_boundary_source(
-                                        static_cast<BoundaryFace>(bc_idx),
-                                        physical_coords[0],
-                                        physical_coords[1],
-                                        physical_coords[2],
-                                        time,
-                                        result.data()
-                                    );
-                                }
+                                handle_dynamic_bc(
+                                    coordinates,
+                                    static_cast<BoundaryFace>(bc_idx),
+                                    result
+                                );
                                 data[idx] = result;
                             }
                             break;
