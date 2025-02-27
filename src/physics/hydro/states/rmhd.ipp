@@ -1433,64 +1433,6 @@ void RMHD<dim>::riemann_fluxes()
 }
 
 //===================================================================================================================
-//                                           SOURCE TERMS
-//===================================================================================================================
-// template <int dim>
-// DUAL RMHD<dim>::conserved_t RMHD<dim>::hydro_sources(const auto& cell) const
-// {
-//     if (null_sources) {
-//         return conserved_t{};
-//     }
-//     const auto x1c = cell.centroid_coordinate(0);
-//     const auto x2c = cell.centroid_coordinate(1);
-//     const auto x3c = cell.centroid_coordinate(2);
-
-//     conserved_t res;
-//     if constexpr (dim == 1) {
-//         hydro_source(x1c, t, res);
-//     }
-//     else if constexpr (dim == 2) {
-//         hydro_source(x1c, x2c, t, res);
-//     }
-//     else {
-//         hydro_source(x1c, x2c, x3c, t, res);
-//     }
-//     return res;
-// }
-
-// template <int dim>
-// DUAL RMHD<dim>::conserved_t
-// RMHD<dim>::this->gravity_sources(const auto& prims, const auto& cell) const
-// {
-//     if (null_gravity) {
-//         return conserved_t{};
-//     }
-//     const auto x1c = cell.centroid_coordinate(0);
-
-//     conserved_t res;
-//     // gravity only changes the momentum and energy
-//     if constexpr (dim > 1) {
-//         const auto x2c = cell.centroid_coordinate(1);
-//         if constexpr (dim > 2) {
-//             const auto x3c = cell.centroid_coordinate(2);
-//             gravity_source(x1c, x2c, x3c, t, res);
-//             res[dimensions + 1] =
-//                 res[1] * prims[1] + res[2] * prims[2] + res[3] * prims[3];
-//         }
-//         else {
-//             gravity_source(x1c, x2c, t, res);
-//             res[dimensions + 1] = res[1] * prims[1] + res[2] * prims[2];
-//         }
-//     }
-//     else {
-//         gravity_source(x1c, t, res);
-//         res[dimensions + 1] = res[1] * prims[1];
-//     }
-
-//     return res;
-// }
-
-//===================================================================================================================
 //                                            UDOT CALCULATIONS
 //===================================================================================================================
 template <int dim>
@@ -1647,17 +1589,11 @@ void RMHD<dim>::advance_impl()
     advance_magnetic_fields();
     sync_magnetic_boundaries(bfield_man);
     advance_conserved();
-    this->conserved_boundary_manager().sync_boundaries(
-        this->full_policy(),
-        this->cons_,
-        this->cons_.contract(this->halo_radius()),
-        this->bcs(),
-        true
-    );
+    this->apply_boundary_conditions();
 }
 
 //===================================================================================================================
-//                                            SIMULATE
+//                                            INITIALIZE SIMULATE
 //===================================================================================================================
 template <int dim>
 void RMHD<dim>::init_simulation()
@@ -1676,11 +1612,6 @@ void RMHD<dim>::init_simulation()
     bstag2.reshape(this->get_shape(yP));
     bstag3.reshape(this->get_shape(zP));
 
-    this->conserved_boundary_manager().sync_boundaries(
-        this->full_policy(),
-        this->cons_,
-        this->cons_.contract(this->halo_radius()),
-        this->bcs()
-    );
+    this->apply_boundary_conditions();
     sync_all_to_device();
 };

@@ -513,12 +513,7 @@ void SRHD<dim>::advance_impl()
             this->prims_.contract(this->halo_radius())
         );
 
-    this->conserved_boundary_manager().sync_boundaries(
-        this->full_policy(),
-        this->cons_,
-        this->cons_.contract(this->halo_radius()),
-        this->bcs()
-    );
+    this->apply_boundary_conditions();
 }
 
 // //===================================================================================================================
@@ -529,12 +524,7 @@ void SRHD<dim>::init_simulation()
 {
     // load_functions();
     init_riemann_solver();
-    this->conserved_boundary_manager().sync_boundaries(
-        this->full_policy(),
-        this->cons_,
-        this->cons_.contract(this->halo_radius()),
-        this->bcs()
-    );
+    this->apply_boundary_conditions();
     pressure_guesses_.resize(this->cons_.size())
         .reshape(this->get_shape(this->full_policy()));
     pressure_guesses_.transform(

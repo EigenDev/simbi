@@ -455,13 +455,7 @@ void Newtonian<dim>::advance_impl()
             this->prims_.contract(this->halo_radius())
         );
 
-    // set the boundaries
-    this->conserved_boundary_manager().sync_boundaries(
-        this->full_policy(),
-        this->cons_,
-        this->cons_.contract(this->halo_radius()),
-        this->bcs()
-    );
+    this->apply_boundary_conditions();
 }
 
 //===================================================================================================================
@@ -472,12 +466,7 @@ void Newtonian<dim>::init_simulation()
 {
     // load_functions();
     init_riemann_solver();
-    this->conserved_boundary_manager().sync_boundaries(
-        this->full_policy(),
-        this->cons_,
-        this->cons_.contract(this->halo_radius()),
-        this->bcs()
-    );
+    this->apply_boundary_conditions();
     // use parent's sync to device method
     this->sync_to_device();
 };
