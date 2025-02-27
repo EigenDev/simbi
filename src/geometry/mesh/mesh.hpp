@@ -66,6 +66,9 @@ namespace simbi {
         GridManager grid_;           // handles indexing and dimensions
 
       public:
+        // Constructors
+        DUAL Mesh() = default;
+
         DUAL Mesh(const InitialConditions& init) : geometry_(init), grid_(init)
         {
         }
@@ -93,6 +96,20 @@ namespace simbi {
             else {
                 auto [ii, jj, kk] = coords;
                 return get_cell_from_indices(ii, jj, kk);
+            }
+        }
+
+        // retrieve cell from array_t
+        DUAL auto retrieve_cell(const array_t<size_type, Dims>& coords) const
+        {
+            if constexpr (Dims == 1) {
+                return get_cell_from_indices(coords[0]);
+            }
+            else if constexpr (Dims == 2) {
+                return get_cell_from_indices(coords[0], coords[1]);
+            }
+            else {
+                return get_cell_from_indices(coords[0], coords[1], coords[2]);
             }
         }
 
