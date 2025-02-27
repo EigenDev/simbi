@@ -281,8 +281,6 @@ namespace simbi {
             derived.cons2prim_impl();
             adapt_dt();
 
-            std::cout << "Starting simulation" << std::endl;
-            std::cin.get();
             // Main simulation loop
             detail::logger::with_logger(derived, tend(), [&] {
                 // Single timestep advance

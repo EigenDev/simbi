@@ -421,9 +421,12 @@ void SRHD<dim>::advance_impl()
 
     auto calc_flux = [this, dcons] DEV(auto& con, const auto& prim) {
         conserved_t fri[2], gri[2], hri[2];
+        const auto [ii, jj, kk] = con.position();
+        const auto cell = this->mesh().get_cell_from_indices(ii, jj, kk);
 
         // Calculate fluxes using prim
         for (int q = 0; q < 2; q++) {
+            auto vface = cell.velocity(q);
             // X-direction flux
             const auto& pL = prim.at(q - 1, 0, 0);
             const auto& pR = prim.at(q - 0, 0, 0);
@@ -436,13 +439,14 @@ void SRHD<dim>::advance_impl()
                     pL + plm_gradient(pL, pLL, pR, this->plm_theta()) * 0.5;
                 const auto pRr =
                     pR - plm_gradient(pR, pL, pRR, this->plm_theta()) * 0.5;
-                fri[q] = (this->*riemann_solve)(pLr, pRr, 1, 0);
+                fri[q] = (this->*riemann_solve)(pLr, pRr, 1, vface);
             }
             else {
-                fri[q] = (this->*riemann_solve)(pL, pR, 1, 0);
+                fri[q] = (this->*riemann_solve)(pL, pR, 1, vface);
             }
 
             if constexpr (dim > 1) {
+                vface = cell.velocity(q + 2);
                 // Y-direction flux
                 const auto& pL_y = prim.at(0, q - 1, 0);
                 const auto& pR_y = prim.at(0, q - 0, 0);
@@ -457,13 +461,14 @@ void SRHD<dim>::advance_impl()
                         pR_y -
                         plm_gradient(pR_y, pL_y, pRR_y, this->plm_theta()) *
                             0.5;
-                    gri[q] = (this->*riemann_solve)(pLr_y, pRr_y, 2, 0);
+                    gri[q] = (this->*riemann_solve)(pLr_y, pRr_y, 2, vface);
                 }
                 else {
-                    gri[q] = (this->*riemann_solve)(pL_y, pR_y, 2, 0);
+                    gri[q] = (this->*riemann_solve)(pL_y, pR_y, 2, vface);
                 }
 
                 if constexpr (dim > 2) {
+                    vface = cell.velocity(q + 4);
                     // Z-direction flux
                     const auto& pL_z = prim.at(0, 0, q - 1);
                     const auto& pR_z = prim.at(0, 0, q - 0);
@@ -478,18 +483,14 @@ void SRHD<dim>::advance_impl()
                             pR_z -
                             plm_gradient(pR_z, pL_z, pRR_z, this->plm_theta()) *
                                 0.5;
-                        hri[q] = (this->*riemann_solve)(pLr_z, pRr_z, 3, 0);
+                        hri[q] = (this->*riemann_solve)(pLr_z, pRr_z, 3, vface);
                     }
                     else {
-                        hri[q] = (this->*riemann_solve)(pL_z, pR_z, 3, 0);
+                        hri[q] = (this->*riemann_solve)(pL_z, pR_z, 3, vface);
                     }
                 }
             }
         }
-
-        // Calculate sources
-        const auto [ii, jj, kk] = con.position();
-        const auto cell = this->mesh().get_cell_from_indices(ii, jj, kk);
 
         const auto delta_con = dcons(
             fri,

@@ -476,19 +476,6 @@ namespace simbi {
             return val;
         }
 
-        template <typename U>
-        DUAL static U apply_dynamic(
-            const U& val,
-            const auto& source_fn,
-            const real x1,
-            const real x2,
-            const real x3,
-            const real t
-        )
-        {
-            return source_fn(val, x1, x2, x3, t);
-        }
-
         // Add plane sequence helper
         template <int num_dims>
         struct PlaneSequence {

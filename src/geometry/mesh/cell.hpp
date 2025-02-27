@@ -278,8 +278,18 @@ namespace simbi {
 
         DUAL real velocity(Side s) const
         {
-            if (static_cast<int>(s) <= 2 * Dims - 1) {
+            if (static_cast<int>(s) <= 2 * Dims) {
                 const real x = faces_[static_cast<int>(s)].normal;
+                return geo_info_.homologous() ? x * geo_info_.expansion_term()
+                                              : 1 * geo_info_.expansion_term();
+            }
+            return 0.0;
+        }
+
+        DUAL real velocity(const int norm) const
+        {
+            if (norm < 2 * Dims) {
+                const real x = faces_[norm].normal;
                 return geo_info_.homologous() ? x * geo_info_.expansion_term()
                                               : 1 * geo_info_.expansion_term();
             }
