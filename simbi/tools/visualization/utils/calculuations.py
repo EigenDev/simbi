@@ -1,11 +1,7 @@
 from ..detail.helpers import (
-    get_iterable,
     calc_cell_volume1D,
     calc_cell_volume2D,
     calc_cell_volume3D,
-    calc_domega,
-    find_nearest,
-    calc_any_mean,
 )
 
 def calc_cell_volumes(mesh: dict['str'], ndim):
