@@ -51,8 +51,11 @@
 #define BOUNDARY_MANAGER_HPP
 
 #include "build_options.hpp"
+#include "core/managers/io_manager.hpp"
 #include "core/types/containers/array_view.hpp"
 #include "core/types/containers/ndarray.hpp"
+#include "core/types/monad/maybe.hpp"
+#include "geometry/mesh/mesh.hpp"
 #include "util/parallel/exec_policy.hpp"
 
 namespace simbi {
@@ -65,11 +68,22 @@ namespace simbi {
             ndarray<T, Dims>& full_array,
             const array_view<T, Dims>& interior_view,
             const ndarray<BoundaryCondition>& conditions,
-            const bool need_corners = false
+            const Maybe<const IOManager<Dims>*> io_manager = Nothing,
+            const Mesh<Dims>& mesh                         = {},
+            const real time                                = 0.0,
+            const bool need_corners                        = false
         ) const
         {
             // Sync faces
-            sync_faces(policy, full_array, interior_view, conditions);
+            sync_faces(
+                policy,
+                full_array,
+                interior_view,
+                conditions,
+                io_manager.unwrap_or(nullptr),
+                &mesh,
+                time
+            );
 
             // Sync corners if needed
             if constexpr (comp_ct_type != CTTYPE::MdZ) {
@@ -128,7 +142,10 @@ namespace simbi {
             const ExecutionPolicy<>& policy,
             ndarray<T, Dims>& full_array,
             const array_view<T, Dims>& interior_view,
-            const ndarray<BoundaryCondition>& conditions
+            const ndarray<BoundaryCondition>& conditions,
+            const IOManager<Dims>* io_manager,
+            const Mesh<Dims>* mesh,
+            const real time
         ) const
         {
             auto* data = full_array.data();
@@ -190,12 +207,46 @@ namespace simbi {
                         conditions[bc_idx]
                     );
 
-                    // convert interior index into coordinates
-                    // auto interior_coords =
-                    // unravel_idx(interior_idx, full_array.shape());
-
                     // Apply boundary condition
                     switch (conditions[bc_idx]) {
+                        case BoundaryCondition::DYNAMIC: {
+                            if constexpr (is_conserved_v<T>) {
+                                // Get coordinates for this point
+                                const auto physical_coords =
+                                    mesh->retrieve_cell(coordinates).centroid();
+
+                                T result;
+                                if constexpr (Dims == 1) {
+                                    io_manager->call_boundary_source(
+                                        static_cast<BoundaryFace>(bc_idx),
+                                        physical_coords[0],
+                                        time,
+                                        result.data()
+                                    );
+                                }
+                                else if constexpr (Dims == 2) {
+                                    io_manager->call_boundary_source(
+                                        static_cast<BoundaryFace>(bc_idx),
+                                        physical_coords[0],
+                                        physical_coords[1],
+                                        time,
+                                        result.data()
+                                    );
+                                }
+                                else {
+                                    io_manager->call_boundary_source(
+                                        static_cast<BoundaryFace>(bc_idx),
+                                        physical_coords[0],
+                                        physical_coords[1],
+                                        physical_coords[2],
+                                        time,
+                                        result.data()
+                                    );
+                                }
+                                data[idx] = result;
+                            }
+                            break;
+                        }
                         case BoundaryCondition::REFLECTING:
                             data[idx] = apply_reflecting(
                                 data[interior_idx],

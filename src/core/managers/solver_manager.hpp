@@ -213,6 +213,8 @@ namespace simbi {
         DUAL auto& boundary_conditions() const { return bcs_; }
         DUAL auto& boundary_conditions() { return bcs_; }
         DUAL auto step() const { return step_; }
+        DUAL auto set_null_sources(bool state) { null_sources_ = state; }
+        DUAL auto set_null_gravity(bool state) { null_gravity_ = state; }
     };
 }   // namespace simbi
 

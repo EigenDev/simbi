@@ -87,7 +87,7 @@ namespace simbi {
         ExecutionPolicyManager<Dims> exec_policy_manager_;
         TimeManager time_manager_;
         SolverManager solver_config_;
-        IOManager io_manager_;
+        std::unique_ptr<IOManager<Dims>> io_manager_;
         boundary_manager<conserved_t, Dims> conserved_boundary_manager_;
 
         bool was_interrupted_{false};
@@ -124,7 +124,10 @@ namespace simbi {
               exec_policy_manager_(mesh_.grid(), init_conditions),
               time_manager_(init_conditions),
               solver_config_(init_conditions),
-              io_manager_(solver_config_, init_conditions),
+              io_manager_(std::make_unique<IOManager<Dims>>(
+                  solver_config_,
+                  init_conditions
+              )),
               // protected references to commonly used values
               gamma(gamma_),
               hllc_z(hllc_z_)
@@ -147,15 +150,15 @@ namespace simbi {
             conserved_t res;
             if constexpr (Dims == 1) {
                 const auto x1c = cell.centroid()[0];
-                // hydro_source(x1c, t, res);
+                io().call_hydro_source(x1c, time(), res.data());
             }
             else if constexpr (Dims == 2) {
                 const auto [x1c, x2c] = cell.centroid();
-                // hydro_source(x1c, x2c, t, res);
+                io().call_hydro_source(x1c, x2c, time(), res.data());
             }
             else {
                 const auto [x1c, x2c, x3c] = cell.centroid();
-                // hydro_source(x1c, x2c, x3c, t, res);
+                io().call_hydro_source(x1c, x2c, x3c, time(), res.data());
             }
 
             return res;
@@ -167,31 +170,55 @@ namespace simbi {
             if (null_gravity()) {
                 return conserved_t{};
             }
-            const auto x1c = cell.centroid_coordinate(0);
+            const auto c = cell.centroid();
 
-            conserved_t res;
-            // // gravity only changes the momentum and energy
-            // if constexpr (dim > 1) {
-            //     const auto x2c = cell.centroid_coordinate(1);
-            //     if constexpr (dim > 2) {
-            //         const auto x3c = cell.centroid_coordinate(2);
-            //         gravity_source(x1c, x2c, x3c, t, res);
-            //         res[dimensions + 1] = res[1] * prims[1] +
-            //                               res[2] * prims[2] + res[3] *
-            //                               prims[3];
-            //     }
-            //     else {
-            //         gravity_source(x1c, x2c, t, res);
-            //         res[dimensions + 1] = res[1] * prims[1] + res[2] *
-            //         prims[2];
-            //     }
-            // }
-            // else {
-            //     gravity_source(x1c, t, res);
-            //     res[dimensions + 1] = res[1] * prims[1];
-            // }
+            conserved_t gravity;
+            if constexpr (Dims > 1) {
+                if constexpr (Dims > 2) {
+                    io().call_gravity_source(
+                        c[0],
+                        c[1],
+                        c[2],
+                        time(),
+                        gravity.data()
+                    );
+                }
+                else {
+                    io().call_gravity_source(
+                        c[0],
+                        c[1],
+                        time(),
+                        gravity.data()
+                    );
+                }
+            }
+            else {
+                io().call_gravity_source(c[0], time(), gravity.data());
+            }
 
-            return res;
+            // gravity source term is rho * g_vec for momentum and
+            // rho * v.dot(g_vec) for energy
+            return {
+              0.0,
+              prims.rho() * gravity.momentum(),
+              prims.velocity().dot(gravity.momentum())
+            };
+        }
+
+        void apply_boundary_conditions()
+        {
+            constexpr auto need_corners = sim_type::MHD<R>;
+            conserved_boundary_manager_.sync_boundaries(
+                full_policy(),
+                cons_,
+                cons_.contract(halo_radius()),
+                bcs(),
+                io_manager_ ? Maybe<const IOManager<Dims>*>(io_manager_.get())
+                            : Nothing,
+                mesh_,
+                time(),
+                need_corners
+            );
         }
 
         void adapt_dt()
@@ -235,6 +262,9 @@ namespace simbi {
         )
         {
             auto& derived = static_cast<Derived&>(*this);
+            // load the user-defined functions if any
+            io().load_functions();
+
             cons_.resize(this->total_zones()).reshape({nz(), ny(), nx()});
             prims_.resize(this->total_zones()).reshape({nz(), ny(), nx()});
 
@@ -251,6 +281,8 @@ namespace simbi {
             derived.cons2prim_impl();
             adapt_dt();
 
+            std::cout << "Starting simulation" << std::endl;
+            std::cin.get();
             // Main simulation loop
             detail::logger::with_logger(derived, tend(), [&] {
                 // Single timestep advance
@@ -306,8 +338,8 @@ namespace simbi {
         DUAL const auto& time_manager() const { return time_manager_; }
         DUAL auto& time_manager() { return time_manager_; }
         DUAL const auto& solver_config() const { return solver_config_; }
-        DUAL const auto& io() const { return io_manager_; }
-        DUAL auto& io() { return io_manager_; }
+        DUAL const auto& io() const { return *io_manager_; }
+        DUAL auto& io() { return *io_manager_; }
         DUAL const auto& conserved_boundary_manager() const
         {
             return conserved_boundary_manager_;
@@ -352,16 +384,16 @@ namespace simbi {
         // accessors from io manager class
         DUAL auto data_directory() const
         {
-            return io_manager_.data_directory();
+            return (*io_manager_).data_directory();
         }
-        DUAL auto current_iter() const { return io_manager_.current_iter(); }
+        DUAL auto current_iter() const { return (*io_manager_).current_iter(); }
         DUAL auto checkpoint_zones() const
         {
-            return io_manager_.checkpoint_zones();
+            return (*io_manager_).checkpoint_zones();
         }
         DUAL auto checkpoint_idx() const
         {
-            return io_manager_.checkpoint_idx();
+            return (*io_manager_).checkpoint_idx();
         }
 
         // accessors from execution manager class

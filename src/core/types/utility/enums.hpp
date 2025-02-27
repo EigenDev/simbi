@@ -100,6 +100,15 @@ namespace simbi {
         PERIODIC,
     };
 
+    enum class BoundaryFace {
+        X1_INNER = 0,
+        X1_OUTER = 1,
+        X2_INNER = 2,
+        X2_OUTER = 3,
+        X3_INNER = 4,
+        X3_OUTER = 5
+    };
+
     enum class WaveSpeedEstimate {
         SCHNEIDER_ET_AL_93,
         MIGNONE_AND_BODO_05,

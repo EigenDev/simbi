@@ -365,8 +365,8 @@ namespace simbi {
 
             DUAL const real& operator[](size_t i) const { return vals_[i]; }
 
-            // implicit conversion to underlying array
-            DUAL operator real*() { return vals_; }
+            DUAL real* data() { return vals_; }
+            DUAL const real* data() const { return vals_; }
 
           private:
             DUAL constexpr Derived* derived()
