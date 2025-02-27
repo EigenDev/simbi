@@ -89,6 +89,9 @@ namespace simbi {
         real expansion_term_{0.0};
 
       public:
+        // Constructors
+        GeometryManager() = default;
+
         DUAL GeometryManager(const InitialConditions& init)
             : geometry_(geometry_map.at(init.coord_system)),
               spacing_types_{
@@ -131,7 +134,7 @@ namespace simbi {
 
             expansion_term_ = adot(t) / a(t);
             min_bounds_[0]  = update(min_bounds_[0], expansion_term_);
-            max_bounds_[1]  = update(max_bounds_[1], expansion_term_);
+            max_bounds_[0]  = update(max_bounds_[0], expansion_term_);
         }
 
         auto geometry_to_c_str() const
