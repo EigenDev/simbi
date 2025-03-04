@@ -4,7 +4,7 @@ import linecache
 import os
 import tracemalloc
 
-from .slogger import logger
+from ..io.logging import logger
 from time import sleep
 from ..key_types import *
 from typing import TextIO, Generator

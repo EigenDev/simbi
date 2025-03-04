@@ -1,6 +1,6 @@
 import logging
 import sys
-from ._detail import bcolors 
+from ..detail._detail import bcolors 
 from typing import Any
 import typing
 TRACE_LEVEL_NUM = 5

@@ -8,7 +8,7 @@ import matplotlib.pyplot as plt
 from typing import Union, Any, Callable, Optional, no_type_check
 from numpy.typing import NDArray
 from numpy import float64 as numpy_float
-from ..detail.helpers import find_nearest
+from ..functional.helpers import find_nearest
 from dataclasses import dataclass, field
 from typing import Union, List, Dict, Any
 from enum import Enum
@@ -167,8 +167,8 @@ def get_field_str(
 
 
 def calc_enthalpy(fields: dict[str, NDArray[numpy_float]]) -> Any:
-    return 1.0 + fields["p"] * fields["ad_gamma"] / (
-        fields["rho"] * (fields["ad_gamma"] - 1.0)
+    return 1.0 + fields["p"] * fields["adiabatic_index"] / (
+        fields["rho"] * (fields["adiabatic_index"] - 1.0)
     )
 
 
@@ -223,9 +223,7 @@ def get_dimensionality(files: Union[list[str], dict[int, list[str]]]) -> int:
 
 
 @no_type_check
-def read_file(
-    filename: str, return_staggered_field: bool = False
-) -> tuple[dict[str, Any], dict[str, Any], dict[str, Any]]:
+def read_file(filename: str) -> tuple[dict[str, Any], dict[str, Any], dict[str, Any]]:
     with h5py.File(filename, "r") as hf:
         ds = dict(hf.get("sim_info").attrs)
         ndim: int = ds["dimensions"]
@@ -244,7 +242,9 @@ def read_file(
         padwidth = (ds["spatial_order"] != "pcm") + 1
         npad = tuple((padwidth, padwidth) for _ in range(ndim))
 
-        def unpad_all(arrays: list[NDArray[numpy_float]]) -> list[NDArray[numpy_float]]:
+        def unpad_all(
+            arrays: list[NDArray[numpy_float]],
+        ) -> list[NDArray[numpy_float]]:
             return [unpad(arr, npad) for arr in arrays]
 
         rho, p, chi = unpad_all([rho, p, chi])
@@ -252,7 +252,12 @@ def read_file(
 
         fields = {f"v{i+1}": v[i] for i in range(len(v))}
         fields.update(
-            {"rho": rho, "p": p, "chi": chi, "ad_gamma": ds["adiabatic_gamma"]}
+            {
+                "rho": rho,
+                "p": p,
+                "chi": chi,
+                "adiabatic_index": ds["adiabatic_index"],
+            }
         )
 
         vsqr = np.sum(v**2, axis=0)
@@ -304,8 +309,7 @@ def read_file(
                     ),
                 )
 
-                if return_staggered_field:
-                    fields.update({"b1stag": b1, "b2stag": b2, "b3stag": b3})
+                fields.update({"b1stag": b1, "b2stag": b2, "b3stag": b3})
 
                 # unpad from ghost zones from the fields in the orthogonal directions
                 b1 = unpad(b1, ((1, 1), (1, 1), (0, 0)))
@@ -332,13 +336,15 @@ def read_file(
         funcs = [
             (
                 np.linspace
-                if ds.get(f"{x}_cell_spacing", "linear") == "linear"
+                if ds.get(f"{x}_spacing", "linear") == "linear"
                 else np.geomspace
             )
             for x in ["x1", "x2", "x3"]
         ]
         mesh = {
-            f"x{i}v": funcs[i - 1](ds[f"x{i}min"], ds[f"x{i}max"], grid[f"x{i}_active_zones"] + 1)
+            f"x{i}v": funcs[i - 1](
+                ds[f"x{i}min"], ds[f"x{i}max"], grid[f"x{i}_active_zones"] + 1
+            )
             for i in range(1, ndim + 1)
         }
 
@@ -423,7 +429,7 @@ def prims2var(fields: dict[str, NDArray[numpy_float]], var: str) -> Any:
         return h - 1.0
     elif var == "mach":
         beta2 = 1.0 - (1.0 + fields["gamma_beta"] ** 2) ** (-1)
-        cs2 = fields["ad_gamma"] * fields["p"] / fields["rho"] / h
+        cs2 = fields["adiabatic_index"] * fields["p"] / fields["rho"] / h
         return np.sqrt(beta2 / cs2)
     elif var == "u1":
         return W * fields["v1"]

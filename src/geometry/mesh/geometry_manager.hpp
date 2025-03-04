@@ -95,9 +95,9 @@ namespace simbi {
         DUAL GeometryManager(const InitialConditions& init)
             : geometry_(geometry_map.at(init.coord_system)),
               spacing_types_{
-                str2cell.at(init.x1_cell_spacing),
-                str2cell.at(init.x2_cell_spacing),
-                str2cell.at(init.x3_cell_spacing)
+                str2cell.at(init.x1_spacing),
+                str2cell.at(init.x2_spacing),
+                str2cell.at(init.x3_spacing)
               },
               min_bounds_{
                 init.x1bounds.first,

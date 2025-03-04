@@ -416,9 +416,10 @@ namespace sogbo_rad {
                     const double eps_e =
                         0.1;   // shocked electrons fraction of internal energy
 
-                    const auto rho_einternal =
-                        pre[central_idx] * qscales.pre_scale /
-                        (args.ad_gamma - 1.0);   // internal energy density
+                    const auto rho_einternal = pre[central_idx] *
+                                               qscales.pre_scale /
+                                               (args.adiabatic_index - 1.0
+                                               );   // internal energy density
                     const auto bfield = calc_shock_bfield(
                         rho_einternal,
                         eps_b

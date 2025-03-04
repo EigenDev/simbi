@@ -197,8 +197,7 @@ void RMHD<dim>::cons2prim_impl()
             real v2 = yy * x * (r2 + h2 * rdb * yy);
             real v3 = yy * x * (r3 + h3 * rdb * yy);
 
-            if constexpr (global::VelocityType ==
-                          global::Velocity::FourVelocity) {
+            if constexpr (global::using_four_velocity) {
                 v1 *= w;
                 v2 *= w;
                 v3 *= w;
@@ -1598,7 +1597,6 @@ void RMHD<dim>::advance_impl()
 template <int dim>
 void RMHD<dim>::init_simulation()
 {
-    // load_functions();
     init_riemann_solver();
     const auto& xP = this->full_xvertex_policy();
     const auto& yP = this->full_yvertex_policy();

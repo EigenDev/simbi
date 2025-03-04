@@ -348,7 +348,7 @@ namespace simbi {
                 // if at the very beginning of the simulation
                 // write the initial state to a file
                 try {
-                    if (sim_state.is_in_initial_state()) {
+                    if (sim_state.is_in_initial_primitive_state()) {
                         if (sim_state.is_in_failure_state()) {
                             throw exception::SimulationFailureException();
                         }

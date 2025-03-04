@@ -3,7 +3,7 @@
 from libcpp.vector cimport vector
 cdef extern from "rad_units.hpp" namespace "sogbo_rad":
     cdef struct sim_conditions:
-        double dt, theta_obs, ad_gamma, current_time, p, z, eps_e, eps_b, d_L
+        double dt, theta_obs, adiabatic_index, current_time, p, z, eps_e, eps_b, d_L
         vector[double] nus
 
     cdef struct quant_scales:

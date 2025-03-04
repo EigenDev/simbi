@@ -318,7 +318,7 @@ def run(parser: argparse.ArgumentParser,
                 full_threed=False,
             )
             sim_info['dt'] = setup['dt']
-            sim_info['adiabatic_gamma'] = setup['ad_gamma']
+            sim_info['adiabatic_index'] = setup['adiabatic_index']
             sim_info['current_time'] = setup['time']
             t1 = pytime.time()
             if args.mode == 'fnu':

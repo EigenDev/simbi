@@ -9,7 +9,7 @@ Header file for low-level synchrotron radiation calculations
 
 namespace sogbo_rad {
     struct sim_conditions {
-        double dt, theta_obs, ad_gamma, current_time;
+        double dt, theta_obs, adiabatic_index, current_time;
         std::vector<double> nus;
     };
 

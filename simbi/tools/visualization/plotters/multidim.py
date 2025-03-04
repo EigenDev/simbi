@@ -8,7 +8,7 @@ from ..utils.formatting import PlotFormatter
 from ..utils.io import DataManager
 from ..core.mixins import DataHandlerMixin, AnimationMixin, CoordinatesMixin
 from ..core.base import BasePlotter
-from ....detail.helpers import find_nearest
+from ....functional.helpers import find_nearest
 from ..core.constants import LINEAR_FIELDS
 from ...utility import get_field_str
 
@@ -99,7 +99,7 @@ class MultidimPlotter(BasePlotter, DataHandlerMixin, AnimationMixin, Coordinates
                                 self.fig,
                                 plot,
                                 nfields,
-                                data.setup['x2max'],
+                                data.setup["x2max"],
                                 idx,
                                 label=next(labels),
                             )
@@ -114,13 +114,15 @@ class MultidimPlotter(BasePlotter, DataHandlerMixin, AnimationMixin, Coordinates
             if not self.cartesian
             else self.config["multidim"].box_depth
         )
-        coord_idx = find_nearest(mesh[f"x{self.config['multidim'].projection[2]}v"], depth)[0]
+        coord_idx = find_nearest(
+            mesh[f"x{self.config['multidim'].projection[2]}v"], depth
+        )[0]
         return (
             var[coord_idx]
-            if self.config['multidim'].projection[2] == 3
+            if self.config["multidim"].projection[2] == 3
             else (
                 var[:, coord_idx, :]
-                if self.config['multidim'].projection[2] == 2
+                if self.config["multidim"].projection[2] == 2
                 else var[:, :, coord_idx]
             )
         )
@@ -134,6 +136,7 @@ class MultidimPlotter(BasePlotter, DataHandlerMixin, AnimationMixin, Coordinates
         theta_cycle: cycle,
     ) -> tuple[NDArray[np.float64], NDArray[np.float64], NDArray[np.float64]]:
         """Position data in angular sectors"""
+
         def theta_sign(quadrant: int) -> int:
             return 1 if quadrant in [0, 3] else -1
 
@@ -153,7 +156,7 @@ class MultidimPlotter(BasePlotter, DataHandlerMixin, AnimationMixin, Coordinates
         """Create plot with appropriate normalization"""
         vmin = color_range[0] or var.min()
         vmax = color_range[1] or var.max()
-        
+
         # Handle uniform/near-uniform data
         if np.allclose(vmin, vmax, rtol=1e-10):
             if self.config["style"].log and field not in LINEAR_FIELDS:
@@ -166,7 +169,7 @@ class MultidimPlotter(BasePlotter, DataHandlerMixin, AnimationMixin, Coordinates
                 eps = max(abs(vmin) * 1e-2, 0.1)
                 vmin -= eps
                 vmax += eps
-                
+
         norm = (
             mcolors.LogNorm(vmin=vmin, vmax=vmax)
             if self.config["style"].log and field not in LINEAR_FIELDS
@@ -184,14 +187,14 @@ class MultidimPlotter(BasePlotter, DataHandlerMixin, AnimationMixin, Coordinates
             shading="auto",
             norm=norm,
         )
-        
+
     def _generate_theta_values(self, x2max: float, npatches: int) -> np.ndarray:
         """Generate theta values that shift backwards by 2*x2max
-        
+
         Args:
             x2max: Maximum theta value
             npatches: Number of patches to generate
-            
+
         Returns:
             Array of theta values
         """
@@ -201,6 +204,6 @@ class MultidimPlotter(BasePlotter, DataHandlerMixin, AnimationMixin, Coordinates
                 base[i] = 0
             else:
                 base[i] = -x2max * i
-                if base[i] < -2*x2max:  # Wrap around if needed
-                    base[i] += 4*x2max
+                if base[i] < -2 * x2max:  # Wrap around if needed
+                    base[i] += 4 * x2max
         return base

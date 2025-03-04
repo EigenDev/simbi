@@ -40,7 +40,7 @@ def py_calc_fnu(
     sim_cond.dt           = sim_info['dt']
     sim_cond.current_time = sim_info['current_time']
     sim_cond.theta_obs    = sim_info['theta_obs']
-    sim_cond.ad_gamma     = sim_info['adiabatic_gamma']
+    sim_cond.adiabatic_index     = sim_info['adiabatic_index']
     sim_cond.nus          = sim_info['nus'] * (1 + sim_info['z'])
     sim_cond.z            = sim_info['z']
     sim_cond.p            = sim_info['p']
@@ -98,7 +98,7 @@ def py_log_events(
     sim_cond.dt           = sim_info['dt']
     sim_cond.current_time = sim_info['current_time']
     sim_cond.theta_obs    = sim_info['theta_obs']
-    sim_cond.ad_gamma     = sim_info['adiabatic_gamma']
+    sim_cond.adiabatic_index     = sim_info['adiabatic_index']
     sim_cond.nus          = sim_info['nus'] * (1 + sim_info['z'])
     sim_cond.z            = sim_info['z']
     sim_cond.p            = sim_info['p']

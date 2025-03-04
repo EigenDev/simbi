@@ -7,13 +7,13 @@ from numpy.typing import NDArray
 from ..core.base import BasePlotter
 from ..utils.io import DataManager
 from ..utils.formatting import PlotFormatter
-from ....detail.helpers import find_nearest, calc_cell_volume
+from ....functional.helpers import find_nearest, calc_cell_volume
 from ... import utility as util
 
 
 class HistogramPlotter(BasePlotter, DataHandlerMixin, AnimationMixin, CoordinatesMixin):
     """Histogram plotter for distribution functions"""
-    
+
     def __init__(self, parser: ArgumentParser):
         super().__init__(parser)
         self.data_manager = DataManager(
@@ -61,8 +61,8 @@ class HistogramPlotter(BasePlotter, DataHandlerMixin, AnimationMixin, Coordinate
             mass = dV * fields["W"] * fields["rho"]
             var = (fields["W"] - 1.0) * mass * util.e_scale.value
         elif self.config["plot"].hist_type == "enthalpy":
-            enthalpy = 1.0 + fields["ad_gamma"] * fields["p"] / (
-                fields["rho"] * (fields["ad_gamma"] - 1.0)
+            enthalpy = 1.0 + fields["adiabatic_index"] * fields["p"] / (
+                fields["rho"] * (fields["adiabatic_index"] - 1.0)
             )
             var = (enthalpy - 1.0) * dV * util.e_scale.value
         elif self.config["plot"].hist_type == "mass":
@@ -78,7 +78,7 @@ class HistogramPlotter(BasePlotter, DataHandlerMixin, AnimationMixin, Coordinate
     ) -> Tuple[np.ndarray, np.ndarray]:
         """Compute histogram data"""
         gamma_beta = fields["gamma_beta"]
-        gbs = np.geomspace(1e-5, gamma_beta.max() + 1.e-4, 128)
+        gbs = np.geomspace(1e-5, gamma_beta.max() + 1.0e-4, 128)
 
         # Compute cumulative distribution
         hist_data = np.array([var[gamma_beta > gb].sum() for gb in gbs])
@@ -173,21 +173,19 @@ class HistogramPlotter(BasePlotter, DataHandlerMixin, AnimationMixin, Coordinate
 
             # Set axis properties
             if not any(self.config["style"].xlims):
-                xlims = (gbs.min()*0.8, gbs.max()*1.5)
+                xlims = (gbs.min() * 0.8, gbs.max() * 1.5)
             else:
                 xlims = self.config["style"].xlims
-            
+
             if not any(self.config["style"].ylims):
-                ylims = (hist_data.min()*0.9, hist_data.max() * 1.5)
+                ylims = (hist_data.min() * 0.9, hist_data.max() * 1.5)
                 if hist_data.min() <= 0:
                     ylims = (None, hist_data.max() * 1.5)
             else:
                 ylims = self.config["style"].ylims
-                
+
             self.formatter.set_axes_properties(self.fig, ax, data.setup, self.config)
-            self.formatter.setup_axis_style(
-                ax, xlim=xlims, ylim=ylims
-            )
+            self.formatter.setup_axis_style(ax, xlim=xlims, ylim=ylims)
 
             # if self.legend:
             #     alpha = 0.0 if self.transparent else 1.0

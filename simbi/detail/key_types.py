@@ -11,7 +11,7 @@ from typing import (
     Iterable,
     Type,
 )
-from numpy import float64 as numpy_float, string_ as numpy_string, int64 as numpy_int
+from numpy import float64 as numpy_float, int64 as numpy_int
 
 FloatOrArray = Union[float, NDArray[Any]]
 FloatOrNone = Optional[float]

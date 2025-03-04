@@ -155,7 +155,7 @@ namespace simbi {
         // Solver configuration
         Solver solver_type_;
         std::string spatial_order_;
-        std::string time_order_;
+        std::string temporal_order_;
         bool use_pcm_;
         bool using_rk1_;
         bool quirk_smoothing_;
@@ -172,12 +172,12 @@ namespace simbi {
         DUAL SolverManager(const InitialConditions& init)
             : solver_type_(get_solver(init.solver)),
               spatial_order_(init.spatial_order),
-              time_order_(init.time_order),
+              temporal_order_(init.temporal_order),
               use_pcm_(spatial_order_ == "pcm"),
-              using_rk1_(time_order_ == "rk1"),
+              using_rk1_(temporal_order_ == "rk1"),
               quirk_smoothing_(init.quirk_smoothing),
               plm_theta_(init.plm_theta),
-              step_((time_order_ == "rk1") ? 1.0 : 0.5)
+              step_((temporal_order_ == "rk1") ? 1.0 : 0.5)
         {
             set_boundary_conditions(init.boundary_conditions);
         }
@@ -203,7 +203,7 @@ namespace simbi {
         // Accessors
         DUAL auto solver_type() const { return solver_type_; }
         DUAL auto spatial_order() const { return spatial_order_; }
-        DUAL auto time_order() const { return time_order_; }
+        DUAL auto temporal_order() const { return temporal_order_; }
         DUAL bool is_pcm() const { return use_pcm_; }
         DUAL bool is_rk1() const { return using_rk1_; }
         DUAL bool is_quirk() const { return quirk_smoothing_; }

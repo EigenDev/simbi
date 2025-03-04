@@ -1,6 +1,7 @@
 plots/
 build/
 builddir/
+simbi/src/libs/
 src/libs/
 *.egg-info/
 data/

@@ -80,9 +80,9 @@ namespace simbi {
             const GridManager& grid,
             const InitialConditions& init
         )
-            : gpu_block_dimx_(get_block_dims("GPUXBLOCK_SIZE")),
-              gpu_block_dimy_(get_block_dims("GPUYBLOCK_SIZE")),
-              gpu_block_dimz_(get_block_dims("GPUZBLOCK_SIZE"))
+            : gpu_block_dimx_(get_block_dims("GPU_BLOCK_X")),
+              gpu_block_dimy_(get_block_dims("GPU_BLOCK_Y")),
+              gpu_block_dimz_(get_block_dims("GPU_BLOCK_Z"))
         {
             compute_execution_policies(grid, init);
         }

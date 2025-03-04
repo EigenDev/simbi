@@ -282,9 +282,6 @@ namespace simbi {
             derived.cons2prim_impl();
             adapt_dt();
 
-            std::cout << "Starting simulation" << std::endl;
-            std::cin.get();
-
             // Main simulation loop
             detail::logger::with_logger(derived, tend(), [&] {
                 // Single timestep advance
@@ -347,7 +344,7 @@ namespace simbi {
             return conserved_boundary_manager_;
         }
 
-        DUAL auto adiabatic_gamma() const { return gamma; }
+        DUAL auto adiabatic_index() const { return gamma; }
 
         // accessors from solver manager class
         DUAL auto solver_type() const { return solver_config_.solver_type(); }
@@ -367,7 +364,10 @@ namespace simbi {
         {
             return solver_config_.spatial_order();
         }
-        DUAL auto time_order() const { return solver_config_.time_order(); }
+        DUAL auto temporal_order() const
+        {
+            return solver_config_.temporal_order();
+        }
 
         // accessors from time manager class
         DUAL auto time() const { return time_manager_.time(); }
@@ -483,7 +483,7 @@ namespace simbi {
         void has_crashed() { has_crashed_ = true; }
         void has_failed() { set_failure_state(true); }
         bool has_been_interrupted() const { return was_interrupted_; }
-        bool is_in_initial_state() const
+        bool is_in_initial_primitive_state() const
         {
             return time() == 0.0 || checkpoint_idx() == 0;
         }

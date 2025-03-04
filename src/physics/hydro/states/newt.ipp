@@ -467,7 +467,6 @@ void Newtonian<dim>::advance_impl()
 template <int dim>
 void Newtonian<dim>::init_simulation()
 {
-    // load_functions();
     init_riemann_solver();
     this->apply_boundary_conditions();
     // use parent's sync to device method

@@ -61,9 +61,9 @@ struct InitialConditions {
     std::vector<std::vector<real>> sources, gsources, osources, bfield;
     std::vector<bool> object_cells;
     std::string data_directory, coord_system, solver;
-    std::string x1_cell_spacing, x2_cell_spacing, x3_cell_spacing, regime;
+    std::string x1_spacing, x2_spacing, x3_spacing, regime;
     std::string hydro_source_lib, gravity_source_lib, boundary_source_lib;
-    std::string spatial_order, time_order;
+    std::string spatial_order, temporal_order;
     std::vector<std::string> boundary_conditions;
     std::pair<real, real> x1bounds;
     std::pair<real, real> x2bounds;

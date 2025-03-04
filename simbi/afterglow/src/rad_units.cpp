@@ -498,7 +498,7 @@ namespace sogbo_rad {
                     //================================================================
                     const auto rho_einternal =
                         pre[central_idx] * qscales.pre_scale /
-                        (args.ad_gamma - 1.0) *
+                        (args.adiabatic_index - 1.0) *
                         units::erg_per_cm3;   // internal energy density
                     const auto bfield = calc_shock_bfield(
                         rho_einternal,
@@ -707,7 +707,7 @@ namespace sogbo_rad {
 
                     const auto rho_einternal =
                         pre[central_idx] * qscales.pre_scale /
-                        (args.ad_gamma - 1.0) *
+                        (args.adiabatic_index - 1.0) *
                         units::erg_per_cm3;   // internal energy density
                     const auto bfield = calc_shock_bfield(
                         rho_einternal,

@@ -2,7 +2,7 @@ from matplotlib.animation import FuncAnimation
 from typing import Dict, Any
 from matplotlib import colors as mcolors
 from ..core.constants import DERIVED
-from ....detail.helpers import calc_any_mean
+from ....functional.helpers import calc_any_mean
 from ... import utility as util
 import numpy as np
 from numpy.typing import NDArray
@@ -61,10 +61,10 @@ class AnimationMixin:
 
     def _update_title(self, setup: dict) -> None:
         """Update plot title"""
-        time = setup["time"] * (util.time_scale if self.config['style'].units else 1.0)
+        time = setup["time"] * (util.time_scale if self.config["style"].units else 1.0)
         setup_name = self.config["plot"].setup
         title = rf"{setup_name} t = {time:.1f}"
-        if setup["is_cartesian"] or self.config['multidim'].slice_along:
+        if setup["is_cartesian"] or self.config["multidim"].slice_along:
             if isinstance(self.axes, list):
                 self.axes[0].set_title(title)
             else:
@@ -83,14 +83,14 @@ class AnimationMixin:
         setup: dict[str, Any],
     ) -> None:
         """Update plot data"""
-        if self.config['plot'].ndim == 1:
+        if self.config["plot"].ndim == 1:
             self.axes[0].set_xlim(setup["x1min"], setup["x1max"])
-            x = calc_any_mean(mesh["x1v"], setup["x1_cell_spacing"])
+            x = calc_any_mean(mesh["x1v"], setup["x1_spacing"])
             self.frames[idx].set_data(x, var)
-        elif self.config['multidim'].slice_along:
+        elif self.config["multidim"].slice_along:
             x = calc_any_mean(
                 mesh[f"{self.config['multidim'].slice_along}v"],
-                setup[f"{self.config['multidim'].slice_along}_cell_spacing"],
+                setup[f"{self.config['multidim'].slice_along}_spacing"],
             )
             sliced_var = self.get_slice_data(var, mesh, setup)
             self.frames[idx].set_data(x, sliced_var)
@@ -125,7 +125,7 @@ class CoordinatesMixin:
 
     def transform_coordinates(self, mesh: dict, setup: dict) -> tuple:
         """Transform coordinates based on system"""
-        if self.config['multidim'].slice_along:
+        if self.config["multidim"].slice_along:
             return self._transform_slice_coords(mesh, setup)
         elif not setup["is_cartesian"]:
             return self._transform_polar(mesh, setup)
@@ -135,7 +135,7 @@ class CoordinatesMixin:
         """Transform coordinates for 1D slice"""
         x = calc_any_mean(
             mesh[f"{self.config['multidim'].slice_along}v"],
-            setup[f"{self.config['multidim'].slice_along}_cell_spacing"],
+            setup[f"{self.config['multidim'].slice_along}_spacing"],
         )
         return x, self._get_slice_indices(mesh, setup)
 
@@ -143,9 +143,9 @@ class CoordinatesMixin:
         self, mesh: dict[str, NDArray[np.float64]], setup: dict[str, Any]
     ) -> tuple:
         """Get the permuted indices for slice through higher dimensions"""
-        if self.config['multidim'].slice_along == "x1":
+        if self.config["multidim"].slice_along == "x1":
             return "x2v", "x3v"
-        elif self.config['multidim'].slice_along == "x2":
+        elif self.config["multidim"].slice_along == "x2":
             return "x3v", "x1v"
         else:
             return "x1v", "x2v"
@@ -165,9 +165,9 @@ class CoordinatesMixin:
                 if self.config["plot"].ndim == 2:
                     return jidx
                 else:
-                    if self.config['multidim'].slice_along == "x1":
+                    if self.config["multidim"].slice_along == "x1":
                         slice = np.s_[kidx, jidx, :]
-                    elif self.config['multidim'].slice_along == "x2":
+                    elif self.config["multidim"].slice_along == "x2":
                         slice = np.s_[jidx, :, kidx]
                     else:
                         slice = np.s_[:, kidx, jidx]
@@ -175,8 +175,8 @@ class CoordinatesMixin:
 
     def _transform_polar(self, mesh: dict, setup: dict[str, Any]) -> tuple:
         """Handle polar coordinate transforms"""
-        x1c = calc_any_mean(mesh["x1v"], setup["x1_cell_spacing"])
-        x2c = calc_any_mean(mesh["x2v"], setup["x2_cell_spacing"])
+        x1c = calc_any_mean(mesh["x1v"], setup["x1_spacing"])
+        x2c = calc_any_mean(mesh["x2v"], setup["x2_spacing"])
         xx, yy = np.meshgrid(x1c, x2c)[::-1]
         if self.config["multidim"].bipolar:
             xx *= -1
@@ -189,7 +189,7 @@ class CoordinatesMixin:
         dim = self.config["plot"].ndim
         if dim == 1:
             return (
-                calc_any_mean(mesh["x1v"], setup["x1_cell_spacing"]),
+                calc_any_mean(mesh["x1v"], setup["x1_spacing"]),
                 range(len(mesh["x1v"])),
             )
         elif dim == 2:

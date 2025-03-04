@@ -19,8 +19,8 @@ cdef extern from "core/types/utility/init_conditions.hpp":
         bool quirk_smoothing, mesh_motion, homologous
         vector[vector[real]] sources, bfield
         string data_directory, coord_system, solver
-        string x1_cell_spacing, x2_cell_spacing, x3_cell_spacing
-        string spatial_order, time_order
+        string x1_spacing, x2_spacing, x3_spacing
+        string spatial_order, temporal_order
         string hydro_source_lib, gravity_source_lib, boundary_source_lib
         pair[real, real] x1bounds, x2bounds, x3bounds
         vector[string] boundary_conditions

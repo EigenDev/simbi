@@ -75,16 +75,16 @@ namespace simbi {
             static auto data_directory      = sim_state.data_directory();
             auto step                       = sim_state.checkpoint_idx();
             static lint tchunk_order_of_mag = 2;
-            const auto time_order_of_mag =
+            const auto temporal_order_of_mag =
                 std::floor(std::log10(sim_state.time()));
-            if (time_order_of_mag > tchunk_order_of_mag) {
+            if (temporal_order_of_mag > tchunk_order_of_mag) {
                 tchunk_order_of_mag += 1;
             }
 
             std::string tnow;
             if (sim_state.dlogt() != 0) {
-                const auto time_order_of_mag = std::floor(std::log10(step));
-                if (time_order_of_mag > tchunk_order_of_mag) {
+                const auto temporal_order_of_mag = std::floor(std::log10(step));
+                if (temporal_order_of_mag > tchunk_order_of_mag) {
                     tchunk_order_of_mag += 1;
                 }
                 tnow = format_real(step);
@@ -305,16 +305,16 @@ namespace simbi {
             auto x3min          = state.mesh().geometry_state().min_bound(2);
             auto x3max          = state.mesh().geometry_state().max_bound(2);
             auto checkpoint_idx = state.io().checkpoint_idx();
-            auto gamma_val      = state.adiabatic_gamma();
+            auto gamma_val      = state.adiabatic_index();
             auto spatial_order  = state.spatial_order();
-            auto time_order     = state.time_order();
+            auto temporal_order = state.temporal_order();
             auto geometry       = state.mesh().geometry_to_c_str();
 
             const std::vector<std::pair<std::string, const void*>> attributes =
                 {{"current_time", &time_val},
                  {"time_step", &dt_val},
                  {"spatial_order", spatial_order.c_str()},
-                 {"time_order", time_order.c_str()},
+                 {"temporal_order", temporal_order.c_str()},
                  {"using_gamma_beta", &using_fourvel},
                  {"mesh_motion", &mesh_moving},
                  {"x1max", &x1max},
@@ -323,7 +323,7 @@ namespace simbi {
                  {"x2min", &x2min},
                  {"x3max", &x3max},
                  {"x3min", &x3min},
-                 {"adiabatic_gamma", &gamma_val},
+                 {"adiabatic_index", &gamma_val},
                  {"nx", &nx_val},
                  {"ny", &ny_val},
                  {"nz", &nz_val},
@@ -331,19 +331,19 @@ namespace simbi {
                  {"geometry", geometry},
                  {"regime", regime.c_str()},
                  {"dimensions", &state.dimensions},
-                 {"x1_cell_spacing",
+                 {"x1_spacing",
                   cell2str.at(state.mesh().geometry_state().spacing_type(0))
                       .c_str()},
-                 {"x2_cell_spacing",
+                 {"x2_spacing",
                   cell2str.at(state.mesh().geometry_state().spacing_type(1))
                       .c_str()},
-                 {"x3_cell_spacing",
+                 {"x3_spacing",
                   cell2str.at(state.mesh().geometry_state().spacing_type(2))
                       .c_str()}};
 
             for (const auto& [name, value] : attributes) {
                 H5::DataType type;
-                if (name == "spatial_order" || name == "time_order" ||
+                if (name == "spatial_order" || name == "temporal_order" ||
                     name == "geometry" || name == "regime" ||
                     name.find("cell_spacing") != std::string::npos) {
 

@@ -21,11 +21,11 @@ class magneticBomb(BaseConfig):
     """
 
     # Dynamic Args to be fed to argparse
-    rho0 = DynamicArg("rho0", 1.e-4, help="density scale", var_type=float)
-    p0 = DynamicArg("p0", 3.e-5, help="pressure scale", var_type=float)
+    rho0 = DynamicArg("rho0", 1.0e-4, help="density scale", var_type=float)
+    p0 = DynamicArg("p0", 3.0e-5, help="pressure scale", var_type=float)
     b0 = DynamicArg("b0", 0.1, help="magnetic field scale", var_type=float)
     nzones = DynamicArg("nzones", 256, help="number of zones in x and y", var_type=int)
-    ad_gamma = DynamicArg(
+    adiabatic_index = DynamicArg(
         "ad-gamma", 4.0 / 3.0, help="Adiabtic gas index", var_type=float
     )
 
@@ -47,7 +47,7 @@ class magneticBomb(BaseConfig):
         )
 
         xx, yy = np.meshgrid(x1, x2)
-        rr = np.sqrt(xx ** 2 + yy ** 2)
+        rr = np.sqrt(xx**2 + yy**2)
         exp_reg = rr < REXP
         pslope = (PEXP - self.p0) / (RSTOP - REXP)
         rhoslope = (RHOEXP - self.rho0) / (RSTOP - REXP)
@@ -58,7 +58,7 @@ class magneticBomb(BaseConfig):
         self.rho[:, rbound] = RHOEXP - rhoslope * (rr[rbound] - REXP)
 
     @simbi_property
-    def initial_state(self) -> Sequence[NDArray[numpy_float]]:
+    def initial_primitive_state(self) -> Sequence[NDArray[numpy_float]]:
         return (
             self.rho,
             self.v1,
@@ -71,11 +71,11 @@ class magneticBomb(BaseConfig):
         )
 
     @simbi_property
-    def geometry(self) -> Sequence[Sequence[Any]]:
+    def bounds(self) -> Sequence[Sequence[Any]]:
         return ((XMIN, XMAX), (XMIN, XMAX), (0, 1))
 
     @simbi_property
-    def x1_cell_spacing(self) -> str:
+    def x1_spacing(self) -> str:
         return "linear"
 
     @simbi_property
@@ -87,8 +87,8 @@ class magneticBomb(BaseConfig):
         return (self.nzones, self.nzones, 1)
 
     @simbi_property
-    def gamma(self) -> DynamicArg:
-        return self.ad_gamma
+    def adiabatic_index(self) -> DynamicArg:
+        return self.adiabatic_index
 
     @simbi_property
     def regime(self) -> str:

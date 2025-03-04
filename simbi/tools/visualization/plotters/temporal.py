@@ -7,7 +7,7 @@ from numpy.typing import NDArray
 from ..utils.io import DataManager
 from ..utils.formatting import PlotFormatter
 from ..core.base import BasePlotter
-from ....detail.helpers import calc_cell_volume
+from ....functional.helpers import calc_cell_volume
 from ... import utility as util
 from ..core.constants import DERIVED
 
@@ -38,7 +38,7 @@ class TemporalPlotter(BasePlotter):
 
     def create_figure(self):
         """Create figure with appropriate styling"""
-        self.fig, self.axes = plt.subplots(1, 1, figsize=self.config['style'].fig_dims)
+        self.fig, self.axes = plt.subplots(1, 1, figsize=self.config["style"].fig_dims)
 
     def _calc_volume(
         self, mesh: dict[str, NDArray[np.float64]], setup: dict[str, Any]
@@ -114,14 +114,16 @@ class TemporalPlotter(BasePlotter):
 
     def plot(self):
         """Main plotting method"""
-            # Compute time series
+        # Compute time series
         series = self._compute_time_series()
         times, data = series.array
 
         # Plot main data
-        label = self.config['style'].labels or None
+        label = self.config["style"].labels or None
         self.frames.append(self.axes.plot(times, data, label=label, alpha=1.0)[0])
-        self.formatter.set_axes_properties(self.fig, self.axes, {"dimensions": 1}, self.config)
+        self.formatter.set_axes_properties(
+            self.fig, self.axes, {"dimensions": 1}, self.config
+        )
         self.formatter.setup_axis_style(self.axes)
         # Add power law fits if requested
         # if (

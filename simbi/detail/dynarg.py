@@ -1,4 +1,5 @@
 import math
+import inspect
 from ..key_types import *
 import numpy as np
 
@@ -15,6 +16,30 @@ class DynamicArg:
         choices: Optional[list[Any]] = None,
         action: Optional[str] = "store",
     ) -> None:
+        # require that all DynamicArg instances are defined within a class
+        # named `config`
+        frame = inspect.currentframe()
+        try:
+            if frame and frame.f_back:
+                # get the class name where this DynamicArg is being defined
+                local_vars = frame.f_back.f_locals
+                if "__module__" in local_vars and "__qualname__" in local_vars:
+                    qualified_name = local_vars["__qualname__"]
+                    # Check if we're in a class named 'config' at any level
+                    if not qualified_name.endswith(".config"):
+                        raise ValueError(
+                            f"DynamicArg must be defined within a 'config' class.\n"
+                            f"Example:\n\n"
+                            f"class MyProblem(BaseConfig):\n"
+                            f"    class config:\n"
+                            f"        {name} = DynamicArg(...)\n"
+                            f"\n"
+                            f"Current context: {qualified_name}"
+                        )
+        finally:
+            # to avoid reference cycles...
+            del frame
+
         self.name = name
         self.value = var_type(value)
         self.help = help
@@ -151,9 +176,13 @@ class DynamicArg:
 
     def sqrt(self) -> float:
         return math.sqrt(self.value)
-    
+
     def __array_function__(
-        self, func: Callable[..., Any], types: list[type], args: tuple[Any], kwargs: dict[str, Any]
+        self,
+        func: Callable[..., Any],
+        types: list[type],
+        args: tuple[Any],
+        kwargs: dict[str, Any],
     ) -> Any:
         sanitized_args = []
         for arg in args:

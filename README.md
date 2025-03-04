@@ -100,17 +100,17 @@ $ CC=<your_c_compiler> CXX=<your_cpp_compiler> meson setup <build_dir> -Dcpp_std
     scripts provided. For example:
 
     ``` bash
-    $ simbi run simbi_configs/examples/marti_muller.py --mode gpu --nzones 100 --ad-gamma 1.4 
+    $ simbi run simbi_configs/examples/marti_muller.py --mode gpu --nzones 100 --ad-index 1.4 
     # or one could do 
-    $ simbi run marti_muller --mode gpu --nzones 100 --ad-gamma 1.4
+    $ simbi run marti_muller --mode gpu --nzones 100 --ad-index 1.4
     # or 
-    $ simbi run marti-muller --mode gpu --nzones 100 --ad-gamma 1.4
+    $ simbi run marti-muller --mode gpu --nzones 100 --ad-index 1.4
     # since the entry point is built to recursively search the simbi_configs/ folder for valid .py scripts
     # and dash-cased searches for file matches with underscores
     ```
 
     where `--mode` is a global command line option available for every
-    config script, and `--nzones` and `--ad-gamma` are problem-specific options
+    config script, and `--nzones` and `--ad-index` are problem-specific options
     that are dynamically parsed based on whatever `DynamicArg` variables
     exist in the config script you create. Check out how to create one of
     these configuration scripts in the `simbi_configs/examples/` folder! When creating

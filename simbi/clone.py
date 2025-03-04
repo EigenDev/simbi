@@ -54,16 +54,16 @@ class {setup_name}(BaseConfig):
         raise NotImplementedError()
 
     @simbi_property
-    def geometry(self) -> Union[Sequence[Union[float, DynamicArg]],
+    def bounds(self) -> Union[Sequence[Union[float, DynamicArg]],
                                 Sequence[Sequence[Union[float, DynamicArg]]]]:
         raise NotImplementedError()
 
     @simbi_property
-    def gamma(self) -> Union[float, DynamicArg]:
+    def adiabatic_index(self) -> Union[float, DynamicArg]:
         raise NotImplementedError()
 
     @simbi_property
-    def x1_cell_spacing(self) -> str:
+    def x1_spacing(self) -> str:
         return "linear"
 
     @simbi_property
@@ -118,10 +118,6 @@ class {setup_name}(BaseConfig):
         return False
 
     @simbi_property
-    def constant_sources(self) -> bool:
-        return False
-
-    @simbi_property
     def x1(self) -> Optional[NDArray[numpy_float]]:
         return None
 
@@ -146,7 +142,7 @@ class {setup_name}(BaseConfig):
         return "second"
 
     @simbi_property
-    def check_point_interval(self) -> float:
+    def checkpoint_interval(self) -> float:
         return 0.1
 
     @simbi_property
@@ -154,22 +150,24 @@ class {setup_name}(BaseConfig):
         return 0.0
 """
 
+
 def pascalcase(name: str) -> str:
-    return ''.join(x for x in name.title() if not x.isspace())
-    
+    return "".join(x for x in name.title() if not x.isspace())
+
+
 def generate(name: str):
-    with open(Path(__file__).resolve().parent / 'gitrepo_home.txt') as f:
+    with open(Path(__file__).resolve().parent / "gitrepo_home.txt") as f:
         githome = f.read()
-    
-    if not name.endswith('.py'):
-        name += '.py'
-        
-    name = name.replace(' ', '_').replace('-', '_')
-    setup_name = str(Path(name.replace('_', ' ')).stem)
-    file = Path(githome).resolve() / 'simbi_configs' / name
+
+    if not name.endswith(".py"):
+        name += ".py"
+
+    name = name.replace(" ", "_").replace("-", "_")
+    setup_name = str(Path(name.replace("_", " ")).stem)
+    file = Path(githome).resolve() / "simbi_configs" / name
     if file.is_file():
         raise ValueError(f"{file} already exists")
-    
+
     print(f"generating {file} file...")
-    with open(file, 'w') as f:
-        f.write(setup_clone.format(setup_name = pascalcase(setup_name)))
+    with open(file, "w") as f:
+        f.write(setup_clone.format(setup_name=pascalcase(setup_name)))

@@ -183,6 +183,10 @@ class PlotFormatter:
                 ax.set_xlabel(rf"${config['style'].xlabel}$")
                 ax.set_ylabel(rf"${config['style'].ylabel}$")
                 ax.set_title(f"{config['plot'].setup} t = {setup['time']:.2f}")
+                if any(config["style"].xlims):
+                    ax.set_xlim(config["style"].xlims)
+                if any(config["style"].ylims):
+                    ax.set_ylim(config["style"].ylims)
 
     @staticmethod
     def format_cartesian_colorbar(
