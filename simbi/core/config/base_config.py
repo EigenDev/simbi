@@ -2,6 +2,7 @@ import argparse
 import abc
 import logging
 import math
+import numpy as np
 from ...detail.dynarg import DynamicArg
 from ..managers.validator import ConfigValidator
 from ..config.initialization import InitializationConfig
@@ -18,9 +19,7 @@ from typing import (
 
 from ...functional.maybe import Maybe
 from numpy.typing import NDArray
-from numpy import float64 as numpy_float
-from numpy import int32 as numpy_int
-from numpy import str_ as numpy_string
+
 from pathlib import Path
 from ..managers import (
     SourceManager,
@@ -105,7 +104,7 @@ class BaseConfig(metaclass=abc.ABCMeta):
     ) -> Union[
         int,
         Sequence[Union[int, DynamicArg]],
-        NDArray[numpy_int],
+        NDArray[np.int64],
         DynamicArg,
         Sequence[Sequence[Union[int, DynamicArg]]],
     ]:
@@ -138,7 +137,7 @@ class BaseConfig(metaclass=abc.ABCMeta):
         return "linear"
 
     @simbi_property(group="sim_state")
-    def passive_scalars(self) -> Optional[Union[Sequence[float], NDArray[numpy_float]]]:
+    def passive_scalars(self) -> Optional[Union[Sequence[float], NDArray[np.float64]]]:
         return None
 
     @simbi_property(group="sim_state")
@@ -154,7 +153,7 @@ class BaseConfig(metaclass=abc.ABCMeta):
         return "hllc"
 
     @simbi_property(group="mesh")
-    def boundary_conditions(self) -> Union[Sequence[str], str, NDArray[numpy_string]]:
+    def boundary_conditions(self) -> Union[Sequence[str], str, NDArray[np.str_]]:
         return "outflow"
 
     @simbi_property(group="sim_state")
@@ -323,14 +322,19 @@ class BaseConfig(metaclass=abc.ABCMeta):
     def setup_cli(
         cls, main_parser: argparse.ArgumentParser, run_parser: argparse.ArgumentParser
     ) -> None:
-        cls.cli_manager(main_parser, run_parser)
+        cls.cli_manager = CLIManager.from_parsers(main_parser, run_parser)
         for dynamic_arg in cls.dynamic_args:
             cls.cli_manager.register_dynamic_arg(dynamic_arg)
 
     @final
     @classmethod
-    def parse_args(cls) -> dict[str, Any]:
-        return cls.cli_manager.parse_args()
+    def parse_args_and_update_configuration(cls) -> None:
+        extra_args = cls.cli_manager.parse_args()
+        # update any dynamic_arg values with the values
+        # that were parsed from the command line
+        for arg in cls.dynamic_args:
+            if arg.name in extra_args:
+                arg.value = extra_args[arg.name]
 
     @final
     @classmethod

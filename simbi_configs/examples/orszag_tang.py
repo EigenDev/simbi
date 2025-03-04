@@ -1,6 +1,6 @@
 import numpy as np
 from simbi import BaseConfig, simbi_property, DynamicArg
-from simbi.key_types import *
+
 
 XMIN = 0.0
 XMAX = 2.0 * np.pi
@@ -44,7 +44,7 @@ class OrszagTang(BaseConfig):
         self.cs: float = (self.adiabatic_index - 1.0) / self.adiabatic_index
 
     @simbi_property
-    def initial_primitive_state(self) -> Sequence[NDArray[numpy_float]]:
+    def initial_primitive_state(self) -> Sequence[NDArray[np.float64]]:
         return (
             self.rho,
             self.v1,

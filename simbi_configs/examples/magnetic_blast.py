@@ -1,6 +1,5 @@
 import numpy as np
 from simbi import BaseConfig, simbi_property, DynamicArg, compute_num_polar_zones
-from simbi.key_types import *
 
 XMIN = -6.0
 XMAX = 6.0
@@ -10,7 +9,7 @@ REXP = 0.08
 RSTOP = 1.0
 
 
-def find_nearest(arr: NDArray[numpy_float], val: float) -> Tuple[Any, Any]:
+def find_nearest(arr: NDArray[np.float64], val: float) -> Tuple[Any, Any]:
     idx = np.argmin(np.abs(arr - val))
     return idx, arr[idx]
 
@@ -58,7 +57,7 @@ class magneticBomb(BaseConfig):
         self.rho[:, rbound] = RHOEXP - rhoslope * (rr[rbound] - REXP)
 
     @simbi_property
-    def initial_primitive_state(self) -> Sequence[NDArray[numpy_float]]:
+    def initial_primitive_state(self) -> Sequence[NDArray[np.float64]]:
         return (
             self.rho,
             self.v1,

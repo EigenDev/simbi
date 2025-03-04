@@ -3,10 +3,10 @@ import sys
 import linecache
 import os
 import tracemalloc
-
+from numpy.typing import NDArray
+from typing import Any, Callable, Generator, Optional, Sequence, Union, cast
 from ..io.logging import logger
 from time import sleep
-from ..key_types import *
 from typing import TextIO, Generator
 
 
@@ -24,7 +24,6 @@ __all__ = [
     "pad_jagged_array",
     "display_top",
 ]
-generic_numpy_array = NDArray[Any]
 
 
 def as_list(x: Any) -> list[Any]:
@@ -34,16 +33,14 @@ def as_list(x: Any) -> list[Any]:
         return [x]
 
 
-def calc_any_mean(arr: generic_numpy_array, cellspacing: str) -> Any:
+def calc_any_mean(arr: NDArray[Any], cellspacing: str) -> Any:
     if cellspacing == "linear":
         return 0.5 * (arr[1:] + arr[:-1])
     else:
         return np.sqrt(arr[1:] * arr[:-1])
 
 
-def calc_centroid(
-    arr: generic_numpy_array, coord_system: str = "spherical"
-) -> generic_numpy_array:
+def calc_centroid(arr: NDArray[Any], coord_system: str = "spherical") -> NDArray[Any]:
     if coord_system == "spherical":
         return np.asanyarray(
             0.75
@@ -61,7 +58,7 @@ def calc_centroid(
 
 
 def calc_vertices(
-    *, arr: generic_numpy_array, direction: int, cell_spacing: str = "linear"
+    *, arr: NDArray[Any], direction: int, cell_spacing: str = "linear"
 ) -> Any:
     if direction not in [1, 2, 3]:
         raise ValueError("Direction must be either 1, 2, or 3")
@@ -70,7 +67,7 @@ def calc_vertices(
     padding[-direction] = [1, 1]
     padding = tuple([tuple(tup) for tup in padding])
 
-    tmp: generic_numpy_array = np.pad(arr, padding, "edge")
+    tmp: NDArray[Any] = np.pad(arr, padding, "edge")
     if dims == 1:
         if cell_spacing == "linear":
             return np.asarray(0.5 * (tmp[1:] + tmp[:-1]))
@@ -105,9 +102,7 @@ def calc_vertices(
                 return np.sqrt(tmp[..., 1:] * tmp[..., :-1])
 
 
-def calc_domega(
-    *, x2: generic_numpy_array, x3: generic_numpy_array | None = None
-) -> generic_numpy_array:
+def calc_domega(*, x2: NDArray[Any], x3: NDArray[Any] | None = None) -> NDArray[Any]:
     x2v = calc_vertices(arr=x2, direction=1)
     dcos = np.cos(x2v[:-1]) - np.cos(x2v[1:])
     if x3:
@@ -116,44 +111,49 @@ def calc_domega(
 
     return np.asanyarray(2.0 * np.pi * dcos)
 
-def get_vertices(coords: np.ndarray, is_radial: bool = False, axis: int = -1) -> np.ndarray:
+
+def get_vertices(
+    coords: np.ndarray, is_radial: bool = False, axis: int = -1
+) -> np.ndarray:
     """Calculate vertices from cell centers or return input if already vertices"""
     if is_radial:
         vertices = np.sqrt(coords[..., 1:] * coords[..., :-1])
     else:
         vertices = 0.5 * (coords[..., 1:] + coords[..., :-1])
-    
+
     # Add boundary vertices
     vertices = np.insert(vertices, 0, coords[..., 0], axis=axis)
     vertices = np.insert(vertices, vertices.shape[axis], coords[..., -1], axis=axis)
     return vertices
 
+
 def calc_volume_1d(x1v: np.ndarray, coord_system: str) -> np.ndarray:
     """Calculate 1D cell volumes from vertices"""
     dx1 = x1v[1:] - x1v[:-1]
-    
+
     if coord_system in ["spherical"]:
         x1mean = np.sqrt(x1v[1:] * x1v[:-1])
         return 4.0 * np.pi * x1mean * x1mean * dx1
     elif coord_system in ["cylindrical"]:
         x1mean = np.sqrt(x1v[1:] * x1v[:-1])
         return 2.0 * np.pi * x1mean * dx1
-    
+
     return dx1**3
+
 
 def calc_volume_2d(x1v: np.ndarray, x2v: np.ndarray, coord_system: str) -> np.ndarray:
     """Calculate 2D cell volumes from vertices
-    
+
     Args:
         x1v: (n1+1,) vertex coordinates along first dimension
         x2v: (n2+1,) vertex coordinates along second dimension
-        
+
     Returns:
         (n2, n1) array of cell volumes
     """
     # Create meshgrids from vertices
     x1vv, _ = np.meshgrid(x1v, x2v, indexing="ij")
-    
+
     if coord_system == "spherical":
         # dr³ has shape (n1, n2)
         dr3 = (x1vv[1:] ** 3 - x1vv[:-1] ** 3) / 3.0
@@ -161,22 +161,25 @@ def calc_volume_2d(x1v: np.ndarray, x2v: np.ndarray, coord_system: str) -> np.nd
         dcos = np.cos(x2v[:-1]) - np.cos(x2v[1:])
         # Broadcast for multiplication
         return (2.0 * np.pi * dr3[:, :-1] * dcos[None, :]).T
-        
+
     elif coord_system == "cartesian":
         dx = x1v[1:] - x1v[:-1]  # shape (n1,)
         dy = x2v[1:] - x2v[:-1]  # shape (n2,)
         # Use outer product for correct broadcasting
         return np.outer(dy, dx)
-        
+
     elif coord_system == "cylindrical":
         dr2 = (x1v[1:] ** 2 - x1v[:-1] ** 2) / 2.0  # shape (n1,)
         dphi = x2v[1:] - x2v[:-1]  # shape (n2,)
         # Use outer product for correct broadcasting
         return np.outer(dphi, dr2)
-        
+
     raise ValueError(f"Unsupported coordinate system: {coord_system}")
 
-def calc_volume_3d(x1v: np.ndarray, x2v: np.ndarray, x3v: np.ndarray, coord_system: str) -> np.ndarray:
+
+def calc_volume_3d(
+    x1v: np.ndarray, x2v: np.ndarray, x3v: np.ndarray, coord_system: str
+) -> np.ndarray:
     """Calculate 3D cell volumes from vertices"""
     if coord_system == "spherical":
         dr3 = (x1v[..., 1:] ** 3 - x1v[..., :-1] ** 3) / 3.0
@@ -189,32 +192,32 @@ def calc_volume_3d(x1v: np.ndarray, x2v: np.ndarray, x3v: np.ndarray, coord_syst
         dz = x3v[1:] - x3v[:-1]
         return dx * dy * dz
     elif coord_system == "cylindrical":
-        dr2  = (x1v[..., 1:] ** 2 - x1v[..., :-1] ** 2) / 2.0
+        dr2 = (x1v[..., 1:] ** 2 - x1v[..., :-1] ** 2) / 2.0
         dphi = x2v[:, 1:] - x2v[:, :-1]
-        dz   = x3v[1:] - x3v[:-1]
+        dz = x3v[1:] - x3v[:-1]
         return dr2 * dphi * dz
     else:
         raise ValueError(f"Unsupported coordinate system: {coord_system}")
 
+
 def calc_cell_volume(
-    coords: list[np.ndarray], 
-    coord_system: str = "spherical",
-    vertices: bool = False
+    coords: list[np.ndarray], coord_system: str = "spherical", vertices: bool = False
 ) -> np.ndarray:
     """Calculate cell volumes for 1D, 2D, or 3D grids"""
     ndim = len(coords)
-    
+
     # Convert to vertices if needed
     if not vertices:
         is_radial = coord_system in ["spherical", "cylindrical"]
-        coords = [get_vertices(c, is_radial and i==0) for i,c in enumerate(coords)]
-    
+        coords = [get_vertices(c, is_radial and i == 0) for i, c in enumerate(coords)]
+
     if ndim == 1:
         return calc_volume_1d(coords[0], coord_system)
     elif ndim == 2:
         return calc_volume_2d(coords[0], coords[1], coord_system)
     else:
         return calc_volume_3d(coords[0], coords[1], coords[2], coord_system)
+
 
 def compute_num_polar_zones(
     *,

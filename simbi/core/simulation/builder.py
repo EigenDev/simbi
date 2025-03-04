@@ -121,7 +121,7 @@ class SimStateBuilder:
             "data_directory": str(io.data_directory),
             "boundary_conditions": [str(bc) for bc in bcs],
             "spatial_order": sim.spatial_order,
-            "temporal_order": sim.time_stepping,
+            "temporal_order": sim.temporal_order,
             "x1_spacing": mesh.x1_spacing,
             "x2_spacing": mesh.x2_spacing,
             "x3_spacing": mesh.x3_spacing,

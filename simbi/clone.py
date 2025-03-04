@@ -12,7 +12,6 @@ from simbi import (
     simbi_classproperty, 
     simbi_property
 )
-from simbi.key_types import *
 
 class {setup_name}(BaseConfig):
     \""" Some Hydro Problem
@@ -29,9 +28,9 @@ class {setup_name}(BaseConfig):
     @simbi_property
     def initial_state(self) -> Union[
                                 Sequence[
-                                    Union[NDArray[numpy_float], 
+                                    Union[NDArray[np.float64], 
                                     Sequence[float]]], 
-                                    NDArray[numpy_float]
+                                    NDArray[np.float64]
                                ]:
         raise NotImplementedError()
 
@@ -68,12 +67,12 @@ class {setup_name}(BaseConfig):
 
     @simbi_property
     def sources(
-            self) -> Optional[Union[Sequence[NDArray[numpy_float]], NDArray[numpy_float]]]:
+            self) -> Optional[Union[Sequence[NDArray[np.float64]], NDArray[np.float64]]]:
         return None
 
     @simbi_property
     def passive_scalars(
-            self) -> Optional[Union[Sequence[float], NDArray[numpy_float]]]:
+            self) -> Optional[Union[Sequence[float], NDArray[np.float64]]]:
         return None
 
     @simbi_classproperty
@@ -118,15 +117,15 @@ class {setup_name}(BaseConfig):
         return False
 
     @simbi_property
-    def x1(self) -> Optional[NDArray[numpy_float]]:
+    def x1(self) -> Optional[NDArray[np.float64]]:
         return None
 
     @simbi_property
-    def x2(self) -> Optional[NDArray[numpy_float]]:
+    def x2(self) -> Optional[NDArray[np.float64]]:
         return None
 
     @simbi_property
-    def x3(self) -> Optional[NDArray[numpy_float]]:
+    def x3(self) -> Optional[NDArray[np.float64]]:
         return None
 
     @simbi_property

@@ -12,6 +12,13 @@ class CLIManager:
     run_parser: argparse.ArgumentParser
     dynamic_args: list[DynamicArg] = field(default_factory=list)
 
+    @classmethod
+    def from_parsers(
+        cls, main_parser: argparse.ArgumentParser, run_parser: argparse.ArgumentParser
+    ) -> "CLIManager":
+        """Create a CLIManager from main and run parsers"""
+        return cls(main_parser=main_parser, run_parser=run_parser)
+
     def register_dynamic_arg(self, arg: DynamicArg) -> None:
         """Register a dynamic argument"""
         if arg.name in [a.name for a in self.dynamic_args]:

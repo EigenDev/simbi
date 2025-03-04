@@ -1,6 +1,5 @@
 import numpy as np
 import numpy.typing as npt
-from ..key_types import *
 from .calculations import (
     calc_labframe_density,
     calc_labframe_momentum,
@@ -20,8 +19,8 @@ from dataclasses import dataclass
 @dataclass
 class ModelState:
     nvars: int
-    u: NDArray[numpy_float]
-    bfield: Optional[List[NDArray[numpy_float]]] = None
+    u: NDArray[np.float64]
+    bfield: Optional[List[NDArray[np.float64]]] = None
 
 
 @dataclass
@@ -67,7 +66,7 @@ class GeometryConfig:
 @dataclass
 class Partition:
     indices: Tuple[slice, ...]
-    initial_primitive_state: NDArray[numpy_float]
+    initial_primitive_state: NDArray[np.float64]
 
 
 def check_valid_state(x: Any, name: str) -> None:
@@ -86,7 +85,7 @@ def flatten_fully(x: Any) -> Any:
 def load_checkpoint(model: Any, filename: str) -> None:
     print(f"Loading from checkpoint: {filename}...", flush=True)
     setup: dict[str, Any] = {}
-    volume_factor: Union[float, NDArray[numpy_float]] = 1.0
+    volume_factor: Union[float, NDArray[np.float64]] = 1.0
     fields, setup, mesh = read_file(filename, return_staggered_field=model.mhd)
     dim: int = setup["dimensions"]
 
@@ -192,8 +191,8 @@ def calculate_break_points(
 
 
 def initialize_partition_state(
-    partition: NDArray[numpy_float],
-    state: NDArray[numpy_float] | list[float],
+    partition: NDArray[np.float64],
+    state: NDArray[np.float64] | list[float],
     regime: str,
     adiabatic_index: float,
     ndims: int,
@@ -225,10 +224,10 @@ def initialize_partition_state(
 
 
 def initialize_mhd_fields(
-    u: NDArray[numpy_float],
+    u: NDArray[np.float64],
     partitions: List[Partition],
     initial_primitive_states: Sequence[Sequence[float]],
-) -> Tuple[NDArray[numpy_float], NDArray[numpy_float], NDArray[numpy_float]]:
+) -> Tuple[NDArray[np.float64], NDArray[np.float64], NDArray[np.float64]]:
     """Initialize staggered MHD fields"""
     b1 = np.zeros_like(u[0])
     b2 = np.zeros_like(u[0])
@@ -284,7 +283,7 @@ def initialize_discontinuous_problem(model: Any) -> None:
 
 @release_memory
 def construct_the_state(
-    model: Any, initial_primitive_state: list[NDArray[numpy_float]] | list[list[float]]
+    model: Any, initial_primitive_state: list[NDArray[np.float64]] | list[list[float]]
 ) -> None:
     """Initialize model state for continuous or discontinuous problems"""
 
@@ -296,12 +295,12 @@ def construct_the_state(
         initialize_discontinuous_problem(model)
     else:
         initial_primitive_state = cast(
-            list[NDArray[numpy_float]], initial_primitive_state
+            list[NDArray[np.float64]], initial_primitive_state
         )
         initialize_continuous_state(model, initial_primitive_state)
 
 
-def pad_mhd_fields(bfields: list[NDArray[numpy_float]]) -> List[NDArray[numpy_float]]:
+def pad_mhd_fields(bfields: list[NDArray[np.float64]]) -> List[NDArray[np.float64]]:
     # pad the mhd fields along perpendicular directions
     b1, b2, b3 = bfields
     b1 = np.pad(b1, ((1, 1), (1, 1), (0, 0)), "edge")
@@ -311,8 +310,8 @@ def pad_mhd_fields(bfields: list[NDArray[numpy_float]]) -> List[NDArray[numpy_fl
 
 
 def pad_staggered_fields(
-    bfields: list[NDArray[numpy_float]],
-) -> List[NDArray[numpy_float]]:
+    bfields: list[NDArray[np.float64]],
+) -> List[NDArray[np.float64]]:
     # pad the staggered fields along parallel directions
     b1, b2, b3 = bfields
     b1 = np.pad(b1, ((1, 1), (1, 1), (0, 0)), "edge")
@@ -321,7 +320,7 @@ def pad_staggered_fields(
     return [b1, b2, b3]
 
 
-def calculate_mean_bfields(bfields: list[NDArray[numpy_float]]) -> list[NDArray[Any]]:
+def calculate_mean_bfields(bfields: list[NDArray[np.float64]]) -> list[NDArray[Any]]:
     # calculate mean B-fields from staggered fields
     b1, b2, b3 = bfields
     return [
@@ -332,9 +331,9 @@ def calculate_mean_bfields(bfields: list[NDArray[numpy_float]]) -> list[NDArray[
 
 
 def update_mhd_fields(
-    bfields: list[NDArray[numpy_float]],
+    bfields: list[NDArray[np.float64]],
     partition_inds: Tuple[slice, ...],
-    mean_bfields: list[NDArray[numpy_float]] | list[float],
+    mean_bfields: list[NDArray[np.float64]] | list[float],
 ) -> None:
     b1, b2, b3 = bfields
     b1[partition_inds] = mean_bfields[0]
@@ -344,12 +343,12 @@ def update_mhd_fields(
 
 def calculate_state_vector(
     adiabatic_index: float,
-    rho: FloatOrArray,
-    velocity: list[NDArray[numpy_float]],
-    pressure: FloatOrArray,
-    mean_bfields: List[NDArray[numpy_float]],
+    rho: NDArray[np.float64],
+    velocity: list[NDArray[np.float64]],
+    pressure: NDArray[np.float64],
+    mean_bfields: List[NDArray[np.float64]],
     regime: str,
-) -> NDArray[numpy_float]:
+) -> NDArray[np.float64]:
     dens = calc_labframe_density(rho, velocity, regime)
     mom = calc_labframe_momentum(
         adiabatic_index, rho, velocity, pressure, mean_bfields, regime
@@ -361,7 +360,7 @@ def calculate_state_vector(
 
 
 def initialize_continuous_state(
-    model: Any, initial_primitive_state: list[NDArray[numpy_float]]
+    model: Any, initial_primitive_state: list[NDArray[np.float64]]
 ) -> None:
     """Handle initialization of continuous problems"""
     rho, *velocity, pressure = initial_primitive_state[: model.number_of_non_em_terms]

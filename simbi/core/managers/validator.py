@@ -22,7 +22,7 @@ class ConfigValidator:
         self.validators: dict[str, Callable[[Any], Maybe[Any]]] = {
             "regime": self.validate_regime,
             "coord_system": self.validate_coord_system,
-            "time_stepping": self.validate_time_stepping,
+            "temporal_order": self.validate_temporal_order,
             "spatial_order": self.validate_spatial_order,
             "x1_spacing": self.validate_cell_spacing,
             "x2_spacing": self.validate_cell_spacing,
@@ -45,10 +45,10 @@ class ConfigValidator:
         except ValueError as e:
             return Maybe.save_failure(f"{e}. Available options: {CoordSystem.list()}")
 
-    def validate_time_stepping(self, time_stepping: str) -> Maybe[str]:
+    def validate_temporal_order(self, temporal_order: str) -> Maybe[str]:
         """validate time stepping scheme"""
         try:
-            return Maybe.of(TimeStepping(time_stepping.lower()).value)
+            return Maybe.of(TimeStepping(temporal_order.lower()).value)
         except ValueError as e:
             return Maybe.save_failure(f"{e}. Available options: {TimeStepping.list()}")
 

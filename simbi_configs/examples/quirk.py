@@ -1,6 +1,5 @@
 import numpy as np
 from simbi import BaseConfig, DynamicArg, simbi_property
-from simbi.key_types import *
 
 
 class Quirk(BaseConfig):
@@ -67,7 +66,7 @@ class Quirk(BaseConfig):
         self.p += 1e-6 * np.random.randn(*self.p.shape)
 
     @simbi_property
-    def initial_primitive_state(self) -> Sequence[NDArray[numpy_float]]:
+    def initial_primitive_state(self) -> Sequence[NDArray[np.float64]]:
         return (self.rho, self.vx, self.vy, self.p)
 
     @simbi_property

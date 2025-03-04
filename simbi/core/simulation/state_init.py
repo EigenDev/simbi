@@ -20,6 +20,21 @@ class SimulationBundle:
     state: NDArray[np.float64]
     staggered_bfields: Optional[NDArray[np.float64]] = None
 
+    def copy_from(self, cli_args: dict[str, Any]) -> "SimulationBundle":
+        """Update simulation bundle with new configuration"""
+        # check if all the cli_args keys are None, if so, return self
+        if all(value is None for value in cli_args.values()):
+            return self
+
+        return SimulationBundle(
+            mesh_config=MeshSettings.update_from(self.mesh_config, cli_args),
+            grid_config=GridSettings.update_from(self.grid_config, cli_args),
+            io_config=IOSettings.update_from(self.io_config, cli_args),
+            sim_config=SimulationSettings.update_from(self.sim_config, cli_args),
+            state=self.state,
+            staggered_bfields=self.staggered_bfields,
+        )
+
 
 def try_checkpoint_initialization(
     config: InitializationConfig,

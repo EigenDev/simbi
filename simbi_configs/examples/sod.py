@@ -1,6 +1,5 @@
 from simbi import BaseConfig, DynamicArg, simbi_property
-from simbi.key_types import *
-from typing import Generator
+from typing import Generator, Sequence
 
 
 class SodProblem(BaseConfig):
@@ -15,7 +14,9 @@ class SodProblem(BaseConfig):
         )
 
     @simbi_property
-    def initial_primitive_state(self) -> tuple[Generator[float, None, None]]:
+    def initial_primitive_state(
+        self,
+    ) -> Generator[tuple[float, float, float], None, None]:
         """return initial primitive generator"""
 
         def _initial_state(resolution=(self.config.nzones,), bounds=(0.0, 1.0)):

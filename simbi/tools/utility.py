@@ -7,7 +7,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 from typing import Union, Any, Callable, Optional, no_type_check
 from numpy.typing import NDArray
-from numpy import float64 as numpy_float
+
 from ..functional.helpers import find_nearest
 from dataclasses import dataclass, field
 from typing import Union, List, Dict, Any
@@ -166,22 +166,22 @@ def get_field_str(
     return mapper.get_field_str(fields, units, normalized)
 
 
-def calc_enthalpy(fields: dict[str, NDArray[numpy_float]]) -> Any:
+def calc_enthalpy(fields: dict[str, NDArray[np.float64]]) -> Any:
     return 1.0 + fields["p"] * fields["adiabatic_index"] / (
         fields["rho"] * (fields["adiabatic_index"] - 1.0)
     )
 
 
-def calc_lorentz_factor(fields: dict[str, NDArray[numpy_float]]) -> Any:
+def calc_lorentz_factor(fields: dict[str, NDArray[np.float64]]) -> Any:
     return (1.0 + fields["gamma_beta"] ** 2) ** 0.5
 
 
-def calc_beta(fields: dict[str, NDArray[numpy_float]]) -> Any:
+def calc_beta(fields: dict[str, NDArray[np.float64]]) -> Any:
     W = calc_lorentz_factor(fields)
     return (1.0 - 1.0 / W**2) ** 0.5
 
 
-def unpad(arr: NDArray[numpy_float], pad_width: tuple[tuple[Any, ...], ...]) -> Any:
+def unpad(arr: NDArray[np.float64], pad_width: tuple[tuple[Any, ...], ...]) -> Any:
     slices = []
     for c in pad_width:
         e = None if c[1] == 0 else -c[1]
@@ -189,7 +189,7 @@ def unpad(arr: NDArray[numpy_float], pad_width: tuple[tuple[Any, ...], ...]) -> 
     return arr[tuple(slices)]
 
 
-def flatten_fully(x: NDArray[numpy_float]) -> NDArray[numpy_float] | Any:
+def flatten_fully(x: NDArray[np.float64]) -> NDArray[np.float64] | Any:
     if any(dim == 1 for dim in x.shape):
         x = np.vstack(x)  # type: ignore
         if len(x.shape) == 2 and x.shape[0] == 1:
@@ -231,7 +231,7 @@ def read_file(filename: str) -> tuple[dict[str, Any], dict[str, Any], dict[str, 
             {k: v.decode("utf-8") for k, v in ds.items() if isinstance(v, np.bytes_)}
         )
 
-        def read_and_flatten(name: str) -> NDArray[numpy_float]:
+        def read_and_flatten(name: str) -> NDArray[np.float64]:
             return flatten_fully(hf.get(name)[:].reshape(ds["nz"], ds["ny"], ds["nx"]))
 
         rho = read_and_flatten("rho")
@@ -243,8 +243,8 @@ def read_file(filename: str) -> tuple[dict[str, Any], dict[str, Any], dict[str, 
         npad = tuple((padwidth, padwidth) for _ in range(ndim))
 
         def unpad_all(
-            arrays: list[NDArray[numpy_float]],
-        ) -> list[NDArray[numpy_float]]:
+            arrays: list[NDArray[np.float64]],
+        ) -> list[NDArray[np.float64]]:
             return [unpad(arr, npad) for arr in arrays]
 
         rho, p, chi = unpad_all([rho, p, chi])
@@ -281,7 +281,7 @@ def read_file(filename: str) -> tuple[dict[str, Any], dict[str, Any], dict[str, 
 
                 def read_bfield(
                     name: str, shape: tuple[int, ...]
-                ) -> NDArray[numpy_float]:
+                ) -> NDArray[np.float64]:
                     return hf.get(name)[:].reshape(shape)
 
                 b1 = read_bfield(
@@ -334,11 +334,7 @@ def read_file(filename: str) -> tuple[dict[str, Any], dict[str, Any], dict[str, 
         fields["W"] = W
 
         funcs = [
-            (
-                np.linspace
-                if ds.get(f"{x}_spacing", "linear") == "linear"
-                else np.geomspace
-            )
+            (np.linspace if ds[f"{x}_spacing"] == "linear" else np.geomspace)
             for x in ["x1", "x2", "x3"]
         ]
         mesh = {
@@ -362,7 +358,7 @@ def read_file(filename: str) -> tuple[dict[str, Any], dict[str, Any], dict[str, 
     return fields, ds, mesh
 
 
-def prims2var(fields: dict[str, NDArray[numpy_float]], var: str) -> Any:
+def prims2var(fields: dict[str, NDArray[np.float64]], var: str) -> Any:
     h = calc_enthalpy(fields)
     W = calc_lorentz_factor(fields)
     if var == "D":
@@ -479,7 +475,7 @@ def prims2var(fields: dict[str, NDArray[numpy_float]], var: str) -> Any:
 
 
 def get_colors(
-    interval: NDArray[numpy_float],
+    interval: NDArray[np.float64],
     cmap: matplotlib.colors.ListedColormap,
     vmin: Optional[float] = None,
     vmax: Optional[float] = None,
@@ -503,8 +499,8 @@ def get_colors(
 
 
 def fill_below_intersec(
-    x: NDArray[numpy_float],
-    y: NDArray[numpy_float],
+    x: NDArray[np.float64],
+    y: NDArray[np.float64],
     constraint: float,
     color: float,
     axis: str,

@@ -13,5 +13,5 @@ class Hydro:
         self.state = bundle.state
         self.runner = SimulationRunner(bundle)
 
-    def simulate(self, **startup_params) -> None:
-        self.runner.run(**startup_params)
+    def simulate(self, **cli_args) -> None:
+        self.runner.run(**cli_args)

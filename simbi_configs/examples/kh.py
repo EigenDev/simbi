@@ -1,6 +1,5 @@
 import numpy as np
 from simbi import BaseConfig, DynamicArg, simbi_property
-from simbi.key_types import *
 
 SEED = 12345
 
@@ -53,7 +52,7 @@ class KelvinHelmholtz(BaseConfig):
         self.vy += vy_rand
 
     @simbi_property
-    def initial_primitive_state(self) -> Sequence[NDArray[numpy_float]]:
+    def initial_primitive_state(self) -> Sequence[NDArray[np.float64]]:
         return (self.rho, self.vx, self.vy, self.p)
 
     @simbi_property

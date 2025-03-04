@@ -1,5 +1,7 @@
+from dataclasses import dataclass
 from simbi import BaseConfig, DynamicArg, simbi_property
-from simbi.key_types import *
+from typing import Any, Generator, Sequence, Union, Callable
+from numpy.typing import NDArray
 import numpy as np
 import argparse
 
@@ -7,84 +9,100 @@ ALPHA_MAX = 2.0
 ALPHA_MIN = 1e-3
 
 
-def range_limited_float_type(arg: Any) -> Any:
-    """Type function for argparse - a float within some predefined bounds"""
-    try:
-        f = float(arg)
-    except ValueError:
-        raise argparse.ArgumentTypeError("Must be a floating point number")
-    if f < ALPHA_MIN or f >= ALPHA_MAX:
+def range_limited_float_type(x: str, min_val: float, max_val: float) -> float:
+    """Return float value within range"""
+    val = float(x)
+    if val < min_val or val > max_val:
         raise argparse.ArgumentTypeError(
-            "Argument must be < " + str(ALPHA_MAX) + " and > " + str(ALPHA_MIN)
+            f"Value must be between {min_val} and {max_val}"
         )
-    return f
+    return val
 
 
-def func(x: NDArray[numpy_float]) -> NDArray[numpy_float]:
-    return np.asanyarray(np.sin(2 * np.pi * x))
+@dataclass(frozen=True)
+class IsentropicWaveParams:
+    """Physical parameters for isentropic wave"""
+
+    rho_ref: float = 1.0
+    p_ref: float = 1.0
+
+    def make_wave_function(
+        self,
+    ) -> Callable[[NDArray[np.float64]], NDArray[np.float64]]:
+        """Create wave shape function"""
+        return lambda x: np.sin(2 * np.pi * x)
 
 
-def rho(alpha: DynamicArg, x: NDArray[numpy_float]) -> NDArray[numpy_float]:
-    return np.asanyarray(1.0 + alpha * func(x))
+@dataclass(frozen=True)
+class IsentropicState:
+    """State calculator for isentropic wave"""
 
+    params: IsentropicWaveParams
+    adiabatic_index: float
+    alpha: float
 
-def cs(
-    adiabatic_index: DynamicArg,
-    rho: Union[NDArray[numpy_float], float],
-    pressure: Union[NDArray[numpy_float], float],
-) -> NDArray[numpy_float]:
-    h = 1.0 + adiabatic_index * pressure / (rho * (adiabatic_index - 1.0))
-    return np.asanyarray(np.sqrt(adiabatic_index * pressure / (rho * h)))
+    def density(self, x: NDArray[np.float64]) -> NDArray[np.float64]:
+        """Calculate density at position x"""
+        wave = self.params.make_wave_function()
+        return 1.0 + self.alpha * wave(x)
 
+    def sound_speed(
+        self, rho: NDArray[np.float64], p: NDArray[np.float64]
+    ) -> NDArray[np.float64]:
+        """Calculate sound speed"""
+        h = 1.0 + self.adiabatic_index * p / (rho * (self.adiabatic_index - 1.0))
+        return np.sqrt(self.adiabatic_index * p / (rho * h))
 
-def pressure(
-    p_ref: float, adiabatic_index: DynamicArg, rho: NDArray[numpy_float], rho_ref: float
-) -> NDArray[numpy_float]:
-    return np.asanyarray(p_ref * (rho / rho_ref) ** float(adiabatic_index))
+    def pressure(self, rho: NDArray[np.float64]) -> NDArray[np.float64]:
+        """Calculate pressure"""
+        return self.params.p_ref * (rho / self.params.rho_ref) ** self.adiabatic_index
 
-
-def velocity(
-    adiabatic_index: DynamicArg,
-    rho: NDArray[numpy_float],
-    rho_ref: float,
-    pressure: NDArray[numpy_float],
-    p_ref: float,
-) -> NDArray[numpy_float]:
-    return np.asanyarray(
-        2
-        / (adiabatic_index - 1.0)
-        * (cs(adiabatic_index, rho, pressure) - cs(adiabatic_index, rho_ref, p_ref))
-    )
+    def velocity(
+        self, rho: NDArray[np.float64], p: NDArray[np.float64]
+    ) -> NDArray[np.float64]:
+        """Calculate velocity"""
+        cs_ref = self.sound_speed(self.params.rho_ref, self.params.p_ref)
+        cs = self.sound_speed(rho, p)
+        return 2.0 / (self.adiabatic_index - 1.0) * (cs - cs_ref)
 
 
 class IsentropicRelWave(BaseConfig):
-    """
-    Relativistic Isentropic Pulse in 1D, Entropy conserving
-    """
+    """Relativistic Isentropic Pulse in 1D, Entropy conserving"""
 
-    nzones = DynamicArg("nzones", 1000, help="number of grid zones", var_type=int)
-    adiabatic_index = DynamicArg(
-        "ad-index", 4.0 / 3.0, help="Adiabatic gas index", var_type=float
-    )
-    alpha = DynamicArg(
-        "alpha", 0.5, help="Wave amplitude", var_type=range_limited_float_type
-    )
-    rho_ref = 1.0
-    p_ref = 1.0
+    class config:
+        nzones = DynamicArg("nzones", 1000, help="number of grid zones", var_type=int)
+        adiabatic_index = DynamicArg(
+            "ad-index", 4.0 / 3.0, help="Adiabatic gas index", var_type=float
+        )
+        alpha = DynamicArg(
+            "alpha",
+            0.5,
+            help="Wave amplitude",
+            var_type=lambda x: range_limited_float_type(x, ALPHA_MIN, ALPHA_MAX),
+        )
 
     def __init__(self) -> None:
-        x = np.linspace(0, 1, self.nzones.value, dtype=float)
-        self.density = rho(self.alpha, x)
-        self.pre = pressure(
-            self.p_ref, self.adiabatic_index, self.density, self.rho_ref
-        )
-        self.beta = velocity(
-            self.adiabatic_index, self.density, self.rho_ref, self.pre, self.p_ref
+        super().__init__()
+        self.wave_params = IsentropicWaveParams()
+        self.state = IsentropicState(
+            self.wave_params, self.config.adiabatic_index, self.config.alpha
         )
 
     @simbi_property
-    def initial_primitive_state(self) -> Sequence[NDArray[numpy_float]]:
-        return (self.density, self.beta, self.pre)
+    def initial_primitive_state(
+        self,
+    ) -> Generator[tuple[float, float, float], None, None]:
+        """Return initial primitive generator"""
+
+        def _initial_state(resolution=(self.config.nzones,), bounds=(0.0, 1.0)):
+            dx = (bounds[1] - bounds[0]) / resolution[0]
+            x = np.fromiter((i * dx for i in range(resolution[0])), dtype=np.float64)
+            rho = self.state.density(x)
+            p = self.state.pressure(rho)
+            v = self.state.velocity(rho, p)
+            yield from zip(rho, v, p)
+
+        return _initial_state
 
     @simbi_property
     def bounds(self) -> Sequence[float]:
@@ -100,11 +118,11 @@ class IsentropicRelWave(BaseConfig):
 
     @simbi_property
     def resolution(self) -> DynamicArg:
-        return self.nzones
+        return self.config.nzones
 
     @simbi_property
     def adiabatic_index(self) -> DynamicArg:
-        return self.adiabatic_index
+        return self.config.adiabatic_index
 
     @simbi_property
     def regime(self) -> str:

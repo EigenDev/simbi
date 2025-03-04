@@ -3,17 +3,16 @@ from numpy.typing import NDArray
 from ..functional.maybe import Maybe
 from typing import Any, Optional, Sequence
 from ..physics import StateVector
-from ..detail.key_types import FloatOrArray
 
 nested_array = NDArray[np.float64] | list[NDArray[np.float64]] | list[float]
 
 
 def calculate_state_vector(
     adiabatic_index: float,
-    rho: FloatOrArray,
+    rho: NDArray[np.float64],
     velocity: Sequence[NDArray[np.float64]],
-    pressure: FloatOrArray,
-    chi: FloatOrArray,
+    pressure: NDArray[np.float64],
+    chi: NDArray[np.float64],
     regime: str,
     bfields: Optional[Sequence[NDArray[np.float64]]] = None,
 ) -> StateVector:
@@ -66,7 +65,7 @@ def dot_product(
     return np.sum(a * b, axis=0)
 
 
-def calc_lorentz_factor(velocity: nested_array, regime: str) -> FloatOrArray:
+def calc_lorentz_factor(velocity: nested_array, regime: str) -> NDArray[np.float64]:
     vsquared = dot_product(velocity, velocity)
     if regime != "classical" and np.any(vsquared >= 1.0):
         raise ValueError("Lorentz factor is not real. Velocity exceeds speed of light.")
@@ -75,10 +74,10 @@ def calc_lorentz_factor(velocity: nested_array, regime: str) -> FloatOrArray:
 
 def calc_spec_enthalpy(
     adiabatic_index: float,
-    rho: FloatOrArray,
-    pressure: FloatOrArray,
+    rho: NDArray[np.float64],
+    pressure: NDArray[np.float64],
     regime: str,
-) -> FloatOrArray:
+) -> NDArray[np.float64]:
     return (
         1.0
         if regime == "classical"
@@ -87,16 +86,16 @@ def calc_spec_enthalpy(
 
 
 def calc_labframe_density(
-    rho: FloatOrArray, velocity: nested_array, regime: str
-) -> FloatOrArray:
+    rho: NDArray[np.float64], velocity: nested_array, regime: str
+) -> NDArray[np.float64]:
     return rho * calc_lorentz_factor(velocity, regime)
 
 
 def calc_labframe_momentum(
     adiabatic_index: float,
-    rho: FloatOrArray,
+    rho: NDArray[np.float64],
     velocity: nested_array,
-    pressure: FloatOrArray,
+    pressure: NDArray[np.float64],
     bfields: nested_array,
     regime: str,
 ) -> NDArray[np.float64]:
@@ -120,13 +119,13 @@ def calc_labframe_momentum(
 
 def calc_labframe_energy(
     adiabatic_index: float,
-    rho: FloatOrArray,
-    pressure: FloatOrArray,
+    rho: NDArray[np.float64],
+    pressure: NDArray[np.float64],
     velocity: nested_array,
     bfields: nested_array,
     regime: str,
-) -> FloatOrArray:
-    res: FloatOrArray
+) -> NDArray[np.float64]:
+    res: NDArray[np.float64]
     bsq = dot_product(bfields, bfields) if np.any(bfields) else 0.0
     vdb = dot_product(velocity, bfields) if np.any(bfields) else 0.0
     vsq = dot_product(velocity, velocity)

@@ -1,5 +1,4 @@
 from simbi import BaseConfig, DynamicArg, simbi_property
-from simbi.key_types import *
 
 
 class Ram45(BaseConfig):

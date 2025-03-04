@@ -1,5 +1,7 @@
+from dataclasses import dataclass
 from simbi import BaseConfig, DynamicArg, simbi_property
-from simbi.key_types import *
+from typing import Sequence, Generator
+from numpy.typing import NDArray
 import numpy as np
 
 XMIN = -2.0
@@ -7,89 +9,200 @@ XMAX = +2.0
 XMEM = 0.5 * (XMIN + XMAX)
 
 
-def beta(u: list[float]) -> NDArray[numpy_float]:
-    unp: NDArray[numpy_float] = np.asarray(u)
-    gamma: float = (1.0 + unp.dot(unp)) ** (0.5)
-    beta: NDArray[numpy_float] = unp / gamma
-    return beta
+@dataclass(frozen=True)
+class ShockTubeState:
+    """Left and right states for shock tube problems"""
+
+    rho: float
+    vx: float
+    vy: float
+    vz: float
+    p: float
+    bx: float
+    by: float
+    bz: float
+
+
+@dataclass(frozen=True)
+class MHDProblemState:
+    """Complete state for MHD shock tube problems"""
+
+    left: ShockTubeState
+    right: ShockTubeState
+
+    @staticmethod
+    def beta(u: Sequence[float]) -> NDArray[np.float64]:
+        """Calculate relativistic beta from 3-velocity"""
+        unp: NDArray[np.float64] = np.asarray(u)
+        gamma: float = (1.0 + unp.dot(unp)) ** (0.5)
+        return unp / gamma
+
+    @classmethod
+    def create_state(
+        cls, left_vals: Sequence[float], right_vals: Sequence[float]
+    ) -> "MHDProblemState":
+        """Create problem state from raw values"""
+        return cls(left=ShockTubeState(*left_vals), right=ShockTubeState(*right_vals))
 
 
 class MagneticShockTube(BaseConfig):
-    """
-    Komissarov (1999), 1D SRMHD test problems.
-    """
+    """Komissarov (1999), 1D SRMHD test problems."""
 
-    nzones = DynamicArg("nzones", 100, help="number of grid zones", var_type=int)
-    problem = DynamicArg(
-        "problem",
-        "contact",
-        help="problem number from Komissarov (1999)",
-        var_type=str,
-        choices=[
-            "fast-shock",
-            "slow-shock",
-            "fast-rarefaction",
-            "slow-rarefaction",
-            "alfven",
-            "compound",
-            "st-1",
-            "st-2",
-            "collision",
-        ],
-    )
+    class config:
+        nzones = DynamicArg("nzones", 100, help="number of grid zones", var_type=int)
+        problem = DynamicArg(
+            "problem",
+            "contact",
+            help="problem number from Komissarov (1999)",
+            var_type=str,
+            choices=[
+                "fast-shock",
+                "slow-shock",
+                "fast-rarefaction",
+                "slow-rarefaction",
+                "alfven",
+                "compound",
+                "st-1",
+                "st-2",
+                "collision",
+            ],
+        )
 
-    @simbi_property
-    def initial_primitive_state(self) -> Sequence[Sequence[float]]:
-        # defined as (rho, v1, v2, v3, pg, b1, b2, b3)
-        if self.problem == "fast-shock":
-            return (
-                (1.000, *beta([25.0, 0.0, 0.0]), 1.000, 20.0, 25.02, 0.0),
-                (25.48, *beta([1.091, 0.3923, 0.0]), 367.5, 20.0, 49.00, 0.0),
-            )
-        elif self.problem == "slow-shock":
-            return (
-                (1.000, *beta([1.5300, 0.0, 0.0]), 10.00, 10.0, 18.28, 0.0),
-                (3.323, *beta([0.9571, -0.6822, 0.0]), 55.36, 10.0, 14.49, 0.0),
-            )
-        elif self.problem == "fast-rarefaction":
-            return (
-                (0.100, *beta([-2.000, 0.0, 0.0]), 1.00, 2.0, 0.000, 0.0),
-                (0.562, *beta([-0.212, -0.590, 0.0]), 10.0, 2.0, 4.710, 0.0),
-            )
-        elif self.problem == "slow-rarefaction":
-            return (
-                (1.78e-3, *beta([-0.765, -1.386, 0.0]), 0.1, 1.0, 1.022, 0.0),
-                (0.01000, *beta([+0.0, 0.0, 0.0]), 1.0, 1.0, 0.000, 0.0),
-            )
-        elif self.problem == "alfven":
-            return (
-                (1.0, *beta([0.0, 0.0, 0.0]), 1.0, 3.0, 3.0000, 0.0),
-                (1.0, *beta([3.70, 5.76, 0.0]), 1.0, 3.0, -6.857, 0.0),
-            )
-        elif self.problem == "compound":
-            return (
-                (1.0, *beta([0.0, 0.0, 0.0]), 1.0, 3.0, +3.000, 0.0),
-                (1.0, *beta([3.70, 5.76, 0.0]), 1.0, 3.0, -6.857, 0.0),
-            )
-        elif self.problem == "st-1":
-            return (
+    def __init__(self) -> None:
+        super().__init__()
+        self.problem_states = {
+            "fast-shock": MHDProblemState.create_state(
+                (
+                    1.000,
+                    *MHDProblemState.beta([25.0, 0.0, 0.0]),
+                    1.000,
+                    20.0,
+                    25.02,
+                    0.0,
+                ),
+                (
+                    25.48,
+                    *MHDProblemState.beta([1.091, 0.3923, 0.0]),
+                    367.5,
+                    20.0,
+                    49.00,
+                    0.0,
+                ),
+            ),
+            "slow-shock": MHDProblemState.create_state(
+                (
+                    1.000,
+                    *MHDProblemState.beta([1.5300, 0.0, 0.0]),
+                    10.00,
+                    10.0,
+                    18.28,
+                    0.0,
+                ),
+                (
+                    3.323,
+                    *MHDProblemState.beta([0.9571, -0.6822, 0.0]),
+                    55.36,
+                    10.0,
+                    14.49,
+                    0.0,
+                ),
+            ),
+            "fast-rarefaction": MHDProblemState.create_state(
+                (
+                    0.100,
+                    *MHDProblemState.beta([-2.000, 0.0, 0.0]),
+                    1.00,
+                    2.0,
+                    0.000,
+                    0.0,
+                ),
+                (
+                    0.562,
+                    *MHDProblemState.beta([-0.212, -0.590, 0.0]),
+                    10.0,
+                    2.0,
+                    4.710,
+                    0.0,
+                ),
+            ),
+            "slow-rarefaction": MHDProblemState.create_state(
+                (
+                    1.78e-3,
+                    *MHDProblemState.beta([-0.765, -1.386, 0.0]),
+                    0.1,
+                    1.0,
+                    1.022,
+                    0.0,
+                ),
+                (
+                    0.01000,
+                    *MHDProblemState.beta([+0.0, 0.0, 0.0]),
+                    1.0,
+                    1.0,
+                    0.000,
+                    0.0,
+                ),
+            ),
+            "alfven": MHDProblemState.create_state(
+                (1.0, *MHDProblemState.beta([0.0, 0.0, 0.0]), 1.0, 3.0, 3.0000, 0.0),
+                (1.0, *MHDProblemState.beta([3.70, 5.76, 0.0]), 1.0, 3.0, -6.857, 0.0),
+            ),
+            "compound": MHDProblemState.create_state(
+                (1.0, *MHDProblemState.beta([0.0, 0.0, 0.0]), 1.0, 3.0, +3.000, 0.0),
+                (1.0, *MHDProblemState.beta([3.70, 5.76, 0.0]), 1.0, 3.0, -6.857, 0.0),
+            ),
+            "st-1": MHDProblemState.create_state(
                 (1.0, 0.0, 0.0, 0.0, 1e3, 1.0, 0.0, 0.0),
                 (0.1, 0.0, 0.0, 0.0, 1.0, 1.0, 0.0, 0.0),
-            )
-        elif self.problem == "st-2":
-            return (
+            ),
+            "st-2": MHDProblemState.create_state(
                 (1.0, 0.0, 0.0, 0.0, 30.0, 0.0, 20.0, 0.0),
                 (0.1, 0.0, 0.0, 0.0, 1.00, 0.0, 0.00, 0.0),
-            )
-        else:
-            return (
-                (1.0, *beta([+5.0, 0.0, 0.0]), 1.0, 10.0, +10.0, 0.0),
-                (1.0, *beta([-5.0, 0.0, 0.0]), 1.0, 10.0, -10.0, 0.0),
-            )
+            ),
+            "collision": MHDProblemState.create_state(
+                (1.0, *MHDProblemState.beta([+5.0, 0.0, 0.0]), 1.0, 10.0, +10.0, 0.0),
+                (1.0, *MHDProblemState.beta([-5.0, 0.0, 0.0]), 1.0, 10.0, -10.0, 0.0),
+            ),
+        }
+
+    @simbi_property
+    def initial_primitive_state(self) -> Generator[tuple[float, ...], None, None]:
+        """Generate initial primitive state"""
+
+        def _initial_state(resolution=(self.nzones, 1, 1), bounds=(XMIN, XMAX)):
+            state = self.problem_states[self.config.problem]
+            dx = (bounds[1] - bounds[0]) / resolution[0]
+
+            for i in range(resolution[0]):
+                x = bounds[0] + (i + 0.5) * dx
+                if x < XMEM:
+                    yield (
+                        state.left.rho,
+                        state.left.vx,
+                        state.left.vy,
+                        state.left.vz,
+                        state.left.p,
+                        state.left.bx,
+                        state.left.by,
+                        state.left.bz,
+                    )
+                else:
+                    yield (
+                        state.right.rho,
+                        state.right.vx,
+                        state.right.vy,
+                        state.right.vz,
+                        state.right.p,
+                        state.right.bx,
+                        state.right.by,
+                        state.right.bz,
+                    )
+
+        return _initial_state
 
     @simbi_property
     def bounds(self) -> Sequence[Sequence[float]]:
-        return ((XMIN, XMAX, XMEM), (0.0, 1.0), (0.0, 1.0))
+        return ((XMIN, XMAX), (0.0, 1.0), (0.0, 1.0))
 
     @simbi_property
     def x1_spacing(self) -> str:
@@ -101,7 +214,7 @@ class MagneticShockTube(BaseConfig):
 
     @simbi_property
     def resolution(self) -> Sequence[DynamicArg | int]:
-        return (self.nzones, 1, 1)
+        return (self.config.nzones, 1, 1)
 
     @simbi_property
     def adiabatic_index(self) -> float:

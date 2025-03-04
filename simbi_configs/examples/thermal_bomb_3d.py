@@ -5,7 +5,7 @@ from simbi import (
     DynamicArg,
     compute_num_polar_zones,
 )
-from simbi.key_types import *
+
 
 RHO_AMB = 1.0
 T_AMB = 1e-10
@@ -13,7 +13,7 @@ P_AMB = RHO_AMB * T_AMB
 NU = 3.0
 
 
-def find_nearest(arr: NDArray[numpy_float], val: float) -> Tuple[Any, Any]:
+def find_nearest(arr: NDArray[np.float64], val: float) -> Tuple[Any, Any]:
     idx = np.argmin(np.abs(arr - val))
     return idx, arr[idx]
 
@@ -73,7 +73,7 @@ class thermalBomb(BaseConfig):
         self.v3 = self.v1.copy()
 
     @simbi_property
-    def initial_primitive_state(self) -> Sequence[NDArray[numpy_float]]:
+    def initial_primitive_state(self) -> Sequence[NDArray[np.float64]]:
         return (self.rho, self.v1, self.v2, self.v3, self.p)
 
     @simbi_property

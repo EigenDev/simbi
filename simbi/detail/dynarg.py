@@ -1,6 +1,6 @@
 import math
 import inspect
-from ..key_types import *
+from typing import Any, Callable, Optional
 import numpy as np
 
 __all__ = ["DynamicArg"]
