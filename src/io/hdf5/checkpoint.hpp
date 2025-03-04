@@ -49,6 +49,8 @@
 #ifndef CHECKPOINT_HPP
 #define CHECKPOINT_HPP
 
+#include <string>
+
 namespace simbi {
     namespace io {
         // forward declaration
@@ -309,43 +311,45 @@ namespace simbi {
             auto spatial_order  = state.spatial_order();
             auto temporal_order = state.temporal_order();
             auto geometry       = state.mesh().geometry_to_c_str();
+            auto x1_spacing =
+                cell2str.at(state.mesh().geometry_state().spacing_type(0));
+            auto x2_spacing =
+                cell2str.at(state.mesh().geometry_state().spacing_type(1));
+            auto x3_spacing =
+                cell2str.at(state.mesh().geometry_state().spacing_type(2));
 
             const std::vector<std::pair<std::string, const void*>> attributes =
-                {{"current_time", &time_val},
-                 {"time_step", &dt_val},
-                 {"spatial_order", spatial_order.c_str()},
-                 {"temporal_order", temporal_order.c_str()},
-                 {"using_gamma_beta", &using_fourvel},
-                 {"mesh_motion", &mesh_moving},
-                 {"x1max", &x1max},
-                 {"x1min", &x1min},
-                 {"x2max", &x2max},
-                 {"x2min", &x2min},
-                 {"x3max", &x3max},
-                 {"x3min", &x3min},
-                 {"adiabatic_index", &gamma_val},
-                 {"nx", &nx_val},
-                 {"ny", &ny_val},
-                 {"nz", &nz_val},
-                 {"checkpoint_idx", &checkpoint_idx},
-                 {"geometry", geometry},
-                 {"regime", regime.c_str()},
-                 {"dimensions", &state.dimensions},
-                 {"x1_spacing",
-                  cell2str.at(state.mesh().geometry_state().spacing_type(0))
-                      .c_str()},
-                 {"x2_spacing",
-                  cell2str.at(state.mesh().geometry_state().spacing_type(1))
-                      .c_str()},
-                 {"x3_spacing",
-                  cell2str.at(state.mesh().geometry_state().spacing_type(2))
-                      .c_str()}};
+                {
+                  {"current_time", &time_val},
+                  {"time_step", &dt_val},
+                  {"spatial_order", spatial_order.c_str()},
+                  {"temporal_order", temporal_order.c_str()},
+                  {"using_gamma_beta", &using_fourvel},
+                  {"mesh_motion", &mesh_moving},
+                  {"x1max", &x1max},
+                  {"x1min", &x1min},
+                  {"x2max", &x2max},
+                  {"x2min", &x2min},
+                  {"x3max", &x3max},
+                  {"x3min", &x3min},
+                  {"adiabatic_index", &gamma_val},
+                  {"nx", &nx_val},
+                  {"ny", &ny_val},
+                  {"nz", &nz_val},
+                  {"checkpoint_idx", &checkpoint_idx},
+                  {"geometry", geometry},
+                  {"regime", regime.c_str()},
+                  {"dimensions", &state.dimensions},
+                  {"x1_spacing", x1_spacing.c_str()},
+                  {"x2_spacing", x2_spacing.c_str()},
+                  {"x3_spacing", x3_spacing.c_str()},
+                };
 
             for (const auto& [name, value] : attributes) {
                 H5::DataType type;
                 if (name == "spatial_order" || name == "temporal_order" ||
                     name == "geometry" || name == "regime" ||
-                    name.find("cell_spacing") != std::string::npos) {
+                    name.find("_spacing") != std::string::npos) {
 
                     type = H5::StrType(H5::PredType::C_S1, 256);
                 }
