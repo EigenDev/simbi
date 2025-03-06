@@ -1,7 +1,10 @@
 import numpy as np
 from simbi import BaseConfig, DynamicArg, simbi_property
+from typing import Any, Sequence, Generator
 
 SEED = 12345
+rng = np.random.default_rng(SEED)
+PEEK_TO_PEEK = 0.01
 
 
 class KelvinHelmholtz(BaseConfig):
@@ -9,9 +12,10 @@ class KelvinHelmholtz(BaseConfig):
     Kelvin Helmholtz problem in Newtonian Fluid
     """
 
-    npts = DynamicArg(
-        "npts", 256, help="Number of zones in x and y dimensions", var_type=int
-    )
+    class config:
+        npts = DynamicArg(
+            "npts", 256, help="Number of zones in x and y dimensions", var_type=int
+        )
 
     xmin = -0.5
     xmax = 0.5
@@ -24,36 +28,28 @@ class KelvinHelmholtz(BaseConfig):
     vxB = -0.5
     pR = 2.5
 
-    def __init__(self) -> None:
-        x = np.linspace(self.xmin, self.xmax, self.npts.value)
-        y = np.linspace(self.ymin, self.ymax, self.npts.value)
-
-        self.rho = np.zeros(shape=(self.npts.value, self.npts.value))
-        self.rho[np.where(np.abs(y) < 0.25)] = self.rhoL
-        self.rho[np.where(np.abs(y) > 0.25)] = self.rhoR
-
-        self.vx = np.zeros(shape=(self.npts.value, self.npts.value))
-        self.vx[np.where(np.abs(y) > 0.25)] = self.vxT
-        self.vx[np.where(np.abs(y) < 0.25)] = self.vxB
-
-        self.vy = np.zeros_like(self.vx)
-
-        self.p = np.zeros(shape=(self.npts.value, self.npts.value))
-        self.p[np.where(np.abs(y) > 0.25)] = self.pL
-        self.p[np.where(np.abs(y) < 0.25)] = self.pR
-
-        # Seed the KH instability with random velocities
-        rng = np.random.default_rng(SEED)
-        sin_arr = 0.01 * np.sin(2 * np.pi * x)
-        vx_rand = rng.choice(sin_arr, size=self.vx.shape)
-        vy_rand = rng.choice(sin_arr, size=self.vy.shape)
-
-        self.vx += vx_rand
-        self.vy += vy_rand
-
     @simbi_property
-    def initial_primitive_state(self) -> Sequence[NDArray[np.float64]]:
-        return (self.rho, self.vx, self.vy, self.p)
+    def initial_primitive_state(self) -> Generator[tuple[float, ...], None, None]:
+        def gas_state() -> Generator[tuple[float, ...], None, None]:
+            dy = (self.ymax - self.ymin) / self.config.npts
+            for j in range(self.config.npts):
+                y = self.ymin + j * dy
+                for i in range(self.config.npts):
+                    vx_noise = PEEK_TO_PEEK * np.sin(2 * np.pi * rng.normal())
+                    vy_noise = PEEK_TO_PEEK * np.sin(2 * np.pi * rng.normal())
+                    if abs(y) < 0.25:
+                        rho = self.rhoL
+                        vx = self.vxT + vx_noise
+                        vy = 0.0 + vy_noise
+                        p = self.pL
+                    else:
+                        rho = self.rhoR
+                        vx = self.vxB + vx_noise
+                        vy = 0.0 + vy_noise
+                        p = self.pR
+                    yield rho, vx, vy, p
+
+        return gas_state
 
     @simbi_property
     def bounds(self) -> Sequence[Sequence[float]]:
@@ -69,7 +65,7 @@ class KelvinHelmholtz(BaseConfig):
 
     @simbi_property
     def resolution(self) -> Sequence[Any]:
-        return (self.npts, self.npts)
+        return (self.config.npts, self.config.npts)
 
     @simbi_property
     def adiabatic_index(self) -> float:

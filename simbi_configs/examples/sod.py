@@ -19,9 +19,10 @@ class SodProblem(BaseConfig):
     ) -> Generator[tuple[float, float, float], None, None]:
         """return initial primitive generator"""
 
-        def _initial_state(resolution=(self.config.nzones,), bounds=(0.0, 1.0)):
-            dx = (bounds[1] - bounds[0]) / resolution[0]
-            for i in range(resolution[0]):
+        def _initial_state():
+            nx = self.resolution
+            dx = (self.bounds[1] - self.bounds[0]) / nx
+            for i in range(nx):
                 if i * dx < 0.5:
                     yield 1.0, 0.0, 1.0
                 else:

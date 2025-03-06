@@ -7,7 +7,7 @@ from .version import __version_tuple__
 from .libs.rad_hydro import py_calc_fnu, py_log_events
 from .functional.helpers import *
 from .tools.utility import get_dimensionality, read_file
-from .core.managers.property import simbi_property
+from .core.managers.property import simbi_property, simbi_class_property
 
 logger = logging.logger
 __version__ = ".".join(map(str, __version_tuple__))

@@ -20,10 +20,20 @@ def calculate_state_vector(
     try:
         dens = calc_labframe_density(rho, velocity, regime)
         mom = calc_labframe_momentum(
-            adiabatic_index, rho, velocity, pressure, bfields or [], regime
+            adiabatic_index,
+            rho,
+            velocity,
+            pressure,
+            [] if bfields is None else bfields,
+            regime,
         )
         energy = calc_labframe_energy(
-            adiabatic_index, rho, pressure, velocity, bfields or [], regime
+            adiabatic_index,
+            rho,
+            pressure,
+            velocity,
+            [] if bfields is None else bfields,
+            regime,
         )
 
         return StateVector(
@@ -31,7 +41,7 @@ def calculate_state_vector(
             momentum=list(mom),
             energy=energy,
             rho_chi=dens * chi,
-            mean_magnetic_field=list(bfields) if bfields else None,
+            mean_magnetic_field=list(bfields) if bfields is not None else None,
         )
     except Exception as e:
         print(f"Failed to calculate state vector: {e}")

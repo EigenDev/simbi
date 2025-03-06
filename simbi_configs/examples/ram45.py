@@ -1,4 +1,18 @@
 from simbi import BaseConfig, DynamicArg, simbi_property
+from typing import Any, Sequence, Generator, Iterator
+from dataclasses import dataclass
+
+
+@dataclass(frozen=True)
+class ShockHeatingState:
+    rho: float
+    v1: float
+    p: float
+
+    def __iter__(self) -> Iterator[float]:
+        yield self.rho
+        yield self.v1
+        yield self.p
 
 
 class Ram45(BaseConfig):
@@ -7,14 +21,20 @@ class Ram45(BaseConfig):
     This setup was adapted from Zhang and MacFadyen (2006) section 4.5
     """
 
-    nzones = DynamicArg("nzones", 100, help="number of grid zones", var_type=int)
-    adiabatic_index = DynamicArg(
-        "ad-gamma", 4.0 / 3.0, help="Adiabatic gas index", var_type=float
-    )
+    class config:
+        nzones = DynamicArg("nzones", 100, help="number of grid zones", var_type=int)
+        adiabatic_index = DynamicArg(
+            "ad-gamma", 4.0 / 3.0, help="Adiabatic gas index", var_type=float
+        )
 
     @simbi_property
-    def initial_primitive_state(self) -> Sequence[Any]:
-        return (1.0, (1.0 - 1.0e-5), 1e-6)
+    def initial_primitive_state(self) -> Generator[tuple[float, ...], None, None]:
+        def gas_state() -> Generator[tuple[float, ...], None, None]:
+            ni = self.resolution
+            for i in range(ni):
+                yield tuple(ShockHeatingState(1.0, (1.0 - 1.0e-5), 1e-6))
+
+        return gas_state
 
     @simbi_property
     def bounds(self) -> Sequence[float]:
@@ -30,11 +50,11 @@ class Ram45(BaseConfig):
 
     @simbi_property
     def resolution(self) -> Sequence[DynamicArg]:
-        return (self.nzones,)
+        return self.config.nzones
 
     @simbi_property
     def adiabatic_index(self) -> DynamicArg:
-        return self.adiabatic_index
+        return self.config.adiabatic_index
 
     @simbi_property
     def regime(self) -> str:

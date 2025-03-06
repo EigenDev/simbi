@@ -1,4 +1,5 @@
 import numpy as np
+import math
 import sys
 import linecache
 import os
@@ -15,7 +16,7 @@ __all__ = [
     "calc_vertices",
     "calc_cell_volume",
     "for_each",
-    "get_iterable",
+    "to_iterable",
     "compute_num_polar_zones",
     "calc_dlogt",
     "print_progress",
@@ -23,6 +24,10 @@ __all__ = [
     "find_nearest",
     "pad_jagged_array",
     "display_top",
+    "tuple_of_tuples",
+    "expand_axis_if_needed",
+    "order_of_mag",
+    "to_tuple_of_tuples",
 ]
 
 
@@ -304,11 +309,18 @@ def for_each(func: Callable[..., Any], x: Any) -> None:
         func(i)
 
 
-def get_iterable(x: Any, func: Callable[..., Sequence[Any]] = list) -> Sequence[Any]:
+def to_iterable(x: Any, func: Callable[..., Sequence[Any]] = list) -> Sequence[Any]:
     if isinstance(x, (Sequence, np.ndarray)) and not isinstance(x, str):
         return func(x)
     else:
+        print("not iterable")
         return func((x,))
+
+
+def to_tuple_of_tuples(x: Any) -> tuple[tuple[Any, ...], ...]:
+    if not tuple_of_tuples(x):
+        return (x,)
+    return x
 
 
 def display_top(
@@ -352,3 +364,17 @@ def display_top(
 
 def tuple_of_tuples(x: Any) -> bool:
     return all(isinstance(a, tuple) for a in x)
+
+
+def expand_axis_if_needed(
+    arr: NDArray[Any], axis: Optional[tuple[int]]
+) -> NDArray[Any]:
+    if axis is None:
+        return arr
+    return np.expand_dims(arr, axis=axis)
+
+
+def order_of_mag(val: float) -> int:
+    if val == 0:
+        return 0
+    return int(math.floor(math.log10(val)))

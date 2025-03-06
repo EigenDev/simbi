@@ -1,23 +1,38 @@
 from simbi import BaseConfig, DynamicArg, simbi_property
+from typing import Sequence, Generator
 
 
 class MartiMuller3D(BaseConfig):
     """
-    Marti & Muller (2003), Relativistic  Shock Tube Problem in 3D Fluid
+    Marti & Muller (2003), Relativistic  Shock Tube Problem on 3D Mesh
     """
 
-    nzones = DynamicArg("nzones", 100, help="number of grid zones", var_type=int)
-    adiabatic_index = DynamicArg(
-        "ad-gamma", 4.0 / 3.0, help="Adiabatic gas index", var_type=float
-    )
+    class config:
+        nzones = DynamicArg("nzones", 100, help="number of grid zones", var_type=int)
+        adiabatic_index = DynamicArg(
+            "ad-gamma", 4.0 / 3.0, help="Adiabatic gas index", var_type=float
+        )
 
     @simbi_property
-    def initial_primitive_state(self) -> Sequence[Sequence[float]]:
-        return ((10.0, 0.0, 0.0, 0.0, 13.33), (1.0, 0.0, 0.0, 0.0, 1e-10))
+    def initial_primitive_state(self) -> Generator[tuple[float, ...], None, None]:
+        def gas_state() -> Generator[tuple[float, ...], None, None]:
+            ni, nj, nk = self.resolution
+            xextent = self.bounds[0][1] - self.bounds[0][0]
+            dx = xextent / ni
+            for k in range(nk):
+                for j in range(nj):
+                    for i in range(ni):
+                        xi = self.bounds[0][0] + i * dx
+                        if xi <= 0.5 * xextent:
+                            yield (10.0, 0.0, 0.0, 0.0, 13.33)
+                        else:
+                            yield (1.0, 0.0, 0.0, 0.0, 1e-10)
+
+        return gas_state
 
     @simbi_property
     def bounds(self) -> Sequence[Sequence[float]]:
-        return ((0.0, 1.0, 0.5), (0.0, 1.0), (0.0, 1.0))
+        return ((0.0, 1.0), (0.0, 1.0), (0.0, 1.0))
 
     @simbi_property
     def x1_spacing(self) -> str:
@@ -29,11 +44,11 @@ class MartiMuller3D(BaseConfig):
 
     @simbi_property
     def resolution(self) -> Sequence[DynamicArg]:
-        return (self.nzones, self.nzones, self.nzones)
+        return (self.config.nzones, self.config.nzones, self.config.nzones)
 
     @simbi_property
     def adiabatic_index(self) -> DynamicArg:
-        return self.adiabatic_index
+        return self.config.adiabatic_index
 
     @simbi_property
     def regime(self) -> str:

@@ -1,6 +1,5 @@
 import argparse
 import abc
-import logging
 import math
 import numpy as np
 from ...detail.dynarg import DynamicArg
@@ -24,6 +23,7 @@ from pathlib import Path
 from ..managers import (
     SourceManager,
     CLIManager,
+    ProblemIO,
     simbi_property,
     simbi_derived_property,
     simbi_class_property,
@@ -207,6 +207,14 @@ class BaseConfig(metaclass=abc.ABCMeta):
     def scale_factor(cls) -> Optional[Callable[[float], float]]:
         return None
 
+    @simbi_property(group="misc")
+    def log_parameter_setup(self) -> bool:
+        return False
+
+    @simbi_property(group="misc")
+    def log_output_dir(self) -> Union[str, Path]:
+        return "."
+
     @simbi_class_property(group="mesh")
     def scale_factor_derivative(cls) -> Optional[Callable[[float], float]]:
         return None
@@ -336,43 +344,6 @@ class BaseConfig(metaclass=abc.ABCMeta):
             if arg.name in extra_args:
                 arg.value = extra_args[arg.name]
 
-    @final
-    @classmethod
-    def _print_problem_params(cls) -> None:
-        from ...io.logging import logger, SimbiFormatter
-        import math
-
-        def order_of_mag(val: float) -> int:
-            if val == 0:
-                return 0
-            return int(math.floor(math.log10(val)))
-
-        if cls.log_output:
-            from datetime import datetime
-            from pathlib import Path
-
-            timestr = datetime.now().strftime("%Y%m%d-%H%M%S")
-            Path(cls.log_directory).mkdir(parents=True, exist_ok=True)
-            logfile = Path(cls.log_directory) / f"simbilog_{timestr}.log"
-            logger.debug(f"Writing log file: {logfile}")
-            file_handler = logging.FileHandler(logfile)
-            file_handler.setLevel(logging.DEBUG)
-            file_handler.setFormatter(SimbiFormatter())
-            logger.addHandler(file_handler)
-
-        logger.info("\nProblem Parameters:")
-        logger.info("=" * 80)
-        if cls.dynamic_args:
-            for member in cls.dynamic_args:
-                val = member.value
-                if isinstance(val, float):
-                    if order_of_mag(abs(val)) > 3:
-                        logger.info(f"{member.name:.<30} {val:<15.2e} {member.help}")
-                        continue
-                    val = round(val, 3)
-                val = str(val)
-                logger.info(f"{member.name:.<30} {val:<15} {member.help}")
-
     @classmethod
     def _compile_source_terms(cls):
         """If the user provided source code, try to compile it"""
@@ -397,6 +368,9 @@ class BaseConfig(metaclass=abc.ABCMeta):
         # collect instance properties
         for name, (_, group) in simbi_property.registry.items():
             if hasattr(self, name):
+                # ignore miscalaneaus groups
+                if group.value not in settings.keys():
+                    continue
                 value = getattr(self, name)
                 settings[group.value][name] = value
 
@@ -455,7 +429,4 @@ class BaseConfig(metaclass=abc.ABCMeta):
 
     @final
     def __del__(self) -> None:
-        try:
-            self._print_problem_params()
-        except Exception:
-            pass
+        ProblemIO.print_params(self)

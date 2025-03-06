@@ -74,7 +74,7 @@ namespace simbi {
                 sim_state.bstag2.sync_to_host();
                 sim_state.bstag3.sync_to_host();
             }
-            static auto data_directory      = sim_state.data_directory();
+            auto data_directory             = sim_state.data_directory();
             auto step                       = sim_state.checkpoint_idx();
             static lint tchunk_order_of_mag = 2;
             const auto temporal_order_of_mag =

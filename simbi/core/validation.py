@@ -1,9 +1,10 @@
 from typing import Sequence
 from .config.constants import (
-    AVAILABLE_COORD_SYSTEMS, 
+    AVAILABLE_COORD_SYSTEMS,
     AVAILABLE_REGIMES,
-    AVAILABLE_BOUNDARY_CONDITIONS
+    AVAILABLE_BOUNDARY_CONDITIONS,
 )
+
 
 def validate_coordinate_system(coord_system: str) -> None:
     if coord_system not in AVAILABLE_COORD_SYSTEMS:
@@ -12,11 +13,9 @@ def validate_coordinate_system(coord_system: str) -> None:
             f"Got: {coord_system}"
         )
 
-def validate_boundary_conditions(
-    bcs: Sequence[str], 
-    dimensionality: int
-) -> list[str]:
-    bcs = list(helpers.get_iterable(bcs))
+
+def validate_boundary_conditions(bcs: Sequence[str], dimensionality: int) -> list[str]:
+    bcs = list(helpers.to_iterable(bcs))
     invalid_bcs = [bc for bc in bcs if bc not in AVAILABLE_BOUNDARY_CONDITIONS]
     if invalid_bcs:
         raise ValueError(

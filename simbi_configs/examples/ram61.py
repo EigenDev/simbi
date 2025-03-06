@@ -1,4 +1,6 @@
 from simbi import BaseConfig, DynamicArg, simbi_property
+from typing import Sequence, Generator
+from dataclasses import dataclass
 
 
 class Ram61(BaseConfig):
@@ -7,18 +9,28 @@ class Ram61(BaseConfig):
     This setup was adapted from Zhang and MacFadyen (2006) section 6.1
     """
 
-    nzones = DynamicArg("nzones", 400, help="number of grid zones", var_type=int)
-    adiabatic_index = DynamicArg(
-        "ad-gamma", 5.0 / 3.0, help="Adiabatic gas index", var_type=float
-    )
+    class config:
+        nzones = DynamicArg("nzones", 400, help="number of grid zones", var_type=int)
+        adiabatic_index = DynamicArg(
+            "ad-gamma", 5.0 / 3.0, help="Adiabatic gas index", var_type=float
+        )
 
     @simbi_property
-    def initial_primitive_state(self) -> Sequence[Sequence[float]]:
-        return ((1.0, 0.0, 0.90, 1e3), (1.0, 0.0, 0.90, 1e-2))  # Left  # Right
+    def initial_primitive_state(self) -> Generator[tuple[float, ...], None, None]:
+        def gas_state() -> Generator[tuple[float, ...], None, None]:
+            ni, nj = self.resolution
+            for j in range(nj):
+                for i in range(ni):
+                    if i < ni // 2:
+                        yield (1.0, 0.0, 0.90, 1e3)
+                    else:
+                        yield (1.0, 0.0, 0.90, 1e-2)
+
+        return gas_state
 
     @simbi_property
     def bounds(self) -> Sequence[Sequence[float]]:
-        return ((0.0, 1.0, 0.5), (0.0, 1.0))
+        return ((0.0, 1.0), (0.0, 1.0))
 
     @simbi_property
     def x1_spacing(self) -> str:
@@ -30,11 +42,11 @@ class Ram61(BaseConfig):
 
     @simbi_property
     def resolution(self) -> Sequence[DynamicArg]:
-        return (self.nzones, self.nzones)
+        return (self.config.nzones, self.config.nzones)
 
     @simbi_property
     def adiabatic_index(self) -> DynamicArg:
-        return self.adiabatic_index
+        return self.config.adiabatic_index
 
     @simbi_property
     def regime(self) -> str:

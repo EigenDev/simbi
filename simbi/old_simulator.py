@@ -95,7 +95,7 @@ class Hydro:
             lambda x: setattr(self, x, extras[x]) if x in dir(self) else None,
             clean_attributes,
         )
-        resolution = helpers.get_iterable(resolution)
+        resolution = helpers.to_iterable(resolution)
         resolution = tuple(resolution)
 
         if not helpers.tuple_of_tuples(geometry):
@@ -259,7 +259,7 @@ class Hydro:
     def _check_boundary_conditions(
         self, boundary_conditions: Union[Sequence[str], str, NDArray[numpy_string]]
     ) -> None:
-        boundary_conditions = list(helpers.get_iterable(boundary_conditions))
+        boundary_conditions = list(helpers.to_iterable(boundary_conditions))
         invalid_bcs = [
             bc for bc in boundary_conditions if bc not in available_boundary_conditions
         ]

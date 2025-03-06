@@ -1,64 +1,86 @@
-import numpy as np
+import math
 from simbi import BaseConfig, simbi_property, DynamicArg
+from typing import Sequence, Generator, Any
+from functools import partial
 
 
 XMIN = 0.0
-XMAX = 2.0 * np.pi
+XMAX = 2.0 * math.pi
 
 
 class OrszagTang(BaseConfig):
     """The Orszag-Tang vortex test case"""
 
-    # Dynamic Args to be fed to argparse
-    v0 = DynamicArg("v0", 0.5, help="velocity scale", var_type=float)
-    b0 = DynamicArg("b0", 1.0, help="magnetic field scale", var_type=float)
-    nzones = DynamicArg("nzones", 256, help="number of zones in x and y", var_type=int)
-    adiabatic_index = DynamicArg(
-        "ad-gamma", 5.0 / 3.0, help="Adiabtic gas index", var_type=float
-    )
+    class config:
+        v0 = DynamicArg("v0", 0.5, help="velocity scale", var_type=float)
+        b0 = DynamicArg("b0", 1.0, help="magnetic field scale", var_type=float)
+        nzones = DynamicArg(
+            "nzones", 256, help="number of zones in x and y", var_type=int
+        )
+        adiabatic_index = DynamicArg(
+            "ad-gamma", 5.0 / 3.0, help="Adiabtic gas index", var_type=float
+        )
 
     def __init__(self) -> None:
-        p0 = self.adiabatic_index
-        rho0 = self.adiabatic_index**2
-        nzones = int(self.nzones)
-        bx_shape = (1, nzones, nzones + 1)
-        by_shape = (1, nzones + 1, nzones)
-        bz_shape = (2, nzones, nzones)
-        x1 = np.linspace(XMIN, XMAX, nzones)
-        x2 = np.linspace(XMIN, XMAX, nzones)
-        x2 = x2[:, None]
-        self.rho = np.ones((1, nzones, nzones), float) * rho0
-        self.p = np.ones_like(self.rho) * p0
-        self.v1 = self.v0 * np.ones_like(self.rho) * (-np.sin(x2))
-        self.v2 = self.v0 * np.ones_like(self.rho) * (+np.sin(x1))
-        self.v3 = np.zeros_like(self.rho)
-        self.bvec = np.array(
-            [
-                self.b0 * np.ones(bx_shape) * (-np.sin(1.0 * x2)),
-                self.b0 * np.ones(by_shape) * (+np.sin(2.0 * x1)),
-                np.zeros(bz_shape),
-            ],
-            dtype=object,
-        )
-
-        self.cs: float = (self.adiabatic_index - 1.0) / self.adiabatic_index
+        self.cs: float = (
+            self.config.adiabatic_index - 1.0
+        ) / self.config.adiabatic_index
 
     @simbi_property
-    def initial_primitive_state(self) -> Sequence[NDArray[np.float64]]:
-        return (
-            self.rho,
-            self.v1,
-            self.v2,
-            self.v3,
-            self.p,
-            self.bvec[0],
-            self.bvec[1],
-            self.bvec[2],
-        )
+    def initial_primitive_state(
+        self,
+    ) -> tuple[
+        Generator[tuple[float, ...], None, None],
+        Generator[float, None, None],
+        Generator[float, None, None],
+        Generator[float, None, None],
+    ]:
+        def gas_state() -> Generator[tuple[float, ...], None, None]:
+            ni, nj, nk = self.resolution
+            p0 = self.config.adiabatic_index
+            rho0 = self.config.adiabatic_index**2
+            v0 = self.config.v0
+            xbounds = self.bounds[0]
+            ybounds = self.bounds[1]
+            dx = (xbounds[1] - xbounds[0]) / ni
+            dy = (ybounds[1] - ybounds[0]) / nj
+            for k in range(nk):
+                for j in range(nj):
+                    y = ybounds[0] + j * dy
+                    for i in range(ni):
+                        x = xbounds[0] + i * dx
+                        vx = -v0 * math.sin(y)
+                        vy = +v0 * math.sin(x)
+                        yield (rho0, vx, vy, 0.0, p0)
+
+        def b_field(bn: str) -> Generator[float, None, None]:
+            ni, nj, nk = self.resolution
+            xbounds = self.bounds[0]
+            ybounds = self.bounds[1]
+            dx = (xbounds[1] - xbounds[0]) / ni
+            dy = (ybounds[1] - ybounds[0]) / nj
+            b0 = self.config.b0
+            for k in range(nk + (bn == "bz")):
+                for j in range(nj + (bn == "by")):
+                    y = ybounds[0] + j * dy
+                    for i in range(ni + (bn == "bx")):
+                        x = xbounds[0] + i * dx
+                        if bn == "bx":
+                            yield -b0 * math.sin(1.0 * y)
+                        elif bn == "by":
+                            yield +b0 * math.sin(2.0 * x)
+                        else:
+                            yield 0.0
+
+        bx = partial(b_field, "bx")
+        by = partial(b_field, "by")
+        bz = partial(b_field, "bz")
+
+        return gas_state, bx, by, bz
 
     @simbi_property
     def bounds(self) -> Sequence[Sequence[Any]]:
-        return ((XMIN, XMAX), (XMIN, XMAX), (0, 1))
+        return ((XMIN, XMAX), (XMIN, XMAX))
 
     @simbi_property
     def x1_spacing(self) -> str:
@@ -70,11 +92,11 @@ class OrszagTang(BaseConfig):
 
     @simbi_property
     def resolution(self) -> Sequence[int | DynamicArg]:
-        return (self.nzones, self.nzones, 1)
+        return (self.config.nzones, self.config.nzones, 1)
 
     @simbi_property
     def adiabatic_index(self) -> DynamicArg:
-        return self.adiabatic_index
+        return self.config.adiabatic_index
 
     @simbi_property
     def regime(self) -> str:

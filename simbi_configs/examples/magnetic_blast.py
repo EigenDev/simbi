@@ -1,77 +1,89 @@
-import numpy as np
-from simbi import BaseConfig, simbi_property, DynamicArg, compute_num_polar_zones
+import math
+from simbi import BaseConfig, simbi_property, DynamicArg
+from typing import Sequence, Generator
+from functools import partial
 
 XMIN = -6.0
 XMAX = 6.0
-PEXP = 1.0
-RHOEXP = 0.1
-REXP = 0.08
-RSTOP = 1.0
+P_EXP = 1.0
+RHO_EXP = 0.1
+R_EXP = 0.08
+R_STOP = 1.0
 
 
-def find_nearest(arr: NDArray[np.float64], val: float) -> Tuple[Any, Any]:
-    idx = np.argmin(np.abs(arr - val))
-    return idx, arr[idx]
-
-
-class magneticBomb(BaseConfig):
+class MagneticBomb(BaseConfig):
     """The Magnetic Bomb
     Launch a cylindrical relativistic magnetized blast wave
     """
 
-    # Dynamic Args to be fed to argparse
-    rho0 = DynamicArg("rho0", 1.0e-4, help="density scale", var_type=float)
-    p0 = DynamicArg("p0", 3.0e-5, help="pressure scale", var_type=float)
-    b0 = DynamicArg("b0", 0.1, help="magnetic field scale", var_type=float)
-    nzones = DynamicArg("nzones", 256, help="number of zones in x and y", var_type=int)
-    adiabatic_index = DynamicArg(
-        "ad-gamma", 4.0 / 3.0, help="Adiabtic gas index", var_type=float
-    )
-
-    def __init__(self) -> None:
-        bx_shape = (1, self.nzones.value, self.nzones.value + 1)
-        by_shape = (1, self.nzones.value + 1, self.nzones.value)
-        bz_shape = (2, self.nzones.value, self.nzones.value)
-        nzones = int(self.nzones)
-        x1 = np.linspace(XMIN, XMAX, nzones)
-        x2 = np.linspace(XMIN, XMAX, nzones)
-        self.rho = np.ones((1, nzones, nzones), float) * self.rho0
-        self.p = np.ones_like(self.rho) * self.p0
-        self.v1 = np.zeros_like(self.rho)
-        self.v2 = self.v1.copy()
-        self.v3 = self.v1.copy()
-        self.bvec = np.array(
-            [np.ones(bx_shape) * self.b0, np.zeros(by_shape), np.zeros(bz_shape)],
-            dtype=object,
+    class config:
+        rho0 = DynamicArg("rho0", 1.0e-4, help="density scale", var_type=float)
+        p0 = DynamicArg("p0", 3.0e-5, help="pressure scale", var_type=float)
+        b0 = DynamicArg("b0", 0.1, help="magnetic field scale", var_type=float)
+        nzones = DynamicArg(
+            "nzones", 256, help="number of zones in x and y", var_type=int
         )
-
-        xx, yy = np.meshgrid(x1, x2)
-        rr = np.sqrt(xx**2 + yy**2)
-        exp_reg = rr < REXP
-        pslope = (PEXP - self.p0) / (RSTOP - REXP)
-        rhoslope = (RHOEXP - self.rho0) / (RSTOP - REXP)
-        self.p[:, exp_reg] = PEXP
-        self.rho[:, exp_reg] = RHOEXP
-        rbound = (rr > REXP) & (rr < RSTOP)
-        self.p[:, rbound] = PEXP - pslope * (rr[rbound] - REXP)
-        self.rho[:, rbound] = RHOEXP - rhoslope * (rr[rbound] - REXP)
-
-    @simbi_property
-    def initial_primitive_state(self) -> Sequence[NDArray[np.float64]]:
-        return (
-            self.rho,
-            self.v1,
-            self.v2,
-            self.v3,
-            self.p,
-            self.bvec[0],
-            self.bvec[1],
-            self.bvec[2],
+        adiabatic_index = DynamicArg(
+            "ad-gamma", 4.0 / 3.0, help="Adiabtic gas index", var_type=float
         )
 
     @simbi_property
-    def bounds(self) -> Sequence[Sequence[Any]]:
-        return ((XMIN, XMAX), (XMIN, XMAX), (0, 1))
+    def initial_primitive_state(
+        self,
+    ) -> tuple[
+        Generator[tuple[float, ...], None, None],
+        Generator[float, None, None],
+        Generator[float, None, None],
+        Generator[float, None, None],
+    ]:
+        def gas_state() -> Generator[tuple[float, ...]]:
+            ni, nj, nk = self.resolution
+            xbounds = self.bounds[0]
+            ybounds = self.bounds[1]
+            dx = (xbounds[1] - xbounds[0]) / ni
+            dy = (ybounds[1] - ybounds[0]) / nj
+            rho_amb = self.config.rho0
+            pre_amb = self.config.p0
+            pslope = (P_EXP - pre_amb) / (R_STOP - R_EXP)
+            rhoslope = (RHO_EXP - rho_amb) / (R_STOP - R_EXP)
+            for k in range(nk):
+                for j in range(nj):
+                    y = ybounds[0] + j * dy
+                    for i in range(ni):
+                        x = xbounds[0] + i * dx
+                        r = math.sqrt(x**2 + y**2)
+                        if r < R_EXP:
+                            yield (RHO_EXP, 0.0, 0.0, 0.0, P_EXP)
+                        elif r > R_EXP and r < R_STOP:
+                            yield (
+                                RHO_EXP - rhoslope * (r - R_EXP),
+                                0.0,
+                                0.0,
+                                0.0,
+                                P_EXP - rhoslope * (r - R_EXP),
+                            )
+                        else:
+                            yield (rho_amb, 0.0, 0.0, 0.0, pre_amb)
+
+        def b_field(bn: str) -> Generator[float, None, None]:
+            ni, nj, nk = self.resolution
+            for k in range(nk + (bn == "bz")):
+                for j in range(nj + (bn == "by")):
+                    for i in range(ni + (bn == "bx")):
+                        if bn == "bx":
+                            yield self.config.b0
+                        else:
+                            yield 0.0
+
+        bx = partial(b_field, "bx")
+        by = partial(b_field, "by")
+        bz = partial(b_field, "bz")
+
+        return (gas_state, bx, by, bz)
+
+    @simbi_property
+    def bounds(self) -> Sequence[Sequence[float]]:
+        return ((XMIN, XMAX), (XMIN, XMAX))
 
     @simbi_property
     def x1_spacing(self) -> str:
@@ -83,11 +95,11 @@ class magneticBomb(BaseConfig):
 
     @simbi_property
     def resolution(self) -> Sequence[int | DynamicArg]:
-        return (self.nzones, self.nzones, 1)
+        return (self.config.nzones, self.config.nzones, 1)
 
     @simbi_property
     def adiabatic_index(self) -> DynamicArg:
-        return self.adiabatic_index
+        return self.config.adiabatic_index
 
     @simbi_property
     def regime(self) -> str:

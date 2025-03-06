@@ -24,43 +24,7 @@ class PropertyGroup(Enum):
     MESH = "mesh"
     IO = "io"
     GRID = "grid"
-
-
-# Property group mappings
-PROPERTY_GROUPS = {
-    # Simulation state properties
-    "regime": PropertyGroup.SIM_STATE,
-    "adiabatic_index": PropertyGroup.SIM_STATE,
-    "initial_primitive_state": PropertyGroup.SIM_STATE,
-    "use_quirk_smoothing": PropertyGroup.SIM_STATE,
-    "passive_scalars": PropertyGroup.SIM_STATE,
-    "plm_theta": PropertyGroup.SIM_STATE,
-    "cfl_number": PropertyGroup.SIM_STATE,
-    "order_of_integration": PropertyGroup.SIM_STATE,
-    "spatial_order": PropertyGroup.SIM_STATE,
-    "temporal_order": PropertyGroup.SIM_STATE,
-    "default_start_time": PropertyGroup.SIM_STATE,
-    "default_end_time": PropertyGroup.SIM_STATE,
-    "solver": PropertyGroup.SIM_STATE,
-    # Mesh properties
-    "coord_system": PropertyGroup.MESH,
-    "resolution": PropertyGroup.MESH,
-    "bounds": PropertyGroup.MESH,
-    "x1_spacing": PropertyGroup.MESH,
-    "x2_spacing": PropertyGroup.MESH,
-    "x3_spacing": PropertyGroup.MESH,
-    "mesh_motion": PropertyGroup.MESH,
-    "scale_factor": PropertyGroup.MESH,
-    "scale_factor_derivative": PropertyGroup.MESH,
-    "boundary_conditions": PropertyGroup.MESH,
-    # IO properties
-    "data_directory": PropertyGroup.IO,
-    "checkpoint_interval": PropertyGroup.IO,
-    "log_output": PropertyGroup.IO,
-    "gravity_sources": PropertyGroup.IO,
-    "hydro_sources": PropertyGroup.IO,
-    "boundary_sources": PropertyGroup.IO,
-}
+    MISC = "misc"
 
 
 class PropertyType(Enum):
@@ -101,14 +65,15 @@ class simbi_property(Generic[T]):
     @property
     def group(self) -> PropertyGroup:
         if self._group is None:
-            # Look up group from base class property
-            from ..config.base_config import BaseConfig
+            return PropertyGroup.MISC
+            # # Look up group from base class property
+            # from ..config.base_config import BaseConfig
 
-            base_prop = getattr(BaseConfig, self._name, None)
-            if base_prop and isinstance(base_prop, simbi_property):
-                self._group = base_prop.group
-            else:
-                raise ValueError(f"No group defined for property {self._name}")
+            # base_prop = getattr(BaseConfig, self._name, None)
+            # if base_prop and isinstance(base_prop, simbi_property):
+            #     self._group = base_prop.group
+            # else:
+            #     raise ValueError(f"No group defined for property {self._name}")
         return self._group
 
     def __set_name__(self, owner: Any, name: str) -> None:

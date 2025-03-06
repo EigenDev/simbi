@@ -2,26 +2,58 @@ import ast
 import sys
 import importlib
 from pathlib import Path
-from typing import List, Dict, Any, Optional, Sequence, Tuple
+from typing import List, Dict, Any, Optional, Sequence, Tuple, Set
 from argparse import ArgumentParser, Namespace
 from ....simulator import Hydro
 from ....detail import bcolors
 from ....core.config.base_config import BaseConfig
 
 
+def _build_inheritance_graph(root: ast.Module) -> Dict[str, Set[str]]:
+    """Build graph of class inheritance relationships"""
+    inheritance_graph = {}
+
+    for node in root.body:
+        if isinstance(node, ast.ClassDef):
+            # Get all base classes for this class
+            bases = [base.id for base in node.bases if isinstance(base, ast.Name)]
+            inheritance_graph[node.name] = set(bases)
+
+    return inheritance_graph
+
+
+def _get_derived_classes(
+    graph: Dict[str, Set[str]], base_class: str = "BaseConfig"
+) -> Set[str]:
+    """Find all classes that inherit from base_class directly or indirectly"""
+    derived = set()
+
+    def visit(class_name: str) -> None:
+        # Find all classes that directly inherit from this class
+        direct_children = {name for name, bases in graph.items() if class_name in bases}
+        # Add them to our result set
+        derived.update(direct_children)
+        # Recursively visit each child
+        for child in direct_children:
+            visit(child)
+
+    # Start search from base class
+    visit(base_class)
+    return derived
+
+
 def _get_setup_classes(script: str) -> List[str]:
-    """Extract setup classes from script"""
+    """Extract all classes that inherit from BaseConfig directly or indirectly"""
     with open(script) as setup_file:
         root = ast.parse(setup_file.read())
 
-    setup_classes = [
-        node.name
-        for node in root.body
-        if isinstance(node, ast.ClassDef)
-        for base in node.bases
-        if base.id == "BaseConfig" or base.id in setup_classes
-    ]
-    return setup_classes
+    # Build inheritance relationships
+    inheritance_graph = _build_inheritance_graph(root)
+
+    # Find all derived classes
+    setup_classes = _get_derived_classes(inheritance_graph)
+
+    return sorted(setup_classes)  # Sort for deterministic order
 
 
 def _configure_single_state(

@@ -1,9 +1,12 @@
+import numpy as np
 from dataclasses import dataclass
-from ...functional import get_iterable, pipe
+from ...functional import to_tuple_of_tuples, pipe, tuple_of_tuples
 from typing import Any, Protocol
 from .state_init import SimulationBundle
 from ..managers.boundary import BoundaryManager
 from pathlib import Path
+from ...io.logging import logger
+from numpy.typing import NDArray
 
 
 class SimulationState(Protocol):
@@ -33,7 +36,7 @@ class SimulationState(Protocol):
     x1bounds: tuple[float, float]
     x2bounds: tuple[float, float]
     x3bounds: tuple[float, float]
-    bfield: list[list[float]]
+    bfield: list[NDArray[np.float64]]
     hydro_source_lib: bytes
     gravity_source_lib: bytes
     boundary_source_lib: bytes
@@ -46,12 +49,33 @@ class SimStateBuilder:
     """Builder for simulation state configuration"""
 
     @staticmethod
+    def prepare_data_directory(data_directory: str) -> str:
+        """Ensure data directory exists"""
+        data_path = Path(data_directory)
+        if not data_path.is_dir():
+            data_path.mkdir(parents=True)
+            logger.info(f"Created data directory: {data_path}")
+
+    @staticmethod
     def get_bounds(
-        bounds: list[tuple[float, float]], dim: int
+        bounds: list[tuple[float, float]], effective_dim: int
     ) -> tuple[tuple[float, float], ...]:
         """Get bounds with defaults for missing dimensions"""
-        bounds_copy = get_iterable(bounds, tuple)
-        defaults = [(0.0, 1.0) for _ in range(3 - dim)]
+        bounds_copy = to_tuple_of_tuples(bounds)
+        for bnd in bounds_copy:
+            if len(bnd) != 2:
+                raise ValueError(
+                    f"Bounds must be a tuple of length 2, got {bounds_copy} instead"
+                )
+        defaults = [(0.0, 1.0) for _ in range(3 - effective_dim)]
+        if tuple_of_tuples(bounds_copy):
+            # if the user for some reason inputs a 3-tuple for the bounds, and
+            # the effective dimensions are not 3, then this is an error
+            if len(bounds) == 3 and (ndef := len(defaults) != 0):
+                raise ValueError(
+                    f"Detected a run wtih effective dimensions {effective_dim}, but the user is inserting undefined bounds. Please remove the bounds: {bounds[-ndef:]} from your configuration"
+                )
+            return *bounds_copy, *tuple(defaults)
         return bounds_copy, *tuple(defaults)
 
     @staticmethod
@@ -94,7 +118,7 @@ class SimStateBuilder:
 
         # Get bounds with defaults
         x1bounds, x2bounds, x3bounds = SimStateBuilder.get_bounds(
-            mesh.bounds, mesh.dimensionality
+            mesh.bounds, mesh.effective_dim(grid.resolution)
         )
 
         bcs = pipe(
@@ -109,6 +133,9 @@ class SimStateBuilder:
         )
 
         # Build base state dict
+        effective_bfields = [[0.0], [0.0], [0.0]]
+        if bundle.staggered_bfields is not None:
+            effective_bfields = [b.flat for b in bundle.staggered_bfields]
         state_dict = {
             "gamma": sim.adiabatic_index,
             "tstart": sim.tstart,
@@ -136,7 +163,7 @@ class SimStateBuilder:
             "x1bounds": x1bounds,
             "x2bounds": x2bounds,
             "x3bounds": x3bounds,
-            "bfield": bundle.staggered_bfields or [[0.0], [0.0], [0.0]],
+            "bfield": effective_bfields,
             "hydro_source_lib": io.hydro_source_lib or "",
             "gravity_source_lib": io.gravity_source_lib or "",
             "boundary_source_lib": io.boundary_source_lib or "",
@@ -144,5 +171,6 @@ class SimStateBuilder:
             "homologous": mesh.is_homologous,
         }
 
+        SimStateBuilder.prepare_data_directory(state_dict["data_directory"])
         # Encode strings and return
         return SimStateBuilder.encode_strings(state_dict)

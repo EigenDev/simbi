@@ -1,21 +1,16 @@
-import numpy as np
+import math
 from simbi import (
     BaseConfig,
     simbi_property,
     DynamicArg,
     compute_num_polar_zones,
+    find_nearest,
 )
-
+from typing import Sequence, Generator, Any
 
 RHO_AMB = 1.0
 T_AMB = 1e-10
-P_AMB = RHO_AMB * T_AMB
 NU = 3.0
-
-
-def find_nearest(arr: NDArray[np.float64], val: float) -> Tuple[Any, Any]:
-    idx = np.argmin(np.abs(arr - val))
-    return idx, arr[idx]
 
 
 class thermalBomb(BaseConfig):
@@ -23,63 +18,76 @@ class thermalBomb(BaseConfig):
     Launch a relativistic blast wave on a 3D Spherical Logarithmic mesh with variable zones per decade in radius
     """
 
-    # Dynamic Args to be fed to argparse
-    e0 = DynamicArg("e0", 10.0, help="energy scale", var_type=float)
-    rho0 = DynamicArg("rho0", 1.0, help="density scale", var_type=float)
-    rinit = DynamicArg("rinit", 0.1, help="intial grid radius", var_type=float)
-    rend = DynamicArg("rend", 1.0, help="radial extent", var_type=float)
-    k = DynamicArg("k", 0.0, help="density power law k", var_type=float)
-    full_sphere = DynamicArg(
-        "full-sphere",
-        False,
-        help="flag for full_sphere computation",
-        var_type=bool,
-        action="store_true",
-    )
-    zpd = DynamicArg("zpd", 64, help="number of radial zones per decade", var_type=int)
-    adiabatic_index = DynamicArg(
-        "ad-gamma", 4.0 / 3.0, help="Adiabtic gas index", var_type=float
-    )
+    class config:
+        e0 = DynamicArg("e0", 10.0, help="energy scale", var_type=float)
+        rho0 = DynamicArg("rho0", 1.0, help="density scale", var_type=float)
+        rinit = DynamicArg("rinit", 0.1, help="intial grid radius", var_type=float)
+        rend = DynamicArg("rend", 1.0, help="radial extent", var_type=float)
+        k = DynamicArg("k", 0.0, help="density power law k", var_type=float)
+        full_sphere = DynamicArg(
+            "full-sphere",
+            False,
+            help="flag for full_sphere computation",
+            var_type=bool,
+            action="store_true",
+        )
+        zpd = DynamicArg(
+            "zpd", 64, help="number of radial zones per decade", var_type=int
+        )
+        adiabatic_index = DynamicArg(
+            "ad-gamma", 4.0 / 3.0, help="Adiabtic gas index", var_type=float
+        )
 
     def __init__(self) -> None:
-        ndec = np.log10(self.rend / self.rinit)
-        self.nr = round(self.zpd * ndec)
-        r = np.geomspace(self.rinit.value, self.rend.value, self.nr)
+        ndec = math.log10(self.config.rend / self.config.rinit)
+        self.nr = round(self.config.zpd * ndec)
         self.theta_min = 0
-        self.theta_max = np.pi if self.full_sphere else 0.5 * np.pi
+        self.theta_max = math.pi if self.config.full_sphere else 0.5 * math.pi
         self.phi_min = 0
-        self.phi_max = 2.0 * np.pi
+        self.phi_max = 2.0 * math.pi
         self.npolar = compute_num_polar_zones(
-            rmin=self.rinit,
-            rmax=self.rend,
+            rmin=self.config.rinit,
+            rmax=self.config.rend,
             nr=self.nr,
             theta_bounds=(self.theta_min, self.theta_max),
         )
         self.nphi = self.npolar
-        dr = self.rinit * 1.5
-
-        p_zones = find_nearest(r, dr)[0]
-        p_c = (self.adiabatic_index - 1.0) * (3 * self.e0 / ((NU + 1) * np.pi * dr**NU))
-
-        self.rho = (
-            np.ones((self.nphi, self.npolar, self.nr), dtype=float)
-            * self.rho0
-            * r ** (-self.k)
-        )
-        self.p = self.rho * T_AMB
-        self.p[..., :p_zones] = p_c
-        self.v1 = np.zeros_like(self.p)
-        self.v2 = self.v1.copy()
-        self.v3 = self.v1.copy()
 
     @simbi_property
-    def initial_primitive_state(self) -> Sequence[NDArray[np.float64]]:
-        return (self.rho, self.v1, self.v2, self.v3, self.p)
+    def initial_primitive_state(self) -> Generator[tuple[float, ...], None, None]:
+        def gas_state() -> Generator[tuple[float, ...], None, None]:
+            ni, nj, nk = self.resolution
+            explosion_radius = self.config.rinit * 1.5
+            dlogr = math.log10(self.config.rend / self.config.rinit) / ni
+            for k in range(nk):
+                for j in range(nj):
+                    for i in range(ni):
+                        r = self.config.rinit * 10 ** (i * dlogr)
+                        rho = RHO_AMB * r ** (-self.config.k)
+                        if r <= explosion_radius:
+                            pre = (self.config.adiabatic_index - 1.0) * (
+                                3.0
+                                * self.config.e0
+                                / (NU + 1)
+                                / math.pi
+                                / explosion_radius**NU
+                            )
+                        else:
+                            pre = T_AMB * rho
+                        yield (
+                            rho,
+                            0.0,
+                            0.0,
+                            0.0,
+                            pre,
+                        )
+
+        return gas_state
 
     @simbi_property
     def bounds(self) -> Sequence[Sequence[Any]]:
         return (
-            (self.rinit, self.rend),
+            (self.config.rinit, self.config.rend),
             (self.theta_min, self.theta_max),
             (self.phi_min, self.phi_max),
         )
@@ -98,7 +106,7 @@ class thermalBomb(BaseConfig):
 
     @simbi_property
     def adiabatic_index(self) -> DynamicArg:
-        return self.adiabatic_index
+        return self.config.adiabatic_index
 
     @simbi_property
     def regime(self) -> str:

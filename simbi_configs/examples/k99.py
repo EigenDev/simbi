@@ -1,12 +1,13 @@
 from dataclasses import dataclass
 from simbi import BaseConfig, DynamicArg, simbi_property
-from typing import Sequence, Generator
+from typing import Sequence, Generator, NamedTuple
+from functools import partial
 from numpy.typing import NDArray
 import numpy as np
 
 XMIN = -2.0
 XMAX = +2.0
-XMEM = 0.5 * (XMIN + XMAX)
+XMEMBRANE = 0.5 * (XMIN + XMAX)
 
 
 @dataclass(frozen=True)
@@ -43,6 +44,14 @@ class MHDProblemState:
     ) -> "MHDProblemState":
         """Create problem state from raw values"""
         return cls(left=ShockTubeState(*left_vals), right=ShockTubeState(*right_vals))
+
+
+class StaggeredMHDState(NamedTuple):
+    """Container that stores face-centered magnetic fields
+    and cell-centered gas variables"""
+
+    gas_vars: tuple[float, ...]
+    staggered_bfields: list[list[float]]
 
 
 class MagneticShockTube(BaseConfig):
@@ -166,25 +175,30 @@ class MagneticShockTube(BaseConfig):
         }
 
     @simbi_property
-    def initial_primitive_state(self) -> Generator[tuple[float, ...], None, None]:
+    def initial_primitive_state(
+        self,
+    ) -> tuple[
+        Generator[tuple[float, ...], None, None],
+        Generator[float, None, None],
+        Generator[float, None, None],
+        Generator[float, None, None],
+    ]:
         """Generate initial primitive state"""
 
-        def _initial_state(resolution=(self.nzones, 1, 1), bounds=(XMIN, XMAX)):
+        def _gas_state() -> Generator[tuple[float, ...], None, None]:
             state = self.problem_states[self.config.problem]
-            dx = (bounds[1] - bounds[0]) / resolution[0]
+            nx = self.resolution[0]
+            dx = (self.bounds[1] - self.bounds[0]) / nx
 
-            for i in range(resolution[0]):
-                x = bounds[0] + (i + 0.5) * dx
-                if x < XMEM:
+            for i in range(nx):
+                xi = self.bounds[0] + i * dx
+                if xi < XMEMBRANE:
                     yield (
                         state.left.rho,
                         state.left.vx,
                         state.left.vy,
                         state.left.vz,
                         state.left.p,
-                        state.left.bx,
-                        state.left.by,
-                        state.left.bz,
                     )
                 else:
                     yield (
@@ -193,16 +207,34 @@ class MagneticShockTube(BaseConfig):
                         state.right.vy,
                         state.right.vz,
                         state.right.p,
-                        state.right.bx,
-                        state.right.by,
-                        state.right.bz,
                     )
 
-        return _initial_state
+        def _bfield(bn: str) -> Generator[float, None, None]:
+            state = self.problem_states[self.config.problem]
+            ni, nj, nk = self.resolution
+            dx = (self.bounds[1] - self.bounds[0]) / ni
+            for k in range(nk + (bn == "bz")):
+                for j in range(nj + (bn == "by")):
+                    for i in range(ni + (bn == "bx")):
+                        xi = self.bounds[0] + i * dx
+                        if xi < XMEMBRANE:
+                            yield getattr(state.left, bn)
+                        else:
+                            yield getattr(state.right, bn)
+
+        _bx = partial(_bfield, bn="bx")
+        _by = partial(_bfield, bn="by")
+        _bz = partial(_bfield, bn="bz")
+        return (
+            _gas_state,
+            _bx,
+            _by,
+            _bz,
+        )
 
     @simbi_property
-    def bounds(self) -> Sequence[Sequence[float]]:
-        return ((XMIN, XMAX), (0.0, 1.0), (0.0, 1.0))
+    def bounds(self) -> Sequence[float]:
+        return (XMIN, XMAX)
 
     @simbi_property
     def x1_spacing(self) -> str:

@@ -41,14 +41,6 @@ class SimulationRunner:
             "SimState",
         )
 
-    def _prepare_data_directory(self) -> str:
-        """Ensure data directory exists"""
-        data_path = Path(self.bundle.io_config.data_directory)
-        if not data_path.is_dir():
-            data_path.mkdir(parents=True)
-            logger.info(f"Created data directory: {data_path}")
-        return str(Path)
-
     def _prepare_simulation_state(self, cli_args: dict[str, Any]) -> dict[str, Any]:
         """Convert SimulationBundle to execution format"""
         # return the cython-compatible state
@@ -108,7 +100,7 @@ class SimulationRunner:
             return str(param)
 
         for key, param in sim_state.items():
-            if key != "self":
+            if key not in ["bfield", "staggered_bfields"]:
                 val_str = format_param(param)
                 logger.info(f"{key.ljust(30, '.')} {val_str}")
 
@@ -120,7 +112,6 @@ class SimulationRunner:
         """Run simulation with functional composition"""
         return pipe(
             None,
-            lambda _: self._prepare_data_directory(),
             lambda _: self._setup_compute_environment(cli_args["compute_mode"]),
             lambda executor: (executor, self._prepare_simulation_state(cli_args)),
             lambda args: (args[0], self._print_simulation_parameter_summary(args[1])),

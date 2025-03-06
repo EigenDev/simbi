@@ -72,7 +72,6 @@ def try_fresh_initialization(
             lambda c: construct_conserved_state(
                 settings["sim_state"]["regime"],
                 settings["sim_state"]["adiabatic_index"],
-                settings["sim_state"]["is_mhd"],
                 c.evaluate(
                     pad_width=1 + (settings["sim_state"]["spatial_order"] == "plm"),
                     nvars=settings["sim_state"]["nvars"],

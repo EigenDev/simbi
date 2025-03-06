@@ -1,4 +1,22 @@
 from simbi import BaseConfig, DynamicArg, simbi_property
+from typing import Sequence, Generator
+from dataclasses import dataclass
+
+
+@dataclass
+class ShockTubeState:
+    """Dataclass for Shock Tube State"""
+
+    rho: float
+    v1: float
+    v2: float
+    p: float
+
+    def __iter__(self) -> Generator:
+        yield self.rho
+        yield self.v1
+        yield self.v2
+        yield self.p
 
 
 class SodProblemQuad(BaseConfig):
@@ -7,23 +25,41 @@ class SodProblemQuad(BaseConfig):
     This setup was adapted from Zhang and MacFadyen (2006) section 4.8 pg. 11
     """
 
-    nzones = DynamicArg("nzones", 256, help="number of grid zones", var_type=int)
-    adiabatic_index = DynamicArg(
-        "ad-gamma", 5.0 / 3.0, help="Adiabatic gas index", var_type=float
-    )
+    class config:
+        nzones = DynamicArg("nzones", 256, help="number of grid zones", var_type=int)
+        adiabatic_index = DynamicArg(
+            "ad-gamma", 5.0 / 3.0, help="Adiabatic gas index", var_type=float
+        )
 
     @simbi_property
-    def initial_primitive_state(self) -> Sequence[Sequence[float]]:
-        return (
-            (0.5, 0.0, 0.0, 1.0),  # Southwest
-            (0.1, 0.0, 0.90, 1.0),  # Southeast
-            (0.1, 0.90, 0.0, 1.0),  # Northwest
-            (0.1, 0.0, 0.0, 0.01),
-        )  # Northeast
+    def initial_primitive_state(self) -> Generator[tuple[float, ...], None, None]:
+
+        def gas_state() -> Generator[tuple[float, ...], None, None]:
+            ni, nj = self.resolution
+            xextent = self.bounds[0][1] - self.bounds[0][0]
+            yextent = self.bounds[1][1] - self.bounds[1][0]
+            dx = xextent / ni
+            dy = yextent / nj
+            for j in range(nj):
+                for i in range(ni):
+                    x = self.bounds[0][0] + i * dx
+                    y = self.bounds[1][0] + j * dy
+                    if x < 0.5 * xextent:
+                        if y < 0.5 * yextent:
+                            yield tuple(ShockTubeState(0.5, 0.0, 0.0, 1.0))
+                        else:
+                            yield tuple(ShockTubeState(0.1, 0.9, 0.0, 1.0))
+                    else:
+                        if y < 0.5 * yextent:
+                            yield tuple(ShockTubeState(0.1, 0.0, 0.9, 1.0))
+                        else:
+                            yield tuple(ShockTubeState(0.1, 0.0, 0.0, 0.01))
+
+        return gas_state
 
     @simbi_property
     def bounds(self) -> Sequence[Sequence[float]]:
-        return ((0.0, 1.0, 0.5), (0.0, 1.0, 0.5))
+        return ((0.0, 1.0), (0.0, 1.0))
 
     @simbi_property
     def x1_spacing(self) -> str:
@@ -35,11 +71,11 @@ class SodProblemQuad(BaseConfig):
 
     @simbi_property
     def resolution(self) -> Sequence[DynamicArg]:
-        return (self.nzones, self.nzones)
+        return (self.config.nzones, self.config.nzones)
 
     @simbi_property
     def adiabatic_index(self) -> DynamicArg:
-        return self.adiabatic_index
+        return self.config.adiabatic_index
 
     @simbi_property
     def regime(self) -> str:

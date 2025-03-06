@@ -1,4 +1,25 @@
 from simbi import BaseConfig, DynamicArg, simbi_property
+from typing import Sequence, Generator, Iterator
+from dataclasses import dataclass
+
+
+@dataclass
+class SplitState:
+    """State for split shock problem"""
+
+    rho: float
+    v1: float
+    v2: float
+    pre: float
+
+    def __iter__(self) -> Iterator[float]:
+        yield self.rho
+        yield self.v1
+        yield self.v2
+        yield self.pre
+
+    def __len__(self) -> int:
+        return 4
 
 
 class Ram44(BaseConfig):
@@ -7,18 +28,31 @@ class Ram44(BaseConfig):
     This setup was adapted from Zhang and MacFadyen (2006) section 4.4
     """
 
-    nzones = DynamicArg("nzones", 400, help="number of grid zones", var_type=int)
-    adiabatic_index = DynamicArg(
-        "ad-gamma", 5.0 / 3.0, help="Adiabatic gas index", var_type=float
-    )
+    class config:
+        nzones = DynamicArg("nzones", 400, help="number of grid zones", var_type=int)
+        adiabatic_index = DynamicArg(
+            "ad-gamma", 5.0 / 3.0, help="Adiabatic gas index", var_type=float
+        )
 
     @simbi_property
-    def initial_primitive_state(self) -> Sequence[Sequence[float]]:
-        return ((1.0, 0.0, 0.0, 1e3), (1.0, 0.0, 0.99, 1e-2))  # Left  # Right
+    def initial_primitive_state(self) -> Generator[tuple[float, ...], None, None]:
+        def gas_state() -> Generator[tuple[float, ...], None, None]:
+            ni, nj = self.resolution
+            xextent = self.bounds[0][1] - self.bounds[0][0]
+            dx = xextent / ni
+            for j in range(nj):
+                for i in range(ni):
+                    x = self.bounds[0][0] + i * dx
+                    if x < 0.5 * xextent:
+                        yield tuple(SplitState(1.0, 0.0, 0.0, 1e3))
+                    else:
+                        yield tuple(SplitState(1.0, 0.0, 0.99, 1e-2))
+
+        return gas_state
 
     @simbi_property
     def bounds(self) -> Sequence[Sequence[float]]:
-        return ((0.0, 1.0, 0.5), (0.0, 1.0))
+        return ((0.0, 1.0), (0.0, 1.0))
 
     @simbi_property
     def x1_spacing(self) -> str:
@@ -30,11 +64,11 @@ class Ram44(BaseConfig):
 
     @simbi_property
     def resolution(self) -> Sequence[DynamicArg]:
-        return (self.nzones, self.nzones)
+        return (self.config.nzones, self.config.nzones)
 
     @simbi_property
     def adiabatic_index(self) -> DynamicArg:
-        return self.adiabatic_index
+        return self.config.adiabatic_index
 
     @simbi_property
     def regime(self) -> str:

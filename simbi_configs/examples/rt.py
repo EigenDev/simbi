@@ -1,5 +1,6 @@
-import numpy as np
-from simbi import BaseConfig, DynamicArg, simbi_property, simbi_classproperty
+import math
+from simbi import BaseConfig, DynamicArg, simbi_property, simbi_class_property
+from typing import Sequence, Any, Generator
 
 
 class RayleighTaylor(BaseConfig):
@@ -7,12 +8,13 @@ class RayleighTaylor(BaseConfig):
     Rayleigh Taylor problem in Newtonian Fluid
     """
 
-    xnpts = DynamicArg(
-        "xnpts", 200, help="Number of zones in x dimensions", var_type=int
-    )
-    ynpts = DynamicArg(
-        "ynpts", 600, help="Number of zones in y dimensions", var_type=int
-    )
+    class config:
+        xnpts = DynamicArg(
+            "xnpts", 200, help="Number of zones in x dimensions", var_type=int
+        )
+        ynpts = DynamicArg(
+            "ynpts", 600, help="Number of zones in y dimensions", var_type=int
+        )
 
     xmin = -0.25
     xmax = 0.25
@@ -25,31 +27,32 @@ class RayleighTaylor(BaseConfig):
     vamp = 0.01
     ymidpoint = (ymax + ymin) * 0.5
 
-    def __init__(self) -> None:
-        x = np.linspace(self.xmin, self.xmax, self.xnpts.value)
-        y = np.linspace(self.ymin, self.ymax, self.ynpts.value)
-        xx, yy = np.meshgrid(x, y)
-
-        self.rho = np.zeros_like(xx)
-        self.rho[np.where(yy <= self.ymidpoint)] = self.rhoD
-        self.rho[np.where(yy > self.ymidpoint)] = self.rhoU
-
-        # Seed the RT instability with velocity perturbation
-        self.vy = (
-            self.vamp
-            * 0.25
-            * (1 + np.cos(4.0 * np.pi * xx))
-            * (1.0 + np.cos(3.0 * np.pi * yy))
-        )
-        self.vx = np.zeros_like(self.vy)
-        self.p = self.p0 - self.g0 * self.rho * yy
-
-        self.gravityx = np.zeros_like(self.rho)
-        self.gravityy = -self.g0 * np.ones_like(self.rho)
-
     @simbi_property
-    def initial_primitive_state(self) -> Sequence[NDArray[np.float64]]:
-        return (self.rho, self.vx, self.vy, self.p)
+    def initial_primitive_state(self) -> Generator[tuple[float, ...], None, None]:
+        def gas_state() -> Generator[tuple[float, ...], None, None]:
+            ni, nj = self.resolution
+            xextent = self.xmax - self.xmin
+            yextent = self.ymax - self.ymin
+            dx = xextent / ni
+            dy = yextent / nj
+            for j in range(nj):
+                y = self.ymin + j * dy
+                for i in range(ni):
+                    x = self.xmin + i * dx
+                    if y <= self.ymidpoint:
+                        rho = self.rhoD
+                    else:
+                        rho = self.rhoU
+                    p = self.p0 - self.g0 * rho * y
+                    vy = (
+                        self.vamp
+                        * 0.25
+                        * (1 + math.cos(4.0 * math.pi * x))
+                        * (1.0 + math.cos(3.0 * math.pi * y))
+                    )
+                    yield rho, 0.0, vy, p
+
+        return gas_state
 
     @simbi_property
     def bounds(self) -> Sequence[Sequence[float]]:
@@ -61,13 +64,13 @@ class RayleighTaylor(BaseConfig):
 
     @simbi_property
     def resolution(self) -> Sequence[Any]:
-        return (self.xnpts, self.ynpts)
+        return (self.config.xnpts, self.config.ynpts)
 
     @simbi_property
     def adiabatic_index(self) -> float:
         return 7.0 / 5.0
 
-    @simbi_classproperty
+    @simbi_class_property
     def gravity_sources(self) -> str:
         return f"""
 extern "C" {{   

@@ -289,7 +289,7 @@ def read_file(filename: str) -> tuple[dict[str, Any], dict[str, Any], dict[str, 
                     (
                         zactive_zones + 2,
                         yactive_zones + 2,
-                        zactive_zones + 1,
+                        xactive_zones + 1,
                     ),
                 )
                 b2 = read_bfield(

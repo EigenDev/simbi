@@ -168,6 +168,16 @@ class DynamicArg:
     def __int__(self) -> int:
         return int(self.value)
 
+    def __pos__(self) -> "DynamicArg":
+        return DynamicArg(
+            self.name, +self.value, self.help, self.var_type, self.choices, self.action
+        )
+
+    def __neg__(self) -> "DynamicArg":
+        return DynamicArg(
+            self.name, -self.value, self.help, self.var_type, self.choices, self.action
+        )
+
     def log10(self) -> float:
         return math.log10(self.value)
 

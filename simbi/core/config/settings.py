@@ -141,6 +141,9 @@ class MeshSettings(BaseSettings):
     scale_factor: Optional[Callable[[float], float]] = None
     scale_factor_derivative: Optional[Callable[[float], float]] = None
 
+    def effective_dim(self, resolution: Sequence[int]) -> int:
+        return sum(1 for _ in filter(lambda r: r > 1, resolution))
+
 
 @dataclass(frozen=True)
 class IOSettings(BaseSettings):

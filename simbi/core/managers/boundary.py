@@ -1,11 +1,11 @@
 from typing import Sequence
-from ...functional.helpers import get_iterable
+from ...functional.helpers import to_iterable
 
 
 class BoundaryManager:
     @classmethod
     def validate_conditions(cls, conditions: Sequence[str], dim: int) -> list[str]:
-        bcs = list(get_iterable(conditions))
+        bcs = list(to_iterable(conditions))
 
         number_of_given_bcs = len(bcs)
         if number_of_given_bcs != 2 * dim:
