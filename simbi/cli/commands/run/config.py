@@ -113,7 +113,20 @@ def use_arg_or_default(arg_value, config_value):
 
 def _build_kwargs_dict(config: BaseConfig, args: Namespace) -> Dict[str, Any]:
     """Build kwargs dictionary for simulation"""
+    spatial_order = args.spatial_order
+    temporal_order = args.time_order
+    if config.order_of_integration == "first" or args.order == "first":
+        spatial_order = "pcm"
+        temporal_order = "rk1"
+    elif config.order_of_integration == "second" or args.order == "second":
+        spatial_order = "plm"
+        temporal_order = "rk2"
+    elif config.order_of_integration is not None:
+        raise ValueError("Order of integration must be 'first' or 'second'")
+
     return {
+        "spatial_order": spatial_order or config.spatial_order,
+        "temporal_order": temporal_order or config.temporal_order,
         "cfl": args.cfl,
         "checkpoint_interval": args.checkpoint_interval,
         "tstart": args.tstart,
