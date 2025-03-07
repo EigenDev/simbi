@@ -91,15 +91,6 @@ class ConfigValidator:
                 f"{e}. Available options: {BoundaryCondition.list()}"
             )
 
-    def validate_state(self, state: StateGenerator) -> Maybe[StateGenerator]:
-        try:
-            ...
-            # TODO: check if state generator is correct
-        except ValueError:
-            return Maybe.save_failure(
-                f"Invalid state configuration. Needs to be a generator expression."
-            )
-
     def validate(self, settings: Any) -> Maybe[Any]:
         validated = settings.copy()
         for name, value in settings.items():

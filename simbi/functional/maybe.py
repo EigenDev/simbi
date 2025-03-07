@@ -29,6 +29,8 @@ class Maybe(Generic[T]):
         """Apply function if value exists, propagate error otherwise"""
         if self._error:
             return Maybe(None, self._error)
+        if self._value is None:
+            return Maybe(None, ValueError("Cannot map over None value"))
         try:
             return Maybe.of(f(self._value))
         except Exception as e:
@@ -38,8 +40,12 @@ class Maybe(Generic[T]):
         """Chain Maybe operations, propagating errors"""
         if self._error:
             return Maybe(None, self._error)
+
+        if self._value is None:
+            return Maybe(None, ValueError("Cannot bind over None value"))
+
         try:
-            result = f(self._value)
+            result: Maybe[U] = f(self._value)
             if not isinstance(result, Maybe):
                 raise TypeError(f"Function must return Maybe, got {type(result)}")
             return result
@@ -50,6 +56,10 @@ class Maybe(Generic[T]):
         """Apply function if value exists, propagate error with context"""
         if self._error:
             return Maybe(None, self._error)
+
+        if self._value is None:
+            return Maybe(None, ValueError(f"{context}: Cannot map over None value"))
+
         try:
             return Maybe.of(f(self._value))
         except Exception as e:
@@ -61,8 +71,12 @@ class Maybe(Generic[T]):
         """Chain Maybe operations with error context"""
         if self._error:
             return Maybe(None, self._error)
+
+        if self._value is None:
+            return Maybe(None, ValueError(f"{context}: Cannot bind over None value"))
+
         try:
-            result = f(self._value)
+            result: Maybe[U] = f(self._value)
             if not isinstance(result, Maybe):
                 raise TypeError(f"Function must return Maybe, got {type(result)}")
             return result
@@ -75,15 +89,13 @@ class Maybe(Generic[T]):
             raise error
         return self._value
 
-    def unwrap_or(self, default: T) -> T:
+    def unwrap_o_else(self, default: T) -> T:
         """Get value or return default"""
         return self._value if self._value is not None else default
 
-    def or_else(self, default: T) -> T:
+    def or_else(self, default: "Maybe[T]") -> "Maybe[T]":
         """Get value or return default"""
-        if isinstance(default, Callable):
-            self._value if self._value is not None else default()
-        return self._value if self._value is not None else default
+        return self if self._value is not None else default
 
     def unwrap(self) -> T:
         """Get value or raise ValueError"""
@@ -92,9 +104,10 @@ class Maybe(Generic[T]):
                 if isinstance(self._error, Exception):
                     raise self._error
                 raise ValueError(str(self._error))
+            raise ValueError("Cannot unwrap None value")
         return self._value
 
     @property
-    def error(self) -> Optional[Exception]:
+    def error(self) -> Optional[Exception | str]:
         """Access the stored error"""
         return self._error

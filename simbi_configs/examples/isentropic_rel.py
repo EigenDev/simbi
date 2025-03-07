@@ -1,6 +1,7 @@
 from dataclasses import dataclass
 from simbi import BaseConfig, DynamicArg, simbi_property
-from typing import Any, Generator, Sequence, Union, Callable
+from simbi.typing import InitialStateType, FloatOrArray
+from typing import Any, Generator, Sequence, Callable
 from numpy.typing import NDArray
 import numpy as np
 import argparse
@@ -28,7 +29,7 @@ class IsentropicWaveParams:
 
     def make_wave_function(
         self,
-    ) -> Callable[[NDArray[np.float64]], NDArray[np.float64]]:
+    ) -> Callable[[NDArray[np.floating[Any]]], NDArray[np.floating[Any]]]:
         """Create wave shape function"""
         return lambda x: np.sin(2 * np.pi * x)
 
@@ -38,32 +39,30 @@ class IsentropicState:
     """State calculator for isentropic wave"""
 
     params: IsentropicWaveParams
-    adiabatic_index: float
-    alpha: float
+    adiabatic_index: float | DynamicArg
+    alpha: float | DynamicArg
 
-    def density(self, x: NDArray[np.float64]) -> NDArray[np.float64]:
+    def density(self, x: NDArray[np.floating[Any]]) -> NDArray[np.floating[Any]]:
         """Calculate density at position x"""
         wave = self.params.make_wave_function()
         return 1.0 + self.alpha * wave(x)
 
-    def sound_speed(
-        self, rho: NDArray[np.float64], p: NDArray[np.float64]
-    ) -> NDArray[np.float64]:
+    def sound_speed(self, rho: FloatOrArray, p: FloatOrArray) -> FloatOrArray:
         """Calculate sound speed"""
         h = 1.0 + self.adiabatic_index * p / (rho * (self.adiabatic_index - 1.0))
         return np.sqrt(self.adiabatic_index * p / (rho * h))
 
-    def pressure(self, rho: NDArray[np.float64]) -> NDArray[np.float64]:
+    def pressure(self, rho: NDArray[np.floating[Any]]) -> NDArray[np.floating[Any]]:
         """Calculate pressure"""
         return self.params.p_ref * (rho / self.params.rho_ref) ** self.adiabatic_index
 
     def velocity(
-        self, rho: NDArray[np.float64], p: NDArray[np.float64]
-    ) -> NDArray[np.float64]:
+        self, rho: NDArray[np.floating[Any]], p: NDArray[np.floating[Any]]
+    ) -> NDArray[np.floating[Any]]:
         """Calculate velocity"""
         cs_ref = self.sound_speed(self.params.rho_ref, self.params.p_ref)
         cs = self.sound_speed(rho, p)
-        return 2.0 / (self.adiabatic_index - 1.0) * (cs - cs_ref)
+        return np.asarray(2.0 / (self.adiabatic_index - 1.0) * (cs - cs_ref))
 
 
 class IsentropicRelWave(BaseConfig):
@@ -89,14 +88,12 @@ class IsentropicRelWave(BaseConfig):
         )
 
     @simbi_property
-    def initial_primitive_state(
-        self,
-    ) -> Generator[tuple[float, float, float], None, None]:
+    def initial_primitive_state(self) -> InitialStateType:
         """Return initial primitive generator"""
 
-        def _initial_state(resolution=(self.config.nzones,), bounds=(0.0, 1.0)):
-            dx = (bounds[1] - bounds[0]) / resolution[0]
-            x = np.fromiter((i * dx for i in range(resolution[0])), dtype=np.float64)
+        def _initial_state() -> Generator[Sequence[float], None, None]:
+            dx = (self.bounds[1] - self.bounds[0]) / self.resolution
+            x = np.fromiter((i * dx for i in range(self.resolution)), dtype=np.float64)
             rho = self.state.density(x)
             p = self.state.pressure(rho)
             v = self.state.velocity(rho, p)

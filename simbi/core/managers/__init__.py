@@ -6,4 +6,16 @@ from .property import (
     simbi_derived_property,
     simbi_class_property,
     class_register,
+    PropertyBase,
 )
+
+__all__ = [
+    "SourceManager",
+    "CLIManager",
+    "ProblemIO",
+    "simbi_property",
+    "simbi_derived_property",
+    "simbi_class_property",
+    "class_register",
+    "PropertyBase",
+]

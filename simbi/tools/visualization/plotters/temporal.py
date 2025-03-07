@@ -41,7 +41,7 @@ class TemporalPlotter(BasePlotter):
         self.fig, self.axes = plt.subplots(1, 1, figsize=self.config["style"].fig_dims)
 
     def _calc_volume(
-        self, mesh: dict[str, NDArray[np.float64]], setup: dict[str, Any]
+        self, mesh: dict[str, NDArray[np.floating[Any]]], setup: dict[str, Any]
     ) -> np.ndarray:
         """Calculate cell volumes based on dimension"""
         dV = calc_cell_volume(

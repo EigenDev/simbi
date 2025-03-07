@@ -1,6 +1,7 @@
 import math
 import inspect
-from typing import Any, Callable, Optional
+from numpy.typing import NDArray
+from typing import Any, Callable, Optional, cast
 import numpy as np
 
 __all__ = ["DynamicArg"]
@@ -62,17 +63,6 @@ class DynamicArg:
         if isinstance(operand, DynamicArg):
             return self.value * operand.value
         return self.value * operand
-
-    def __array_ufunc__(
-        self, ufunc: Any, method: Any, *inputs: Any, **kwargs: Any
-    ) -> Any:
-        sanitized_inputs = []
-        for arg in inputs:
-            if isinstance(arg, DynamicArg):
-                sanitized_inputs += [arg.value]
-            else:
-                sanitized_inputs += [arg]
-        return getattr(ufunc, method)(*sanitized_inputs, **kwargs)
 
     def __rmul__(self, operand: Any) -> Any:
         return self.__mul__(operand)
@@ -151,9 +141,6 @@ class DynamicArg:
             return self.value > other.value
         return self.value > other
 
-    def __neg__(self) -> Any:
-        return self.value * (-1.0)
-
     def __bool__(self) -> Any:
         if isinstance(self.value, bool):
             return self.value
@@ -187,17 +174,50 @@ class DynamicArg:
     def sqrt(self) -> float:
         return math.sqrt(self.value)
 
+    def __index__(self) -> int:
+        return int(self.value)
+
+    # Numpy functionaly
+    def __array_right_divide__(self, other: NDArray[Any]) -> NDArray[Any]:
+        return cast(NDArray[Any], other / self.value)
+
+    def __array_left_divide__(self, other: NDArray[Any]) -> NDArray[Any]:
+        return cast(NDArray[Any], self.value / other)
+
+    def __array_right_multiply__(self, other: NDArray[Any]) -> NDArray[Any]:
+        return cast(NDArray[Any], other * self.value)
+
+    def __array_left_multiply__(self, other: NDArray[Any]) -> NDArray[Any]:
+        return cast(NDArray[Any], self.value * other)
+
+    def __array__(self) -> NDArray[Any]:
+        """Allow direct conversion to numpy array"""
+        return np.array(self.value)
+
+    def __array_ufunc__(
+        self, ufunc: np.ufunc, method: str, *inputs: Any, **kwargs: Any
+    ) -> Any:
+        """Handle NumPy universal functions like add, multiply, etc."""
+        if method == "__call__":
+            # Convert all DynamicArg instances to their values
+            inputs = tuple(
+                arg.value if isinstance(arg, DynamicArg) else arg for arg in inputs
+            )
+            return ufunc(*inputs, **kwargs)
+        else:
+            return NotImplemented
+
     def __array_function__(
         self,
         func: Callable[..., Any],
-        types: list[type],
-        args: tuple[Any],
+        types: tuple[type, ...],
+        args: tuple[Any, ...],
         kwargs: dict[str, Any],
     ) -> Any:
-        sanitized_args = []
-        for arg in args:
-            if isinstance(arg, DynamicArg):
-                sanitized_args.append(arg.value)
-            else:
-                sanitized_args.append(arg)
-        return func(*sanitized_args, **kwargs)
+        """Handle NumPy functions like linspace, geomspace, etc."""
+        # Convert all DynamicArg instances to their values
+        args = tuple(arg.value if isinstance(arg, DynamicArg) else arg for arg in args)
+        kwargs = {
+            k: v.value if isinstance(v, DynamicArg) else v for k, v in kwargs.items()
+        }
+        return func(*args, **kwargs)

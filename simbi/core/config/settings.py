@@ -1,5 +1,5 @@
 from dataclasses import dataclass, asdict
-from typing import Optional, Sequence, Callable, Any
+from typing import Optional, Sequence, Callable, Any, overload, Optional, Type, TypeVar
 from pathlib import Path
 from .constants import (
     CoordSystem,
@@ -10,13 +10,11 @@ from .constants import (
     Solver,
 )
 
+T = TypeVar("T", bound="BaseSettings")
+
 
 @dataclass(frozen=True)
 class BaseSettings:
-    @classmethod
-    def from_dict(cls, setup: dict) -> "BaseSettings":
-        return cls(**setup)
-
     @classmethod
     def update_from(cls, instance: Any, cli_args: dict[str, Any]) -> Any:
         self_params = asdict(instance)
@@ -55,12 +53,10 @@ class GridSettings(BaseSettings):
         )
 
     @classmethod
-    def from_dict(
-        cls, setup: dict[str, dict[str, Any]], spatial_order: str
-    ) -> "GridSettings":
+    def from_dict(cls, setup: dict[str, Any], spatial_order: str) -> "GridSettings":
         # pad the resolution with ones up to 3D
-        dim = len(setup["resolution"])
-        resolution = setup["resolution"]
+        dim: int = len(setup["resolution"])
+        resolution: tuple[int, ...] = setup["resolution"]
         if len(resolution) < 3:
             resolution += (1,) * (3 - len(resolution))
         nx_active, ny_active, nz_active = resolution
@@ -130,7 +126,7 @@ class MeshSettings(BaseSettings):
     """Mesh configuration"""
 
     coord_system: CoordSystem
-    bounds: Sequence[Sequence[float]]
+    bounds: Sequence[tuple[float, float]] | Sequence[float]
     boundary_conditions: Sequence[str]
     dimensionality: int
     mesh_motion: bool
@@ -144,6 +140,10 @@ class MeshSettings(BaseSettings):
     def effective_dim(self, resolution: Sequence[int]) -> int:
         return sum(1 for _ in filter(lambda r: r > 1, resolution))
 
+    @classmethod
+    def from_dict(cls, setup: dict[str, Any]) -> "MeshSettings":
+        return cls(**setup)
+
 
 @dataclass(frozen=True)
 class IOSettings(BaseSettings):
@@ -156,6 +156,10 @@ class IOSettings(BaseSettings):
     gravity_source_lib: Optional[Path] = None
     boundary_source_lib: Optional[Path] = None
 
+    @classmethod
+    def from_dict(cls, setup: dict[str, Any]) -> "IOSettings":
+        return cls(**setup)
+
 
 @dataclass(frozen=True)
 class SimulationSettings(BaseSettings):
@@ -166,14 +170,14 @@ class SimulationSettings(BaseSettings):
     regime: Regime = Regime.CLASSICAL
     temporal_order: TimeStepping = TimeStepping.RK1
     spatial_order: SpatialOrder = SpatialOrder.PLM
-    plm_theta: Optional[float] = None
+    plm_theta: float = 1.5
     quirk_smoothing: bool = False
     is_mhd: bool = False
     dlogt: float = 0.0
     solver: Solver = Solver.HLLC
 
     @classmethod
-    def from_dict(cls, setup: dict) -> "SimulationSettings":
+    def from_dict(cls, setup: dict[str, Any]) -> "SimulationSettings":
         return cls(
             adiabatic_index=setup["adiabatic_index"],
             tstart=setup["default_start_time"],

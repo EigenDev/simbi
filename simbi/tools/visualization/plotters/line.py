@@ -16,8 +16,7 @@ class LinePlotter(BasePlotter, DataHandlerMixin, AnimationMixin, CoordinatesMixi
         super().__init__(parser)
         self.formatter = PlotFormatter()
         self.data_manager = DataManager(
-            self.config["plot"].files, 
-            movie_mode=self.config["plot"].kind == "movie"
+            self.config["plot"].files, movie_mode=self.config["plot"].kind == "movie"
         )
 
     def create_figure(self) -> None:
@@ -40,16 +39,24 @@ class LinePlotter(BasePlotter, DataHandlerMixin, AnimationMixin, CoordinatesMixi
 
                     # Use CoordinatesMixin
                     x, indices = self.transform_coordinates(data.mesh, data.setup)
-                    if self.config['multidim'].slice_along:
+                    if self.config["multidim"].slice_along:
                         sliced_var = self.get_slice_data(var, data.mesh, data.setup)
                         self._plot_slice(ax, x, sliced_var, field)
                     else:
                         self._plot_line(ax, x, var, field)
 
             self.formatter.set_axes_properties(self.fig, ax, data.setup, self.config)
-            self.formatter.setup_axis_style(ax, xlim=self.config['style'].xlims, ylim=self.config['style'].ylims)
+            self.formatter.setup_axis_style(
+                ax, xlim=self.config["style"].xlims, ylim=self.config["style"].ylims
+            )
 
-    def _plot_line(self, ax: plt.Axes, x: NDArray[np.float64], var: NDArray[np.float64], field: str):
+    def _plot_line(
+        self,
+        ax: plt.Axes,
+        x: NDArray[np.floating[Any]],
+        var: NDArray[np.floating[Any]],
+        field: str,
+    ):
         """Plot 1D line using transformed coordinates"""
         yvar = var if self.config["plot"].ndim == 1 else var[:, 0]
         field_string = get_field_str(field)

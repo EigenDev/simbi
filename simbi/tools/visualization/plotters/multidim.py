@@ -129,12 +129,14 @@ class MultidimPlotter(BasePlotter, DataHandlerMixin, AnimationMixin, Coordinates
 
     def _place_at_patch(
         self,
-        xx: NDArray[np.float64],
-        yy: NDArray[np.float64],
-        var: NDArray[np.float64],
+        xx: NDArray[np.floating[Any]],
+        yy: NDArray[np.floating[Any]],
+        var: NDArray[np.floating[Any]],
         idx: int,
         theta_cycle: cycle,
-    ) -> tuple[NDArray[np.float64], NDArray[np.float64], NDArray[np.float64]]:
+    ) -> tuple[
+        NDArray[np.floating[Any]], NDArray[np.floating[Any]], NDArray[np.floating[Any]]
+    ]:
         """Position data in angular sectors"""
 
         def theta_sign(quadrant: int) -> int:

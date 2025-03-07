@@ -79,7 +79,7 @@ class AnimationMixin:
         self,
         idx: int,
         var: np.ndarray,
-        mesh: dict[str, NDArray[np.float64]],
+        mesh: dict[str, NDArray[np.floating[Any]]],
         setup: dict[str, Any],
     ) -> None:
         """Update plot data"""
@@ -110,10 +110,10 @@ class CoordinatesMixin:
 
     def get_slice_data(
         self,
-        var: NDArray[np.float64],
-        mesh: dict[str, NDArray[np.float64]],
+        var: NDArray[np.floating[Any]],
+        mesh: dict[str, NDArray[np.floating[Any]]],
         setup: dict[str, Any],
-    ) -> NDArray[np.float64]:
+    ) -> NDArray[np.floating[Any]]:
         """ "Get data for a 1D slice of a higher-dimensional field"""
         slices = self._get_slice_indices(mesh, setup)
         return var[slices]
@@ -140,7 +140,7 @@ class CoordinatesMixin:
         return x, self._get_slice_indices(mesh, setup)
 
     def _get_permuted_indices(
-        self, mesh: dict[str, NDArray[np.float64]], setup: dict[str, Any]
+        self, mesh: dict[str, NDArray[np.floating[Any]]], setup: dict[str, Any]
     ) -> tuple:
         """Get the permuted indices for slice through higher dimensions"""
         if self.config["multidim"].slice_along == "x1":
@@ -151,7 +151,7 @@ class CoordinatesMixin:
             return "x1v", "x2v"
 
     def _get_slice_indices(
-        self, mesh: dict[str, NDArray[np.float64]], setup: dict[str, Any]
+        self, mesh: dict[str, NDArray[np.floating[Any]]], setup: dict[str, Any]
     ) -> tuple:
         """Get indices for slice through higher dimensions"""
         for xkcoord in map(float, self.config["multidim"].coords["xk"].split(",")):
@@ -183,8 +183,8 @@ class CoordinatesMixin:
         return xx, yy
 
     def _transform_cartesian(
-        self, mesh: dict[str, NDArray[np.float64]], setup: dict[str, Any]
-    ) -> tuple[NDArray[np.float64], NDArray[np.float64]]:
+        self, mesh: dict[str, NDArray[np.floating[Any]]], setup: dict[str, Any]
+    ) -> tuple[NDArray[np.floating[Any]], NDArray[np.floating[Any]]]:
         """Transform coordinates for standard plot"""
         dim = self.config["plot"].ndim
         if dim == 1:

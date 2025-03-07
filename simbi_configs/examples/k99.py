@@ -1,6 +1,7 @@
 from dataclasses import dataclass
 from simbi import BaseConfig, DynamicArg, simbi_property
-from typing import Sequence, Generator, NamedTuple
+from simbi.typing import InitialStateType
+from typing import Sequence, Generator, NamedTuple, Any
 from functools import partial
 from numpy.typing import NDArray
 import numpy as np
@@ -32,9 +33,9 @@ class MHDProblemState:
     right: ShockTubeState
 
     @staticmethod
-    def beta(u: Sequence[float]) -> NDArray[np.float64]:
+    def beta(u: Sequence[float]) -> NDArray[np.floating[np.floating[Any]]]:
         """Calculate relativistic beta from 3-velocity"""
-        unp: NDArray[np.float64] = np.asarray(u)
+        unp: NDArray[np.floating[Any]] = np.asarray(u)
         gamma: float = (1.0 + unp.dot(unp)) ** (0.5)
         return unp / gamma
 
@@ -175,14 +176,7 @@ class MagneticShockTube(BaseConfig):
         }
 
     @simbi_property
-    def initial_primitive_state(
-        self,
-    ) -> tuple[
-        Generator[tuple[float, ...], None, None],
-        Generator[float, None, None],
-        Generator[float, None, None],
-        Generator[float, None, None],
-    ]:
+    def initial_primitive_state(self) -> InitialStateType:
         """Generate initial primitive state"""
 
         def _gas_state() -> Generator[tuple[float, ...], None, None]:

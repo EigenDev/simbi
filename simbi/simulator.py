@@ -5,6 +5,7 @@
 
 from .core.config.base_config import BaseConfig
 from .core.simulation.runner import SimulationRunner
+from typing import Any
 
 
 class Hydro:
@@ -13,5 +14,5 @@ class Hydro:
         self.state = bundle.state
         self.runner = SimulationRunner(bundle)
 
-    def simulate(self, **cli_args) -> None:
+    def simulate(self, **cli_args: dict[str, Any]) -> None:
         self.runner.run(**cli_args)

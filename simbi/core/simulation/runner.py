@@ -51,14 +51,16 @@ class SimulationRunner:
         # Reshape state for contiguous memory access
         state_contig = self.bundle.state.reshape(self.bundle.state.shape[0], -1)
         # Execute simulation
-        return executor().run(
+        executor().run(
             state=state_contig,
             sim_info=sim_state,
             a=self.bundle.mesh_config.scale_factor or (lambda t: 1.0),
             adot=self.bundle.mesh_config.scale_factor_derivative or (lambda t: 0.0),
         )
 
-    def _print_simulation_parameter_summary(self, sim_state: dict[str, Any]) -> None:
+    def _print_simulation_parameter_summary(
+        self, sim_state: dict[str, Any]
+    ) -> dict[str, Any]:
         logger.info("=" * 80)
         logger.info("Simulation Parameters")
         logger.info("=" * 80)
@@ -110,7 +112,7 @@ class SimulationRunner:
 
     def run(self, **cli_args: Any) -> None:
         """Run simulation with functional composition"""
-        return pipe(
+        pipe(
             None,
             lambda _: self._setup_compute_environment(cli_args["compute_mode"]),
             lambda executor: (executor, self._prepare_simulation_state(cli_args)),

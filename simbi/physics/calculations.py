@@ -4,17 +4,17 @@ from ..functional.maybe import Maybe
 from typing import Any, Optional, Sequence
 from ..physics import StateVector
 
-nested_array = NDArray[np.float64] | list[NDArray[np.float64]] | list[float]
+nested_array = Sequence[NDArray[np.floating[Any]]]
 
 
 def calculate_state_vector(
     adiabatic_index: float,
-    rho: NDArray[np.float64],
-    velocity: Sequence[NDArray[np.float64]],
-    pressure: NDArray[np.float64],
-    chi: NDArray[np.float64],
+    rho: NDArray[np.floating[Any]],
+    velocity: nested_array,
+    pressure: NDArray[np.floating[Any]],
+    chi: NDArray[np.floating[Any]],
     regime: str,
-    bfields: Optional[Sequence[NDArray[np.float64]]] = None,
+    bfields: nested_array,
 ) -> StateVector:
     """Pure function to calculate state vector"""
     try:
@@ -41,10 +41,10 @@ def calculate_state_vector(
             momentum=list(mom),
             energy=energy,
             rho_chi=dens * chi,
-            mean_magnetic_field=list(bfields) if bfields is not None else None,
+            mean_magnetic_field=bfields,
         )
     except Exception as e:
-        print(f"Failed to calculate state vector: {e}")
+        raise ValueError(f"Error calculating state vector: {e}")
 
 
 def validate_state_vector(state: StateVector) -> Maybe[StateVector]:
@@ -55,27 +55,27 @@ def validate_state_vector(state: StateVector) -> Maybe[StateVector]:
         return Maybe.save_failure("Momentum contains NaN values")
     if np.any(np.isnan(state.energy)):
         return Maybe.save_failure("Energy contains NaN values")
-    if state.magnetic_field and any(np.any(np.isnan(b)) for b in state.magnetic_field):
+    if state.mean_magnetic_field and any(
+        np.any(np.isnan(b)) for b in state.mean_magnetic_field
+    ):
         return Maybe.save_failure("Magnetic field contains NaN values")
     return Maybe.of(state)
 
 
 def elemental_multiply(a: nested_array, b: nested_array) -> Any:
-    if isinstance(a, list):
-        return np.array([a[i] * b[i] for i in range(len(a))])
-    return a * b
+    return np.array([a[i] * b[i] for i in range(len(a))])
 
 
 def dot_product(
     a: nested_array,
     b: nested_array,
 ) -> Any:
-    if isinstance(a, list):
-        return np.sum([a[i] * b[i] for i in range(len(a))], axis=0)
-    return np.sum(a * b, axis=0)
+    return np.sum([a[i] * b[i] for i in range(len(a))], axis=0)
 
 
-def calc_lorentz_factor(velocity: nested_array, regime: str) -> NDArray[np.float64]:
+def calc_lorentz_factor(
+    velocity: nested_array, regime: str
+) -> NDArray[np.floating[Any]] | float:
     vsquared = dot_product(velocity, velocity)
     if regime != "classical" and np.any(vsquared >= 1.0):
         raise ValueError("Lorentz factor is not real. Velocity exceeds speed of light.")
@@ -84,10 +84,10 @@ def calc_lorentz_factor(velocity: nested_array, regime: str) -> NDArray[np.float
 
 def calc_spec_enthalpy(
     adiabatic_index: float,
-    rho: NDArray[np.float64],
-    pressure: NDArray[np.float64],
+    rho: NDArray[np.floating[Any]],
+    pressure: NDArray[np.floating[Any]],
     regime: str,
-) -> NDArray[np.float64]:
+) -> NDArray[np.floating[Any]] | float:
     return (
         1.0
         if regime == "classical"
@@ -96,19 +96,19 @@ def calc_spec_enthalpy(
 
 
 def calc_labframe_density(
-    rho: NDArray[np.float64], velocity: nested_array, regime: str
-) -> NDArray[np.float64]:
+    rho: NDArray[np.floating[Any]], velocity: nested_array, regime: str
+) -> NDArray[np.floating[Any]]:
     return rho * calc_lorentz_factor(velocity, regime)
 
 
 def calc_labframe_momentum(
     adiabatic_index: float,
-    rho: NDArray[np.float64],
+    rho: NDArray[np.floating[Any]],
     velocity: nested_array,
-    pressure: NDArray[np.float64],
+    pressure: NDArray[np.floating[Any]],
     bfields: nested_array,
     regime: str,
-) -> NDArray[np.float64]:
+) -> NDArray[np.floating[Any]]:
     vdb = dot_product(velocity, bfields) if np.any(bfields) else 0.0
     bsq = dot_product(bfields, bfields) if np.any(bfields) else 0.0
     vdb_bvec = (
@@ -129,13 +129,13 @@ def calc_labframe_momentum(
 
 def calc_labframe_energy(
     adiabatic_index: float,
-    rho: NDArray[np.float64],
-    pressure: NDArray[np.float64],
+    rho: NDArray[np.floating[Any]],
+    pressure: NDArray[np.floating[Any]],
     velocity: nested_array,
     bfields: nested_array,
     regime: str,
-) -> NDArray[np.float64]:
-    res: NDArray[np.float64]
+) -> NDArray[np.floating[Any]]:
+    res: NDArray[np.floating[Any]]
     bsq = dot_product(bfields, bfields) if np.any(bfields) else 0.0
     vdb = dot_product(velocity, bfields) if np.any(bfields) else 0.0
     vsq = dot_product(velocity, velocity)

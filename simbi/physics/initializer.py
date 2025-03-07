@@ -1,9 +1,9 @@
 import numpy as np
 from dataclasses import dataclass
-from typing import Optional
+from typing import Optional, Sequence
 from ..functional.maybe import Maybe
 from numpy.typing import NDArray
-from typing import Optional
+from typing import Optional, Any
 from .calculations import calculate_state_vector
 from ..physics.states.state_vector import StateVector
 
@@ -13,15 +13,15 @@ class InitialState:
     """Initial state configuration"""
 
     state: StateVector
-    staggered_bfields: Optional[list[NDArray[np.float64]]] = None
+    staggered_bfields: Sequence[NDArray[np.floating[Any]]]
 
 
 def calculate_mean_bfields(
-    staggered_bfields: list[NDArray[np.float64]],
-) -> Optional[list[NDArray[np.float64]]]:
+    staggered_bfields: Sequence[NDArray[np.floating[Any]]],
+) -> Sequence[NDArray[np.floating[Any]]]:
     # calculate mean B-fields from staggered fields
     if not staggered_bfields:
-        return None
+        return []
 
     b1, b2, b3 = staggered_bfields
     return [
@@ -32,14 +32,13 @@ def calculate_mean_bfields(
 
 
 def get_padded_mean_bfields(
-    staggered_bfields: list[NDArray[np.float64]],
-    shape: tuple[int, int, int] = None,
-) -> Optional[list[NDArray[np.float64]]]:
+    staggered_bfields: Sequence[NDArray[np.floating[Any]]],
+    shape: tuple[int, int, int],
+) -> Sequence[NDArray[np.floating[Any]]]:
     """return the padded mean magnetic fields whose shape is the same as the gas variables"""
-    if not staggered_bfields:
-        return None
-
     mean_bfields = calculate_mean_bfields(staggered_bfields)
+    if not mean_bfields:
+        return []
     # the pad widths are the same in each direction, so we only need to compute
     # the half integer distance from one axis
     distance = (shape[0] - mean_bfields[0].shape[0]) // 2
@@ -48,11 +47,11 @@ def get_padded_mean_bfields(
 
 
 def pad_staggered_fields(
-    bfields: list[NDArray[np.float64]],
-) -> Optional[list[NDArray[np.float64]]]:
+    bfields: Sequence[NDArray[np.floating[Any]]],
+) -> Sequence[NDArray[np.floating[Any]]]:
     """pad the staggered fields along perpendicular directions"""
     if not bfields:
-        return None
+        return []
     b1, b2, b3 = bfields
     b1 = np.pad(b1, ((1, 1), (1, 1), (0, 0)), "edge")
     b2 = np.pad(b2, ((1, 1), (0, 0), (1, 1)), "edge")
@@ -63,7 +62,9 @@ def pad_staggered_fields(
 def construct_conserved_state(
     regime: str,
     adiabatic_index: float,
-    prims_and_fields: tuple[NDArray[np.float64], list[NDArray[np.float64]]],
+    prims_and_fields: tuple[
+        NDArray[np.floating[Any]], Sequence[NDArray[np.floating[Any]]]
+    ],
 ) -> Maybe[InitialState]:
     """Pure function to construct continuous state"""
     try:

@@ -45,7 +45,7 @@ class HistogramPlotter(BasePlotter, DataHandlerMixin, AnimationMixin, Coordinate
             ax.set_xticklabels(["0.0001", "0.001", "0.01", "0.1", "1", "10", "100"])
 
     def _calc_volume(
-        self, mesh: dict[str, NDArray[np.float64]], setup: dict[str, Any]
+        self, mesh: dict[str, NDArray[np.floating[Any]]], setup: dict[str, Any]
     ) -> np.ndarray:
         """Calculate cell volumes"""
         dV = calc_cell_volume(

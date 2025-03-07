@@ -4,7 +4,7 @@ from ...functional.helpers import to_iterable
 
 class BoundaryManager:
     @classmethod
-    def validate_conditions(cls, conditions: Sequence[str], dim: int) -> list[str]:
+    def validate_conditions(cls, conditions: Sequence[str], dim: int) -> Sequence[str]:
         bcs = list(to_iterable(conditions))
 
         number_of_given_bcs = len(bcs)
@@ -24,11 +24,11 @@ class BoundaryManager:
     def check_and_fix_curvlinear_conditions(
         cls,
         *,
-        conditions: list[str],
-        boundary_source: bool,
+        conditions: Sequence[str],
+        contains_boundary_source_terms: bool,
         dim: int,
         coord_system: str,
-    ) -> list[str]:
+    ) -> Sequence[str]:
         """
         check the boundary conditions given by the user. If the user sets the coordinate
         system to spherical or cylindrical, the boundary conditions are set to the defaults
@@ -40,12 +40,12 @@ class BoundaryManager:
             # if the user set dynamics boundaries, use them
             # only if they've set boundary source terms
             if conditions[0] == "dynamic":
-                if boundary_source:
+                if contains_boundary_source_terms:
                     bcs[0] = "dynamic"
                 else:
                     bcs[0] = "reflecting"
             elif conditions[1] == "dynamic":
-                if boundary_source:
+                if contains_boundary_source_terms:
                     bcs[1] = "dynamic"
                 else:
                     bcs[1] = "outflow"

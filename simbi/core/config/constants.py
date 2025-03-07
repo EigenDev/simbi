@@ -1,13 +1,14 @@
 from enum import Enum
+from typing import Any
 
 
 class ExtendedEnum(Enum):
     @classmethod
-    def list(cls):
+    def list(cls: Any) -> list[Any]:
         return list(map(lambda c: c.value, cls))
 
-    def encode(self):
-        return self.value.encode("utf-8")
+    def encode(self) -> bytes:
+        return bytes(self.value.encode("utf-8"))
 
 
 class CoordSystem(str, ExtendedEnum):

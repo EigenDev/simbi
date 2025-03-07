@@ -2,11 +2,14 @@ import argparse
 import abc
 import math
 import numpy as np
+from ..types.typing import StateGenerator
 from ...detail.dynarg import DynamicArg
 from ..managers.validator import ConfigValidator
 from ..config.initialization import InitializationConfig
 from ..simulation.state_init import SimulationBundle, initialize_simulation
-from ..protocol import StateGenerator
+from ...functional.maybe import Maybe
+from numpy.typing import NDArray
+from pathlib import Path
 from typing import (
     Callable,
     Optional,
@@ -14,16 +17,14 @@ from typing import (
     Union,
     Sequence,
     final,
+    ClassVar,
+    Type,
 )
-
-from ...functional.maybe import Maybe
-from numpy.typing import NDArray
-
-from pathlib import Path
 from ..managers import (
     SourceManager,
     CLIManager,
     ProblemIO,
+    PropertyBase,
     simbi_property,
     simbi_derived_property,
     simbi_class_property,
@@ -37,8 +38,35 @@ def err_message(name: str) -> str:
     return f"Configuration must include a {name} simbi_property"
 
 
+class DynamicArgNamespace:
+    """Namespace for dynamic arguments"""
+
+    def __init__(self) -> None:
+        self.args: list[DynamicArg] = []
+
+    def append(self, arg: DynamicArg) -> None:
+        self.args.append(arg)
+
+
+class ConfigNamespace(DynamicArgNamespace):
+    """Namespace for configuration that preserves DynamicArg instances"""
+
+    def __init__(self, dynamic_args: dict[str, DynamicArg]) -> None:
+        super().__init__()
+        for name, arg in dynamic_args.items():
+            setattr(self, name, arg)
+            self.args.append(arg)
+
+    def __getattribute__(self, name: str) -> Any:
+        attr = super().__getattribute__(name)
+        if isinstance(attr, DynamicArg):
+            return attr.value
+        return attr
+
+
 @class_register
 class BaseConfig(metaclass=abc.ABCMeta):
+    config: ClassVar[DynamicArgNamespace]
     cli_manager: CLIManager
     source_manager: SourceManager = SourceManager(
         Path(__file__).resolve().parent.parent.parent / "src" / "libs"
@@ -47,14 +75,18 @@ class BaseConfig(metaclass=abc.ABCMeta):
     base_properties: dict[str, Any] = {}
     validator: ConfigValidator = ConfigValidator()
 
-    def __init_subclass__(cls: Any, *args: Any, **kwargs: Any) -> None:
+    def __init_subclass__(cls: Type["BaseConfig"], *args: Any, **kwargs: Any) -> None:
         super().__init_subclass__(*args, **kwargs)
+
+        # Compile source terms if any
+        if any([cls.hydro_sources, cls.gravity_sources, cls.boundary_sources]):
+            cls._compile_source_terms()
 
         # get config class if it exists
         config_cls = getattr(cls, "config", None)
         if config_cls is None:
-            # create empty config class if none defined
-            cls.config = type("config", (), {})
+            # create empty namespace if none defined
+            cls.config = DynamicArgNamespace()
             return
 
         # collect and register dynamic args from config class
@@ -67,20 +99,17 @@ class BaseConfig(metaclass=abc.ABCMeta):
         for _, arg in dynamic_args.items():
             cls.dynamic_args.append(arg)
 
-        # Compile source terms if any
-        if any([cls.hydro_sources, cls.gravity_sources, cls.boundary_sources]):
-            cls._compile_source_terms()
-
     def __init__(self) -> None:
-        self.config = type(
-            "ConfigInstance",
-            (),
-            {
-                name: arg.value
-                for name, arg in vars(self.__class__.config).items()
-                if isinstance(arg, DynamicArg)
-            },
-        )()
+        # Create config namespace that preserves DynamicArg instances but returns raw values
+        dynamic_args = {
+            name: arg
+            for name, arg in vars(self.__class__.config).items()
+            if isinstance(arg, DynamicArg)
+        }
+        config_namespace = ConfigNamespace(dynamic_args)
+
+        # Set the config namespace as an instance attribute
+        super().__setattr__("config", config_namespace)
 
     @abc.abstractmethod
     @simbi_property(group="sim_state")
@@ -137,7 +166,9 @@ class BaseConfig(metaclass=abc.ABCMeta):
         return "linear"
 
     @simbi_property(group="sim_state")
-    def passive_scalars(self) -> Optional[Union[Sequence[float], NDArray[np.float64]]]:
+    def passive_scalars(
+        self,
+    ) -> Optional[Union[Sequence[float], NDArray[np.floating[Any]]]]:
         return None
 
     @simbi_property(group="sim_state")
@@ -219,32 +250,32 @@ class BaseConfig(metaclass=abc.ABCMeta):
     def scale_factor_derivative(cls) -> Optional[Callable[[float], float]]:
         return None
 
-    @simbi_class_property(group="io")
+    @simbi_class_property(group="misc")
     def gravity_sources(cls) -> Optional[str]:
         return None
 
-    @simbi_class_property(group="io")
+    @simbi_class_property(group="misc")
     def hydro_sources(cls) -> Optional[str]:
         return None
 
-    @simbi_class_property(group="io")
+    @simbi_class_property(group="misc")
     def boundary_sources(cls) -> Optional[str]:
         return None
 
     # store the shared library path to the compiled source terms
     @final
     @simbi_derived_property(depends_on=["hydro_sources"], group="io")
-    def hydro_source_lib(self, hydro_sources: Optional[str]) -> Optional[str]:
+    def hydro_source_lib(self, hydro_sources: Optional[str]) -> Optional[Path]:
         return self.source_manager.get_library_path("hydro")
 
     @final
     @simbi_derived_property(depends_on=["gravity_sources"], group="io")
-    def gravity_source_lib(self, gravity_sources: Optional[str]) -> Optional[str]:
+    def gravity_source_lib(self, gravity_sources: Optional[str]) -> Optional[Path]:
         return self.source_manager.get_library_path("gravity")
 
     @final
     @simbi_derived_property(depends_on=["boundary_sources"], group="io")
-    def boundary_source_lib(self, boundary_sources: Optional[str]) -> Optional[str]:
+    def boundary_source_lib(self, boundary_sources: Optional[str]) -> Optional[Path]:
         return self.source_manager.get_library_path("boundary")
 
     @simbi_derived_property(depends_on=["regime"], group="sim_state")
@@ -311,17 +342,6 @@ class BaseConfig(metaclass=abc.ABCMeta):
         return 0.0
 
     @classmethod
-    def _compile_source_terms(cls) -> None:
-        sources = {
-            "hydro": cls.hydro_sources,
-            "gravity": cls.gravity_sources,
-            "boundary": cls.boundary_sources,
-        }
-        compiled = cls.source_manager.compile_sources(cls.__name__.lower(), sources)
-        for name, path in compiled.items():
-            setattr(cls, f"{name}_source_lib", str(path))
-
-    @classmethod
     def set_logdir(cls, value: str) -> None:
         setattr(cls, "log_directory", value)
 
@@ -345,7 +365,7 @@ class BaseConfig(metaclass=abc.ABCMeta):
                 arg.value = extra_args[arg.name]
 
     @classmethod
-    def _compile_source_terms(cls):
+    def _compile_source_terms(cls) -> None:
         """If the user provided source code, try to compile it"""
         sources = {
             "hydro": cls.hydro_sources,
@@ -358,7 +378,7 @@ class BaseConfig(metaclass=abc.ABCMeta):
 
     def _collect_property_values(self) -> dict[str, dict[str, Any]]:
         """Collect all property values group by category"""
-        settings = {
+        settings: dict[str, Any] = {
             "sim_state": {},
             "mesh": {},
             "grid": {},
@@ -366,13 +386,16 @@ class BaseConfig(metaclass=abc.ABCMeta):
         }
 
         # collect instance properties
-        for name, (_, group) in simbi_property.registry.items():
-            if hasattr(self, name):
-                # ignore miscalaneaus groups
-                if group.value not in settings.keys():
-                    continue
-                value = getattr(self, name)
-                settings[group.value][name] = value
+        try:
+            for name, (_, group) in PropertyBase.registry.items():
+                if hasattr(self, name):
+                    # ignore miscalaneaus groups
+                    if group.value not in settings.keys():
+                        continue
+                    value = getattr(self, name)
+                    settings[group.value][name] = value
+        except Exception as e:
+            raise e
 
         # if boundary conditions or resolution are given as single values,
         # turn them into sequences
@@ -405,7 +428,7 @@ class BaseConfig(metaclass=abc.ABCMeta):
     def _validate_settings(self, settings: dict[str, Any]) -> Maybe[dict[str, Any]]:
         return self.validator.validate(settings)
 
-    def _create_bundle(self, settings: dict[str, Any]) -> SimulationBundle:
+    def _create_bundle(self, settings: dict[str, Any]) -> Maybe[SimulationBundle]:
         return initialize_simulation(
             InitializationConfig(
                 initial_primitive_gen=self.initial_primitive_state,
@@ -424,7 +447,9 @@ class BaseConfig(metaclass=abc.ABCMeta):
                 "Failed to collect property values",
             )
             .bind_with_context(self._validate_settings, "Failed to validate settings")
-            .map_with_context(self._create_bundle, "Failed to create simulation bundle")
+            .bind_with_context(
+                self._create_bundle, "Failed to create simulation bundle"
+            )
         )
 
     @final

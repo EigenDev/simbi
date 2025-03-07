@@ -1,10 +1,34 @@
 import numpy as np
 import itertools
 from dataclasses import dataclass
-from typing import Sequence, Optional, Union
+from ..types.typing import (
+    InitialStateType,
+    MHDStateGenerator,
+    PureHydroStateGenerator,
+    GeneratorTuple,
+    SingleGenerator,
+    StateGenerator,
+)
+from typing import Sequence, Optional, Union, Any, Generator, TypeGuard, Callable
 from ...functional import Maybe, to_iterable
 from numpy.typing import NDArray
-from ..protocol import StateGenerator
+from pathlib import Path
+
+
+def is_mhd_generator(gen: StateGenerator) -> TypeGuard[GeneratorTuple]:
+    """Type guard to narrow generator function type for MHD problems"""
+    try:
+        return isinstance(gen, tuple) and len(gen) == 4
+    except:
+        return False
+
+
+def is_pure_hydro_generator(gen: StateGenerator) -> TypeGuard[SingleGenerator]:
+    """Type guard to narrow generator function type for pure hydro problems"""
+    try:
+        return isinstance(gen, tuple)
+    except:
+        return True
 
 
 @dataclass(frozen=True)
@@ -14,9 +38,11 @@ class InitializationConfig:
     initial_primitive_gen: StateGenerator
     resolution: Sequence[int]
     bounds: Union[Sequence[Sequence[float]] | Sequence[float]]
-    checkpoint_file: Optional[str] = None
+    checkpoint_file: Optional[str | Path] = None
 
-    def evaluate(self, pad_width: int, nvars: int) -> Maybe[NDArray[np.float64]]:
+    def evaluate(
+        self, pad_width: int, nvars: int
+    ) -> Maybe[tuple[NDArray[np.floating[Any]], Sequence[NDArray[np.floating[Any]]]]]:
         """Lazy evaluation of initial state"""
         try:
             mhd = False
@@ -30,11 +56,16 @@ class InitializationConfig:
             padded_state = np.zeros(padded_shape, dtype=np.float64)
 
             if mhd:
-                gas = self.initial_primitive_gen[0]()
-                gas_gen, dummy_gas_gen, *_ = itertools.tee(gas)
-                b1_gen, b2_gen, b3_gen = tuple(
-                    x() for x in self.initial_primitive_gen[1:]
-                )
+                if not is_mhd_generator(self.initial_primitive_gen):
+                    return Maybe.save_failure(
+                        "Expected a tuple of generators for MHD problems"
+                    )
+
+                gens: GeneratorTuple = self.initial_primitive_gen
+
+                gas, *b_vec = gens
+                gas_gen, dummy_gas_gen, *_ = itertools.tee(gas())
+                b1_gen, b2_gen, b3_gen = (gen() for gen in b_vec)
 
                 b1_shape = (
                     self.resolution[2],
@@ -58,7 +89,13 @@ class InitializationConfig:
                     np.fromiter(b3_gen, dtype=float).reshape(b3_shape),
                 ]
             else:
-                gas_gen, dummy_gas_gen = itertools.tee(self.initial_primitive_gen())
+                if not is_pure_hydro_generator(self.initial_primitive_gen):
+                    return Maybe.save_failure(
+                        "Expected a single generator for non-MHD problems"
+                    )
+
+                gen: SingleGenerator = self.initial_primitive_gen
+                gas_gen, dummy_gas_gen = itertools.tee(gen())
 
             # check that the generator yields the correct number of variables
             # (they can yield up to the pressure, or to passive scalar if the user chooses)

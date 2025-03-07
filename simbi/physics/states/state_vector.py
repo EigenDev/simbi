@@ -1,6 +1,6 @@
 import numpy as np
 from dataclasses import dataclass
-from typing import Optional
+from typing import Sequence, Any
 from numpy.typing import NDArray
 
 
@@ -15,15 +15,15 @@ class StateVector:
     - Works well with frozen dataclasses for immutability
     """
 
-    density: NDArray[np.float64]
-    momentum: list[NDArray[np.float64]]
-    energy: NDArray[np.float64]
-    rho_chi: NDArray[np.float64]
-    mean_magnetic_field: Optional[list[NDArray[np.float64]]] = None
+    density: NDArray[np.floating[Any]]
+    momentum: Sequence[NDArray[np.floating[Any]]]
+    energy: NDArray[np.floating[Any]]
+    rho_chi: NDArray[np.floating[Any]]
+    mean_magnetic_field: Sequence[NDArray[np.floating[Any]]]
 
-    def __array__(self) -> NDArray[np.float64]:
+    def __array__(self) -> NDArray[np.floating[Any]]:
         """Enables direct numpy array conversion via np.asarray(state)"""
-        if self.mean_magnetic_field is None:
+        if not self.mean_magnetic_field:
             # Pre-allocate for [density, mx, my, mz, E, rho_chi]
             nvars = len(self.momentum) + 3
             result = np.empty((nvars,) + self.density.shape, dtype=np.float64)
@@ -43,6 +43,6 @@ class StateVector:
         return result
 
     # Keep original method for backward compatibility
-    def to_numpy(self) -> NDArray[np.float64]:
+    def to_numpy(self) -> NDArray[np.floating[Any]]:
         """Convert state to numpy array"""
         return np.asarray(self)

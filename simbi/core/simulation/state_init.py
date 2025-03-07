@@ -1,7 +1,7 @@
 import numpy as np
 from numpy.typing import NDArray
 from dataclasses import dataclass
-from typing import Optional, Any
+from typing import Optional, Any, Sequence
 from ..config.settings import MeshSettings, IOSettings, GridSettings, SimulationSettings
 from ..config.initialization import InitializationConfig
 from ...functional.maybe import Maybe
@@ -17,8 +17,8 @@ class SimulationBundle:
     grid_config: GridSettings
     io_config: IOSettings
     sim_config: SimulationSettings
-    state: NDArray[np.float64]
-    staggered_bfields: Optional[NDArray[np.float64]] = None
+    state: NDArray[np.floating[Any]]
+    staggered_bfields: Sequence[NDArray[np.floating[Any]]]
 
     def copy_from(self, cli_args: dict[str, Any]) -> "SimulationBundle":
         """Update simulation bundle with new configuration"""
@@ -53,9 +53,9 @@ def try_checkpoint_initialization(
                     chkpt.setup, spatial_order=chkpt.setup["spatial_order"]
                 ),
                 io_config=IOSettings.from_dict(chkpt.setup),
-                sim_state=SimulationSettings.from_dict(chkpt.setup),
+                sim_config=SimulationSettings.from_dict(chkpt.setup),
                 state=chkpt.state.to_numpy(),
-                bfield=chkpt.staggered_bfields,
+                staggered_bfields=chkpt.staggered_bfields,
             ),
             "Failed to create bundle from checkpoint",
         )
@@ -102,4 +102,4 @@ def initialize_simulation(
         Maybe.of(config)
         .bind(try_checkpoint_initialization)
         .or_else(try_fresh_initialization(config, settings))
-    ).unwrap()
+    )

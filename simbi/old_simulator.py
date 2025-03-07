@@ -50,7 +50,7 @@ class Hydro:
     geometry: Any
     u: NDArray[Any]
     resolution: Sequence[int]
-    bfield: NDArray[np.float64] = np.array([[0.0], [0.0], [0.0]])
+    bfield: NDArray[np.floating[Any]] = np.array([[0.0], [0.0], [0.0]])
     trace_memory: bool = False
 
     def __init__(

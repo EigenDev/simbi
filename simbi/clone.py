@@ -28,9 +28,9 @@ class {setup_name}(BaseConfig):
     @simbi_property
     def initial_state(self) -> Union[
                                 Sequence[
-                                    Union[NDArray[np.float64], 
+                                    Union[NDArray[np.floating[Any]], 
                                     Sequence[float]]], 
-                                    NDArray[np.float64]
+                                    NDArray[np.floating[Any]]
                                ]:
         raise NotImplementedError()
 
@@ -67,12 +67,12 @@ class {setup_name}(BaseConfig):
 
     @simbi_property
     def sources(
-            self) -> Optional[Union[Sequence[NDArray[np.float64]], NDArray[np.float64]]]:
+            self) -> Optional[Union[Sequence[NDArray[np.floating[Any]]], NDArray[np.floating[Any]]]]:
         return None
 
     @simbi_property
     def passive_scalars(
-            self) -> Optional[Union[Sequence[float], NDArray[np.float64]]]:
+            self) -> Optional[Union[Sequence[float], NDArray[np.floating[Any]]]]:
         return None
 
     @simbi_classproperty
@@ -117,15 +117,15 @@ class {setup_name}(BaseConfig):
         return False
 
     @simbi_property
-    def x1(self) -> Optional[NDArray[np.float64]]:
+    def x1(self) -> Optional[NDArray[np.floating[Any]]]:
         return None
 
     @simbi_property
-    def x2(self) -> Optional[NDArray[np.float64]]:
+    def x2(self) -> Optional[NDArray[np.floating[Any]]]:
         return None
 
     @simbi_property
-    def x3(self) -> Optional[NDArray[np.float64]]:
+    def x3(self) -> Optional[NDArray[np.floating[Any]]]:
         return None
 
     @simbi_property

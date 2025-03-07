@@ -1,4 +1,5 @@
 from simbi import BaseConfig, DynamicArg, simbi_property
+from simbi.typing import InitialStateType
 from typing import Generator, Sequence
 
 
@@ -16,10 +17,10 @@ class SodProblem(BaseConfig):
     @simbi_property
     def initial_primitive_state(
         self,
-    ) -> Generator[tuple[float, float, float], None, None]:
+    ) -> InitialStateType:
         """return initial primitive generator"""
 
-        def _initial_state():
+        def _initial_state() -> Generator[Sequence[float], None, None]:
             nx = self.resolution
             dx = (self.bounds[1] - self.bounds[0]) / nx
             for i in range(nx):

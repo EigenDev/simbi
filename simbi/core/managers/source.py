@@ -18,7 +18,7 @@ class SourceManager:
         self.lib_dir.mkdir(parents=True, exist_ok=True)
 
     def compile_sources(
-        self, class_name: str, sources: dict[str, str]
+        self, class_name: str, sources: dict[str, str | None]
     ) -> dict[str, Path]:
         """Compile source files and return paths to libraries"""
         compiled_libs = {}

@@ -15,14 +15,12 @@ __all__ = [
     "calc_centroid",
     "calc_vertices",
     "calc_cell_volume",
-    "for_each",
     "to_iterable",
     "compute_num_polar_zones",
     "calc_dlogt",
     "print_progress",
     "progressbar",
     "find_nearest",
-    "pad_jagged_array",
     "display_top",
     "tuple_of_tuples",
     "expand_axis_if_needed",
@@ -118,9 +116,10 @@ def calc_domega(*, x2: NDArray[Any], x3: NDArray[Any] | None = None) -> NDArray[
 
 
 def get_vertices(
-    coords: np.ndarray, is_radial: bool = False, axis: int = -1
-) -> np.ndarray:
+    coords: NDArray[np.floating[Any]], is_radial: bool = False, axis: int = -1
+) -> NDArray[np.floating[Any]]:
     """Calculate vertices from cell centers or return input if already vertices"""
+    vertices: NDArray[np.floating[Any]]
     if is_radial:
         vertices = np.sqrt(coords[..., 1:] * coords[..., :-1])
     else:
@@ -132,21 +131,28 @@ def get_vertices(
     return vertices
 
 
-def calc_volume_1d(x1v: np.ndarray, coord_system: str) -> np.ndarray:
+def calc_volume_1d(
+    x1v: NDArray[np.floating[Any]], coord_system: str
+) -> NDArray[np.floating[Any]]:
     """Calculate 1D cell volumes from vertices"""
-    dx1 = x1v[1:] - x1v[:-1]
+    dx1: NDArray[np.floating[Any]] = x1v[1:] - x1v[:-1]
+    vol: NDArray[np.floating[Any]]
 
     if coord_system in ["spherical"]:
-        x1mean = np.sqrt(x1v[1:] * x1v[:-1])
-        return 4.0 * np.pi * x1mean * x1mean * dx1
+        x1mean: NDArray[np.floating[Any]] = np.sqrt(x1v[1:] * x1v[:-1])
+        vol = 4.0 * np.pi * x1mean * x1mean * dx1
+        return vol
     elif coord_system in ["cylindrical"]:
         x1mean = np.sqrt(x1v[1:] * x1v[:-1])
-        return 2.0 * np.pi * x1mean * dx1
+        vol = 2.0 * np.pi * x1mean * dx1
+        return vol
 
     return dx1**3
 
 
-def calc_volume_2d(x1v: np.ndarray, x2v: np.ndarray, coord_system: str) -> np.ndarray:
+def calc_volume_2d(
+    x1v: NDArray[np.floating[Any]], x2v: NDArray[np.floating[Any]], coord_system: str
+) -> NDArray[np.floating[Any]]:
     """Calculate 2D cell volumes from vertices
 
     Args:
@@ -157,25 +163,28 @@ def calc_volume_2d(x1v: np.ndarray, x2v: np.ndarray, coord_system: str) -> np.nd
         (n2, n1) array of cell volumes
     """
     # Create meshgrids from vertices
+    x1vv: NDArray[np.floating[Any]]
     x1vv, _ = np.meshgrid(x1v, x2v, indexing="ij")
 
     if coord_system == "spherical":
         # dr³ has shape (n1, n2)
-        dr3 = (x1vv[1:] ** 3 - x1vv[:-1] ** 3) / 3.0
+        dr3: NDArray[np.floating[Any]] = (x1vv[1:] ** 3 - x1vv[:-1] ** 3) / 3.0
         # dcos has shape (n2,)
-        dcos = np.cos(x2v[:-1]) - np.cos(x2v[1:])
+        dcos: NDArray[np.floating[Any]] = np.cos(x2v[:-1]) - np.cos(x2v[1:])
         # Broadcast for multiplication
         return (2.0 * np.pi * dr3[:, :-1] * dcos[None, :]).T
 
     elif coord_system == "cartesian":
-        dx = x1v[1:] - x1v[:-1]  # shape (n1,)
-        dy = x2v[1:] - x2v[:-1]  # shape (n2,)
+        dx: NDArray[np.floating[Any]] = x1v[1:] - x1v[:-1]  # shape (n1,)
+        dy: NDArray[np.floating[Any]] = x2v[1:] - x2v[:-1]  # shape (n2,)
         # Use outer product for correct broadcasting
         return np.outer(dy, dx)
 
     elif coord_system == "cylindrical":
-        dr2 = (x1v[1:] ** 2 - x1v[:-1] ** 2) / 2.0  # shape (n1,)
-        dphi = x2v[1:] - x2v[:-1]  # shape (n2,)
+        dr2: NDArray[np.floating[Any]] = (
+            x1v[1:] ** 2 - x1v[:-1] ** 2
+        ) / 2.0  # shape (n1,)
+        dphi: NDArray[np.floating[Any]] = x2v[1:] - x2v[:-1]  # shape (n2,)
         # Use outer product for correct broadcasting
         return np.outer(dphi, dr2)
 
@@ -183,37 +192,54 @@ def calc_volume_2d(x1v: np.ndarray, x2v: np.ndarray, coord_system: str) -> np.nd
 
 
 def calc_volume_3d(
-    x1v: np.ndarray, x2v: np.ndarray, x3v: np.ndarray, coord_system: str
-) -> np.ndarray:
+    x1v: NDArray[np.floating[Any]],
+    x2v: NDArray[np.floating[Any]],
+    x3v: NDArray[np.floating[Any]],
+    coord_system: str,
+) -> NDArray[np.floating[Any]]:
     """Calculate 3D cell volumes from vertices"""
+    dr3: NDArray[np.floating[Any]]
+    dcos: NDArray[np.floating[Any]]
+    dphi: NDArray[np.floating[Any]]
+    dx: NDArray[np.floating[Any]]
+    dy: NDArray[np.floating[Any]]
+    dz: NDArray[np.floating[Any]]
+    dr2: NDArray[np.floating[Any]]
+    vol: NDArray[np.floating[Any]]
+
     if coord_system == "spherical":
         dr3 = (x1v[..., 1:] ** 3 - x1v[..., :-1] ** 3) / 3.0
         dcos = np.cos(x2v[:-1]) - np.cos(x2v[1:])
         dphi = x3v[1:] - x3v[:-1]
-        return 0.5 * dr3 * dcos * dphi
+        vol = 0.5 * dr3 * dcos * dphi
+        return vol
     elif coord_system == "cartesian":
         dx = x1v[..., 1:] - x1v[..., :-1]
         dy = x2v[1:] - x2v[:-1]
         dz = x3v[1:] - x3v[:-1]
-        return dx * dy * dz
+        vol = dx * dy * dz
+        return vol
     elif coord_system == "cylindrical":
         dr2 = (x1v[..., 1:] ** 2 - x1v[..., :-1] ** 2) / 2.0
         dphi = x2v[:, 1:] - x2v[:, :-1]
         dz = x3v[1:] - x3v[:-1]
-        return dr2 * dphi * dz
+        vol = dr2 * dphi * dz
+        return vol
     else:
         raise ValueError(f"Unsupported coordinate system: {coord_system}")
 
 
 def calc_cell_volume(
-    coords: list[np.ndarray], coord_system: str = "spherical", vertices: bool = False
-) -> np.ndarray:
+    coords: Sequence[NDArray[np.floating[Any]]],
+    coord_system: str = "spherical",
+    vertices: bool = False,
+) -> NDArray[np.floating[Any]]:
     """Calculate cell volumes for 1D, 2D, or 3D grids"""
-    ndim = len(coords)
+    ndim: int = len(coords)
 
     # Convert to vertices if needed
     if not vertices:
-        is_radial = coord_system in ["spherical", "cylindrical"]
+        is_radial: bool = coord_system in ["spherical", "cylindrical"]
         coords = [get_vertices(c, is_radial and i == 0) for i, c in enumerate(coords)]
 
     if ndim == 1:
@@ -283,18 +309,6 @@ def print_progress() -> None:
             sleep(0.01)
 
 
-def pad_jagged_array(arr: Union[NDArray[Any], Sequence[Any]]) -> NDArray[Any]:
-    arr = [
-        np.array(val) if isinstance(val, (Sequence, np.ndarray)) else np.array([val])
-        for val in arr
-    ]
-    max_dim = max(a.ndim for a in arr)
-    max_size = np.max([a.size for a in arr if a.ndim == max_dim])
-    max_shape = [a.shape for a in arr if a.size == max_size][0]
-    arr = np.array([a if a.shape == max_shape else np.ones(max_shape) * a for a in arr])
-    return arr
-
-
 def find_nearest(arr: NDArray[Any], val: Any) -> Any:
     if arr.ndim > 1:
         ids = np.argmin(np.abs(arr - val), axis=1)
@@ -304,23 +318,17 @@ def find_nearest(arr: NDArray[Any], val: Any) -> Any:
         return idx, arr[idx]
 
 
-def for_each(func: Callable[..., Any], x: Any) -> None:
-    for i in x:
-        func(i)
-
-
 def to_iterable(x: Any, func: Callable[..., Sequence[Any]] = list) -> Sequence[Any]:
     if isinstance(x, (Sequence, np.ndarray)) and not isinstance(x, str):
         return func(x)
     else:
-        print("not iterable")
         return func((x,))
 
 
 def to_tuple_of_tuples(x: Any) -> tuple[tuple[Any, ...], ...]:
     if not tuple_of_tuples(x):
         return (x,)
-    return x
+    return tuple(y for y in x)
 
 
 def display_top(
