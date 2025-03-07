@@ -20,7 +20,7 @@ class SimulationBundle:
     state: NDArray[np.floating[Any]]
     staggered_bfields: Sequence[NDArray[np.floating[Any]]]
 
-    def copy_from(self, cli_args: dict[str, Any]) -> "SimulationBundle":
+    def update_from_cli_args(self, cli_args: dict[str, Any]) -> "SimulationBundle":
         """Update simulation bundle with new configuration"""
         # check if all the cli_args keys are None, if so, return self
         if all(value is None for value in cli_args.values()):

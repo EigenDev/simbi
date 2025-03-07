@@ -43,7 +43,7 @@ class SimulationRunner:
     def _prepare_simulation_state(self, cli_args: dict[str, Any]) -> dict[str, Any]:
         """Convert SimulationBundle to execution format"""
         # return the cython-compatible state
-        return SimStateBuilder.build(self.bundle.copy_from(cli_args))
+        return SimStateBuilder.build(self.bundle.update_from_cli_args(cli_args))
 
     def _execute_simulation(self, executor: Any, sim_state: dict[str, Any]) -> None:
         """Execute simulation using loaded module"""

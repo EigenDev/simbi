@@ -383,6 +383,7 @@ class BaseConfig(metaclass=abc.ABCMeta):
 
         # Check all parsed arguments against property registry
         for name, value in vars(args).items():
+            print(name, value)
             # Convert CLI name format to property name
             prop_name = name.replace("-", "_")
 
@@ -406,6 +407,15 @@ class BaseConfig(metaclass=abc.ABCMeta):
                             prop_name,
                             ClassProperty(lambda _, v=value: v, prop.group),  # type: ignore
                         )
+            elif name == "order" and value is not None:
+                # if value is first, then set the time and spatial integration
+                # level accoridngly
+                if value == "first":
+                    setattr(cls, "spatial_order", "pcm")
+                    setattr(cls, "temporal_order", "rk1")
+                else:
+                    setattr(cls, "spatial_order", "plm")
+                    setattr(cls, "temporal_order", "rk2")
 
     @classmethod
     def _compile_source_terms(cls) -> None:
