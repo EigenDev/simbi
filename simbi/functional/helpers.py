@@ -331,6 +331,10 @@ def to_tuple_of_tuples(x: Any) -> tuple[tuple[Any, ...], ...]:
     return tuple(y for y in x)
 
 
+def to_tuple_of_pairs(x: Any) -> tuple[tuple[Any, Any], ...]:
+    return tuple((x[i], x[i + 1]) for i in range(0, len(x), 2))
+
+
 def display_top(
     snapshot: tracemalloc.Snapshot, key_type: str = "lineno", limit: int = 3
 ) -> None:

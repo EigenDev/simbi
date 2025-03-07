@@ -1,5 +1,5 @@
 import inspect
-from ...detail.dynarg import DynamicArg
+from ..types.dynarg import DynamicArg
 from enum import Enum
 from typing import (
     TypeVar,

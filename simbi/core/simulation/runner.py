@@ -2,10 +2,9 @@ from dataclasses import dataclass
 from ..config import GPUConfig
 from ...io.logging import logger
 from ...functional.utilities import pipe
-from ...functional.helpers import tuple_of_tuples, print_progress
+from ...functional.helpers import tuple_of_tuples, print_progress, to_tuple_of_pairs
 from .builder import SimStateBuilder
 from typing import Any
-from pathlib import Path
 from ..simulation.state_init import SimulationBundle
 import numpy as np
 import os
@@ -98,7 +97,7 @@ class SimulationRunner:
             elif isinstance(param, (list, np.ndarray)):
                 if len(param) > 6:
                     return f"user-defined {param.__class__.__name__} terms"
-                return [format_param(p) for p in param]  # type: ignore
+                return to_tuple_of_pairs(list(format_param(p) for p in param))  # type: ignore
             elif isinstance(param, tuple):
                 return format_tuple_of_tuples(param)
 

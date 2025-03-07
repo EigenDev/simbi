@@ -1,4 +1,4 @@
-from typing import Sequence
+from typing import Sequence, Any
 from ...functional.helpers import to_iterable
 
 
@@ -6,18 +6,28 @@ class BoundaryManager:
     @classmethod
     def validate_conditions(cls, conditions: Sequence[str], dim: int) -> Sequence[str]:
         bcs = list(to_iterable(conditions))
+        ncell_faces = 2 * dim
+        number_of_given_bcs = len(bcs)
+        if number_of_given_bcs != ncell_faces:
+            if number_of_given_bcs != ncell_faces // 2:
+                if number_of_given_bcs != 1:
+                    raise ValueError(
+                        "Please include a number of boundary conditions equal to half the number of cell faces or the same number of cell faces"
+                    )
 
+        return conditions
+
+    @classmethod
+    def extrapolate_conditions_if_needed(
+        cls, conditions: Sequence[str], dim: int
+    ) -> Sequence[str]:
+        bcs: list[str] = list(to_iterable(conditions))
         number_of_given_bcs = len(bcs)
         if number_of_given_bcs != 2 * dim:
             if number_of_given_bcs == 1:
                 bcs *= 2 * dim
-            elif number_of_given_bcs == dim:
-                bcs = [bc for bc in bcs for _ in range(2)]
             else:
-                raise ValueError(
-                    "Please include a number of boundary conditions equal to at least half the number of cell faces"
-                )
-
+                bcs = list(bc for bc in bcs for _ in range(2))
         return bcs
 
     @classmethod

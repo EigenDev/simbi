@@ -3,7 +3,7 @@ import abc
 import math
 import numpy as np
 from ..types.typing import InitialStateType
-from ...detail.dynarg import DynamicArg
+from ..types.dynarg import DynamicArg
 from ..managers.validator import ConfigValidator
 from ..config.initialization import InitializationConfig
 from ..simulation.state_init import SimulationBundle, initialize_simulation
@@ -188,7 +188,7 @@ class BaseConfig(metaclass=abc.ABCMeta):
         return "hllc"
 
     @simbi_property(group="mesh")
-    def boundary_conditions(self) -> Union[Sequence[str], str, NDArray[np.str_]]:
+    def boundary_conditions(self) -> Union[Sequence[str], str, Sequence[Sequence[int]]]:
         return "outflow"
 
     @simbi_property(group="sim_state")

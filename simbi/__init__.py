@@ -2,7 +2,7 @@ from .io import logging
 from .functional import helpers
 from .simulator import Hydro
 from .core.config.base_config import BaseConfig
-from .detail.dynarg import DynamicArg
+from .core.types.dynarg import DynamicArg
 from .version import __version_tuple__
 from .libs.rad_hydro import py_calc_fnu, py_log_events
 from .functional.helpers import *

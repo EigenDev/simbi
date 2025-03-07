@@ -127,6 +127,9 @@ class SimStateBuilder:
         bcs = pipe(
             mesh.boundary_conditions,
             lambda bcs: BoundaryManager.validate_conditions(bcs, mesh.dimensionality),
+            lambda bcs: BoundaryManager.extrapolate_conditions_if_needed(
+                bcs, mesh.dimensionality
+            ),
             lambda bcs: BoundaryManager.check_and_fix_curvlinear_conditions(
                 conditions=bcs,
                 coord_system=mesh.coord_system,

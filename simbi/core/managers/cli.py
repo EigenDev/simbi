@@ -1,5 +1,5 @@
 from dataclasses import dataclass, field
-from ...detail.dynarg import DynamicArg
+from ..types.dynarg import DynamicArg
 from typing import Any
 import argparse
 
