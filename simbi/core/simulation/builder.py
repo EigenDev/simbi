@@ -179,6 +179,5 @@ class SimStateBuilder:
         )
 
         SimStateBuilder.prepare_data_directory(state_dict["data_directory"])
-        x = SimStateBuilder.to_dict(state_dict)
         # Encode strings and return
         return SimStateBuilder.to_dict(state_dict)
