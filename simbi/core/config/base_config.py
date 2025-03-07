@@ -383,7 +383,6 @@ class BaseConfig(metaclass=abc.ABCMeta):
 
         # Check all parsed arguments against property registry
         for name, value in vars(args).items():
-            print(name, value)
             # Convert CLI name format to property name
             prop_name = name.replace("-", "_")
 
