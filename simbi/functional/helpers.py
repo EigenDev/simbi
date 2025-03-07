@@ -302,10 +302,10 @@ def print_progress() -> None:
     try:
         from rich.progress import track
 
-        for _ in track(range(100), description="Loading..."):
+        for _ in track(range(150), description="Loading..."):
             sleep(0.01)
     except ImportError:
-        for _ in progressbar(range(100), "Loading: ", 60):
+        for _ in progressbar(range(150), "Loading: ", 60):
             sleep(0.01)
 
 
