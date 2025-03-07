@@ -2,7 +2,7 @@ from dataclasses import dataclass
 from ..config import GPUConfig
 from ...io.logging import logger
 from ...functional.utilities import pipe
-from ...functional.helpers import tuple_of_tuples
+from ...functional.helpers import tuple_of_tuples, print_progress
 from .builder import SimStateBuilder
 from typing import Any
 from pathlib import Path
@@ -50,6 +50,9 @@ class SimulationRunner:
         """Execute simulation using loaded module"""
         # Reshape state for contiguous memory access
         state_contig = self.bundle.state.reshape(self.bundle.state.shape[0], -1)
+        # Give user a chance to check their params
+        print_progress()
+
         # Execute simulation
         executor().run(
             state=state_contig,
@@ -99,7 +102,7 @@ class SimulationRunner:
             elif isinstance(param, tuple):
                 return format_tuple_of_tuples(param)
 
-            return str(param)
+            return param.decode("utf-8") if isinstance(param, bytes) else str(param)
 
         for key, param in sim_state.items():
             if key not in ["bfield", "staggered_bfields"]:
