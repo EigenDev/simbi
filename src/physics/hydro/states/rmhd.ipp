@@ -1,4 +1,3 @@
-#include "core/managers/boundary_manager.hpp"       // for BoundaryManager
 #include "geometry/vector_calculus.hpp"             // for curl_component
 #include "physics/hydro/schemes/ct/emf_field.hpp"   // for EMField
 #include <cmath>                                    // for max, min
@@ -1330,21 +1329,21 @@ void RMHD<dim>::sync_flux_boundaries()
 }
 
 template <int dim>
-void RMHD<dim>::sync_magnetic_boundaries(const auto& bfield_man)
+void RMHD<dim>::sync_magnetic_boundaries()
 {
-    bfield_man.sync_boundaries(
+    bfield_man_.sync_boundaries(
         this->full_xvertex_policy(),
         bstag1,
         bstag1.contract({1, 1, 0}),
         this->bcs()
     );
-    bfield_man.sync_boundaries(
+    bfield_man_.sync_boundaries(
         this->full_yvertex_policy(),
         bstag2,
         bstag2.contract({1, 0, 1}),
         this->bcs()
     );
-    bfield_man.sync_boundaries(
+    bfield_man_.sync_boundaries(
         this->full_zvertex_policy(),
         bstag3,
         bstag3.contract({0, 1, 1}),
@@ -1582,11 +1581,10 @@ void RMHD<dim>::advance_conserved()
 template <int dim>
 void RMHD<dim>::advance_impl()
 {
-    static auto bfield_man = boundary_manager<real, dim>{};
     riemann_fluxes();
     sync_flux_boundaries();
     advance_magnetic_fields();
-    sync_magnetic_boundaries(bfield_man);
+    sync_magnetic_boundaries();
     advance_conserved();
     this->apply_boundary_conditions();
 }
@@ -1609,7 +1607,5 @@ void RMHD<dim>::init_simulation()
     bstag1.reshape(this->get_shape(xP));
     bstag2.reshape(this->get_shape(yP));
     bstag3.reshape(this->get_shape(zP));
-
-    this->apply_boundary_conditions();
     sync_all_to_device();
 };

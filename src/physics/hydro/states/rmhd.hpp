@@ -50,12 +50,13 @@
 #ifndef RMHD_HPP
 #define RMHD_HPP
 
-#include "base.hpp"                            // for HydroBase
-#include "build_options.hpp"                   // for real, HD, lint, luint
-#include "core/types/containers/ndarray.hpp"   // for ndarray
-#include "core/types/monad/maybe.hpp"          // for Maybe
-#include "core/types/utility/enums.hpp"        // for TIMESTEP_TYPE
-#include "geometry/mesh/mesh.hpp"              // for Mesh
+#include "base.hpp"                             // for HydroBase
+#include "build_options.hpp"                    // for real, HD, lint, luint
+#include "core/managers/boundary_manager.hpp"   // for BoundaryManager
+#include "core/types/containers/ndarray.hpp"    // for ndarray
+#include "core/types/monad/maybe.hpp"           // for Maybe
+#include "core/types/utility/enums.hpp"         // for TIMESTEP_TYPE
+#include "geometry/mesh/mesh.hpp"               // for Mesh
 #include "physics/hydro/schemes/ct/ct_calculator.hpp"   // for anyPrimitive
 #include "physics/hydro/types/generic_structs.hpp"   // for Eigenvals, mag_four_vec
 #include "util/parallel/exec_policy.hpp"             // for ExecutionPolicy
@@ -71,6 +72,7 @@ namespace simbi {
     {
       private:
         using base_t = HydroBase<RMHD<dim>, dim, Regime::RMHD>;
+        boundary_manager<real, dim> bfield_man_;
 
       protected:
         // type alias
@@ -121,7 +123,7 @@ namespace simbi {
 
         DEV auto cons2prim_single(const auto& cons) const;
         void sync_flux_boundaries();
-        void sync_magnetic_boundaries(const auto& bfield_man);
+        void sync_magnetic_boundaries();
         void riemann_fluxes();
         void advance_conserved();
         void advance_magnetic_fields();
