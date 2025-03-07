@@ -1,5 +1,6 @@
 import math
 from simbi import BaseConfig, simbi_property, DynamicArg
+from simbi.typing import InitialStateType
 from typing import Sequence, Generator
 from functools import partial
 
@@ -28,14 +29,7 @@ class MagneticBomb(BaseConfig):
         )
 
     @simbi_property
-    def initial_primitive_state(
-        self,
-    ) -> tuple[
-        Generator[tuple[float, ...], None, None],
-        Generator[float, None, None],
-        Generator[float, None, None],
-        Generator[float, None, None],
-    ]:
+    def initial_primitive_state(self) -> InitialStateType:
         def gas_state() -> Generator[tuple[float, ...]]:
             ni, nj, nk = self.resolution
             xbounds = self.bounds[0]

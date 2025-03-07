@@ -1,6 +1,7 @@
 import math
 import random
 from simbi import BaseConfig, DynamicArg, simbi_property
+from simbi.typing import InitialStateType
 from typing import Any, Sequence, Generator, Iterator
 from dataclasses import dataclass
 
@@ -67,7 +68,7 @@ class Quirk(BaseConfig):
         }
 
     @simbi_property
-    def initial_primitive_state(self) -> Generator[tuple[float, ...], None, None]:
+    def initial_primitive_state(self) -> InitialStateType:
         def gas_state() -> Generator[tuple[float, ...], None, None]:
             state = self.problem_states[self.config.mach_mode.value]
             ni, nj = self.resolution

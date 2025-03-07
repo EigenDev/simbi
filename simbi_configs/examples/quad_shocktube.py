@@ -1,4 +1,5 @@
 from simbi import BaseConfig, DynamicArg, simbi_property
+from simbi.typing import InitialStateType
 from typing import Sequence, Generator
 from dataclasses import dataclass
 
@@ -12,7 +13,7 @@ class ShockTubeState:
     v2: float
     p: float
 
-    def __iter__(self) -> Generator:
+    def __iter__(self) -> Generator[float, None, None]:
         yield self.rho
         yield self.v1
         yield self.v2
@@ -32,7 +33,7 @@ class SodProblemQuad(BaseConfig):
         )
 
     @simbi_property
-    def initial_primitive_state(self) -> Generator[tuple[float, ...], None, None]:
+    def initial_primitive_state(self) -> InitialStateType:
 
         def gas_state() -> Generator[tuple[float, ...], None, None]:
             ni, nj = self.resolution

@@ -1,6 +1,7 @@
 import numpy as np
 import matplotlib.pyplot as plt
 import matplotlib.colors as mcolors
+from typing import Any
 from numpy.typing import NDArray
 from matplotlib.collections import QuadMesh
 from itertools import cycle

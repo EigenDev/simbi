@@ -4,7 +4,7 @@ from ..core.base import BasePlotter
 from ..core.mixins import DataHandlerMixin, AnimationMixin, CoordinatesMixin
 from ..utils.formatting import PlotFormatter
 from ..utils.io import DataManager
-from typing import Sequence
+from typing import Sequence, Any
 from numpy.typing import NDArray
 from ...utility import get_field_str
 

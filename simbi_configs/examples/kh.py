@@ -1,6 +1,7 @@
 import numpy as np
 from simbi import BaseConfig, DynamicArg, simbi_property
 from typing import Any, Sequence, Generator
+from simbi.typing import InitialStateType
 
 SEED = 12345
 rng = np.random.default_rng(SEED)
@@ -29,7 +30,7 @@ class KelvinHelmholtz(BaseConfig):
     pR = 2.5
 
     @simbi_property
-    def initial_primitive_state(self) -> Generator[tuple[float, ...], None, None]:
+    def initial_primitive_state(self) -> InitialStateType:
         def gas_state() -> Generator[tuple[float, ...], None, None]:
             dy = (self.ymax - self.ymin) / self.config.npts
             for j in range(self.config.npts):

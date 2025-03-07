@@ -4,9 +4,9 @@ from simbi import (
     simbi_property,
     DynamicArg,
     compute_num_polar_zones,
-    find_nearest,
 )
 from typing import Sequence, Generator, Any
+from simbi.typing import InitialStateType
 
 
 RHO_AMB = 1.0
@@ -14,7 +14,7 @@ T_AMB = 1e-10
 NU = 3.0
 
 
-class thermalBomb(BaseConfig):
+class ThermalBomb(BaseConfig):
     """The Thermal Bomb
     Launch a relativistic blast wave on a 2D Spherical Logarithmic mesh with variable zones per decade in radius
     """
@@ -52,7 +52,7 @@ class thermalBomb(BaseConfig):
         )
 
     @simbi_property
-    def initial_primitive_state(self) -> Generator[tuple[float, ...], None, None]:
+    def initial_primitive_state(self) -> InitialStateType:
         def gas_state() -> Generator[tuple[float, ...], None, None]:
             ni, nj = self.resolution
             explosion_radius = self.config.rinit * 1.5

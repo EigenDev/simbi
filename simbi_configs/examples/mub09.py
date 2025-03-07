@@ -1,4 +1,5 @@
 from simbi import BaseConfig, DynamicArg, simbi_property
+from simbi.typing import InitialStateType
 from typing import Sequence, Generator, Iterator, Any
 from dataclasses import dataclass
 from functools import partial
@@ -78,17 +79,10 @@ class MagneticShockTube(BaseConfig):
         }
 
     @simbi_property
-    def initial_primitive_state(
-        self,
-    ) -> tuple[
-        Generator[tuple[float, ...], None, None],
-        Generator[float, None, None],
-        Generator[float, None, None],
-        Generator[float, None, None],
-    ]:
+    def initial_primitive_state(self) -> InitialStateType:
         def gas_state() -> Generator[tuple[float, ...], None, None]:
             ni, nj, nk = self.resolution
-            state = self.problem_states[self.config.problem]
+            state = self.problem_states[str(self.config.problem)]
             xextent = self.bounds[1] - self.bounds[0]
             dx = xextent / ni
             for k in range(nk):
@@ -101,7 +95,7 @@ class MagneticShockTube(BaseConfig):
                             yield tuple(state[1])
 
         def bfield(bn: str) -> Generator[float, None, None]:
-            state = self.problem_states[self.config.problem]
+            state = self.problem_states[str(self.config.problem)]
             ni, nj, nk = self.resolution
             xextent = self.bounds[1] - self.bounds[0]
             dx = xextent / ni

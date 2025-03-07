@@ -1,4 +1,5 @@
 from simbi import BaseConfig, DynamicArg, simbi_property
+from simbi.typing import InitialStateType
 from typing import Sequence, Generator
 from dataclasses import dataclass
 
@@ -16,7 +17,7 @@ class Ram61(BaseConfig):
         )
 
     @simbi_property
-    def initial_primitive_state(self) -> Generator[tuple[float, ...], None, None]:
+    def initial_primitive_state(self) -> InitialStateType:
         def gas_state() -> Generator[tuple[float, ...], None, None]:
             ni, nj = self.resolution
             for j in range(nj):

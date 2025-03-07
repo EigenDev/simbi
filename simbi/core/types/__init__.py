@@ -2,9 +2,9 @@ import typing
 
 __all__ = [
     "GeneratorTuple",
-    "SingleGenerator",
+    "GasStateGenerator",
     "PureHydroStateGenerator",
-    "MHDStateGenerator",
+    "MHDStateGenerators",
     "InitialStateType",
     "PrimitiveStateFunc",
     "StateGenerator",

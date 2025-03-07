@@ -2,26 +2,34 @@ from typing import Generator, Callable, Sequence, Union, Any
 from numpy.typing import NDArray
 import numpy as np
 
-GeneratorTuple = tuple[
-    Generator[Sequence[float], None, None],  # gas state
-    Generator[float, None, None],  # Bx
-    Generator[float, None, None],  # By
-    Generator[float, None, None],  # Bz
-]
-SingleGenerator = Generator[Sequence[float], None, None]
-PureHydroStateGenerator = Callable[[], SingleGenerator]
-MHDStateGenerator = Callable[[], GeneratorTuple]
+GasStateGenerator = Generator[Sequence[float], None, None]
+StaggereBFieldGenerator = Generator[float, None, None]
 
-InitialStateType = Union[PureHydroStateGenerator, MHDStateGenerator]
+PureHydroStateGenerator = Callable[[], GasStateGenerator]
+MHDStateGenerators = tuple[
+    Callable[[], GasStateGenerator],
+    Callable[[], StaggereBFieldGenerator],
+    Callable[[], StaggereBFieldGenerator],
+    Callable[[], StaggereBFieldGenerator],
+]
+
+
+GeneratorTuple = tuple[
+    GasStateGenerator,  # gas state
+    StaggereBFieldGenerator,  # Bx
+    StaggereBFieldGenerator,  # By
+    StaggereBFieldGenerator,  # Bz
+]
+InitialStateType = Union[PureHydroStateGenerator, MHDStateGenerators]
 
 PrimitiveStateFunc = (
-    Callable[[], SingleGenerator]
+    Callable[[], GasStateGenerator]
     | Callable[
         [],
         GeneratorTuple,
     ]
 )
 
-StateGenerator = SingleGenerator | GeneratorTuple
+StateGenerator = GasStateGenerator | GeneratorTuple
 
 FloatOrArray = Union[float, NDArray[np.floating[Any]]]

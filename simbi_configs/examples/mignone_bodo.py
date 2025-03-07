@@ -1,5 +1,6 @@
 from simbi import BaseConfig, DynamicArg, simbi_property
-from typing import Sequence, Generator, Iterator
+from simbi.typing import InitialStateType
+from typing import Sequence, Generator, Iterator, Any
 from dataclasses import dataclass
 
 
@@ -29,8 +30,7 @@ class MignoneBodo(BaseConfig):
             "problem", 1, help="test problem to compute", var_type=int, choices=[1, 2]
         )
 
-    def __init__(self, **kwargs):
-        super().__init__(**kwargs)
+    def __init__(self) -> None:
         self.problem_state = {
             1: (
                 ShockTubeState(1.0, 0.0, 1.0),
@@ -43,7 +43,7 @@ class MignoneBodo(BaseConfig):
         }
 
     @simbi_property
-    def initial_primitive_state(self) -> Generator[tuple[float, ...], None, None]:
+    def initial_primitive_state(self) -> InitialStateType:
         def gas_state() -> Generator[tuple[float, ...], None, None]:
             ni = self.resolution
             xextent = self.bounds[1] - self.bounds[0]
@@ -51,9 +51,9 @@ class MignoneBodo(BaseConfig):
             for i in range(ni):
                 xi = self.bounds[0] + i * dx
                 if xi < 0.5 * xextent:
-                    rho, v, p = self.problem_state[self.config.problem][0]
+                    rho, v, p = self.problem_state[int(self.config.problem)][0]
                 else:
-                    rho, v, p = self.problem_state[self.config.problem][1]
+                    rho, v, p = self.problem_state[int(self.config.problem)][1]
                 yield (rho, v, p)
 
         return gas_state

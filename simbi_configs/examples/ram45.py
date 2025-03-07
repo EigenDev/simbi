@@ -1,5 +1,6 @@
 from simbi import BaseConfig, DynamicArg, simbi_property
-from typing import Any, Sequence, Generator, Iterator
+from simbi.typing import InitialStateType
+from typing import Sequence, Generator, Iterator
 from dataclasses import dataclass
 
 
@@ -28,7 +29,7 @@ class Ram45(BaseConfig):
         )
 
     @simbi_property
-    def initial_primitive_state(self) -> Generator[tuple[float, ...], None, None]:
+    def initial_primitive_state(self) -> InitialStateType:
         def gas_state() -> Generator[tuple[float, ...], None, None]:
             ni = self.resolution
             for i in range(ni):
@@ -49,7 +50,7 @@ class Ram45(BaseConfig):
         return "cartesian"
 
     @simbi_property
-    def resolution(self) -> Sequence[DynamicArg]:
+    def resolution(self) -> DynamicArg:
         return self.config.nzones
 
     @simbi_property

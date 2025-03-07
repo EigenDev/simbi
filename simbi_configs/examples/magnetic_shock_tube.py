@@ -1,4 +1,5 @@
 from simbi import BaseConfig, DynamicArg, simbi_property
+from simbi.typing import InitialStateType
 from typing import Sequence, Generator
 from dataclasses import dataclass
 from functools import partial
@@ -70,12 +71,7 @@ class MagneticShockTube(BaseConfig):
         }
 
     @simbi_property
-    def initial_primitive_state(self) -> tuple[
-        Generator[tuple[float, ...], None, None],
-        Generator[float, None, None],
-        Generator[float, None, None],
-        Generator[float, None, None],
-    ]:
+    def initial_primitive_state(self) -> InitialStateType:
         # defined as (rho, v1, v2, v3, pg, b1, b2, b3)
         def gas_state() -> Generator[tuple[float, ...], None, None]:
             state = self.problem_states[self.config.problem]

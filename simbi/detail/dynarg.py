@@ -177,7 +177,17 @@ class DynamicArg:
     def __index__(self) -> int:
         return int(self.value)
 
-    # Numpy functionaly
+    def __iter__(self) -> "DynamicArg":
+        """support yielding"""
+        return self
+
+    def __next__(self) -> Any:
+        """Return raw value when yielded and stop iteration"""
+        value = self.value
+        raise StopIteration
+        return value  # This line is never reached but helps type inference
+
+    # numpy functionaly
     def __array_right_divide__(self, other: NDArray[Any]) -> NDArray[Any]:
         return cast(NDArray[Any], other / self.value)
 

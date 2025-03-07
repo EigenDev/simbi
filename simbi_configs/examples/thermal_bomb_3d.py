@@ -4,8 +4,8 @@ from simbi import (
     simbi_property,
     DynamicArg,
     compute_num_polar_zones,
-    find_nearest,
 )
+from simbi.typing import InitialStateType
 from typing import Sequence, Generator, Any
 
 RHO_AMB = 1.0
@@ -54,7 +54,7 @@ class thermalBomb(BaseConfig):
         self.nphi = self.npolar
 
     @simbi_property
-    def initial_primitive_state(self) -> Generator[tuple[float, ...], None, None]:
+    def initial_primitive_state(self) -> InitialStateType:
         def gas_state() -> Generator[tuple[float, ...], None, None]:
             ni, nj, nk = self.resolution
             explosion_radius = self.config.rinit * 1.5

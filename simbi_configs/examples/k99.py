@@ -33,7 +33,7 @@ class MHDProblemState:
     right: ShockTubeState
 
     @staticmethod
-    def beta(u: Sequence[float]) -> NDArray[np.floating[np.floating[Any]]]:
+    def beta(u: Sequence[float]) -> NDArray[np.floating[Any]]:
         """Calculate relativistic beta from 3-velocity"""
         unp: NDArray[np.floating[Any]] = np.asarray(u)
         gamma: float = (1.0 + unp.dot(unp)) ** (0.5)
@@ -180,7 +180,7 @@ class MagneticShockTube(BaseConfig):
         """Generate initial primitive state"""
 
         def _gas_state() -> Generator[tuple[float, ...], None, None]:
-            state = self.problem_states[self.config.problem]
+            state = self.problem_states[str(self.config.problem)]
             nx = self.resolution[0]
             dx = (self.bounds[1] - self.bounds[0]) / nx
 
@@ -204,7 +204,7 @@ class MagneticShockTube(BaseConfig):
                     )
 
         def _bfield(bn: str) -> Generator[float, None, None]:
-            state = self.problem_states[self.config.problem]
+            state = self.problem_states[str(self.config.problem)]
             ni, nj, nk = self.resolution
             dx = (self.bounds[1] - self.bounds[0]) / ni
             for k in range(nk + (bn == "bz")):

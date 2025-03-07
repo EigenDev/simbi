@@ -1,5 +1,6 @@
 import math
 from simbi import BaseConfig, simbi_property, DynamicArg
+from simbi.typing import InitialStateType
 from typing import Sequence, Generator, Any
 from functools import partial
 
@@ -27,18 +28,11 @@ class OrszagTang(BaseConfig):
         ) / self.config.adiabatic_index
 
     @simbi_property
-    def initial_primitive_state(
-        self,
-    ) -> tuple[
-        Generator[tuple[float, ...], None, None],
-        Generator[float, None, None],
-        Generator[float, None, None],
-        Generator[float, None, None],
-    ]:
+    def initial_primitive_state(self) -> InitialStateType:
         def gas_state() -> Generator[tuple[float, ...], None, None]:
             ni, nj, nk = self.resolution
-            p0 = self.config.adiabatic_index
-            rho0 = self.config.adiabatic_index**2
+            p0 = float(self.config.adiabatic_index)
+            rho0 = float(self.config.adiabatic_index) ** 2
             v0 = self.config.v0
             xbounds = self.bounds[0]
             ybounds = self.bounds[1]

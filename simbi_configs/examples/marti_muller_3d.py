@@ -1,4 +1,5 @@
 from simbi import BaseConfig, DynamicArg, simbi_property
+from simbi.typing import InitialStateType
 from typing import Sequence, Generator
 
 
@@ -14,7 +15,7 @@ class MartiMuller3D(BaseConfig):
         )
 
     @simbi_property
-    def initial_primitive_state(self) -> Generator[tuple[float, ...], None, None]:
+    def initial_primitive_state(self) -> InitialStateType:
         def gas_state() -> Generator[tuple[float, ...], None, None]:
             ni, nj, nk = self.resolution
             xextent = self.bounds[0][1] - self.bounds[0][0]

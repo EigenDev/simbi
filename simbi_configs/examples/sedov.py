@@ -4,8 +4,9 @@ from simbi import (
     DynamicArg,
     simbi_property,
     compute_num_polar_zones,
-    find_nearest,
 )
+from simbi.typing import InitialStateType
+
 from typing import Any, Sequence, Generator
 
 
@@ -52,7 +53,7 @@ class SedovTaylor(BaseConfig):
         )
 
     @simbi_property
-    def initial_primitive_state(self) -> Generator[tuple[float, ...], None, None]:
+    def initial_primitive_state(self) -> InitialStateType:
         def gas_state() -> Generator[tuple[float, ...], None, None]:
             ni, nj = self.resolution
             explosion_radius = self.config.rinit * 1.5
