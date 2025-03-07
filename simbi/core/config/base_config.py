@@ -2,7 +2,7 @@ import argparse
 import abc
 import math
 import numpy as np
-from ..types.typing import StateGenerator
+from ..types.typing import InitialStateType
 from ...detail.dynarg import DynamicArg
 from ..managers.validator import ConfigValidator
 from ..config.initialization import InitializationConfig
@@ -19,6 +19,10 @@ from typing import (
     final,
     ClassVar,
     Type,
+)
+from ..managers.property import (
+    ClassProperty,
+    InstanceProperty,
 )
 from ..managers import (
     SourceManager,
@@ -113,7 +117,7 @@ class BaseConfig(metaclass=abc.ABCMeta):
 
     @abc.abstractmethod
     @simbi_property(group="sim_state")
-    def initial_primitive_state(self) -> StateGenerator:
+    def initial_primitive_state(self) -> InitialStateType:
         raise NotImplementedError(err_message("initial_primitive_state"))
 
     @abc.abstractmethod
@@ -201,7 +205,11 @@ class BaseConfig(metaclass=abc.ABCMeta):
         return 0
 
     @simbi_property(group="io")
-    def log_output(self) -> tuple[bool, int]:
+    def log_output(self) -> bool:
+        return False
+
+    @simbi_property(group="io")
+    def log_checkpoints_tuple(self) -> tuple[bool, int]:
         """logarithmic output flag. First argument is setting,
         second argument is number of output files to produce"""
         return (False, 0)
@@ -327,18 +335,21 @@ class BaseConfig(metaclass=abc.ABCMeta):
         return dimensionality + 3
 
     @simbi_derived_property(
-        depends_on=["log_output", "default_end_time", "default_start_time"],
+        depends_on=["log_checkpoints_tuple", "default_end_time", "default_start_time"],
         group="sim_state",
     )
     def dlogt(
         self,
-        log_output: tuple[bool, int],
+        log_checkpoints_tuple: tuple[bool, int],
         default_end_time: float,
         default_start_time: float,
     ) -> float:
         """return the logarithmic time spacing from the log_output flag"""
-        if log_output[0]:
-            return math.log10(default_end_time / default_start_time) / log_output[1]
+        if log_checkpoints_tuple[0]:
+            return (
+                math.log10(default_end_time / default_start_time)
+                / log_checkpoints_tuple[1]
+            )
         return 0.0
 
     @classmethod
@@ -357,12 +368,44 @@ class BaseConfig(metaclass=abc.ABCMeta):
     @final
     @classmethod
     def parse_args_and_update_configuration(cls) -> None:
-        extra_args = cls.cli_manager.parse_args()
+        args = cls.cli_manager.main_parser.parse_args()
         # update any dynamic_arg values with the values
         # that were parsed from the command line
         for arg in cls.dynamic_args:
-            if arg.name in extra_args:
-                arg.value = extra_args[arg.name]
+            if arg.name in vars(args):
+                arg.value = getattr(args, arg.name)
+
+        for name in PropertyBase.registry:
+            if hasattr(args, name.replace("-", "_")):
+                value = getattr(args, name.replace("-", "_"))
+                if value is not None:
+                    cls.cli_manager.property_overrides[name] = value
+
+        # Check all parsed arguments against property registry
+        for name, value in vars(args).items():
+            # Convert CLI name format to property name
+            prop_name = name.replace("-", "_")
+
+            # If this matches a property name and has a value
+            if prop_name in PropertyBase.registry and value is not None:
+                # Store override in cli_manager
+                cls.cli_manager.property_overrides[prop_name] = value
+
+                # Update property descriptor if possible
+                prop = getattr(cls, prop_name, None)
+                if isinstance(prop, PropertyBase):
+                    if isinstance(prop, InstanceProperty):
+                        setattr(
+                            cls,
+                            prop_name,
+                            InstanceProperty(lambda _, v=value: v, prop.group),
+                        )
+                    elif isinstance(prop, ClassProperty):
+                        setattr(
+                            cls,
+                            prop_name,
+                            ClassProperty(lambda _, v=value: v, prop.group),  # type: ignore
+                        )
 
     @classmethod
     def _compile_source_terms(cls) -> None:
@@ -386,16 +429,14 @@ class BaseConfig(metaclass=abc.ABCMeta):
         }
 
         # collect instance properties
-        try:
-            for name, (_, group) in PropertyBase.registry.items():
-                if hasattr(self, name):
-                    # ignore miscalaneaus groups
-                    if group.value not in settings.keys():
-                        continue
-                    value = getattr(self, name)
-                    settings[group.value][name] = value
-        except Exception as e:
-            raise e
+        for name, (_, group) in PropertyBase.registry.items():
+            if hasattr(self, name):
+                # ignore miscalaneaus groups
+                if group.value not in settings.keys():
+                    continue
+
+                value = getattr(self, name)
+                settings[group.value][name] = value
 
         # if boundary conditions or resolution are given as single values,
         # turn them into sequences

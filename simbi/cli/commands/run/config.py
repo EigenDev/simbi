@@ -70,10 +70,10 @@ def _configure_single_state(
         importlib.import_module(f"{base_script}"), f"{setup_class}"
     )
 
-    if argv:
-        run_parser = getattr(args, "active_parser")
-        problem_class_t.setup_cli(parser, run_parser)
-        problem_class_t.parse_args_and_update_configuration()
+    # check if the user has passed any non-void arguments
+    run_parser = getattr(args, "active_parser")
+    problem_class_t.setup_cli(parser, run_parser)
+    problem_class_t.parse_args_and_update_configuration()
 
     problem_class: Any = problem_class_t()
 
@@ -113,8 +113,8 @@ def use_arg_or_default(arg_value, config_value):
 
 def _build_kwargs_dict(config: BaseConfig, args: Namespace) -> Dict[str, Any]:
     """Build kwargs dictionary for simulation"""
-    spatial_order = None
-    temporal_order = None
+    spatial_order = args.spatial_order
+    temporal_order = args.time_order
     if config.order_of_integration == "first" or args.order == "first":
         spatial_order = "pcm"
         temporal_order = "rk1"

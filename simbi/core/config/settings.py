@@ -151,14 +151,27 @@ class IOSettings(BaseSettings):
     checkpoint_file: Optional[Path]
     checkpoint_interval: float
     checkpoint_index: int
-    log_output: tuple[bool, int]
+    log_output: bool
     hydro_source_lib: Optional[Path] = None
     gravity_source_lib: Optional[Path] = None
     boundary_source_lib: Optional[Path] = None
 
+    @staticmethod
+    def try_get_path(path: str) -> Optional[Path]:
+        return Path(path) if path else None
+
     @classmethod
     def from_dict(cls, setup: dict[str, Any]) -> "IOSettings":
-        return cls(**setup)
+        return cls(
+            data_directory=Path(setup["data_directory"]),
+            checkpoint_file=Path(setup["checkpoint_file"] or ""),
+            checkpoint_interval=setup["checkpoint_interval"],
+            checkpoint_index=setup["checkpoint_index"],
+            log_output=setup["log_output"],
+            hydro_source_lib=IOSettings.try_get_path(setup["hydro_source_lib"]),
+            gravity_source_lib=IOSettings.try_get_path(setup["gravity_source_lib"]),
+            boundary_source_lib=IOSettings.try_get_path(setup["boundary_source_lib"]),
+        )
 
 
 @dataclass(frozen=True)
@@ -197,7 +210,7 @@ class SimulationSettings(BaseSettings):
     def update_from(cls, instance: Any, cli_args: dict[str, Any]) -> Any:
         self_params = asdict(instance)
         self_params.update(
-            (k, cli_args[k] or self_params[k])
+            (k, cli_args[k] if cli_args[k] is not None else self_params[k])
             for k in set(cli_args).intersection(self_params)
         )
         return cls(

@@ -24,9 +24,9 @@ __all__ = [
     "helpers",
     "InitialStateType",
     "GeneratorTuple",
-    "SingleGenerator",
+    "GasStateGenerator",
     "PureHydroStateGenerator",
-    "MHDStateGenerator",
+    "MHDStateGenerators",
     "PrimitiveStateFunc",
     "StateGenerator",
 ]

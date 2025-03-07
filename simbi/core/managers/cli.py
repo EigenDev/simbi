@@ -11,6 +11,7 @@ class CLIManager:
     main_parser: argparse.ArgumentParser
     run_parser: argparse.ArgumentParser
     dynamic_args: list[DynamicArg] = field(default_factory=list)
+    property_overrides: dict[str, Any] = field(default_factory=dict)
 
     @classmethod
     def from_parsers(

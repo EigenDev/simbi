@@ -3,9 +3,9 @@ from .core.types.typing import *
 __all__ = [
     "InitialStateType",
     "GeneratorTuple",
-    "SingleGenerator",
+    "GasStateGenerator",
     "PureHydroStateGenerator",
-    "MHDStateGenerator",
+    "MHDStateGenerators",
     "PrimitiveStateFunc",
     "StateGenerator",
     "FloatorArray",
