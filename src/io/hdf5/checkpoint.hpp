@@ -49,8 +49,8 @@
 #ifndef CHECKPOINT_HPP
 #define CHECKPOINT_HPP
 
+#include "build_options.hpp"
 #include <string>
-
 namespace simbi {
     namespace io {
         // forward declaration
