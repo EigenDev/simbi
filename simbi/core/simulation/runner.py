@@ -102,7 +102,10 @@ class SimulationRunner:
             elif isinstance(param, tuple):
                 return format_tuple_of_tuples(param)
 
-            return param.decode("utf-8") if isinstance(param, bytes) else str(param)
+            x = param.decode("utf-8") if isinstance(param, bytes) else str(param)
+            if x == "":
+                return "None"
+            return x
 
         for key, param in sim_state.items():
             if key not in ["bfield", "staggered_bfields"]:
