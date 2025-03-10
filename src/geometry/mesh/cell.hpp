@@ -272,7 +272,7 @@ namespace simbi {
         }
 
         // Unified accessor methods
-        DUAL real area(const int norm) const
+        DUAL real area(const size_type norm) const
         {
             if (norm < 2 * Dims) {
                 return faces_[norm].area;
@@ -280,7 +280,7 @@ namespace simbi {
             return 0.0;
         }
 
-        DUAL real dx(const int norm) const
+        DUAL real dx(const size_type norm) const
         {
             if (norm < Dims) {
                 return widths_[norm];
@@ -290,13 +290,13 @@ namespace simbi {
 
         DUAL real normal(Side s) const
         {
-            if (static_cast<int>(s) < 2 * Dims) {
-                return faces_[static_cast<int>(s)].normal;
+            if (static_cast<size_type>(s) < 2 * Dims) {
+                return faces_[static_cast<size_type>(s)].normal;
             }
             return 0.0;
         }
 
-        DUAL real normal(const int norm) const
+        DUAL real normal(const size_type norm) const
         {
             if (norm < 2 * Dims) {
                 return faces_[norm].normal;
@@ -314,7 +314,7 @@ namespace simbi {
             return 0.0;
         }
 
-        DUAL real velocity(const int norm) const
+        DUAL real velocity(const size_type norm) const
         {
             if (norm < 2 * Dims) {
                 const real x = faces_[norm].normal;
@@ -364,9 +364,12 @@ namespace simbi {
         }
 
         template <GridDirection Dir>
-        DUAL real
-        get_face(const luint ii, const luint jj, const luint kk, const int side)
-            const
+        DUAL real get_face(
+            const luint ii,
+            const luint jj,
+            const luint kk,
+            const int side
+        ) const
         {
             constexpr int dir = Dir == GridDirection::X1   ? 1
                                 : Dir == GridDirection::X2 ? 2
@@ -513,14 +516,14 @@ namespace simbi {
         DUAL constexpr auto geometry() const { return geo_info_.geometry(); }
         DUAL constexpr auto centroid() const { return centroid_; }
         DUAL constexpr auto volume() const { return dV_; }
-        DUAL constexpr auto width(int ii) const
+        DUAL constexpr auto width(const size_type ii) const
         {
             if (ii >= Dims) {
                 return 0.0;
             }
             return widths_[ii];
         }
-        DUAL constexpr auto centroid_coordinate(int ii) const
+        DUAL constexpr auto centroid_coordinate(const size_type ii) const
         {
             if (ii >= Dims) {
                 return 0.0;
@@ -528,7 +531,7 @@ namespace simbi {
             return centroid_[ii];
         }
 
-        DUAL constexpr auto inverse_volume(const int ii) const
+        DUAL constexpr auto inverse_volume(const size_type ii) const
         {
             if (geo_info_.geometry() == Geometry::CARTESIAN) {
                 return 1.0 / widths_[ii];

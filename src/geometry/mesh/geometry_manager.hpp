@@ -145,6 +145,7 @@ namespace simbi {
                 case Geometry::CYLINDRICAL: return "cylindrical";
                 case Geometry::AXIS_CYLINDRICAL: return "axis_cylindrical";
                 case Geometry::PLANAR_CYLINDRICAL: return "planar_cylindrical";
+                default: return "unknown";
             }
         }
 

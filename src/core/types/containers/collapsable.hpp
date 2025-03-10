@@ -65,8 +65,8 @@ namespace simbi {
 
             // fill from the back of the initialize list, since we
             // are in general inputting shapes like (nk, nj, ni)
-            auto init_size = std::distance(init.begin(), init.end());
-            auto start     = init.begin();
+            size_type init_size = std::distance(init.begin(), init.end());
+            auto start          = init.begin();
             if (init_size > Dims) {
                 std::advance(start, init_size - Dims);
             }

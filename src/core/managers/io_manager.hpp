@@ -292,13 +292,13 @@ namespace simbi {
                     if (dlsym_error) {
                         // erro out  only  if the boundary
                         // condition is set to dynamic
-                        for (int i = 0; i < 2 * Dims; ++i) {
-                            if (symbol == b_symbols[i].first &&
-                                solver_manager_.boundary_conditions()[i] ==
+                        for (size_type ii = 0; ii < 2 * Dims; ++ii) {
+                            if (symbol == b_symbols[ii].first &&
+                                solver_manager_.boundary_conditions()[ii] ==
                                     BoundaryCondition::DYNAMIC) {
                                 std::cerr << "Cannot load symbol '" << symbol
                                           << "': " << dlsym_error << '\n';
-                                solver_manager_.boundary_conditions()[i] =
+                                solver_manager_.boundary_conditions()[ii] =
                                     BoundaryCondition::OUTFLOW;
                                 dlclose(handle);
                             }

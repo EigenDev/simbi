@@ -74,6 +74,39 @@ namespace simbi {
         using eigenvals_t = Eigenvals<Dims, R>;
         using function_t  = typename helpers::real_func<Dims>::type;
 
+        template <typename D>
+        struct WaveSpeedFunctor {
+            // pointers work better in gpu
+            const D* derived_ptr;
+
+            DUAL WaveSpeedFunctor(const D* d) : derived_ptr(d) {}
+
+            template <typename T>
+            DUAL real
+            operator()(const real acc, const T& prim, const luint gid) const
+            {
+                auto speeds   = derived_ptr->get_wave_speeds(prim);
+                auto cell     = derived_ptr->mesh().get_cell_from_global(gid);
+                auto local_dt = calc_local_dt(speeds, cell);
+                return std::min(acc, local_dt);
+            }
+        };
+
+        void adapt_dt()
+        {
+            const auto& derived = static_cast<const Derived&>(*this);
+            auto functor        = WaveSpeedFunctor<Derived>(&derived);
+
+            time_manager_.set_dt(
+                prims_.reduce(
+                    static_cast<real>(INFINITY),
+                    functor,
+                    this->full_policy()
+                ) *
+                cfl_
+            );
+        }
+
       private:
         // state
         std::vector<std::vector<real>> state_;
@@ -127,10 +160,12 @@ namespace simbi {
               exec_policy_manager_(mesh_.grid(), init_conditions),
               time_manager_(init_conditions),
               solver_config_(init_conditions),
-              io_manager_(std::make_unique<IOManager<Dims>>(
-                  solver_config_,
-                  init_conditions
-              )),
+              io_manager_(
+                  std::make_unique<IOManager<Dims>>(
+                      solver_config_,
+                      init_conditions
+                  )
+              ),
               // protected references to commonly used values
               gamma(gamma_),
               hllc_z(hllc_z_)
@@ -226,40 +261,43 @@ namespace simbi {
             );
         }
 
-        void adapt_dt()
+        static DUAL real calc_local_dt(const auto& speeds, const auto& cell)
         {
-            auto& derived = static_cast<Derived&>(*this);
-
-            auto calc_local_dt =
-                [] DEV(const auto& speeds, const auto& cell) -> real {
-                auto dt = INFINITY;
-                for (size_type ii = 0; ii < Dims; ++ii) {
-                    auto dx = cell.width(ii);
-                    auto dt_dx =
-                        dx / std::min(speeds[2 * ii], speeds[2 * ii + 1]);
-                    dt = std::min<real>(dt, dt_dx);
-                }
-                return dt;
-            };
-
-            // Single-pass reduction that combines fold and reduce
-            time_manager_.set_dt(
-                prims_.reduce(
-                    static_cast<real>(INFINITY),
-                    [&derived,
-                     calc_local_dt,
-                     this](const auto& acc, const auto& prim, const luint gid) {
-                        auto speeds   = derived.get_wave_speeds(prim);
-                        auto cell     = this->mesh().get_cell_from_global(gid);
-                        auto local_dt = calc_local_dt(speeds, cell);
-
-                        return std::min(acc, local_dt);
-                    },
-                    this->full_policy()
-                ) *
-                cfl_
-            );
+            auto dt = INFINITY;
+            for (size_type ii = 0; ii < Dims; ++ii) {
+                auto dx    = cell.width(ii);
+                auto dt_dx = dx / std::min(speeds[2 * ii], speeds[2 * ii + 1]);
+                dt         = std::min<real>(dt, dt_dx);
+            }
+            return dt;
         };
+
+        // void adapt_dt()
+        // {
+        //     auto& derived     = static_cast<Derived&>(*this);
+        //     auto* derived_ptr = &derived;
+
+        //     // Single-pass reduction that combines fold and reduce
+        //     time_manager_.set_dt(
+        //         prims_.reduce(
+        //             static_cast<real>(INFINITY),
+        //             [derived_ptr, this] DEV(
+        //                 const auto& acc,
+        //                 const auto& prim,
+        //                 const luint gid
+        //             ) {
+        //                 auto speeds   = derived_ptr->get_wave_speeds(prim);
+        //                 auto cell     =
+        //                 this->mesh().get_cell_from_global(gid); auto local_dt
+        //                 = calc_local_dt(speeds, cell);
+
+        //                 return std::min(acc, local_dt);
+        //             },
+        //             this->full_policy()
+        //         ) *
+        //         cfl_
+        //     );
+        // };
 
         void init_orbital_system(const InitialConditions& init)
         {

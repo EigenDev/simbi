@@ -100,201 +100,6 @@ namespace simbi {
             }
         }
 
-      private:
-        size_type
-        reflecting_idx(size_type ii, size_type ni, size_type radius) const
-        {
-            if (ii < radius) {
-                return 2 * radius - ii - 1;
-            }
-            else if (ii >= ni + radius) {
-                return 2 * (ni + radius) - ii - 1;
-            }
-            return ii;
-        }
-        size_type
-        periodic_idx(size_type ii, size_type ni, size_type radius) const
-        {
-            if (ii < radius) {
-                return ni + ii;
-            }
-            else if (ii >= ni + radius) {
-                return ii - ni;
-            }
-            return ii;
-        }
-        size_type
-        outflow_idx(size_type ii, size_type ni, size_type radius) const
-        {
-            if (ii < radius) {
-                return radius;
-            }
-            else if (ii >= ni + radius) {
-                return ni + radius - 1;
-            }
-            return ii;
-        }
-        uarray<Dims> unravel_idx(size_type idx, const uarray<Dims>& shape) const
-        {
-            return memory_layout_coordinates<Dims>(idx, shape);
-        }
-        void sync_faces(
-            const ExecutionPolicy<>& policy,
-            ndarray<T, Dims>& full_array,
-            const array_view<T, Dims>& interior_view,
-            const ndarray<BoundaryCondition>& conditions,
-            const IOManager<Dims>* io_manager,
-            const Mesh<Dims>* mesh,
-            const real time
-        ) const
-        {
-            auto* data = full_array.data();
-            auto radii = [&]() {
-                uarray<Dims> rad;
-                for (size_type ii = 0; ii < Dims; ++ii) {
-                    if constexpr (global::col_major) {
-                        rad[ii] = (full_array.shape()[ii] -
-                                   interior_view.shape()[ii]) /
-                                  2;
-                    }
-                    else {
-                        rad[ii] = (full_array.shape()[Dims - (ii + 1)] -
-                                   interior_view.shape()[Dims - (ii + 1)]) /
-                                  2;
-                    }
-                }
-                return rad;
-            }();
-
-            // validate io_manager before kernel launch
-            if (!io_manager &&
-                std::any_of(conditions.begin(), conditions.end(), [](auto bc) {
-                    return bc == BoundaryCondition::DYNAMIC;
-                })) {
-                throw std::runtime_error(
-                    "IO Manager required for dynamic boundary conditions"
-                );
-            }
-
-            // copy necessary data to avoid pointer issues
-            const auto handle_dynamic_bc = [=] DEV(
-                                               const auto& coords,
-                                               const BoundaryFace face,
-                                               T& result
-                                           ) {
-                if constexpr (is_conserved_v<T>) {
-                    return [=] DEV(
-                               const auto& coords,
-                               const BoundaryFace face,
-                               T& result
-                           ) {
-                        const auto physical_coords =
-                            mesh->retrieve_cell(coords).centroid();
-                        if constexpr (Dims == 1) {
-                            io_manager->call_boundary_source(
-                                face,
-                                physical_coords[0],
-                                time,
-                                result.data()
-                            );
-                        }
-                        else if constexpr (Dims == 2) {
-                            io_manager->call_boundary_source(
-                                face,
-                                physical_coords[0],
-                                physical_coords[1],
-                                time,
-                                result.data()
-                            );
-                        }
-                        else {
-                            io_manager->call_boundary_source(
-                                face,
-                                physical_coords[0],
-                                physical_coords[1],
-                                physical_coords[2],
-                                time,
-                                result.data()
-                            );
-                        }
-                    };
-                }
-                else {
-                    // Return a no-op lambda when T is not conserved
-                    return [](const auto&, const BoundaryFace, auto&) {};
-                }
-            };
-
-            parallel_for(policy, [=, this] DEV(size_type idx) {
-                auto coordinates = unravel_idx(idx, full_array.shape());
-                auto rshape      = interior_view.shape();
-                // reverse shape if row major
-                if constexpr (!global::col_major) {
-                    std::reverse(rshape.begin(), rshape.end());
-                }
-
-                // Only process boundary points (automatically excludes corners)
-                if (!is_boundary_point(coordinates, rshape, radii)) {
-                    return;
-                }
-
-                // Find which dimension's boundary we're on
-                int boundary_dim = -1;
-                bool is_lower    = false;
-                for (size_type dim = 0; dim < Dims; ++dim) {
-                    if (coordinates[dim] < radii[dim]) {
-                        boundary_dim = dim;
-                        is_lower     = true;
-                        break;
-                    }
-                    if (coordinates[dim] >= rshape[dim] + radii[dim]) {
-                        boundary_dim = dim;
-                        is_lower     = false;
-                        break;
-                    }
-                }
-
-                // Process boundary point
-                if (boundary_dim >= 0) {
-                    size_t bc_idx = 2 * boundary_dim + (is_lower ? 0 : 1);
-                    const auto interior_idx = get_interior_idx(
-                        coordinates,
-                        boundary_dim,
-                        interior_view.shape(),
-                        full_array.strides(),
-                        radii,
-                        conditions[bc_idx]
-                    );
-
-                    // Apply boundary condition
-                    switch (conditions[bc_idx]) {
-                        case BoundaryCondition::DYNAMIC: {
-                            if constexpr (is_conserved_v<T>) {
-                                T result;
-                                handle_dynamic_bc(
-                                    coordinates,
-                                    static_cast<BoundaryFace>(bc_idx),
-                                    result
-                                );
-                                data[idx] = result;
-                            }
-                            break;
-                        }
-                        case BoundaryCondition::REFLECTING:
-                            data[idx] = apply_reflecting(
-                                data[interior_idx],
-                                boundary_dim + 1
-                            );
-                            break;
-                        case BoundaryCondition::PERIODIC:
-                            data[idx] = apply_periodic(data[interior_idx]);
-                            break;
-                        default:   // OUTFLOW
-                            data[idx] = data[interior_idx];
-                    }
-                }
-            });
-        }
         void sync_corners(
             const ExecutionPolicy<>& policy,
             ndarray<T, Dims>& full_array,
@@ -398,6 +203,213 @@ namespace simbi {
                     }
                 }
             });
+        }
+
+        void sync_faces(
+            const ExecutionPolicy<>& policy,
+            ndarray<T, Dims>& full_array,
+            const array_view<T, Dims>& interior_view,
+            const ndarray<BoundaryCondition>& conditions,
+            const IOManager<Dims>* io_manager,
+            const Mesh<Dims>* mesh,
+            const real time
+        ) const
+        {
+            auto* data = full_array.data();
+            auto radii = [&]() {
+                uarray<Dims> rad;
+                for (size_type ii = 0; ii < Dims; ++ii) {
+                    if constexpr (global::col_major) {
+                        rad[ii] = (full_array.shape()[ii] -
+                                   interior_view.shape()[ii]) /
+                                  2;
+                    }
+                    else {
+                        rad[ii] = (full_array.shape()[Dims - (ii + 1)] -
+                                   interior_view.shape()[Dims - (ii + 1)]) /
+                                  2;
+                    }
+                }
+                return rad;
+            }();
+
+            // validate io_manager before kernel launch
+            if (!io_manager &&
+                std::any_of(conditions.begin(), conditions.end(), [](auto bc) {
+                    return bc == BoundaryCondition::DYNAMIC;
+                })) {
+                throw std::runtime_error(
+                    "IO Manager required for dynamic boundary conditions"
+                );
+            }
+
+            // copy necessary data to avoid pointer issues
+            const auto handle_dynamic_bc = [mesh, io_manager, time] DEV(
+                                               const auto& coords,
+                                               const BoundaryFace face,
+                                               T& result
+                                           ) {
+                if constexpr (is_conserved_v<T>) {
+                    return [=] DEV(
+                               const auto& coords,
+                               const BoundaryFace face,
+                               T& result
+                           ) {
+                        const auto physical_coords =
+                            mesh->retrieve_cell(coords).centroid();
+                        if constexpr (Dims == 1) {
+                            io_manager->call_boundary_source(
+                                face,
+                                physical_coords[0],
+                                time,
+                                result.data()
+                            );
+                        }
+                        else if constexpr (Dims == 2) {
+                            io_manager->call_boundary_source(
+                                face,
+                                physical_coords[0],
+                                physical_coords[1],
+                                time,
+                                result.data()
+                            );
+                        }
+                        else {
+                            io_manager->call_boundary_source(
+                                face,
+                                physical_coords[0],
+                                physical_coords[1],
+                                physical_coords[2],
+                                time,
+                                result.data()
+                            );
+                        }
+                    };
+                }
+                else {
+                    // Return a no-op lambda when T is not conserved
+                    return [] DEV(const auto&, const BoundaryFace, auto&) {};
+                }
+            };
+
+            parallel_for(
+                policy,
+                [data,
+                 handle_dynamic_bc,
+                 conditions,
+                 full_array,
+                 interior_view,
+                 radii,
+                 this] DEV(size_type idx) {
+                    auto coordinates = unravel_idx(idx, full_array.shape());
+                    auto rshape      = interior_view.shape();
+                    // reverse shape if row major
+                    if constexpr (!global::col_major) {
+                        std::reverse(rshape.begin(), rshape.end());
+                    }
+
+                    // Only process boundary points (automatically excludes
+                    // corners)
+                    if (!is_boundary_point(coordinates, rshape, radii)) {
+                        return;
+                    }
+
+                    // Find which dimension's boundary we're on
+                    int boundary_dim = -1;
+                    bool is_lower    = false;
+                    for (size_type dim = 0; dim < Dims; ++dim) {
+                        if (coordinates[dim] < radii[dim]) {
+                            boundary_dim = dim;
+                            is_lower     = true;
+                            break;
+                        }
+                        if (coordinates[dim] >= rshape[dim] + radii[dim]) {
+                            boundary_dim = dim;
+                            is_lower     = false;
+                            break;
+                        }
+                    }
+
+                    // Process boundary point
+                    if (boundary_dim >= 0) {
+                        size_t bc_idx = 2 * boundary_dim + (is_lower ? 0 : 1);
+                        const auto interior_idx = get_interior_idx(
+                            coordinates,
+                            boundary_dim,
+                            interior_view.shape(),
+                            full_array.strides(),
+                            radii,
+                            conditions[bc_idx]
+                        );
+
+                        // Apply boundary condition
+                        switch (conditions[bc_idx]) {
+                            case BoundaryCondition::DYNAMIC: {
+                                if constexpr (is_conserved_v<T>) {
+                                    T result;
+                                    handle_dynamic_bc(
+                                        coordinates,
+                                        static_cast<BoundaryFace>(bc_idx),
+                                        result
+                                    );
+                                    data[idx] = result;
+                                }
+                                break;
+                            }
+                            case BoundaryCondition::REFLECTING:
+                                data[idx] = apply_reflecting(
+                                    data[interior_idx],
+                                    boundary_dim + 1
+                                );
+                                break;
+                            case BoundaryCondition::PERIODIC:
+                                data[idx] = apply_periodic(data[interior_idx]);
+                                break;
+                            default:   // OUTFLOW
+                                data[idx] = data[interior_idx];
+                        }
+                    }
+                }
+            );
+        }
+
+      private:
+        size_type
+        reflecting_idx(size_type ii, size_type ni, size_type radius) const
+        {
+            if (ii < radius) {
+                return 2 * radius - ii - 1;
+            }
+            else if (ii >= ni + radius) {
+                return 2 * (ni + radius) - ii - 1;
+            }
+            return ii;
+        }
+        size_type
+        periodic_idx(size_type ii, size_type ni, size_type radius) const
+        {
+            if (ii < radius) {
+                return ni + ii;
+            }
+            else if (ii >= ni + radius) {
+                return ii - ni;
+            }
+            return ii;
+        }
+        size_type
+        outflow_idx(size_type ii, size_type ni, size_type radius) const
+        {
+            if (ii < radius) {
+                return radius;
+            }
+            else if (ii >= ni + radius) {
+                return ni + radius - 1;
+            }
+            return ii;
+        }
+        uarray<Dims> unravel_idx(size_type idx, const uarray<Dims>& shape) const
+        {
+            return memory_layout_coordinates<Dims>(idx, shape);
         }
 
         DUAL static bool is_boundary_point(

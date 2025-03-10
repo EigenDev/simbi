@@ -27,15 +27,15 @@ namespace simbi {
         {
 #if GPU_CODE
             real min  = INFINITY;
-            luint ii  = blockIdx.x * block_dim.x + threadIdx.x;
-            luint jj  = blockIdx.y * block_dim.y + threadIdx.y;
-            luint kk  = blockIdx.z * block_dim.z + threadIdx.z;
-            luint tid = threadIdx.z * block_dim.x * block_dim.y +
-                        threadIdx.y * block_dim.x + threadIdx.x;
-            luint bid = blockIdx.z * grid_dim.x * grid_dim.y +
-                        blockIdx.y * grid_dim.x + blockIdx.x;
-            luint nt = block_dim.x * block_dim.y * block_dim.z * grid_dim.x *
-                       grid_dim.y * grid_dim.z;
+            luint ii  = blockIdx.x * blockDim.x + threadIdx.x;
+            luint jj  = blockIdx.y * blockDim.y + threadIdx.y;
+            luint kk  = blockIdx.z * blockDim.z + threadIdx.z;
+            luint tid = threadIdx.z * blockDim.x * blockDim.y +
+                        threadIdx.y * blockDim.x + threadIdx.x;
+            luint bid = blockIdx.z * gridDim.x * gridDim.y +
+                        blockIdx.y * gridDim.x + blockIdx.x;
+            luint nt = blockDim.x * blockDim.y * blockDim.z * gridDim.x *
+                       gridDim.y * gridDim.z;
             luint gid;
             if constexpr (dim == 1) {
                 gid = ii;
@@ -64,24 +64,24 @@ namespace simbi {
         {
 #if GPU_CODE
             real min        = INFINITY;
-            const luint ii  = blockIdx.x * block_dim.x + threadIdx.x;
-            const luint tid = threadIdx.z * block_dim.x * block_dim.y +
-                              threadIdx.y * block_dim.x + threadIdx.x;
-            // luint bid  = blockIdx.z * grid_dim.x * grid_dim.y + blockIdx.y
-            // * grid_dim.x + blockIdx.x;
-            const luint nt = block_dim.x * block_dim.y * block_dim.z *
-                             grid_dim.x * grid_dim.y * grid_dim.z;
+            const luint ii  = blockIdx.x * blockDim.x + threadIdx.x;
+            const luint tid = threadIdx.z * blockDim.x * blockDim.y +
+                              threadIdx.y * blockDim.x + threadIdx.x;
+            // luint bid  = blockIdx.z * gridDim.x * gridDim.y + blockIdx.y
+            // * gridDim.x + blockIdx.x;
+            const luint nt = blockDim.x * blockDim.y * blockDim.z * gridDim.x *
+                             gridDim.y * gridDim.z;
             const luint gid = [&] {
                 if constexpr (dim == 1) {
                     return ii;
                 }
                 else if constexpr (dim == 2) {
-                    luint jj = blockIdx.y * block_dim.y + threadIdx.y;
+                    luint jj = blockIdx.y * blockDim.y + threadIdx.y;
                     return self->nx * jj + ii;
                 }
                 else if constexpr (dim == 3) {
-                    luint jj = blockIdx.y * block_dim.y + threadIdx.y;
-                    luint kk = blockIdx.z * block_dim.z + threadIdx.z;
+                    luint jj = blockIdx.y * blockDim.y + threadIdx.y;
+                    luint kk = blockIdx.z * blockDim.z + threadIdx.z;
                     return self->ny * self->nx * kk + self->nx * jj + ii;
                 }
             }();
@@ -304,13 +304,13 @@ namespace simbi {
             else if constexpr (dim == 2) {
                 if constexpr (axis == BlockAx::I) {
                     if constexpr (global::on_gpu) {
-                        return block_dim.x * blockIdx.x + threadIdx.x;
+                        return blockDim.x * blockIdx.x + threadIdx.x;
                     }
                     return idx % ni;
                 }
                 else if constexpr (axis == BlockAx::J) {
                     if constexpr (global::on_gpu) {
-                        return block_dim.y * blockIdx.y + threadIdx.y;
+                        return blockDim.y * blockIdx.y + threadIdx.y;
                     }
                     return idx / ni;
                 }
@@ -321,19 +321,19 @@ namespace simbi {
             else {
                 if constexpr (axis == BlockAx::I) {
                     if constexpr (global::on_gpu) {
-                        return block_dim.x * blockIdx.x + threadIdx.x;
+                        return blockDim.x * blockIdx.x + threadIdx.x;
                     }
                     return get_column(idx, ni, nj, kk);
                 }
                 else if constexpr (axis == BlockAx::J) {
                     if constexpr (global::on_gpu) {
-                        return block_dim.y * blockIdx.y + threadIdx.y;
+                        return blockDim.y * blockIdx.y + threadIdx.y;
                     }
                     return get_row(idx, ni, nj, kk);
                 }
                 else {
                     if constexpr (global::on_gpu) {
-                        return block_dim.z * blockIdx.z + threadIdx.z;
+                        return blockDim.z * blockIdx.z + threadIdx.z;
                     }
                     return get_height(idx, ni, nj);
                 }

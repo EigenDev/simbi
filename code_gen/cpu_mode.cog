@@ -82,7 +82,7 @@ namespace simbi {
     using devProgram_t    = int;
 
     inline dim3 blockIdx(1, 1, 1);
-    inline dim3 block_dim(1, 1, 1);
-    inline dim3 grid_dim(1, 1, 1);
+    inline dim3 blockDim(1, 1, 1);
+    inline dim3 gridDim(1, 1, 1);
     inline dim3 threadIdx(1, 1, 1);
 }   // namespace simbi

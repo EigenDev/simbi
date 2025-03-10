@@ -232,8 +232,8 @@ namespace simbi {
 
         // vector-to-vector operations w/ type promotions
         template <typename U, size_type OtherDims, VectorType OtherType>
-        DUAL constexpr auto dot(const VectorOps<U, OtherDims, OtherType>& other
-        ) const
+        DUAL constexpr auto
+        dot(const VectorOps<U, OtherDims, OtherType>& other) const
         {
             using result_type = promote_t<T, U>;
             result_type sum{0};
@@ -418,11 +418,16 @@ namespace simbi {
 
         // if less than 3D, the cross product is simply the magnitude
         template <typename U, VectorType OtherType>
-        DUAL constexpr auto cross(const VectorOps<U, Dims, OtherType>& other
-        ) const
+        DUAL constexpr auto
+        cross(const VectorOps<U, Dims, OtherType>& other) const
             requires(Dims < 3)
         {
-            return (*this)[0] * other[1] - (*this)[1] * other[0];
+            if (Dims == 1) {
+                return 0.0;
+            }
+            else {
+                return (*this)[0] * other[1] - (*this)[1] * other[0];
+            }
         }
 
         // Implicit conversion to general vector type
@@ -438,23 +443,23 @@ namespace simbi {
         // Type conversion operations
         DUAL constexpr auto as_magnetic() const
         {
-            return Vector<T, 3, VectorType::MAGNETIC>{this->data_};
+            return Vector<T, Dims, VectorType::MAGNETIC>{this->data_};
         }
 
         DUAL constexpr auto as_spatial() const
         {
-            return Vector<T, 3, VectorType::SPATIAL>{this->data_};
+            return Vector<T, Dims, VectorType::SPATIAL>{this->data_};
         }
 
         DUAL constexpr auto to_general() const
         {
-            return Vector<real, 3, VectorType::GENERAL>(*this);
+            return Vector<T, Dims, VectorType::GENERAL>(*this);
         }
 
         DUAL constexpr auto as_spatial()
             requires FourVector<Type>
         {
-            return Vector<T, 3, VectorType::SPATIAL>{this->data_};
+            return Vector<T, Dims, VectorType::SPATIAL>{this->data_};
         }
     };
 
@@ -518,9 +523,15 @@ namespace simbi {
             : VectorOps<T, Dims, Type>{storage_, owned}
         {
             if (values.empty()) {
-                throw std::length_error(
-                    "Cannot construct vector from empty std::vector"
-                );
+                if constexpr (global::on_gpu) {
+                    printf("Cannot construct vector from empty std::vector\n");
+                    this->data_ = storage_;
+                }
+                else {
+                    throw std::length_error(
+                        "Cannot construct vector from empty std::vector"
+                    );
+                }
             }
 
             // Copy min(values.size(), Dims) elements

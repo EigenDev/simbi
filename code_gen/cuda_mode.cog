@@ -143,9 +143,22 @@ __device__ __forceinline__ real devAtomicMinReal(real* addr, real value)
 
 __device__ __forceinline__ real devAtomicAddReal(real* addr, real value)
 {
-    real old =
-        __int_as_real(atomicAdd((atomic_cast*) addr, __real_as_int(value)));
-    return old;
+#if FLOAT_PRECISION
+    return atomicAdd(addr, value);   // Built-in float atomic
+#else
+    unsigned long long int* address_as_ull = (unsigned long long int*) addr;
+    unsigned long long int old             = *address_as_ull;
+    unsigned long long int assumed;
+    do {
+        assumed = old;
+        old     = atomicCAS(
+            address_as_ull,
+            assumed,
+            __double_as_longlong(value + __longlong_as_double(assumed))
+        );
+    } while (assumed != old);
+    return __longlong_as_double(old);
+#endif
 }
 
 constexpr auto devMemcpy               = cudaMemcpy;

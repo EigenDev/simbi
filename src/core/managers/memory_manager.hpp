@@ -64,9 +64,12 @@ namespace simbi {
             this->size_ = size;
             host_data_  = util::make_unique<T[]>(size);
             if constexpr (global::on_gpu) {
-                void* ptr;
-                gpu::api::malloc(&ptr, this->size_ * sizeof(T));
-                device_data_ = unique_ptr<T, gpuDeleter<T>>(ptr);
+                T* device_ptr;
+                gpu::api::malloc(
+                    reinterpret_cast<void**>(&device_ptr),
+                    this->size_ * sizeof(T)
+                );
+                device_data_ = unique_ptr<T, gpuDeleter<T>>(device_ptr);
             }
         }
 
@@ -83,9 +86,9 @@ namespace simbi {
         DUAL T* data() const
         {
             if constexpr (global::on_gpu) {
-                if (!is_synced_) {
-                    sync_to_device();
-                }
+                // if (!is_synced_) {
+                //     sync_to_device();
+                // }
                 return device_data_.get();
             }
             return host_data_.get();

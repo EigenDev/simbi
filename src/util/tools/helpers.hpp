@@ -408,8 +408,8 @@ namespace simbi {
 #if __CUDA_ARCH__ >= 700
             mask = __match_any_sync(__activemask(), val);
 #else
-            const int tid = threadIdx.z * block_dim.x * block_dim.y +
-                            threadIdx.y * block_dim.x + threadIdx.x;
+            const int tid = threadIdx.z * blockDim.x * blockDim.y +
+                            threadIdx.y * blockDim.x + threadIdx.x;
             unsigned tmask = __activemask();
             for (int i = 0; i < global::WARP_SIZE; i++) {
                 unsigned long long tval =
@@ -449,9 +449,9 @@ namespace simbi {
             static __shared__ real
                 shared[global::WARP_SIZE];   // Shared mem for 32 (Nvidia) / 64
                                              // (AMD) partial mins
-            const int tid = threadIdx.z * block_dim.x * block_dim.y +
-                            threadIdx.y * block_dim.x + threadIdx.x;
-            const int bsz = block_dim.x * block_dim.y * block_dim.z;
+            const int tid = threadIdx.z * blockDim.x * blockDim.y +
+                            threadIdx.y * blockDim.x + threadIdx.x;
+            const int bsz = blockDim.x * blockDim.y * blockDim.z;
             int lane      = tid % global::WARP_SIZE;
             int wid       = tid / global::WARP_SIZE;
 

@@ -67,7 +67,7 @@ namespace simbi {
 
       public:
         // Constructors
-        DUAL Mesh() = default;
+        Mesh() = default;
 
         DUAL Mesh(const InitialConditions& init) : geometry_(init), grid_(init)
         {

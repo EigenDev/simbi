@@ -68,6 +68,7 @@
 #include <span>                                   // for span
 
 namespace simbi {
+
     template <typename T, size_type Dims = 1>
     class ndarray : public array_properties<T, Dims>
     {
@@ -121,6 +122,19 @@ namespace simbi {
                 this->shape_[ii] = 1;
             }
             this->strides_ = this->compute_strides(this->shape_);
+        }
+
+        ndarray(const size_type sz, T fill_value)
+        {
+            mem_.allocate(sz);
+            this->size_     = sz;
+            this->shape_[0] = sz;
+            // fill the remaining dimensions with 1
+            for (size_type ii = 1; ii < Dims; ++ii) {
+                this->shape_[ii] = 1;
+            }
+            this->strides_ = this->compute_strides(this->shape_);
+            fill(fill_value);
         }
 
         auto data() -> T* { return mem_.data(); }
@@ -350,7 +364,6 @@ namespace simbi {
             uarray<Dims> new_shape;
             uarray<Dims> offsets;
 
-#pragma unroll
             for (size_type ii = 0; ii < Dims; ++ii) {
                 new_shape[ii] = this->shape_[ii] - 2 * radius;
                 offsets[ii]   = radius;
@@ -369,7 +382,6 @@ namespace simbi {
             uarray<Dims> new_shape;
             uarray<Dims> offsets;
 
-#pragma unroll
             for (size_type ii = 0; ii < Dims; ++ii) {
                 // Only contract dimensions with non-zero radius
                 new_shape[ii] = radii.vals[ii] > 0
@@ -405,6 +417,52 @@ namespace simbi {
             );
         }
 
+        template <typename F, typename... Arrays>
+        struct TransformFunctor {
+            F op;
+            T* mem;
+            std::tuple<Arrays*...> arrays;
+
+            DUAL TransformFunctor(F op_, T* mem_, Arrays*... arrays_)
+                : op(op_), mem(mem_), arrays(std::make_tuple(arrays_...))
+            {
+            }
+
+            template <size_t... Is>
+            DUAL void apply_impl(size_type idx, std::index_sequence<Is...>)
+            {
+                mem[idx] = op(mem[idx], std::get<Is>(arrays)[idx]...);
+            }
+
+            DUAL void operator()(size_type idx)
+            {
+                apply_impl(idx, std::make_index_sequence<sizeof...(Arrays)>{});
+            }
+        };
+
+        template <typename F, typename... Arrays>
+        struct TransformFunctorIdcs {
+            F op;
+            T* mem;
+            std::tuple<Arrays*...> arrays;
+
+            DUAL TransformFunctorIdcs(F op_, T* mem_, Arrays*... arrays_)
+                : op(op_), mem(mem_), arrays(std::make_tuple(arrays_...))
+            {
+            }
+
+            template <size_t... Is>
+            DUAL void apply_impl(size_type idx, std::index_sequence<Is...>)
+            {
+                mem[idx] = op(mem[idx], idx, std::get<Is>(arrays)[idx]...);
+            }
+
+            DUAL void operator()(size_type idx)
+            {
+                apply_impl(idx, std::make_index_sequence<sizeof...(Arrays)>{});
+            }
+        };
+
         template <typename F>
         void transform(F op, const ExecutionPolicy<>& policy)
         {
@@ -432,8 +490,17 @@ namespace simbi {
         {
             if constexpr (global::on_gpu) {
                 mem_.ensure_device_synced();
-                parallel_for(policy, [=, this] DEV(size_type ii) {
-                    mem_[ii] = op(mem_[ii], arrays[ii]...);
+
+                // functor with captured arrays because device lambdas
+                // can't capture parameter pack elements
+                auto functor = TransformFunctor<F, DependentArrays...>(
+                    op,
+                    mem_.data(),
+                    arrays.data()...
+                );
+
+                parallel_for(policy, [functor] DEV(size_type ii) {
+                    functor(ii);
                 });
                 policy.synchronize();
             }
@@ -455,8 +522,15 @@ namespace simbi {
         {
             if constexpr (global::on_gpu) {
                 mem_.ensure_device_synced();
-                parallel_for(policy, [=, this] DEV(size_type ii) {
-                    mem_[ii] = op(mem_[ii], arrays[ii]...);
+
+                auto functor = TransformFunctor<F, DependentArrays...>(
+                    op,
+                    mem_.data(),
+                    arrays.data()...
+                );
+
+                parallel_for(policy, [functor] DEV(size_type ii) {
+                    functor(ii);
                 });
                 policy.synchronize();
             }
@@ -496,8 +570,15 @@ namespace simbi {
         {
             if constexpr (global::on_gpu) {
                 mem_.ensure_device_synced();
-                parallel_for(policy, [=, this] DEV(size_type ii) {
-                    mem_[ii] = op(mem_[ii], ii, arrays[ii]...);
+
+                auto functor = TransformFunctorIdcs<F, DependentArrays...>(
+                    op,
+                    mem_.data(),
+                    arrays.data()...
+                );
+
+                parallel_for(policy, [functor] DEV(size_type ii) {
+                    functor(ii);
                 });
                 policy.synchronize();
             }
@@ -514,7 +595,7 @@ namespace simbi {
             if constexpr (global::on_gpu) {
                 ndarray<U> result(1, init);
                 result.sync_to_device();
-                auto result_ptr = result.mem_.data();
+                auto result_ptr = result.data();
                 auto arr        = mem_.data();
 
                 parallel_for(policy, [=, this] DEV(size_type idx) {

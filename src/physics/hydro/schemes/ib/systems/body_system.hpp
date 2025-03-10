@@ -67,7 +67,7 @@ namespace simbi::ibsystem {
         MeshType mesh_;
 
       public:
-        DUAL BodySystem() = default;
+        BodySystem() = default;
         DUAL BodySystem(const MeshType& mesh) : mesh_(mesh) {}
 
         DUAL void add_body(

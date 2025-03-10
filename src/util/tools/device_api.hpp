@@ -49,7 +49,7 @@
 #ifndef DEVICE_API_HPP
 #define DEVICE_API_HPP
 
-#include "build_options.hpp"   // for block_dim, threadIdx, STATIC
+#include "build_options.hpp"   // for blockDim, threadIdx, STATIC
 #include <cstddef>             // for size_t
 #include <omp.h>               // for omp_get_thread_num
 #include <stdexcept>           // for runtime_error
@@ -261,11 +261,11 @@ namespace simbi {
     {
         if constexpr (global::on_gpu) {
             return (
-                (blockIdx.z * block_dim.z + threadIdx.z) * block_dim.x *
-                    grid_dim.x * block_dim.y * grid_dim.y +
-                (blockIdx.y * block_dim.y + threadIdx.y) * block_dim.x *
-                    grid_dim.x +
-                blockIdx.x * block_dim.x + threadIdx.x
+                (blockIdx.z * blockDim.z + threadIdx.z) * blockDim.x *
+                    gridDim.x * blockDim.y * gridDim.y +
+                (blockIdx.y * blockDim.y + threadIdx.y) * blockDim.x *
+                    gridDim.x +
+                blockIdx.x * blockDim.x + threadIdx.x
             );
         }
         else {
@@ -276,26 +276,26 @@ namespace simbi {
     STATIC
     unsigned int globalThreadCount()
     {
-        return block_dim.x * grid_dim.x * block_dim.y * grid_dim.y *
-               block_dim.z * grid_dim.z;
+        return blockDim.x * gridDim.x * blockDim.y * gridDim.y * blockDim.z *
+               gridDim.z;
     }
 
     STATIC
     unsigned int get_ii_in2D()
     {
         if constexpr (global::col_major) {
-            return block_dim.y * blockIdx.y + threadIdx.y;
+            return blockDim.y * blockIdx.y + threadIdx.y;
         }
-        return block_dim.x * blockIdx.x + threadIdx.x;
+        return blockDim.x * blockIdx.x + threadIdx.x;
     }
 
     STATIC
     unsigned int get_jj_in2D()
     {
         if constexpr (global::col_major) {
-            return block_dim.x * blockIdx.x + threadIdx.x;
+            return blockDim.x * blockIdx.x + threadIdx.x;
         }
-        return block_dim.y * blockIdx.y + threadIdx.y;
+        return blockDim.y * blockIdx.y + threadIdx.y;
     }
 
     template <global::Platform P = global::BuildPlatform>
@@ -330,8 +330,8 @@ namespace simbi {
     STATIC unsigned int get_threadId()
     {
 #if GPU_CODE
-        return block_dim.x * block_dim.y * threadIdx.z +
-               block_dim.x * threadIdx.y + threadIdx.x;
+        return blockDim.x * blockDim.y * threadIdx.z +
+               blockDim.x * threadIdx.y + threadIdx.x;
 #else
         if (global::use_omp) {
             return omp_get_thread_num();

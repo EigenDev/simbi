@@ -211,16 +211,16 @@ namespace simbi {
         DUAL auto get_wave_speeds(const Maybe<primitive_t>& prim) const
             -> WaveSpeeds
         {
-            if constexpr (dt_type == TIMESTEP_TYPE::MINIMUM) {
-                return WaveSpeeds{
-                  .v1p = 1.0,
-                  .v1m = 1.0,
-                  .v2p = 1.0,
-                  .v2m = 1.0,
-                  .v3p = 1.0,
-                  .v3m = 1.0
-                };
-            }
+            // if constexpr (dt_type == TIMESTEP_TYPE::MINIMUM) {
+            //     return WaveSpeeds{
+            //       .v1p = 1.0,
+            //       .v1m = 1.0,
+            //       .v2p = 1.0,
+            //       .v2m = 1.0,
+            //       .v3p = 1.0,
+            //       .v3m = 1.0
+            //     };
+            // }
             const real cs = prim->sound_speed(gamma);
             const real v1 = prim->vcomponent(1);
             const real v2 = prim->vcomponent(2);

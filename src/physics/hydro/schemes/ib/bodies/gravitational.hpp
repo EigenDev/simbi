@@ -136,7 +136,7 @@ namespace simbi {
 
                 // Apply gravitational force to entire fluid domain
                 cons_states.transform_with_indices(
-                    [&](auto& state, size_type idx, auto& prim) {
+                    [=, this] DEV(auto& state, size_type idx, auto& prim) {
                         const auto mesh_cell =
                             this->mesh_.get_cell_from_global(idx);
                         const auto r = mesh_cell.centroid() - this->position_;

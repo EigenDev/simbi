@@ -94,7 +94,6 @@ namespace simbi {
         DUAL static size_type compute_size(const uarray<Dims>& dims)
         {
             size_type size = 1;
-#pragma unroll
             for (size_type ii = 0; ii < Dims; ++ii) {
                 size *= dims[ii];
             }
@@ -109,7 +108,7 @@ namespace simbi {
             if constexpr (global::col_major) {
                 // Column major (i,j,k): k fastest
                 strides[Dims - 1] = 1;   // k stride
-                for (size_type ii = Dims - 2; ii >= 0; --ii) {
+                for (size_type ii = Dims - 2; ii == 0; --ii) {
                     strides[ii] = strides[ii + 1] * dims[ii + 1];
                 }
                 // Result: strides = {nj*nk, nk, 1}
@@ -131,7 +130,6 @@ namespace simbi {
         DUAL size_type compute_offset(const uarray<Dims>& offsets) const
         {
             size_type offset = 0;
-#pragma unroll
             for (size_type ii = 0; ii < Dims; ++ii) {
                 offset += offsets[ii] * strides_[ii];
             }

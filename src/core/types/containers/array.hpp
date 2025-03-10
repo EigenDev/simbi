@@ -60,12 +60,11 @@ namespace simbi {
     {
       public:
         // Default constructor
-        DUAL constexpr array_t() = default;
+        constexpr array_t() = default;
 
         // Initialize with value
         DUAL constexpr array_t(const T& value)
         {
-#pragma unroll
             for (size_type i = 0; i < N; ++i) {
                 data_[i] = value;
             }
@@ -79,7 +78,6 @@ namespace simbi {
                 std::cout << "N: " << N << std::endl;
                 throw std::length_error("Invalid initializer list size");
             }
-#pragma unroll
             for (size_type i = 0; i < N; ++i) {
                 data_[i] = *(values.begin() + i);
             }
@@ -88,7 +86,6 @@ namespace simbi {
         // Copy constructor
         DUAL constexpr array_t(const array_t& other)
         {
-#pragma unroll
             for (size_type i = 0; i < N; ++i) {
                 data_[i] = other.data_[i];
             }
@@ -97,7 +94,6 @@ namespace simbi {
         // Move constructor
         DUAL constexpr array_t(array_t&& other)
         {
-#pragma unroll
             for (size_type i = 0; i < N; ++i) {
                 data_[i] = other.data_[i];
             }
@@ -107,7 +103,6 @@ namespace simbi {
         DUAL constexpr array_t& operator=(const array_t& other)
         {
             if (this != &other) {
-#pragma unroll
                 for (size_type i = 0; i < N; ++i) {
                     data_[i] = other.data_[i];
                 }

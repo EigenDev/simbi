@@ -113,7 +113,7 @@ namespace simbi {
             }
 
           public:
-            DUAL BaseBody() = default;
+            BaseBody() = default;
             DUAL BaseBody(
                 const MeshType& mesh,
                 const spatial_vector_t<T, Dims>& position,
@@ -153,14 +153,16 @@ namespace simbi {
         template <typename T, size_type Dims, typename MeshType>
         class ImmersedBody : public BaseBody<T, Dims, MeshType>
         {
-          protected:
-            // grid-aware cell info
+          public:
+            // grid-aware cell info. public for gpu lambdas
             struct CellInfo {
                 bool is_cut;
                 T volume_fraction;
                 spatial_vector_t<T, Dims> normal;
                 T distance;
             };
+
+          protected:
             // Cut cell data
             ndarray<CellInfo, Dims> cell_info_;
 
@@ -299,7 +301,7 @@ namespace simbi {
             DUAL void update_cut_cells()
             {
                 cell_info_.transform_with_indices(
-                    [&](auto& cell, size_type idx) {
+                    [=, this] DEV(auto& cell, size_type idx) {
                         const auto mesh_cell =
                             this->mesh_.get_cell_from_global(idx);
                         // Use mesh geometry for distance calc

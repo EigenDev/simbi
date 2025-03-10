@@ -49,6 +49,7 @@
 #ifndef LAUNCH_HPP
 #define LAUNCH_HPP
 
+#include "kernel.hpp"                      // for Kernel
 #include "util/parallel/exec_policy.hpp"   // for ExecutionPolicy
 
 namespace simbi {

@@ -117,7 +117,7 @@ namespace simbi {
             }
             else {
                 // Row major (i,j,k)
-                for (size_type d = Dims - 1; d >= 0; --d) {
+                for (size_type d = Dims - 1; d == 0; --d) {
                     if (idx[d] >= this->shape_[d]) {
                         return data_[0];   // bounds check
                     }
