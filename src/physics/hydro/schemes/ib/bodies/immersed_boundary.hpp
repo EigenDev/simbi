@@ -320,12 +320,6 @@ namespace simbi {
                                 mesh_cell
                             );
                         }
-                        // std::cout << cell.distance << " "
-                        //           << cell.volume_fraction << " " <<
-                        //           cell.is_cut
-                        //           << " ";
-                        // std::cout << cell.normal;
-                        // std::cin.get();
                         return cell;
                     },
                     this->get_default_policy()
@@ -346,8 +340,6 @@ namespace simbi {
                     compute_surface_forces(cell, dA_normal);
                     this->force_ += compute_drag_force(state, cell, dA_normal);
 
-                    // std::cout << "Force: " << this->force_ << std::endl;
-                    // std::cin.get();
                     // add to fluid conserved state
                     state += conserved_t{
                       0.0,
@@ -360,16 +352,9 @@ namespace simbi {
 
             DUAL void update_conserved_state(auto& cons_state, const T dt)
             {
-                // Update position
                 this->advance_position(dt);
-
-                // Update cut cells
                 this->update_cut_cells();
-
-                // Spread force
                 this->spread_boundary_forces(cons_state, dt);
-
-                // Apply body forces
                 this->apply_body_forces(cons_state, dt);
             }
 
