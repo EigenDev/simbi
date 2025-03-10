@@ -94,4 +94,4 @@ def construct_conserved_state(
         )
 
     except Exception as e:
-        return Maybe.save_failure(f"Failed to construct state: {str(e)}")
+        return Maybe(None, ValueError(f"Error constructing conserved state: {e}"))

@@ -32,11 +32,12 @@ void Newtonian<dim>::cons2prim_impl()
     shared_atomic_bool local_failure;
     this->prims_.transform(
         [gamma = this->gamma,
-         loc   = &local_failure] DEV(auto& prim, const auto& cons_var)
-            -> Maybe<primitive_t> {
+         loc   = &local_failure,
+         iter  = this->current_iter(
+         )] DEV(auto& prim, const auto& cons_var) -> Maybe<primitive_t> {
             const auto& rho = cons_var.dens();
             const auto vel  = cons_var.momentum() / rho;
-            const auto& chi = cons_var.chi();
+            const auto& chi = cons_var.chi() / rho;
             const auto pre =
                 (gamma - 1.0) * (cons_var.nrg() - 0.5 * rho * vel.dot(vel));
 

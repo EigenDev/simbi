@@ -121,6 +121,11 @@ class DynamicArg:
             return self.value**power.value
         return self.value**power
 
+    def __rpow__(self, base: Any) -> Any:
+        if isinstance(base, DynamicArg):
+            return base.value**self.value
+        return base**self.value
+
     def __lt__(self, other: Any) -> Any:
         if isinstance(other, DynamicArg):
             return self.value < other.value

@@ -208,7 +208,7 @@ namespace simbi {
             return mag;
         }
 
-        DUAL constexpr auto normalize() const
+        DUAL constexpr auto normalize()
         {
             auto mag = norm();
             if (mag > zero) {
@@ -316,6 +316,26 @@ namespace simbi {
             return result;
         }
 
+        template <typename U>
+        DUAL constexpr auto operator*=(const U scalar)
+            requires(!std::is_const_v<T>)
+        {
+            for (size_type ii = 0; ii < Dims; ++ii) {
+                (*this)[ii] *= scalar;
+            }
+            return *this;
+        }
+
+        template <typename U>
+        DUAL constexpr auto operator/=(const U scalar)
+            requires(!std::is_const_v<T>)
+        {
+            for (size_type ii = 0; ii < Dims; ++ii) {
+                (*this)[ii] /= scalar;
+            }
+            return *this;
+        }
+
         // unary operations
         DUAL constexpr auto operator-() const
         {
@@ -324,6 +344,38 @@ namespace simbi {
                 result[ii] = -(*this)[ii];
             }
             return result;
+        }
+
+        // assignment operators
+        template <typename U, size_type OtherDims, VectorType OtherType>
+        DUAL constexpr auto&
+        operator=(const VectorOps<U, OtherDims, OtherType>& other)
+            requires(!std::is_const_v<T>)
+        {
+            for (size_type ii = 0; ii < Dims; ++ii) {
+                (*this)[ii] = static_cast<T>(other[ii]);
+            }
+            return *this;
+        }
+
+        // equality operators
+        template <typename U, size_type OtherDims, VectorType OtherType>
+        DUAL constexpr bool
+        operator==(const VectorOps<U, OtherDims, OtherType>& other) const
+        {
+            for (size_type ii = 0; ii < Dims; ++ii) {
+                if ((*this)[ii] != other[ii]) {
+                    return false;
+                }
+            }
+            return true;
+        }
+
+        template <typename U, size_type OtherDims, VectorType OtherType>
+        DUAL constexpr bool
+        operator!=(const VectorOps<U, OtherDims, OtherType>& other) const
+        {
+            return !(*this == other);
         }
 
         // cross product
@@ -362,6 +414,15 @@ namespace simbi {
             else {
                 return (*this)[0] * other[1] - (*this)[1] * other[0];
             }
+        }
+
+        // if less than 3D, the cross product is simply the magnitude
+        template <typename U, VectorType OtherType>
+        DUAL constexpr auto cross(const VectorOps<U, Dims, OtherType>& other
+        ) const
+            requires(Dims < 3)
+        {
+            return (*this)[0] * other[1] - (*this)[1] * other[0];
         }
 
         // Implicit conversion to general vector type
@@ -451,12 +512,36 @@ namespace simbi {
         //     }
         // }
 
+        // construct from std::vector
+        DUAL explicit Vector(const std::vector<T> values)
+            requires(!std::is_const_v<T>)
+            : VectorOps<T, Dims, Type>{storage_, owned}
+        {
+            if (values.empty()) {
+                throw std::length_error(
+                    "Cannot construct vector from empty std::vector"
+                );
+            }
+
+            // Copy min(values.size(), Dims) elements
+            const size_type n = std::min(values.size(), Dims);
+            std::copy_n(values.begin(), n, storage_);
+
+            // Zero-fill remaining elements if values.size() < Dims
+            if (n < Dims) {
+                std::fill(storage_ + n, storage_ + Dims, T{});
+            }
+
+            this->data_ = storage_;
+        }
+
         // Variadic constructor for direct element initialization
         template <typename... Args>
-        DUAL constexpr Vector(Args... args)
-            requires(sizeof...(Args) == Dims)
+        DUAL constexpr Vector(Args&&... args)
+            requires(sizeof...(Args) == Dims &&
+                     (std::is_constructible_v<T, Args> && ...))
             : VectorOps<T, Dims, Type>{storage_, owned},
-              storage_{static_cast<T>(args)...}
+              storage_{static_cast<T>(std::forward<Args>(args))...}
         {
             this->data_ = storage_;
         }

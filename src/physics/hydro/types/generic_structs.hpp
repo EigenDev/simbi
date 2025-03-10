@@ -1065,71 +1065,6 @@ namespace simbi {
 //=======================================================
 // TYPE TRAITS
 //=======================================================
-template <>
-struct is_1D_mhd_primitive<simbi::anyPrimitive<1, simbi::Regime::RMHD>>
-    : std::true_type {
-};
-
-template <>
-struct is_2D_mhd_primitive<simbi::anyPrimitive<2, simbi::Regime::RMHD>>
-    : std::true_type {
-};
-
-template <>
-struct is_3D_mhd_primitive<simbi::anyPrimitive<3, simbi::Regime::RMHD>>
-    : std::true_type {
-};
-
-template <size_type Dims>
-struct is_relativistic_mhd<simbi::anyPrimitive<Dims, simbi::Regime::RMHD>>
-    : std::true_type {
-};
-
-template <size_type Dims>
-struct is_relativistic_mhd<simbi::anyConserved<Dims, simbi::Regime::RMHD>>
-    : std::true_type {
-};
-
-template <size_type Dims>
-struct is_relativistic<simbi::anyPrimitive<Dims, simbi::Regime::SRHD>>
-    : std::true_type {
-};
-
-template <size_type Dims>
-struct is_relativistic<simbi::anyConserved<Dims, simbi::Regime::RMHD>>
-    : std::true_type {
-};
-
-template <>
-struct is_1D_primitive<simbi::anyPrimitive<1, simbi::Regime::NEWTONIAN>>
-    : std::true_type {
-};
-
-template <>
-struct is_1D_primitive<simbi::anyPrimitive<1, simbi::Regime::SRHD>>
-    : std::true_type {
-};
-
-template <>
-struct is_2D_primitive<simbi::anyPrimitive<2, simbi::Regime::NEWTONIAN>>
-    : std::true_type {
-};
-
-template <>
-struct is_2D_primitive<simbi::anyPrimitive<2, simbi::Regime::SRHD>>
-    : std::true_type {
-};
-
-template <>
-struct is_3D_primitive<simbi::anyPrimitive<3, simbi::Regime::NEWTONIAN>>
-    : std::true_type {
-};
-
-template <>
-struct is_3D_primitive<simbi::anyPrimitive<3, simbi::Regime::SRHD>>
-    : std::true_type {
-};
-
 // Partial specialization for anyPrimitive
 template <size_type Dims, simbi::Regime R>
 struct is_primitive<simbi::anyPrimitive<Dims, R>> {
@@ -1140,5 +1075,18 @@ struct is_primitive<simbi::anyPrimitive<Dims, R>> {
 template <size_type Dims, simbi::Regime R>
 struct is_conserved<simbi::anyConserved<Dims, R>> {
     static const bool value = true;
+};
+
+// Partial specialization for MHD
+template <size_type Dims, simbi::Regime R>
+struct is_mhd<simbi::anyConserved<Dims, R>> {
+    static const bool value = (R == simbi::Regime::RMHD);
+};
+
+// Partial specialization for relativistic
+template <size_type Dims, simbi::Regime R>
+struct is_relativistic<simbi::anyConserved<Dims, R>> {
+    static const bool value =
+        (R == simbi::Regime::SRHD) || (R == simbi::Regime::RMHD);
 };
 #endif

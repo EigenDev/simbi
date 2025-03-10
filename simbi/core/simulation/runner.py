@@ -107,7 +107,7 @@ class SimulationRunner:
             return x
 
         for key, param in sim_state.items():
-            if key not in ["bfield", "staggered_bfields"]:
+            if key not in ["bfield", "staggered_bfields", "bodies"]:
                 val_str = format_param(param)
                 logger.info(f"{key.ljust(30, '.')} {val_str}")
 

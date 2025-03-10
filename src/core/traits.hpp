@@ -56,17 +56,7 @@
 //                  PRIMITIVE TYPE TRAITS
 //==========================================================================
 template <typename T>
-struct is_1D_primitive {
-    static const bool value = false;
-};
-
-template <typename T>
-struct is_2D_primitive {
-    static const bool value = false;
-};
-
-template <typename T>
-struct is_3D_primitive {
+struct is_primitive {
     static const bool value = false;
 };
 
@@ -81,17 +71,7 @@ struct is_relativistic_mhd {
 };
 
 template <typename T>
-struct is_1D_mhd_primitive {
-    static const bool value = false;
-};
-
-template <typename T>
-struct is_2D_mhd_primitive {
-    static const bool value = false;
-};
-
-template <typename T>
-struct is_3D_mhd_primitive {
+struct is_mhd {
     static const bool value = false;
 };
 
@@ -160,11 +140,6 @@ struct array_raw_type {
 };
 
 template <typename T>
-struct is_primitive {
-    static const bool value = false;
-};
-
-template <typename T>
 inline constexpr bool is_primitive_v = is_primitive<T>::value;
 
 template <typename T>
@@ -174,5 +149,10 @@ struct is_conserved {
 
 template <typename T>
 inline constexpr bool is_conserved_v = is_conserved<T>::value;
+
+template <typename T>
+inline constexpr bool is_mhd_v = is_mhd<T>::value;
+template <typename T>
+inline constexpr bool is_relativistic_mhd_v = is_relativistic_mhd<T>::value;
 
 #endif

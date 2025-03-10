@@ -6,6 +6,17 @@ from libcpp.vector cimport vector
 from libcpp cimport bool
 from libcpp.string cimport string 
 
+
+cdef unordered_map[string, BodyType] body_type_map = {
+    b"GRAVITATIONAL": BodyType.GRAVITATIONAL,
+    b"ELASTIC": BodyType.ELASTIC,
+    b"RIGID": BodyType.RIGID,
+    b"VISCOUS": BodyType.VISCOUS,
+    b"SINK": BodyType.SINK,
+    b"SOURCE": BodyType.SOURCE,
+    b"GRAVITATIONAL_SINK": BodyType.GRAVITATIONAL_SINK
+}
+
 cdef class SimState:
     cdef Driver driver_state
 
@@ -54,6 +65,46 @@ cdef class SimState:
         sim_cond.boundary_source_lib = <string>sim_info['boundary_source_lib']
         sim_cond.mesh_motion         = <bool>sim_info['mesh_motion']
         sim_cond.homologous          = <bool>sim_info['homologous']
+        
+        # Create property map
+        cdef unordered_map[string, PropertyValue] properties
+        cdef vector[real] pos_vec, vel_vec
+        cdef np.ndarray[double, ndim=1] pos_arr, vel_arr
+        if "bodies" in sim_info:
+            for body in sim_info["bodies"]:
+                # Create contiguous numpy arrays
+                pos_arr = np.ascontiguousarray(
+                    body["position"], dtype=np.float64
+                )
+                vel_arr = np.ascontiguousarray(
+                    body["velocity"], dtype=np.float64
+                )
+                
+                # Convert to std::vector
+                pos_vec = pos_arr
+                vel_vec = vel_arr
+                
+                # Create property map with vectors
+                properties["position".encode("utf-8")] = PropertyValue(pos_vec)
+                properties["velocity".encode("utf-8")] = PropertyValue(vel_vec)
+                properties["mass".encode("utf-8")] = PropertyValue(<real>body["mass"])
+                properties["radius".encode("utf-8")] = PropertyValue(<real>body["radius"])
+
+                # add the rest of the body-specific properties
+                for extra_prop in set(body.keys()) - {"position", "velocity", "mass", "radius", "body_type"}:
+                    properties[extra_prop.encode("utf-8")] = PropertyValue(<real>body[extra_prop])
+                
+                body_type_str = body["body_type"].upper().encode("utf-8")
+                if body_type_map.find(body_type_str) == body_type_map.end():
+                    raise ValueError(f"Invalid body type: {body['body_type']}")
+
+                # Rest of property handling...
+                sim_cond.immersed_bodies.push_back(
+                    pair[BodyType, unordered_map[string, PropertyValue]](
+                        body_type_map[body_type_str],
+                        properties
+                    )
+                )
 
         cdef PyObjWrapper a_cpp = PyObjWrapper(a)
         cdef PyObjWrapper adot_cpp = PyObjWrapper(adot)

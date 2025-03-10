@@ -3,8 +3,8 @@
  *  *           SIMBI - Special Relativistic Magnetohydrodynamics Code
  *  *=============================================================================
  *  *
- *  * @file            viscuous.hpp
- *  * @brief           Viscuous Immersed Body Implementation
+ *  * @file            viscous.hpp
+ *  * @brief           Viscous Immersed Body Implementation
  *  * @details
  *  *
  *  * @version         0.8.0
@@ -61,18 +61,38 @@ namespace simbi {
         {
           protected:
             T viscosity_;
-            T drag_coeff_;
 
           public:
+            DUAL constexpr ViscousBody(
+                const MeshType& mesh,
+                const spatial_vector_t<T, Dims>& position,
+                const spatial_vector_t<T, Dims>& velocity,
+                const T mass,
+                const T radius,
+                const T viscosity
+            )
+                : ImmersedBody<T, Dims, MeshType>(
+                      mesh,
+                      position,
+                      velocity,
+                      mass,
+                      radius
+                  ),
+                  viscosity_(viscosity)
+            {
+            }
+
             // Viscous body methods
-            DUAL auto
-            compute_surface_forces(const auto& cell, const auto& dA_normal)
+            DUAL void compute_surface_forces(
+                const ImmersedBody<T, Dims, MeshType>::CellInfo& cell,
+                const spatial_vector_t<T, Dims>& dA_normal
+            ) override
             {
                 // Compute relative velocity
                 const auto v_rel = this->velocity_ - this->fluid_velocity_;
 
                 // Compute viscous force
-                this->force_ = -viscosity_ * da_normal.norm() * v_rel;
+                this->force_ = -viscosity_ * dA_normal.norm() * v_rel;
             }
         };
     }   // namespace ib

@@ -3,12 +3,12 @@
  *  *           SIMBI - Special Relativistic Magnetohydrodynamics Code
  *  *=============================================================================
  *  *
- *  * @file            rigid.hpp
- *  * @brief           Rigid Immersed Body Implementation
+ *  * @file            body_system.hpp
+ *  * @brief
  *  * @details
  *  *
  *  * @version         0.8.0
- *  * @date            2025-02-16
+ *  * @date            2025-03-07
  *  * @author          Marcus DuPont
  *  * @email           marcus.dupont@princeton.edu
  *  *
@@ -40,65 +40,64 @@
  *  *==============================================================================
  *  * @history        Version History
  *  *==============================================================================
- *  * 2025-02-16      v0.8.0      Initial implementation
+ *  * 2025-03-07      v0.8.0      Initial implementation
  *  *
  *  *==============================================================================
  *  * @copyright (C) 2025 Marcus DuPont. All rights reserved.
  *  *==============================================================================
  */
 
-#ifndef RIGID_HPP
-#define RIGID_HPP
+#ifndef BODY_SYSTEM_HPP
+#define BODY_SYSTEM_HPP
 
-#include "build_options.hpp"
-#include "immersed_boundary.hpp"
+#include "body_factory.hpp"                    // for BodyFactory
+#include "build_options.hpp"                   // for DUAL
+#include "core/types/containers/ndarray.hpp"   // for ndarray
+#include "core/types/containers/vector.hpp"    // for spatial_vector_t
+#include "core/types/utility/smart_ptr.hpp"    // for std::shared_ptr
+#include <unordered_map>                       // for std::unordered_map
 
-namespace simbi {
-    namespace ib {
-        // Rigid body functionality
-        template <typename T, size_type Dims, typename MeshType>
-        class RigidBody : public ImmersedBody<T, Dims, MeshType>
+namespace simbi::ibsystem {
+    template <typename T, size_type Dims, typename MeshType>
+    class BodySystem
+    {
+      protected:
+        std::vector<std::unique_ptr<ib::ImmersedBody<T, Dims, MeshType>>>
+            bodies_;
+        MeshType mesh_;
+
+      public:
+        DUAL BodySystem() = default;
+        DUAL BodySystem(const MeshType& mesh) : mesh_(mesh) {}
+
+        DUAL void add_body(
+            ib::BodyType type,
+            const spatial_vector_t<T, Dims>& position,
+            const spatial_vector_t<T, Dims>& velocity,
+            T mass,
+            T radius,
+            const auto& params = {}
+        )
         {
-          protected:
-            T intertia_;
-            T pressure_;
+            auto body = ib::BodyFactory<T, Dims, MeshType>::create_body(
+                type,
+                mesh_,
+                position,
+                velocity,
+                mass,
+                radius,
+                params
+            );
+            bodies_.push_back(std::move(body));
+        }
 
-          public:
-            // Constructor
-            DUAL constexpr RigidBody(
-                const MeshType& mesh,
-                const spatial_vector_t<T, Dims>& position,
-                const spatial_vector_t<T, Dims>& velocity,
-                const T mass,
-                const T radius,
-                const T inertia,
-                const T pressure
-            )
-                : ImmersedBody<T, Dims, MeshType>(
-                      mesh,
-                      position,
-                      velocity,
-                      mass,
-                      radius
-                  ),
-                  intertia_(inertia),
-                  pressure_(pressure)
-
-            {
-            }
-            // Rigid body methods
-            DUAL void compute_surface_forces(
-                const ImmersedBody<T, Dims, MeshType>::CellInfo& cell,
-                const spatial_vector_t<T, Dims>& dA_normal
-            ) override
-            {
-                // Pressure force
-                this->force_ = -dA_normal * pressure_ * cell.volume_fraction;
-            }
-        };
-
-    }   // namespace ib
-
-}   // namespace simbi
+        // DUAL void update_system(auto& prim_states, const T dt)
+        // {
+        //     for (auto& body : bodies_) {
+        //         body->update_conserved_state(prim_states, dt);
+        //     }
+        // }
+    };
+}   // namespace simbi::ibsystem
 
 #endif

@@ -62,14 +62,36 @@ namespace simbi {
           protected:
             T stiffness_;
             T damping_;
-            T pressure_;
 
           public:
-            // Elastic body methods
-            DUAL auto
-            compute_surface_forces(const auto& cell, const auto& dA_normal)
+            // Constructor
+            DUAL constexpr ElasticBody(
+                const MeshType& mesh,
+                const spatial_vector_t<T, Dims>& position,
+                const spatial_vector_t<T, Dims>& velocity,
+                const T mass,
+                const T radius,
+                const T stiffness,
+                const T damping
+            )
+                : ImmersedBody<T, Dims, MeshType>(
+                      mesh,
+                      position,
+                      velocity,
+                      mass,
+                      radius
+                  ),
+                  stiffness_(stiffness),
+                  damping_(damping)
             {
-                interpolate_fluid_velocity();
+            }
+            // Elastic body methods
+            DUAL void compute_surface_forces(
+                const ImmersedBody<T, Dims, MeshType>::CellInfo& cell,
+                const spatial_vector_t<T, Dims>& dA_normal
+            ) override
+            {
+                this->interpolate_fluid_velocity();
                 // Compute relative velocity
                 const auto v_rel = this->velocity_ - this->fluid_velocity_;
 

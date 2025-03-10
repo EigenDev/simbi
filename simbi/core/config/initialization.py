@@ -54,8 +54,9 @@ class InitializationConfig:
 
             if mhd:
                 if not is_mhd_generator(self.initial_primitive_gen):
-                    return Maybe.save_failure(
-                        "Expected a tuple of generators for MHD problems"
+                    return Maybe(
+                        None,
+                        ValueError("Expected a tuple of generators for MHD problems"),
                     )
 
                 gens: MHDStateGenerators = self.initial_primitive_gen
@@ -86,8 +87,8 @@ class InitializationConfig:
                 ]
             else:
                 if not is_pure_hydro_generator(self.initial_primitive_gen):
-                    return Maybe.save_failure(
-                        "Expected a single generator for non-MHD problems"
+                    return Maybe(
+                        None, ValueError("Expected a generator for pure hydro problems")
                     )
 
                 gen: GasStateGenerator = self.initial_primitive_gen()
@@ -99,9 +100,7 @@ class InitializationConfig:
             ngas_vars = nvars if not mhd else 6
             if not (ngas_vars - 1 <= n_yielded <= ngas_vars):
                 if not mhd or ngas_vars != 5:
-                    return Maybe.save_failure(
-                        f"Initial state generator does must yield a number of gas variables between {ngas_vars - 1} and {ngas_vars}"
-                    )
+                    return Maybe(None, ValueError("Invalid number of gas variables"))
 
             interior = (slice(pad_width, -pad_width),) * len(self.resolution)
             interior_shape = padded_state[:n_yielded, *interior].shape
@@ -142,4 +141,4 @@ class InitializationConfig:
 
             return Maybe.of((padded_state, staggered_bfields))
         except Exception as e:
-            return Maybe.save_failure(f"Failed to generate initial state: {str(e)}")
+            return Maybe(None, e)

@@ -228,6 +228,34 @@ namespace simbi {
                         calculate_distance_vector(pos, *this);
             }
         }
+        DUAL auto get_face_index(const spatial_vector_t<real, Dims>& nhat) const
+        {
+            // determine the face index based on the normal vector
+            // This is used to determine the direction of the
+            // surface normal vector. If the normal vector points
+            // in the x1 direction, but in the negative direction,
+            // then the face index will be 0. Same logic for the x2
+            // and x3 directions.
+            if (nhat[0] < 0) {
+                return 0;
+            }
+            else if (nhat[0] > 0) {
+                return 1;
+            }
+            else if (Dims > 1 && nhat[1] < 0) {
+                return 2;
+            }
+            else if (Dims > 1 && nhat[1] > 0) {
+                return 3;
+            }
+            else if (Dims > 2 && nhat[2] < 0) {
+                return 4;
+            }
+            else if (Dims > 2 && nhat[2] > 0) {
+                return 5;
+            }
+            return 0;
+        }
 
         DUAL auto area_normal(const spatial_vector_t<real, Dims>& nhat) const
         {
@@ -470,7 +498,15 @@ namespace simbi {
 
         DUAL auto max_cell_width() const
         {
-            return my_max3<real>(widths_[0], widths_[1], widths_[2]);
+            if constexpr (Dims == 1) {
+                return widths_[0];
+            }
+            else if constexpr (Dims == 2) {
+                return my_max<real>(widths_[0], widths_[1]);
+            }
+            else if constexpr (Dims == 3) {
+                return my_max3<real>(widths_[0], widths_[1], widths_[2]);
+            }
         }
 
         // accessors

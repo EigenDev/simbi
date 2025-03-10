@@ -126,7 +126,6 @@ namespace simbi {
         {
             return grid_.active_dimensions();
         }
-        DUAL auto active_cells() const { return grid_.active_cells(); }
         DUAL auto halo_radius() const { return grid_.halo_radius(); }
         DUAL auto nhalos() const { return grid_.nhalos(); }
         DUAL auto geometry() const { return geometry_.geometry(); }
@@ -144,6 +143,8 @@ namespace simbi {
         {
             return geometry_.geometry_to_c_str();
         }
+
+        DUAL auto size() const { return grid_.active_zones(); }
     };
 }   // namespace simbi
 #endif   // MESH_HPP

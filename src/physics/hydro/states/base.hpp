@@ -59,6 +59,7 @@
 #include "core/types/utility/managed.hpp"           // for Managed
 #include "geometry/mesh/mesh.hpp"                   // for Mesh
 #include "io/console/logger.hpp"                    // for logger
+#include "physics/hydro/schemes/ib/systems/orbital.hpp"   // for OrbitalSystem
 #include "physics/hydro/types/generic_structs.hpp"   // for anyConserved, anyPrimitive
 
 namespace simbi {
@@ -106,6 +107,8 @@ namespace simbi {
         // Common state members
         ndarray<Maybe<primitive_t>, Dims> prims_;
         ndarray<conserved_t, Dims> cons_;
+        std::unique_ptr<ibsystem::OrbitalSystem<real, Dims, Mesh<Dims>>>
+            orbital_system_;
 
         HydroBase() = default;
 
@@ -133,6 +136,7 @@ namespace simbi {
               hllc_z(hllc_z_)
 
         {
+            init_orbital_system(init_conditions);
             if (std::getenv("USE_OMP")) {
                 global::use_omp = true;
                 if (const char* omp_tnum = std::getenv("OMP_NUM_THREADS")) {
@@ -257,6 +261,34 @@ namespace simbi {
             );
         };
 
+        void init_orbital_system(const InitialConditions& init)
+        {
+            if (!init.immersed_bodies.empty()) {
+                orbital_system_ = std::make_unique<
+                    ibsystem::OrbitalSystem<real, Dims, Mesh<Dims>>>(
+                    mesh_,
+                    init.gamma
+                );
+
+                for (const auto& [type, props] : init.immersed_bodies) {
+                    orbital_system_->add_body(
+                        type,
+                        spatial_vector_t<real, Dims>(
+                            std::get<std::vector<real>>(props.at("position"))
+                        ),
+                        spatial_vector_t<real, Dims>(
+                            std::get<std::vector<real>>(props.at("velocity"))
+                        ),
+                        std::get<real>(props.at("mass")),
+                        std::get<real>(props.at("radius")),
+                        props   // Full property map passed through
+                    );
+                }
+
+                orbital_system_->init_system();
+            }
+        }
+
         void simulate(
             const std::function<real(real)> a,
             const std::function<real(real)> adot
@@ -298,8 +330,31 @@ namespace simbi {
         DUAL void advance_system()
         {
             auto& derived = static_cast<Derived&>(*this);
+
+            // 0.(optional) maybe there are orbital bodies. if so, apply first
+            // half-kick
+            if (orbital_system_) {
+                orbital_system_->advance_velocities(0.5 * time_step());
+            }
+
             // 1. advance the regime-specific system
             derived.advance_impl();
+
+            // 1.b (optional) update orbital system
+            if (orbital_system_) {
+                // Full drift
+                orbital_system_->advance_positions(time_step());
+
+                // compute and apply forces
+                orbital_system_
+                    ->compute_and_apply_forces(cons_, prims_, time_step());
+
+                // Second half-kick for bodies
+                orbital_system_->advance_velocities(0.5 * time_step());
+            }
+
+            // std::cout << "done with advance_impl" << std::endl;
+            // std::cin.get();
 
             // 2. convert to primitives
             derived.cons2prim_impl();

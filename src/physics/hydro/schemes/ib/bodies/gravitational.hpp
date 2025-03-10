@@ -81,35 +81,129 @@ namespace simbi {
                       mass,
                       radius
                   ),
-                  grav_strength_(grav_strength),
-                  softening_length_(softening * radius)
+                  softening_length_(softening * radius),
+                  grav_strength_(grav_strength)
             {
+                if (grav_strength_ < 0) {
+                    throw std::invalid_argument(
+                        "Gravitational strength must be non-negative."
+                    );
+                }
             }
 
-            // N-body methods
-            DUAL void update_position(const T dt)
-            {
-                // first half-kick
-                this->velocity_ += 0.5 * dt * this->force_ / this->mass_;
-                // drift
-                this->position_ += dt * this->velocity_;
-                // second half-kick after force computation
-                compute_body_forces(this->mesh_.bodies_);
-                this->velocity_ += 0.5 * dt * this->force_ / this->mass_;
-            }
-
-            DUAL auto compute_body_forces(const auto& bodies)
+            DUAL void compute_body_forces(
+                const std::vector<
+                    std::unique_ptr<ib::ImmersedBody<T, Dims, MeshType>>>&
+                    bodies
+            ) override
             {
                 this->force_ = spatial_vector_t<T, Dims>();
                 for (const auto& other : bodies) {
                     if (other.get() != this) {
-                        const auto r = other->position_ - this->position_;
+                        const auto r = other->position() - this->position_;
                         const auto r2 =
                             r.dot(r) + softening_length_ * softening_length_;
-                        this->force_ += grav_strength_ * other->mass_ * r /
+                        this->force_ += -grav_strength_ * other->mass() * r /
                                         (r2 * std::sqrt(r2));
                     }
                 }
+            }
+
+            DUAL void compute_surface_forces(
+                const ImmersedBody<T, Dims, MeshType>::CellInfo& cell,
+                const spatial_vector_t<T, Dims>& dA_normal
+            ) override
+            {
+                // do nothing
+            }
+
+            template <typename StateArray, typename PrimitiveArray>
+            DUAL void apply_body_forces_impl(
+                StateArray& cons_states,
+                const PrimitiveArray& prims,
+                const std::vector<
+                    std::unique_ptr<ImmersedBody<T, Dims, MeshType>>>& bodies,
+                const T dt
+            )
+            {
+                using conserved_t = typename StateArray::value_type;
+
+                // Reset force accumulator
+                this->force_ = spatial_vector_t<T, Dims>();
+
+                // Apply N-body gravitational forces between bodies
+                compute_body_forces(bodies);
+
+                // Apply gravitational force to entire fluid domain
+                cons_states.transform_with_indices(
+                    [&](auto& state, size_type idx, auto& prim) {
+                        const auto mesh_cell =
+                            this->mesh_.get_cell_from_global(idx);
+                        const auto r = mesh_cell.centroid() - this->position_;
+                        const auto r2 =
+                            r.dot(r) + softening_length_ * softening_length_;
+
+                        // Gravitational force on fluid element
+                        const auto force = -grav_strength_ * this->mass_ * r /
+                                           (r2 * std::sqrt(r2));
+
+                        // momentum and energy change
+                        const auto dp = prim->rho() * force * dt;
+
+                        const auto v_old = prim->velocity();
+                        auto v_new = (state.momentum() + dp) / prim->rho();
+                        const auto v_avg = 0.5 * (v_old + v_new);
+                        const auto dE    = dp.dot(v_avg);
+                        state += conserved_t{0.0, dp, dE};
+
+                        // Store reaction force on body
+                        this->force_ -=
+                            force * state.dens() * mesh_cell.volume();
+
+                        return state;
+                    },
+                    this->get_default_policy(),
+                    prims
+                );
+            }
+
+            // Override each regime-specific version
+            DUAL void apply_body_forces(
+                ndarray<anyConserved<Dims, Regime::NEWTONIAN>, Dims>&
+                    cons_states,
+                const ndarray<
+                    Maybe<anyPrimitive<Dims, Regime::NEWTONIAN>>,
+                    Dims>& prims,
+                const std::vector<
+                    std::unique_ptr<ImmersedBody<T, Dims, MeshType>>>& bodies,
+                const T dt
+            ) override
+            {
+                apply_body_forces_impl(cons_states, prims, bodies, dt);
+            }
+
+            DUAL void apply_body_forces(
+                ndarray<anyConserved<Dims, Regime::SRHD>, Dims>& cons_states,
+                const ndarray<Maybe<anyPrimitive<Dims, Regime::SRHD>>, Dims>&
+                    prims,
+                const std::vector<
+                    std::unique_ptr<ImmersedBody<T, Dims, MeshType>>>& bodies,
+                const T dt
+            ) override
+            {
+                apply_body_forces_impl(cons_states, prims, bodies, dt);
+            }
+
+            DUAL void apply_body_forces(
+                ndarray<anyConserved<Dims, Regime::RMHD>, Dims>& cons_states,
+                const ndarray<Maybe<anyPrimitive<Dims, Regime::RMHD>>, Dims>&
+                    prims,
+                const std::vector<
+                    std::unique_ptr<ImmersedBody<T, Dims, MeshType>>>& bodies,
+                const T dt
+            ) override
+            {
+                apply_body_forces_impl(cons_states, prims, bodies, dt);
             }
         };
 

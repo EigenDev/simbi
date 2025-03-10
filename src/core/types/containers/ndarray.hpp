@@ -111,6 +111,18 @@ namespace simbi {
             data.shrink_to_fit();
         }
 
+        ndarray(const size_type sz)
+        {
+            mem_.allocate(sz);
+            this->size_     = sz;
+            this->shape_[0] = sz;
+            // fill the remaining dimensions with 1
+            for (size_type ii = 1; ii < Dims; ++ii) {
+                this->shape_[ii] = 1;
+            }
+            this->strides_ = this->compute_strides(this->shape_);
+        }
+
         auto data() -> T* { return mem_.data(); }
         auto data() const -> const T* { return mem_.data(); }
         auto fill(T value) -> void
@@ -455,6 +467,47 @@ namespace simbi {
             }
         }
 
+        // transform with no dependent ndarrays
+        // but we now track the indices
+        template <typename F>
+        void transform_with_indices(F op, const ExecutionPolicy<>& policy)
+        {
+            if constexpr (global::on_gpu) {
+                mem_.ensure_device_synced();
+                parallel_for(policy, [=, this] DEV(size_type ii) {
+                    mem_[ii] = op(mem_[ii], ii);
+                });
+                policy.synchronize();
+            }
+            else {
+                parallel_for(policy, [=, this](size_type ii) {
+                    mem_[ii] = op(mem_[ii], ii);
+                });
+            }
+        }
+
+        // transform with indices and variadic dependent ndarrays
+        template <typename... DependentArrays, typename F>
+        void transform_with_indices(
+            F op,
+            const ExecutionPolicy<>& policy,
+            const DependentArrays&... arrays
+        )
+        {
+            if constexpr (global::on_gpu) {
+                mem_.ensure_device_synced();
+                parallel_for(policy, [=, this] DEV(size_type ii) {
+                    mem_[ii] = op(mem_[ii], ii, arrays[ii]...);
+                });
+                policy.synchronize();
+            }
+            else {
+                parallel_for(policy, [=, this](size_type ii) {
+                    mem_[ii] = op(mem_[ii], ii, arrays[ii]...);
+                });
+            }
+        }
+
         template <typename U, typename F>
         U reduce(U init, F reduce_op, const ExecutionPolicy<>& policy) const
         {
@@ -516,7 +569,7 @@ namespace simbi {
         // filter method to apply a function to each element
         template <typename F>
         ndarray<size_type, 1>
-        filter_indices(F op, const ExecutionPolicy<>& policy)
+        filter_indices(F op, const ExecutionPolicy<>& policy) const
         {
             ndarray<size_type, 1> indices(this->size());
             size_type count = 0;
@@ -524,7 +577,7 @@ namespace simbi {
             if constexpr (global::on_gpu) {
                 mem_.ensure_device_synced();
                 indices.sync_to_device();
-                auto indices_ptr = indices.mem_.data();
+                auto indices_ptr = indices.data();
                 auto arr         = mem_.data();
                 auto count_ptr   = &count;
 

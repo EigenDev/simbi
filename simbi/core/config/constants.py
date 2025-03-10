@@ -51,3 +51,15 @@ class Solver(str, ExtendedEnum):
     HLLE = "hlle"
     HLLC = "hllc"
     HLLD = "hlld"
+
+
+class BodyType(str, ExtendedEnum):
+    RIGID = "rigid"
+    ELASTIC = "elastic"
+    VISCUOUS = "viscous"
+    SINK = "sink"
+    SOURCE = "source"
+    GRAVITATIONAL = "gravitational"
+    # TODO: Implement these later
+    POROUS = "porous"
+    PASSIVE = "passive"

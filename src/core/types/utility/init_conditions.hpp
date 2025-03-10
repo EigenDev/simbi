@@ -50,16 +50,17 @@
 #define INIT_CONDITIONS_HPP
 
 #include "build_options.hpp"
+#include "core/types/containers/vector.hpp"
+#include "physics/hydro/schemes/ib/bodies/immersed_boundary.hpp"
 #include <string>
 #include <vector>
 
 struct InitialConditions {
     real time, checkpoint_interval, dlogt;
-    real plm_theta, engine_duration, gamma, cfl, tend;
+    real plm_theta, gamma, cfl, tend;
     luint nx, ny, nz, checkpoint_idx;
     bool quirk_smoothing, homologous, mesh_motion;
-    std::vector<std::vector<real>> sources, gsources, osources, bfield;
-    std::vector<bool> object_cells;
+    std::vector<std::vector<real>> bfield;
     std::string data_directory, coord_system, solver;
     std::string x1_spacing, x2_spacing, x3_spacing, regime;
     std::string hydro_source_lib, gravity_source_lib, boundary_source_lib;
@@ -68,6 +69,19 @@ struct InitialConditions {
     std::pair<real, real> x1bounds;
     std::pair<real, real> x2bounds;
     std::pair<real, real> x3bounds;
+
+    using PropertyValue = std::variant<
+        real,               // for scalar properties
+        std::vector<real>   // Python will enforce the dimensionality of the
+                            // vector
+        >;
+
+    std::vector<std::pair<
+        simbi::ib::BodyType,
+        std::unordered_map<std::string, PropertyValue>   // Can store both
+                                                         // scalars and vectors
+        >>
+        immersed_bodies;
 
     std::tuple<lint, lint, lint> active_zones() const
     {

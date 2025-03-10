@@ -53,6 +53,7 @@
 #include "core/types/containers/array.hpp"          // for array
 #include "core/types/utility/enums.hpp"             // for Geometry, Cellspacing
 #include "core/types/utility/init_conditions.hpp"   // for InitialConditions
+#include <cmath>
 
 namespace simbi {
     class GridManager
@@ -81,8 +82,8 @@ namespace simbi {
         {
             nhalos_       = 2 * halo_radius_;
             xag_          = nx_ - nhalos_;
-            yag_          = ny_ - nhalos_;
-            zag_          = nz_ - nhalos_;
+            yag_          = std::max<int>(1, ny_ - nhalos_);
+            zag_          = std::max<int>(1, nz_ - nhalos_);
             active_zones_ = xag_ * yag_ * zag_;
         }
 
@@ -119,7 +120,7 @@ namespace simbi {
         }
         DUAL constexpr auto halo_radius() const { return halo_radius_; }
         DUAL constexpr auto nhalos() const { return nhalos_; }
-        DUAL constexpr auto active_cells() const { return active_zones_; }
+        DUAL constexpr auto active_zones() const { return active_zones_; }
         DUAL constexpr auto total_zones() const { return nx_ * ny_ * nz_; }
     };
 }   // namespace simbi

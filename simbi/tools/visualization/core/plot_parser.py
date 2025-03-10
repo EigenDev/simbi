@@ -334,7 +334,7 @@ class PlottingArgumentBuilder:
             (
                 ["--annot-text"],
                 {
-                    "default": None,  
+                    "default": None,
                     "nargs": "+",
                     "type": str,
                     "help": "text in annotations",
@@ -343,13 +343,9 @@ class PlottingArgumentBuilder:
             (
                 ["--inset"],
                 {
-                    
                     "default": None,
-                    
                     "action": ParseKVAction,
-                    
                     "metavar": "KEY=VALUE",
-                    
                     "nargs": "+",
                     "help": "flag for inset plot. Takes KEY=VALUE for inset x-ylims",
                 },
@@ -435,13 +431,9 @@ class PlottingArgumentBuilder:
             (
                 ["--extra-args"],
                 {
-                    
                     "nargs": "+",
-                    
                     "action": ParseKVAction,
-                    
                     "help": "accepts dict style args KEY=VALUE",
-                    
                     "metavar": "KEY=VALUE",
                 },
             ),
@@ -470,23 +462,23 @@ class PlottingArgumentBuilder:
                 ["--cbar-orient"],
                 {
                     "dest": "cbar_orient",
-                    "default": "vertical",  
-                    "type": str,  
-                    "help": "Colorbar orientation",  
+                    "default": "vertical",
+                    "type": str,
+                    "help": "Colorbar orientation",
                     "choices": ["horizontal", "vertical"],
                 },
-            ),  
+            ),
             (
                 ["--bipolar"],
-                {"dest": "bipolar", "default": False, "action": "store_true"},  
+                {"dest": "bipolar", "default": False, "action": "store_true"},
             ),
             (
                 ["--subplots"],
-                {"dest": "subplots", "default": None, "type": int},  
+                {"dest": "subplots", "default": None, "type": int},
             ),
             (
                 ["--sub_split"],
-                {"dest": "sub_split", "default": None, "nargs": "+", "type": int},  
+                {"dest": "sub_split", "default": None, "nargs": "+", "type": int},
             ),
             (
                 ["--coords"],
@@ -525,10 +517,7 @@ class PlottingArgumentBuilder:
                 ["--xlabel"],
                 {"nargs": 1, "default": "x", "help": "X label name"},
             ),
-            (
-                ["--ylabel"], 
-                {"nargs": 1, "default": "y", "help": "Y label name"}
-            ),
+            (["--ylabel"], {"nargs": 1, "default": "y", "help": "Y label name"}),
         ]
         for style in VALID_PLOT_TYPES:
             self.style_group.append(
@@ -639,7 +628,7 @@ class PlottingArgumentBuilder:
     @staticmethod
     def get_config(args: argparse.Namespace) -> Dict[str, Any]:
         """Parse arguments into configuration groups"""
-        # get all args exceot the first one which is the command name
+        # get all args except the first one which is the command name
         args_dict = vars(args)
         return PlottingArgumentBuilder()._build_config(args_dict)
 

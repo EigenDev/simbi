@@ -50,15 +50,15 @@ def calculate_state_vector(
 def validate_state_vector(state: StateVector) -> Maybe[StateVector]:
     """Validate state vector components"""
     if np.any(np.isnan(state.density)):
-        return Maybe.save_failure("Density contains NaN values")
+        return Maybe(None, ValueError("Density contains NaN values"))
     if any(np.any(np.isnan(m)) for m in state.momentum):
-        return Maybe.save_failure("Momentum contains NaN values")
+        return Maybe(None, ValueError("Momentum contains NaN values"))
     if np.any(np.isnan(state.energy)):
-        return Maybe.save_failure("Energy contains NaN values")
+        return Maybe(None, ValueError("Energy contains NaN values"))
     if state.mean_magnetic_field and any(
         np.any(np.isnan(b)) for b in state.mean_magnetic_field
     ):
-        return Maybe.save_failure("Magnetic field contains NaN values")
+        return Maybe(None, ValueError("Magnetic field contains NaN values"))
     return Maybe.of(state)
 
 

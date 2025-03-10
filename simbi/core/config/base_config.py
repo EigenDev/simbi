@@ -5,6 +5,7 @@ import numpy as np
 from ..types.typing import InitialStateType
 from ..types.dynarg import DynamicArg
 from ..managers.validator import ConfigValidator
+from ..managers.body_validator import BodyConfigValidator
 from ..config.initialization import InitializationConfig
 from ..simulation.state_init import SimulationBundle, initialize_simulation
 from ...functional.maybe import Maybe
@@ -78,6 +79,7 @@ class BaseConfig(metaclass=abc.ABCMeta):
     dynamic_args: list[DynamicArg] = []
     base_properties: dict[str, Any] = {}
     validator: ConfigValidator = ConfigValidator()
+    body_validator: BodyConfigValidator = BodyConfigValidator()
 
     def __init_subclass__(cls: Type["BaseConfig"], *args: Any, **kwargs: Any) -> None:
         super().__init_subclass__(*args, **kwargs)
@@ -258,6 +260,11 @@ class BaseConfig(metaclass=abc.ABCMeta):
     def scale_factor_derivative(cls) -> Optional[Callable[[float], float]]:
         return None
 
+    @simbi_property(group="sim_state")
+    def immersed_bodies(self) -> list[dict[str, Any]]:
+        """list of immersed bodies (IB method of Peskin (2002))"""
+        return []
+
     @simbi_class_property(group="misc")
     def gravity_sources(cls) -> Optional[str]:
         return None
@@ -428,6 +435,24 @@ class BaseConfig(metaclass=abc.ABCMeta):
         for name, path in compiled.items():
             setattr(cls, f"{name}_source_lib", str(path))
 
+    def __getattribute__(self, name: str) -> Any:
+        """Validate property access. (Sometimes we make mistakes in our configs :P)"""
+        try:
+            attr = super().__getattribute__(name)
+            if isinstance(attr, property) and name in PropertyBase.registry:
+                # This is a simbi_property, validate its computation
+                try:
+                    return attr.__get__(self)
+                except Exception as e:
+                    raise ValueError(f"Invalid configuration: {str(e)}") from e
+            return attr
+        except AttributeError as e:
+            if name in PropertyBase.registry:
+                raise ValueError(
+                    f"Missing required property '{name}' for configuration."
+                ) from e
+            raise
+
     def _collect_property_values(self) -> dict[str, dict[str, Any]]:
         """Collect all property values group by category"""
         settings: dict[str, Any] = {
@@ -475,8 +500,22 @@ class BaseConfig(metaclass=abc.ABCMeta):
             **settings["io"],
         }
 
+    def _validate_bodies(self, settings: dict[str, Any]) -> Maybe[dict[str, Any]]:
+        if bodies := settings["sim_state"]["immersed_bodies"]:
+            validated_bodies = []
+            for body in bodies:
+                result = self.body_validator.validate(body)
+                if result.is_error():
+                    Maybe(None, result.error)
+                validated_bodies.append(result.unwrap())
+
+            bodies = validated_bodies
+
+        return Maybe.of(settings)
+
     def _validate_settings(self, settings: dict[str, Any]) -> Maybe[dict[str, Any]]:
-        return self.validator.validate(settings)
+        cleaned_settings = self._validate_bodies(settings)
+        return self.validator.validate(cleaned_settings.unwrap())
 
     def _create_bundle(self, settings: dict[str, Any]) -> Maybe[SimulationBundle]:
         return initialize_simulation(
@@ -492,14 +531,9 @@ class BaseConfig(metaclass=abc.ABCMeta):
     def to_simulation_bundle(self) -> Maybe[SimulationBundle]:
         return (
             Maybe.of(self)
-            .map_with_context(
-                lambda _: self._collect_property_values(),
-                "Failed to collect property values",
-            )
-            .bind_with_context(self._validate_settings, "Failed to validate settings")
-            .bind_with_context(
-                self._create_bundle, "Failed to create simulation bundle"
-            )
+            .map(lambda _: self._collect_property_values())
+            .bind(self._validate_settings)
+            .bind(self._create_bundle)
         )
 
     @final

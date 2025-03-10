@@ -1,5 +1,5 @@
-from dataclasses import dataclass, asdict
-from typing import Optional, Sequence, Callable, Any, overload, Optional, Type, TypeVar
+from dataclasses import dataclass, asdict, field
+from typing import Optional, Sequence, Callable, Any, Optional, TypeVar
 from pathlib import Path
 from .constants import (
     CoordSystem,
@@ -188,9 +188,12 @@ class SimulationSettings(BaseSettings):
     is_mhd: bool = False
     dlogt: float = 0.0
     solver: Solver = Solver.HLLC
+    bodies: list[dict[str, Any]] = field(default_factory=list)
 
     @classmethod
     def from_dict(cls, setup: dict[str, Any]) -> "SimulationSettings":
+        # print(setup)
+        # zzz = input("Press Enter to continue...")
         return cls(
             adiabatic_index=setup["adiabatic_index"],
             tstart=setup["default_start_time"],
@@ -204,6 +207,7 @@ class SimulationSettings(BaseSettings):
             is_mhd=setup["is_mhd"],
             dlogt=setup["dlogt"],
             solver=Solver(setup["solver"]),
+            bodies=setup["immersed_bodies"],
         )
 
     @classmethod
@@ -226,4 +230,5 @@ class SimulationSettings(BaseSettings):
             is_mhd=self_params["is_mhd"],
             dlogt=self_params["dlogt"],
             solver=Solver(self_params["solver"]),
+            bodies=self_params["bodies"],
         )

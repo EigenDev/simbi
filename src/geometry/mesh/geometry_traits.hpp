@@ -215,40 +215,45 @@ namespace simbi {
 
         static constexpr auto
         calculate_distance_vector(const auto& pos, const auto& cell)
+            requires(Dims == 1)
         {
-            // get the distance vector in cartesian coordinates by
-            // converting the spherical coordinates to cartesian
-            if constexpr (Dims == 1) {
-                const auto x1      = cell.centroid_coordinate(0);
-                const auto x1prime = pos[0];
-                return spatial_vector_t<real, 3>{x1 - x1prime, 0.0, 0.0};
-            }
-            else if constexpr (Dims == 2) {
-                const auto x1      = cell.centroid_coordinate(0);
-                const auto x1prime = pos[0];
-                const auto x2      = cell.centroid_coordinate(1);
-                const auto x2prime = pos[1];
-                const auto x       = x1 * std::sin(x2);
-                const auto y       = x1 * std::cos(x2);
-                const auto xp      = x1prime * std::sin(x2prime);
-                const auto yp      = x1prime * std::cos(x2prime);
-                return spatial_vector_t<real, 3>{x - xp, y - yp, 0.0};
-            }
-            else {
-                const auto x1      = cell.centroid_coordinate(0);
-                const auto x1prime = pos[0];
-                const auto x2      = cell.centroid_coordinate(1);
-                const auto x2prime = pos[1];
-                const auto x3      = cell.centroid_coordinate(2);
-                const auto x3prime = pos[2];
-                const auto x       = x1 * std::sin(x2) * std::cos(x3);
-                const auto y       = x1 * std::sin(x2) * std::sin(x3);
-                const auto z       = x1 * std::cos(x2);
-                const auto xp = x1prime * std::sin(x2prime) * std::cos(x3prime);
-                const auto yp = x1prime * std::sin(x2prime) * std::sin(x3prime);
-                const auto zp = x1prime * std::cos(x2prime);
-                return spatial_vector_t<real, 3>{x - xp, y - yp, z - zp};
-            }
+            const auto x1      = cell.centroid_coordinate(0);
+            const auto x1prime = pos[0];
+            return spatial_vector_t<real, 1>{x1 - x1prime};
+        }
+
+        static constexpr auto
+        calculate_distance_vector(const auto& pos, const auto& cell)
+            requires(Dims == 2)
+        {
+            const auto x1      = cell.centroid_coordinate(0);
+            const auto x1prime = pos[0];
+            const auto x2      = cell.centroid_coordinate(1);
+            const auto x2prime = pos[1];
+            const auto x       = x1 * std::sin(x2);
+            const auto y       = x1 * std::cos(x2);
+            const auto xp      = x1prime * std::sin(x2prime);
+            const auto yp      = x1prime * std::cos(x2prime);
+            return spatial_vector_t<real, 2>{x - xp, y - yp};
+        }
+
+        static constexpr auto
+        calculate_distance_vector(const auto& pos, const auto& cell)
+            requires(Dims == 3)
+        {
+            const auto x1      = cell.centroid_coordinate(0);
+            const auto x1prime = pos[0];
+            const auto x2      = cell.centroid_coordinate(1);
+            const auto x2prime = pos[1];
+            const auto x3      = cell.centroid_coordinate(2);
+            const auto x3prime = pos[2];
+            const auto x       = x1 * std::sin(x2) * std::cos(x3);
+            const auto y       = x1 * std::sin(x2) * std::sin(x3);
+            const auto z       = x1 * std::cos(x2);
+            const auto xp = x1prime * std::sin(x2prime) * std::cos(x3prime);
+            const auto yp = x1prime * std::sin(x2prime) * std::sin(x3prime);
+            const auto zp = x1prime * std::cos(x2prime);
+            return spatial_vector_t<real, 3>{x - xp, y - yp, z - zp};
         }
 
         static constexpr auto
@@ -355,38 +360,45 @@ namespace simbi {
 
         static constexpr auto
         calculate_distance_vector(const auto& pos, const auto& cell)
+            requires(Dims == 1)
         {
-            if constexpr (Dims == 1) {
-                const auto x1      = cell.centroid_coordinate(0);
-                const auto x1prime = pos[0];
-                return spatial_vector_t<real, 3>{x1 - x1prime, 0.0, 0.0};
-            }
-            else if constexpr (Dims == 2) {
-                const auto x1      = cell.centroid_coordinate(0);
-                const auto x1prime = pos[0];
-                const auto x2      = cell.centroid_coordinate(1);
-                const auto x2prime = pos[1];
-                const auto x       = x1 * std::cos(x2);
-                const auto y       = x1 * std::sin(x2);
-                const auto xp      = x1prime * std::cos(x2prime);
-                const auto yp      = x1prime * std::sin(x2prime);
-                return spatial_vector_t<real, 3>{x - xp, y - yp, 0.0};
-            }
-            else {
-                const auto x1      = cell.centroid_coordinate(0);
-                const auto x1prime = pos[0];
-                const auto x2      = cell.centroid_coordinate(1);
-                const auto x2prime = pos[1];
-                const auto x3      = cell.centroid_coordinate(2);
-                const auto x3prime = pos[2];
-                const auto x       = x1 * std::cos(x2);
-                const auto y       = x1 * std::sin(x2);
-                const auto z       = x3;
-                const auto xp      = x1prime * std::cos(x2prime);
-                const auto yp      = x1prime * std::sin(x2prime);
-                const auto zp      = x3prime;
-                return spatial_vector_t<real, 3>{x - xp, y - yp, z - zp};
-            }
+            const auto x1      = cell.centroid_coordinate(0);
+            const auto x1prime = pos[0];
+            return spatial_vector_t<real, 1>{x1 - x1prime};
+        }
+
+        static constexpr auto
+        calculate_distance_vector(const auto& pos, const auto& cell)
+            requires(Dims == 2)
+        {
+            const auto x1      = cell.centroid_coordinate(0);
+            const auto x1prime = pos[0];
+            const auto x2      = cell.centroid_coordinate(1);
+            const auto x2prime = pos[1];
+            const auto x       = x1 * std::cos(x2);
+            const auto y       = x1 * std::sin(x2);
+            const auto xp      = x1prime * std::cos(x2prime);
+            const auto yp      = x1prime * std::sin(x2prime);
+            return spatial_vector_t<real, 2>{x - xp, y - yp};
+        }
+
+        static constexpr auto
+        calculate_distance_vector(const auto& pos, const auto& cell)
+            requires(Dims == 3)
+        {
+            const auto x1      = cell.centroid_coordinate(0);
+            const auto x1prime = pos[0];
+            const auto x2      = cell.centroid_coordinate(1);
+            const auto x2prime = pos[1];
+            const auto x3      = cell.centroid_coordinate(2);
+            const auto x3prime = pos[2];
+            const auto x       = x1 * std::cos(x2);
+            const auto y       = x1 * std::sin(x2);
+            const auto z       = x3;
+            const auto xp      = x1prime * std::cos(x2prime);
+            const auto yp      = x1prime * std::sin(x2prime);
+            const auto zp      = x3prime;
+            return spatial_vector_t<real, 3>{x - xp, y - yp, z - zp};
         }
 
         static constexpr auto
@@ -454,28 +466,32 @@ namespace simbi {
 
         static constexpr auto
         calculate_distance_vector(const auto& pos, const auto& cell)
+            requires(Dims == 1)
         {
-            if constexpr (Dims == 1) {
-                return spatial_vector_t<real, 3>{
-                  cell.centroid_coordinate(0) - pos[0],
-                  0.0,
-                  0.0
-                };
-            }
-            else if constexpr (Dims == 2) {
-                return spatial_vector_t<real, 3>{
-                  cell.centroid_coordinate(0) - pos[0],
-                  cell.centroid_coordinate(1) - pos[1],
-                  0.0
-                };
-            }
-            else {
-                return spatial_vector_t<real, 3>{
-                  cell.centroid_coordinate(0) - pos[0],
-                  cell.centroid_coordinate(1) - pos[1],
-                  cell.centroid_coordinate(2) - pos[2]
-                };
-            }
+            return spatial_vector_t<real, 1>{
+              cell.centroid_coordinate(0) - pos[0]
+            };
+        }
+
+        static constexpr auto
+        calculate_distance_vector(const auto& pos, const auto& cell)
+            requires(Dims == 2)
+        {
+            return spatial_vector_t<real, 2>{
+              cell.centroid_coordinate(0) - pos[0],
+              cell.centroid_coordinate(1) - pos[1]
+            };
+        }
+
+        static constexpr auto
+        calculate_distance_vector(const auto& pos, const auto& cell)
+            requires(Dims == 3)
+        {
+            return spatial_vector_t<real, 3>{
+              cell.centroid_coordinate(0) - pos[0],
+              cell.centroid_coordinate(1) - pos[1],
+              cell.centroid_coordinate(2) - pos[2]
+            };
         }
 
         static constexpr auto

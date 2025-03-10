@@ -45,8 +45,8 @@ def try_checkpoint_initialization(
 
     return (
         Maybe.of(config.checkpoint_file)
-        .bind_with_context(load_checkpoint, "Failed to load checkpoint")
-        .map_with_context(
+        .bind(load_checkpoint)
+        .map(
             lambda chkpt: SimulationBundle(
                 mesh_config=MeshSettings.from_dict(chkpt.setup),
                 grid_config=GridSettings.from_dict(
@@ -56,8 +56,7 @@ def try_checkpoint_initialization(
                 sim_config=SimulationSettings.from_dict(chkpt.setup),
                 state=chkpt.state.to_numpy(),
                 staggered_bfields=chkpt.staggered_bfields,
-            ),
-            "Failed to create bundle from checkpoint",
+            )
         )
     )
 

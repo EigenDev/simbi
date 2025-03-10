@@ -91,7 +91,7 @@ namespace simbi {
             // Source particle methods
             DUAL void inject(auto& cons_state)
             {
-                for (const auto& idx : cut_cell_indices()) {
+                for (const auto& idx : this->cut_cell_indices()) {
                     auto& cell = cons_state[idx];
                     cell.mass() += injection_rate_ * cell.volume_fraction;
                     cell.momentum() +=
@@ -99,7 +99,7 @@ namespace simbi {
                     cell.nrg() += injection_energy_ * cell.volume_fraction;
                 }
             }
-        }
+        };
     }   // namespace ib
 
 }   // namespace simbi

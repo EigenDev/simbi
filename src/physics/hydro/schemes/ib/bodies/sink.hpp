@@ -94,15 +94,16 @@ namespace simbi {
                 for (const auto& idx : this->cut_cell_indices()) {
                     const auto& cell = this->cell_info_[idx];
                     if (std::abs(cell.distance) <= accretion_radius_) {
-                        const auto mesh_cell = this->mesh_.cell_geometry(idx);
+                        const auto mesh_cell =
+                            this->mesh_.get_cell_from_global(idx);
                         const T dm =
-                            accretion_efficiency_ * prim_states[idx].rho() *
+                            accretion_efficiency_ * prim_states[idx]->rho() *
                             cell.volume_fraction * mesh_cell.calculate_volume();
 
                         total_mass += dm;
-                        total_momentum += prim_states[idx].velocity() * dm;
+                        total_momentum += prim_states[idx]->velocity() * dm;
 
-                        prim_states[idx].rho() *= (1.0 - cell.volume_fraction);
+                        prim_states[idx]->rho() *= (1.0 - cell.volume_fraction);
                     }
                 }
 
@@ -176,7 +177,7 @@ namespace simbi {
                     2.0 * this->grav_strength_ * this->mass_ /
                     std::abs(cell.distance)
                 );
-                const auto v_rel = (this->velocity_ - prim_state.velocity());
+                const auto v_rel = (this->velocity_ - prim_state->velocity());
                 if (v_rel.norm() > v_esc) {
                     return false;
                 }
@@ -193,27 +194,28 @@ namespace simbi {
                     const auto& cell = this->cell_info_[idx];
 
                     // Get local sound speed
-                    const T cs = prim_states[idx].sound_speed(gamma);
+                    const T cs = prim_states[idx]->sound_speed(gamma);
 
                     if (should_accrete(cell, prim_states[idx], cs)) {
-                        const auto mesh_cell = this->mesh_.cell_geometry(idx);
-                        const T dm =
-                            accretion_efficiency_ * prim_states[idx].rho() *
-                            cell.volume_fraction * mesh_cell.volume()();
+                        const auto mesh_cell =
+                            this->mesh_.get_cell_from_global(idx);
+                        const T dm = accretion_efficiency_ *
+                                     prim_states[idx]->rho() *
+                                     cell.volume_fraction * mesh_cell.volume();
 
                         total_mass += dm;
-                        total_momentum += prim_states[idx].velocity() * dm;
+                        total_momentum += prim_states[idx]->velocity() * dm;
 
                         // remove mass from fluid
-                        prim_states[idx].rho() *= (1.0 - cell.volume_fraction);
+                        prim_states[idx]->rho() *= (1.0 - cell.volume_fraction);
 
                         // update accretion stats
                         accretion_stats_.total_mass_accreted += dm;
                         accretion_stats_.total_energy_acrcreted +=
                             0.5 * dm *
-                            prim_states[idx].velocity().norm_squared();
+                            prim_states[idx]->velocity().norm_squared();
                         accretion_stats_.total_momentum_accreted +=
-                            prim_states[idx].velocity() * dm;
+                            prim_states[idx]->velocity() * dm;
                     }
                 }
 

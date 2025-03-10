@@ -53,49 +53,62 @@
 #include "core/types/containers/ndarray.hpp"
 #include "physics/hydro/schemes/ib/bodies/gravitational.hpp"
 #include "physics/hydro/schemes/ib/bodies/sink.hpp"
+#include "physics/hydro/schemes/ib/systems/body_system.hpp"
 
 namespace simbi {
     namespace ibsystem {
         // concrete orbital n-body system implementation
         // that tracks orbital parameters like energy, angular momentum, etc.
         template <typename T, size_type Dims, typename MeshType>
-        class OrbitalSystem
+        class OrbitalSystem : public BodySystem<T, Dims, MeshType>
         {
+            // dims < 3D, we work with j-scalar. Otherwise, it's the full
+            // vector.
+            using ang_type =
+                std::conditional_t < Dims<3, T, spatial_vector_t<T, Dims>>;
+
           private:
-            ndarray<
-                util::smart_ptr<ib::GravitationalBody<T, Dims, MeshType>>,
-                1>
-                bodies_;
             spatial_vector_t<T, Dims> com_;
-            spatial_vector_t<T, Dims> angular_momentum_;
+            ang_type angular_momentum_;
             T total_energy_;
             T total_mass_;
-            MeshType mesh_;
+            T gamma_;
+
+          protected:
+            T initial_energy_;
+            ang_type initial_angular_momentum_;
+
+            DUAL void check_conservation_errors()
+            {
+                // Check relative energy error
+                T energy_error = std::abs(
+                    (total_energy_ - initial_energy_) / initial_energy_
+                );
+
+                // Check angular momentum conservation
+                T ang_mom_error = [&]() {
+                    if constexpr (Dims == 3) {
+                        return (angular_momentum_ - initial_angular_momentum_)
+                                   .norm() /
+                               initial_angular_momentum_.norm();
+                    }
+                    else {
+                        return (angular_momentum_ - initial_angular_momentum_) /
+                               initial_angular_momentum_;
+                    }
+                }();
+
+                if (energy_error > 1e-6 || ang_mom_error > 1e-6) {
+                    // Log warning or take corrective action
+                    // Could add a correction step here
+                }
+            }
 
           public:
-            DUAL OrbitalSystem(const MeshType& mesh) : mesh_(mesh) {}
-
-            // method to add a gravitational body to the system
-            DUAL void add_body(
-                const spatial_vector_t<T, Dims>& position,
-                const spatial_vector_t<T, Dims>& velocity,
-                const T mass,
-                const T radius,
-                const T grav_strength,
-                const T softening = 0.01   // Small fraction of radius
-            )
+            // using BodySystem<T, Dims, MeshType>::BodySystem;
+            DUAL OrbitalSystem(const MeshType& mesh, const real gamma)
+                : BodySystem<T, Dims, MeshType>(mesh), gamma_(gamma)
             {
-                auto body =
-                    util::make_unique<ib::GravitationalBody<T, Dims, MeshType>>(
-                        mesh_,
-                        position,
-                        velocity,
-                        mass,
-                        radius,
-                        grav_strength,
-                        softening
-                    );
-                bodies_.push_back(body);
             }
 
             // method to add a gravitational sink to the system
@@ -111,7 +124,7 @@ namespace simbi {
             {
                 auto sink = util::make_unique<
                     ib::GravitationalSinkParticle<T, Dims, MeshType>>(
-                    mesh_,
+                    this->mesh_,
                     position,
                     velocity,
                     mass,
@@ -120,27 +133,102 @@ namespace simbi {
                     softening,
                     accretion_efficiency
                 );
-                bodies_.push_back(sink);
+                this->bodies_.push_back(sink);
             }
 
-            DUAL void update_system(auto& prim_states, const T dt)
+            DUAL void update_system(auto& cons_state, const T dt)
             {
-                compute_center_of_mass();
-                // update bodies and sinks
-                for (auto& body : bodies_) {
-                    body->compute_body_forces(bodies_);
-                    body->update_position(dt);
-
-                    // Handle accretion if body is a sink
-                    if (auto* sink = dynamic_cast<
-                            ib::GravitationalSinkParticle<T, Dims, MeshType>*>(
-                            body.get()
-                        )) {
-                        sink->accrete(prim_states);
-                    }
+                // First half kick for all bodies
+                for (auto& body : this->bodies_) {
+                    body->advance_velocity(0.5 * dt);
                 }
 
+                // Full drift
+                for (auto& body : this->bodies_) {
+                    body->advance_position(dt);
+                }
+
+                // Recompute forces
+                for (auto& body : this->bodies_) {
+                    body->compute_body_forces(this->bodies_);
+                }
+
+                for (auto& body : this->bodies_) {
+                    body->spread_boundary_forces(cons_state, dt);
+                }
+
+                for (auto& body : this->bodies_) {
+                    body->apply_body_forces(cons_state, this->bodies_, dt);
+                }
+
+                // Second half kick
+                for (auto& body : this->bodies_) {
+                    body->advance_velocity(0.5 * dt);
+                }
+
+                // Handle accretion if needed
+                // for (auto& body : this->bodies_) {
+                //     if (auto* sink = dynamic_cast<
+                //             ib::GravitationalSinkParticle<T, Dims,
+                //             MeshType>*>( body.get()
+                //         )) {
+                //         sink->accrete(cons_state, gamma_);
+                //     }
+                // }
+
+                // Update diagnostics
+                compute_center_of_mass();
                 update_conserved_quantities();
+                check_conservation_errors();
+            }
+
+            DUAL void init_system()
+            {
+                // Initial force computation for all bodies
+                for (auto& body : this->bodies_) {
+                    body->compute_body_forces(this->bodies_);
+                }
+
+                // Initialize conserved quantities
+                compute_center_of_mass();
+                update_conserved_quantities();
+
+                // Store initial values for energy tracking
+                initial_energy_           = total_energy_;
+                initial_angular_momentum_ = angular_momentum_;
+            }
+
+            DUAL void advance_velocities(const T dt)
+            {
+                for (auto& body : this->bodies_) {
+                    body->advance_velocity(dt);
+                }
+            }
+            DUAL void advance_positions(const T dt)
+            {
+                for (auto& body : this->bodies_) {
+                    body->advance_position(dt);
+                }
+            }
+
+            DUAL void compute_and_apply_forces(
+                auto& cons_state,
+                const auto& prim_state,
+                const T dt
+            )
+            {
+                for (auto& body : this->bodies_) {
+                    body->compute_body_forces(this->bodies_);
+                }
+
+                for (auto& body : this->bodies_) {
+                    body->apply_body_forces(
+                        cons_state,
+                        prim_state,
+                        this->bodies_,
+                        dt
+                    );
+                }
             }
 
           private:
@@ -149,7 +237,7 @@ namespace simbi {
                 com_        = spatial_vector_t<T, Dims>();
                 total_mass_ = 0;
 
-                for (const auto& body : bodies_) {
+                for (const auto& body : this->bodies_) {
                     com_ += body->position() * body->mass();
                     total_mass_ += body->mass();
                 }
@@ -159,9 +247,9 @@ namespace simbi {
             DUAL void update_conserved_quantities()
             {
                 total_energy_     = 0;
-                angular_momentum_ = spatial_vector_t<T, Dims>();
+                angular_momentum_ = ang_type();
 
-                for (const auto& body : bodies_) {
+                for (const auto& body : this->bodies_) {
                     const auto v = body->velocity();
                     const auto r = body->position() - com_;
 

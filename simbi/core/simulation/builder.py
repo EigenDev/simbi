@@ -44,6 +44,7 @@ class SimStateDict(TypedDict):
     boundary_source_lib: str
     mesh_motion: bool
     homologous: bool
+    bodies: list[dict[str, float | str | list[float]]]
 
 
 @dataclass
@@ -179,6 +180,7 @@ class SimStateBuilder:
             boundary_source_lib=str(io.boundary_source_lib or ""),
             mesh_motion=mesh.mesh_motion,
             homologous=mesh.is_homologous,
+            bodies=sim.bodies,
         )
 
         SimStateBuilder.prepare_data_directory(state_dict["data_directory"])
