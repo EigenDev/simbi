@@ -15,7 +15,7 @@ class SimbiParser(BaseParser):
         super().__init__(
             prog="simbi",
             usage="%(prog)s <command> <input> [options]",
-            description="Relativistic gas dynamics module",
+            description="Relativistic magneto-gas dynamics module",
             formatter_class=HelpFormatter,
             add_help=False,
         )
