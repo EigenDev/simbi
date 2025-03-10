@@ -87,7 +87,7 @@ class KeplerProblem(BaseConfig):
     def immersed_bodies(self) -> list[dict[str, Any]]:
         # Basic scales
         R_0 = 1.0
-        M_0 = 10.0
+        M_0 = 1.0
         G = 1.0
         T_0 = math.sqrt(R_0**3 / (G * M_0))
 
@@ -116,7 +116,7 @@ class KeplerProblem(BaseConfig):
 
     @simbi_property
     def checkpoint_interval(self) -> float:
-        return self.tend / 50  # 50 snapshots
+        return self.default_end_time / 50  # 50 snapshots
 
     @simbi_property
     def bounds(self) -> Sequence[Sequence[float]]:
