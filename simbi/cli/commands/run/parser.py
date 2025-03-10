@@ -223,7 +223,6 @@ def setup_parser(subparsers) -> None:
     )
 
     # Add argument groups
-    problem_args = run_parser.add_argument_group("problem")
     overridable = run_parser.add_argument_group("override")
     global_args = run_parser.add_argument_group("globals")
     onthefly = run_parser.add_argument_group("onthefly")
@@ -234,9 +233,6 @@ def setup_parser(subparsers) -> None:
         help="setup script for simulation run",
         type=validate_simbi_script,
     )
-    
-    # store the problem-specific arguments in a separate group
-    setattr(run_parser, "problem_args", problem_args)
 
     # Add group arguments
     _add_overridable_args(overridable)

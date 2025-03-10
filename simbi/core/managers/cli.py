@@ -20,13 +20,14 @@ class CLIManager:
         """Create a CLIManager from main and run parsers"""
         return cls(main_parser=main_parser, run_parser=run_parser)
 
-    def register_dynamic_arg(self, arg: DynamicArg) -> None:
+    def register_dynamic_arg(self, arg: DynamicArg, name: str) -> None:
         """Register a dynamic argument"""
         if arg.name in [a.name for a in self.dynamic_args]:
             return
 
         self.dynamic_args.append(arg)
-        problem_args = getattr(self.run_parser, "problem_args")
+        problem_args = self.run_parser.add_argument_group(name)
+
         if isinstance(arg.value, bool):
             problem_args.add_argument(
                 f"--{arg.name}", help=arg.help, action=arg.action, default=arg.value

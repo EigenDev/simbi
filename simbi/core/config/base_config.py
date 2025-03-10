@@ -370,7 +370,7 @@ class BaseConfig(metaclass=abc.ABCMeta):
     ) -> None:
         cls.cli_manager = CLIManager.from_parsers(main_parser, run_parser)
         for dynamic_arg in cls.dynamic_args:
-            cls.cli_manager.register_dynamic_arg(dynamic_arg)
+            cls.cli_manager.register_dynamic_arg(dynamic_arg, cls.__name__)
 
     @final
     @classmethod
