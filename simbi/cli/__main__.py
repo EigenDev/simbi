@@ -10,7 +10,10 @@ def main() -> None:
         pass
 
     parser = SimbiParser()
-    args, argv = parser.parse_args()
+    args, argv = parser.parse_known_args()
+
+    if args.command == "plot" and argv:
+        parser.error("unrecognized arguments: " + " ".join(argv))
 
     if hasattr(args, "func"):
         args.func(args, argv)
