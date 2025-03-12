@@ -64,6 +64,9 @@ namespace simbi {
 
         template <Regime R>
         concept Relativistic = R == Regime::SRHD || R == Regime::RMHD;
+
+        template <Regime R>
+        concept Newtonian = R == Regime::NEWTONIAN;
     }   // namespace sim_type
 
     template <typename T>
@@ -573,6 +576,16 @@ namespace simbi {
             // field components computed from the Riemann problem
             // so we just return the magnetic field components
             return this->bcomponent(nhat);
+        }
+
+        DUAL auto pressure(const real gamma, bool isothermal, real cs2) const
+            requires sim_type::Newtonian<R>
+        {
+            if (isothermal) {
+                return dens() * cs2;
+            }
+            return (gamma - 1.0) *
+                   (nrg() - 0.5 * dens() * momentum().dot(momentum()));
         }
     };
 

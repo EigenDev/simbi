@@ -1,8 +1,10 @@
 import math
+import numpy as np
 import inspect
 from numpy.typing import NDArray
-from typing import Any, Callable, Optional, cast
-import numpy as np
+from argparse import Action
+from typing import Any, Callable, Optional, cast, Type
+
 
 __all__ = ["DynamicArg"]
 
@@ -15,7 +17,7 @@ class DynamicArg:
         help: str,
         var_type: Callable[..., Any],
         choices: Optional[list[Any]] = None,
-        action: Optional[str] = "store",
+        action: str | Type[Action] = "store",
     ) -> None:
         # require that all DynamicArg instances are defined within a class
         # named `config`

@@ -244,11 +244,7 @@ namespace simbi {
             }
 
             // copy necessary data to avoid pointer issues
-            const auto handle_dynamic_bc = [mesh, io_manager, time] DEV(
-                                               const auto& coords,
-                                               const BoundaryFace face,
-                                               T& result
-                                           ) {
+            const auto handle_dynamic_bc = [mesh, io_manager, time]() {
                 if constexpr (is_conserved_v<T>) {
                     return [=] DEV(
                                const auto& coords,
@@ -287,7 +283,7 @@ namespace simbi {
                     };
                 }
                 else {
-                    // surpress compoler warning about unused captures
+                    // suppress compoler warning about unused captures
                     (void) mesh;
                     (void) io_manager;
                     (void) time;
@@ -351,7 +347,8 @@ namespace simbi {
                             case BoundaryCondition::DYNAMIC: {
                                 if constexpr (is_conserved_v<T>) {
                                     T result;
-                                    handle_dynamic_bc(
+                                    auto dynamic_handler = handle_dynamic_bc();
+                                    dynamic_handler(
                                         coordinates,
                                         static_cast<BoundaryFace>(bc_idx),
                                         result

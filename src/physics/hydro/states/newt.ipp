@@ -41,12 +41,7 @@ void Newtonian<dim>::cons2prim_impl()
             const auto& rho = cons_var.dens();
             const auto vel  = cons_var.momentum() / rho;
             const auto& chi = cons_var.chi() / rho;
-
-            const auto pre =
-                isothermal ? rho * cs2
-                           : (gamma - 1.0) *
-                                 (cons_var.nrg() - 0.5 * rho * vel.dot(vel));
-            (gamma - 1.0) * (cons_var.nrg() - 0.5 * rho * vel.dot(vel));
+            const auto pre  = cons_var.pressure(gamma, isothermal, cs2);
 
             if (pre < 0 || !std::isfinite(pre)) {
                 // store the invalid state
@@ -87,7 +82,7 @@ DUAL Newtonian<dim>::eigenvals_t Newtonian<dim>::calc_eigenvals(
     switch (this->solver_type()) {
         case Solver::HLLC: {
             // Pressure-based wave speed estimates (Batten et al. 1997)
-            const real pvrs = 0.5 * (pL + pR) - 0.5 * (vR - vL) * 0.5 *
+            const real pvrs = 0.5 * (pL + pR) - 0.5 * (vR - vL) *
                                                     (rhoL + rhoR) * 0.5 *
                                                     (csL + csR);
             const real pmin = std::min(pL, pR);
@@ -99,10 +94,6 @@ DUAL Newtonian<dim>::eigenvals_t Newtonian<dim>::calc_eigenvals(
                 pStar = pvrs;
             }
             else {
-                //  two-rarefaction approximation
-                const real gm1 = gamma - 1.0;
-                const real gp1 = gamma + 1.0;
-                const real gel = 2.0 / gm1;
 
                 if (isothermal_) {
                     // Isothermal case
@@ -113,14 +104,16 @@ DUAL Newtonian<dim>::eigenvals_t Newtonian<dim>::calc_eigenvals(
                             (rhoL * aL + rhoR * aR);
                 }
                 else {
+                    //  two-rarefaction approximation
+
                     // Adiabatic case
-                    real aL = 2.0 / gp1 / rhoL;
-                    real bR = pR * gm1 / gp1;
-                    real aR = 2.0 / gp1 / rhoR;
-                    real bL = pL * gm1 / gp1;
+                    const real aL = std::sqrt(gamma / rhoL);
+                    const real aR = std::sqrt(gamma / rhoR);
+                    const real bL = pL;
+                    const real bR = pR;
 
                     pStar = std::pow(
-                        (csL + csR - 0.5 * gm1 * (vR - vL)) /
+                        (csL + csR - 0.5 * (gamma - 1.0) * (vR - vL)) /
                             (aL / std::pow(pL + bR, 0.5) +
                              aR / std::pow(pR + bL, 0.5)),
                         2.0
@@ -134,16 +127,18 @@ DUAL Newtonian<dim>::eigenvals_t Newtonian<dim>::calc_eigenvals(
                 qL = 1.0;
             }
             else {
-                qL =
-                    std::sqrt(1.0 + (gp1 / (2.0 * gamma)) * (pStar / pL - 1.0));
+                qL = std::sqrt(
+                    1.0 + ((gamma + 1.0) / (2.0 * gamma)) * (pStar / pL - 1.0)
+                );
             }
 
             if (pStar <= pR) {
                 qR = 1.0;
             }
             else {
-                qR =
-                    std::sqrt(1.0 + (gp1 / (2.0 * gamma)) * (pStar / pR - 1.0));
+                qR = std::sqrt(
+                    1.0 + ((gamma + 1.0) / (2.0 * gamma)) * (pStar / pR - 1.0)
+                );
             }
 
             // Signal speeds
@@ -152,8 +147,8 @@ DUAL Newtonian<dim>::eigenvals_t Newtonian<dim>::calc_eigenvals(
 
             // Middle wave speed (more robust formula)
             const real aStar =
-                (pR - pL + rhoL * vL * (SL - vL) - rhoR * vR * (SR - vR)) /
-                (rhoL * (SL - vL) - rhoR * (SR - vR));
+                (pR - pL + rhoL * vL * (aL - vL) - rhoR * vR * (aR - vR)) /
+                (rhoL * (aL - vL) - rhoR * (aR - vR));
 
             if constexpr (dim == 1) {
                 return {aL, aR, aStar, pStar};

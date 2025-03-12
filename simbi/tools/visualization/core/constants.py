@@ -1,4 +1,8 @@
-VALID_PLOT_TYPES= ["line", "multidim", "temporal", "histogram"]
+VALID_PLOT_TYPES = ["line", "multidim", "temporal", "histogram"]
+
+FIELD_ALIASES = {
+    "Sigma": "rho",
+}
 
 DERIVED = [
     "D",
@@ -19,7 +23,7 @@ DERIVED = [
     "ptot",
     "pmag",
     "sigma",
-    "enthalpy_density"
+    "enthalpy_density",
 ]
 FIELD_CHOICES = [
     "rho",
@@ -33,9 +37,10 @@ FIELD_CHOICES = [
     "b1",
     "b2",
     "b3",
+    "Sigma",
 ] + DERIVED
 
-# these fields will be plotted in 
+# these fields will be plotted in
 # linear scale regardless of the
 # log_scale setting
 LINEAR_FIELDS = [
@@ -66,6 +71,4 @@ LEGEND_LOCATIONS = [
     "center",
 ]
 
-FONT_SIZES = {
-    f"{x}pt": x for x in range(6, 21)
-}
+FONT_SIZES = {f"{x}pt": x for x in range(6, 21)}

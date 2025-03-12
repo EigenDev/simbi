@@ -62,11 +62,13 @@ class MultidimPlotter(BasePlotter, DataHandlerMixin, AnimationMixin, Coordinates
             labels = cycle([labels])
         else:
             labels = cycle(labels)
+
         for data in self.data_manager.iter_files():
             if not data.setup["is_cartesian"]:
                 # create a cycle of theta values that shift backwards by 2*pi/patches
                 thetas = self._generate_theta_values(data.setup["x2max"], self.patches)
                 theta_cycle = cycle(thetas)
+
             for idx in range(self.patches):
                 field = next(field_cycle)
                 is_distinct_field = idx < nfields

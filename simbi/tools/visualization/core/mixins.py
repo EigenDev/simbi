@@ -1,7 +1,6 @@
 from matplotlib.animation import FuncAnimation
 from typing import Dict, Any
-from matplotlib import colors as mcolors
-from ..core.constants import DERIVED
+from ..core.constants import DERIVED, FIELD_ALIASES
 from ....functional.helpers import calc_any_mean
 from ... import utility as util
 import numpy as np
@@ -13,11 +12,12 @@ class DataHandlerMixin:
 
     def get_variable(self, fields: Dict[str, np.ndarray], field: str) -> np.ndarray:
         """Extract and transform variable data"""
-        var = (
-            util.prims2var(fields, field)
-            if field in DERIVED
-            else fields.get(field, fields["v1"] if field == "v" else fields[field])
-        )
+        if field in DERIVED:
+            var = util.derived2var(fields, field)
+        elif field in FIELD_ALIASES:
+            var = fields[FIELD_ALIASES[field]]
+        else:
+            var = fields["v1"] if field == "v" else fields[field]
 
         if self.config["style"].units:
             self._apply_units(var, field)

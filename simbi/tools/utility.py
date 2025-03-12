@@ -75,6 +75,7 @@ FIELD_MAP: Dict[str, str] = {
     "pmag": r"$p_{\rm mag}$",
     "ptot": r"$p_{\rm tot}$",
     "sigma": r"$\sigma$",
+    "Sigma": r"\Sigma",
     "enthalpy_density": r"$w$",
     "b1": r"$B_1$",
     "b2": r"$B_2$",
@@ -131,7 +132,7 @@ class FieldMapper:
 
     def _get_field_type(self, field: str) -> FieldType:
         """Determine field type"""
-        if field in ["rho", "D"]:
+        if field in ["rho", "D", "Sigma"]:
             return FieldType.DENSITY
         if field in ["energy", "p"]:
             return FieldType.ENERGY

@@ -93,10 +93,6 @@ class BaseConfig(metaclass=abc.ABCMeta):
                     f"Available properties: {list(BaseConfig.base_properties.keys())}"
                 )
 
-        # Compile source terms if any
-        if any([cls.hydro_sources, cls.gravity_sources, cls.boundary_sources]):
-            cls._compile_source_terms()
-
         # get config class if it exists
         config_cls = getattr(cls, "config", None)
         if config_cls is None:
@@ -115,6 +111,10 @@ class BaseConfig(metaclass=abc.ABCMeta):
             cls.dynamic_args.append(arg)
 
     def __init__(self) -> None:
+        # Compile source terms if any
+        if any([self.hydro_sources, self.gravity_sources, self.boundary_sources]):
+            self._compile_source_terms()
+
         # Create config namespace that preserves DynamicArg instances but returns raw values
         dynamic_args = {
             name: arg
@@ -274,15 +274,15 @@ class BaseConfig(metaclass=abc.ABCMeta):
         """list of immersed bodies (IB method of Peskin (2002))"""
         return []
 
-    @simbi_class_property(group="misc")
+    @simbi_property(group="misc")
     def gravity_sources(cls) -> Optional[str]:
         return None
 
-    @simbi_class_property(group="misc")
+    @simbi_property(group="misc")
     def hydro_sources(cls) -> Optional[str]:
         return None
 
-    @simbi_class_property(group="misc")
+    @simbi_property(group="misc")
     def boundary_sources(cls) -> Optional[str]:
         return None
 
@@ -374,18 +374,21 @@ class BaseConfig(metaclass=abc.ABCMeta):
         """checks whether the simulation is isothermal"""
         return adiabatic_index == 1.0
 
-    @simbi_derived_property(
-        depends_on=["isothermal", "adiabatic_index"], group="sim_state"
-    )
-    def sound_speed(self, isothermal: bool, adiabatic_index: float) -> float:
+    @simbi_property(group="sim_state")
+    def sound_speed(self) -> float:
         """if the simulation is determined to be isothermal, the user should define the sound speed or we error out"""
-        if isothermal:
+        if self.isothermal:
             raise NotImplementedError(
                 "For isothermal simulations (gamma=1), the sound speed must be defined. "
                 "Override the sound_speed to get rid of this error"
             )
 
         return 0.0
+
+    @simbi_property(group="misc")
+    def buffer_parameters(self) -> dict[str, float]:
+        """buffer zone parameters for disk simulations"""
+        return {}
 
     def set_logdir(cls, value: str) -> None:
         setattr(cls, "log_directory", value)
@@ -450,17 +453,18 @@ class BaseConfig(metaclass=abc.ABCMeta):
                     setattr(cls, "spatial_order", "plm")
                     setattr(cls, "temporal_order", "rk2")
 
-    @classmethod
-    def _compile_source_terms(cls) -> None:
+    def _compile_source_terms(self) -> None:
         """If the user provided source code, try to compile it"""
         sources = {
-            "hydro": cls.hydro_sources,
-            "gravity": cls.gravity_sources,
-            "boundary": cls.boundary_sources,
+            "hydro": self.hydro_sources,
+            "gravity": self.gravity_sources,
+            "boundary": self.boundary_sources,
         }
-        compiled = cls.source_manager.compile_sources(cls.__name__.lower(), sources)
+        compiled = self.source_manager.compile_sources(
+            type(self).__name__.lower(), sources
+        )
         for name, path in compiled.items():
-            setattr(cls, f"{name}_source_lib", str(path))
+            setattr(self, f"{name}_source_lib", str(path))
 
     def __getattribute__(self, name: str) -> Any:
         """Validate property access. (Sometimes we make mistakes in our configs :P)"""
