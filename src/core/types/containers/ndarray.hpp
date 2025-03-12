@@ -49,7 +49,8 @@
 #ifndef NDARRAY_HPP
 #define NDARRAY_HPP
 
-#include "build_options.hpp"   // for global::on_gpu, rea;
+#include "../utility/operation_traits.hpp"   // for OperationTraits, PoinwiseOp
+#include "build_options.hpp"                 // for global::on_gpu, rea;
 #include "collapsable.hpp"
 #include "core/managers/array_props.hpp"          // for array_properties
 #include "core/managers/memory_manager.hpp"       // for memory_manager
@@ -66,7 +67,6 @@
 #include "util/tools/helpers.hpp"                 // for unravel_index
 #include <cassert>                                // for assert
 #include <span>                                   // for span
-
 namespace simbi {
 
     template <typename T, size_type Dims = 1>
@@ -433,52 +433,6 @@ namespace simbi {
             );
         }
 
-        template <typename F, typename... Arrays>
-        struct TransformFunctor {
-            F op;
-            T* mem;
-            std::tuple<Arrays*...> arrays;
-
-            DUAL TransformFunctor(F op_, T* mem_, Arrays*... arrays_)
-                : op(op_), mem(mem_), arrays(std::make_tuple(arrays_...))
-            {
-            }
-
-            template <size_t... Is>
-            DUAL void apply_impl(size_type idx, std::index_sequence<Is...>)
-            {
-                mem[idx] = op(mem[idx], std::get<Is>(arrays)[idx]...);
-            }
-
-            DUAL void operator()(size_type idx)
-            {
-                apply_impl(idx, std::make_index_sequence<sizeof...(Arrays)>{});
-            }
-        };
-
-        template <typename F, typename... Arrays>
-        struct TransformFunctorIdcs {
-            F op;
-            T* mem;
-            std::tuple<Arrays*...> arrays;
-
-            DUAL TransformFunctorIdcs(F op_, T* mem_, Arrays*... arrays_)
-                : op(op_), mem(mem_), arrays(std::make_tuple(arrays_...))
-            {
-            }
-
-            template <size_t... Is>
-            DUAL void apply_impl(size_type idx, std::index_sequence<Is...>)
-            {
-                mem[idx] = op(mem[idx], idx, std::get<Is>(arrays)[idx]...);
-            }
-
-            DUAL void operator()(size_type idx)
-            {
-                apply_impl(idx, std::make_index_sequence<sizeof...(Arrays)>{});
-            }
-        };
-
         template <typename F>
         void transform(F op, const ExecutionPolicy<>& policy)
         {
@@ -504,27 +458,13 @@ namespace simbi {
             const DependentArrays&... arrays
         )
         {
-            if constexpr (global::on_gpu) {
-                mem_.ensure_device_synced();
-
-                // functor with captured arrays because device lambdas
-                // can't capture parameter pack elements
-                auto functor = TransformFunctor<F, DependentArrays...>(
-                    op,
-                    mem_.data(),
-                    arrays.data()...
-                );
-
-                parallel_for(policy, [functor] DEV(size_type ii) {
-                    functor(ii);
-                });
-                policy.synchronize();
-            }
-            else {
-                parallel_for(policy, [=, this](size_type ii) {
-                    mem_[ii] = op(mem_[ii], arrays[ii]...);
-                });
-            }
+            OperationTraits<PointwiseOp>::execute(
+                mem_.data(),
+                this->size_,
+                op,
+                policy,
+                arrays.data()...
+            );
         }
 
         // transform with variadic dependent ndarrays
@@ -536,25 +476,13 @@ namespace simbi {
             DependentArrays&... arrays
         )
         {
-            if constexpr (global::on_gpu) {
-                mem_.ensure_device_synced();
-
-                auto functor = TransformFunctor<F, DependentArrays...>(
-                    op,
-                    mem_.data(),
-                    arrays.data()...
-                );
-
-                parallel_for(policy, [functor] DEV(size_type ii) {
-                    functor(ii);
-                });
-                policy.synchronize();
-            }
-            else {
-                parallel_for(policy, [&](size_type ii) {
-                    mem_[ii] = op(mem_[ii], arrays[ii]...);
-                });
-            }
+            OperationTraits<PointwiseOp>::execute(
+                mem_.data(),
+                this->size_,
+                op,
+                policy,
+                arrays.data()...
+            );
         }
 
         // transform with no dependent ndarrays
@@ -584,25 +512,13 @@ namespace simbi {
             const DependentArrays&... arrays
         )
         {
-            if constexpr (global::on_gpu) {
-                mem_.ensure_device_synced();
-
-                auto functor = TransformFunctorIdcs<F, DependentArrays...>(
-                    op,
-                    mem_.data(),
-                    arrays.data()...
-                );
-
-                parallel_for(policy, [functor] DEV(size_type ii) {
-                    functor(ii);
-                });
-                policy.synchronize();
-            }
-            else {
-                parallel_for(policy, [=, this](size_type ii) {
-                    mem_[ii] = op(mem_[ii], ii, arrays[ii]...);
-                });
-            }
+            OperationTraits<PointwiseOpIdx>::execute(
+                mem_.data(),
+                this->size_,
+                op,
+                policy,
+                arrays.data()...
+            );
         }
 
         template <typename U, typename F>
