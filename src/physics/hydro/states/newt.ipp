@@ -49,11 +49,6 @@ void Newtonian<dim>::cons2prim_impl()
             (gamma - 1.0) * (cons_var.nrg() - 0.5 * rho * vel.dot(vel));
 
             if (pre < 0 || !std::isfinite(pre)) {
-                std::cout << "iso: " << isothermal << std::endl;
-                std::cout << "cs2: " << cs2 << std::endl;
-                std::cout << "rho: " << rho << std::endl;
-                std::cout << "pre: " << pre << std::endl;
-                std::cin.get();
                 // store the invalid state
                 loc->store(true);
                 return simbi::Nothing;
