@@ -84,6 +84,15 @@ class BaseConfig(metaclass=abc.ABCMeta):
     def __init_subclass__(cls: Type["BaseConfig"], *args: Any, **kwargs: Any) -> None:
         super().__init_subclass__(*args, **kwargs)
 
+        # prevent users from defining properties that don't exist in the BaseConfig
+        for name, value in vars(cls).items():
+            if isinstance(value, PropertyBase) and not hasattr(BaseConfig, name):
+                raise AttributeError(
+                    f"Invalid simbi_property '{name}' in {cls.__name__}. "
+                    f"All simbi_properties must be defined in BaseConfig."
+                    f"Available properties: {list(BaseConfig.base_properties.keys())}"
+                )
+
         # Compile source terms if any
         if any([cls.hydro_sources, cls.gravity_sources, cls.boundary_sources]):
             cls._compile_source_terms()
@@ -359,7 +368,25 @@ class BaseConfig(metaclass=abc.ABCMeta):
             )
         return 0.0
 
-    @classmethod
+    @final
+    @simbi_derived_property(depends_on=["adiabatic_index"], group="sim_state")
+    def isothermal(self, adiabatic_index: float) -> bool:
+        """checks whether the simulation is isothermal"""
+        return adiabatic_index == 1.0
+
+    @simbi_derived_property(
+        depends_on=["isothermal", "adiabatic_index"], group="sim_state"
+    )
+    def sound_speed(self, isothermal: bool, adiabatic_index: float) -> float:
+        """if the simulation is determined to be isothermal, the user should define the sound speed or we error out"""
+        if isothermal:
+            raise NotImplementedError(
+                "For isothermal simulations (gamma=1), the sound speed must be defined. "
+                "Override the sound_speed to get rid of this error"
+            )
+
+        return 0.0
+
     def set_logdir(cls, value: str) -> None:
         setattr(cls, "log_directory", value)
 

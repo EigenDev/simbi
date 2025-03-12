@@ -166,8 +166,9 @@ namespace simbi {
             // Cut cell data
             ndarray<CellInfo, Dims> cell_info_;
 
-            T drag_coeff_{0.47};     // default sphere drag coefficient
-            bool is_sink_ = false;   // is this a sink particle?
+            T drag_coeff_{0.47};            // default sphere drag coefficient
+            bool is_sink_        = false;   // is this a sink particle?
+            bool fixed_position_ = true;    // do I want the body to move?
 
             DUAL auto cut_cell_indices() const
             {
@@ -252,8 +253,9 @@ namespace simbi {
                 const spatial_vector_t<T, Dims>& velocity,
                 const T mass,
                 const T radius,
-                const T drag_coeff = 0.47,
-                const bool is_sink = false
+                const T drag_coeff        = 0.47,
+                const bool is_sink        = false,
+                const bool fixed_position = true
             )
                 : BaseBody<T, Dims, MeshType>(
                       mesh,
@@ -264,7 +266,8 @@ namespace simbi {
                   ),
                   cell_info_(mesh.size()),
                   drag_coeff_(drag_coeff),
-                  is_sink_(is_sink)
+                  is_sink_(is_sink),
+                  fixed_position_(fixed_position)
             {
                 update_cut_cells();
             }
@@ -273,12 +276,18 @@ namespace simbi {
 
             DUAL void advance_position(const T dt) override
             {
+                if (fixed_position_) {
+                    return;
+                }
                 this->position_ += this->velocity_ * dt;
                 update_cut_cells();
             }
 
             DUAL void advance_velocity(const T dt)
             {
+                if (fixed_position_) {
+                    return;
+                }
                 this->velocity_ += this->force_ * dt / this->mass_;
             }
 
@@ -309,16 +318,55 @@ namespace simbi {
                             mesh_cell.compute_distance_vector(this->position_);
                         cell.distance = r.norm() - this->radius_;
 
+                        // if (r.norm() <= 0.2) {
+                        //     // std::cout << "idx in cut cells: " << idx
+                        //     //           << std::endl;
+                        //     std::cout << "Distance: " << cell.distance
+                        //               << std::endl;
+                        //     // std::cout << "radius: " << this->radius_
+                        //     //           << std::endl;
+                        //     std::cout << "mesh cell width: "
+                        //               << mesh_cell.max_cell_width()
+                        //               << std::endl;
+                        //     // std::cout << "mesh cell centroid: "
+                        //     //           << mesh_cell.centroid() <<
+                        //     std::endl;
+                        //     // std::cout << "body position: " <<
+                        //     this->position_
+                        //     //           << std::endl;
+                        //     std::cout << "mesh cell norm: " << r.norm()
+                        //               << std::endl;
+                        // }
+
+                        const auto dx = mesh_cell.max_cell_width() * T(0.5);
+                        const auto max_corner_dist = dx * std::sqrt(T(Dims));
+
                         // Use mesh geometry for volume fraction
-                        if (std::abs(cell.distance) <=
-                            mesh_cell.max_cell_width()) {
-                            r.normalize();
+                        if (std::abs(cell.distance) <= max_corner_dist) {
+                            // find dominant direction by comparing absolute
+                            // values of components
+                            auto max_dir = 0;
+                            auto max_val = std::abs(r[0]);
+
+                            for (size_type ii = 1; ii < Dims; ++ii) {
+                                if (std::abs(r[ii]) > max_val) {
+                                    max_val = std::abs(r[ii]);
+                                    max_dir = ii;
+                                }
+                            }
+
                             cell.is_cut          = true;
-                            cell.normal          = r;
+                            cell.normal          = spatial_vector_t<T, Dims>();
+                            cell.normal[max_dir] = r[max_dir] > 0 ? 1.0 : -1.0;
                             cell.volume_fraction = compute_volume_fraction(
                                 cell.distance,
                                 mesh_cell
                             );
+                        }
+                        else if (cell.distance < 0.0) {
+                            // the cell is completely inside the body
+                            cell.is_cut          = true;
+                            cell.volume_fraction = 1.0;
                         }
                         return cell;
                     },

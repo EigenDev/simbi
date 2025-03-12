@@ -36,9 +36,9 @@ cdef extern from "core/types/utility/init_conditions.hpp":
 
 cdef extern from "core/types/utility/init_conditions.hpp":
     cdef cppclass InitialConditions:
-        real time, checkpoint_interval, dlogt, plm_theta, engine_duration, gamma, cfl, tend
+        real time, checkpoint_interval, dlogt, plm_theta, gamma, cfl, tend, sound_speed_squared
         int nx, ny, nz, checkpoint_idx
-        bool quirk_smoothing, mesh_motion, homologous
+        bool quirk_smoothing, mesh_motion, homologous, isothermal
         vector[vector[real]] sources, bfield
         string data_directory, coord_system, solver
         string x1_spacing, x2_spacing, x3_spacing

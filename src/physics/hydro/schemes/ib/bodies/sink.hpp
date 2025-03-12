@@ -123,7 +123,7 @@ namespace simbi {
           protected:
             struct AccretionStats {
                 T total_mass_accreted{0};
-                T total_energy_acrcreted{0};
+                T total_energy_accreted{0};
                 spatial_vector_t<T, Dims> total_momentum_accreted;
                 spatial_vector_t<T, Dims> total_angular_momentum_accreted;
             };
@@ -168,6 +168,7 @@ namespace simbi {
                 // bondi radius
                 const auto r_bondi =
                     2.0 * this->grav_strength_ * this->mass_ / (cs * cs);
+
                 if (std::abs(cell.distance) > r_bondi) {
                     return false;
                 }
@@ -185,12 +186,20 @@ namespace simbi {
                 return true;
             }
 
-            DUAL void accrete(auto& prim_states, real gamma)
+            DUAL void accrete(
+                auto& cons_states,
+                const auto& prim_states,
+                const real gamma
+            )
             {
                 T total_mass = 0;
                 spatial_vector_t<T, Dims> total_momentum;
+                const auto cut_cells = this->cut_cell_indices();
 
-                for (const auto& idx : this->cut_cell_indices()) {
+                // floor values for stability
+                const auto density_floor = global::epsilon;
+
+                for (const auto idx : cut_cells) {
                     const auto& cell = this->cell_info_[idx];
 
                     // Get local sound speed
@@ -199,23 +208,46 @@ namespace simbi {
                     if (should_accrete(cell, prim_states[idx], cs)) {
                         const auto mesh_cell =
                             this->mesh_.get_cell_from_global(idx);
-                        const T dm = accretion_efficiency_ *
-                                     prim_states[idx]->rho() *
-                                     cell.volume_fraction * mesh_cell.volume();
+                        const T cell_mass =
+                            cons_states[idx].dens() * mesh_cell.volume();
 
-                        total_mass += dm;
-                        total_momentum += prim_states[idx]->velocity() * dm;
+                        // Calculate maximum mass fraction that can be removed
+                        const T max_removable_fraction =
+                            (cell_mass - density_floor * mesh_cell.volume()) /
+                            cell_mass;
 
-                        // remove mass from fluid
-                        prim_states[idx]->rho() *= (1.0 - cell.volume_fraction);
+                        // Calculate desired removal fraction based on
+                        // efficiency
+                        const T desired_fraction =
+                            accretion_efficiency_ * cell.volume_fraction;
 
-                        // update accretion stats
-                        accretion_stats_.total_mass_accreted += dm;
-                        accretion_stats_.total_energy_acrcreted +=
-                            0.5 * dm *
-                            prim_states[idx]->velocity().norm_squared();
-                        accretion_stats_.total_momentum_accreted +=
-                            prim_states[idx]->velocity() * dm;
+                        // Take minimum to ensure we don't go below floor
+                        const T removal_fraction =
+                            std::min(max_removable_fraction, desired_fraction);
+
+                        if (removal_fraction > 0) {
+                            // Calculate actual mass removed
+                            const T dm = removal_fraction * cell_mass;
+
+                            // Remove mass and momentum proportionally
+                            cons_states[idx].dens() *= (1.0 - removal_fraction);
+                            cons_states[idx].momentum() *=
+                                (1.0 - removal_fraction);
+                            cons_states[idx].nrg() *= (1.0 - removal_fraction);
+
+                            total_mass += dm;
+                            total_momentum += prim_states[idx]->velocity() * dm;
+
+                            // Update accretion stats
+                            accretion_stats_.total_mass_accreted += dm;
+                            accretion_stats_.total_energy_accreted +=
+                                0.5 * dm *
+                                prim_states[idx]->velocity().dot(
+                                    prim_states[idx]->velocity()
+                                );
+                            accretion_stats_.total_momentum_accreted +=
+                                prim_states[idx]->velocity() * dm;
+                        }
                     }
                 }
 

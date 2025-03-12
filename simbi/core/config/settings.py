@@ -189,11 +189,11 @@ class SimulationSettings(BaseSettings):
     dlogt: float = 0.0
     solver: Solver = Solver.HLLC
     bodies: list[dict[str, Any]] = field(default_factory=list)
+    sound_speed: float = 0.0
+    isothermal: bool = False
 
     @classmethod
     def from_dict(cls, setup: dict[str, Any]) -> "SimulationSettings":
-        # print(setup)
-        # zzz = input("Press Enter to continue...")
         return cls(
             adiabatic_index=setup["adiabatic_index"],
             tstart=setup["default_start_time"],
@@ -208,6 +208,8 @@ class SimulationSettings(BaseSettings):
             dlogt=setup["dlogt"],
             solver=Solver(setup["solver"]),
             bodies=setup["immersed_bodies"],
+            sound_speed=setup["sound_speed"],
+            isothermal=setup["isothermal"],
         )
 
     @classmethod
@@ -231,4 +233,6 @@ class SimulationSettings(BaseSettings):
             dlogt=self_params["dlogt"],
             solver=Solver(self_params["solver"]),
             bodies=self_params["bodies"],
+            sound_speed=self_params["sound_speed"],
+            isothermal=self_params["isothermal"],
         )

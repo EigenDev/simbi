@@ -1,5 +1,10 @@
 from ..config.constants import BodyType
-from ..config.bodies import BodyConfig, GravitationalBodyConfig, ElasticBodyConfig
+from ..config.bodies import (
+    BodyConfig,
+    GravitationalBodyConfig,
+    ElasticBodyConfig,
+    GravitationalSinkConfig,
+)
 from ...functional.maybe import Maybe
 from typing import Any
 import numpy as np
@@ -13,6 +18,13 @@ class BodyConfigValidator:
         BodyType.ELASTIC: {"mass", "radius", "stiffness", "damping"},
         BodyType.RIGID: {"mass", "radius"},
         BodyType.SINK: {"mass", "radius", "grav_strength", "accretion_efficiency"},
+        BodyType.GRAVITATIONAL_SINK: {
+            "mass",
+            "radius",
+            "grav_strength",
+            "accretion_efficiency",
+            "softening",
+        },
     }
 
     @classmethod
@@ -55,6 +67,19 @@ class BodyConfigValidator:
                         radius=float(body_dict["radius"]),
                         stiffness=float(body_dict["stiffness"]),
                         damping=float(body_dict["damping"]),
+                    )
+                )
+            elif body_type == BodyType.GRAVITATIONAL_SINK:
+                return Maybe.of(
+                    GravitationalSinkConfig(
+                        body_type=body_type,
+                        position=pos,
+                        velocity=vel,
+                        mass=float(body_dict["mass"]),
+                        radius=float(body_dict["radius"]),
+                        grav_strength=float(body_dict["grav_strength"]),
+                        softening_length=float(body_dict.get("softening_length", 0.01)),
+                        accretion_efficiency=float(body_dict["accretion_efficiency"]),
                     )
                 )
             else:

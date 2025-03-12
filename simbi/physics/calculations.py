@@ -18,6 +18,7 @@ def calculate_state_vector(
 ) -> StateVector:
     """Pure function to calculate state vector"""
     try:
+        validate_eos(adiabatic_index, regime)
         dens = calc_labframe_density(rho, velocity, regime)
         mom = calc_labframe_momentum(
             adiabatic_index,
@@ -88,11 +89,16 @@ def calc_spec_enthalpy(
     pressure: NDArray[np.floating[Any]],
     regime: str,
 ) -> NDArray[np.floating[Any]] | float:
-    return (
-        1.0
-        if regime == "classical"
-        else 1.0 + adiabatic_index * pressure / (rho * (adiabatic_index - 1.0))
-    )
+    if regime == "classical":
+        if adiabatic_index == 1.0:
+            # Isothermal case - pressure = cs^2 * rho
+            # where cs is the isothermal sound speed
+            return 1.0 + pressure / rho
+        else:
+            return 1.0
+    else:
+        # Adiabatic case
+        return 1.0 + adiabatic_index * pressure / (rho * (adiabatic_index - 1.0))
 
 
 def calc_labframe_density(
@@ -143,8 +149,19 @@ def calc_labframe_energy(
     enthalpy = calc_spec_enthalpy(adiabatic_index, rho, pressure, regime)
 
     if regime == "classical":
-        res = pressure / (adiabatic_index - 1.0) + 0.5 * rho * vsq + 0.5 * bsq
+        if adiabatic_index == 1.0:
+            # Isothermal case - internal energy term not needed
+            res = 0.5 * rho * vsq + 0.5 * bsq
+        else:
+            # Adiabatic case
+            res = pressure / (adiabatic_index - 1.0) + 0.5 * rho * vsq + 0.5 * bsq
     else:
+        # Relativistic case - isothermal not allowed
+        if adiabatic_index == 1.0:
+            raise ValueError(
+                "Isothermal EOS (gamma=1) is not physically valid for relativistic flows"
+            )
+        enthalpy = calc_spec_enthalpy(adiabatic_index, rho, pressure, regime)
         res = (
             rho * lorentz**2 * enthalpy
             - pressure
@@ -154,3 +171,16 @@ def calc_labframe_energy(
         )
 
     return res
+
+
+def is_isothermal(adiabatic_index: float) -> bool:
+    """Check if simulation is isothermal"""
+    return abs(adiabatic_index - 1.0) < 1e-10
+
+
+def validate_eos(adiabatic_index: float, regime: str) -> None:
+    """Validate equation of state is physically consistent"""
+    if is_isothermal(adiabatic_index) and regime != "classical":
+        raise ValueError(
+            "Isothermal equation of state (gamma=1) is only valid for classical flows"
+        )

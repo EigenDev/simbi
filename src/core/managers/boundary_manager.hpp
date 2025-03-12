@@ -287,6 +287,10 @@ namespace simbi {
                     };
                 }
                 else {
+                    // surpress compoler warning about unused captures
+                    (void) mesh;
+                    (void) io_manager;
+                    (void) time;
                     // Return a no-op lambda when T is not conserved
                     return [] DEV(const auto&, const BoundaryFace, auto&) {};
                 }
@@ -357,15 +361,18 @@ namespace simbi {
                                 break;
                             }
                             case BoundaryCondition::REFLECTING:
+                                (void) handle_dynamic_bc;
                                 data[idx] = apply_reflecting(
                                     data[interior_idx],
                                     boundary_dim + 1
                                 );
                                 break;
                             case BoundaryCondition::PERIODIC:
+                                (void) handle_dynamic_bc;
                                 data[idx] = apply_periodic(data[interior_idx]);
                                 break;
                             default:   // OUTFLOW
+                                (void) handle_dynamic_bc;
                                 data[idx] = data[interior_idx];
                         }
                     }

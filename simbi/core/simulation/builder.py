@@ -45,6 +45,8 @@ class SimStateDict(TypedDict):
     mesh_motion: bool
     homologous: bool
     bodies: list[dict[str, float | str | list[float]]]
+    isothermal: bool
+    sound_speed: float
 
 
 @dataclass
@@ -181,6 +183,8 @@ class SimStateBuilder:
             mesh_motion=mesh.mesh_motion,
             homologous=mesh.is_homologous,
             bodies=sim.bodies,
+            isothermal=sim.isothermal,
+            sound_speed=sim.sound_speed,
         )
 
         SimStateBuilder.prepare_data_directory(state_dict["data_directory"])

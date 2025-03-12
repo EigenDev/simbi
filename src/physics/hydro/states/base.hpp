@@ -160,12 +160,10 @@ namespace simbi {
               exec_policy_manager_(mesh_.grid(), init_conditions),
               time_manager_(init_conditions),
               solver_config_(init_conditions),
-              io_manager_(
-                  std::make_unique<IOManager<Dims>>(
-                      solver_config_,
-                      init_conditions
-                  )
-              ),
+              io_manager_(std::make_unique<IOManager<Dims>>(
+                  solver_config_,
+                  init_conditions
+              )),
               // protected references to commonly used values
               gamma(gamma_),
               hllc_z(hllc_z_)
@@ -390,9 +388,6 @@ namespace simbi {
                 // Second half-kick for bodies
                 orbital_system_->advance_velocities(0.5 * time_step());
             }
-
-            // std::cout << "done with advance_impl" << std::endl;
-            // std::cin.get();
 
             // 2. convert to primitives
             derived.cons2prim_impl();

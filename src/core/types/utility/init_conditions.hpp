@@ -57,9 +57,9 @@
 
 struct InitialConditions {
     real time, checkpoint_interval, dlogt;
-    real plm_theta, gamma, cfl, tend;
+    real plm_theta, gamma, cfl, tend, sound_speed_squared;
     luint nx, ny, nz, checkpoint_idx;
-    bool quirk_smoothing, homologous, mesh_motion;
+    bool quirk_smoothing, homologous, mesh_motion, isothermal;
     std::vector<std::vector<real>> bfield;
     std::string data_directory, coord_system, solver;
     std::string x1_spacing, x2_spacing, x3_spacing, regime;

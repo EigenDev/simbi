@@ -65,6 +65,8 @@ cdef class SimState:
         sim_cond.boundary_source_lib = <string>sim_info['boundary_source_lib']
         sim_cond.mesh_motion         = <bool>sim_info['mesh_motion']
         sim_cond.homologous          = <bool>sim_info['homologous']
+        sim_cond.isothermal          = <bool>sim_info['isothermal']
+        sim_cond.sound_speed_squared = <real>(sim_info['sound_speed']**2)
         
         # Create property map
         cdef unordered_map[string, PropertyValue] properties

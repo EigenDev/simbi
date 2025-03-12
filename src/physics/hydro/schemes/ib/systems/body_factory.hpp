@@ -66,7 +66,7 @@ namespace simbi::ib {
     class BodyFactory
     {
       public:
-        static auto create_body(
+        static std::unique_ptr<ImmersedBody<T, Dims, MeshType>> create_body(
             BodyType type,
             const MeshType& mesh,
             const spatial_vector_t<T, Dims>& pos,
@@ -85,18 +85,31 @@ namespace simbi::ib {
 
             switch (type) {
                 case BodyType::GRAVITATIONAL:
-                    return std::make_unique<
-                        GravitationalBody<T, Dims, MeshType>>(
-                        mesh,
-                        pos,
-                        vel,
-                        mass,
-                        radius,
-                        get_scalar(properties.at("grav_strength")),
-                        get_scalar(properties.at("softening"))
+                    return std::unique_ptr<ImmersedBody<T, Dims, MeshType>>(
+                        new GravitationalBody<T, Dims, MeshType>(
+                            mesh,
+                            pos,
+                            vel,
+                            mass,
+                            radius,
+                            get_scalar(properties.at("grav_strength")),
+                            get_scalar(properties.at("softening"))
+                        )
                     );
 
-                    // return empty unque_ptr
+                case BodyType::GRAVITATIONAL_SINK:
+                    return std::unique_ptr<ImmersedBody<T, Dims, MeshType>>(
+                        new GravitationalSinkParticle<T, Dims, MeshType>(
+                            mesh,
+                            pos,
+                            vel,
+                            mass,
+                            radius,
+                            get_scalar(properties.at("grav_strength")),
+                            get_scalar(properties.at("softening")),
+                            get_scalar(properties.at("accretion_efficiency"))
+                        )
+                    );
                 default: throw std::runtime_error("Invalid body type");
             }
         }

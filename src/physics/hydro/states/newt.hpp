@@ -70,6 +70,10 @@ namespace simbi {
       private:
         using base_t = HydroBase<Newtonian<dim>, dim, Regime::NEWTONIAN>;
 
+        // isothermal EOS
+        bool isothermal_;
+        real sound_speed_squared_;
+
       protected:
         // type aliases
         using base_t::gamma;

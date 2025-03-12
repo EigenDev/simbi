@@ -235,7 +235,23 @@ namespace simbi {
         }
         auto& resize(size_type size, T fill_value = T())
         {
+            // save any old date we had if it existed
+            std::vector<T> old_data;
+            if (this->size_ > 0) {
+                old_data.resize(std::min(this->size_, size));
+                std::copy(
+                    mem_.data(),
+                    mem_.data() + old_data.size(),
+                    old_data.begin()
+                );
+            }
             mem_.allocate(size);
+
+            // now we can restore any old date if there was any
+            if (!old_data.empty()) {
+                std::copy(old_data.begin(), old_data.end(), mem_.data());
+            }
+
             this->size_     = size;
             this->shape_[0] = size;
             // fill the remaining dimensions with 1
@@ -653,9 +669,9 @@ namespace simbi {
         filter_indices(F op, const ExecutionPolicy<>& policy) const
         {
             ndarray<size_type, 1> indices(this->size());
-            size_type count = 0;
 
             if constexpr (global::on_gpu) {
+                size_type count = 0;
                 mem_.ensure_device_synced();
                 indices.sync_to_device();
                 auto indices_ptr = indices.data();
@@ -674,9 +690,12 @@ namespace simbi {
                 indices.sync_to_host();
             }
             else {
+                std::atomic<size_type> count{0};
                 parallel_for(policy, [&, this](size_type idx) {
                     if (op(mem_[idx])) {
-                        indices[count++] = idx;
+                        size_type current_count =
+                            count.fetch_add(1, std::memory_order_relaxed);
+                        indices[current_count] = idx;
                     }
                 });
 

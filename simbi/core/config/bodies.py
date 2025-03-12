@@ -30,3 +30,21 @@ class ElasticBodyConfig(BodyConfig):
 
     stiffness: float
     damping: float
+
+
+@dataclass(frozen=True)
+class ViscousBodyConfig(BodyConfig):
+    """Configuration for viscous bodies"""
+
+    viscosity: float
+    bulk_viscosity: float
+    shear_viscosity: float
+
+
+@dataclass(frozen=True)
+class GravitationalSinkConfig(BodyConfig):
+    """Configuration for gravitational sinks"""
+
+    grav_strength: float
+    accretion_efficiency: float
+    softening_length: float

@@ -15,7 +15,9 @@ Newtonian<dim>::Newtonian(
     std::vector<std::vector<real>>& state,
     InitialConditions& init_conditions
 )
-    : HydroBase<Newtonian<dim>, dim, Regime::NEWTONIAN>(state, init_conditions)
+    : HydroBase<Newtonian<dim>, dim, Regime::NEWTONIAN>(state, init_conditions),
+      isothermal_(init_conditions.isothermal),
+      sound_speed_squared_(init_conditions.sound_speed_squared)
 {
 }
 
@@ -31,17 +33,27 @@ void Newtonian<dim>::cons2prim_impl()
 {
     shared_atomic_bool local_failure;
     this->prims_.transform(
-        [gamma = this->gamma,
-         loc   = &local_failure,
-         iter  = this->current_iter(
-         )] DEV(auto& prim, const auto& cons_var) -> Maybe<primitive_t> {
+        [gamma      = this->gamma,
+         loc        = &local_failure,
+         isothermal = isothermal_,
+         cs2 = sound_speed_squared_] DEV(auto& prim, const auto& cons_var)
+            -> Maybe<primitive_t> {
             const auto& rho = cons_var.dens();
             const auto vel  = cons_var.momentum() / rho;
             const auto& chi = cons_var.chi() / rho;
+
             const auto pre =
-                (gamma - 1.0) * (cons_var.nrg() - 0.5 * rho * vel.dot(vel));
+                isothermal ? rho * cs2
+                           : (gamma - 1.0) *
+                                 (cons_var.nrg() - 0.5 * rho * vel.dot(vel));
+            (gamma - 1.0) * (cons_var.nrg() - 0.5 * rho * vel.dot(vel));
 
             if (pre < 0 || !std::isfinite(pre)) {
+                std::cout << "iso: " << isothermal << std::endl;
+                std::cout << "cs2: " << cs2 << std::endl;
+                std::cout << "rho: " << rho << std::endl;
+                std::cout << "pre: " << pre << std::endl;
+                std::cin.get();
                 // store the invalid state
                 loc->store(true);
                 return simbi::Nothing;
@@ -79,38 +91,74 @@ DUAL Newtonian<dim>::eigenvals_t Newtonian<dim>::calc_eigenvals(
     const real csL = std::sqrt(gamma * pL / rhoL);
     switch (this->solver_type()) {
         case Solver::HLLC: {
-            // const real cbar   = 0.5 * (csL + csR);
-            // const real rhoBar = 0.5 * (rhoL + rhoR);
-            // const real pStar =
-            //     0.5 * (pL + pR) + 0.5 * (vL - vR) * cbar * rhoBar;
+            // Pressure-based wave speed estimates (Batten et al. 1997)
+            const real pvrs = 0.5 * (pL + pR) - 0.5 * (vR - vL) * 0.5 *
+                                                    (rhoL + rhoR) * 0.5 *
+                                                    (csL + csR);
+            const real pmin = std::min(pL, pR);
+            const real pmax = std::max(pL, pR);
 
-            // Steps to Compute HLLC as described in Toro et al. 2019
-            const real num = csL + csR - (gamma - 1.0) * 0.5 * (vR - vL);
-            const real denom =
-                csL * std::pow(pL, -hllc_z) + csR * std::pow(pR, -hllc_z);
-            const real p_term = num / denom;
-            const real pStar  = std::pow(p_term, (1.0 / hllc_z));
+            real pStar;
+            if (pmax / pmin <= 2.0 && pmin <= pvrs && pvrs <= pmax) {
+                //  PVRS estimate if pressure ratio is small
+                pStar = pvrs;
+            }
+            else {
+                //  two-rarefaction approximation
+                const real gm1 = gamma - 1.0;
+                const real gp1 = gamma + 1.0;
+                const real gel = 2.0 / gm1;
 
-            const real qL = (pStar <= pL)
-                                ? 1.0
-                                : std::sqrt(
-                                      1.0 + ((gamma + 1.0) / (2.0 * gamma)) *
-                                                (pStar / pL - 1.0)
-                                  );
+                if (isothermal_) {
+                    // Isothermal case
+                    const real aL = std::sqrt(sound_speed_squared_ / rhoL);
+                    const real aR = std::sqrt(sound_speed_squared_ / rhoR);
+                    pStar         = (rhoL * aL * pR + rhoR * aR * pL -
+                             rhoL * rhoR * aL * aR * (vR - vL)) /
+                            (rhoL * aL + rhoR * aR);
+                }
+                else {
+                    // Adiabatic case
+                    real aL = 2.0 / gp1 / rhoL;
+                    real bR = pR * gm1 / gp1;
+                    real aR = 2.0 / gp1 / rhoR;
+                    real bL = pL * gm1 / gp1;
 
-            const real qR = (pStar <= pR)
-                                ? 1.0
-                                : std::sqrt(
-                                      1.0 + ((gamma + 1.0) / (2.0 * gamma)) *
-                                                (pStar / pR - 1.0)
-                                  );
+                    pStar = std::pow(
+                        (csL + csR - 0.5 * gm1 * (vR - vL)) /
+                            (aL / std::pow(pL + bR, 0.5) +
+                             aR / std::pow(pR + bL, 0.5)),
+                        2.0
+                    );
+                }
+            }
 
-            const real aL = vL - qL * csL;
-            const real aR = vR + qR * csR;
+            // Compute wave speeds using pressure estimate
+            real qL, qR;
+            if (pStar <= pL) {
+                qL = 1.0;
+            }
+            else {
+                qL =
+                    std::sqrt(1.0 + (gp1 / (2.0 * gamma)) * (pStar / pL - 1.0));
+            }
 
+            if (pStar <= pR) {
+                qR = 1.0;
+            }
+            else {
+                qR =
+                    std::sqrt(1.0 + (gp1 / (2.0 * gamma)) * (pStar / pR - 1.0));
+            }
+
+            // Signal speeds
+            const real aL = vL - csL * qL;
+            const real aR = vR + csR * qR;
+
+            // Middle wave speed (more robust formula)
             const real aStar =
-                ((pR - pL + rhoL * vL * (aL - vL) - rhoR * vR * (aR - vR)) /
-                 (rhoL * (aL - vL) - rhoR * (aR - vR)));
+                (pR - pL + rhoL * vL * (SL - vL) - rhoR * vR * (SR - vR)) /
+                (rhoL * (SL - vL) - rhoR * (SR - vR));
 
             if constexpr (dim == 1) {
                 return {aL, aR, aStar, pStar};

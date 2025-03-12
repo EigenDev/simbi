@@ -167,14 +167,14 @@ namespace simbi {
                 }
 
                 // Handle accretion if needed
-                // for (auto& body : this->bodies_) {
-                //     if (auto* sink = dynamic_cast<
-                //             ib::GravitationalSinkParticle<T, Dims,
-                //             MeshType>*>( body.get()
-                //         )) {
-                //         sink->accrete(cons_state, gamma_);
-                //     }
-                // }
+                for (auto& body : this->bodies_) {
+                    if (auto* sink = dynamic_cast<
+                            ib::GravitationalSinkParticle<T, Dims, MeshType>*>(
+                            body.get()
+                        )) {
+                        sink->accrete(cons_state, gamma_);
+                    }
+                }
 
                 // Update diagnostics
                 compute_center_of_mass();
@@ -228,6 +228,15 @@ namespace simbi {
                         this->bodies_,
                         dt
                     );
+                }
+
+                for (auto& body : this->bodies_) {
+                    if (auto* sink = dynamic_cast<
+                            ib::GravitationalSinkParticle<T, Dims, MeshType>*>(
+                            body.get()
+                        )) {
+                        sink->accrete(cons_state, prim_state, gamma_);
+                    }
                 }
             }
 

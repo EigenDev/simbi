@@ -60,6 +60,7 @@ class BodyType(str, ExtendedEnum):
     SINK = "sink"
     SOURCE = "source"
     GRAVITATIONAL = "gravitational"
+    GRAVITATIONAL_SINK = "gravitational_sink"
     # TODO: Implement these later
     POROUS = "porous"
     PASSIVE = "passive"
