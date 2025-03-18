@@ -74,7 +74,8 @@
         "exception": "cpp"
     },
     "C_Cpp.default.configurationProvider": "mesonbuild.mesonbuild",
-    "C_Cpp.default.compileCommands": "/Users/marcusdupont/research/simbi/builddir/compile_commands.json",
+    "C_Cpp.default.compileCommands":
+        "/Users/marcusdupont/research/simbi/builddir/compile_commands.json",
     // Doxygen Generator Settings
     "doxdocgen.generic.authorName": "Marcus DuPont",
     "doxdocgen.generic.authorEmail": "marcus.dupont@princeton.edu",
@@ -125,7 +126,7 @@
         " *",
         " *==============================================================================",
         " * @copyright (C) {year} Marcus DuPont. All rights reserved.",
-        " *==============================================================================",
+        " *=============================================================================="
     ],
     "doxdocgen.file.fileOrder": [
         "custom"
