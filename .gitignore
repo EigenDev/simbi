@@ -10,13 +10,15 @@ movies/
 scripts/
 simbi/tools/extras/*
 version.py
+.clangd
+.vscode/
 *.in
 *.h5
 *.pdf
 *.png
 *.pyc
 *.mp4
-*.xml 
+*.xml
 *.csv
 *.job
 *.txt
