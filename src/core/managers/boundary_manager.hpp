@@ -290,7 +290,7 @@ namespace simbi {
                     // Return a no-op lambda when T is not conserved
                     return [] DEV(const auto&, const BoundaryFace, auto&) {};
                 }
-            };
+            }();
 
             parallel_for(
                 policy,
@@ -347,8 +347,7 @@ namespace simbi {
                             case BoundaryCondition::DYNAMIC: {
                                 if constexpr (is_conserved_v<T>) {
                                     T result;
-                                    auto dynamic_handler = handle_dynamic_bc();
-                                    dynamic_handler(
+                                    handle_dynamic_bc(
                                         coordinates,
                                         static_cast<BoundaryFace>(bc_idx),
                                         result

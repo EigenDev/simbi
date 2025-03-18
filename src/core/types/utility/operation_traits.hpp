@@ -64,6 +64,7 @@ namespace simbi {
 
     struct StencilOp {
     };
+
     struct ReduceOp {
     };
 

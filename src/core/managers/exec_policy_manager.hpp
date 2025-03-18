@@ -65,6 +65,8 @@ namespace simbi {
         ExecutionPolicy<> xvertex_policy_, yvertex_policy_, zvertex_policy_;
         ExecutionPolicy<> fullxvertex_policy_, fullyvertex_policy_,
             fullzvertex_policy_;
+        std::vector<simbiStream_t> streams_;
+        std::vector<int> devices_;
 
         // GPU configuration methods
         DUAL luint get_block_dims(const std::string& key) const
@@ -73,6 +75,52 @@ namespace simbi {
                 return static_cast<luint>(std::stoi(val));
             }
             return 1;
+        }
+
+        std::vector<int> parse_device_list(const char* dev_list) const
+        {
+            std::vector<int> devices;
+            std::string dev_str(dev_list);
+            std::istringstream ss(dev_str);
+            std::string token;
+            while (std::getline(ss, token, ',')) {
+                devices.push_back(std::stoi(token));
+            }
+            return devices;
+        }
+
+        void setup_multi_gpu(const InitialConditions& init)
+        {
+            if constexpr (global::on_gpu) {
+                int device_count;
+                gpu::api::getDeviceCount(&device_count);
+
+                // grab the requested devices from environment or use all
+                // available
+                if (const char* dev_list = std::getenv("GPU_DEVICES")) {
+                    devices_ = parse_device_list(dev_list);
+                }
+                else {
+                    devices_.resize(device_count);
+                    std::iota(devices_.begin(), devices_.end(), 0);
+                }
+
+                // create streams per device
+                streams_.resize(devices_.size());
+                for (size_t i = 0; i < devices_.size(); i++) {
+                    gpu::api::setDevice(devices_[i]);
+                    gpu::api::streamCreate(&streams_[i]);
+
+                    // enable peer access if configured
+                    if (init.enable_peer_access) {
+                        for (int j = 0; j < devices_.size(); j++) {
+                            if (i != j) {
+                                gpu::api::enablePeerAccess(devices_[j]);
+                            }
+                        }
+                    }
+                }
+            }
         }
 
       public:
@@ -84,6 +132,7 @@ namespace simbi {
               gpu_block_dimy_(get_block_dims("GPU_BLOCK_Y")),
               gpu_block_dimz_(get_block_dims("GPU_BLOCK_Z"))
         {
+            setup_multi_gpu(init);
             compute_execution_policies(grid, init);
         }
 
@@ -106,11 +155,24 @@ namespace simbi {
             return fullzvertex_policy_;
         }
 
-        constexpr void compute_execution_policies(
+        void compute_execution_policies(
             const GridManager& grid,
             const InitialConditions& init
         )
         {
+            ExecutionPolicyConfig config{
+              .shared_mem_bytes        = 0,
+              .streams                 = streams_,
+              .devices                 = devices_,
+              .batch_size              = 1024,
+              .min_elements_per_thread = 1,
+              .enable_peer_access      = init.enable_peer_access,
+              .halo_radius             = grid.halo_radius(),
+              .memory_type = init.managed_memory ? MemoryType::MANAGED
+                                                 : MemoryType::DEVICE,
+              .halo_mode   = HaloExchangeMode::ASYNC
+            };
+
             auto xblockdim = std::min(grid.active_gridsize(0), gpu_block_dimx_);
             auto yblockdim = std::min(grid.active_gridsize(1), gpu_block_dimy_);
             auto zblockdim = std::min(grid.active_gridsize(2), gpu_block_dimz_);
@@ -131,27 +193,25 @@ namespace simbi {
                 }
             }
 
-            const simbiStream_t stream = nullptr;
-
             full_policy_ = ExecutionPolicy(
                 grid.dimensions(),
                 {xblockdim, yblockdim, zblockdim},
-                {.shared_mem_bytes = 0, .streams = {stream}, .devices = {0}}
+                config
             );
             fullxvertex_policy_ = ExecutionPolicy(
                 grid.flux_shape(0),
                 {xblockdim, yblockdim, zblockdim},
-                {.shared_mem_bytes = 0, .streams = {stream}, .devices = {0}}
+                config
             );
             fullyvertex_policy_ = ExecutionPolicy(
                 grid.flux_shape(1),
                 {xblockdim, yblockdim, zblockdim},
-                {.shared_mem_bytes = 0, .streams = {stream}, .devices = {0}}
+                config
             );
             fullzvertex_policy_ = ExecutionPolicy(
                 grid.flux_shape(2),
                 {xblockdim, yblockdim, zblockdim},
-                {.shared_mem_bytes = 0, .streams = {stream}, .devices = {0}}
+                config
             );
             interior_policy_ = full_policy_.contract(grid.halo_radius());
             xvertex_policy_  = fullxvertex_policy_.contract({0, 1, 1});
