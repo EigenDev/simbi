@@ -51,7 +51,6 @@
 
 #include "build_options.hpp"   // for blockDim, threadIdx, STATIC
 #include <cstddef>             // for size_t
-#include <omp.h>               // for omp_get_thread_num
 #include <stdexcept>           // for runtime_error
 #include <string>              // for allocator, operator+, char_traits, to_s...
 #include <thread>              // for get_id, hash, thread
@@ -333,12 +332,7 @@ namespace simbi {
         return blockDim.x * blockDim.y * threadIdx.z +
                blockDim.x * threadIdx.y + threadIdx.x;
 #else
-        if (global::use_omp) {
-            return omp_get_thread_num();
-        }
-        else {
-            return std::hash<std::thread::id>{}(std::this_thread::get_id());
-        }
+        return std::hash<std::thread::id>{}(std::this_thread::get_id());
 #endif
     }
 }   // namespace simbi

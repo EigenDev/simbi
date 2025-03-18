@@ -50,6 +50,7 @@
 #define VECTOR_HPP
 
 #include "build_options.hpp"   // for real, lint, luint
+#include <cmath>
 #include <type_traits>
 
 namespace simbi {
@@ -217,6 +218,12 @@ namespace simbi {
                 }
             }
             return *this;
+        }
+
+        DUAL constexpr auto normalized() const
+        {
+            auto mag = norm();
+            return *this / mag;
         }
 
         DUAL constexpr auto unit() const

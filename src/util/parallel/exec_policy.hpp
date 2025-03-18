@@ -63,12 +63,27 @@ struct ExecutionException : public std::exception {
 
 namespace simbi {
 
+    enum class MemoryType {
+        DEVICE,
+        MANAGED,
+        PINNED
+    };
+
+    enum class HaloExchangeMode {
+        SYNC,
+        ASYNC,
+    };
+
     struct ExecutionPolicyConfig {
         size_type shared_mem_bytes         = 0;
         std::vector<simbiStream_t> streams = {};
-        std::vector<int> devices           = {0};   // Default to device 0
+        std::vector<int> devices           = {0};
         size_type batch_size               = 1024;
         size_type min_elements_per_thread  = 1;
+        bool enable_peer_access            = true;
+        size_type halo_radius              = 2;
+        MemoryType memory_type             = MemoryType::DEVICE;
+        HaloExchangeMode halo_mode         = HaloExchangeMode::ASYNC;
     };
 
     template <typename T = luint, typename U = luint>
@@ -83,6 +98,7 @@ namespace simbi {
         std::vector<dim3> device_grid_sizes;
         size_type batch_size;
         size_type min_elements_per_thread;
+        ExecutionPolicyConfig config;
 
         ~ExecutionPolicy() = default;
         ExecutionPolicy()  = default;
@@ -97,7 +113,8 @@ namespace simbi {
               streams(config.streams),
               devices(config.devices),
               batch_size(config.batch_size),
-              min_elements_per_thread(config.min_elements_per_thread)
+              min_elements_per_thread(config.min_elements_per_thread),
+              config(config)
         {
             if (grid_sizes.size() != block_sizes.size()) {
                 throw ExecutionException();
