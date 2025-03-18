@@ -59,7 +59,7 @@
 #include "core/types/utility/managed.hpp"           // for Managed
 #include "geometry/mesh/mesh.hpp"                   // for Mesh
 #include "io/console/logger.hpp"                    // for logger
-#include "physics/hydro/schemes/ib/systems/orbital.hpp"   // for OrbitalSystem
+#include "physics/hydro/schemes/ib/systems/gravitational_system.hpp"   // for GravitationalSystem
 #include "physics/hydro/types/generic_structs.hpp"   // for anyConserved, anyPrimitive
 
 namespace simbi {
@@ -97,14 +97,19 @@ namespace simbi {
             const auto& derived = static_cast<const Derived&>(*this);
             auto functor        = WaveSpeedFunctor<Derived>(&derived);
 
-            time_manager_.set_dt(
-                prims_.reduce(
-                    static_cast<real>(INFINITY),
-                    functor,
-                    this->full_policy()
-                ) *
-                cfl_
-            );
+            const auto gas_dt = prims_.reduce(
+                                    static_cast<real>(INFINITY),
+                                    functor,
+                                    this->full_policy()
+                                ) *
+                                cfl_;
+
+            real orbital_dt = INFINITY;
+            if (orbital_system_) {
+                orbital_dt = orbital_system_->get_orbital_timestep(cfl_);
+            }
+
+            time_manager_.set_dt(std::min(gas_dt, orbital_dt));
         }
 
       private:
@@ -140,7 +145,7 @@ namespace simbi {
         // Common state members
         ndarray<Maybe<primitive_t>, Dims> prims_;
         ndarray<conserved_t, Dims> cons_;
-        std::unique_ptr<ibsystem::OrbitalSystem<real, Dims, Mesh<Dims>>>
+        std::unique_ptr<ibsystem::GravitationalSystem<real, Dims>>
             orbital_system_;
 
         HydroBase() = default;
@@ -160,22 +165,18 @@ namespace simbi {
               exec_policy_manager_(mesh_.grid(), init_conditions),
               time_manager_(init_conditions),
               solver_config_(init_conditions),
-              io_manager_(std::make_unique<IOManager<Dims>>(
-                  solver_config_,
-                  init_conditions
-              )),
+              io_manager_(
+                  std::make_unique<IOManager<Dims>>(
+                      solver_config_,
+                      init_conditions
+                  )
+              ),
               // protected references to commonly used values
               gamma(gamma_),
               hllc_z(hllc_z_)
 
         {
             init_orbital_system(init_conditions);
-            if (std::getenv("USE_OMP")) {
-                global::use_omp = true;
-                if (const char* omp_tnum = std::getenv("OMP_NUM_THREADS")) {
-                    omp_set_num_threads(std::stoi(omp_tnum));
-                }
-            }
         }
 
         DUAL conserved_t hydro_sources(const auto& cell) const
@@ -300,24 +301,32 @@ namespace simbi {
         void init_orbital_system(const InitialConditions& init)
         {
             if (!init.immersed_bodies.empty()) {
-                orbital_system_ = std::make_unique<
-                    ibsystem::OrbitalSystem<real, Dims, Mesh<Dims>>>(
-                    mesh_,
-                    init.gamma
-                );
+                orbital_system_ =
+                    std::make_unique<ibsystem::GravitationalSystem<real, Dims>>(
+                        mesh_,
+                        init.gamma
+                    );
 
-                for (const auto& [type, props] : init.immersed_bodies) {
+                for (const auto& [body_type, props] : init.immersed_bodies) {
+                    // Extract common properties
+                    spatial_vector_t<real, Dims> position(
+                        std::get<std::vector<real>>(props.at("position"))
+                    );
+                    spatial_vector_t<real, Dims> velocity(
+                        std::get<std::vector<real>>(props.at("velocity"))
+                    );
+                    real mass   = std::get<real>(props.at("mass"));
+                    real radius = std::get<real>(props.at("radius"));
+
+                    // Let the orbital system use the builder to create and add
+                    // the body
                     orbital_system_->add_body(
-                        type,
-                        spatial_vector_t<real, Dims>(
-                            std::get<std::vector<real>>(props.at("position"))
-                        ),
-                        spatial_vector_t<real, Dims>(
-                            std::get<std::vector<real>>(props.at("velocity"))
-                        ),
-                        std::get<real>(props.at("mass")),
-                        std::get<real>(props.at("radius")),
-                        props   // Full property map passed through
+                        body_type,
+                        position,
+                        velocity,
+                        mass,
+                        radius,
+                        props
                     );
                 }
 
@@ -367,32 +376,16 @@ namespace simbi {
         {
             auto& derived = static_cast<Derived&>(*this);
 
-            // 0.(optional) maybe there are orbital bodies. if so, apply first
-            // half-kick
+            // orbital dynamics (if any bodies are present)
             if (orbital_system_) {
-                orbital_system_->advance_velocities(0.5 * time_step());
+                if constexpr (sim_type::Newtonian<R>) {
+                    orbital_system_->update_system(cons_, prims_, time_step());
+                }
             }
 
-            // 1. advance the regime-specific system
+            // gas dynamics
             derived.advance_impl();
-
-            // 1.b (optional) update orbital system
-            if (orbital_system_) {
-                // Full drift
-                orbital_system_->advance_positions(time_step());
-
-                // compute and apply forces
-                orbital_system_
-                    ->compute_and_apply_forces(cons_, prims_, time_step());
-
-                // Second half-kick for bodies
-                orbital_system_->advance_velocities(0.5 * time_step());
-            }
-
-            // 2. convert to primitives
             derived.cons2prim_impl();
-
-            // 3. adapt timestep
             adapt_dt();
         }
 

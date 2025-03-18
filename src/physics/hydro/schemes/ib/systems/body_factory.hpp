@@ -50,68 +50,239 @@
 #ifndef BODY_FACTORY_HPP
 #define BODY_FACTORY_HPP
 
-#include "../bodies/elastic.hpp"                    // for ElasticBody
-#include "../bodies/gravitational.hpp"              // for GravitationalBody
-#include "../bodies/rigid.hpp"                      // for RigidBody
-#include "../bodies/sink.hpp"                       // for SinkBody
-#include "../bodies/source.hpp"                     // for SourceBody
-#include "../bodies/viscous.hpp"                    // for ViscuousBody
+#include "../bodies/types/gravitational.hpp"   // for GravitationalBody, GravitationalSinkBody
 #include "core/types/containers/vector.hpp"         // for spatial_vector_t
+#include "core/types/utility/enums.hpp"             // for BodyType
 #include "core/types/utility/init_conditions.hpp"   // for InitialConditions
-#include <string>                                   // for std::string
-#include <unordered_map>                            // for std::unordered_map
+#include "physics/hydro/schemes/ib/bodies/immersed_boundary.hpp"   // for ImmersedBody
+#include "physics/hydro/schemes/ib/bodies/policies/force_policies.hpp"
+#include "physics/hydro/schemes/ib/bodies/policies/motion_policies.hpp"
+#include "physics/hydro/schemes/ib/bodies/types/any_body.hpp"
+
+namespace simbi {
+    template <size_type Dims>
+    class Mesh;
+}
 
 namespace simbi::ib {
-    template <typename T, size_t Dims, typename MeshType>
+    template <typename T, size_type Dims>
     class BodyFactory
     {
       public:
-        static std::unique_ptr<ImmersedBody<T, Dims, MeshType>> create_body(
+        using MeshType = Mesh<Dims>;
+        using PropertyMap =
+            std::unordered_map<std::string, InitialConditions::PropertyValue>;
+
+        // Main build method - constructs a body of the specific type
+        static std::unique_ptr<AnyBody<T, Dims>> build(
             BodyType type,
             const MeshType& mesh,
-            const spatial_vector_t<T, Dims>& pos,
-            const spatial_vector_t<T, Dims>& vel,
-            const T mass,
-            const T radius,
-            const std::unordered_map<
-                std::string,
-                InitialConditions::PropertyValue>& properties
+            const spatial_vector_t<T, Dims>& position,
+            const spatial_vector_t<T, Dims>& velocity,
+            T mass,
+            T radius,
+            const PropertyMap& props
         )
         {
-            // Helper to get scalar value
-            auto get_scalar = [](const auto& prop_value) -> T {
-                return std::get<T>(prop_value);
-            };
-
             switch (type) {
                 case BodyType::GRAVITATIONAL:
-                    return std::unique_ptr<ImmersedBody<T, Dims, MeshType>>(
-                        new GravitationalBody<T, Dims, MeshType>(
-                            mesh,
-                            pos,
-                            vel,
-                            mass,
-                            radius,
-                            get_scalar(properties.at("grav_strength")),
-                            get_scalar(properties.at("softening"))
-                        )
+                    return build_gravitational_body(
+                        mesh,
+                        position,
+                        velocity,
+                        mass,
+                        radius,
+                        props
                     );
-
+                // case BodyType::ELASTIC:
+                //     return build_elastic_body(
+                //         mesh,
+                //         position,
+                //         velocity,
+                //         mass,
+                //         radius,
+                //         props
+                //     );
+                // case BodyType::RIGID:
+                //     return build_rigid_body(
+                //         mesh,
+                //         position,
+                //         velocity,
+                //         mass,
+                //         radius,
+                //         props
+                //     );
                 case BodyType::GRAVITATIONAL_SINK:
-                    return std::unique_ptr<ImmersedBody<T, Dims, MeshType>>(
-                        new GravitationalSinkParticle<T, Dims, MeshType>(
-                            mesh,
-                            pos,
-                            vel,
-                            mass,
-                            radius,
-                            get_scalar(properties.at("grav_strength")),
-                            get_scalar(properties.at("softening")),
-                            get_scalar(properties.at("accretion_efficiency"))
-                        )
+                    return build_gravitational_sink_body(
+                        mesh,
+                        position,
+                        velocity,
+                        mass,
+                        radius,
+                        props
                     );
-                default: throw std::runtime_error("Invalid body type");
+                // Other body types...
+                default:
+                    throw std::runtime_error(
+                        "Unknown body type: " +
+                        std::to_string(static_cast<int>(type))
+                    );
             }
+        }
+
+      private:
+        // Extract a property with a default value
+        template <typename V>
+        static V extract_property(
+            const PropertyMap& props,
+            const std::string& name,
+            V default_value
+        )
+        {
+            auto it = props.find(name);
+            if (it != props.end()) {
+                return std::get<V>(it->second);
+            }
+            return default_value;
+        }
+
+        // Build gravitational force policy parameters
+        static GravitationalForcePolicy<T, Dims>::Params
+        build_grav_force_params(const PropertyMap& props)
+        {
+            typename GravitationalForcePolicy<T, Dims>::Params params;
+            params.G = extract_property<T>(props, "grav_strength", T(1.0));
+            params.softening_length =
+                extract_property<T>(props, "softening", T(0.01));
+            params.two_way_coupling =
+                extract_property<bool>(props, "two_way_coupling", false);
+            return params;
+        }
+
+        // Build standard fluid interaction policy parameters
+        static GravitationalFluidInteractionPolicy<T, Dims>::Params
+        build_grav_fluid_params(const PropertyMap& props)
+        {
+            typename GravitationalFluidInteractionPolicy<T, Dims>::Params
+                params;
+            // params.interaction_strength = extract_property<T>(
+            //     props,
+            //     "fluid_interaction_strength",
+            //     T(1.0)
+            // );
+            return params;
+        }
+
+        // Build accreting fluid interaction policy parameters
+        static AccretingFluidInteractionPolicy<T, Dims>::Params
+        build_accretion_fluid_params(const PropertyMap& props)
+        {
+            typename AccretingFluidInteractionPolicy<T, Dims>::Params params;
+            params.accretion_efficiency =
+                extract_property<T>(props, "accretion_efficiency", T(0.01));
+            params.accretion_radius_factor =
+                extract_property<T>(props, "accretion_radius_factor", T(1.0));
+            return params;
+        }
+
+        // Build rigid material policy parameters
+        static RigidMaterialPolicy<T, Dims>::Params
+        build_rigid_material_params(const PropertyMap& props)
+        {
+            typename RigidMaterialPolicy<T, Dims>::Params params;
+            params.density = extract_property<T>(props, "density", T(1.0));
+            params.restitution_coefficient =
+                extract_property<T>(props, "restitution", T(0.8));
+            params.infinitely_rigid =
+                extract_property<bool>(props, "infinitely_rigid", true);
+            return params;
+        }
+
+        // Build motion policy parameters
+        static DynamicMotionPolicy<T, Dims>::Params
+        build_dynamic_motion_params(const PropertyMap& props)
+        {
+            typename DynamicMotionPolicy<T, Dims>::Params params;
+            params.live_motion =
+                extract_property<bool>(props, "live_motion", true);
+            return params;
+        }
+
+        static StaticMotionPolicy<T, Dims>::Params
+        build_static_motion_params(const PropertyMap& props)
+        {
+            typename StaticMotionPolicy<T, Dims>::Params params;
+            return params;
+        }
+
+        // Build a gravitational body
+        static std::unique_ptr<AnyBody<T, Dims>> build_gravitational_body(
+            const MeshType& mesh,
+            const spatial_vector_t<T, Dims>& position,
+            const spatial_vector_t<T, Dims>& velocity,
+            T mass,
+            T radius,
+            const PropertyMap& props
+        )
+        {
+            auto grav_params     = build_grav_force_params(props);
+            auto fluid_params    = build_grav_fluid_params(props);
+            auto material_params = build_rigid_material_params(props);
+            auto motion_params   = build_dynamic_motion_params(props);
+
+            return std::make_unique<AnyBody<T, Dims>>(
+                std::in_place_type<GravitationalBody<T, Dims>>,
+                mesh,
+                position,
+                velocity,
+                mass,
+                radius,
+                grav_params,
+                material_params,
+                fluid_params,
+                motion_params
+            );
+        }
+
+        // Build a gravitational sink body (combines gravitational and
+        // accretion)
+        static std::unique_ptr<AnyBody<T, Dims>> build_gravitational_sink_body(
+            const MeshType& mesh,
+            const spatial_vector_t<T, Dims>& position,
+            const spatial_vector_t<T, Dims>& velocity,
+            T mass,
+            T radius,
+            const PropertyMap& props
+        )
+        {
+            auto grav_params     = build_grav_force_params(props);
+            auto fluid_params    = build_accretion_fluid_params(props);
+            auto material_params = build_rigid_material_params(props);
+            auto motion_params   = build_dynamic_motion_params(props);
+
+            return std::make_unique<AnyBody<T, Dims>>(
+                std::in_place_type<GravitationalSinkBody<T, Dims>>,
+                mesh,
+                position,
+                velocity,
+                mass,
+                radius,
+                grav_params,
+                material_params,
+                fluid_params,
+                motion_params
+            );
+        }
+
+        // Similar methods for other body types
+        static std::unique_ptr<AnyBody<T, Dims>> build_elastic_body(...)
+        {
+            // TODO: Implement elastic body construction
+        }
+
+        static std::unique_ptr<AnyBody<T, Dims>> build_rigid_body(...)
+        {
+            // TODO: Implement rigid body construction
         }
     };
 }   // namespace simbi::ib

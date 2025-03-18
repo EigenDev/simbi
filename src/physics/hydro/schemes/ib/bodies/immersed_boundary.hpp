@@ -50,12 +50,15 @@
 #ifndef IMMERSED_BOUNDARY_HPP
 #define IMMERSED_BOUNDARY_HPP
 
-#include "build_options.hpp"
-#include "core/types/containers/ndarray.hpp"
-#include "core/types/containers/vector.hpp"
-#include "core/types/utility/enums.hpp"
+#include "build_options.hpp"                   // for DUAL, DEV, real, size_type
+#include "core/types/containers/ndarray.hpp"   // for ndarray
+#include "core/types/containers/vector.hpp"    // for spatial_vector_t
+#include "core/types/utility/enums.hpp"        // for BodyType
 
 namespace simbi {
+    template <size_type Dims>
+    class Mesh;
+
     template <size_type Dims>
     class Cell;
 
@@ -66,23 +69,12 @@ namespace simbi {
     struct anyPrimitive;
 
     namespace ib {
-        enum class BodyType {
-            RIGID,                // Rigid body
-            ELASTIC,              // Elastic body
-            VISCOUS,              // Viscous body
-            POROUS,               // Porous body
-            SINK,                 // Fluid sink (accretes mass/momentum)
-            SOURCE,               // Fluid source (injections mass/momentum)
-            PASSIVE,              // Passive body
-            GRAVITATIONAL,        // Gravitational body
-            GRAVITATIONAL_SINK,   // Gravitational sink
-        };
-
         // base class for all immersed boundary bodies
-        template <typename T, size_type Dims, typename MeshType>
+        template <typename T, size_type Dims>
         class BaseBody
         {
           protected:
+            using MeshType = Mesh<Dims>;
             const MeshType& mesh_;
             spatial_vector_t<T, Dims> position_;
             spatial_vector_t<T, Dims> velocity_;
@@ -113,7 +105,8 @@ namespace simbi {
             }
 
           public:
-            BaseBody() = default;
+            BaseBody()  = default;
+            ~BaseBody() = default;
             DUAL BaseBody(
                 const MeshType& mesh,
                 const spatial_vector_t<T, Dims>& position,
@@ -131,29 +124,36 @@ namespace simbi {
 
             // accessors
             DUAL auto position() const { return position_; }
-
             DUAL auto velocity() const { return velocity_; }
-
             DUAL auto mass() const { return mass_; }
-
             DUAL auto radius() const { return radius_; }
-
             DUAL auto force() const { return force_; }
-
             DUAL auto fluid_velocity() const { return fluid_velocity_; }
-
-            // pure virtual interace
-            virtual DUAL void advance_position(const T dt) = 0;
-            virtual ~BaseBody()                            = default;
 
             void interpolate_fluid_velocity(const auto& prim_state) {}
         };
 
         // Immersed boundary body class
-        template <typename T, size_type Dims, typename MeshType>
-        class ImmersedBody : public BaseBody<T, Dims, MeshType>
+        template <
+            typename T,
+            size_type Dims,
+            template <typename, size_type> class ForcePolicy,
+            template <typename, size_type> class MaterialPolicy,
+            template <typename, size_type> class FluidInteractionPolicy,
+            template <typename, size_type> class MotionPolicy>
+        class ImmersedBody : public BaseBody<T, Dims>,
+                             public ForcePolicy<T, Dims>,
+                             public MaterialPolicy<T, Dims>,
+                             public FluidInteractionPolicy<T, Dims>,
+                             public MotionPolicy<T, Dims>
         {
           public:
+            using MeshType  = Mesh<Dims>;
+            using ForceP    = ForcePolicy<T, Dims>;
+            using MaterialP = MaterialPolicy<T, Dims>;
+            using FluidP    = FluidInteractionPolicy<T, Dims>;
+            using MotionP   = MotionPolicy<T, Dims>;
+
             // grid-aware cell info. public for gpu lambdas
             struct CellInfo {
                 bool is_cut;
@@ -162,13 +162,46 @@ namespace simbi {
                 T distance;
             };
 
+            template <template <typename> class Trait>
+            DUAL static constexpr bool has_trait()
+            {
+                return has_trait_impl<
+                    Trait,
+                    ForceP,
+                    MaterialP,
+                    FluidP,
+                    MotionP>();
+            }
+
+          private:
+            template <template <typename> class Trait, typename... Policies>
+            DUAL static constexpr bool has_trait_impl()
+            {
+                return (has_policy_trait<Trait, Policies>::value || ...);
+            }
+
+            // check if a policy uses a specific trait
+            template <template <typename> class Trait, typename Policy>
+            struct has_policy_trait {
+                template <typename P>
+                static auto test(
+                    int
+                ) -> decltype(std::declval<typename P::template trait_t<T>>(), std::true_type{});
+
+                template <typename>
+                static std::false_type test(...);
+
+                static constexpr bool value = decltype(test<Policy>(0))::value;
+            };
+
+            friend ForceP;
+            friend MaterialP;
+            friend FluidP;
+            friend MotionP;
+
           protected:
             // Cut cell data
             ndarray<CellInfo, Dims> cell_info_;
-
-            T drag_coeff_{0.47};            // default sphere drag coefficient
-            bool is_sink_        = false;   // is this a sink particle?
-            bool fixed_position_ = true;    // do I want the body to move?
 
             DUAL auto cut_cell_indices() const
             {
@@ -230,21 +263,6 @@ namespace simbi {
                 return 1.0 - std::abs(distance) / mesh_cell.max_cell_width();
             }
 
-            // helper for drag calculation
-            DUAL spatial_vector_t<T, Dims> compute_drag_force(
-                const auto& cons_state,
-                const auto& cell,
-                const auto& dA_normal
-            ) const
-            {
-                const auto v_rel = this->velocity_ - this->fluid_velocity_;
-                if (v_rel.norm() > 0) {
-                    return -0.5 * cons_state.dens() * drag_coeff_ *
-                           dA_normal.norm() * v_rel.norm() * v_rel;
-                }
-                return spatial_vector_t<T, Dims>();
-            }
-
           public:
             // constructor
             DUAL ImmersedBody(
@@ -253,57 +271,52 @@ namespace simbi {
                 const spatial_vector_t<T, Dims>& velocity,
                 const T mass,
                 const T radius,
-                const T drag_coeff        = 0.47,
-                const bool is_sink        = false,
-                const bool fixed_position = true
+                const typename ForceP::Params& force_params       = {},
+                const typename MaterialP::Params& material_params = {},
+                const typename FluidP::Params& fluid_params       = {},
+                const typename MotionP::Params& motion_params     = {}
             )
-                : BaseBody<T, Dims, MeshType>(
-                      mesh,
-                      position,
-                      velocity,
-                      mass,
-                      radius
-                  ),
-                  cell_info_(mesh.size()),
-                  drag_coeff_(drag_coeff),
-                  is_sink_(is_sink),
-                  fixed_position_(fixed_position)
+                : BaseBody<T, Dims>(mesh, position, velocity, mass, radius),
+                  ForceP(force_params),
+                  MaterialP(material_params),
+                  FluidP(fluid_params),
+                  MotionP(motion_params),
+                  cell_info_(mesh.size())
             {
                 update_cut_cells();
             }
-
             ~ImmersedBody() = default;
 
-            DUAL void advance_position(const T dt) override
+            DUAL void advance_position(const T dt)
             {
-                if (fixed_position_) {
-                    return;
-                }
-                this->position_ += this->velocity_ * dt;
+                MotionP::advance_position(*this, dt);
                 update_cut_cells();
             }
 
             DUAL void advance_velocity(const T dt)
             {
-                if (fixed_position_) {
-                    return;
-                }
-                this->velocity_ += this->force_ * dt / this->mass_;
+                MotionP::advance_velocity(*this, dt);
             }
 
-            DUAL void interpolate_fluid_velocity(const auto& prim_state)
+            DUAL void calculate_forces(const auto& other_bodies, const T dt)
             {
-                this->fluid_velocity_ = spatial_vector_t<T, Dims>();
-                T total_volume        = 0.0;
+                this->force_ = spatial_vector_t<T, Dims>();
+                ForceP::calculate_forces(*this, other_bodies, dt);
+                FluidP::calculate_fluid_forces(*this, this->mesh_, dt);
+            }
 
-                for (const auto& idx : cut_cell_indices()) {
-                    const auto& cell = cell_info_[idx];
-                    this->fluid_velocity_ +=
-                        prim_state[idx].velocity() * cell.volume_fraction;
-                    total_volume += cell.volume_fraction;
-                }
+            DUAL void update_material_state(const T dt)
+            {
+                MaterialP::update_material_state(*this, dt);
+            }
 
-                this->fluid_velocity_ /= total_volume;
+            DUAL void apply_to_fluid(
+                auto& cons_states,
+                const auto& prim_states,
+                const T dt
+            )
+            {
+                FluidP::apply_to_fluid(*this, cons_states, prim_states, dt);
             }
 
             // IBM specific methods
@@ -317,27 +330,6 @@ namespace simbi {
                         auto r =
                             mesh_cell.compute_distance_vector(this->position_);
                         cell.distance = r.norm() - this->radius_;
-
-                        // if (r.norm() <= 0.2) {
-                        //     // std::cout << "idx in cut cells: " << idx
-                        //     //           << std::endl;
-                        //     std::cout << "Distance: " << cell.distance
-                        //               << std::endl;
-                        //     // std::cout << "radius: " << this->radius_
-                        //     //           << std::endl;
-                        //     std::cout << "mesh cell width: "
-                        //               << mesh_cell.max_cell_width()
-                        //               << std::endl;
-                        //     // std::cout << "mesh cell centroid: "
-                        //     //           << mesh_cell.centroid() <<
-                        //     std::endl;
-                        //     // std::cout << "body position: " <<
-                        //     this->position_
-                        //     //           << std::endl;
-                        //     std::cout << "mesh cell norm: " << r.norm()
-                        //               << std::endl;
-                        // }
-
                         const auto dx = mesh_cell.max_cell_width() * T(0.5);
                         const auto max_corner_dist = dx * std::sqrt(T(Dims));
 
@@ -374,104 +366,15 @@ namespace simbi {
                 );
             }
 
-            DUAL void spread_boundary_forces(auto& cons_state, const T dt)
-            {
-                using ndarray_t = std::remove_reference_t<decltype(cons_state)>;
-                using conserved_t = typename ndarray_t::value_type;
-                for (const auto& idx : cut_cell_indices()) {
-                    const auto& cell = cell_info_[idx];
-                    const auto mesh_cell =
-                        this->mesh_.get_cell_from_global(idx);
-                    const auto dA_normal = mesh_cell.area_normal(cell.normal);
-                    const auto dV        = mesh_cell.volume();
-                    auto& state          = cons_state[idx];
-                    compute_surface_forces(cell, dA_normal);
-                    this->force_ += compute_drag_force(state, cell, dA_normal);
-
-                    // add to fluid conserved state
-                    state += conserved_t{
-                      0.0,
-                      this->force_ * cell.volume_fraction / dV,
-                      this->force_.dot(this->velocity_) * cell.volume_fraction /
-                          dV
-                    };
-                }
-            }
-
-            DUAL void update_conserved_state(auto& cons_state, const T dt)
-            {
-                this->advance_position(dt);
-                this->update_cut_cells();
-                this->spread_boundary_forces(cons_state, dt);
-                this->apply_body_forces(cons_state, dt);
-            }
-
             // read-only accesors
-            DUAL bool is_sink() const { return this->is_sink_; }
             DUAL auto position() const { return this->position_; }
             DUAL auto velocity() const { return this->velocity_; }
             DUAL auto force() const { return this->force_; }
             DUAL auto mass() const { return this->mass_; }
             DUAL auto radius() const { return this->radius_; }
-            DUAL auto drag_coeff() const { return this->drag_coeff_; }
             DUAL auto fluid_velocity() const { return this->fluid_velocity_; }
             DUAL auto cell_info() const { return this->cell_info_; }
-
-            // these default implementations can be overridden by derived
-            // classes optionally
-
-            // Virtual method for N-body forces
-            virtual DUAL void compute_body_forces(
-                const std::vector<
-                    std::unique_ptr<ImmersedBody<T, Dims, MeshType>>>& bodies
-            )
-            {
-                // Default implementation - no forces
-                // this->force_ = spatial_vector_t<T, Dims>();
-            }
-
-            virtual DUAL void compute_surface_forces(
-                const CellInfo& cell,
-                const spatial_vector_t<T, Dims>& dA_normal
-            ) = 0;
-
-            virtual DUAL void apply_body_forces(
-                ndarray<anyConserved<Dims, Regime::NEWTONIAN>, Dims>&
-                    cons_states,
-                const ndarray<
-                    Maybe<anyPrimitive<Dims, Regime::NEWTONIAN>>,
-                    Dims>& prims,
-                const std::vector<
-                    std::unique_ptr<ImmersedBody<T, Dims, MeshType>>>& bodies,
-                const T dt
-            )
-            {
-                // no body forces by default
-            }
-
-            virtual DUAL void apply_body_forces(
-                ndarray<anyConserved<Dims, Regime::SRHD>, Dims>& cons_states,
-                const ndarray<Maybe<anyPrimitive<Dims, Regime::SRHD>>, Dims>&
-                    prims,
-                const std::vector<
-                    std::unique_ptr<ImmersedBody<T, Dims, MeshType>>>& bodies,
-                const T dt
-            )
-            {
-                // no body forces by default
-            }
-
-            virtual DUAL void apply_body_forces(
-                ndarray<anyConserved<Dims, Regime::RMHD>, Dims>& cons_states,
-                const ndarray<Maybe<anyPrimitive<Dims, Regime::RMHD>>, Dims>&
-                    prims,
-                const std::vector<
-                    std::unique_ptr<ImmersedBody<T, Dims, MeshType>>>& bodies,
-                const T dt
-            )
-            {
-                // no body forces by default
-            }
+            DUAL auto mesh() const { return this->mesh_; }
         };
     }   // namespace ib
 

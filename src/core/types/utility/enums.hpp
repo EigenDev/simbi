@@ -224,6 +224,18 @@ namespace simbi {
         RESET,
     };
 
+    enum class BodyType {
+        RIGID,                // Rigid body
+        ELASTIC,              // Elastic body
+        VISCOUS,              // Viscous body
+        POROUS,               // Porous body
+        SINK,                 // Fluid sink (accretes mass/momentum)
+        SOURCE,               // Fluid source (injections mass/momentum)
+        PASSIVE,              // Passive body
+        GRAVITATIONAL,        // Gravitational body
+        GRAVITATIONAL_SINK,   // Gravitational sink
+    };
+
     constexpr auto comp_wave_speed    = WaveSpeedEstimate::MIGNONE_AND_BODO_05;
     constexpr auto comp_ct_type       = CTTYPE::CONTACT;
     constexpr auto comp_slope_limiter = LIMITER::VAN_LEER;

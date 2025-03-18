@@ -1,10 +1,6 @@
-cimport numpy as np 
-import numpy as np 
-import sys
+cimport numpy as np
+import numpy as np
 from hydro_classes cimport *
-from libcpp.vector cimport vector 
-from libcpp cimport bool
-from libcpp.string cimport string 
 
 
 cdef unordered_map[string, BodyType] body_type_map = {
@@ -32,7 +28,7 @@ cdef class SimState:
         adot: callable[[float], float]
     ):
 
-        cdef InitialConditions sim_cond 
+        cdef InitialConditions sim_cond
 
         # Directly assign dictionary values to sim_cond members
         sim_cond.tend                = <double>sim_info['tend']
@@ -58,16 +54,16 @@ cdef class SimState:
         sim_cond.cfl                 = <double>sim_info['cfl']
         sim_cond.boundary_conditions = <vector[string]>sim_info['boundary_conditions']
         sim_cond.checkpoint_idx      = <int>sim_info['checkpoint_idx']
-        sim_cond.quirk_smoothing     = <bool>sim_info['quirk_smoothing']
+        sim_cond.quirk_smoothing     = <cbool>sim_info['quirk_smoothing']
         sim_cond.bfield              = <vector[vector[real]]>sim_info["bfield"]
         sim_cond.hydro_source_lib    = <string>sim_info['hydro_source_lib']
         sim_cond.gravity_source_lib  = <string>sim_info['gravity_source_lib']
         sim_cond.boundary_source_lib = <string>sim_info['boundary_source_lib']
-        sim_cond.mesh_motion         = <bool>sim_info['mesh_motion']
-        sim_cond.homologous          = <bool>sim_info['homologous']
-        sim_cond.isothermal          = <bool>sim_info['isothermal']
+        sim_cond.mesh_motion         = <cbool>sim_info['mesh_motion']
+        sim_cond.homologous          = <cbool>sim_info['homologous']
+        sim_cond.isothermal          = <cbool>sim_info['isothermal']
         sim_cond.sound_speed_squared = <real>(sim_info['sound_speed']**2)
-        
+
         # Create property map
         cdef unordered_map[string, PropertyValue] properties
         cdef vector[real] pos_vec, vel_vec
@@ -81,11 +77,11 @@ cdef class SimState:
                 vel_arr = np.ascontiguousarray(
                     body["velocity"], dtype=np.float64
                 )
-                
+
                 # Convert to std::vector
                 pos_vec = pos_arr
                 vel_vec = vel_arr
-                
+
                 # Create property map with vectors
                 properties["position".encode("utf-8")] = PropertyValue(pos_vec)
                 properties["velocity".encode("utf-8")] = PropertyValue(vel_vec)
@@ -94,8 +90,11 @@ cdef class SimState:
 
                 # add the rest of the body-specific properties
                 for extra_prop in set(body.keys()) - {"position", "velocity", "mass", "radius", "body_type"}:
-                    properties[extra_prop.encode("utf-8")] = PropertyValue(<real>body[extra_prop])
-                
+                    if isinstance(body[extra_prop], bool):
+                        properties[extra_prop.encode("utf-8")] = PropertyValue(<cbool>body[extra_prop])
+                    else:
+                        properties[extra_prop.encode("utf-8")] = PropertyValue(<real>body[extra_prop])
+
                 body_type_str = body["body_type"].upper().encode("utf-8")
                 if body_type_map.find(body_type_str) == body_type_map.end():
                     raise ValueError(f"Invalid body type: {body['body_type']}")
@@ -112,9 +111,9 @@ cdef class SimState:
         cdef PyObjWrapper adot_cpp = PyObjWrapper(adot)
 
         self.driver_state.run(
-            state, 
-            sim_info["dimensionality"], 
-            sim_info["regime"], 
+            state,
+            sim_info["dimensionality"],
+            sim_info["regime"],
             sim_cond,
             a_cpp,
             adot_cpp

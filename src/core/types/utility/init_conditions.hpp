@@ -49,11 +49,10 @@
 #ifndef INIT_CONDITIONS_HPP
 #define INIT_CONDITIONS_HPP
 
-#include "build_options.hpp"
+#include "build_options.hpp"   // for real
 #include "core/types/containers/vector.hpp"
+#include "core/types/utility/enums.hpp"
 #include "physics/hydro/schemes/ib/bodies/immersed_boundary.hpp"
-#include <string>
-#include <vector>
 
 struct InitialConditions {
     real time, checkpoint_interval, dlogt;
@@ -69,17 +68,20 @@ struct InitialConditions {
     std::pair<real, real> x1bounds;
     std::pair<real, real> x2bounds;
     std::pair<real, real> x3bounds;
+    bool enable_peer_access{true}, managed_memory{false};
 
     using PropertyValue = std::variant<
-        real,               // for scalar properties
-        std::vector<real>   // Python will enforce the dimensionality of the
-                            // vector
+        real,                // for scalar properties
+        std::vector<real>,   // Python will enforce the dimensionality of the
+                             // vector
+        bool                 // for boolean properties
         >;
 
     std::vector<std::pair<
-        simbi::ib::BodyType,
-        std::unordered_map<std::string, PropertyValue>   // Can store both
-                                                         // scalars and vectors
+        simbi::BodyType,
+        std::unordered_map<std::string, PropertyValue>   // Can store
+                                                         // scalars, booleans,
+                                                         // and vectors
         >>
         immersed_bodies;
 
