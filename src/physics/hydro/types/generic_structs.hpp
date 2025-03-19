@@ -584,8 +584,8 @@ namespace simbi {
             if (isothermal) {
                 return dens() * cs2;
             }
-            return (gamma - 1.0) *
-                   (nrg() - 0.5 * dens() * momentum().dot(momentum()));
+            const auto vel = momentum() / dens();
+            return (gamma - 1.0) * (nrg() - 0.5 * dens() * vel.dot(vel));
         }
     };
 
@@ -722,8 +722,8 @@ namespace simbi {
         {
             return gamma * press() / (rho() * enthalpy(gamma));
         }
-        DUAL general_vector_t<real, Dims> spatial_momentum(const real gamma
-        ) const
+        DUAL general_vector_t<real, Dims>
+        spatial_momentum(const real gamma) const
         {
             if constexpr (R == Regime::SRHD) {
                 return (
