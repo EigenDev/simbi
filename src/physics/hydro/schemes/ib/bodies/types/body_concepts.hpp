@@ -60,7 +60,6 @@ namespace simbi::ib::concepts {
     // Specific capability concepts
     template <typename Body, typename T>
     concept HasGravitationalProperties = requires(const Body& b) {
-        { b.G() } -> std::convertible_to<T>;
         { b.softening_length() } -> std::convertible_to<T>;
         { b.two_way_coupling() } -> std::convertible_to<bool>;
     };

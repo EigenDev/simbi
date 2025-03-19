@@ -42,7 +42,7 @@ class SimulationRunner:
 
     def _prepare_simulation_state(self, cli_args: dict[str, Any]) -> dict[str, Any]:
         """Convert SimulationBundle to execution format"""
-        # return the cython-compatible state
+
         return SimStateBuilder.build(self.bundle.update_from_cli_args(cli_args))
 
     def _execute_simulation(self, executor: Any, sim_state: dict[str, Any]) -> None:
@@ -107,7 +107,7 @@ class SimulationRunner:
             return x
 
         for key, param in sim_state.items():
-            if key not in ["bfield", "staggered_bfields", "bodies"]:
+            if key not in ["bfield", "staggered_bfields", "bodies", "body_system"]:
                 val_str = format_param(param)
                 logger.info(f"{key.ljust(30, '.')} {val_str}")
 

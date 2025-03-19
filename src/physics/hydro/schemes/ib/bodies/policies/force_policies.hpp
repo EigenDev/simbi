@@ -74,7 +74,6 @@ namespace simbi::ib {
 
         DUAL const trait_t& gravitational_trait() const { return trait_; }
         DUAL trait_t& gravitational_trait() { return trait_; }
-        DUAL T G() const { return trait_.G(); }
         DUAL T softening_length() const { return trait_.softening_length(); }
 
         // Calculate gravitational forces
@@ -95,8 +94,8 @@ namespace simbi::ib {
                         const auto r2 =
                             r.dot(r) + trait_.softening_length() *
                                            trait_.softening_length();
-                        body.force_ += -trait_.G() * other.mass() *
-                                       body.mass() * r / (r2 * std::sqrt(r2));
+                        body.force_ += -other.mass() * body.mass() * r /
+                                       (r2 * std::sqrt(r2));
                     }
                 }
             }

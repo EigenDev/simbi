@@ -60,6 +60,7 @@
 #include "geometry/mesh/mesh.hpp"                   // for Mesh
 #include "io/console/logger.hpp"                    // for logger
 #include "physics/hydro/schemes/ib/systems/gravitational_system.hpp"   // for GravitationalSystem
+#include "physics/hydro/schemes/ib/systems/system_config.hpp"   // for system_config
 #include "physics/hydro/types/generic_structs.hpp"   // for anyConserved, anyPrimitive
 
 namespace simbi {
@@ -105,8 +106,8 @@ namespace simbi {
                                 cfl_;
 
             real orbital_dt = INFINITY;
-            if (orbital_system_) {
-                orbital_dt = orbital_system_->get_orbital_timestep(cfl_);
+            if (gravitational_system_) {
+                orbital_dt = gravitational_system_->get_orbital_timestep(cfl_);
             }
 
             time_manager_.set_dt(std::min(gas_dt, orbital_dt));
@@ -146,7 +147,7 @@ namespace simbi {
         ndarray<Maybe<primitive_t>, Dims> prims_;
         ndarray<conserved_t, Dims> cons_;
         std::unique_ptr<ibsystem::GravitationalSystem<real, Dims>>
-            orbital_system_;
+            gravitational_system_;
 
         HydroBase() = default;
 
@@ -165,18 +166,16 @@ namespace simbi {
               exec_policy_manager_(mesh_.grid(), init_conditions),
               time_manager_(init_conditions),
               solver_config_(init_conditions),
-              io_manager_(
-                  std::make_unique<IOManager<Dims>>(
-                      solver_config_,
-                      init_conditions
-                  )
-              ),
+              io_manager_(std::make_unique<IOManager<Dims>>(
+                  solver_config_,
+                  init_conditions
+              )),
               // protected references to commonly used values
               gamma(gamma_),
               hllc_z(hllc_z_)
 
         {
-            init_orbital_system(init_conditions);
+            init_gravitational_system(init_conditions);
         }
 
         DUAL conserved_t hydro_sources(const auto& cell) const
@@ -271,66 +270,106 @@ namespace simbi {
             return dt;
         };
 
-        // void adapt_dt()
-        // {
-        //     auto& derived     = static_cast<Derived&>(*this);
-        //     auto* derived_ptr = &derived;
-
-        //     // Single-pass reduction that combines fold and reduce
-        //     time_manager_.set_dt(
-        //         prims_.reduce(
-        //             static_cast<real>(INFINITY),
-        //             [derived_ptr, this] DEV(
-        //                 const auto& acc,
-        //                 const auto& prim,
-        //                 const luint gid
-        //             ) {
-        //                 auto speeds   = derived_ptr->get_wave_speeds(prim);
-        //                 auto cell     =
-        //                 this->mesh().get_cell_from_global(gid); auto local_dt
-        //                 = calc_local_dt(speeds, cell);
-
-        //                 return std::min(acc, local_dt);
-        //             },
-        //             this->full_policy()
-        //         ) *
-        //         cfl_
-        //     );
-        // };
-
-        void init_orbital_system(const InitialConditions& init)
+        void init_gravitational_system(const InitialConditions& init)
         {
-            if (!init.immersed_bodies.empty()) {
-                orbital_system_ =
-                    std::make_unique<ibsystem::GravitationalSystem<real, Dims>>(
-                        mesh_,
-                        init.gamma
-                    );
+            if (init.contains("body_system")) {
+                const auto& sys_props = init.get_dict("body_system");
 
-                for (const auto& [body_type, props] : init.immersed_bodies) {
-                    // Extract common properties
-                    spatial_vector_t<real, Dims> position(
-                        std::get<std::vector<real>>(props.at("position"))
-                    );
-                    spatial_vector_t<real, Dims> velocity(
-                        std::get<std::vector<real>>(props.at("velocity"))
-                    );
-                    real mass   = std::get<real>(props.at("mass"));
-                    real radius = std::get<real>(props.at("radius"));
-
-                    // Let the orbital system use the builder to create and add
-                    // the body
-                    orbital_system_->add_body(
-                        body_type,
-                        position,
-                        velocity,
-                        mass,
-                        radius,
-                        props
-                    );
+                // Extract basic gravitational config
+                ibsystem::config::GravitationalConfig<real> grav_config;
+                if (sys_props.contains("prescribed_motion")) {
+                    grav_config.prescribed_motion =
+                        sys_props.at("prescribed_motion").get<bool>();
+                }
+                if (sys_props.contains("reference_frame")) {
+                    grav_config.reference_frame =
+                        sys_props.at("reference_frame").get<std::string>();
                 }
 
-                orbital_system_->init_system();
+                // Check system type
+                if (sys_props.contains("system_type")) {
+                    const auto& system_type =
+                        sys_props.at("system_type").get<std::string>();
+
+                    if (system_type == "binary" &&
+                        sys_props.contains("binary_config")) {
+                        if constexpr (Dims >= 2) {
+                            const auto& binary_props =
+                                sys_props.at("binary_config").get<ConfigDict>();
+
+                            // Extract binary config
+                            real total_mass =
+                                binary_props.contains("total_mass")
+                                    ? binary_props.at("total_mass").get<real>()
+                                    : 1.0;
+                            real semi_major =
+                                binary_props.contains("semi_major")
+                                    ? binary_props.at("semi_major").get<real>()
+                                    : 1.0;
+                            real eccentricity =
+                                binary_props.contains("eccentricity")
+                                    ? binary_props.at("eccentricity")
+                                          .get<real>()
+                                    : 0.0;
+                            real mass_ratio =
+                                binary_props.contains("mass_ratio")
+                                    ? binary_props.at("mass_ratio").get<real>()
+                                    : 1.0;
+
+                            // Use factory method to create binary system
+                            gravitational_system_ =
+                                ibsystem::GravitationalSystem<real, Dims>::
+                                    create_binary_system(
+                                        mesh_,
+                                        init.gamma,
+                                        total_mass,
+                                        semi_major,
+                                        eccentricity,
+                                        mass_ratio,
+                                        grav_config.prescribed_motion
+                                    );
+                        }
+                    }
+                    else {
+                        throw std::runtime_error(
+                            "Invalid gravitational system type: " + system_type
+                        );
+                    }
+                }
+            }
+            else if (!init.immersed_bodies.empty()) {
+                // gravitational_system_ =
+                //     std::make_unique<ibsystem::GravitationalSystem<real,
+                //     Dims>>(
+                //         mesh_,
+                //         init.gamma
+                //     );
+
+                // for (const auto& [body_type, props] : init.immersed_bodies) {
+                //     // Extract common properties
+                //     spatial_vector_t<real, Dims> position(
+                //         std::get<std::vector<real>>(props.at("position"))
+                //     );
+                //     spatial_vector_t<real, Dims> velocity(
+                //         std::get<std::vector<real>>(props.at("velocity"))
+                //     );
+                //     real mass   = std::get<real>(props.at("mass"));
+                //     real radius = std::get<real>(props.at("radius"));
+
+                //     // Let the orbital system use the builder to create and
+                //     add
+                //     // the body
+                //     gravitational_system_->add_body(
+                //         body_type,
+                //         position,
+                //         velocity,
+                //         mass,
+                //         radius,
+                //         props
+                //     );
+                // }
+
+                // gravitational_system_->init_system();
             }
         }
 
@@ -377,9 +416,10 @@ namespace simbi {
             auto& derived = static_cast<Derived&>(*this);
 
             // orbital dynamics (if any bodies are present)
-            if (orbital_system_) {
+            if (gravitational_system_) {
                 if constexpr (sim_type::Newtonian<R>) {
-                    orbital_system_->update_system(cons_, prims_, time_step());
+                    gravitational_system_
+                        ->update_system(cons_, prims_, time(), time_step());
                 }
             }
 

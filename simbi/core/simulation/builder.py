@@ -54,12 +54,11 @@ class SimStateBuilder:
     """Builder for simulation state configuration"""
 
     @staticmethod
-    def prepare_data_directory(data_directory: str) -> None:
+    def prepare_data_directory(data_directory: Path) -> None:
         """Ensure data directory exists"""
-        data_path = Path(data_directory)
-        if not data_path.is_dir():
-            data_path.mkdir(parents=True)
-            logger.info(f"Created data directory: {data_path}")
+        if not data_directory.is_dir():
+            data_directory.mkdir(parents=True)
+            logger.info(f"Created data directory: {data_directory}")
 
     @staticmethod
     def get_bounds(
@@ -120,7 +119,8 @@ class SimStateBuilder:
         mesh = bundle.mesh_config
         grid = bundle.grid_config
         io = bundle.io_config
-        sim = bundle.sim_config
+
+        SimStateBuilder.prepare_data_directory(io.data_directory)
 
         # Get bounds with defaults
         x1bounds, x2bounds, x3bounds = SimStateBuilder.get_bounds(
@@ -149,44 +149,17 @@ class SimStateBuilder:
         ]
         if bundle.staggered_bfields is not None:
             effective_bfields = [b.flat for b in bundle.staggered_bfields]
-        state_dict = SimStateDict(
-            gamma=sim.adiabatic_index,
-            tstart=sim.tstart,
-            tend=sim.tend,
-            cfl=sim.cfl,
-            dlogt=sim.dlogt,
-            plm_theta=sim.plm_theta,
-            checkpoint_interval=io.checkpoint_interval,
-            checkpoint_idx=io.checkpoint_index,
-            data_directory=str(io.data_directory),
-            boundary_conditions=[str(bc) for bc in bcs],
-            spatial_order=sim.spatial_order.encode(),
-            temporal_order=sim.temporal_order.encode(),
-            x1_spacing=mesh.x1_spacing,
-            x2_spacing=mesh.x2_spacing,
-            x3_spacing=mesh.x3_spacing,
-            solver=sim.solver.encode(),
-            regime=sim.regime.encode(),
-            dimensionality=mesh.dimensionality,
-            coord_system=mesh.coord_system.encode(),
-            quirk_smoothing=sim.quirk_smoothing,
-            nx=grid.nx,
-            ny=grid.ny,
-            nz=grid.nz,
+
+        x = [
+            getattr(bundle, s).to_execution_dict() for s in ["mesh_config", "sim_config", "grid_config", "io_config"]
+        ]
+        state_dict = {**x[0], **x[1], **x[2], **x[3], "bfield": effective_bfields}
+        state_dict.update(
+            boundary_conditions=[bc.encode('utf-8') for bc in bcs],
             x1bounds=x1bounds,
             x2bounds=x2bounds,
             x3bounds=x3bounds,
-            bfield=effective_bfields,
-            hydro_source_lib=str(io.hydro_source_lib or ""),
-            gravity_source_lib=str(io.gravity_source_lib or ""),
-            boundary_source_lib=str(io.boundary_source_lib or ""),
-            mesh_motion=mesh.mesh_motion,
-            homologous=mesh.is_homologous,
-            bodies=sim.bodies,
-            isothermal=sim.isothermal,
-            sound_speed=sim.sound_speed,
         )
 
-        SimStateBuilder.prepare_data_directory(state_dict["data_directory"])
         # Encode strings and return
-        return SimStateBuilder.to_dict(state_dict)
+        return state_dict

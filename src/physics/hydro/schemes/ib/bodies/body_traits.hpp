@@ -9,7 +9,6 @@ namespace simbi::ib::traits {
     {
       public:
         struct Params {
-            T G                   = T(1);      // Gravitational constant
             T softening_length    = T(0.01);   // Softening length
             bool two_way_coupling = false;     // Apply reaction forces to body?
         };
@@ -17,7 +16,6 @@ namespace simbi::ib::traits {
         Gravitational(const Params& params = {}) : params_(params) {}
 
         // capabilities of the gravitational traits
-        DUAL T G() const { return params_.G; }
         DUAL T softening_length() const { return params_.softening_length; }
         DUAL bool two_way_coupling() const { return params_.two_way_coupling; }
 

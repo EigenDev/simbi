@@ -51,9 +51,9 @@
 #define BODY_FACTORY_HPP
 
 #include "../bodies/types/gravitational.hpp"   // for GravitationalBody, GravitationalSinkBody
-#include "core/types/containers/vector.hpp"         // for spatial_vector_t
-#include "core/types/utility/enums.hpp"             // for BodyType
-#include "core/types/utility/init_conditions.hpp"   // for InitialConditions
+#include "core/types/containers/vector.hpp"     // for spatial_vector_t
+#include "core/types/utility/config_dict.hpp"   // for ConfigDict
+#include "core/types/utility/enums.hpp"         // for BodyType
 #include "physics/hydro/schemes/ib/bodies/immersed_boundary.hpp"   // for ImmersedBody
 #include "physics/hydro/schemes/ib/bodies/policies/force_policies.hpp"
 #include "physics/hydro/schemes/ib/bodies/policies/motion_policies.hpp"
@@ -70,9 +70,6 @@ namespace simbi::ib {
     {
       public:
         using MeshType = Mesh<Dims>;
-        using PropertyMap =
-            std::unordered_map<std::string, InitialConditions::PropertyValue>;
-
         // Main build method - constructs a body of the specific type
         static std::unique_ptr<AnyBody<T, Dims>> build(
             BodyType type,
@@ -81,7 +78,7 @@ namespace simbi::ib {
             const spatial_vector_t<T, Dims>& velocity,
             T mass,
             T radius,
-            const PropertyMap& props
+            const ConfigDict& props
         )
         {
             switch (type) {
@@ -134,26 +131,27 @@ namespace simbi::ib {
         // Extract a property with a default value
         template <typename V>
         static V extract_property(
-            const PropertyMap& props,
+            const ConfigDict& props,
             const std::string& name,
             V default_value
         )
         {
+            // extract the property from the config dictionary
             auto it = props.find(name);
             if (it != props.end()) {
-                return std::get<V>(it->second);
+                return it->second.get<V>();
             }
+            // if not found, return the default value
             return default_value;
         }
 
         // Build gravitational force policy parameters
         static GravitationalForcePolicy<T, Dims>::Params
-        build_grav_force_params(const PropertyMap& props)
+        build_grav_force_params(const ConfigDict& props)
         {
             typename GravitationalForcePolicy<T, Dims>::Params params;
-            params.G = extract_property<T>(props, "grav_strength", T(1.0));
             params.softening_length =
-                extract_property<T>(props, "softening", T(0.01));
+                extract_property<T>(props, "softening_length", T(0.01));
             params.two_way_coupling =
                 extract_property<bool>(props, "two_way_coupling", false);
             return params;
@@ -161,7 +159,7 @@ namespace simbi::ib {
 
         // Build standard fluid interaction policy parameters
         static GravitationalFluidInteractionPolicy<T, Dims>::Params
-        build_grav_fluid_params(const PropertyMap& props)
+        build_grav_fluid_params(const ConfigDict& props)
         {
             typename GravitationalFluidInteractionPolicy<T, Dims>::Params
                 params;
@@ -175,7 +173,7 @@ namespace simbi::ib {
 
         // Build accreting fluid interaction policy parameters
         static AccretingFluidInteractionPolicy<T, Dims>::Params
-        build_accretion_fluid_params(const PropertyMap& props)
+        build_accretion_fluid_params(const ConfigDict& props)
         {
             typename AccretingFluidInteractionPolicy<T, Dims>::Params params;
             params.accretion_efficiency =
@@ -187,7 +185,7 @@ namespace simbi::ib {
 
         // Build rigid material policy parameters
         static RigidMaterialPolicy<T, Dims>::Params
-        build_rigid_material_params(const PropertyMap& props)
+        build_rigid_material_params(const ConfigDict& props)
         {
             typename RigidMaterialPolicy<T, Dims>::Params params;
             params.density = extract_property<T>(props, "density", T(1.0));
@@ -200,7 +198,7 @@ namespace simbi::ib {
 
         // Build motion policy parameters
         static DynamicMotionPolicy<T, Dims>::Params
-        build_dynamic_motion_params(const PropertyMap& props)
+        build_dynamic_motion_params(const ConfigDict& props)
         {
             typename DynamicMotionPolicy<T, Dims>::Params params;
             params.live_motion =
@@ -209,7 +207,7 @@ namespace simbi::ib {
         }
 
         static StaticMotionPolicy<T, Dims>::Params
-        build_static_motion_params(const PropertyMap& props)
+        build_static_motion_params(const ConfigDict& props)
         {
             typename StaticMotionPolicy<T, Dims>::Params params;
             return params;
@@ -222,7 +220,7 @@ namespace simbi::ib {
             const spatial_vector_t<T, Dims>& velocity,
             T mass,
             T radius,
-            const PropertyMap& props
+            const ConfigDict& props
         )
         {
             auto grav_params     = build_grav_force_params(props);
@@ -252,7 +250,7 @@ namespace simbi::ib {
             const spatial_vector_t<T, Dims>& velocity,
             T mass,
             T radius,
-            const PropertyMap& props
+            const ConfigDict& props
         )
         {
             auto grav_params     = build_grav_force_params(props);
@@ -274,7 +272,6 @@ namespace simbi::ib {
             );
         }
 
-        // Similar methods for other body types
         static std::unique_ptr<AnyBody<T, Dims>> build_elastic_body(...)
         {
             // TODO: Implement elastic body construction

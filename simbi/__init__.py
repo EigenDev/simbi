@@ -9,6 +9,7 @@ from .functional.helpers import *
 from .tools.utility import get_dimensionality, read_file
 from .core.managers.property import simbi_property, simbi_class_property
 from .core.types.typing import *
+from .core.types.dicts import *
 
 logger = logging.logger
 __all__ = [
@@ -29,5 +30,8 @@ __all__ = [
     "MHDStateGenerators",
     "PrimitiveStateFunc",
     "StateGenerator",
+    "ImmersedBodyConfig",
+    "GravitationalSystemConfig",
+    "BinaryConfig",
 ]
 __version__ = ".".join(map(str, __version_tuple__))

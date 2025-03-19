@@ -406,7 +406,6 @@ namespace simbi::ib {
 
             // load gravitational trait parameters
             const auto softening        = trait_.softening_length();
-            const auto G                = trait_.G();
             const auto mesh             = body.mesh();
             const auto two_way_coupling = trait_.two_way_coupling();
 
@@ -421,7 +420,7 @@ namespace simbi::ib {
 
                     // Gravitational force on fluid element
                     const auto force =
-                        -G * body.mass() * r / (r2 * std::sqrt(r2));
+                        -body_ptr->mass() * r / (r2 * std::sqrt(r2));
 
                     // momentum and energy change
                     const auto dp = prim->rho() * force * dt;

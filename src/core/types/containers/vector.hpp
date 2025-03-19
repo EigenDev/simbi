@@ -239,8 +239,8 @@ namespace simbi {
 
         // vector-to-vector operations w/ type promotions
         template <typename U, size_type OtherDims, VectorType OtherType>
-        DUAL constexpr auto
-        dot(const VectorOps<U, OtherDims, OtherType>& other) const
+        DUAL constexpr auto dot(const VectorOps<U, OtherDims, OtherType>& other
+        ) const
         {
             using result_type = promote_t<T, U>;
             result_type sum{0};
@@ -425,8 +425,8 @@ namespace simbi {
 
         // if less than 3D, the cross product is simply the magnitude
         template <typename U, VectorType OtherType>
-        DUAL constexpr auto
-        cross(const VectorOps<U, Dims, OtherType>& other) const
+        DUAL constexpr auto cross(const VectorOps<U, Dims, OtherType>& other
+        ) const
             requires(Dims < 3)
         {
             if (Dims == 1) {
@@ -852,6 +852,40 @@ namespace simbi {
             }
         }
     }   // namespace unit_vectors
+
+    namespace vecops {
+        // helpers to rotate vectors by some angle
+        template <typename Vec, typename T>
+        static constexpr auto rotate_2D(const Vec& vec, const T& angle)
+        {
+            return Vector<T, 2, VectorType::SPATIAL>{
+              vec[0] * std::cos(angle) - vec[1] * std::sin(angle),
+              vec[0] * std::sin(angle) + vec[1] * std::cos(angle)
+            };
+        }
+
+        template <typename Vec, typename T>
+        static constexpr auto rotate_3D(const Vec& vec, const T& angle)
+        {
+            return Vector<T, 3, VectorType::SPATIAL>{
+              vec[0] * std::cos(angle) - vec[1] * std::sin(angle),
+              vec[0] * std::sin(angle) + vec[1] * std::cos(angle),
+              vec[2]
+            };
+        }
+
+        // general rotation function that checks the dimension at compile-time
+        template <typename Vec, typename T>
+        static constexpr auto rotate(const Vec& vec, const T& angle)
+        {
+            if constexpr (Vec::dimensions == 2) {
+                return rotate_2D(vec, angle);
+            }
+            else {
+                return rotate_3D(vec, angle);
+            }
+        }
+    }   // namespace vecops
 
 }   // namespace simbi
 

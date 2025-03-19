@@ -11,6 +11,7 @@ from ..simulation.state_init import SimulationBundle, initialize_simulation
 from ...functional.maybe import Maybe
 from numpy.typing import NDArray
 from pathlib import Path
+from ..types.dicts import GravitationalSystemConfig, ImmersedBodyConfig
 from typing import (
     Callable,
     Optional,
@@ -270,7 +271,12 @@ class BaseConfig(metaclass=abc.ABCMeta):
         return None
 
     @simbi_property(group="sim_state")
-    def immersed_bodies(self) -> list[dict[str, Any]]:
+    def gravitational_system(self) -> Optional[GravitationalSystemConfig]:
+         """Define a gravitational system configuration."""
+         return None
+
+    @simbi_property(group="sim_state")
+    def immersed_bodies(self) -> list[ImmersedBodyConfig]:
         """list of immersed bodies (IB method of Peskin (2002))"""
         return []
 
@@ -484,7 +490,7 @@ class BaseConfig(metaclass=abc.ABCMeta):
                 ) from e
             raise
 
-    def _collect_property_values(self) -> dict[str, dict[str, Any]]:
+    def _collect_properties(self) -> dict[str, dict[str, Any]]:
         """Collect all property values group by category"""
         settings: dict[str, Any] = {
             "sim_state": {},
@@ -523,14 +529,6 @@ class BaseConfig(metaclass=abc.ABCMeta):
 
         return settings
 
-    def _collect_settings(self, settings: dict[str, dict[str, Any]]) -> dict[str, Any]:
-        return {
-            **settings["sim_state"],
-            **settings["mesh"],
-            **settings["grid"],
-            **settings["io"],
-        }
-
     def _validate_bodies(self, settings: dict[str, Any]) -> Maybe[dict[str, Any]]:
         if bodies := settings["sim_state"]["immersed_bodies"]:
             validated_bodies = []
@@ -562,7 +560,7 @@ class BaseConfig(metaclass=abc.ABCMeta):
     def to_simulation_bundle(self) -> Maybe[SimulationBundle]:
         return (
             Maybe.of(self)
-            .map(lambda _: self._collect_property_values())
+            .map(lambda _: self._collect_properties())
             .bind(self._validate_settings)
             .bind(self._create_bundle)
         )

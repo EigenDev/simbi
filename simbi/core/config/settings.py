@@ -1,6 +1,10 @@
 from dataclasses import dataclass, asdict, field
 from typing import Optional, Sequence, Callable, Any, Optional, TypeVar
 from pathlib import Path
+
+from simbi.functional.helpers import to_tuple_of_tuples
+
+from ...core.types.dicts import BodySystemConfig
 from .constants import (
     CoordSystem,
     Regime,
@@ -12,6 +16,12 @@ from .constants import (
 
 T = TypeVar("T", bound="BaseSettings")
 
+
+def get_first_existing_key(some_dict: dict[str, Any], keys: list[str], default: Any) -> Any:
+    for key in keys:
+        if key in some_dict:
+            return some_dict[key]
+    return default
 
 @dataclass(frozen=True)
 class BaseSettings:
@@ -53,7 +63,8 @@ class GridSettings(BaseSettings):
         )
 
     @classmethod
-    def from_dict(cls, setup: dict[str, Any], spatial_order: str) -> "GridSettings":
+    def from_dict(cls, setup: dict[str, Any],
+                  spatial_order: str) -> "GridSettings":
         # pad the resolution with ones up to 3D
         dim: int = len(setup["resolution"])
         resolution: tuple[int, ...] = setup["resolution"]
@@ -73,7 +84,8 @@ class GridSettings(BaseSettings):
         )
 
     @classmethod
-    def update_from(cls, instance: "GridSettings", cli_args: dict[str, Any]) -> Any:
+    def update_from(cls, instance: "GridSettings",
+                    cli_args: dict[str, Any]) -> Any:
         self_params = asdict(instance)
         if cli_args["spatial_order"] is None:
             return cls(**self_params)
@@ -91,6 +103,19 @@ class GridSettings(BaseSettings):
             nghosts=nghosts,
             dimensionality=dimensionality,
         )
+
+    def to_execution_dict(self) -> dict[str, Any]:
+        """convert the settings to execution format dict"""
+        return {
+            "nx": self.nx,
+            "ny": self.ny,
+            "nz": self.nz,
+            "nxv": self.nxv,
+            "nyv": self.nyv,
+            "nzv": self.nzv,
+            "nghosts": self.nghosts,
+            "dimensionality": self.dimensionality,
+        }
 
     @property
     def shape(self) -> tuple[int, int, int]:
@@ -144,6 +169,24 @@ class MeshSettings(BaseSettings):
     def from_dict(cls, setup: dict[str, Any]) -> "MeshSettings":
         return cls(**setup)
 
+    def to_execution_dict(self) -> dict[str, Any]:
+        """convert the settings to execution format dict"""
+        return {
+            "coord_system": self.coord_system.encode('utf-8'),
+            "bounds": to_tuple_of_tuples(
+                self.bounds),
+            "boundary_conditions": [
+                bc.encode('utf-8') for bc in self.boundary_conditions],
+            "dimensionality": self.dimensionality,
+            "mesh_motion": self.mesh_motion,
+            "is_homologous": self.is_homologous,
+            "x1_spacing": self.x1_spacing.encode('utf-8'),
+            "x2_spacing": self.x2_spacing.encode('utf-8'),
+            "x3_spacing": self.x3_spacing.encode('utf-8'),
+            "scale_factor": self.scale_factor,
+            "scale_factor_derivative": self.scale_factor_derivative,
+        }
+
 
 @dataclass(frozen=True)
 class IOSettings(BaseSettings):
@@ -168,10 +211,26 @@ class IOSettings(BaseSettings):
             checkpoint_interval=setup["checkpoint_interval"],
             checkpoint_index=setup["checkpoint_index"],
             log_output=setup["log_output"],
-            hydro_source_lib=IOSettings.try_get_path(setup["hydro_source_lib"]),
-            gravity_source_lib=IOSettings.try_get_path(setup["gravity_source_lib"]),
-            boundary_source_lib=IOSettings.try_get_path(setup["boundary_source_lib"]),
+            hydro_source_lib=IOSettings.try_get_path(
+                setup["hydro_source_lib"]),
+            gravity_source_lib=IOSettings.try_get_path(
+                setup["gravity_source_lib"]),
+            boundary_source_lib=IOSettings.try_get_path(
+                setup["boundary_source_lib"]),
         )
+
+    def to_execution_dict(self) -> dict[str, Any]:
+        """convert the settings to execution format dict"""
+        return {
+            "data_directory": f"{self.data_directory}/".encode('utf-8'),
+            "checkpoint_file": (str(self.checkpoint_file) if self.checkpoint_file else "").encode('utf-8'),
+            "checkpoint_interval": self.checkpoint_interval,
+            "checkpoint_index": self.checkpoint_index,
+            "log_output": self.log_output,
+            "hydro_source_lib": (str(self.hydro_source_lib) if self.hydro_source_lib else "").encode('utf-8'),
+            "gravity_source_lib": (str(self.gravity_source_lib) if self.gravity_source_lib else "").encode('utf-8'),
+            "boundary_source_lib": (str(self.boundary_source_lib) if self.boundary_source_lib else "").encode('utf-8'),
+        }
 
 
 @dataclass(frozen=True)
@@ -191,6 +250,7 @@ class SimulationSettings(BaseSettings):
     bodies: list[dict[str, Any]] = field(default_factory=list)
     sound_speed: float = 0.0
     isothermal: bool = False
+    body_system: Optional[BodySystemConfig] = None
 
     @classmethod
     def from_dict(cls, setup: dict[str, Any]) -> "SimulationSettings":
@@ -210,6 +270,7 @@ class SimulationSettings(BaseSettings):
             bodies=setup["immersed_bodies"],
             sound_speed=setup["sound_speed"],
             isothermal=setup["isothermal"],
+            body_system=get_first_existing_key(setup, ["gravitational_system", "elastic_system", "rigid_system"], None),
         )
 
     @classmethod
@@ -235,4 +296,27 @@ class SimulationSettings(BaseSettings):
             bodies=self_params["bodies"],
             sound_speed=self_params["sound_speed"],
             isothermal=self_params["isothermal"],
+            body_system=self_params["body_system"],
         )
+
+    def to_execution_dict(self) -> dict[str, Any]:
+        """convert the settings to execution format dict"""
+        return {
+            "adiabatic_index": self.adiabatic_index,
+            "tstart": self.tstart,
+            "tend": self.tend,
+            "cfl": self.cfl,
+            "regime": self.regime.encode('utf-8'),
+            "temporal_order": self.temporal_order.value.encode('utf-8'),
+            "spatial_order": self.spatial_order.value.encode('utf-8'),
+            "plm_theta": self.plm_theta,
+            "quirk_smoothing": self.quirk_smoothing,
+            "is_mhd": self.is_mhd,
+            "dlogt": self.dlogt,
+            "solver": self.solver.encode('utf-8'),
+            "bodies": self.bodies,
+            "sound_speed": self.sound_speed,
+            "isothermal": self.isothermal,
+            "body_system": dict(
+                self.body_system) if self.body_system else None,
+        }

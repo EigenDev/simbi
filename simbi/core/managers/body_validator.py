@@ -14,14 +14,13 @@ class BodyConfigValidator:
     """Validates immersed body configurations"""
 
     REQUIRED_PARAMS = {
-        BodyType.GRAVITATIONAL: {"mass", "radius", "grav_strength"},
+        BodyType.GRAVITATIONAL: {"mass", "radius"},
         BodyType.ELASTIC: {"mass", "radius", "stiffness", "damping"},
         BodyType.RIGID: {"mass", "radius"},
         BodyType.SINK: {"mass", "radius", "grav_strength", "accretion_efficiency"},
         BodyType.GRAVITATIONAL_SINK: {
             "mass",
             "radius",
-            "grav_strength",
             "accretion_efficiency",
             "softening",
         },
@@ -53,7 +52,6 @@ class BodyConfigValidator:
                         velocity=vel,
                         mass=float(body_dict["mass"]),
                         radius=float(body_dict["radius"]),
-                        grav_strength=float(body_dict["grav_strength"]),
                         softening_length=float(body_dict.get("softening_length", 0.01)),
                     )
                 )
@@ -77,7 +75,6 @@ class BodyConfigValidator:
                         velocity=vel,
                         mass=float(body_dict["mass"]),
                         radius=float(body_dict["radius"]),
-                        grav_strength=float(body_dict["grav_strength"]),
                         softening_length=float(body_dict.get("softening_length", 0.01)),
                         accretion_efficiency=float(body_dict["accretion_efficiency"]),
                     )

@@ -73,6 +73,8 @@ namespace simbi::ib {
             virtual void
             calculate_forces(const std::vector<BodyRef>& others, T dt) = 0;
             virtual void update_material_state(T dt)                   = 0;
+            virtual void set_position(const spatial_vector_t<T, Dims>& pos) {}
+            virtual void set_velocity(const spatial_vector_t<T, Dims>& vel) {}
 
             // Fluid interaction
             virtual void apply_to_fluid(
@@ -89,7 +91,6 @@ namespace simbi::ib {
             virtual bool has_deformable_capability() const { return false; }
 
             // Optional gravitational properties
-            virtual T G() const { return T(0); }
             virtual T softening_length() const { return T(0); }
             virtual bool two_way_coupling() const { return false; }
 
@@ -140,6 +141,14 @@ namespace simbi::ib {
             // Implement dynamics methods
             void advance_position(T dt) override { body_.advance_position(dt); }
             void advance_velocity(T dt) override { body_.advance_velocity(dt); }
+            void set_position(const spatial_vector_t<T, Dims>& pos) override
+            {
+                body_.set_position(pos);
+            }
+            void set_velocity(const spatial_vector_t<T, Dims>& vel) override
+            {
+                body_.set_velocity(vel);
+            }
 
             void
             calculate_forces(const std::vector<BodyRef>& others, T dt) override
@@ -205,16 +214,6 @@ namespace simbi::ib {
 
             // Implement optional capability methods if they exist
 
-            // Gravitational properties
-            T G() const override
-            {
-                if constexpr (concepts::
-                                  HasGravitationalProperties<BodyType, T>) {
-                    return body_.G();
-                }
-                return Concept::G();
-            }
-
             T softening_length() const override
             {
                 if constexpr (concepts::
@@ -243,9 +242,8 @@ namespace simbi::ib {
         // Constructor from any type that satisfies the ImmersedBody concept
         template <concepts::ImmersedBody<T, Dims> BodyType, typename... Args>
         AnyBody(std::in_place_type_t<BodyType>, Args&&... args)
-            : concept_(
-                  std::make_unique<Model<BodyType>>(std::forward<Args>(args)...)
-              )
+            : concept_(std::make_unique<Model<BodyType>>(std::forward<Args>(args
+              )...))
         {
         }
 
@@ -296,10 +294,15 @@ namespace simbi::ib {
             return concept_->has_gravitational_capability();
         }
 
-        // Optional capability methods
-        T G() const { return concept_->G(); }
-        T softening_length() const { return concept_->softening_length(); }
-        // ... other optional properties
+        void set_position(const spatial_vector_t<T, Dims>& pos)
+        {
+            concept_->set_position(pos);
+        }
+
+        void set_velocity(const spatial_vector_t<T, Dims>& vel)
+        {
+            concept_->set_velocity(vel);
+        }
     };
 }   // namespace simbi::ib
 #endif   // ANY_HPP

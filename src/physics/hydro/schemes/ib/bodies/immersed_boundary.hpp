@@ -184,8 +184,7 @@ namespace simbi {
             template <template <typename> class Trait, typename Policy>
             struct has_policy_trait {
                 template <typename P>
-                static auto test(
-                    int
+                static auto test(int
                 ) -> decltype(std::declval<typename P::template trait_t<T>>(), std::true_type{});
 
                 template <typename>
@@ -375,6 +374,16 @@ namespace simbi {
             DUAL auto fluid_velocity() const { return this->fluid_velocity_; }
             DUAL auto cell_info() const { return this->cell_info_; }
             DUAL auto mesh() const { return this->mesh_; }
+
+            // setters for position and velocity
+            DUAL void set_position(const auto& position)
+            {
+                this->position_ = position;
+            }
+            DUAL void set_velocity(const auto& velocity)
+            {
+                this->velocity_ = velocity;
+            }
         };
     }   // namespace ib
 

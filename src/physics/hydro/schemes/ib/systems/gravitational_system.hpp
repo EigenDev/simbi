@@ -50,25 +50,38 @@
 #define GRAVITATIONAL_SYSTEM_HPP
 
 #include "build_options.hpp"
-#include "core/types/containers/ndarray.hpp"
-#include "core/types/utility/enums.hpp"
+#include "physics/hydro/schemes/ib/bodies/types/any_body.hpp"
 #include "physics/hydro/schemes/ib/systems/body_system.hpp"
+#include "physics/hydro/schemes/ib/systems/system_config.hpp"
+#include "physics/hydro/schemes/ib/systems/system_dynamics.hpp"
+#include "physics/hydro/schemes/ib/systems/system_factories.hpp"
+#include "physics/hydro/schemes/ib/systems/system_traits.hpp"
+#include <memory>
+#include <optional>
 #include <type_traits>
+#include <variant>
 
 namespace simbi::ibsystem {
     template <typename T, size_type Dims>
+    struct BinaryTypeImpl {
+        using type = std::monostate;
+    };
+
+    template <typename T, size_type Dims>
+        requires traits::AtLeastTwoDimensional<Dims>
+    struct BinaryTypeImpl<T, Dims> {
+        using type =
+            std::unique_ptr<ibsystem::dynamics::BinaryDynamics<T, Dims>>;
+    };
+
+    template <typename T, size_type Dims>
+    using BinaryType = typename BinaryTypeImpl<T, Dims>::type;
+
+    template <typename T, size_type Dims>
     class GravitationalSystem : public BodySystem<T, Dims>
     {
-      private:
-        struct orbit_params_t {
-            T semi_major;
-            T eccentricity;
-            T inclination;
-            T longitude_of_ascending_node;
-            T argument_of_periapsis;
-            T true_anomaly;
-        };
 
+      private:
         // Base class type alias
         using Base = BodySystem<T, Dims>;
 
@@ -86,7 +99,6 @@ namespace simbi::ibsystem {
         T total_energy_;
         T total_mass_;
         T gamma_;
-        orbit_params_t orbital_params_;
 
         // Conservation tracking
         T initial_energy_;
@@ -98,27 +110,139 @@ namespace simbi::ibsystem {
             SYMPLECTIC_EULER
         };
 
+        // system traits
+        traits::GravitationalTrait<T> grav_trait_;
+
+        // optional specialized traits. (e.g. binary system, triples)
+        std::optional<ibsystem::config::BinaryConfig<T>> binary_config_;
+        std::optional<ibsystem::config::PlanetaryConfig<T>> planetary_config_;
+
+        // specialized dynamics
+        BinaryType<T, Dims> binary_dynamics_;
+
         IntegrationMethod integration_method_ = IntegrationMethod::LEAPFROG;
 
       public:
-        DUAL
-        GravitationalSystem(const typename Base::MeshType& mesh, const T gamma)
-            : Base(mesh), gamma_(gamma)
+        GravitationalSystem(
+            const typename Base::MeshType& mesh,
+            const T gamma,
+            const ibsystem::config::GravitationalConfig<T>& grav_config
+        )
+            : Base(mesh), gamma_(gamma), grav_trait_(grav_config)
         {
+        }
+
+        void
+        set_binary_configuration(const ibsystem::config::BinaryConfig<T>& config
+        )
+        {
+            static_assert(
+                Dims >= 2,
+                "Binary systems require at least 2 dimensions"
+            );
+            binary_config_    = config;
+            auto binary_trait = ibsystem::traits::BinaryTrait<T, Dims>(config);
+            binary_dynamics_ =
+                std::make_unique<ibsystem::dynamics::BinaryDynamics<T, Dims>>(
+                    grav_trait_.config(),
+                    binary_trait
+                );
+        }
+
+        void add_binary_pair(T radius1, T radius2)
+        {
+            if (!binary_config_) {
+                throw std::runtime_error("Binary configuration not set");
+            }
+
+            auto bodies = ibsystem::factory::BinaryFactory<T, Dims>::create(
+                this->mesh_,
+                grav_trait_.config(),
+                *binary_config_
+            );
+
+            // Add bodies to this system
+            for (auto& body : bodies) {
+                this->bodies_.push_back(std::move(body));
+            }
+        }
+
+        static std::unique_ptr<GravitationalSystem<T, Dims>>
+        create_binary_system(
+            const typename Base::MeshType& mesh,
+            T gamma,
+            T total_mass,
+            T semi_major_axis,
+            T eccentricity         = T(0),
+            T mass_ratio           = T(1),
+            bool prescribed_motion = true
+        )
+        {
+            // Create gravitational config
+            ibsystem::config::GravitationalConfig<T> grav_config;
+            grav_config.prescribed_motion = prescribed_motion;
+
+            // Create binary config
+            ibsystem::config::BinaryConfig<T> binary_config;
+            binary_config.semi_major   = semi_major_axis;
+            binary_config.eccentricity = eccentricity;
+            binary_config.mass_ratio   = mass_ratio;
+            binary_config.total_mass   = total_mass;
+
+            // Create system
+            auto system = std::make_unique<GravitationalSystem<T, Dims>>(
+                mesh,
+                gamma,
+                grav_config
+            );
+
+            // Set binary configuration
+            system->set_binary_configuration(binary_config);
+
+            // Add binary pair with default radii
+            T default_radius = semi_major_axis * T(0.01);
+            system->add_binary_pair(default_radius, default_radius);
+
+            // Initialize
+            system->init_system();
+
+            return system;
         }
 
         DUAL void update_system(
             ConsArray& cons_states,
             const PrimArray& prim_states,
+            const T time,
             const T dt
         )
         {
-            switch (integration_method_) {
-                case IntegrationMethod::LEAPFROG: integrate_leapfrog(dt); break;
-                default: integrate_symplectic_euler(dt); break;
+            if constexpr (Dims >= 2) {
+                if (binary_dynamics_) {
+                    // Extract pointers to bodies
+                    std::vector<ib::AnyBody<T, Dims>*> body_ptrs;
+                    for (auto& body : this->bodies_) {
+                        body_ptrs.push_back(body.get());
+                    }
+
+                    if (grav_trait_.use_prescribed_motion()) {
+                        // Update using prescribed dynamics
+                        binary_dynamics_->update_prescribed(
+                            body_ptrs,
+                            time + dt
+                        );
+                    }
+                    else {
+                        // Use numerical integration
+                        binary_dynamics_->update_numerical(body_ptrs, dt);
+                    }
+                }
+                else {
+                    // Default integration
+                    integrate_leapfrog(dt);
+                }
             }
 
-            // Apply forces to fluid if needed
+            // Apply forces to fluid
             this->apply_forces_to_fluid(cons_states, prim_states, dt);
 
             // Update diagnostics
@@ -133,11 +257,11 @@ namespace simbi::ibsystem {
 
             // if there is only one body, we can't calculate a timestep
             // so we return infinity
-            if (this->bodies().size() < 2) {
+            if (this->bodies_.size() < 2) {
                 return orbital_dt;
             }
 
-            for (const auto& body_ptr : this->bodies()) {
+            for (const auto& body_ptr : this->bodies_) {
                 const auto pos   = body_ptr->position();
                 const auto vel   = body_ptr->velocity();
                 const auto force = body_ptr->force();
@@ -299,8 +423,7 @@ namespace simbi::ibsystem {
                     const auto r =
                         (body2->position() - body1->position()).norm();
                     if (r > 0) {
-                        total_energy_ -=
-                            body1->G() * body1->mass() * body2->mass() / r;
+                        total_energy_ -= body1->mass() * body2->mass() / r;
                     }
                 }
             }

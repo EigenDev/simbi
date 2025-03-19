@@ -118,7 +118,6 @@ class KeplerianRingTest(BaseConfig):
                 "mass": 1.0,
                 "velocity": [0.0, 0.0],
                 "position": [0.0, 0.0],
-                "grav_strength": 1.0,
                 "radius": 0.01,
                 "softening": 0.05,
             }
@@ -187,37 +186,37 @@ class KeplerianRingTest(BaseConfig):
     extern "C" {{
         // Helper function for buffer damping
         inline void apply_buffer_damping(
-            double x1, double x2, double t, 
+            double x1, double x2, double t,
             double* result,
             const double r_buffer,
             const double r_outer,
             const double tau
         ) {{
             const double r = std::sqrt(x1*x1 + x2*x2);
-        
+
             // First set initial values (since result array is zero-initialized)
             const double rho = 1e-8;  // Background density
             const double cs = {self.sound_speed};
             const double press = rho * cs*cs;
-            
+
             // Default to background values
             result[0] = rho;
             result[1] = 0.0;  // vx
             result[2] = 0.0;  // vy
             result[3] = press;
-            
+
             if (r <= r_buffer) return;
-            
+
             const double s = (r - r_buffer)/(r_outer - r_buffer);
             const double alpha = s*s;
-            
+
             // Keplerian velocity at this radius
             const double G = 1.0;
             const double M = 1.0;
             const double v_k = std::sqrt(G*M/r);
             const double vx = -v_k * (x2/r);
             const double vy = v_k * (x1/r);
-            
+
             // Apply damping towards background state
             result[0] += -alpha*(result[0] - rho)/tau;
             result[1] += -alpha*(result[1] - rho*vx)/tau;
@@ -227,19 +226,19 @@ class KeplerianRingTest(BaseConfig):
 
         // x1 boundaries (left/right)
         void bx1_inner_source(double x1, double x2, double t, double result[]) {{
-            apply_buffer_damping(x1, x2, t, result, 
+            apply_buffer_damping(x1, x2, t, result,
                             {buffer_params["r_buffer"]},
                             {buffer_params["r_outer"]},
                             {buffer_params["damp_time"]});
         }}
-        
+
         void bx1_outer_source(double x1, double x2, double t, double result[]) {{
             apply_buffer_damping(x1, x2, t, result,
                             {buffer_params["r_buffer"]},
                             {buffer_params["r_outer"]},
                             {buffer_params["damp_time"]});
         }}
-        
+
         // x2 boundaries (bottom/top)
         void bx2_inner_source(double x1, double x2, double t, double result[]) {{
             apply_buffer_damping(x1, x2, t, result,
@@ -247,7 +246,7 @@ class KeplerianRingTest(BaseConfig):
                             {buffer_params["r_outer"]},
                             {buffer_params["damp_time"]});
         }}
-        
+
         void bx2_outer_source(double x1, double x2, double t, double result[]) {{
             apply_buffer_damping(x1, x2, t, result,
                             {buffer_params["r_buffer"]},

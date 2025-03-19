@@ -21,6 +21,48 @@ cdef extern from "build_options.hpp":
     cdef cbool col_major "COLUMN_MAJOR"
     ctypedef double real
 
+    cdef extern from "core/types/utility/config_dict.hpp" namespace "simbi":
+        cdef cppclass ConfigDict:
+            ConfigDict() except +
+            # Add the indexing operator
+            ConfigValue& operator[](const string&) except +
+            # Add method to check if key exists
+            bint find "find"(const string&) const
+            # Add method to retrieve a value
+            ConfigValue& at(const string&) except +
+            # Add iterators
+            cppclass iterator:
+                pair[string, ConfigValue]& operator*()
+                iterator operator++()
+                bint operator==(iterator)
+                bint operator!=(iterator)
+            iterator begin()
+            iterator end()
+
+        cdef cppclass ConfigValue:
+            ConfigValue() except +
+            ConfigValue(cbool value) except +
+            ConfigValue(int value) except +
+            ConfigValue(double value) except +
+            ConfigValue(string value) except +
+            ConfigValue(vector[double] value) except +
+            ConfigValue(ConfigDict value) except +
+            # Add type checking methods
+            bint is_bool() const
+            bint is_int() const
+            bint is_double() const
+            bint is_string() const
+            bint is_array() const
+            bint is_dict() const
+            # Add getters
+            # cbool get_bool "get<bool>"() const except +
+            # int get_int "get<int>"() const except +
+            # double get_double "get<double>"() const except +
+            # string get_string "get<std::string>"() const except +
+            # vector[double] get_array "get<std::vector<double>>"() const except +
+            # ConfigDict get_dict "get<simbi::ConfigDict>"() const except +
+
+
 cdef extern from "core/types/utility/enums.hpp" namespace "simbi":
     cdef enum class BodyType:
         GRAVITATIONAL "simbi::BodyType::GRAVITATIONAL"
@@ -48,6 +90,7 @@ cdef extern from "core/types/utility/init_conditions.hpp":
         vector[string] boundary_conditions
         vector[vector[real]] boundary_sources
         vector[pair[BodyType, unordered_map[string, PropertyValue]]] immersed_bodies
+        ConfigDict config
 
 cdef extern from "core/cython/driver.hpp" namespace "simbi":
     cdef cppclass Driver:

@@ -19,8 +19,6 @@ class BodyConfig:
 @dataclass(frozen=True)
 class GravitationalBodyConfig(BodyConfig):
     """Configuration for gravitational bodies"""
-
-    grav_strength: float
     softening_length: float = 0.01
 
 
@@ -45,6 +43,5 @@ class ViscousBodyConfig(BodyConfig):
 class GravitationalSinkConfig(BodyConfig):
     """Configuration for gravitational sinks"""
 
-    grav_strength: float
     accretion_efficiency: float
     softening_length: float
