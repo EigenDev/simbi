@@ -77,7 +77,6 @@ namespace simbi {
       protected:
         // type aliases
         using base_t::gamma;
-        using base_t::hllc_z;
 
       public:
         using typename base_t::conserved_t;
