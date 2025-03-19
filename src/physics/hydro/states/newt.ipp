@@ -96,7 +96,6 @@ DUAL Newtonian<dim>::eigenvals_t Newtonian<dim>::calc_eigenvals(
             else {
                 if (isothermal_) {
                     // Isothermal case - simplified wave speed estimate
-                    // Using isothermal sound speed directly
                     pStar = (rhoL * csL * pR + rhoR * csR * pL -
                              rhoL * rhoR * csL * csR * (vR - vL)) /
                             (rhoL * csL + rhoR * csR);
@@ -144,8 +143,6 @@ DUAL Newtonian<dim>::eigenvals_t Newtonian<dim>::calc_eigenvals(
             const real aR = vR + csR * qR;   // Right wave speed
 
             // Middle wave speed (contact discontinuity)
-            // Using a more robust formula that correctly handles vacuum
-            // conditions
             const real aStar =
                 (pR - pL + rhoL * vL * (aL - vL) - rhoR * vR * (aR - vR)) /
                 (rhoL * (aL - vL) - rhoR * (aR - vR));
