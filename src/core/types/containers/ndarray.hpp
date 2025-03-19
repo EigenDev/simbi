@@ -49,24 +49,23 @@
 #ifndef NDARRAY_HPP
 #define NDARRAY_HPP
 
-#include "../utility/operation_traits.hpp"   // for OperationTraits, PoinwiseOp
-#include "build_options.hpp"                 // for global::on_gpu, rea;
-#include "collapsable.hpp"
-#include "core/managers/array_props.hpp"          // for array_properties
-#include "core/managers/memory_manager.hpp"       // for memory_manager
-#include "core/traits.hpp"                        // for is_maybe
-#include "core/types/alias/alias.hpp"             // for uarray
-#include "core/types/containers/array.hpp"        // for array
-#include "core/types/containers/array_view.hpp"   // for array_view"
-#include "core/types/monad/maybe.hpp"             // for Maybe
-#include "core/types/utility/enums.hpp"           // for BoundaryCondition
-#include "core/types/utility/idx_sequence.hpp"    // for make_idx_sequence
-#include "core/types/utility/smart_ptr.hpp"       // for smart_ptr<T[]>
-#include "util/parallel/exec_policy.hpp"          // for ExecutionPolicy
-#include "util/parallel/parallel_for.hpp"         // for parallel_for
-#include "util/tools/helpers.hpp"                 // for unravel_index
-#include <cassert>                                // for assert
-#include <span>                                   // for span
+#include "build_options.hpp"                       // for global::on_gpu, rea;
+#include "core/managers/array_props.hpp"           // for array_properties
+#include "core/managers/memory_manager.hpp"        // for memory_manager
+#include "core/traits.hpp"                         // for is_maybe
+#include "core/types/alias/alias.hpp"              // for uarray
+#include "core/types/containers/array.hpp"         // for array
+#include "core/types/containers/array_view.hpp"    // for array_view"
+#include "core/types/containers/collapsable.hpp"   // for collapsable
+#include "core/types/monad/maybe.hpp"              // for Maybe
+#include "core/types/utility/enums.hpp"            // for BoundaryCondition
+#include "core/types/utility/idx_sequence.hpp"     // for make_idx_sequence
+#include "core/types/utility/operation_traits.hpp"   // for OperationTraits, PoinwiseOp
+#include "core/types/utility/smart_ptr.hpp"          // for smart_ptr<T[]>
+#include "util/parallel/exec_policy.hpp"             // for ExecutionPolicy
+#include "util/parallel/parallel_for.hpp"            // for parallel_for
+#include "util/tools/helpers.hpp"                    // for unravel_index
+#include <cassert>                                   // for assert
 namespace simbi {
 
     template <typename T, size_type Dims = 1>

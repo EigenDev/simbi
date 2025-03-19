@@ -51,7 +51,10 @@
 #define OPERATION_TRAITS_HPP
 
 #include "build_options.hpp"
+#include "core/traits.hpp"
 #include "device_operations.hpp"
+#include "util/parallel/parallel_for.hpp"
+#include <span>
 
 namespace simbi {
 
@@ -124,6 +127,75 @@ namespace simbi {
             else {
                 parallel_for(policy, [&](size_t ii) {
                     data[ii] = op(data[ii], ii, arrays[ii]...);
+                });
+            }
+        }
+    };
+
+    // Specialization for stencil operations
+    template <>
+    struct OperationTraits<StencilOp> {
+        template <
+            typename MainView,
+            typename F,
+            typename Policy,
+            typename... DependentViews>
+        static void execute(
+            MainView* main_view,
+            F op,
+            const Policy& policy,
+            DependentViews&... dependent_views
+        )
+        {
+            // get underlying raw type from main view
+            using main_t = typename MainView::raw_type;
+            if constexpr (global::on_gpu) {
+                // TODO: Implement GPU stencil transform
+            }
+            else {
+                parallel_for(policy, [=](size_type idx) {
+                    // Get local coordinates
+                    auto pos = main_view->get_local_coords(idx);
+
+                    // Create span from data pointer
+                    std::span<main_t> data_span(
+                        main_view->data(),
+                        main_view->source_size()
+                    );
+
+                    // Create stencil view for center position
+                    typename MainView::stencil_view center_view(
+                        data_span,
+                        pos,
+                        main_view->shape(),
+                        main_view->strides(),
+                        main_view->offsets()
+                    );
+
+                    // Create tuple of dependent views
+                    auto dependent_views_tuple = std::make_tuple(
+                        typename MainView::template stencil_view<
+                            typename array_raw_type<DependentViews>::type>(
+                            std::span<
+                                typename array_raw_type<DependentViews>::type>(
+                                dependent_views.data(),
+                                dependent_views.source_size()
+                            ),
+                            dependent_views
+                                .get_local_coords(idx, main_view->shape()),
+                            dependent_views.shape(),
+                            dependent_views.strides(),
+                            dependent_views.offsets()
+                        )...
+                    );
+
+                    // Apply operation with all stencil views
+                    center_view.value() = std::apply(
+                        [&op, &center_view](auto&... views) {
+                            return op(center_view, views...);
+                        },
+                        dependent_views_tuple
+                    );
                 });
             }
         }

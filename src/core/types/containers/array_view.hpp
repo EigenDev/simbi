@@ -50,11 +50,12 @@
 #ifndef ARRAY_VIEW_HPP
 #define ARRAY_VIEW_HPP
 
-#include "build_options.hpp"                // for DUAL, real
-#include "core/managers/array_props.hpp"    // for array_properties
-#include "core/traits.hpp"                  // for is_maybe_v, has_value_type
-#include "util/parallel/exec_policy.hpp"    // for ExecutionPolicy
-#include "util/parallel/parallel_for.hpp"   // for parallel_for
+#include "build_options.hpp"               // for DUAL, real
+#include "core/managers/array_props.hpp"   // for array_properties
+#include "core/traits.hpp"                 // for is_maybe_v, has_value_type
+#include "core/types/utility/operation_traits.hpp"   // for OperationTraits, StencilOp
+#include "util/parallel/exec_policy.hpp"             // for ExecutionPolicy
+#include "util/parallel/parallel_for.hpp"            // for parallel_for
 #include <span>
 
 namespace simbi {
@@ -155,83 +156,7 @@ namespace simbi {
             const DependentViews&... arrays
         )
         {
-            if constexpr (global::on_gpu) {
-                // First prepare device arrays for views
-                auto center_data    = this->data();
-                auto center_shape   = this->shape();
-                auto center_strides = this->strides();
-                auto center_offsets = this->offsets();
-
-                // Helper to extract properties from each array
-                auto make_properties = [](const auto& arr) {
-                    return std::make_tuple(
-                        arr.data(),
-                        arr.shape(),
-                        arr.strides(),
-                        arr.offsets()
-                    );
-                };
-
-                // Create tuples of properties for dependent arrays
-                auto dep_properties =
-                    std::make_tuple(make_properties(arrays)...);
-
-                // Launch kernel with device-friendly lambda
-                parallel_for(policy, [=, this] DEV(size_type idx) {
-                    stencil_view<T> center_view(
-                        center_data,
-                        get_local_coords(idx, center_shape),
-                        center_shape,
-                        center_strides,
-                        center_offsets
-                    );
-
-                    // Create dependent views from properties tuple
-                    auto dep_views = create_device_views<DependentViews...>(
-                        idx,
-                        dep_properties,
-                        std::make_index_sequence<sizeof...(DependentViews)>{}
-                    );
-
-                    // Apply operation
-                    center_view.value() =
-                        call_device_op(op, center_view, dep_views);
-                });
-            }
-            else {
-                parallel_for(policy, [=, this](size_type idx) {
-                    // Get local coordinates
-                    auto pos = this->get_local_coords(idx);
-
-                    // Create span from data pointer
-                    std::span<T> data_span(this->data(), this->source_size());
-                    stencil_view center_view(
-                        data_span,
-                        pos,
-                        this->shape(),
-                        this->strides(),
-                        this->offsets()
-                    );
-
-                    auto all_views = std::make_tuple(
-                        center_view,
-                        stencil_view<
-                            typename array_raw_type<DependentViews>::type>(
-                            std::span<
-                                typename array_raw_type<DependentViews>::type>(
-                                arrays.data(),
-                                arrays.source_size()
-                            ),
-                            arrays.get_local_coords(idx, this->shape()),
-                            arrays.shape(),
-                            arrays.strides(),
-                            arrays.offsets()
-                        )...
-                    );
-
-                    center_view.value() = std::apply(op, all_views);
-                });
-            }
+            OperationTraits<StencilOp>::execute(this, op, policy, arrays...);
         }
 
         DUAL auto source_size() const { return data_.size(); }
@@ -358,136 +283,6 @@ namespace simbi {
             uarray<Dims> strides_;
             uarray<Dims> offsets_;
         };
-
-        template <typename... Views, size_t... Is>
-        DUAL auto
-        create_device_views(const std::tuple<std::tuple<std::span<typename array_raw_type<Views>::type>, uarray<Dims>, uarray<Dims>, uarray<Dims>>...>& props, size_type idx, std::index_sequence<Is...>)
-        {
-            return std::make_tuple(
-                stencil_view<typename array_raw_type<Views>::type>(
-                    std::get<0>(std::get<Is>(props)),   // span
-                    get_local_coords(
-                        idx,
-                        std::get<1>(std::get<Is>(props))
-                    ),                                  // pos
-                    std::get<1>(std::get<Is>(props)),   // shape
-                    std::get<2>(std::get<Is>(props)),   // strides
-                    std::get<3>(std::get<Is>(props))    // offsets
-                )...
-            );
-        }
-
-        template <typename F, typename View, typename Array, size_t N>
-        DUAL auto call_device_op(
-            F& op,
-            View& center_view,
-            const std::array<Array, N>& dep_views
-        )
-        {
-            if constexpr (N == 1) {
-                return op(center_view, dep_views[0]);
-            }
-            else if constexpr (N == 2) {
-                return op(center_view, dep_views[0], dep_views[1]);
-            }
-            else if constexpr (N == 3) {
-                return op(
-                    center_view,
-                    dep_views[0],
-                    dep_views[1],
-                    dep_views[2]
-                );
-            }
-            else if constexpr (N == 4) {
-                return op(
-                    center_view,
-                    dep_views[0],
-                    dep_views[1],
-                    dep_views[2],
-                    dep_views[3]
-                );
-            }
-            else if constexpr (N == 5) {
-                return op(
-                    center_view,
-                    dep_views[0],
-                    dep_views[1],
-                    dep_views[2],
-                    dep_views[3],
-                    dep_views[4]
-                );
-            }
-            else if constexpr (N == 6) {
-                return op(
-                    center_view,
-                    dep_views[0],
-                    dep_views[1],
-                    dep_views[2],
-                    dep_views[3],
-                    dep_views[4],
-                    dep_views[5]
-                );
-            }
-            else if constexpr (N == 7) {
-                return op(
-                    center_view,
-                    dep_views[0],
-                    dep_views[1],
-                    dep_views[2],
-                    dep_views[3],
-                    dep_views[4],
-                    dep_views[5],
-                    dep_views[6]
-                );
-            }
-            else if constexpr (N == 8) {
-                return op(
-                    center_view,
-                    dep_views[0],
-                    dep_views[1],
-                    dep_views[2],
-                    dep_views[3],
-                    dep_views[4],
-                    dep_views[5],
-                    dep_views[6],
-                    dep_views[7]
-                );
-            }
-            else if constexpr (N == 9) {
-                return op(
-                    center_view,
-                    dep_views[0],
-                    dep_views[1],
-                    dep_views[2],
-                    dep_views[3],
-                    dep_views[4],
-                    dep_views[5],
-                    dep_views[6],
-                    dep_views[7],
-                    dep_views[8]
-                );
-            }
-            else if constexpr (N == 10) {
-                return op(
-                    center_view,
-                    dep_views[0],
-                    dep_views[1],
-                    dep_views[2],
-                    dep_views[3],
-                    dep_views[4],
-                    dep_views[5],
-                    dep_views[6],
-                    dep_views[7],
-                    dep_views[8],
-                    dep_views[9]
-                );
-            }
-            else {
-                if constexpr (!global::on_gpu) {
-                    throw std::runtime_error("Too many dependent views");
-                }
-            }
-        }
 
       protected:
         // non-owning pointer to source data
