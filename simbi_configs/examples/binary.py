@@ -39,7 +39,7 @@ class BinaryOrbitTest(BaseConfig):
                 semi_major=0.2,
                 eccentricity=0.0,
                 mass_ratio=1.0,
-                total_mass=1.0,
+                total_mass=1.0
             ),
         )
 
