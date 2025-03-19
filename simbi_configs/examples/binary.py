@@ -11,18 +11,6 @@ class BinaryOrbitTest(BaseConfig):
         npts = DynamicArg(
             "npts", 256, help="Grid resolution (minimal for test)", var_type=int
         )
-        buffer_width = DynamicArg(
-            "buffer_width",
-            0.2,
-            help="Width of buffer zone (fraction of outer radius)",
-            var_type=float,
-        )
-        buffer_damp_time = DynamicArg(
-            "buffer_damp_time",
-            0.1,
-            help="Damping timescale (orbital periods at r=1)",
-            var_type=float,
-        )
 
     # Small domain since we just need space for the binary
     xmin = -2.0
