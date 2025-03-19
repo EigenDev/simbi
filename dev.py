@@ -20,7 +20,7 @@ DEFAULT_CONFIG = {
     "precision": 'double',
     "install_mode": "default",
     "dev_arch": 0,
-    "build_dir": "builddir",
+    "build_dir": "build",
     "four_velocity": False,
     "shared_memory": True,
     "cpp_version": "c++20",
@@ -188,7 +188,7 @@ def parse_the_arguments(
     build_parser.add_argument(
         "--build-dir",
         type=str,
-        default="builddir",
+        default="build",
         help="build directory name for meson build")
     build_parser.add_argument(
         "--extras",
@@ -293,10 +293,10 @@ def parse_the_arguments(
 
 def build_simbi(args: argparse.Namespace) -> tuple[str]:
     simbi_dir = Path().resolve()
-    if args.build_dir == "build":
-        raise argparse.ArgumentError(
-            args.builddir,
-            "please choose a different build name other than 'build'")
+    # if args.build_dir == "build":
+    #     raise argparse.ArgumentError(
+    #         args.build_dira
+    #         "please choose a different build name other than 'build'")
 
     check_minimal_dependencies()
     simbi_env = os.environ.copy()

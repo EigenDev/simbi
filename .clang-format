@@ -27,8 +27,8 @@ AlignConsecutiveMacros: Consecutive
 AlignConsecutiveAssignments: true
 NamespaceIndentation: All
 FixNamespaceComments: true
-AllowShortEnumsOnASingleLine: false 
-# IndentAccessModifiers: true         
+AllowShortEnumsOnASingleLine: false
+# IndentAccessModifiers: true
 AlignOperands: true
 # IndentCaseBlocks: true
 IndentCaseLabels: true
