@@ -33,5 +33,6 @@ __all__ = [
     "ImmersedBodyConfig",
     "GravitationalSystemConfig",
     "BinaryConfig",
+    "BinaryComponentConfig",
 ]
 __version__ = ".".join(map(str, __version_tuple__))
