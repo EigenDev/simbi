@@ -1,6 +1,7 @@
 from libcpp.vector cimport vector
 from libcpp cimport bool as cbool
 from libcpp.string cimport string
+from libcpp.list cimport list as cpplist
 from libcpp.pair cimport pair
 from libcpp.unordered_map cimport unordered_map
 
@@ -47,6 +48,7 @@ cdef extern from "build_options.hpp":
             ConfigValue(string value) except +
             ConfigValue(vector[double] value) except +
             ConfigValue(ConfigDict value) except +
+            ConfigValue(cpplist[ConfigDict] value) except +
             # Add type checking methods
             bint is_bool() const
             bint is_int() const
@@ -54,13 +56,7 @@ cdef extern from "build_options.hpp":
             bint is_string() const
             bint is_array() const
             bint is_dict() const
-            # Add getters
-            # cbool get_bool "get<bool>"() const except +
-            # int get_int "get<int>"() const except +
-            # double get_double "get<double>"() const except +
-            # string get_string "get<std::string>"() const except +
-            # vector[double] get_array "get<std::vector<double>>"() const except +
-            # ConfigDict get_dict "get<simbi::ConfigDict>"() const except +
+            bint is_list() const
 
 
 cdef extern from "core/types/utility/enums.hpp" namespace "simbi":

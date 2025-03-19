@@ -3,6 +3,7 @@
 
 #include "build_options.hpp"   // for real, luint, global::managed_memory, use
 #include "core/types/containers/vector.hpp"   // for spatial_vector_t
+#include <list>
 #include <stdexcept>
 #include <string>
 #include <unordered_map>
@@ -21,13 +22,14 @@ namespace simbi {
         // The variant type that can hold various data types including nested
         // dictionary
         using ValueType = std::variant<
-            std::monostate,        // For empty/null values
-            bool,                  // For boolean values
-            int,                   // For integer values
-            double,                // For floating point
-            std::string,           // For string values
-            std::vector<double>,   // For numeric arrays
-            ConfigDict             // For nested dictionaries
+            std::monostate,         // For empty/null values
+            bool,                   // For boolean values
+            int,                    // For integer values
+            double,                 // For floating point
+            std::string,            // For string values
+            std::vector<double>,    // For numeric arrays
+            ConfigDict,             // For nested dictionaries
+            std::list<ConfigDict>   // For list of dictionaries
             >;
 
         ValueType value;
@@ -43,6 +45,7 @@ namespace simbi {
         ConfigValue(std::string v) : value(std::move(v)) {}
         ConfigValue(std::vector<double> v) : value(std::move(v)) {}
         ConfigValue(ConfigDict v) : value(std::move(v)) {}
+        ConfigValue(std::list<ConfigDict> v) : value(std::move(v)) {}
 
         // Helper for spatial vectors
         template <typename T, size_type Dims>
@@ -75,6 +78,10 @@ namespace simbi {
         bool is_dict() const
         {
             return std::holds_alternative<ConfigDict>(value);
+        }
+        bool is_list() const
+        {
+            return std::holds_alternative<std::list<ConfigDict>>(value);
         }
 
         // Value access with type checking
@@ -122,6 +129,12 @@ namespace simbi {
                     throw std::runtime_error("Not a dictionary value");
                 }
                 return std::get<ConfigDict>(value);
+            }
+            else if constexpr (std::is_same_v<T, std::list<ConfigDict>>) {
+                if (!is_list()) {
+                    throw std::runtime_error("Not a list of dictionaries");
+                }
+                return std::get<std::list<ConfigDict>>(value);
             }
             else {
                 static_assert(always_false<T>::value, "Unsupported type");

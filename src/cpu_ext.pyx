@@ -17,6 +17,7 @@ cdef ConfigDict convert_python_to_config_dict(py_dict):
     """Convert a Python dictionary to ConfigDict."""
     cdef ConfigDict result
     cdef vector[double] vec_value
+    cdef cpplist[ConfigDict] vec_dict
 
     for key, value in py_dict.items():
         cpp_key: string = key.encode("utf-8")
@@ -36,6 +37,12 @@ cdef ConfigDict convert_python_to_config_dict(py_dict):
         elif isinstance(value, dict):
             # Recursively convert nested dictionaries
             result[cpp_key] = ConfigValue(convert_python_to_config_dict(value))
+        elif isinstance(value, list) and all(isinstance(x, dict) for x in value):
+            for x in value:
+                vec_dict.push_back(convert_python_to_config_dict(x))
+            result[cpp_key] = ConfigValue(vec_dict)
+        elif isinstance(value, bytes):
+            result[cpp_key] = ConfigValue(<string>value)
 
     return result
 

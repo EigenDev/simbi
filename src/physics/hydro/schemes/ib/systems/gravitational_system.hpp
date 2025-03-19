@@ -173,6 +173,7 @@ namespace simbi::ibsystem {
             T gamma,
             T total_mass,
             T semi_major_axis,
+            config::binary_pair<T> body_components,
             T eccentricity         = T(0),
             T mass_ratio           = T(1),
             bool prescribed_motion = true
@@ -188,6 +189,7 @@ namespace simbi::ibsystem {
             binary_config.eccentricity = eccentricity;
             binary_config.mass_ratio   = mass_ratio;
             binary_config.total_mass   = total_mass;
+            binary_config.binary_pair  = body_components;
 
             // Create system
             auto system = std::make_unique<GravitationalSystem<T, Dims>>(

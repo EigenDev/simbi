@@ -62,6 +62,7 @@
 #include "physics/hydro/schemes/ib/systems/gravitational_system.hpp"   // for GravitationalSystem
 #include "physics/hydro/schemes/ib/systems/system_config.hpp"   // for system_config
 #include "physics/hydro/types/generic_structs.hpp"   // for anyConserved, anyPrimitive
+#include <list>
 
 namespace simbi {
     template <typename Derived, size_type Dims, Regime R>
@@ -121,7 +122,6 @@ namespace simbi {
         // physical / numerical parameters
         real gamma_;
         real cfl_;
-        real hllc_z_;
 
         Mesh<Dims> mesh_;
         ExecutionPolicyManager<Dims> exec_policy_manager_;
@@ -161,18 +161,18 @@ namespace simbi {
               in_failure_state_(false),
               gamma_(init_conditions.gamma),
               cfl_(init_conditions.cfl),
-              hllc_z_((gamma_ - 1.0) / (2.0 * gamma_)),
               mesh_(init_conditions),
               exec_policy_manager_(mesh_.grid(), init_conditions),
               time_manager_(init_conditions),
               solver_config_(init_conditions),
-              io_manager_(std::make_unique<IOManager<Dims>>(
-                  solver_config_,
-                  init_conditions
-              )),
+              io_manager_(
+                  std::make_unique<IOManager<Dims>>(
+                      solver_config_,
+                      init_conditions
+                  )
+              ),
               // protected references to commonly used values
-              gamma(gamma_),
-              hllc_z(hllc_z_)
+              gamma(gamma_)
 
         {
             init_gravitational_system(init_conditions);
@@ -316,6 +316,28 @@ namespace simbi {
                                     ? binary_props.at("mass_ratio").get<real>()
                                     : 1.0;
 
+                            auto binary_comps =
+                                binary_props.at("components")
+                                    .get<std::list<ConfigDict>>();
+                            auto body_component = [](const ConfigDict& props) {
+                                ibsystem::config::GravitationalComponent<real>
+                                    comp;
+                                comp.mass   = props.at("mass").get<real>();
+                                comp.radius = props.at("radius").get<real>();
+                                comp.softening_length =
+                                    props.at("softening_length").get<real>();
+                                comp.accretion_efficiency =
+                                    props.at("accretion_efficiency")
+                                        .get<real>();
+                                comp.accretion_radius_factor =
+                                    props.at("accretion_radius_factor")
+                                        .get<real>();
+                                comp.two_way_coupling =
+                                    props.at("two_way_coupling").get<bool>();
+                                comp.is_an_accretor =
+                                    props.at("is_an_accretor").get<bool>();
+                                return comp;
+                            };
                             // Use factory method to create binary system
                             gravitational_system_ =
                                 ibsystem::GravitationalSystem<real, Dims>::
@@ -324,6 +346,8 @@ namespace simbi {
                                         init.gamma,
                                         total_mass,
                                         semi_major,
+                                        {body_component(binary_comps.front()),
+                                         body_component(binary_comps.back())},
                                         eccentricity,
                                         mass_ratio,
                                         grav_config.prescribed_motion
@@ -431,7 +455,6 @@ namespace simbi {
 
         // protected references to commonly used values
         const real& gamma;
-        const real& hllc_z;
 
       public:
         void sync_to_device()

@@ -8,12 +8,21 @@ class ImmersedBodyConfig(TypedDict):
     radius: float
     specifics: Optional[dict[str, float | int | bool]]  # Specific parameters for the body
 
+class BinaryComponentConfig(TypedDict):
+    mass: float
+    radius: float
+    is_an_acrretor: bool
+    softening_length: float
+    two_way_coupling: bool
+    accretion_efficiency: float
+    accretion_radius_factor: float
 
 class BinaryConfig(TypedDict):
     semi_major: float
     eccentricity: float
     mass_ratio: float
     total_mass: float
+    components: list[BinaryComponentConfig]
 
 
 class BodySystemConfig(TypedDict):
@@ -33,4 +42,5 @@ __all__ = [
     "ImmersedBodyConfig",
     "GravitationalSystemConfig",
     "BinaryConfig",
+    "BinaryComponentConfig",
 ]

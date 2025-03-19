@@ -24,14 +24,22 @@ namespace simbi::ibsystem::factory {
             std::vector<std::unique_ptr<ib::AnyBody<T, Dims>>> bodies;
             bodies.reserve(2);
 
-            // the masses
-            T total_mass = binary_config.total_mass;
-            T m1         = total_mass / (T(1) + binary_config.mass_ratio);
-            T m2         = total_mass - m1;
-            // we'll set some arbitrary defaults for now.
-            // TODO: make these binary_configurable
-            T radius1 = binary_config.semi_major * T(0.01);
-            T radius2 = radius1;
+            // components
+            auto body1 = binary_config.binary_pair.first;
+            auto body2 = binary_config.binary_pair.second;
+            body1.configure();
+            body2.configure();
+
+            T m1      = body1.mass;
+            T m2      = body2.mass;
+            T radius1 = body1.radius;
+            T radius2 = body2.radius;
+
+            if (m1 + m2 != binary_config.total_mass) {
+                throw std::runtime_error(
+                    "Individual masses do not sum to total mass"
+                );
+            }
 
             traits::BinaryTrait<T, Dims> trait(binary_config);
             auto [pos1, pos2] = trait.initial_positions();
@@ -40,26 +48,32 @@ namespace simbi::ibsystem::factory {
             // create the bodies
             ConfigDict body1_props;
             ConfigDict body2_props;
+            ConfigDict orbital_props;
 
-            if (grav_config.prescribed_motion) {
-                ConfigDict orbital_props;
-                orbital_props["semi_major_axis"] =
-                    ConfigValue(binary_config.semi_major);
-                orbital_props["eccentricity"] =
-                    ConfigValue(binary_config.eccentricity);
-                orbital_props["period"] = ConfigValue(trait.orbital_period());
-                orbital_props["argument_of_periapsis"] = ConfigValue(T(0));
-                orbital_props["primary_mass"]          = ConfigValue(m2);
-                orbital_props["system_mass"]    = ConfigValue(total_mass);
-                body1_props["orbital_elements"] = ConfigValue(orbital_props);
-                body2_props["orbital_elements"] = ConfigValue(orbital_props);
+            body1_props["softening_length"] =
+                ConfigValue(body1.softening_length);
+            body1_props["two_way_coupling"] =
+                ConfigValue(body1.two_way_coupling);
+            if (body1.is_an_accretor) {
+                body1_props["accretion_efficiency"] =
+                    ConfigValue(body1.accretion_efficiency);
+                body1_props["accretion_radius_factor"] =
+                    ConfigValue(body1.accretion_radius_factor);
             }
-            else {
-                throw std::runtime_error("Live motion not implemented yet");
+
+            body2_props["softening_length"] =
+                ConfigValue(body2.softening_length);
+            body2_props["two_way_coupling"] =
+                ConfigValue(body2.two_way_coupling);
+            if (body2.is_an_accretor) {
+                body2_props["accretion_efficiency"] =
+                    ConfigValue(body2.accretion_efficiency);
+                body2_props["accretion_radius_factor"] =
+                    ConfigValue(body2.accretion_radius_factor);
             }
 
             bodies.push_back(ib::BodyFactory<T, Dims>::build(
-                BodyType::GRAVITATIONAL,
+                body1.body_type,
                 mesh,
                 pos1,
                 vel1,
@@ -68,7 +82,7 @@ namespace simbi::ibsystem::factory {
                 body1_props
             ));
             bodies.push_back(ib::BodyFactory<T, Dims>::build(
-                BodyType::GRAVITATIONAL,
+                body2.body_type,
                 mesh,
                 pos2,
                 vel2,

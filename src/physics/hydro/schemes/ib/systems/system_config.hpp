@@ -1,7 +1,9 @@
 #ifndef SYSTEM_CONFIG_HPP
 #define SYSTEM_CONFIG_HPP
 
+#include "core/types/utility/enums.hpp"
 #include <string>
+#include <utility>
 
 // houses pure data structures for a system
 namespace simbi::ibsystem::config {
@@ -13,7 +15,31 @@ namespace simbi::ibsystem::config {
     };
 
     template <typename T>
+    struct GravitationalComponent {
+        T mass;
+        T radius;
+        T softening_length;
+        T accretion_efficiency    = 0.01;
+        T accretion_radius_factor = 0.01;
+        bool two_way_coupling     = false;
+        bool is_an_accretor       = false;
+        BodyType body_type        = BodyType::GRAVITATIONAL;
+
+        void configure()
+        {
+            if (is_an_accretor) {
+                body_type = BodyType::GRAVITATIONAL_SINK;
+            }
+        }
+    };
+
+    template <typename T>
+    using binary_pair =
+        std::pair<GravitationalComponent<T>, GravitationalComponent<T>>;
+
+    template <typename T>
     struct BinaryConfig {
+        binary_pair<T> binary_pair;
         T semi_major                  = 1.0;
         T eccentricity                = 0.0;
         T mass_ratio                  = 1.0;    // q = m2/m1

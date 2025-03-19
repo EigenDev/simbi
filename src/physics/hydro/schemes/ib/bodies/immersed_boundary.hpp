@@ -83,27 +83,6 @@ namespace simbi {
             T mass_;
             T radius_;
 
-            // default policy based on mesh size and whatnot
-            DUAL auto get_default_policy() const
-            {
-                auto grid_sizes = array_t<luint, 3>{
-                  mesh_.grid().active_gridsize(0),
-                  mesh_.grid().active_gridsize(1),
-                  mesh_.grid().active_gridsize(2)
-                };
-
-                // default block sizes based on dimensionality
-                auto block_sizes = array_t<luint, 3>{256, 1, 1};
-                if constexpr (Dims > 1) {
-                    block_sizes = {16, 16, 1};
-                }
-                if constexpr (Dims > 2) {
-                    block_sizes = {8, 8, 8};
-                }
-
-                return ExecutionPolicy<>(grid_sizes, block_sizes);
-            }
-
           public:
             BaseBody()  = default;
             ~BaseBody() = default;
@@ -129,8 +108,37 @@ namespace simbi {
             DUAL auto radius() const { return radius_; }
             DUAL auto force() const { return force_; }
             DUAL auto fluid_velocity() const { return fluid_velocity_; }
-
             void interpolate_fluid_velocity(const auto& prim_state) {}
+
+            // reference to various body properties that are needed by the
+            // policies
+            DUAL auto& force_ref() { return force_; }
+            DUAL auto& fluid_velocity_ref() { return fluid_velocity_; }
+            DUAL auto& position_ref() { return position_; }
+            DUAL auto& velocity_ref() { return velocity_; }
+            DUAL auto& mass_ref() { return mass_; }
+            DUAL auto& radius_ref() { return radius_; }
+
+            // default policy based on mesh size and whatnot
+            DUAL auto get_default_policy() const
+            {
+                auto grid_sizes = array_t<luint, 3>{
+                  mesh_.grid().active_gridsize(0),
+                  mesh_.grid().active_gridsize(1),
+                  mesh_.grid().active_gridsize(2)
+                };
+
+                // default block sizes based on dimensionality
+                auto block_sizes = array_t<luint, 3>{256, 1, 1};
+                if constexpr (Dims > 1) {
+                    block_sizes = {16, 16, 1};
+                }
+                if constexpr (Dims > 2) {
+                    block_sizes = {8, 8, 8};
+                }
+
+                return ExecutionPolicy<>(grid_sizes, block_sizes);
+            }
         };
 
         // Immersed boundary body class
@@ -379,6 +387,7 @@ namespace simbi {
             DUAL void set_position(const auto& position)
             {
                 this->position_ = position;
+                update_cut_cells();
             }
             DUAL void set_velocity(const auto& velocity)
             {
