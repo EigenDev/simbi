@@ -85,38 +85,32 @@ DUAL Newtonian<dim>::eigenvals_t Newtonian<dim>::calc_eigenvals(
             const real pvrs = 0.5 * (pL + pR) - 0.5 * (vR - vL) *
                                                     (rhoL + rhoR) * 0.5 *
                                                     (csL + csR);
-            const real pmin = std::min(pL, pR);
-            const real pmax = std::max(pL, pR);
+            const real pmin = my_min(pL, pR);
+            const real pmax = my_max(pL, pR);
 
             real pStar;
             if (pmax / pmin <= 2.0 && pmin <= pvrs && pvrs <= pmax) {
-                //  PVRS estimate if pressure ratio is small
+                // PVRS estimate if pressure ratio is small
                 pStar = pvrs;
             }
             else {
-
                 if (isothermal_) {
-                    // Isothermal case
-                    const real aL = std::sqrt(sound_speed_squared_ / rhoL);
-                    const real aR = std::sqrt(sound_speed_squared_ / rhoR);
-                    pStar         = (rhoL * aL * pR + rhoR * aR * pL -
-                             rhoL * rhoR * aL * aR * (vR - vL)) /
-                            (rhoL * aL + rhoR * aR);
+                    // Isothermal case - simplified wave speed estimate
+                    // Using isothermal sound speed directly
+                    pStar = (rhoL * csL * pR + rhoR * csR * pL -
+                             rhoL * rhoR * csL * csR * (vR - vL)) /
+                            (rhoL * csL + rhoR * csR);
                 }
                 else {
-                    //  two-rarefaction approximation
-
-                    // Adiabatic case
-                    const real aL = std::sqrt(gamma / rhoL);
-                    const real aR = std::sqrt(gamma / rhoR);
-                    const real bL = pL;
-                    const real bR = pR;
+                    // Two-rarefaction approximation for adiabatic case
+                    const real gamma_factor = (gamma - 1.0) / (2.0 * gamma);
+                    const real pL_pow       = std::pow(pL, gamma_factor);
+                    const real pR_pow       = std::pow(pR, gamma_factor);
 
                     pStar = std::pow(
                         (csL + csR - 0.5 * (gamma - 1.0) * (vR - vL)) /
-                            (aL / std::pow(pL + bR, 0.5) +
-                             aR / std::pow(pR + bL, 0.5)),
-                        2.0
+                            (csL / pL_pow + csR / pR_pow),
+                        2.0 * gamma / (gamma - 1.0)
                     );
                 }
             }
@@ -124,28 +118,34 @@ DUAL Newtonian<dim>::eigenvals_t Newtonian<dim>::calc_eigenvals(
             // Compute wave speeds using pressure estimate
             real qL, qR;
             if (pStar <= pL) {
+                // Rarefaction wave on left side
                 qL = 1.0;
             }
             else {
+                // Shock wave on left side - use Rankine-Hugoniot relation
                 qL = std::sqrt(
                     1.0 + ((gamma + 1.0) / (2.0 * gamma)) * (pStar / pL - 1.0)
                 );
             }
 
             if (pStar <= pR) {
+                // Rarefaction wave on right side
                 qR = 1.0;
             }
             else {
+                // Shock wave on right side - use Rankine-Hugoniot relation
                 qR = std::sqrt(
                     1.0 + ((gamma + 1.0) / (2.0 * gamma)) * (pStar / pR - 1.0)
                 );
             }
 
-            // Signal speeds
-            const real aL = vL - csL * qL;
-            const real aR = vR + csR * qR;
+            // Signal speeds - left and right waves
+            const real aL = vL - csL * qL;   // Left wave speed
+            const real aR = vR + csR * qR;   // Right wave speed
 
-            // Middle wave speed (more robust formula)
+            // Middle wave speed (contact discontinuity)
+            // Using a more robust formula that correctly handles vacuum
+            // conditions
             const real aStar =
                 (pR - pL + rhoL * vL * (aL - vL) - rhoR * vR * (aR - vR)) /
                 (rhoL * (aL - vL) - rhoR * (aR - vR));
