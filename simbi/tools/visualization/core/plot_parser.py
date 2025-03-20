@@ -72,7 +72,6 @@ class ParseKVAction(argparse.Action):
         values: Any,
         option_string: str | None = None,
     ) -> None:
-
         setattr(namespace, self.dest, dict())
         for each in values:
             try:
@@ -326,7 +325,7 @@ class PlottingArgumentBuilder:
                         "upper right",
                         "upper center",
                         "lower center",
-                        "center" "center left",
+                        "centercenter left",
                         "center right",
                     ],
                 },

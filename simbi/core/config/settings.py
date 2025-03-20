@@ -17,11 +17,14 @@ from .constants import (
 T = TypeVar("T", bound="BaseSettings")
 
 
-def get_first_existing_key(some_dict: dict[str, Any], keys: list[str], default: Any) -> Any:
+def get_first_existing_key(
+    some_dict: dict[str, Any], keys: list[str], default: Any
+) -> Any:
     for key in keys:
         if key in some_dict:
             return some_dict[key]
     return default
+
 
 @dataclass(frozen=True)
 class BaseSettings:
@@ -63,8 +66,7 @@ class GridSettings(BaseSettings):
         )
 
     @classmethod
-    def from_dict(cls, setup: dict[str, Any],
-                  spatial_order: str) -> "GridSettings":
+    def from_dict(cls, setup: dict[str, Any], spatial_order: str) -> "GridSettings":
         # pad the resolution with ones up to 3D
         dim: int = len(setup["resolution"])
         resolution: tuple[int, ...] = setup["resolution"]
@@ -84,8 +86,7 @@ class GridSettings(BaseSettings):
         )
 
     @classmethod
-    def update_from(cls, instance: "GridSettings",
-                    cli_args: dict[str, Any]) -> Any:
+    def update_from(cls, instance: "GridSettings", cli_args: dict[str, Any]) -> Any:
         self_params = asdict(instance)
         if cli_args["spatial_order"] is None:
             return cls(**self_params)
@@ -172,17 +173,17 @@ class MeshSettings(BaseSettings):
     def to_execution_dict(self) -> dict[str, Any]:
         """convert the settings to execution format dict"""
         return {
-            "coord_system": self.coord_system.encode('utf-8'),
-            "bounds": to_tuple_of_tuples(
-                self.bounds),
+            "coord_system": self.coord_system.encode("utf-8"),
+            "bounds": to_tuple_of_tuples(self.bounds),
             "boundary_conditions": [
-                bc.encode('utf-8') for bc in self.boundary_conditions],
+                bc.encode("utf-8") for bc in self.boundary_conditions
+            ],
             "dimensionality": self.dimensionality,
             "mesh_motion": self.mesh_motion,
             "is_homologous": self.is_homologous,
-            "x1_spacing": self.x1_spacing.encode('utf-8'),
-            "x2_spacing": self.x2_spacing.encode('utf-8'),
-            "x3_spacing": self.x3_spacing.encode('utf-8'),
+            "x1_spacing": self.x1_spacing.encode("utf-8"),
+            "x2_spacing": self.x2_spacing.encode("utf-8"),
+            "x3_spacing": self.x3_spacing.encode("utf-8"),
             "scale_factor": self.scale_factor,
             "scale_factor_derivative": self.scale_factor_derivative,
         }
@@ -211,25 +212,30 @@ class IOSettings(BaseSettings):
             checkpoint_interval=setup["checkpoint_interval"],
             checkpoint_index=setup["checkpoint_index"],
             log_output=setup["log_output"],
-            hydro_source_lib=IOSettings.try_get_path(
-                setup["hydro_source_lib"]),
-            gravity_source_lib=IOSettings.try_get_path(
-                setup["gravity_source_lib"]),
-            boundary_source_lib=IOSettings.try_get_path(
-                setup["boundary_source_lib"]),
+            hydro_source_lib=IOSettings.try_get_path(setup["hydro_source_lib"]),
+            gravity_source_lib=IOSettings.try_get_path(setup["gravity_source_lib"]),
+            boundary_source_lib=IOSettings.try_get_path(setup["boundary_source_lib"]),
         )
 
     def to_execution_dict(self) -> dict[str, Any]:
         """convert the settings to execution format dict"""
         return {
-            "data_directory": f"{self.data_directory}/".encode('utf-8'),
-            "checkpoint_file": (str(self.checkpoint_file) if self.checkpoint_file else "").encode('utf-8'),
+            "data_directory": f"{self.data_directory}/".encode("utf-8"),
+            "checkpoint_file": (
+                str(self.checkpoint_file) if self.checkpoint_file else ""
+            ).encode("utf-8"),
             "checkpoint_interval": self.checkpoint_interval,
             "checkpoint_index": self.checkpoint_index,
             "log_output": self.log_output,
-            "hydro_source_lib": (str(self.hydro_source_lib) if self.hydro_source_lib else "").encode('utf-8'),
-            "gravity_source_lib": (str(self.gravity_source_lib) if self.gravity_source_lib else "").encode('utf-8'),
-            "boundary_source_lib": (str(self.boundary_source_lib) if self.boundary_source_lib else "").encode('utf-8'),
+            "hydro_source_lib": (
+                str(self.hydro_source_lib) if self.hydro_source_lib else ""
+            ).encode("utf-8"),
+            "gravity_source_lib": (
+                str(self.gravity_source_lib) if self.gravity_source_lib else ""
+            ).encode("utf-8"),
+            "boundary_source_lib": (
+                str(self.boundary_source_lib) if self.boundary_source_lib else ""
+            ).encode("utf-8"),
         }
 
 
@@ -270,7 +276,9 @@ class SimulationSettings(BaseSettings):
             bodies=setup["immersed_bodies"],
             sound_speed=setup["sound_speed"],
             isothermal=setup["isothermal"],
-            body_system=get_first_existing_key(setup, ["gravitational_system", "elastic_system", "rigid_system"], None),
+            body_system=get_first_existing_key(
+                setup, ["gravitational_system", "elastic_system", "rigid_system"], None
+            ),
         )
 
     @classmethod
@@ -306,17 +314,16 @@ class SimulationSettings(BaseSettings):
             "tstart": self.tstart,
             "tend": self.tend,
             "cfl": self.cfl,
-            "regime": self.regime.encode('utf-8'),
-            "temporal_order": self.temporal_order.value.encode('utf-8'),
-            "spatial_order": self.spatial_order.value.encode('utf-8'),
+            "regime": self.regime.encode("utf-8"),
+            "temporal_order": self.temporal_order.value.encode("utf-8"),
+            "spatial_order": self.spatial_order.value.encode("utf-8"),
             "plm_theta": self.plm_theta,
             "quirk_smoothing": self.quirk_smoothing,
             "is_mhd": self.is_mhd,
             "dlogt": self.dlogt,
-            "solver": self.solver.encode('utf-8'),
+            "solver": self.solver.encode("utf-8"),
             "bodies": self.bodies,
             "sound_speed": self.sound_speed,
             "isothermal": self.isothermal,
-            "body_system": dict(
-                self.body_system) if self.body_system else None,
+            "body_system": dict(self.body_system) if self.body_system else None,
         }

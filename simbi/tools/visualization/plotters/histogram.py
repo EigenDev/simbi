@@ -49,7 +49,7 @@ class HistogramPlotter(BasePlotter, DataHandlerMixin, AnimationMixin, Coordinate
     ) -> np.ndarray:
         """Calculate cell volumes"""
         dV = calc_cell_volume(
-            coords=[mesh[f"x{i+1}v"] for i in range(self.config["plot"].ndim)],
+            coords=[mesh[f"x{i + 1}v"] for i in range(self.config["plot"].ndim)],
             coord_system=setup["coord_system"],
             vertices=True,
         )
@@ -144,7 +144,6 @@ class HistogramPlotter(BasePlotter, DataHandlerMixin, AnimationMixin, Coordinate
         """Main plotting method"""
         for ax_idx, ax in enumerate(self.axes):
             for file_idx, data in enumerate(self.data_manager.iter_files()):
-
                 # Handle multiple subplots
                 if self.config["plot"].nplots > 1 and file_idx == len(self.flist) // 2:
                     ax = self.axes[ax_idx + 1]

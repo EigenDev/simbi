@@ -95,7 +95,7 @@ class PlotFormatter:
     def setup__plot(self, ax: Axes, config: Config) -> None:
         """Apply plot configuration and style"""
         if not config.grid.cartesian:
-            self.setup_polar_axes(ax, config['style'].show_ticks)
+            self.setup_polar_axes(ax, config["style"].show_ticks)
         else:
             self.setup_axis_style(ax, PlotStyle())
         self.setup_color_map()
@@ -104,10 +104,10 @@ class PlotFormatter:
         self.color_maps = [
             (
                 plt.get_cmap(cmap).reversed()
-                if self.config['style'].rcmap
+                if self.config["style"].rcmap
                 else plt.get_cmap(cmap)
             )
-            for cmap in self.config['style'].cmap
+            for cmap in self.config["style"].cmap
         ]
         self.color_maps = cycle(self.color_maps)
 

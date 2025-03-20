@@ -35,7 +35,7 @@ def validate_simbi_script(param):
                     base,
                     bcolors.ENDC,
                     "".join(
-                        f'> {bcolors.BOLD}{conf.replace("_", "-")}{bcolors.ENDC}\n'
+                        f"> {bcolors.BOLD}{conf.replace('_', '-')}{bcolors.ENDC}\n"
                         for conf in available_configs
                     ),
                 )

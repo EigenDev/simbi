@@ -1,4 +1,5 @@
-from typing import TypedDict, Optional
+from typing import TypedDict, Optional, NotRequired
+
 
 class ImmersedBodyConfig(TypedDict):
     body_type: str
@@ -6,16 +7,20 @@ class ImmersedBodyConfig(TypedDict):
     velocity: list[float]
     position: list[float]
     radius: float
-    specifics: Optional[dict[str, float | int | bool]]  # Specific parameters for the body
+    specifics: Optional[
+        dict[str, float | int | bool]
+    ]  # Specific parameters for the body
+
 
 class BinaryComponentConfig(TypedDict):
     mass: float
     radius: float
-    is_an_acrretor: bool
+    is_an_accretor: bool
     softening_length: float
     two_way_coupling: bool
     accretion_efficiency: float
-    accretion_radius_factor: float
+    accretion_radius: float
+
 
 class BinaryConfig(TypedDict):
     semi_major: float
@@ -27,16 +32,20 @@ class BinaryConfig(TypedDict):
 
 class BodySystemConfig(TypedDict):
     """Configuration for generic body system."""
+
     pass
+
 
 class GravitationalSystemConfig(BodySystemConfig):
     """Configuration for gravitational system."""
 
     # General gravitational config
-    prescribed_motion: bool
-    reference_frame: str
-    system_type: str
-    binary_config: Optional[BinaryConfig]  # Only used if system_type="binary"
+    prescribed_motion: NotRequired[bool]
+    reference_frame: NotRequired[str]
+    system_type: NotRequired[str]
+    # Only used if system_type="binary"
+    binary_config: NotRequired[BinaryConfig]
+
 
 __all__ = [
     "ImmersedBodyConfig",

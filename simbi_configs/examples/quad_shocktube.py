@@ -34,7 +34,6 @@ class SodProblemQuad(BaseConfig):
 
     @simbi_property
     def initial_primitive_state(self) -> InitialStateType:
-
         def gas_state() -> Generator[tuple[float, ...], None, None]:
             ni, nj = self.resolution
             xextent = self.bounds[0][1] - self.bounds[0][0]

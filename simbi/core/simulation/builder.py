@@ -151,11 +151,12 @@ class SimStateBuilder:
             effective_bfields = [b.flat for b in bundle.staggered_bfields]
 
         x = [
-            getattr(bundle, s).to_execution_dict() for s in ["mesh_config", "sim_config", "grid_config", "io_config"]
+            getattr(bundle, s).to_execution_dict()
+            for s in ["mesh_config", "sim_config", "grid_config", "io_config"]
         ]
         state_dict = {**x[0], **x[1], **x[2], **x[3], "bfield": effective_bfields}
         state_dict.update(
-            boundary_conditions=[bc.encode('utf-8') for bc in bcs],
+            boundary_conditions=[bc.encode("utf-8") for bc in bcs],
             x1bounds=x1bounds,
             x2bounds=x2bounds,
             x3bounds=x3bounds,

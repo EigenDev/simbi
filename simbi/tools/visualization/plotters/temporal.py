@@ -45,7 +45,7 @@ class TemporalPlotter(BasePlotter):
     ) -> np.ndarray:
         """Calculate cell volumes based on dimension"""
         dV = calc_cell_volume(
-            coords=[mesh[f"x{i+1}v"] for i in range(self.config["plot"].ndim)],
+            coords=[mesh[f"x{i + 1}v"] for i in range(self.config["plot"].ndim)],
             coord_system=setup["coord_system"],
             vertices=True,
         )

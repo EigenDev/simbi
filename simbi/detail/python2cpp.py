@@ -1,5 +1,6 @@
 import ast
 
+
 class PythonToCpp(ast.NodeVisitor):
     def __init__(self):
         self.cpp_code = ""

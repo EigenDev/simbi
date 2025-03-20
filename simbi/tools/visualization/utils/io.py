@@ -4,9 +4,11 @@ import numpy as np
 from pathlib import Path
 from ...utility import read_file as util_read_file
 
+
 @dataclass
 class SimulationData:
     """Container for simulation data"""
+
     fields: Dict[str, np.ndarray]
     setup: Dict[str, Any]
     mesh: Dict[str, np.ndarray]
@@ -14,26 +16,27 @@ class SimulationData:
 
 class DataManager:
     """Handles data I/O operations"""
+
     def __init__(self, files: list[str] | str, movie_mode: bool = False):
         self.files = files
         self.file_list, self.frame_count = DataManager.get_file_list(self.files)
         self.movie_mode = movie_mode
         if self.movie_mode:
             self.file_list_iter = iter(self.file_list)
-    
+
     @staticmethod
     def read_file(path: str) -> SimulationData:
         """Read simulation data from file"""
         path = Path(path)
         if not path.exists():
             raise FileNotFoundError(f"File {path} not found")
-        
+
         try:
             fields, setup, mesh = util_read_file(path)
             return SimulationData(fields, setup, mesh)
         except Exception as e:
             raise IOError(f"Failed to read {path}: {str(e)}")
-            
+
     @staticmethod
     def get_file_list(files: str, sort: bool = False) -> Tuple[list, int]:
         """Get sorted list of files and frame count"""
@@ -43,9 +46,9 @@ class DataManager:
         else:
             file_list = sorted(files) if sort else files
             frame_count = len(file_list)
-        
+
         return file_list, frame_count
-    
+
     def iter_files(self) -> SimulationData:
         """Iterate over files and yield simulation data"""
         if not self.movie_mode:

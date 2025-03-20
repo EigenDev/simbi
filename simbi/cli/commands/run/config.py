@@ -7,6 +7,7 @@ from argparse import ArgumentParser, Namespace
 from ....simulator import Hydro
 from ....detail import bcolors
 from ....core.config.base_config import BaseConfig
+from ...utils.type_checker import type_check_input
 
 
 def _build_inheritance_graph(root: ast.Module) -> Dict[str, Set[str]]:
@@ -152,6 +153,8 @@ def configure_state(
     setup_classes = _get_setup_classes(script)
     if not setup_classes:
         raise ValueError("Invalid simbi configuration")
+
+    type_check_input(script)
 
     states = []
     state_docs = []

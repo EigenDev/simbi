@@ -271,9 +271,9 @@ class BaseConfig(metaclass=abc.ABCMeta):
         return None
 
     @simbi_property(group="sim_state")
-    def gravitational_system(self) -> Optional[GravitationalSystemConfig]:
-         """Define a gravitational system configuration."""
-         return None
+    def gravitational_system(self) -> GravitationalSystemConfig:
+        """Define a gravitational system configuration."""
+        return {}
 
     @simbi_property(group="sim_state")
     def immersed_bodies(self) -> list[ImmersedBodyConfig]:

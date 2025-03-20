@@ -253,7 +253,7 @@ def read_file(filename: str) -> tuple[dict[str, Any], dict[str, Any], dict[str, 
         rho, p, chi = unpad_all([rho, p, chi])
         v = np.array(unpad_all(v))
 
-        fields = {f"v{i+1}": v[i] for i in range(len(v))}
+        fields = {f"v{i + 1}": v[i] for i in range(len(v))}
         fields.update(
             {
                 "rho": rho,
@@ -277,7 +277,7 @@ def read_file(filename: str) -> tuple[dict[str, Any], dict[str, Any], dict[str, 
         if ds["regime"] in ["srhd", "srmhd"]:
             W = (1 + vsqr) ** 0.5 if ds["using_gamma_beta"] else (1 - vsqr) ** (-0.5)
             if ds["using_gamma_beta"]:
-                fields.update({f"v{i+1}": v[i] / W for i in range(len(v))})
+                fields.update({f"v{i + 1}": v[i] / W for i in range(len(v))})
                 vsqr /= W**2
 
             if ds["regime"] == "srmhd":

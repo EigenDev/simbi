@@ -19,6 +19,7 @@ class BodyConfig:
 @dataclass(frozen=True)
 class GravitationalBodyConfig(BodyConfig):
     """Configuration for gravitational bodies"""
+
     softening_length: float = 0.01
 
 

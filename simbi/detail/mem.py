@@ -2,7 +2,8 @@ from threading import Thread
 from typing import Any, Callable
 import queue
 
-def release_memory(func: Callable[...,Any]) -> Callable[...,Any]:
+
+def release_memory(func: Callable[..., Any]) -> Callable[..., Any]:
     def wrapper(*args: Any, **kwargs: Any) -> None:
         q: queue.Queue[None | Exception] = queue.Queue()
 

@@ -15,6 +15,7 @@ class PlotType(Enum):
 @dataclass
 class PlotGroup:
     """Basic plot configuration"""
+
     setup: str
     files: List[Path]
     plot_type: PlotType
@@ -33,6 +34,7 @@ class PlotGroup:
 @dataclass
 class StyleGroup:
     """Plot style configuration"""
+
     color_maps: List[str] = field(default_factory=lambda: cycle(["viridis"]))
     log: bool = False
     semilogx: bool = False

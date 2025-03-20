@@ -1,5 +1,11 @@
 import math
-from simbi import BaseConfig, DynamicArg, simbi_property, BinaryConfig, GravitationalSystemConfig
+from simbi import (
+    BaseConfig,
+    DynamicArg,
+    simbi_property,
+    BinaryConfig,
+    GravitationalSystemConfig,
+)
 from typing import Any, Sequence, Generator
 from simbi.typing import InitialStateType
 
@@ -32,14 +38,11 @@ class BinaryOrbitTest(BaseConfig):
     def gravitational_system(self) -> GravitationalSystemConfig:
         """Define gravitational system configuration."""
         return GravitationalSystemConfig(
-            prescribed_motion=True, # move on analytic orbits (i.e., no live binary)
+            prescribed_motion=True,  # move on analytic orbits (i.e., no live binary)
             reference_frame="center_of_mass",
             system_type="binary",
             binary_config=BinaryConfig(
-                semi_major=0.2,
-                eccentricity=0.0,
-                mass_ratio=1.0,
-                total_mass=1.0
+                semi_major=0.2, eccentricity=0.0, mass_ratio=1.0, total_mass=1.0
             ),
         )
 

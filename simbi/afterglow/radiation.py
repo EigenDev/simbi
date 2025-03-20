@@ -15,7 +15,7 @@ from .helpers import (
     get_dL,
     generate_pseudo_mesh,
     read_afterglow_library_data,
-    read_simbi_afterglow
+    read_simbi_afterglow,
 )
 from simbi import py_calc_fnu, py_log_events, find_nearest
 from .scales import get_scale_model
@@ -32,230 +32,185 @@ def day_type(param: str) -> units.Quantity:
     try:
         param = float(param) * units.day
     except BaseException:
-        raise argparse.ArgumentTypeError(
-            "time bin edges must be numeric types")
+        raise argparse.ArgumentTypeError("time bin edges must be numeric types")
 
     return param
+
 
 def deg_type(param: str):
     try:
         param = np.deg2rad(float(param))
     except BaseException:
-        raise argparse.ArgumentTypeError(
-            "viewing angle most be numerica type")
+        raise argparse.ArgumentTypeError("viewing angle most be numerica type")
 
     return param
 
-def parse_args(
-    parser: argparse.ArgumentParser,
-    args: argparse.Namespace
-):
+
+def parse_args(parser: argparse.ArgumentParser, args: argparse.Namespace):
     afterglow_parser = get_subparser(parser, 2)
     afterglow_parser.add_argument(
-        '--files',
-        nargs='+',
-        help='Explicit filenames or directory')
+        "--files", nargs="+", help="Explicit filenames or directory"
+    )
     afterglow_parser.add_argument(
-        '--theta-obs',
-        help='observation angle in degrees',
-        type=deg_type,
-        default=0.0)
+        "--theta-obs", help="observation angle in degrees", type=deg_type, default=0.0
+    )
     afterglow_parser.add_argument(
-        '--nu',
-        help='Observed frequency',
-        default=[1e9],
-        type=float,
-        nargs='+')
+        "--nu", help="Observed frequency", default=[1e9], type=float, nargs="+"
+    )
     afterglow_parser.add_argument(
-        '--save',
-        help='file name to save fig',
-        default=None,
-        type=str)
+        "--save", help="file name to save fig", default=None, type=str
+    )
     afterglow_parser.add_argument(
-        '--tex',
-        help='true if want latex rendering on figs',
+        "--tex",
+        help="true if want latex rendering on figs",
         default=False,
-        action='store_true')
+        action="store_true",
+    )
     afterglow_parser.add_argument(
-        '--ntbins',
-        type=int,
-        help='number of time bins',
-        default=50)
+        "--ntbins", type=int, help="number of time bins", default=50
+    )
     afterglow_parser.add_argument(
-        '--theta-samples',
-        type=int,
-        help='number of theta_samples',
-        default=200)
+        "--theta-samples", type=int, help="number of theta_samples", default=200
+    )
     afterglow_parser.add_argument(
-        '--phi-samples',
-        type=int,
-        help='number of phi',
-        default=10)
+        "--phi-samples", type=int, help="number of phi", default=10
+    )
     afterglow_parser.add_argument(
-        '--example-data',
+        "--example-data",
         type=str,
-        help='data file(s) from other afterglow library',
-        nargs='+',
-        default=[])
-    afterglow_parser.add_argument(
-        '--load',
-        type=str,
-        help='data file from simbi-computed light curves',
+        help="data file(s) from other afterglow library",
+        nargs="+",
         default=[],
-        nargs='+')
+    )
     afterglow_parser.add_argument(
-        '--cmap',
-        help='colormap scheme for light curves',
-        default=None,
-        type=str)
-    afterglow_parser.add_argument(
-        '--clims',
-        help='color value limits',
-        nargs='+',
-        type=float,
-        default=[0.25, 0.75])
-    afterglow_parser.add_argument(
-        '--output',
-        help='name of file to be saved as',
+        "--load",
         type=str,
-        default='some_lc.h5')
+        help="data file from simbi-computed light curves",
+        default=[],
+        nargs="+",
+    )
     afterglow_parser.add_argument(
-        '--example-labels',
-        help='label(s) of the example curve\'s markers',
+        "--cmap", help="colormap scheme for light curves", default=None, type=str
+    )
+    afterglow_parser.add_argument(
+        "--clims",
+        help="color value limits",
+        nargs="+",
+        type=float,
+        default=[0.25, 0.75],
+    )
+    afterglow_parser.add_argument(
+        "--output", help="name of file to be saved as", type=str, default="some_lc.h5"
+    )
+    afterglow_parser.add_argument(
+        "--example-labels",
+        help="label(s) of the example curve's markers",
         type=str,
         default=[],
-        nargs='+')
+        nargs="+",
+    )
     afterglow_parser.add_argument(
-        '--xlims',
-        help='x limits in plot',
-        default=None,
-        type=float,
-        nargs='+')
+        "--xlims", help="x limits in plot", default=None, type=float, nargs="+"
+    )
     afterglow_parser.add_argument(
-        '--ylims',
-        help='y limits in plot',
-        default=None,
-        type=float,
-        nargs='+')
+        "--ylims", help="y limits in plot", default=None, type=float, nargs="+"
+    )
     afterglow_parser.add_argument(
-        '--fig-dims',
-        help='figure dimensions',
-        default=(5, 4),
-        type=float,
-        nargs='+')
+        "--fig-dims", help="figure dimensions", default=(5, 4), type=float, nargs="+"
+    )
+    afterglow_parser.add_argument("--title", help="title of plot", default=None)
     afterglow_parser.add_argument(
-        '--title',
-        help='title of plot',
-        default=None)
-    afterglow_parser.add_argument(
-        '--spectra',
-        help='set if want to plot spectra instead of light curve',
+        "--spectra",
+        help="set if want to plot spectra instead of light curve",
         default=False,
-        action='store_true')
+        action="store_true",
+    )
     afterglow_parser.add_argument(
-        '--times',
-        help='discrtete times for spectra calculation',
+        "--times",
+        help="discrtete times for spectra calculation",
         default=[1],
-        nargs='+',
-        type=float)
-    afterglow_parser.add_argument(
-        '--z',
-        help='redshift',
+        nargs="+",
         type=float,
-        default=0)
+    )
+    afterglow_parser.add_argument("--z", help="redshift", type=float, default=0)
     afterglow_parser.add_argument(
-        '--dL',
-        help='luminosity distance in [cm]',
-        default=1e28,
-        type=float)
-    afterglow_parser.add_argument(
-        '--eps_e',
-        help='energy density fraction in electrons',
-        default=0.1,
-        type=float)
-    afterglow_parser.add_argument(
-        '--eps_b',
-        help='energy density fraction in magnetic field',
-        default=0.1,
-        type=float)
-    afterglow_parser.add_argument(
-        '--p',
-        help='electron distribution index',
-        default=2.5,
-        type=float)
-    afterglow_parser.add_argument(
-        '--mode',
-        help='mode to output radiation',
-        default='fnu',
-        choices=['fnu', 'events'],
-        type=str)
-    afterglow_parser.add_argument(
-        '--scale',
-        help='scale string for units',
-        default='solar',
-        type=str)
-    afterglow_parser.add_argument(
-        '--no-cut',
-        help='flag for not cutting off grid edges',
-        default=False,
-        action='store_true'
+        "--dL", help="luminosity distance in [cm]", default=1e28, type=float
     )
     afterglow_parser.add_argument(
-        '--labels',
-        help='list of label names for simbi checkpoints',
+        "--eps_e", help="energy density fraction in electrons", default=0.1, type=float
+    )
+    afterglow_parser.add_argument(
+        "--eps_b",
+        help="energy density fraction in magnetic field",
+        default=0.1,
+        type=float,
+    )
+    afterglow_parser.add_argument(
+        "--p", help="electron distribution index", default=2.5, type=float
+    )
+    afterglow_parser.add_argument(
+        "--mode",
+        help="mode to output radiation",
+        default="fnu",
+        choices=["fnu", "events"],
+        type=str,
+    )
+    afterglow_parser.add_argument(
+        "--scale", help="scale string for units", default="solar", type=str
+    )
+    afterglow_parser.add_argument(
+        "--no-cut",
+        help="flag for not cutting off grid edges",
+        default=False,
+        action="store_true",
+    )
+    afterglow_parser.add_argument(
+        "--labels",
+        help="list of label names for simbi checkpoints",
         default=[],
         type=str,
-        nargs='+'
+        nargs="+",
     )
     afterglow_parser.add_argument(
-        '--legend-loc',
-        help='location of legend',
+        "--legend-loc",
+        help="location of legend",
         default=None,
         type=str,
         choices=[
-            'lower left',
-            'lower right',
-            'lower center',
-            'center',
-            'upper right',
-            'upper left',
-            'upper center'
-        ]
+            "lower left",
+            "lower right",
+            "lower center",
+            "center",
+            "upper right",
+            "upper left",
+            "upper center",
+        ],
     )
     afterglow_parser.add_argument(
-        '--vline',
-        help='location of vertical line in plot',
-        default=None,
-        type=float
+        "--vline", help="location of vertical line in plot", default=None, type=float
     )
     afterglow_parser.add_argument(
-        '--tbins',
-        help='time bin edges in units of days',
+        "--tbins",
+        help="time bin edges in units of days",
         default=None,
         nargs=2,
-        type=day_type
+        type=day_type,
     )
 
     return parser, parser.parse_args(
-        args=None if sys.argv[2:] else ['afterglow', '--help'])
+        args=None if sys.argv[2:] else ["afterglow", "--help"]
+    )
 
 
-def run(parser: argparse.ArgumentParser,
-        args: argparse.Namespace,
-        *_):
-
+def run(parser: argparse.ArgumentParser, args: argparse.Namespace, *_):
     parser, args = parse_args(parser, args)
     args.times.sort()
     args.nu.sort()
 
     scales = get_scale_model(args.scale)
     if args.tex:
-        plt.rcParams.update({
-            "text.usetex": True,
-            "font.family": "Times New Roman"
-        })
+        plt.rcParams.update({"text.usetex": True, "font.family": "Times New Roman"})
 
-    
     files = None if not args.files else util.get_file_list(args.files)[0]
     fig, ax = plt.subplots(figsize=args.fig_dims)
     freqs = np.asarray(args.nu) * units.Hz
@@ -266,7 +221,7 @@ def run(parser: argparse.ArgumentParser,
         cmap = plt.cm.get_cmap(args.cmap)
         colors = util.get_colors(cinterval, cmap, vmin, vmax)
     else:
-        cmap = plt.cm.get_cmap('viridis')
+        cmap = plt.cm.get_cmap("viridis")
         colors = util.get_colors(np.linspace(0, 1, len(args.nu)), cmap)
 
     # ---------------------------------------------------------
@@ -277,13 +232,11 @@ def run(parser: argparse.ArgumentParser,
         dim = util.get_dimensionality(files)
         nbins = args.ntbins
         nbin_edges = nbins + 1
-        if args.mode == 'fnu':
-            tbin_edge = args.tbins or get_tbin_edges(
-                args, files, scales.time_scale)
+        if args.mode == "fnu":
+            tbin_edge = args.tbins or get_tbin_edges(args, files, scales.time_scale)
             tbin_edges = np.geomspace(
-                tbin_edge[0] * 0.9,
-                tbin_edge[1] * 1.1,
-                nbin_edges)
+                tbin_edge[0] * 0.9, tbin_edge[1] * 1.1, nbin_edges
+            )
             time_bins = np.sqrt(tbin_edges[1:] * tbin_edges[:-1])
             fnu = {i: np.zeros(nbins) * units.mJy for i in args.nu}
             fnu_contig = np.array(
@@ -291,21 +244,21 @@ def run(parser: argparse.ArgumentParser,
             ).flatten()
 
         scales_dict = {
-            'time_scale': scales.time_scale.value,
-            'length_scale': scales.length_scale.value,
-            'rho_scale': scales.rho_scale.value,
-            'pre_scale': scales.pre_scale.value,
-            'v_scale': 1.0
+            "time_scale": scales.time_scale.value,
+            "length_scale": scales.length_scale.value,
+            "rho_scale": scales.rho_scale.value,
+            "pre_scale": scales.pre_scale.value,
+            "v_scale": 1.0,
         }
 
         sim_info = {
-            'theta_obs': args.theta_obs,
-            'nus': freqs.value,
-            'z': args.z,
-            'd_L': get_dL(args.z).value,
-            'eps_e': args.eps_e,
-            'eps_b': args.eps_b,
-            'p': args.p,
+            "theta_obs": args.theta_obs,
+            "nus": freqs.value,
+            "z": args.z,
+            "d_L": get_dL(args.z).value,
+            "eps_e": args.eps_e,
+            "eps_b": args.eps_b,
+            "p": args.p,
         }
 
         for idx, file in enumerate(files):
@@ -317,11 +270,11 @@ def run(parser: argparse.ArgumentParser,
                 full_sphere=True,
                 full_threed=False,
             )
-            sim_info['dt'] = setup['dt']
-            sim_info['adiabatic_index'] = setup['adiabatic_index']
-            sim_info['current_time'] = setup['time']
+            sim_info["dt"] = setup["dt"]
+            sim_info["adiabatic_index"] = setup["adiabatic_index"]
+            sim_info["current_time"] = setup["time"]
             t1 = pytime.time()
-            if args.mode == 'fnu':
+            if args.mode == "fnu":
                 py_calc_fnu(
                     fields=fields,
                     tbin_edges=tbin_edges.value,
@@ -330,7 +283,7 @@ def run(parser: argparse.ArgumentParser,
                     qscales=scales_dict,
                     sim_info=sim_info,
                     checkpoint_idx=idx,
-                    data_dim=dim
+                    data_dim=dim,
                 )
             else:
                 py_log_events(
@@ -342,9 +295,7 @@ def run(parser: argparse.ArgumentParser,
                     sim_info=sim_info,
                     data_dim=dim,
                 )
-            print(
-                f"Processed file {file} in {pytime.time() - t1:.2f} s",
-                flush=True)
+            print(f"Processed file {file} in {pytime.time() - t1:.2f} s", flush=True)
 
         fnu_contig = fnu_contig.reshape(len(args.nu), nbins) * (1.0 + args.z)
         for idx, key in enumerate(fnu.keys()):
@@ -352,25 +303,25 @@ def run(parser: argparse.ArgumentParser,
 
         # Save the data
         file_name = args.output
-        if not file_name.endswith('.h5'):
-            file_name += '.h5'
+        if not file_name.endswith(".h5"):
+            file_name += ".h5"
 
         isFile = os.path.isfile(file_name)
         dirname = os.path.dirname(file_name)
-        if os.path.exists(dirname) == False and dirname != '':
+        if os.path.exists(dirname) == False and dirname != "":
             if not isFile:
                 # Create a new directory because it does not exist
                 os.makedirs(dirname)
-                print(80 * '=')
+                print(80 * "=")
                 print(f"creating new directory named {dirname}...")
 
         print(80 * "=")
         print(f"Saving file as {file_name}...")
-        print(80 * '=')
-        with h5py.File(file_name, 'w') as hf:
-            hf.create_dataset('nu', data=[nu for nu in args.nu])
-            hf.create_dataset('fnu', data=fnu_contig)
-            hf.create_dataset('tbins', data=time_bins)
+        print(80 * "=")
+        with h5py.File(file_name, "w") as hf:
+            hf.create_dataset("nu", data=[nu for nu in args.nu])
+            hf.create_dataset("fnu", data=fnu_contig)
+            hf.create_dataset("tbins", data=time_bins)
 
     # --------------------------------------------------
     # Plotting
@@ -385,20 +336,26 @@ def run(parser: argparse.ArgumentParser,
         color = next(color_cycle)
         power_of_ten = int(np.floor(np.log10(val)))
         front_part = val / 10**power_of_ten
-        var_label = r'$t=' if args.spectra else r'$\nu='
+        var_label = r"$t=" if args.spectra else r"$\nu="
         if front_part == 1.0:
-            label = f'{var_label}' + \
-                r'10^{%d}$' % (power_of_ten) + \
-                (' day' if args.spectra else ' Hz')
+            label = (
+                f"{var_label}"
+                + r"10^{%d}$" % (power_of_ten)
+                + (" day" if args.spectra else " Hz")
+            )
         else:
-            label = f'{var_label}' + r'%d \times 10^{%d}$' % (
-                int(front_part), power_of_ten) + (' day' if args.spectra else ' Hz')
+            label = (
+                f"{var_label}"
+                + r"%d \times 10^{%d}$" % (int(front_part), power_of_ten)
+                + (" day" if args.spectra else " Hz")
+            )
 
         if files:
             if args.spectra:
                 nearest_dat = find_nearest(time_bins.value, val)[0]
                 relevant_flux = np.asanyarray(
-                    [fnu[key][nearest_dat].value for key in fnu.keys()])
+                    [fnu[key][nearest_dat].value for key in fnu.keys()]
+                )
                 xarr = args.nu
             else:
                 relevant_flux = fnu[val]
@@ -409,86 +366,91 @@ def run(parser: argparse.ArgumentParser,
         for dat in args.example_data:
             example_data = read_afterglow_library_data(dat)
             if args.spectra:
-                key = find_nearest(example_data['tday'].value, val)[
-                    1] * units.day
-                x = example_data['freq'] * units.Hz
-                y = example_data['spectra'][key]
+                key = find_nearest(example_data["tday"].value, val)[1] * units.day
+                x = example_data["freq"] * units.Hz
+                y = example_data["spectra"][key]
                 m = 5.0
             else:
                 key = val * units.Hz
-                x = example_data['tday']
-                y = example_data['fnu'][key]
+                x = example_data["tday"]
+                y = example_data["fnu"][key]
                 m = 0.5
-            ax.plot(x, y, 'o', color=color, markersize=m)
+            ax.plot(x, y, "o", color=color, markersize=m)
 
         for dfile in args.load:
             linestyle = next(linecycler)
             dat = read_simbi_afterglow(dfile)
             if args.spectra:
-                nearest_day = find_nearest(dat['tday'].value, val)[0]
-                x = sorted(dat['freq'].value)
+                nearest_day = find_nearest(dat["tday"].value, val)[0]
+                x = sorted(dat["freq"].value)
                 y = np.array(
-                    [dat['fnu'][key][nearest_day].value for key in sorted(dat['fnu'].keys())])
+                    [
+                        dat["fnu"][key][nearest_day].value
+                        for key in sorted(dat["fnu"].keys())
+                    ]
+                )
             else:
-                x = dat['tday']
-                y = dat['fnu'][val * units.Hz]
+                x = dat["tday"]
+                y = dat["fnu"][val * units.Hz]
 
             ax.plot(x, y, color=color, label=label, linestyle=linestyle)
 
         if label not in legend_labels:
             # create dummy axes for color-coded legend labels
-            line, = ax.plot([], [], color=color, label=label)
+            (line,) = ax.plot([], [], color=color, label=label)
             sim_lines += [line]
             legend_labels += [label]
 
         linecycler = cycle(lines)
 
     if args.title:
-        ax.set_title(rf'{args.title}')
+        ax.set_title(rf"{args.title}")
 
     ylims = args.ylims if args.ylims else (1e-11, 1e4)
     ax.set_ylim(*ylims)
-    ax.set_yscale('log')
-    ax.set_xscale('log')
-    ax.spines['top'].set_visible(False)
-    ax.spines['right'].set_visible(False)
-    ax.set_ylabel(r'Flux  Density [mJy]')
+    ax.set_yscale("log")
+    ax.set_xscale("log")
+    ax.spines["top"].set_visible(False)
+    ax.spines["right"].set_visible(False)
+    ax.set_ylabel(r"Flux  Density [mJy]")
     if args.xlims:
         ax.set_xlim(*args.xlims)
 
     if args.spectra:
-        ax.set_xlabel(r'$\nu_{\rm obs} [\rm Hz]$')
+        ax.set_xlabel(r"$\nu_{\rm obs} [\rm Hz]$")
     else:
-        ax.set_xlabel(r'$t_{\rm obs} [\rm day]$')
+        ax.set_xlabel(r"$t_{\rm obs} [\rm day]$")
 
     if args.vline:
-        ax.axvline(args.vline, color='black', linestyle=':', alpha=0.8)
+        ax.axvline(args.vline, color="black", linestyle=":", alpha=0.8)
 
     ex_lines = []
-    marks = cycle(['o', 's'])
+    marks = cycle(["o", "s"])
     for label in args.example_labels:
         ex_lines += [
-            mlines.Line2D([0], [0],
-                          marker=next(marks),
-                          color='w',
-                          label=label,
-                          markerfacecolor='grey',
-                          markersize=5)
+            mlines.Line2D(
+                [0],
+                [0],
+                marker=next(marks),
+                color="w",
+                label=label,
+                markerfacecolor="grey",
+                markersize=5,
+            )
         ]
 
     for label in args.labels:
         ex_lines += [
-            mlines.Line2D([0, 1], [0, 1],
-                          linestyle=next(linecycler),
-                          label=label,
-                          color='grey')
+            mlines.Line2D(
+                [0, 1], [0, 1], linestyle=next(linecycler), label=label, color="grey"
+            )
         ]
 
     ax.legend(handles=[*sim_lines, *ex_lines], loc=args.legend_loc)
     if args.save:
-        file_str = f"{args.save}".replace(' ', '_')
-        print(f'saving as {file_str}.pdf')
-        fig.savefig(f'{file_str}.pdf')
+        file_str = f"{args.save}".replace(" ", "_")
+        print(f"saving as {file_str}.pdf")
+        fig.savefig(f"{file_str}.pdf")
         plt.show()
     else:
         plt.show()

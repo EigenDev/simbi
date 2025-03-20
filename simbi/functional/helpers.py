@@ -5,10 +5,10 @@ import linecache
 import os
 import tracemalloc
 from numpy.typing import NDArray
-from typing import Any, Callable, Generator, Optional, Sequence, Union, cast
+from typing import Any, Callable, Generator, Optional, Sequence, cast
 from ..io.logging import logger
 from time import sleep
-from typing import TextIO, Generator
+from typing import TextIO
 
 
 __all__ = [
@@ -252,16 +252,12 @@ def calc_cell_volume(
 
 def compute_num_polar_zones(
     *,
-    rmin: Optional[Any] = None,
-    rmax: Optional[Any] = None,
-    nr: Optional[int] = None,
-    zpd: Optional[int] = None,
+    rmin: float,
+    rmax: float,
+    nr: int,
+    zpd: int,
     theta_bounds: tuple[float, float] = (0.0, np.pi),
 ) -> int:
-    # Convert the values if None
-    rmin = rmin or 1.0
-    rmax = rmax or 1.0
-    nr = nr or 1
     if zpd is not None:
         return int(round((theta_bounds[1] - theta_bounds[0]) * zpd / np.log(10)))
     elif None not in (rmin, rmax, nr):
@@ -285,7 +281,7 @@ def progressbar(
     def show(j: int) -> None:
         x = int(size * j / count)
         print(
-            f"{prefix}[{u'█'*x}{('.'*(size-x))}] {j}/{count}",
+            f"{prefix}[{'█' * x}{('.' * (size - x))}] {j}/{count}",
             end="\r",
             file=out,
             flush=True,
