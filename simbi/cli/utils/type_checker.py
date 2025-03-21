@@ -27,7 +27,8 @@ def type_check_input(file: Path) -> None:
         )
 
         if type_checker.returncode != 0:
-            logger.error(f"Type checking failed: {type_checker.stderr}")
+            spinner.stop()
+            logger.error(f"Type checking failed: {type_checker.stdout}")
             raise TypeError(
                 "\nYour configuration script failed type safety checks. "
                 + "Please fix them or run with --no-type-check option"
@@ -41,7 +42,7 @@ def type_check_input(file: Path) -> None:
         spinner.start()
         # wait a few seconds before moving forward
         # to give user a chance to read the message
-        time.sleep(2)
+        time.sleep(1.1)
         spinner.stop()
     except Exception as e:
         spinner.stop()

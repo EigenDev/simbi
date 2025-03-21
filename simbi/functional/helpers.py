@@ -5,9 +5,10 @@ import linecache
 import os
 import tracemalloc
 from numpy.typing import NDArray
-from typing import Any, Callable, Generator, Optional, Sequence, cast
+from typing import Any, Callable, Generator, Optional, Sequence, cast, Type
 from ..io.logging import logger
 from time import sleep
+from dataclasses import is_dataclass
 from typing import TextIO
 
 
@@ -26,7 +27,12 @@ __all__ = [
     "expand_axis_if_needed",
     "order_of_mag",
     "to_tuple_of_tuples",
+    "is_dataclass_instance",
 ]
+
+
+def is_dataclass_instance(obj: Type[Any]) -> bool:
+    return is_dataclass(obj) and not isinstance(obj, type)
 
 
 def as_list(x: Any) -> list[Any]:

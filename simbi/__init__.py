@@ -16,7 +16,7 @@ from .core.types.typing import (
     PrimitiveStateFunc,
     StateGenerator,
 )
-from .core.types.dicts import (
+from .core.config.bodies import (
     ImmersedBodyConfig,
     GravitationalSystemConfig,
     BinaryConfig,

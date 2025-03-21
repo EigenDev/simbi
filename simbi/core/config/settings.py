@@ -1,10 +1,10 @@
+import dataclasses
+from enum import Enum
 from dataclasses import dataclass, asdict, field
-from typing import Optional, Sequence, Callable, Any, Optional, TypeVar
+from typing import Optional, Sequence, Callable, Any, TypeVar, Self
 from pathlib import Path
-
 from simbi.functional.helpers import to_tuple_of_tuples
-
-from ...core.types.dicts import BodySystemConfig
+from ...core.config.bodies import BodySystemConfig
 from .constants import (
     CoordSystem,
     Regime,
@@ -30,12 +30,29 @@ def get_first_existing_key(
 class BaseSettings:
     @classmethod
     def update_from(cls, instance: Any, cli_args: dict[str, Any]) -> Any:
-        self_params = asdict(instance)
-        self_params.update(
-            (k, cli_args[k] or self_params[k])
-            for k in set(cli_args).intersection(self_params)
-        )
-        return cls(**self_params)
+        # Filter out None values and process enum types
+        processed_args = {}
+
+        for key, value in cli_args.items():
+            if value is None or not hasattr(instance, key):
+                continue
+
+            current_value = getattr(instance, key)
+
+            # Handle enum conversions
+            if isinstance(current_value, Enum) and isinstance(value, str):
+                enum_class = type(current_value)
+                try:
+                    processed_args[key] = enum_class(value)
+                except ValueError:
+                    # Log warning or raise error
+                    continue
+            else:
+                processed_args[key] = value
+
+        # I didn't know dataclasses has the replace method. Nice!
+        # My life is officially 0.1% easier
+        return dataclasses.replace(instance, **processed_args)
 
 
 @dataclass(frozen=True)
@@ -48,22 +65,6 @@ class GridSettings(BaseSettings):
     nzv: int  # Number of vertices in the z-direction
     nghosts: int  # Number of ghost cells
     dimensionality: int
-
-    @classmethod
-    def from_resolution(
-        cls, resolution: Sequence[int], nghosts: int, dim: int
-    ) -> "GridSettings":
-        nx_active, ny_active, nz_active = resolution
-        return cls(
-            nx=nx_active + nghosts,
-            ny=ny_active + nghosts * (dim > 1),
-            nz=nz_active + nghosts * (dim > 2),
-            nxv=nx_active + 1,
-            nyv=ny_active + 1,
-            nzv=nz_active + 1,
-            nghosts=nghosts,
-            dimensionality=dim,
-        )
 
     @classmethod
     def from_dict(cls, setup: dict[str, Any], spatial_order: str) -> "GridSettings":
@@ -86,7 +87,7 @@ class GridSettings(BaseSettings):
         )
 
     @classmethod
-    def update_from(cls, instance: "GridSettings", cli_args: dict[str, Any]) -> Any:
+    def update_from(cls, instance: "GridSettings", cli_args: dict[str, Any]) -> Self:
         self_params = asdict(instance)
         if cli_args["spatial_order"] is None:
             return cls(**self_params)
@@ -279,32 +280,6 @@ class SimulationSettings(BaseSettings):
             ),
         )
 
-    @classmethod
-    def update_from(cls, instance: Any, cli_args: dict[str, Any]) -> Any:
-        self_params = asdict(instance)
-        self_params.update(
-            (k, cli_args[k] if cli_args[k] is not None else self_params[k])
-            for k in set(cli_args).intersection(self_params)
-        )
-        return cls(
-            adiabatic_index=self_params["adiabatic_index"],
-            tstart=self_params["tstart"],
-            tend=self_params["tend"],
-            cfl=self_params["cfl"],
-            regime=Regime(self_params["regime"]),
-            temporal_order=TimeStepping(self_params["temporal_order"]),
-            spatial_order=SpatialOrder(self_params["spatial_order"]),
-            plm_theta=self_params["plm_theta"],
-            quirk_smoothing=self_params["quirk_smoothing"],
-            is_mhd=self_params["is_mhd"],
-            dlogt=self_params["dlogt"],
-            solver=Solver(self_params["solver"]),
-            bodies=self_params["bodies"],
-            sound_speed=self_params["sound_speed"],
-            isothermal=self_params["isothermal"],
-            body_system=self_params["body_system"],
-        )
-
     def to_execution_dict(self) -> dict[str, Any]:
         """convert the settings to execution format dict"""
         return {
@@ -323,5 +298,5 @@ class SimulationSettings(BaseSettings):
             "bodies": self.bodies,
             "sound_speed": self.sound_speed,
             "isothermal": self.isothermal,
-            "body_system": dict(self.body_system) if self.body_system else None,
+            "body_system": asdict(self.body_system) if self.body_system else None,
         }

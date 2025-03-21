@@ -1,48 +1,59 @@
+from typing import Optional
 from dataclasses import dataclass
-from .constants import BodyType
-from typing import Any
-from numpy.typing import NDArray
-import numpy as np
 
 
 @dataclass(frozen=True)
-class BodyConfig:
-    """Base configuration for all body types"""
+class ImmersedBodyConfig:
+    body_type: str
+    mass: float
+    velocity: list[float]
+    position: list[float]
+    radius: float
+    specifics: Optional[dict[str, float | int | bool]] = None
 
-    body_type: BodyType
-    position: NDArray[np.floating[Any]]
-    velocity: NDArray[np.floating[Any]]
+
+@dataclass(frozen=True)
+class BinaryComponentConfig:
     mass: float
     radius: float
-
-
-@dataclass(frozen=True)
-class GravitationalBodyConfig(BodyConfig):
-    """Configuration for gravitational bodies"""
-
-    softening_length: float = 0.01
-
-
-@dataclass(frozen=True)
-class ElasticBodyConfig(BodyConfig):
-    """Configuration for elastic bodies"""
-
-    stiffness: float
-    damping: float
-
-
-@dataclass(frozen=True)
-class ViscousBodyConfig(BodyConfig):
-    """Configuration for viscous bodies"""
-
-    viscosity: float
-    bulk_viscosity: float
-    shear_viscosity: float
-
-
-@dataclass(frozen=True)
-class GravitationalSinkConfig(BodyConfig):
-    """Configuration for gravitational sinks"""
-
-    accretion_efficiency: float
+    is_an_accretor: bool
     softening_length: float
+    two_way_coupling: bool
+    accretion_efficiency: float
+    accretion_radius: float
+
+
+@dataclass(frozen=True)
+class BinaryConfig:
+    semi_major: float
+    eccentricity: float
+    mass_ratio: float
+    total_mass: float
+    components: list[BinaryComponentConfig]
+
+
+@dataclass(frozen=True)
+class BodySystemConfig:
+    """Configuration for generic body system."""
+
+    pass
+
+
+@dataclass(frozen=True)
+class GravitationalSystemConfig(BodySystemConfig):
+    """Configuration for gravitational system."""
+
+    # General gravitational config
+    prescribed_motion: bool
+    reference_frame: str
+    system_type: str
+    # Only used if system_type="binary"
+    binary_config: BinaryConfig
+
+
+__all__ = [
+    "ImmersedBodyConfig",
+    "GravitationalSystemConfig",
+    "BinaryConfig",
+    "BinaryComponentConfig",
+]

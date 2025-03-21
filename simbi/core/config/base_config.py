@@ -8,10 +8,10 @@ from ..managers.validator import ConfigValidator
 from ..managers.body_validator import BodyConfigValidator
 from ..config.initialization import InitializationConfig
 from ..simulation.state_init import SimulationBundle, initialize_simulation
-from ...functional.maybe import Maybe
 from numpy.typing import NDArray
 from pathlib import Path
-from ..types.dicts import GravitationalSystemConfig, ImmersedBodyConfig
+from ...functional import Maybe
+from .bodies import GravitationalSystemConfig, ImmersedBodyConfig
 from typing import (
     Callable,
     Optional,
@@ -271,9 +271,9 @@ class BaseConfig(metaclass=abc.ABCMeta):
         return None
 
     @simbi_property(group="sim_state")
-    def gravitational_system(self) -> GravitationalSystemConfig:
+    def gravitational_system(self) -> Optional[GravitationalSystemConfig]:
         """Define a gravitational system configuration."""
-        return {}
+        return None
 
     @simbi_property(group="sim_state")
     def immersed_bodies(self) -> list[ImmersedBodyConfig]:
