@@ -22,14 +22,19 @@ namespace simbi {
         // The variant type that can hold various data types including nested
         // dictionary
         using ValueType = std::variant<
-            std::monostate,         // For empty/null values
-            bool,                   // For boolean values
-            int,                    // For integer values
-            double,                 // For floating point
-            std::string,            // For string values
-            std::vector<double>,    // For numeric arrays
-            ConfigDict,             // For nested dictionaries
-            std::list<ConfigDict>   // For list of dictionaries
+            std::monostate,                   // For empty/null values
+            bool,                             // For boolean values
+            int,                              // For integer values
+            luint,                            // For unsigned integer values
+            real,                             // For floating point
+            std::string,                      // For string values
+            std::vector<real>,                // For numeric arrays
+            std::vector<std::vector<real>>,   // For 2D arrays
+            std::vector<std::string>,         // For string arrays
+            std::vector<int>,                 // For integer arrays
+            std::pair<real, real>,            // For pairs of real values
+            ConfigDict,                       // For nested dictionaries
+            std::list<ConfigDict>             // For list of dictionaries
             >;
 
         ValueType value;
@@ -40,20 +45,25 @@ namespace simbi {
         // Constructors for different types
         ConfigValue(bool v) : value(v) {}
         ConfigValue(int v) : value(v) {}
-        ConfigValue(double v) : value(v) {}
+        ConfigValue(luint v) : value(v) {}
+        ConfigValue(real v) : value(v) {}
         ConfigValue(const char* v) : value(std::string(v)) {}
         ConfigValue(std::string v) : value(std::move(v)) {}
-        ConfigValue(std::vector<double> v) : value(std::move(v)) {}
+        ConfigValue(std::vector<real> v) : value(std::move(v)) {}
+        ConfigValue(std::vector<std::string> v) : value(std::move(v)) {}
+        ConfigValue(std::vector<int> v) : value(std::move(v)) {}
+        ConfigValue(std::vector<std::vector<real>> v) : value(std::move(v)) {}
         ConfigValue(ConfigDict v) : value(std::move(v)) {}
         ConfigValue(std::list<ConfigDict> v) : value(std::move(v)) {}
+        ConfigValue(std::pair<real, real> v) : value(std::move(v)) {}
 
         // Helper for spatial vectors
         template <typename T, size_type Dims>
         ConfigValue(spatial_vector_t<T, Dims> v)
         {
-            std::vector<double> vec_values;
+            std::vector<real> vec_values;
             for (size_type i = 0; i < Dims; ++i) {
-                vec_values.push_back(static_cast<double>(v[i]));
+                vec_values.push_back(static_cast<real>(v[i]));
             }
             value = std::move(vec_values);
         }
@@ -65,15 +75,24 @@ namespace simbi {
         }
         bool is_bool() const { return std::holds_alternative<bool>(value); }
         bool is_int() const { return std::holds_alternative<int>(value); }
-        bool is_double() const { return std::holds_alternative<double>(value); }
-        bool is_number() const { return is_int() || is_double(); }
+        bool is_uint() const { return std::holds_alternative<luint>(value); }
+        bool is_real_number() const
+        {
+            return std::holds_alternative<real>(value);
+        }
+        bool is_number() const { return is_int() || is_real_number(); }
         bool is_string() const
         {
             return std::holds_alternative<std::string>(value);
         }
         bool is_array() const
         {
-            return std::holds_alternative<std::vector<double>>(value);
+            return std::holds_alternative<std::vector<real>>(value);
+        }
+        bool is_nested_array_of_floats() const
+        {
+            return std::holds_alternative<std::vector<std::vector<real>>>(value
+            );
         }
         bool is_dict() const
         {
@@ -82,6 +101,18 @@ namespace simbi {
         bool is_list() const
         {
             return std::holds_alternative<std::list<ConfigDict>>(value);
+        }
+        bool is_array_of_strings() const
+        {
+            return std::holds_alternative<std::vector<std::string>>(value);
+        }
+        bool is_pair() const
+        {
+            return std::holds_alternative<std::pair<real, real>>(value);
+        }
+        bool is_array_of_ints() const
+        {
+            return std::holds_alternative<std::vector<int>>(value);
         }
 
         // Value access with type checking
@@ -98,17 +129,17 @@ namespace simbi {
                 if (is_int()) {
                     return std::get<int>(value);
                 }
-                if (is_double()) {
-                    return static_cast<int>(std::get<double>(value));
+                if (is_real_number()) {
+                    return static_cast<int>(std::get<real>(value));
                 }
                 throw std::runtime_error("Not an integer value");
             }
-            else if constexpr (std::is_same_v<T, double>) {
-                if (is_double()) {
-                    return std::get<double>(value);
+            else if constexpr (std::is_same_v<T, real>) {
+                if (is_real_number()) {
+                    return std::get<real>(value);
                 }
                 if (is_int()) {
-                    return static_cast<double>(std::get<int>(value));
+                    return static_cast<real>(std::get<int>(value));
                 }
                 throw std::runtime_error("Not a numeric value");
             }
@@ -118,11 +149,11 @@ namespace simbi {
                 }
                 return std::get<std::string>(value);
             }
-            else if constexpr (std::is_same_v<T, std::vector<double>>) {
+            else if constexpr (std::is_same_v<T, std::vector<real>>) {
                 if (!is_array()) {
                     throw std::runtime_error("Not an array value");
                 }
-                return std::get<std::vector<double>>(value);
+                return std::get<std::vector<real>>(value);
             }
             else if constexpr (std::is_same_v<T, ConfigDict>) {
                 if (!is_dict()) {
@@ -135,6 +166,41 @@ namespace simbi {
                     throw std::runtime_error("Not a list of dictionaries");
                 }
                 return std::get<std::list<ConfigDict>>(value);
+            }
+            else if constexpr (std::is_same_v<T, std::vector<std::string>>) {
+                if (!is_array_of_strings()) {
+                    throw std::runtime_error("Not an array of strings");
+                }
+                return std::get<std::vector<std::string>>(value);
+            }
+            else if constexpr (std::is_same_v<T, std::pair<real, real>>) {
+                if (!is_pair()) {
+                    throw std::runtime_error("Not a pair of real values");
+                }
+                return std::get<std::pair<real, real>>(value);
+            }
+            else if constexpr (std::is_same_v<T, std::vector<int>>) {
+                if (!is_array_of_ints()) {
+                    throw std::runtime_error("Not an array of integers");
+                }
+                return std::get<std::vector<int>>(value);
+            }
+            else if constexpr (std::is_same_v<
+                                   T,
+                                   std::vector<std::vector<real>>>) {
+                if (!is_nested_array_of_floats()) {
+                    throw std::runtime_error("Not a nested array of floats");
+                }
+                return std::get<std::vector<std::vector<real>>>(value);
+            }
+            else if constexpr (std::is_same_v<T, luint>) {
+                if (is_uint()) {
+                    return std::get<luint>(value);
+                }
+                if (is_int()) {
+                    return static_cast<luint>(std::get<int>(value));
+                }
+                throw std::runtime_error("Not an unsigned integer value");
             }
             else {
                 static_assert(always_false<T>::value, "Unsupported type");
@@ -149,7 +215,7 @@ namespace simbi {
                 throw std::runtime_error("Not an array value");
             }
 
-            const auto& array = std::get<std::vector<double>>(value);
+            const auto& array = std::get<std::vector<real>>(value);
             if (array.size() < Dims) {
                 throw std::runtime_error("Array too small for spatial vector");
             }
