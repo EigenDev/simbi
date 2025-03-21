@@ -129,7 +129,7 @@ class KeplerianRingTest(BaseConfig):
 
     @simbi_property
     def checkpoint_interval(self) -> float:
-        return self.default_end_time / 100  # 50 snapshots
+        return self.default_end_time / 100  # 100 snapshots
 
     @simbi_property
     def bounds(self) -> Sequence[Sequence[float]]:
