@@ -1,5 +1,5 @@
 import math
-from simbi import BaseConfig, DynamicArg, simbi_property, simbi_class_property
+from simbi import BaseConfig, DynamicArg, simbi_property, ImmersedBodyConfig
 from typing import Any, Sequence, Generator
 from simbi.typing import InitialStateType
 
@@ -111,16 +111,16 @@ class KeplerianRingTest(BaseConfig):
         }
 
     @simbi_property
-    def immersed_bodies(self) -> list[dict[str, Any]]:
+    def immersed_bodies(self) -> list[ImmersedBodyConfig]:
         return [
-            {
-                "body_type": "gravitational",
-                "mass": 1.0,
-                "velocity": [0.0, 0.0],
-                "position": [0.0, 0.0],
-                "radius": 0.01,
-                "softening": 0.05,
-            }
+            ImmersedBodyConfig(
+                body_type="gravitational",
+                mass=1.0,
+                velocity=[0.0, 0.0],
+                position=[0.0, 0.0],
+                radius=0.01,
+                specifics={"softening_length": 0.05 * 0.01, "two_way_coupling": False},
+            )
         ]
 
     @simbi_property
@@ -159,7 +159,7 @@ class KeplerianRingTest(BaseConfig):
         M = 1.0
         r0 = 1.0
         v_k = math.sqrt(G * M / r0)
-        return h_r * v_k  # Return cs, not cs^2
+        return h_r * v_k
 
     @simbi_property
     def regime(self) -> str:
