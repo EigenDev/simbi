@@ -723,7 +723,7 @@ namespace simbi {
             return gamma * press() / (rho() * enthalpy(gamma));
         }
         DUAL general_vector_t<real, Dims>
-        spatial_momentum(const real gamma) const
+        spatial_momentum(const real gamma = 1.0) const
         {
             if constexpr (R == Regime::SRHD) {
                 return (
