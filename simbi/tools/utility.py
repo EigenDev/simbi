@@ -10,7 +10,6 @@ from numpy.typing import NDArray
 
 from ..functional.helpers import find_nearest
 from dataclasses import dataclass, field
-from typing import Union, List, Dict, Any
 from enum import Enum
 
 # FONT SIZES
@@ -48,7 +47,7 @@ class FieldType(Enum):
     OTHER = "other"
 
 
-FIELD_MAP: Dict[str, str] = {
+FIELD_MAP: dict[str, str] = {
     "rho": r"\rho",
     "D": "D",
     "gamma_beta": r"$\Gamma \beta$",
@@ -82,7 +81,7 @@ FIELD_MAP: Dict[str, str] = {
     "b3": r"$B_3$",
 }
 
-UNITS: Dict[str, str] = {
+UNITS: dict[str, str] = {
     "energy": r"\rm erg \ cm^{-3}",
     "density": r"\rm g \ cm^{-3}",
 }
@@ -92,23 +91,23 @@ UNITS: Dict[str, str] = {
 class FieldMapper:
     """Maps field names to LaTeX strings"""
 
-    field_map: Dict[str, str] = field(default_factory=lambda: FIELD_MAP)
-    units: Dict[str, str] = field(default_factory=lambda: UNITS)
+    field_map: dict[str, str] = field(default_factory=lambda: FIELD_MAP)
+    units: dict[str, str] = field(default_factory=lambda: UNITS)
 
     def get_field_str(
         self,
-        fields: Union[str, List[str], Dict[str, Any]],
+        fields: Union[str, list[str], dict[str, Any]],
         units: bool = False,
         normalized: bool = True,
-    ) -> Union[str, List[str]]:
+    ) -> Union[str, list[str]]:
         """Get LaTeX string for field(s)"""
         field_list = self._normalize_fields(fields)
         field_strings = [self._format_field(f, units, normalized) for f in field_list]
         return field_strings[0] if len(field_strings) == 1 else field_strings
 
     def _normalize_fields(
-        self, fields: Union[str, List[str], Dict[str, Any]]
-    ) -> List[str]:
+        self, fields: Union[str, list[str], dict[str, Any]]
+    ) -> list[str]:
         """Convert input to list of field names"""
         if isinstance(fields, str):
             return [fields]
@@ -158,10 +157,10 @@ class FieldMapper:
 
 # Usage remains the same
 def get_field_str(
-    fields: Union[str, List[str], Dict[str, Any]],
+    fields: Union[str, list[str], dict[str, Any]],
     units: bool = False,
     normalized: bool = True,
-) -> Union[str, List[str]]:
+) -> Union[str, list[str]]:
     """Get LaTeX string for field(s)"""
     mapper = FieldMapper()
     return mapper.get_field_str(fields, units, normalized)
@@ -204,7 +203,10 @@ def flatten_fully(x: NDArray[np.floating[Any]]) -> NDArray[np.floating[Any]] | A
 
 def get_dimensionality(files: Union[list[str], dict[int, list[str]]]) -> int:
     dims = []
-    all_equal: Callable[[list[int]], bool] = lambda x: x.count(x[0]) == len(x)
+
+    def all_equal(x: list[int]) -> bool:
+        return x.count(x[0]) == len(x)
+
     ndim: int = 0
     if isinstance(files, dict):
         import itertools
@@ -214,7 +216,7 @@ def get_dimensionality(files: Union[list[str], dict[int, list[str]]]) -> int:
     files = list(filter(bool, files))
     for file in files:
         with h5py.File(file, "r") as hf:
-            ds = hf.get("sim_info").attrs
+            ds: h5py.AttributeManager = hf["sim_info"].attrs
             ndim = ds["dimensions"]
             dims += [ndim]
             if not all_equal(dims):
