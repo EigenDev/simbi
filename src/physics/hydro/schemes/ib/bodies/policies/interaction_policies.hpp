@@ -1,195 +1,13 @@
 #ifndef INTERACTION_POLICIES_HPP
 #define INTERACTION_POLICIES_HPP
 
-#include "../body_traits.hpp"   // for Accreting
-#include "build_options.hpp"    // for DUAL, size_type, real
-#include <cmath>                // for M_PI
+#include "../body_traits.hpp"                 // for Accreting
+#include "build_options.hpp"                  // for DUAL, size_type, real
+#include "core/types/containers/vector.hpp"   // for spatial_vector_t
+#include "util/parallel/parallel_for.hpp"
+#include <cmath>   // for M_PI
 
 namespace simbi::ib {
-    //---------------------------------------------------------------------------
-    // Minimal fluid interaction policy
-    // --------------------------------------------------------------------------
-    template <typename T, size_type Dims>
-    class MinimalFluidInteractionPolicy
-    {
-      public:
-        struct Params {
-            T drag_coefficient = T(0.0);   // No drag by default
-        };
-
-        DUAL MinimalFluidInteractionPolicy(const Params& params = {})
-            : params_(params)
-        {
-        }
-
-        // Calculate fluid forces on the body
-        template <typename Body>
-        DUAL void
-        calculate_fluid_forces(Body& body, const auto& mesh, const T dt)
-        {
-            // Minimal implementation - could be empty or just add minimal drag
-            if (params_.drag_coefficient > 0) {
-                add_minimal_drag(body);
-            }
-        }
-
-        // Apply forces from body to fluid
-        template <typename Body, typename ConsArray, typename PrimArray>
-        DUAL void apply_to_fluid(
-            Body& body,
-            ConsArray& cons_states,
-            const PrimArray& prim_states,
-            const T dt
-        )
-        {
-            // Do nothing - body doesn't affect fluid
-        }
-
-        DUAL const Params& params() const { return params_; }
-        DUAL Params& params() { return params_; }
-
-      private:
-        Params params_;
-
-        template <typename Body>
-        DUAL void add_minimal_drag(Body& body)
-        {
-            // Simple drag proportional to velocity squared
-            const auto v      = body.velocity();
-            const auto v_norm = v.norm();
-
-            if (v_norm > 0) {
-                // Simple drag force: F = -0.5 * rho * Cd * A * v^2
-                // We'll use a simplified version based just on velocity
-                const auto drag_force = -params_.drag_coefficient * v_norm * v;
-                body.force_ += drag_force;
-            }
-        }
-    };
-
-    //---------------------------------------------------------------------------
-    // Standard fluid interaction policy
-    // --------------------------------------------------------------------------
-    template <typename T, size_type Dims>
-    class StandardFluidInteractionPolicy
-    {
-      public:
-        struct Params {
-            T drag_coefficient    = T(0.47);   // Default sphere drag
-            bool two_way_coupling = true;   // Body affects fluid and vice versa
-        };
-
-        DUAL StandardFluidInteractionPolicy(const Params& params = {})
-            : params_(params)
-        {
-        }
-
-        // Calculate fluid forces on the body
-        template <typename Body>
-        DUAL void
-        calculate_fluid_forces(Body& body, const auto& mesh, const T dt)
-        {
-            // TODO: Interpolate fluid velocity at body position
-            // body.interpolate_fluid_velocity();
-
-            // Calculate drag force
-            const auto v_rel  = body.velocity() - body.fluid_velocity();
-            const auto v_norm = v_rel.norm();
-
-            if (v_norm > 0) {
-                // Surface area - approximation for a sphere
-                const auto area = T(M_PI) * body.radius() * body.radius();
-
-                // Density - use average from cut cells
-                T avg_density  = 0;
-                T total_volume = 0;
-
-                for (const auto& idx : body.cut_cell_indices()) {
-                    const auto& cell     = body.cell_info()[idx];
-                    const auto mesh_cell = mesh.get_cell_from_global(idx);
-
-                    // Only consider cells that are partially fluid
-                    if (cell.is_cut && cell.volume_fraction < 1.0) {
-                        const T cell_volume =
-                            mesh_cell.volume() * (1.0 - cell.volume_fraction);
-                        // Note: we would need to access density from
-                        // conservation states here For simplicity, we'll use a
-                        // constant density of 1.0
-                        const T cell_density = 1.0;
-
-                        avg_density += cell_density * cell_volume;
-                        total_volume += cell_volume;
-                    }
-                }
-
-                // Avoid division by zero
-                if (total_volume > 0) {
-                    avg_density /= total_volume;
-                }
-                else {
-                    avg_density = 1.0;   // Default density
-                }
-
-                // Full drag equation: F = -0.5 * rho * Cd * A * v^2 * (v/|v|)
-                const auto drag_force = -0.5 * avg_density *
-                                        params_.drag_coefficient * area *
-                                        v_norm * v_rel;
-
-                body.force_ += drag_force;
-            }
-        }
-
-        // Apply forces from body to fluid
-        template <typename Body, typename ConsArray, typename PrimArray>
-        DUAL void apply_to_fluid(
-            Body& body,
-            ConsArray& cons_states,
-            const PrimArray& prim_states,
-            const T dt
-        )
-        {
-            if (!params_.two_way_coupling) {
-                return;
-            }
-
-            using conserved_t = typename ConsArray::value_type;
-
-            // Apply reaction forces to fluid in cut cells
-            for (const auto& idx : body.cut_cell_indices()) {
-                const auto& cell     = body.cell_info()[idx];
-                const auto mesh_cell = body.mesh().get_cell_from_global(idx);
-                const auto dV        = mesh_cell.volume();
-
-                // Skip completely solid cells
-                if (cell.volume_fraction >= 1.0) {
-                    continue;
-                }
-
-                // Force on fluid = -force on body
-                const auto force_density =
-                    -body.force_ * (1.0 - cell.volume_fraction) / dV;
-
-                // Use force to update momentum and energy
-                auto& state = cons_states[idx];
-
-                // Momentum change
-                const auto dp = force_density * dt;
-
-                // Energy change - work done by force
-                const auto work = dp.dot(body.velocity());
-
-                // Update conserved state
-                state += conserved_t{0.0, dp, work};
-            }
-        }
-
-        DUAL const Params& params() const { return params_; }
-        DUAL Params& params() { return params_; }
-
-      private:
-        Params params_;
-    };
-
     //---------------------------------------------------------------------------
     // Gravitational fluid interaction policy
     // --------------------------------------------------------------------------
@@ -205,57 +23,45 @@ namespace simbi::ib {
         {
         }
 
-        template <typename Body, typename ConsArray, typename PrimArray>
-        void apply_to_fluid(
+        template <typename Body, typename Primitive>
+        auto apply_forces_to_fluid(
             Body& body,
-            ConsArray& cons_states,
-            const PrimArray& prim_states,
-            const auto dt
+            const Primitive& prim,
+            const auto& mesh_cell,
+            const auto& coords,
+            const auto& context,
+            const T dt
         )
         {
-            using conserved_t = typename ConsArray::value_type;
-
+            using conserved_t = typename Primitive::counterpart_t;
             // Reset force accumulator
             body.force_ref() = spatial_vector_t<T, Dims>();
 
             // load gravitational trait parameters
             const auto softening        = trait_.softening_length();
-            const auto mesh             = body.mesh();
             const auto two_way_coupling = trait_.two_way_coupling();
 
             // Apply gravitational force to entire fluid domain
-            cons_states.transform_with_indices(
-                [=,
-                 body_ptr =
-                     &body] DEV(auto& state, size_type idx, const auto& prim) {
-                    const auto mesh_cell = mesh.get_cell_from_global(idx);
-                    const auto r  = mesh_cell.centroid() - body_ptr->position();
-                    const auto r2 = r.dot(r) + softening * softening;
+            const auto r  = mesh_cell.centroid() - body.position();
+            const auto r2 = r.dot(r) + softening * softening;
 
-                    // Gravitational force on fluid element
-                    const auto force =
-                        -body_ptr->mass() * r / (r2 * std::sqrt(r2));
+            // Gravitational force on fluid element (G = 1)
+            const auto force = -body.mass() * r / (r2 * std::sqrt(r2));
 
-                    // momentum and energy change
-                    const auto dp = prim->rho() * force * dt;
+            // momentum and energy change
+            const auto dp = prim.labframe_density() * force * dt;
 
-                    const auto v_old = prim->velocity();
-                    auto v_new       = (state.momentum() + dp) / prim->rho();
-                    const auto v_avg = 0.5 * (v_old + v_new);
-                    const auto dE    = dp.dot(v_avg);
-                    state += conserved_t{0.0, dp, dE};
+            const auto v_old = prim.velocity();
+            const auto v_new = (prim.spatial_momentum() + dp) / prim.rho();
+            const auto v_avg = 0.5 * (v_old + v_new);
+            const auto dE    = dp.dot(v_avg);
+            const auto state = conserved_t{0.0, dp, dE};
 
-                    if (two_way_coupling) {
-                        // Store reaction force on body
-                        body_ptr->force_ref() -=
-                            force * state.dens() * mesh_cell.volume();
-                    }
-
-                    return state;
-                },
-                body.get_default_policy(),
-                prim_states
-            );
+            if (two_way_coupling) {
+                // Store reaction force on body
+                body.force_ref() -= force * state.dens() * mesh_cell.volume();
+            }
+            return state;
         }
 
         // fluid forces are nill here
@@ -265,6 +71,8 @@ namespace simbi::ib {
         {
             // do nada
         }
+
+        DUAL const trait_t& trait() const { return trait_; }
 
       private:
         trait_t trait_;
@@ -303,9 +111,9 @@ namespace simbi::ib {
         {
             return accr_trait_.accretion_efficiency();
         }
-        DUAL T accretion_radius_factor() const
+        DUAL T accretion_radius() const
         {
-            return accr_trait_.accretion_radius_factor();
+            return accr_trait_.accretion_radius();
         }
         DUAL T total_accreted_mass() const
         {
@@ -320,98 +128,138 @@ namespace simbi::ib {
             // do nothing
         }
 
-        // Accrete material from fluid
-        template <typename Body, typename ConsArray, typename PrimArray>
-        DUAL void accrete(
-            Body& body,
-            ConsArray& cons_states,
-            const PrimArray& prim_states
+        auto calculate_radial_accretion_profile(
+            const T distance,
+            const T r_bondi,
+            const T accretion_efficiency,
+            const T gamma
         )
         {
-            const auto accretion_radius =
-                body.radius() * accr_trait_.accretion_radius_factor();
-            T total_accreted_mass        = 0;
-            auto total_accreted_momentum = spatial_vector_t<T, Dims>();
-            T total_accreted_energy      = 0;
+            // the bondi accretion rate is proportional to
+            // r^{-2} for isothermal gas, and r^{-3/2} for adiabatic gas
+            // of index 5/3.
+            T power_index = (gamma == 1.0) ? 2.0 : 1.5;
 
-            for (const auto& idx : body.cut_cell_indices()) {
-                const auto& cell = body.cell_info()[idx];
-                // const auto cs           = prim_states[idx]->sound_speed();
-                // const auto bondi_radius = 2.0 * body.mass() / (cs * cs);
+            // let's pretend we have some ISCO
+            const T inner_radius = 0.1 * r_bondi;
 
-                // Check if cell is within accretion radius
-                if (std::abs(cell.distance) <= accretion_radius) {
-                    const auto mesh_cell =
-                        body.mesh().get_cell_from_global(idx);
-                    auto& state = cons_states[idx];
+            // and the core
+            const T core_radius = 0.2 * inner_radius;
 
-                    // Skip cells with negligible mass
-                    if (state.dens() <= global::epsilon) {
-                        continue;
-                    }
+            // cubic spline as described in Monaghan's 1992
+            // "Smoothed Particle Hydrodynamics" paper
+            auto smoothing_kernel = [](const T r_norm) -> T {
+                if (r_norm >= 1.0) {
+                    return 0.0;
+                }
+                const T q = 1.0 - r_norm;
+                return q * q * (1.0 + 2.0 * r_norm);
+            };
 
-                    // Calculate maximum allowed accretion fraction
-                    const T max_accretion_fraction =
-                        accr_trait_.accretion_efficiency() *
-                        cell.volume_fraction;
+            T accretion_factor;
 
-                    // Calculate mass to accrete
-                    const T cell_volume   = mesh_cell.volume();
-                    const T cell_mass     = state.dens() * cell_volume;
-                    const T accreted_mass = max_accretion_fraction * cell_mass;
+            if (distance <= core_radius) {
+                // zone 1: core region - maximum accretion
+                accretion_factor = accretion_efficiency;
+            }
+            else if (distance <= inner_radius) {
+                // zone 2: transition region - cubic spline
+                T kernel_value = smoothing_kernel(
+                    (distance - core_radius) / (inner_radius - core_radius)
+                );
 
-                    if (accreted_mass > 0) {
-                        // Calculate momentum and energy accreted
-                        const auto cell_momentum = state.momentum();
-                        const auto accreted_momentum =
-                            cell_momentum * (accreted_mass / cell_mass);
-                        const auto cell_energy = state.nrg();
-                        const auto accreted_energy =
-                            cell_energy * (accreted_mass / cell_mass);
+                // add Bondi-like componenet that increases as kernel
+                // decreases
+                T bondi_factor = accretion_efficiency *
+                                 std::pow(distance / r_bondi, -power_index);
+                accretion_factor = accretion_efficiency * kernel_value +
+                                   bondi_factor * (1.0 - kernel_value);
+            }
+            else if (distance <= r_bondi) {
+                // zone 3: outer region - Bondi-like accretion
+                constexpr T cutoff = 0.7;
+                T r_scaled         = distance / r_bondi;
+                accretion_factor =
+                    accretion_efficiency * std::pow(r_scaled, -power_index);
 
-                        // Remove accreted material from fluid
-                        state.dens() *= (1.0 - max_accretion_fraction);
-                        state.momentum() *= (1.0 - max_accretion_fraction);
-                        state.nrg() *= (1.0 - max_accretion_fraction);
-
-                        // Accumulate totals
-                        total_accreted_mass += accreted_mass;
-                        total_accreted_momentum += accreted_momentum;
-                        total_accreted_energy += accreted_energy;
-                    }
+                // smooth cutoff near Bondi radius
+                if (r_scaled > cutoff) {
+                    // Apply smooth transition to zero at Bondi radius
+                    T transition =
+                        smoothing_kernel((1.0 - r_scaled) / (1.0 - cutoff));
+                    accretion_factor *= transition;
                 }
             }
-
-            // Update body properties based on accreted material
-            if (total_accreted_mass > 0) {
-                // Update mass and momentum
-                const auto old_momentum = body.mass() * body.velocity();
-                body.mass_ += total_accreted_mass;
-                body.velocity_ =
-                    (old_momentum + total_accreted_momentum) / body.mass();
-
-                // Update accretion stats in trait
-                accr_trait_.add_accreted_mass(total_accreted_mass);
-                accr_trait_.add_accreted_momentum(total_accreted_momentum.norm()
-                );
-                accr_trait_.add_accreted_energy(total_accreted_energy);
+            else {
+                // zone 4: outer region - no accretion
+                accretion_factor = 0.0;
             }
+
+            return std::min(accretion_factor, accretion_efficiency);
         }
 
-        // Apply local accretion interaction onto fluid
-        template <typename Body, typename ConsArray, typename PrimArray>
-        DUAL void apply_to_fluid(
+        template <typename Body, typename Primitive>
+        DUAL auto accrete_from_cell(
             Body& body,
-            ConsArray& cons_states,
-            const PrimArray& prim_states,
+            const Primitive& prim,
+            const auto& mesh_cell,
+            const auto& coords,
+            const auto& context,
             const T dt
         )
         {
-            Base::apply_to_fluid(body, cons_states, prim_states, dt);
-            // Perform accretion if conditions are met
-            if (accr_trait_.accretion_efficiency() > 0) {
-                accrete(body, cons_states, prim_states);
+            using conserved_t = typename Primitive::counterpart_t;
+            conserved_t result{};
+            // T total_accretion_fraction = 0.0;
+
+            const auto r_vector = mesh_cell.centroid() - body.position();
+            const auto distance = r_vector.norm();
+
+            const auto cs_ambient = context.ambient_sound_speed;
+            const auto r_bondi = 2.0 * body.mass() / (cs_ambient * cs_ambient);
+
+            if (distance > 2.0 * r_bondi) {
+                return conserved_t{};
             }
+
+            T accretion_factor = calculate_radial_accretion_profile(
+                distance,
+                r_bondi,
+                body.accretion_efficiency(),
+                context.gamma
+            );
+
+            if (accretion_factor > 0) {
+                const T max_accretion = std::min(accretion_factor, 0.5);
+                result -= conserved_t{
+                  max_accretion * prim.labframe_density(),
+                  max_accretion * prim.spatial_momentum(context.gamma),
+                  max_accretion * prim.energy(context.gamma)
+                };
+            }
+
+            return result;
+        }
+
+        template <typename Body, typename Primitive>
+        auto apply_forces_to_fluid(
+            Body& body,
+            const Primitive& prim,
+            const auto& mesh_cell,
+            const auto& coords,
+            const auto& context,
+            const T dt
+        )
+        {
+            auto state = Base::apply_forces_to_fluid(
+                body,
+                prim,
+                mesh_cell,
+                coords,
+                context,
+                dt
+            );
+            return state;
         }
 
       private:

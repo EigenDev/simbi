@@ -178,8 +178,8 @@ namespace simbi::ib {
             typename AccretingFluidInteractionPolicy<T, Dims>::Params params;
             params.accretion_params.accretion_efficiency =
                 extract_property<T>(props, "accretion_efficiency", T(0.01));
-            params.accretion_params.accretion_radius_factor =
-                extract_property<T>(props, "accretion_radius_factor", T(1.0));
+            params.accretion_params.accretion_radius =
+                extract_property<T>(props, "accretion_radius", T(1.0));
             params.grav_params.softening_length =
                 extract_property<T>(props, "softening_length", T(0.01));
             params.grav_params.two_way_coupling =

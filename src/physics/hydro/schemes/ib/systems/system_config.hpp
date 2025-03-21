@@ -10,7 +10,7 @@ namespace simbi::ibsystem::config {
     // basic gravitational config
     template <typename T>
     struct GravitationalConfig {
-        bool prescribed_motion      = false;
+        bool prescribed_motion      = true;
         std::string reference_frame = "center_of_mass";
     };
 
@@ -19,11 +19,11 @@ namespace simbi::ibsystem::config {
         T mass;
         T radius;
         T softening_length;
-        T accretion_efficiency    = 0.01;
-        T accretion_radius_factor = 0.01;
-        bool two_way_coupling     = false;
-        bool is_an_accretor       = false;
-        BodyType body_type        = BodyType::GRAVITATIONAL;
+        T accretion_efficiency = 0.01;
+        T accretion_radius     = 0.01;
+        bool two_way_coupling  = false;
+        bool is_an_accretor    = false;
+        BodyType body_type     = BodyType::GRAVITATIONAL;
 
         void configure()
         {

@@ -6,6 +6,8 @@
 #include "body_factory.hpp"                    // for BodyFactory
 #include "build_options.hpp"                   // for DUAL
 #include "core/types/containers/vector.hpp"    // for spatial_vector_t
+#include "core/types/utility/config_dict.hpp"
+#include "physics/hydro/types/generic_structs.hpp"
 
 namespace simbi {
     template <size_type Dims>
@@ -17,10 +19,11 @@ namespace simbi::ibsystem {
     class BodySystem
     {
       protected:
-        using MeshType  = Mesh<Dims>;
-        using BodyRef   = ib::BodyReference<T, Dims>;
-        using ConsArray = typename ib::concepts::StateType<Dims>::ConsArray;
-        using PrimArray = typename ib::concepts::StateType<Dims>::PrimArray;
+        using MeshType    = Mesh<Dims>;
+        using BodyRef     = ib::BodyReference<T, Dims>;
+        using ConsArray   = typename ib::concepts::StateType<Dims>::ConsArray;
+        using PrimArray   = typename ib::concepts::StateType<Dims>::PrimArray;
+        using conserved_t = anyConserved<Dims, Regime::NEWTONIAN>;
 
         std::vector<std::unique_ptr<ib::AnyBody<T, Dims>>> bodies_;
         MeshType mesh_;
@@ -35,7 +38,7 @@ namespace simbi::ibsystem {
             const spatial_vector_t<T, Dims>& velocity,
             T mass,
             T radius,
-            const auto& props
+            const ConfigDict& props
         )
         {
             auto body = ib::BodyFactory<T, Dims>::build(
@@ -80,15 +83,36 @@ namespace simbi::ibsystem {
         }
 
         // Apply forces to fluid
-        DUAL void apply_forces_to_fluid(
-            ConsArray& cons_states,
-            const PrimArray& prim_states,
-            T dt
+        DUAL auto apply_forces_to_fluid(
+            const auto& prim,
+            const auto& mesh_cell,
+            const auto& coords,
+            const auto& context,
+            const T dt
         )
         {
+            auto res = conserved_t{};
             for (auto& body : bodies_) {
-                body->apply_to_fluid(cons_states, prim_states, dt);
+                res += body->apply_forces_to_fluid(
+                    prim,
+                    mesh_cell,
+                    coords,
+                    context,
+                    dt
+                );
             }
+
+            // apply accretion if the body is an accreting body
+            for (auto& body : bodies_) {
+                res += body->accrete_from_cell(
+                    prim,
+                    mesh_cell,
+                    coords,
+                    context,
+                    dt
+                );
+            }
+            return res;
         }
 
         // Update positions (advance positions for all bodies)

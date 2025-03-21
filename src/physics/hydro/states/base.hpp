@@ -50,17 +50,19 @@
 #define BASE_HPP
 
 #include "build_options.hpp"   // for real, luint, global::managed_memory, use...
-#include "core/managers/boundary_manager.hpp"       // for boundary_manager
-#include "core/managers/exec_policy_manager.hpp"    // for ExecutionPolicy
-#include "core/managers/io_manager.hpp"             // for IOManager
-#include "core/managers/solver_manager.hpp"         // for SolverManager
-#include "core/managers/time_manager.hpp"           // for TimeManager
+#include "core/managers/boundary_manager.hpp"      // for boundary_manager
+#include "core/managers/exec_policy_manager.hpp"   // for ExecutionPolicy
+#include "core/managers/io_manager.hpp"            // for IOManager
+#include "core/managers/solver_manager.hpp"        // for SolverManager
+#include "core/managers/time_manager.hpp"          // for TimeManager
+#include "core/types/containers/vector.hpp"
 #include "core/types/utility/init_conditions.hpp"   // for InitialConditions
 #include "core/types/utility/managed.hpp"           // for Managed
 #include "geometry/mesh/mesh.hpp"                   // for Mesh
 #include "io/console/logger.hpp"                    // for logger
 #include "physics/hydro/schemes/ib/systems/gravitational_system.hpp"   // for GravitationalSystem
 #include "physics/hydro/schemes/ib/systems/system_config.hpp"   // for system_config
+#include "physics/hydro/types/context.hpp"           // for HydroContext
 #include "physics/hydro/types/generic_structs.hpp"   // for anyConserved, anyPrimitive
 #include <list>
 
@@ -114,6 +116,21 @@ namespace simbi {
             time_manager_.set_dt(std::min(gas_dt, orbital_dt));
         }
 
+        DUAL conserved_t ib_sources(
+            const auto& prim,
+            const auto& cell,
+            std::tuple<size_type, size_type, size_type>&& coords
+        )
+        {
+            return gravitational_system_->apply_forces_to_fluid(
+                prim,
+                cell,
+                coords,
+                context_,
+                time_step()
+            );
+        }
+
       private:
         // state
         std::vector<std::vector<real>> state_;
@@ -148,6 +165,7 @@ namespace simbi {
         ndarray<conserved_t, Dims> cons_;
         std::unique_ptr<ibsystem::GravitationalSystem<real, Dims>>
             gravitational_system_;
+        HydroContext context_;
 
         HydroBase() = default;
 
@@ -175,6 +193,8 @@ namespace simbi {
               gamma(gamma_)
 
         {
+            context_.gamma         = gamma_;
+            context_.is_isothermal = (gamma_ == 1.0);
             init_gravitational_system(init_conditions);
         }
 
@@ -329,9 +349,8 @@ namespace simbi {
                                 comp.accretion_efficiency =
                                     props.at("accretion_efficiency")
                                         .get<real>();
-                                comp.accretion_radius_factor =
-                                    props.at("accretion_radius_factor")
-                                        .get<real>();
+                                comp.accretion_radius =
+                                    props.at("accretion_radius").get<real>();
                                 comp.two_way_coupling =
                                     props.at("two_way_coupling").get<bool>();
                                 comp.is_an_accretor =
@@ -362,38 +381,32 @@ namespace simbi {
                 }
             }
             else if (!init.immersed_bodies.empty()) {
-                // gravitational_system_ =
-                //     std::make_unique<ibsystem::GravitationalSystem<real,
-                //     Dims>>(
-                //         mesh_,
-                //         init.gamma
-                //     );
+                gravitational_system_ =
+                    std::make_unique<ibsystem::GravitationalSystem<real, Dims>>(
+                        mesh_,
+                        init.gamma
+                    );
 
-                // for (const auto& [body_type, props] : init.immersed_bodies) {
-                //     // Extract common properties
-                //     spatial_vector_t<real, Dims> position(
-                //         std::get<std::vector<real>>(props.at("position"))
-                //     );
-                //     spatial_vector_t<real, Dims> velocity(
-                //         std::get<std::vector<real>>(props.at("velocity"))
-                //     );
-                //     real mass   = std::get<real>(props.at("mass"));
-                //     real radius = std::get<real>(props.at("radius"));
+                for (const auto& [body_type, props] : init.immersed_bodies) {
+                    // Extract common properties
+                    const auto& position =
+                        props.at("position").get<std::vector<real>>();
+                    const auto& velocity =
+                        props.at("velocity").get<std::vector<real>>();
+                    const real mass   = props.at("mass").get<real>();
+                    const real radius = props.at("radius").get<real>();
 
-                //     // Let the orbital system use the builder to create and
-                //     add
-                //     // the body
-                //     gravitational_system_->add_body(
-                //         body_type,
-                //         position,
-                //         velocity,
-                //         mass,
-                //         radius,
-                //         props
-                //     );
-                // }
+                    gravitational_system_->add_body(
+                        body_type,
+                        spatial_vector_t<real, Dims>(position),
+                        spatial_vector_t<real, Dims>(velocity),
+                        mass,
+                        radius,
+                        props
+                    );
+                }
 
-                // gravitational_system_->init_system();
+                gravitational_system_->init_system();
             }
         }
 
@@ -408,16 +421,16 @@ namespace simbi {
 
             cons_.resize(this->total_zones()).reshape({nz(), ny(), nx()});
             prims_.resize(this->total_zones()).reshape({nz(), ny(), nx()});
-
             // Copy the state array into real& profile variables
             for (size_type ii = 0; ii < this->total_zones(); ii++) {
                 for (int q = 0; q < conserved_t::nmem; q++) {
                     cons_[ii][q] = state_[q][ii];
                 }
             }
+
             deallocate_state();
 
-            // // Initialize simulation
+            // Initialize simulation
             derived.init_simulation();
             derived.cons2prim_impl();
             adapt_dt();
@@ -442,8 +455,7 @@ namespace simbi {
             // orbital dynamics (if any bodies are present)
             if (gravitational_system_) {
                 if constexpr (sim_type::Newtonian<R>) {
-                    gravitational_system_
-                        ->update_system(cons_, prims_, time(), time_step());
+                    gravitational_system_->update_system(time(), time_step());
                 }
             }
 
@@ -590,6 +602,10 @@ namespace simbi {
         DUAL auto ny() const { return mesh_.grid().total_gridsize(1); }
         DUAL auto nz() const { return mesh_.grid().total_gridsize(2); }
         DUAL auto total_zones() const { return mesh_.grid().total_zones(); }
+        DUAL auto has_immersed_bodies() const
+        {
+            return gravitational_system_ != nullptr;
+        };
 
         DUAL auto checkpoint_identifier() const
         {

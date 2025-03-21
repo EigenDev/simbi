@@ -3,6 +3,9 @@
 
 #include "body_concepts.hpp"
 #include "core/types/containers/vector.hpp"
+#include "geometry/mesh/cell.hpp"
+#include "physics/hydro/types/context.hpp"
+#include "physics/hydro/types/generic_structs.hpp"
 
 namespace simbi::ib {
     // Forward declarations
@@ -16,8 +19,9 @@ namespace simbi::ib {
         AnyBody<T, Dims>* body_;
 
       public:
-        using ConsArray = concepts::StateType<Dims>::ConsArray;
-        using PrimArray = concepts::StateType<Dims>::PrimArray;
+        using Conserved = anyConserved<Dims, Regime::NEWTONIAN>;
+        using Primitive = anyPrimitive<Dims, Regime::NEWTONIAN>;
+        using CellType  = Cell<Dims>;
 
         BodyReference(AnyBody<T, Dims>& body) : body_(&body) {}
 
@@ -37,13 +41,16 @@ namespace simbi::ib {
             body_->calculate_forces(others, dt);
         }
         void update_material_state(T dt) { body_->update_material_state(dt); }
-        void apply_to_fluid(
-            ConsArray& cons_states,
-            const PrimArray& prim_states,
+        Conserved apply_forces_to_fluid(
+            const Primitive& prim,
+            const CellType& mesh_cell,
+            const std::tuple<size_type, size_type, size_type>& coords,
+            const HydroContext& context,
             T dt
         )
         {
-            body_->apply_to_fluid(cons_states, prim_states, dt);
+            return body_
+                ->apply_forces_to_fluid(prim, mesh_cell, coords, context, dt);
         }
     };
 
@@ -53,8 +60,9 @@ namespace simbi::ib {
     {
       private:
         using BodyRef   = BodyReference<T, Dims>;
-        using ConsArray = concepts::StateType<Dims>::ConsArray;
-        using PrimArray = concepts::StateType<Dims>::PrimArray;
+        using Conserved = anyConserved<Dims, Regime::NEWTONIAN>;
+        using Primitive = anyPrimitive<Dims, Regime::NEWTONIAN>;
+        using CellType  = Cell<Dims>;
 
         // Interface for the body
         struct Concept {
@@ -77,12 +85,24 @@ namespace simbi::ib {
             virtual void set_velocity(const spatial_vector_t<T, Dims>& vel) {}
 
             // Fluid interaction
-            virtual void apply_to_fluid(
-                ConsArray& cons_states,
-                const PrimArray& prim_states,
+            virtual Conserved apply_forces_to_fluid(
+                const Primitive& prim,
+                const CellType& mesh_cell,
+                const std::tuple<size_type, size_type, size_type>& coords,
+                const HydroContext& context,
                 T dt
             )                                                        = 0;
             virtual spatial_vector_t<T, Dims> fluid_velocity() const = 0;
+            virtual Conserved accrete_from_cell(
+                const Primitive& prim,
+                const CellType& mesh_cell,
+                const std::tuple<size_type, size_type, size_type>& coords,
+                const HydroContext& context,
+                T dt
+            )
+            {
+                return Conserved{};
+            }
 
             // Capability testing (returns true if capability exists)
             virtual bool has_gravitational_capability() const { return false; }
@@ -108,7 +128,7 @@ namespace simbi::ib {
 
             // Optional accretion properties
             virtual T accretion_efficiency() const { return T(0); }
-            virtual T accretion_radius_factor() const { return T(0); }
+            virtual T accretion_radius() const { return T(0); }
             virtual T total_accreted_mass() const { return T(0); }
         };
 
@@ -176,14 +196,21 @@ namespace simbi::ib {
                 body_.update_material_state(dt);
             }
 
-            // Implement fluid interaction methods
-            void apply_to_fluid(
-                ConsArray& cons_states,
-                const PrimArray& prim_states,
+            Conserved apply_forces_to_fluid(
+                const Primitive& prim,
+                const CellType& mesh_cell,
+                const std::tuple<size_type, size_type, size_type>& coords,
+                const HydroContext& context,
                 T dt
             ) override
             {
-                body_.apply_to_fluid(cons_states, prim_states, dt);
+                return body_.apply_forces_to_fluid(
+                    prim,
+                    mesh_cell,
+                    coords,
+                    context,
+                    dt
+                );
             }
 
             spatial_vector_t<T, Dims> fluid_velocity() const override
@@ -232,7 +259,25 @@ namespace simbi::ib {
                 return Concept::two_way_coupling();
             }
 
-            // Similarly implement other optional properties...
+            Conserved accrete_from_cell(
+                const Primitive& prim,
+                const CellType& mesh_cell,
+                const std::tuple<size_type, size_type, size_type>& coords,
+                const HydroContext& context,
+                T dt
+            ) override
+            {
+                if constexpr (concepts::HasAccretionProperties<BodyType, T>) {
+                    return body_.accrete_from_cell(
+                        prim,
+                        mesh_cell,
+                        coords,
+                        context,
+                        dt
+                    );
+                }
+                return Conserved{};
+            }
         };
 
         // The actual implementation
@@ -242,8 +287,9 @@ namespace simbi::ib {
         // Constructor from any type that satisfies the ImmersedBody concept
         template <concepts::ImmersedBody<T, Dims> BodyType, typename... Args>
         AnyBody(std::in_place_type_t<BodyType>, Args&&... args)
-            : concept_(std::make_unique<Model<BodyType>>(std::forward<Args>(args
-              )...))
+            : concept_(
+                  std::make_unique<Model<BodyType>>(std::forward<Args>(args)...)
+              )
         {
         }
 
@@ -274,13 +320,28 @@ namespace simbi::ib {
             concept_->update_material_state(dt);
         }
 
-        void apply_to_fluid(
-            ConsArray& cons_states,
-            const PrimArray& prim_states,
+        Conserved apply_forces_to_fluid(
+            const Primitive& prim,
+            const CellType& mesh_cell,
+            const std::tuple<size_type, size_type, size_type>& coords,
+            const HydroContext& context,
             T dt
         )
         {
-            concept_->apply_to_fluid(cons_states, prim_states, dt);
+            return concept_
+                ->apply_forces_to_fluid(prim, mesh_cell, coords, context, dt);
+        }
+
+        Conserved accrete_from_cell(
+            const Primitive& prim,
+            const CellType& mesh_cell,
+            const std::tuple<size_type, size_type, size_type>& coords,
+            const HydroContext& context,
+            T dt
+        )
+        {
+            return concept_
+                ->accrete_from_cell(prim, mesh_cell, coords, context, dt);
         }
 
         spatial_vector_t<T, Dims> fluid_velocity() const

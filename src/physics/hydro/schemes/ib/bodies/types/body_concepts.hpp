@@ -5,6 +5,8 @@
 #include "core/types/containers/ndarray.hpp"
 #include "core/types/containers/vector.hpp"
 #include "core/types/utility/enums.hpp"
+#include "geometry/mesh/cell.hpp"
+#include "physics/hydro/types/context.hpp"
 #include "physics/hydro/types/generic_structs.hpp"
 #include <functional>
 #include <vector>
@@ -30,17 +32,15 @@ namespace simbi::ib::concepts {
     template <typename Body, typename T, size_type Dims>
     concept HasFluidInteraction = requires(
         Body& b,
-        typename StateType<Dims>::ConsArray& cons_states,
-        const typename StateType<Dims>::PrimArray& prim_states,
-        T dt
+        const anyPrimitive<Dims, Regime::NEWTONIAN>& prim,
+        const Cell<Dims>& cell,
+        const HydroContext& context,
+        const std::tuple<size_type, size_type, size_type>& coords,
+        const T dt
     ) {
         {
-            b.apply_to_fluid(cons_states, prim_states, dt)
-        } -> std::same_as<void>;
-        { b.interpolate_fluid_velocity(prim_states) } -> std::same_as<void>;
-        {
-            b.fluid_velocity()
-        } -> std::convertible_to<spatial_vector_t<T, Dims>>;
+            b.apply_forces_to_fluid(prim, cell, coords, context, dt)
+        } -> std::same_as<anyConserved<Dims, Regime::NEWTONIAN>>;
     };
 
     template <typename Body, typename T, size_type Dims>
@@ -83,7 +83,7 @@ namespace simbi::ib::concepts {
     template <typename Body, typename T>
     concept HasAccretionProperties = requires(const Body& b) {
         { b.accretion_efficiency() } -> std::convertible_to<T>;
-        { b.accretion_radius_factor() } -> std::convertible_to<T>;
+        { b.accretion_radius() } -> std::convertible_to<T>;
         { b.total_accreted_mass() } -> std::convertible_to<T>;
     };
 

@@ -35,11 +35,11 @@ namespace simbi::ibsystem::factory {
             T radius1 = body1.radius;
             T radius2 = body2.radius;
 
-            if (m1 + m2 != binary_config.total_mass) {
-                throw std::runtime_error(
-                    "Individual masses do not sum to total mass"
-                );
-            }
+            // if (m1 + m2 != binary_config.total_mass) {
+            //     throw std::runtime_error(
+            //         "Individual masses do not sum to total mass"
+            //     );
+            // }
 
             traits::BinaryTrait<T, Dims> trait(binary_config);
             auto [pos1, pos2] = trait.initial_positions();
@@ -57,8 +57,8 @@ namespace simbi::ibsystem::factory {
             if (body1.is_an_accretor) {
                 body1_props["accretion_efficiency"] =
                     ConfigValue(body1.accretion_efficiency);
-                body1_props["accretion_radius_factor"] =
-                    ConfigValue(body1.accretion_radius_factor);
+                body1_props["accretion_radius"] =
+                    ConfigValue(body1.accretion_radius);
             }
 
             body2_props["softening_length"] =
@@ -68,28 +68,32 @@ namespace simbi::ibsystem::factory {
             if (body2.is_an_accretor) {
                 body2_props["accretion_efficiency"] =
                     ConfigValue(body2.accretion_efficiency);
-                body2_props["accretion_radius_factor"] =
-                    ConfigValue(body2.accretion_radius_factor);
+                body2_props["accretion_radius"] =
+                    ConfigValue(body2.accretion_radius);
             }
 
-            bodies.push_back(ib::BodyFactory<T, Dims>::build(
-                body1.body_type,
-                mesh,
-                pos1,
-                vel1,
-                m1,
-                radius1,
-                body1_props
-            ));
-            bodies.push_back(ib::BodyFactory<T, Dims>::build(
-                body2.body_type,
-                mesh,
-                pos2,
-                vel2,
-                m2,
-                radius2,
-                body2_props
-            ));
+            bodies.push_back(
+                ib::BodyFactory<T, Dims>::build(
+                    body1.body_type,
+                    mesh,
+                    pos1,
+                    vel1,
+                    m1,
+                    radius1,
+                    body1_props
+                )
+            );
+            bodies.push_back(
+                ib::BodyFactory<T, Dims>::build(
+                    body2.body_type,
+                    mesh,
+                    pos2,
+                    vel2,
+                    m2,
+                    radius2,
+                    body2_props
+                )
+            );
 
             return bodies;
         }

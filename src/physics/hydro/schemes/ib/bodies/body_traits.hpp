@@ -81,8 +81,8 @@ namespace simbi::ib::traits {
     {
       public:
         struct Params {
-            T accretion_efficiency    = T(0.01);
-            T accretion_radius_factor = T(1.0);
+            T accretion_efficiency = T(0.01);
+            T accretion_radius     = T(1.0);
         };
 
         Accreting(const Params& params = {}) : params_(params) {}
@@ -93,10 +93,7 @@ namespace simbi::ib::traits {
             return params_.accretion_efficiency;
         }
 
-        DUAL T accretion_radius_factor() const
-        {
-            return params_.accretion_radius_factor;
-        }
+        DUAL T accretion_radius() const { return params_.accretion_radius; }
 
         DUAL T total_accreted_mass() const { return total_accreted_mass_; }
         DUAL T total_accreted_momentum() const

@@ -19,6 +19,7 @@ Newtonian<dim>::Newtonian(
       isothermal_(init_conditions.isothermal),
       sound_speed_squared_(init_conditions.sound_speed_squared)
 {
+    this->context_.ambient_sound_speed = std::sqrt(sound_speed_squared_);
 }
 
 // Destructor
@@ -473,7 +474,7 @@ void Newtonian<dim>::advance_impl()
             }
         }
 
-        const auto delta_con = dcons(
+        auto delta_con = dcons(
             fri,
             gri,
             hri,
@@ -482,6 +483,15 @@ void Newtonian<dim>::advance_impl()
             cell.geometrical_sources(prim.value(), gamma),
             cell
         );
+
+        // if immersed boundary is present, add the force term
+        if (this->has_immersed_bodies()) {
+            delta_con += this->ib_sources(
+                prim.value(),
+                cell,
+                std::make_tuple(ii, jj, kk)
+            );
+        }
         // Return updated conserved values
         return con.value() + delta_con;
     };

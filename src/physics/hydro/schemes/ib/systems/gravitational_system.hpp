@@ -126,14 +126,14 @@ namespace simbi::ibsystem {
         GravitationalSystem(
             const typename Base::MeshType& mesh,
             const T gamma,
-            const ibsystem::config::GravitationalConfig<T>& grav_config
+            const ibsystem::config::GravitationalConfig<T>& grav_config = {}
         )
             : Base(mesh), gamma_(gamma), grav_trait_(grav_config)
         {
         }
 
-        void
-        set_binary_configuration(const ibsystem::config::BinaryConfig<T>& config
+        void set_binary_configuration(
+            const ibsystem::config::BinaryConfig<T>& config
         )
         {
             static_assert(
@@ -211,12 +211,7 @@ namespace simbi::ibsystem {
             return system;
         }
 
-        DUAL void update_system(
-            ConsArray& cons_states,
-            const PrimArray& prim_states,
-            const T time,
-            const T dt
-        )
+        DUAL void update_system(const T time, const T dt)
         {
             if constexpr (Dims >= 2) {
                 if (binary_dynamics_) {
@@ -243,9 +238,6 @@ namespace simbi::ibsystem {
                     integrate_leapfrog(dt);
                 }
             }
-
-            // Apply forces to fluid
-            this->apply_forces_to_fluid(cons_states, prim_states, dt);
 
             // Update diagnostics
             compute_center_of_mass();

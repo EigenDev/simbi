@@ -192,7 +192,8 @@ namespace simbi {
             template <template <typename> class Trait, typename Policy>
             struct has_policy_trait {
                 template <typename P>
-                static auto test(int
+                static auto test(
+                    int
                 ) -> decltype(std::declval<typename P::template trait_t<T>>(), std::true_type{});
 
                 template <typename>
@@ -317,13 +318,40 @@ namespace simbi {
                 MaterialP::update_material_state(*this, dt);
             }
 
-            DUAL void apply_to_fluid(
-                auto& cons_states,
-                const auto& prim_states,
+            DUAL anyConserved<Dims, Regime::NEWTONIAN> apply_forces_to_fluid(
+                const auto& prim,
+                const auto& mesh_cell,
+                const auto& coords,
+                const auto& context,
                 const T dt
             )
             {
-                FluidP::apply_to_fluid(*this, cons_states, prim_states, dt);
+                return FluidP::apply_forces_to_fluid(
+                    *this,
+                    prim,
+                    mesh_cell,
+                    coords,
+                    context,
+                    dt
+                );
+            }
+
+            DUAL anyConserved<Dims, Regime::NEWTONIAN> accrete_from_cell(
+                const auto& prim,
+                const auto& mesh_cell,
+                const auto& coords,
+                const auto& context,
+                const T dt
+            )
+            {
+                return FluidP::accrete_from_cell(
+                    *this,
+                    prim,
+                    mesh_cell,
+                    coords,
+                    context,
+                    dt
+                );
             }
 
             // IBM specific methods
