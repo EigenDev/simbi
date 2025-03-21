@@ -1,11 +1,12 @@
 import argparse
+from itertools import cycle
 from typing import Any, Optional, Dict
-from ..config.config import *
-from .constants import VALID_PLOT_TYPES, FIELD_CHOICES
+from ..config.config import PlotGroup, StyleGroup, AnimationGroup, MultidimGroup
+from .constants import VALID_PLOT_TYPES, FIELD_CHOICES, LEGEND_LOCATIONS
 from ....cli.base_parser import BaseParser
 
 
-def tuple_arg(param: str) -> tuple[int]:
+def tuple_arg(param: str) -> tuple[int, ...]:
     """Parse a tuple of ints from the command line"""
     try:
         return tuple(int(arg) for arg in param.split(","))
@@ -20,7 +21,7 @@ def colorbar_limits(c):
         if vmin > vmax:
             return vmax, vmin
         return vmin, vmax
-    except:
+    except BaseException:
         raise argparse.ArgumentTypeError(
             "Colorbar limits must be in the format: vmin,vmax"
         )
@@ -54,11 +55,14 @@ class PlotStyleAction(argparse.Action):
         values: Any,
         option_string: Optional[str] = None,
     ) -> None:
+        if not option_string:
+            raise ValueError("No option string provided")
+
         if option_string == "--plot-type":
             if values not in VALID_PLOT_TYPES:
                 raise ValueError(f"Invalid plot style: {values}")
             setattr(namespace, self.dest, values)
-        else:
+        elif option_string.startswith("--"):
             # Convert flag to style name (e.g. --line -> "line")
             style = option_string.replace("--", "")
             setattr(namespace, self.dest, style)
@@ -259,6 +263,14 @@ class PlottingArgumentBuilder:
                     "type": float,
                     "nargs": "+",
                     "help": "list of values to scale plotted variables down by",
+                },
+            ),
+            (
+                ["--time-modulus"],
+                {
+                    "default": 1,
+                    "type": float,
+                    "nargs": 1,
                 },
             ),
             (
@@ -575,19 +587,20 @@ class PlottingArgumentBuilder:
                 color_maps=args["cmap"],
                 log=args["log"],
                 semilogx=args["semilogx"],
-                legend_loc=args.get("legend_loc"),
+                legend_loc=args["legend_loc"],
                 fig_dims=args["fig_dims"],
                 use_tex=args["use_tex"],
                 print=args["print"],
                 pictorial=args["pictorial"],
-                annotation_loc=args.get("annot_loc"),
-                annotation_text=args.get("annot_text"),
-                annotation_anchor=args.get("ax_anchor"),
-                labels=args.get("labels"),
+                annotation_loc=args["annot_loc"],
+                annotation_text=args["annot_text"],
+                annotation_anchor=args["ax_anchor"],
+                labels=args["labels"],
                 xlims=args["xlims"],
                 ylims=args["ylims"],
                 power=args["power"],
                 scale_downs=args["scale_downs"],
+                time_modulus=args["time_modulus"],
                 black_background=args["dbg"],
                 units=args["units"],
                 normalize=args["norm"],

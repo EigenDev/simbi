@@ -59,6 +59,7 @@ class StyleGroup:
     print: bool = False
     pictorial: bool = False
     scale_downs: Sequence[float] = field(default_factory=lambda: [1.0])
+    time_modulus: float = 1.0
     normalize: bool = False
     bbox_kind: str = "tight"
     font_color: str = "black"
