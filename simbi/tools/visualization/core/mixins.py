@@ -13,7 +13,7 @@ class DataHandlerMixin:
     def get_variable(self, fields: Dict[str, np.ndarray], field: str) -> np.ndarray:
         """Extract and transform variable data"""
         if field in DERIVED:
-            var = util.derived2var(fields, field)
+            var = util.prims2var(fields, field)
         elif field in FIELD_ALIASES:
             var = fields[FIELD_ALIASES[field]]
         else:
