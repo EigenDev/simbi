@@ -12,6 +12,7 @@ class CLIManager:
     run_parser: argparse.ArgumentParser
     dynamic_args: list[DynamicArg] = field(default_factory=list)
     property_overrides: dict[str, Any] = field(default_factory=dict)
+    arg_group_set: bool = False
 
     @classmethod
     def from_parsers(
@@ -26,7 +27,13 @@ class CLIManager:
             return
 
         self.dynamic_args.append(arg)
-        problem_args = self.run_parser.add_argument_group(name)
+        # the problem args group should only be called once
+        if not self.arg_group_set:
+            problem_args = self.run_parser.add_argument_group(name)
+            setattr(self.run_parser, "problem_args", problem_args)
+            self.arg_group_set = True
+        else:
+            problem_args = getattr(self.run_parser, "problem_args")
 
         if isinstance(arg.value, bool):
             problem_args.add_argument(
