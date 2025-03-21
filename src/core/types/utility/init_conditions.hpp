@@ -269,7 +269,6 @@ struct InitialConditions {
                 }
             }
             else {
-                std::cout << "checking some things" << std::endl;
                 // get individual x1bounds, x2bounds, x3bounds
                 if (init.contains("x1bounds") &&
                     init.at("x1bounds").is_pair()) {
