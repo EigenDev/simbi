@@ -25,13 +25,14 @@ classifiers = [
 ]
 dynamic = ["version", "readme"]
 dependencies = [
-    "numpy", 
-    "h5py", 
-    "cython", 
+    "numpy",
+    "h5py",
+    "cython",
     "meson",
     "mypy",
     "matplotlib",
     "astropy",
+    "halo",
 ]
 
 [project.optional-dependencies]
