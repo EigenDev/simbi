@@ -13,6 +13,8 @@ version.py
 .clangd
 .vscode/
 .cache/
+.*
+!*.gitignore
 *.in
 *.h5
 *.pdf
