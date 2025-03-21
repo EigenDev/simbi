@@ -17,7 +17,7 @@ DEFAULT_CONFIG = {
     "gpu_compilation": "disabled",
     "progress_bar": True,
     "column_major": False,
-    "precision": 'double',
+    "precision": "double",
     "install_mode": "default",
     "dev_arch": 0,
     "build_dir": "build",
@@ -51,7 +51,8 @@ def get_tool(name: str) -> Optional[str]:
         homebrew = Path("/opt/homebrew/")
         if not homebrew.is_dir():
             print(
-                f"{YELLOW}WRN{RST} no homebrew found. Running Apple's default compiler might raise issues")
+                f"{YELLOW}WRN{RST} no homebrew found. Running Apple's default compiler might raise issues"
+            )
             cont = input("Continue anyway? [y/N]")
             if cont.lower() != "y":
                 sys.exit(0)
@@ -65,17 +66,23 @@ def is_tool(name: str) -> bool:
 
 def generate_build_options(args: argparse.Namespace) -> None:
     try:
-        subprocess.run(["cog",
-                        "-d",
-                        "-o",
-                        "build_options.hpp.in",
-                        "code_gen/build_options.hpp.in.cog"],
-                       env={**os.environ,
-                            'GPU_ENABLED': str(args.gpu_compilation == 'enabled'),
-                            'GPU_PLATFORM': args.gpu_platform.upper()},
-                       check=True,
-                       capture_output=True,
-                       text=True)
+        subprocess.run(
+            [
+                "cog",
+                "-d",
+                "-o",
+                "build_options.hpp.in",
+                "code_gen/build_options.hpp.in.cog",
+            ],
+            env={
+                **os.environ,
+                "GPU_ENABLED": str(args.gpu_compilation == "enabled"),
+                "GPU_PLATFORM": args.gpu_platform.upper(),
+            },
+            check=True,
+            capture_output=True,
+            text=True,
+        )
     except subprocess.CalledProcessError as e:
         print(f"{YELLOW}WRN{RST}: cog failed to generate test.hpp.in")
         print(e.stderr)
@@ -97,17 +104,15 @@ def check_minimal_dependencies() -> None:
     MIN_PYTHON = (3, 10)
     if sys.version_info < MIN_PYTHON:
         raise RuntimeError(
-            f"Python {
-                MIN_PYTHON[0]}.{
-                MIN_PYTHON[1]} or later is required")
+            f"Python {MIN_PYTHON[0]}.{MIN_PYTHON[1]} or later is required"
+        )
 
     dependencies = ["mesonbuild", "numpy", "cython", "ninja", "cogapp"]
     for dep in dependencies:
         try:
             __import__(dep)
         except ImportError as e:
-            subprocess.run([sys.executable, "-m", "pip",
-                           "install", dep], check=True)
+            subprocess.run([sys.executable, "-m", "pip", "install", dep], check=True)
 
 
 def write_to_cache(args: argparse.Namespace) -> None:
@@ -123,12 +128,12 @@ def get_output(command: list[str]) -> str:
 
 
 def configure(
-        args: argparse.Namespace,
-        reconfigure: str,
-        hdf5_include: str,
-        gpu_include: str) -> list[str]:
+    args: argparse.Namespace, reconfigure: str, hdf5_include: str, gpu_include: str
+) -> list[str]:
     command = [
-        "meson", "setup", args.build_dir,
+        "meson",
+        "setup",
+        args.build_dir,
         f"-Dgpu_compilation={args.gpu_compilation}",
         f"-Dcolumn_major={args.column_major}",
         f"-Dprecision={args.precision}",
@@ -139,7 +144,7 @@ def configure(
         f"-Dbuildtype={args.build_type}",
         reconfigure,
         f"-Dprogress_bar={args.progress_bar}",
-        f"-Dshared_memory={args.shared_memory}"
+        f"-Dshared_memory={args.shared_memory}",
     ]
     return command
 
@@ -151,12 +156,13 @@ def generate_home_locator(simbi_dir: str) -> None:
             f.write(get_output(["git", "rev-parse", "--show-toplevel"]))
 
 
-def parse_the_arguments(
-) -> tuple[argparse.ArgumentParser, argparse.Namespace]:
+def parse_the_arguments() -> tuple[argparse.ArgumentParser, argparse.Namespace]:
     parser = argparse.ArgumentParser(
-        "Parser for building and installing simbi with meson")
+        "Parser for building and installing simbi with meson"
+    )
     subparsers = parser.add_subparsers(
-        help="sub-commands that build / install / uninstall the code")
+        help="sub-commands that build / install / uninstall the code"
+    )
 
     build_parser = subparsers.add_parser("build", add_help=False)
     build_parser.set_defaults(func=build_simbi)
@@ -164,125 +170,123 @@ def parse_the_arguments(
         "--dev-arch",
         type=int,
         default=0,
-        help="SM architecture specification for gpu compilation")
+        help="SM architecture specification for gpu compilation",
+    )
     build_parser.add_argument(
         "--verbose",
         "-v",
         action="store_const",
         default=[],
         const=["--verbose"],
-        help="flag for verbose compilation output")
+        help="flag for verbose compilation output",
+    )
     build_parser.add_argument(
         "--configure",
         action="store_true",
         default=False,
-        help="flag to only configure the meson build directory without installing")
+        help="flag to only configure the meson build directory without installing",
+    )
     build_parser.add_argument(
         "--install-mode",
         type=str,
-        choices=[
-            "default",
-            "develop"],
+        choices=["default", "develop"],
         default="default",
-        help="install mode (normal or editable)")
+        help="install mode (normal or editable)",
+    )
     build_parser.add_argument(
         "--build-dir",
         type=str,
         default="build",
-        help="build directory name for meson build")
+        help="build directory name for meson build",
+    )
     build_parser.add_argument(
         "--extras",
         action="store_true",
         default=False,
-        help="flag to install the optional dependencies")
+        help="flag to install the optional dependencies",
+    )
     build_parser.add_argument(
         "--four-velocity",
         action=argparse.BooleanOptionalAction,
         default=False,
-        help="flag to set four-velocity as the velocity primitive instead of beta")
+        help="flag to set four-velocity as the velocity primitive instead of beta",
+    )
     build_parser.add_argument(
         "--progress-bar",
         action=argparse.BooleanOptionalAction,
         default=True,
-        help="flag to show / hide progress bar")
+        help="flag to show / hide progress bar",
+    )
     build_parser.add_argument(
         "--shared-memory",
         action=argparse.BooleanOptionalAction,
         default=True,
-        help="flag to enable / disable shared memory for gpu builds")
+        help="flag to enable / disable shared memory for gpu builds",
+    )
     build_parser.add_argument(
         "--cpp17",
         action="store_const",
         default="c++20",
         const="c++17",
         dest="cpp_version",
-        help="flag for setting c++ version to c++17 instead of default c++20")
+        help="flag for setting c++ version to c++17 instead of default c++20",
+    )
     build_parser.add_argument(
         "--gpu-platform",
         type=str,
         default="cuda",
-        choices=[
-            "cuda",
-            "hip",
-            "None"],
-        help="flag to set the gpu platform for compilation")
+        choices=["cuda", "hip", "None"],
+        help="flag to set the gpu platform for compilation",
+    )
 
     compile_type = build_parser.add_mutually_exclusive_group()
     compile_type.add_argument(
         "--gpu-compilation",
         action="store_const",
         dest="gpu_compilation",
-        const="enabled")
+        const="enabled",
+    )
     compile_type.add_argument(
         "--cpu-compilation",
         action="store_const",
         dest="gpu_compilation",
-        const="disabled")
+        const="disabled",
+    )
 
     build_type = build_parser.add_mutually_exclusive_group()
     build_type.add_argument(
-        "--release",
-        action="store_const",
-        dest="build_type",
-        const="release")
+        "--release", action="store_const", dest="build_type", const="release"
+    )
     build_type.add_argument(
-        "--debug",
-        action="store_const",
-        dest="build_type",
-        const="debug")
+        "--debug", action="store_const", dest="build_type", const="debug"
+    )
 
     precision = build_parser.add_mutually_exclusive_group()
     precision.add_argument(
-        "--double",
-        action="store_const",
-        dest="precision",
-        const='double')
+        "--double", action="store_const", dest="precision", const="double"
+    )
     precision.add_argument(
-        "--float",
-        action="store_const",
-        dest="precision",
-        const='single')
+        "--float", action="store_const", dest="precision", const="single"
+    )
 
     major = build_parser.add_mutually_exclusive_group()
     major.add_argument(
-        "--row-major",
-        action="store_const",
-        dest="column_major",
-        const=False)
+        "--row-major", action="store_const", dest="column_major", const=False
+    )
     major.add_argument(
-        "--column-major",
-        action="store_const",
-        dest="column_major",
-        const=True)
+        "--column-major", action="store_const", dest="column_major", const=True
+    )
 
     build_parser.set_defaults(
-        precision='double',
+        precision="double",
         column_major=False,
         gpu_compilation="disabled",
-        build_type="release")
+        build_type="release",
+    )
 
     install_parser = subparsers.add_parser(
-        "install", help="install simbi", parents=[build_parser])
+        "install", help="install simbi", parents=[build_parser]
+    )
     install_parser.set_defaults(func=install_simbi)
 
     unbuild_parser = subparsers.add_parser("uninstall", help="uninstall simbi")
@@ -314,12 +318,12 @@ def build_simbi(args: argparse.Namespace) -> tuple[str]:
                 "func",
                 "extras",
                 "cpp_version",
-                    "build_type"]:
+                "build_type",
+            ]:
                 continue
 
             if getattr(args, arg) == default_value and arg not in cli_args:
-                if arg in FLAG_OVERRIDES and cli_args.intersection(
-                        FLAG_OVERRIDES[arg]):
+                if arg in FLAG_OVERRIDES and cli_args.intersection(FLAG_OVERRIDES[arg]):
                     continue
                 if arg in cached_vars:
                     setattr(args, arg, cached_vars[arg])
@@ -329,11 +333,14 @@ def build_simbi(args: argparse.Namespace) -> tuple[str]:
     generate_home_locator(simbi_dir=simbi_dir)
     write_to_cache(args)
 
-    build_configured = subprocess.run(
-        ["meson", "introspect", f"{args.build_dir}", "-i", "--targets"],
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
-    ).returncode == 0
+    build_configured = (
+        subprocess.run(
+            ["meson", "introspect", f"{args.build_dir}", "-i", "--targets"],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        ).returncode
+        == 0
+    )
 
     reconfigure_flag = "--reconfigure" if build_configured else ""
     if "CC" not in simbi_env:
@@ -350,7 +357,10 @@ def build_simbi(args: argparse.Namespace) -> tuple[str]:
     if is_tool("nvcc"):
         which_cuda = Path(get_tool("nvcc"))
         gpu_runtime_dir = " ".join(
-            str(path.parent) for path in which_cuda.parents if "cuda" in str(path.parent))
+            str(path.parent)
+            for path in which_cuda.parents
+            if "cuda" in str(path.parent)
+        )
     elif is_tool("hipcc"):
         gpu_runtime_dir = get_output(["hipconfig", "--rocmpath"])
 
@@ -360,20 +370,21 @@ def build_simbi(args: argparse.Namespace) -> tuple[str]:
         gpu_include = ""
 
     h5pkg = get_output(["pkg-config", "--cflags", "hdf5"]).split()
-    hdf5_include = " ".join(include_dir[2:] for include_dir in filter(
-        lambda x: x.startswith("-I"), h5pkg))
+    hdf5_include = " ".join(
+        include_dir[2:] for include_dir in filter(lambda x: x.startswith("-I"), h5pkg)
+    )
 
     if not hdf5_include:
         h5cc_show = get_output(["h5cc", "-show"]).split()
-        hdf5_libpath = Path(" ".join(lib_dir[2:] for lib_dir in filter(
-            lambda x: x.startswith("-L"), h5cc_show)))
+        hdf5_libpath = Path(
+            " ".join(
+                lib_dir[2:]
+                for lib_dir in filter(lambda x: x.startswith("-L"), h5cc_show)
+            )
+        )
         hdf5_include = hdf5_libpath.parents[0].resolve() / "include"
 
-    config_command = configure(
-        args,
-        reconfigure_flag,
-        hdf5_include,
-        gpu_include)
+    config_command = configure(args, reconfigure_flag, hdf5_include, gpu_include)
     subprocess.run(config_command, env=simbi_env, check=True)
 
     build_dir = f"{simbi_dir}/build"
@@ -383,9 +394,11 @@ def build_simbi(args: argparse.Namespace) -> tuple[str]:
 
     if not args.configure:
         compile_child = subprocess.Popen(
-            ["meson", "compile"] + args.verbose, cwd=f"{args.build_dir}").wait()
+            ["meson", "compile"] + args.verbose, cwd=f"{args.build_dir}"
+        ).wait()
         install_child = subprocess.Popen(
-            ["meson", "install"], cwd=f"{args.build_dir}").wait()
+            ["meson", "install"], cwd=f"{args.build_dir}"
+        ).wait()
 
         if compile_child == install_child == 0:
             return egg_dir, build_dir
@@ -398,12 +411,16 @@ def build_simbi(args: argparse.Namespace) -> tuple[str]:
 def install_simbi(args: argparse.Namespace) -> None:
     egg_dir, build_dir = build_simbi(args)
     extras = "" if not args.extras else "[extras]"
-    install_mode = "." + extras if args.install_mode == "default" else "-e" + "." + extras
+    install_mode = (
+        "." + extras if args.install_mode == "default" else "-e" + "." + extras
+    )
 
-    p1 = subprocess.Popen([sys.executable, "-m", "pip",
-                          "install", install_mode], stdout=subprocess.PIPE)
+    p1 = subprocess.Popen(
+        [sys.executable, "-m", "pip", "install", install_mode], stdout=subprocess.PIPE
+    )
     p2 = subprocess.Popen(
-        ("grep", "-v", "Requirement already satisfied"), stdin=p1.stdout)
+        ("grep", "-v", "Requirement already satisfied"), stdin=p1.stdout
+    )
     p1.stdout.close()
     p2.communicate()[0]
 
@@ -412,8 +429,7 @@ def install_simbi(args: argparse.Namespace) -> None:
 
 def uninstall_simbi(args: argparse.Namespace) -> None:
     simbi_dir = Path().resolve()
-    subprocess.run([sys.executable, "-m", "pip",
-                   "uninstall", "simbi"], check=True)
+    subprocess.run([sys.executable, "-m", "pip", "uninstall", "simbi"], check=True)
     exts = [str(ext) for ext in Path(simbi_dir / "simbi/libs/").glob("*.so")]
     if exts:
         subprocess.run(["rm", "-ri", *exts], check=True)
