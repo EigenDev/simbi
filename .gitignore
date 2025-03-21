@@ -12,6 +12,7 @@ simbi/tools/extras/*
 version.py
 .clangd
 .vscode/
+.cache/
 *.in
 *.h5
 *.pdf
