@@ -1,5 +1,11 @@
 from .io import logging
-from .functional import helpers
+from .functional.helpers import (
+    calc_cell_volume,
+    find_nearest,
+    compute_num_polar_zones,
+    calc_centroid,
+    calc_any_mean,
+)
 from .simulator import Hydro
 from .core.config.base_config import BaseConfig
 from .core.types.dynarg import DynamicArg
@@ -36,7 +42,6 @@ __all__ = [
     "simbi_class_property",
     "get_dimensionality",
     "read_file",
-    "helpers",
     "InitialStateType",
     "GeneratorTuple",
     "GasStateGenerator",
@@ -49,5 +54,10 @@ __all__ = [
     "BinaryConfig",
     "BinaryComponentConfig",
     "bcolors",
+    "calc_cell_volume",
+    "find_nearest",
+    "compute_num_polar_zones",
+    "calc_centroid",
+    "calc_any_mean",
 ]
 __version__ = ".".join(map(str, __version_tuple__))

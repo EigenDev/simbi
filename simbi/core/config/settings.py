@@ -3,6 +3,7 @@ from enum import Enum
 from dataclasses import dataclass, asdict, field
 from typing import Optional, Sequence, Callable, Any, TypeVar, Self
 from pathlib import Path
+from simbi.core.config.bodies import ImmersedBodyConfig
 from simbi.functional.helpers import to_tuple_of_tuples
 from ...core.config.bodies import BodySystemConfig
 from .constants import (
@@ -252,7 +253,7 @@ class SimulationSettings(BaseSettings):
     is_mhd: bool = False
     dlogt: float = 0.0
     solver: Solver = Solver.HLLC
-    bodies: list[dict[str, Any]] = field(default_factory=list)
+    bodies: list[ImmersedBodyConfig] = field(default_factory=list)
     sound_speed: float = 0.0
     isothermal: bool = False
     body_system: Optional[BodySystemConfig] = None
@@ -295,7 +296,7 @@ class SimulationSettings(BaseSettings):
             "is_mhd": self.is_mhd,
             "dlogt": self.dlogt,
             "solver": self.solver,
-            "bodies": self.bodies,
+            "bodies": [asdict(x) for x in self.bodies],
             "sound_speed": self.sound_speed,
             "isothermal": self.isothermal,
             "body_system": asdict(self.body_system) if self.body_system else None,
