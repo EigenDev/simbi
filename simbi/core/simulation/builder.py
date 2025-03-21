@@ -1,52 +1,10 @@
-import numpy as np
 from dataclasses import dataclass
 from ...functional import to_tuple_of_tuples, pipe
-from typing import Any, Protocol, Sequence, TypedDict
+from typing import Any, Sequence
 from .state_init import SimulationBundle
 from ..managers.boundary import BoundaryManager
 from pathlib import Path
 from ...io.logging import logger
-from numpy.typing import NDArray
-
-
-class SimStateDict(TypedDict):
-    """TypedDict for simulation state"""
-
-    gamma: float
-    tstart: float
-    tend: float
-    cfl: float
-    dlogt: float
-    plm_theta: float
-    checkpoint_interval: float
-    checkpoint_idx: int
-    regime: str | bytes
-    dimensionality: int
-    data_directory: str
-    boundary_conditions: list[str]
-    spatial_order: str | bytes
-    temporal_order: str | bytes
-    x1_spacing: str
-    x2_spacing: str
-    x3_spacing: str
-    solver: str | bytes
-    coord_system: str | bytes
-    quirk_smoothing: bool
-    nx: int
-    ny: int
-    nz: int
-    x1bounds: tuple[float, float]
-    x2bounds: tuple[float, float]
-    x3bounds: tuple[float, float]
-    bfield: list[Any]
-    hydro_source_lib: str
-    gravity_source_lib: str
-    boundary_source_lib: str
-    mesh_motion: bool
-    homologous: bool
-    bodies: list[dict[str, float | str | list[float]]]
-    isothermal: bool
-    sound_speed: float
 
 
 @dataclass
@@ -82,36 +40,6 @@ class SimStateBuilder:
                 f"Detected a run wtih effective dimensions {effective_dim}, but the user is inserting undefined bounds. Please remove the bounds: {bounds[-ndef:]} from your configuration"
             )
         return (*bounds_copy, *tuple(defaults))
-
-    @classmethod
-    def to_dict(cls, state: "SimStateDict") -> dict[str, Any]:
-        """Convert SimStateDict to raw dictionary with encoded strings"""
-        raw_dict: dict[str, Any] = dict(state)
-
-        # Handle data directory
-        path = Path(raw_dict["data_directory"])
-        raw_dict["data_directory"] = (
-            f"{path}/".encode("utf-8")
-            if str(path) and not str(path).endswith("/")
-            else str(path).encode("utf-8")
-        )
-
-        # Encode string values
-        string_fields = {
-            "boundary_conditions": lambda x: [bc.encode("utf-8") for bc in x],
-            "x1_spacing": lambda x: x.encode("utf-8"),
-            "x2_spacing": lambda x: x.encode("utf-8"),
-            "x3_spacing": lambda x: x.encode("utf-8"),
-            "hydro_source_lib": lambda x: x.encode("utf-8"),
-            "gravity_source_lib": lambda x: x.encode("utf-8"),
-            "boundary_source_lib": lambda x: x.encode("utf-8"),
-        }
-
-        for field, encoder in string_fields.items():
-            if field in raw_dict:
-                raw_dict[field] = encoder(raw_dict[field])  # type: ignore
-
-        return raw_dict
 
     @staticmethod
     def build(bundle: SimulationBundle) -> dict[str, Any]:
@@ -156,11 +84,12 @@ class SimStateBuilder:
         ]
         state_dict = {**x[0], **x[1], **x[2], **x[3], "bfield": effective_bfields}
         state_dict.update(
-            boundary_conditions=[bc.encode("utf-8") for bc in bcs],
+            boundary_conditions=[bc for bc in bcs],
             x1bounds=x1bounds,
             x2bounds=x2bounds,
             x3bounds=x3bounds,
         )
+        state_dict.pop("bounds")
 
         # Encode strings and return
         return state_dict

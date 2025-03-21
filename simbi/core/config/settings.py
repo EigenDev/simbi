@@ -173,17 +173,15 @@ class MeshSettings(BaseSettings):
     def to_execution_dict(self) -> dict[str, Any]:
         """convert the settings to execution format dict"""
         return {
-            "coord_system": self.coord_system.encode("utf-8"),
+            "coord_system": self.coord_system,
             "bounds": to_tuple_of_tuples(self.bounds),
-            "boundary_conditions": [
-                bc.encode("utf-8") for bc in self.boundary_conditions
-            ],
+            "boundary_conditions": [bc for bc in self.boundary_conditions],
             "dimensionality": self.dimensionality,
             "mesh_motion": self.mesh_motion,
             "is_homologous": self.is_homologous,
-            "x1_spacing": self.x1_spacing.encode("utf-8"),
-            "x2_spacing": self.x2_spacing.encode("utf-8"),
-            "x3_spacing": self.x3_spacing.encode("utf-8"),
+            "x1_spacing": self.x1_spacing,
+            "x2_spacing": self.x2_spacing,
+            "x3_spacing": self.x3_spacing,
             "scale_factor": self.scale_factor,
             "scale_factor_derivative": self.scale_factor_derivative,
         }
@@ -220,22 +218,22 @@ class IOSettings(BaseSettings):
     def to_execution_dict(self) -> dict[str, Any]:
         """convert the settings to execution format dict"""
         return {
-            "data_directory": f"{self.data_directory}/".encode("utf-8"),
+            "data_directory": f"{self.data_directory}/",
             "checkpoint_file": (
                 str(self.checkpoint_file) if self.checkpoint_file else ""
-            ).encode("utf-8"),
+            ),
             "checkpoint_interval": self.checkpoint_interval,
             "checkpoint_index": self.checkpoint_index,
             "log_output": self.log_output,
             "hydro_source_lib": (
                 str(self.hydro_source_lib) if self.hydro_source_lib else ""
-            ).encode("utf-8"),
+            ),
             "gravity_source_lib": (
                 str(self.gravity_source_lib) if self.gravity_source_lib else ""
-            ).encode("utf-8"),
+            ),
             "boundary_source_lib": (
                 str(self.boundary_source_lib) if self.boundary_source_lib else ""
-            ).encode("utf-8"),
+            ),
         }
 
 
@@ -314,14 +312,14 @@ class SimulationSettings(BaseSettings):
             "tstart": self.tstart,
             "tend": self.tend,
             "cfl": self.cfl,
-            "regime": self.regime.encode("utf-8"),
-            "temporal_order": self.temporal_order.value.encode("utf-8"),
-            "spatial_order": self.spatial_order.value.encode("utf-8"),
+            "regime": self.regime.value,
+            "temporal_order": self.temporal_order.value,
+            "spatial_order": self.spatial_order.value,
             "plm_theta": self.plm_theta,
             "quirk_smoothing": self.quirk_smoothing,
             "is_mhd": self.is_mhd,
             "dlogt": self.dlogt,
-            "solver": self.solver.encode("utf-8"),
+            "solver": self.solver,
             "bodies": self.bodies,
             "sound_speed": self.sound_speed,
             "isothermal": self.isothermal,
