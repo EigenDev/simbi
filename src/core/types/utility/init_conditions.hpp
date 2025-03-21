@@ -56,7 +56,9 @@
 #include "enums.hpp"
 #include "physics/hydro/schemes/ib/bodies/immersed_boundary.hpp"
 #include <cinttypes>
+#include <memory>
 #include <unordered_map>
+#include <utility>
 
 struct InitialConditions {
     real time, checkpoint_interval, dlogt;
@@ -74,16 +76,7 @@ struct InitialConditions {
     std::pair<real, real> x3bounds;
     bool enable_peer_access{true}, managed_memory{false};
     simbi::ConfigDict config;
-
-    using PropertyValue = std::variant<
-        real,                // for scalar properties
-        std::vector<real>,   // Python will enforce the dimensionality of the
-                             // vector
-        bool                 // for boolean properties
-        >;
-    using PropertyMap = std::unordered_map<std::string, PropertyValue>;
-
-    std::vector<std::pair<simbi::BodyType, PropertyMap>> immersed_bodies;
+    std::vector<std::pair<simbi::BodyType, simbi::ConfigDict>> immersed_bodies;
 
     std::tuple<lint, lint, lint> active_zones() const
     {
@@ -91,13 +84,12 @@ struct InitialConditions {
         return std::make_tuple(nx - nghosts, ny - nghosts, nz - nghosts);
     }
 
-    // Check if a key exists
+    // Basic dictionary access methods
     bool contains(const std::string& key) const
     {
         return config.find(key) != config.end();
     }
 
-    // Access a value (with optional default)
     const simbi::ConfigValue& at(const std::string& key) const
     {
         static const simbi::ConfigValue empty_value;
@@ -105,7 +97,6 @@ struct InitialConditions {
         return (it != config.end()) ? it->second : empty_value;
     }
 
-    // Accessor with default value
     template <typename T>
     T get(const std::string& key, const T& default_value) const
     {
@@ -120,7 +111,6 @@ struct InitialConditions {
         }
     }
 
-    // Nested dictionary access
     simbi::ConfigDict get_dict(const std::string& key) const
     {
         if (!contains(key) || !at(key).is_dict()) {
@@ -129,8 +119,6 @@ struct InitialConditions {
         return at(key).get<simbi::ConfigDict>();
     }
 
-    // Helper for nested key access (e.g.
-    // "gravitational_system.binary_config.semi_major")
     simbi::ConfigValue get_nested(const std::string& nested_key) const
     {
         std::istringstream ss(nested_key);
@@ -162,73 +150,398 @@ struct InitialConditions {
         return it->second;
     }
 
-    // Function to populate the immersed_bodies from config
-    // This allows backward compatibility while we transition to new config
-    // system
-    void populate_immersed_bodies()
+    // Builder class for InitialConditions
+    class Builder
     {
-        if (!contains("immersed_bodies") || !at("immersed_bodies").is_dict()) {
-            return;
+      public:
+        static InitialConditions
+        from_config(const simbi::ConfigDict& config_dict)
+        {
+            InitialConditions init;
+            // Store the full config for reference
+            init.config = config_dict;
+
+            // Build basic properties
+            build_basic_properties(init);
+
+            // Build boundary conditions
+            build_boundary_conditions(init);
+
+            // Build bounds
+            build_bounds(init);
+
+            // Build mesh properties
+            build_mesh_properties(init);
+
+            // Build physics properties
+            build_physics_properties(init);
+
+            // Build source libraries
+            build_source_libraries(init);
+
+            // Build immersed bodies (if present)
+            build_immersed_bodies(init);
+
+            return init;
         }
 
-        const auto& bodies_dict =
-            at("immersed_bodies").get<simbi::ConfigDict>();
-        for (const auto& [body_name, body_config] : bodies_dict) {
-            if (!body_config.is_dict()) {
-                continue;
-            }
+      private:
+        // Helper methods to build different parts of InitialConditions
+        static void build_basic_properties(InitialConditions& init)
+        {
+            // Time settings
+            init.time = init.get<real>("tstart", 0.0);
+            init.tend = init.get<real>("tend", 1.0);
+            init.checkpoint_interval =
+                init.get<real>("checkpoint_interval", 0.1);
+            init.dlogt          = init.get<real>("dlogt", 0.0);
+            init.checkpoint_idx = init.get<luint>("checkpoint_index", 0);
 
-            const auto& body_dict = body_config.get<simbi::ConfigDict>();
+            // Solver settings
+            init.solver        = init.get<std::string>("solver", "hllc");
+            init.spatial_order = init.get<std::string>("spatial_order", "plm");
+            init.temporal_order =
+                init.get<std::string>("temporal_order", "rk2");
+            init.plm_theta       = init.get<real>("plm_theta", 1.5);
+            init.quirk_smoothing = init.get<bool>("quirk_smoothing", false);
+            init.regime          = init.get<std::string>("regime", "classical");
+            init.cfl             = init.get<real>("cfl", 0.3);
 
-            // Extract body properties
-            auto it_type = body_dict.find("body_type");
-            if (it_type == body_dict.end() || !it_type->second.is_string()) {
-                continue;   // Skip if no valid type
-            }
+            // I/O settings
+            init.data_directory =
+                init.get<std::string>("data_directory", "data/");
+        }
 
-            const std::string type_str = it_type->second.get<std::string>();
-            simbi::BodyType body_type;
-
-            if (type_str == "gravitational") {
-                body_type = simbi::BodyType::GRAVITATIONAL;
-            }
-            else if (type_str == "gravitational_sink") {
-                body_type = simbi::BodyType::GRAVITATIONAL_SINK;
+        static void build_boundary_conditions(InitialConditions& init)
+        {
+            if (init.contains("boundary_conditions")) {
+                if (init.at("boundary_conditions").is_array_of_strings()) {
+                    init.boundary_conditions =
+                        init.at("boundary_conditions")
+                            .get<std::vector<std::string>>();
+                }
+                else if (init.at("boundary_conditions").is_string()) {
+                    // Single boundary condition for all boundaries
+                    std::string bc =
+                        init.at("boundary_conditions").get<std::string>();
+                    // Create vector with appropriate size based on
+                    // dimensionality
+                    int ndims = 1;
+                    if (init.contains("dimensionality")) {
+                        ndims = init.get<int>("dimensionality", 1);
+                    }
+                    else if (init.contains("resolution")) {
+                        auto res =
+                            init.at("resolution").get<std::vector<real>>();
+                        ndims = res.size();
+                    }
+                    init.boundary_conditions.resize(2 * ndims, bc);
+                }
             }
             else {
-                continue;   // Skip if type is not recognized
+                // default to outflow for all boundaries
+                int ndims = 1;
+                if (init.contains("dimensionality")) {
+                    ndims = init.get<int>("dimensionality", 1);
+                }
+                else if (init.contains("resolution")) {
+                    auto res = init.at("resolution").get<std::vector<real>>();
+                    ndims    = res.size();
+                }
+                init.boundary_conditions.resize(2 * ndims, "outflow");
+            }
+        }
+
+        static void build_bounds(InitialConditions& init)
+        {
+            if (init.contains("bounds") &&
+                init.at("bounds").is_nested_array_of_floats()) {
+                auto bounds =
+                    init.at("bounds").get<std::vector<std::vector<real>>>();
+                if (bounds.size() >= 1 && bounds[0].size() >= 2) {
+                    init.x1bounds = std::make_pair(bounds[0][0], bounds[0][1]);
+                }
+                if (bounds.size() >= 2 && bounds[1].size() >= 2) {
+                    init.x2bounds = std::make_pair(bounds[1][0], bounds[1][1]);
+                }
+                if (bounds.size() >= 3 && bounds[2].size() >= 2) {
+                    init.x3bounds = std::make_pair(bounds[2][0], bounds[2][1]);
+                }
+            }
+            else {
+                std::cout << "checking some things" << std::endl;
+                // get individual x1bounds, x2bounds, x3bounds
+                if (init.contains("x1bounds") &&
+                    init.at("x1bounds").is_pair()) {
+                    init.x1bounds =
+                        init.at("x1bounds").get<std::pair<real, real>>();
+                }
+                if (init.contains("x2bounds") &&
+                    init.at("x2bounds").is_pair()) {
+                    init.x2bounds =
+                        init.at("x2bounds").get<std::pair<real, real>>();
+                }
+                if (init.contains("x3bounds") &&
+                    init.at("x3bounds").is_pair()) {
+                    init.x3bounds =
+                        init.at("x3bounds").get<std::pair<real, real>>();
+                }
+            }
+        }
+
+        static void build_mesh_properties(InitialConditions& init)
+        {
+            // Resolution
+            if (init.contains("resolution") &&
+                init.at("resolution").is_array()) {
+                auto res = init.at("resolution").get<std::vector<int>>();
+                if (res.size() >= 1) {
+                    init.nx = res[0];
+                }
+                if (res.size() >= 2) {
+                    init.ny = res[1];
+                }
+                if (res.size() >= 3) {
+                    init.nz = res[2];
+                }
+            }
+            else {
+                // Try individual nx, ny, nz
+                // python should take care of this, though
+                // so maybe I'll remove this later
+                // TODO: rethink this part
+                init.nx = init.get<luint>("nx", 100);
+                init.ny = init.get<luint>("ny", 1);
+                init.nz = init.get<luint>("nz", 1);
             }
 
-            // Extract common properties
-            PropertyMap props;
+            // Coordinate system
+            init.coord_system =
+                init.get<std::string>("coord_system", "cartesian");
 
-            // Add each property to the map
-            for (const auto& [prop_name, prop_value] : body_dict) {
-                if (prop_name == "body_type") {
-                    continue;   // Already handled
-                }
+            // Grid spacing
+            init.x1_spacing = init.get<std::string>("x1_spacing", "linear");
+            init.x2_spacing = init.get<std::string>("x2_spacing", "linear");
+            init.x3_spacing = init.get<std::string>("x3_spacing", "linear");
 
-                // Convert the ConfigValue to PropertyValue
-                if (prop_value.is_double()) {
-                    props[prop_name] =
-                        static_cast<real>(prop_value.get<double>());
-                }
-                else if (prop_value.is_array()) {
-                    props[prop_name] = prop_value.get<std::vector<double>>();
-                }
-                else if (prop_value.is_bool()) {
-                    props[prop_name] = prop_value.get<bool>();
-                }
-                else {
-                    throw std::runtime_error(
-                        "Unsupported property type for " + prop_name
+            // Mesh motion
+            init.mesh_motion = init.get<bool>("mesh_motion", false);
+            init.homologous  = init.get<bool>("is_homologous", false);
+        }
+
+        static void build_physics_properties(InitialConditions& init)
+        {
+            // Equation of state
+            init.gamma      = init.get<real>("adiabatic_index", 5.0 / 3.0);
+            init.isothermal = init.get<bool>("isothermal", false);
+
+            if (init.isothermal) {
+                real sound_speed         = init.get<real>("sound_speed", 1.0);
+                init.sound_speed_squared = sound_speed * sound_speed;
+            }
+
+            // Magnetic field (if present)
+            if (init.contains("bfield") &&
+                init.at("bfield").is_nested_array_of_floats()) {
+                init.bfield =
+                    init.at("bfield").get<std::vector<std::vector<real>>>();
+            }
+        }
+
+        static void build_source_libraries(InitialConditions& init)
+        {
+            init.hydro_source_lib =
+                init.get<std::string>("hydro_source_lib", "");
+            init.gravity_source_lib =
+                init.get<std::string>("gravity_source_lib", "");
+            init.boundary_source_lib =
+                init.get<std::string>("boundary_source_lib", "");
+        }
+
+        static void build_immersed_bodies(InitialConditions& init)
+        {
+            // Clear existing bodies
+            init.immersed_bodies.clear();
+
+            // Check if bodies are provided in list format
+            if (init.contains("bodies") && init.at("bodies").is_list()) {
+                const auto& bodies_list =
+                    init.at("bodies").get<std::list<simbi::ConfigDict>>();
+
+                for (const auto& body_dict : bodies_list) {
+                    // extract body type from the dict!
+                    if (!body_dict.contains("body_type") ||
+                        !body_dict.at("body_type").is_string()) {
+                        continue;   // Skip invalid body entries
+                    }
+
+                    const std::string type_str =
+                        body_dict.at("body_type").get<std::string>();
+                    simbi::BodyType body_type = string_to_body_type(type_str);
+
+                    // create property map
+                    simbi::ConfigDict props;
+
+                    // add the required properties
+                    add_vector_property(body_dict, "position", props);
+                    add_vector_property(body_dict, "velocity", props);
+                    add_scalar_property(body_dict, "mass", props);
+                    add_scalar_property(body_dict, "radius", props);
+
+                    // add specifics/extra properties
+                    // this is a dictionary of properties that are specific to
+                    // the body type
+                    if (body_dict.contains("specifics") &&
+                        body_dict.at("specifics").is_dict()) {
+                        const auto& specifics =
+                            body_dict.at("specifics").get<simbi::ConfigDict>();
+                        for (const auto& [key, value] : specifics) {
+                            add_property(key, value, props);
+                        }
+                    }
+
+                    // Add other properties (not in specifics)
+                    for (const auto& [key, value] : body_dict) {
+                        if (key != "body_type" && key != "position" &&
+                            key != "velocity" && key != "mass" &&
+                            key != "radius" && key != "specifics") {
+                            add_property(key, value, props);
+                        }
+                    }
+
+                    // Add to immersed_bodies
+                    init.immersed_bodies.push_back(
+                        std::make_pair(body_type, props)
                     );
                 }
             }
+            // Check for old-style immersed_bodies dictionary
+            else if (init.contains("immersed_bodies") &&
+                     init.at("immersed_bodies").is_dict()) {
+                const auto& bodies_dict =
+                    init.at("immersed_bodies").get<simbi::ConfigDict>();
 
-            // Add to the immersed_bodies list
-            immersed_bodies.push_back(std::make_pair(body_type, props));
+                for (const auto& [body_name, body_config] : bodies_dict) {
+                    if (!body_config.is_dict()) {
+                        continue;
+                    }
+
+                    const auto& body_dict =
+                        body_config.get<simbi::ConfigDict>();
+
+                    // Extract body type
+                    auto it_type = body_dict.find("body_type");
+                    if (it_type == body_dict.end() ||
+                        !it_type->second.is_string()) {
+                        continue;   // Skip if no valid type
+                    }
+
+                    const std::string type_str =
+                        it_type->second.get<std::string>();
+                    simbi::BodyType body_type = string_to_body_type(type_str);
+
+                    // Create property map
+                    simbi::ConfigDict props;
+
+                    // Add each property to the map
+                    for (const auto& [prop_name, prop_value] : body_dict) {
+                        if (prop_name == "body_type") {
+                            continue;   // Already handled
+                        }
+
+                        add_property(prop_name, prop_value, props);
+                    }
+
+                    // Add to immersed_bodies
+                    init.immersed_bodies.push_back(
+                        std::make_pair(body_type, props)
+                    );
+                }
+            }
         }
+
+        // helpers
+        static simbi::BodyType string_to_body_type(const std::string& type_str)
+        {
+            std::string type_upper = type_str;
+            std::transform(
+                type_upper.begin(),
+                type_upper.end(),
+                type_upper.begin(),
+                ::toupper
+            );
+
+            if (type_upper == "GRAVITATIONAL") {
+                return simbi::BodyType::GRAVITATIONAL;
+            }
+            else if (type_upper == "ELASTIC") {
+                return simbi::BodyType::ELASTIC;
+            }
+            else if (type_upper == "RIGID") {
+                return simbi::BodyType::RIGID;
+            }
+            else if (type_upper == "VISCOUS") {
+                return simbi::BodyType::VISCOUS;
+            }
+            else if (type_upper == "SINK") {
+                return simbi::BodyType::SINK;
+            }
+            else if (type_upper == "SOURCE") {
+                return simbi::BodyType::SOURCE;
+            }
+            else if (type_upper == "GRAVITATIONAL_SINK") {
+                return simbi::BodyType::GRAVITATIONAL_SINK;
+            }
+            else {
+                // Default to gravitational
+                return simbi::BodyType::GRAVITATIONAL;
+            }
+        }
+
+        static void add_property(
+            const std::string& name,
+            const simbi::ConfigValue& value,
+            simbi::ConfigDict& props
+        )
+        {
+            if (value.is_real_number()) {
+                props[name] = static_cast<real>(value.get<double>());
+            }
+            else if (value.is_array()) {
+                props[name] = value.get<std::vector<double>>();
+            }
+            else if (value.is_bool()) {
+                props[name] = value.get<bool>();
+            }
+        }
+
+        static void add_vector_property(
+            const simbi::ConfigDict& dict,
+            const std::string& name,
+            simbi::ConfigDict& props
+        )
+        {
+            if (dict.contains(name) && dict.at(name).is_array()) {
+                props[name] = dict.at(name).get<std::vector<double>>();
+            }
+        }
+
+        static void add_scalar_property(
+            const simbi::ConfigDict& dict,
+            const std::string& name,
+            simbi::ConfigDict& props
+        )
+        {
+            if (dict.contains(name) && dict.at(name).is_real_number()) {
+                props[name] = static_cast<real>(dict.at(name).get<double>());
+            }
+        }
+    };
+
+    // static factory method to create InitialConditions from ConfigDict
+    static InitialConditions create(const simbi::ConfigDict& config)
+    {
+        return Builder::from_config(config);
     }
 };
 
