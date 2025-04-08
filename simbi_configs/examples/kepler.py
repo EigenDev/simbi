@@ -152,7 +152,7 @@ class KeplerianRingTest(BaseConfig):
         return 1.0
 
     @simbi_property
-    def sound_speed(self) -> float:
+    def ambient_sound_speed(self) -> float:
         # Must define this since we're isothermal
         h_r = 0.01  # H/R aspect ratio
         G = 1.0
@@ -196,7 +196,7 @@ class KeplerianRingTest(BaseConfig):
 
             // First set initial values (since result array is zero-initialized)
             const double rho = 1e-8;  // Background density
-            const double cs = {self.sound_speed};
+            const double cs = {self.ambient_sound_speed};
             const double press = rho * cs*cs;
 
             // Default to background values

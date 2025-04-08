@@ -74,7 +74,7 @@ class MagneticShockTube(BaseConfig):
     def initial_primitive_state(self) -> InitialStateType:
         # defined as (rho, v1, v2, v3, pg, b1, b2, b3)
         def gas_state() -> Generator[tuple[float, ...], None, None]:
-            state = self.problem_states[self.config.problem]
+            state = self.problem_states[int(self.config.problem)]
             ni, nj, nk = self.resolution
             dx = (self.bounds[1] - self.bounds[0]) / ni
             for k in range(nk):
@@ -99,7 +99,7 @@ class MagneticShockTube(BaseConfig):
                             )
 
         def b_field(bn: str) -> Generator[float, None, None]:
-            state = self.problem_states[self.config.problem]
+            state = self.problem_states[int(self.config.problem)]
             ni, nj, nk = self.resolution
             dx = (self.bounds[1] - self.bounds[0]) / ni
             for k in range(nk + (bn == "bz")):
@@ -117,7 +117,7 @@ class MagneticShockTube(BaseConfig):
         return gas_state, bx, by, bz
 
     @simbi_property
-    def bounds(self) -> Sequence[Sequence[float]]:
+    def bounds(self) -> Sequence[float]:
         return (0.0, 1.0)
 
     @simbi_property
