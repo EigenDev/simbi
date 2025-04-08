@@ -1,34 +1,48 @@
 import numpy as np
 from numpy.typing import NDArray
 from ..functional.maybe import Maybe
-from typing import Any, Optional, Sequence
+from typing import Any, Sequence
+from enum import Enum, IntEnum
 from ..physics import StateVector
 
-nested_array = Sequence[NDArray[np.floating[Any]]]
+Array = NDArray[np.floating[Any]]
+nested_array = Sequence[Array]
+
+
+class VectorComponent(IntEnum):
+    X1 = 0
+    X2 = 1
+    X3 = 2
+
+
+class VectorMode(Enum):
+    Magnitude = "magnitude"
+    All = "all"
 
 
 def calculate_state_vector(
     adiabatic_index: float,
-    rho: NDArray[np.floating[Any]],
+    rho: Array,
     velocity: nested_array,
-    pressure: NDArray[np.floating[Any]],
-    chi: NDArray[np.floating[Any]],
+    pressure: Array,
+    chi: Array,
     regime: str,
     bfields: nested_array,
 ) -> StateVector:
     """Pure function to calculate state vector"""
     try:
         validate_eos(adiabatic_index, regime)
-        dens = calc_labframe_density(rho, velocity, regime)
-        mom = calc_labframe_momentum(
-            adiabatic_index,
+        dens = labframe_density(rho, velocity, regime)
+        mom = labframe_momentum(
             rho,
-            velocity,
             pressure,
+            velocity,
             [] if bfields is None else bfields,
+            adiabatic_index,
             regime,
         )
-        energy = calc_labframe_energy(
+
+        energy = labframe_energy(
             adiabatic_index,
             rho,
             pressure,
@@ -74,21 +88,32 @@ def dot_product(
     return np.sum([a[i] * b[i] for i in range(len(a))], axis=0)
 
 
-def calc_lorentz_factor(
-    velocity: nested_array, regime: str
-) -> NDArray[np.floating[Any]] | float:
+def lorentz_factor(
+    velocity: nested_array, regime: str, using_gamma_beta: bool = False
+) -> Array | float:
     vsquared = dot_product(velocity, velocity)
     if regime != "classical" and np.any(vsquared >= 1.0):
         raise ValueError("Lorentz factor is not real. Velocity exceeds speed of light.")
-    return 1.0 if regime == "classical" else (1.0 - vsquared) ** (-0.5)
+
+    if regime == "classical":
+        return 1.0
+    elif not using_gamma_beta:
+        return np.asarray(1.0 / np.sqrt(1.0 - vsquared))
+    else:
+        return np.asarray(np.sqrt(1.0 + vsquared))
 
 
-def calc_spec_enthalpy(
+def four_velocity(velocity: nested_array, regime: str, component: int) -> Array:
+    lorentz = lorentz_factor(velocity, regime)
+    return np.asarray(velocity[component] * lorentz)
+
+
+def spec_enthalpy(
     adiabatic_index: float,
-    rho: NDArray[np.floating[Any]],
-    pressure: NDArray[np.floating[Any]],
+    rho: Array,
+    pressure: Array,
     regime: str,
-) -> NDArray[np.floating[Any]] | float:
+) -> Array | float:
     if regime == "classical":
         if adiabatic_index == 1.0:
             # Isothermal case - pressure = cs^2 * rho
@@ -101,52 +126,24 @@ def calc_spec_enthalpy(
         return 1.0 + adiabatic_index * pressure / (rho * (adiabatic_index - 1.0))
 
 
-def calc_labframe_density(
-    rho: NDArray[np.floating[Any]], velocity: nested_array, regime: str
-) -> NDArray[np.floating[Any]]:
-    return rho * calc_lorentz_factor(velocity, regime)
+def labframe_density(rho: Array, velocity: nested_array, regime: str) -> Array:
+    return rho * lorentz_factor(velocity, regime)
 
 
-def calc_labframe_momentum(
+def labframe_energy(
     adiabatic_index: float,
-    rho: NDArray[np.floating[Any]],
-    velocity: nested_array,
-    pressure: NDArray[np.floating[Any]],
-    bfields: nested_array,
-    regime: str,
-) -> NDArray[np.floating[Any]]:
-    vdb = dot_product(velocity, bfields) if np.any(bfields) else 0.0
-    bsq = dot_product(bfields, bfields) if np.any(bfields) else 0.0
-    vdb_bvec = (
-        np.array([bn * vdb for bn in bfields])
-        if np.any(bfields)
-        else [0.0] * len(velocity)
-    )
-
-    enthalpy = calc_spec_enthalpy(adiabatic_index, rho, pressure, regime)
-    lorentz = calc_lorentz_factor(velocity, regime)
-    return np.array(
-        [
-            (rho * lorentz**2 * enthalpy + bsq) * velocity[i] - vdb_bvec[i]
-            for i in range(len(velocity))
-        ]
-    )
-
-
-def calc_labframe_energy(
-    adiabatic_index: float,
-    rho: NDArray[np.floating[Any]],
-    pressure: NDArray[np.floating[Any]],
+    rho: Array,
+    pressure: Array,
     velocity: nested_array,
     bfields: nested_array,
     regime: str,
-) -> NDArray[np.floating[Any]]:
-    res: NDArray[np.floating[Any]]
+) -> Array:
+    res: Array
     bsq = dot_product(bfields, bfields) if np.any(bfields) else 0.0
     vdb = dot_product(velocity, bfields) if np.any(bfields) else 0.0
     vsq = dot_product(velocity, velocity)
-    lorentz = calc_lorentz_factor(velocity, regime)
-    enthalpy = calc_spec_enthalpy(adiabatic_index, rho, pressure, regime)
+    lorentz = lorentz_factor(velocity, regime)
+    enthalpy = spec_enthalpy(adiabatic_index, rho, pressure, regime)
 
     if regime == "classical":
         if adiabatic_index == 1.0:
@@ -161,7 +158,7 @@ def calc_labframe_energy(
             raise ValueError(
                 "Isothermal EOS (gamma=1) is not physically valid for relativistic flows"
             )
-        enthalpy = calc_spec_enthalpy(adiabatic_index, rho, pressure, regime)
+        enthalpy = spec_enthalpy(adiabatic_index, rho, pressure, regime)
         res = (
             rho * lorentz**2 * enthalpy
             - pressure
@@ -171,6 +168,129 @@ def calc_labframe_energy(
         )
 
     return res
+
+
+def enthalpy(
+    rho: Array,
+    pre: Array,
+    gamma: float,
+    regime: str = "classical",
+) -> Array | float:
+    """Calculate the enthalpy per particle"""
+    if regime == "classical":
+        return 1.0
+    return 1.0 + gamma * pre / (rho * (gamma - 1.0))
+
+
+def labframe_energy_density(
+    rho: Array,
+    pre: Array,
+    vel: Sequence[Array],
+    bfield: Sequence[Array],
+    gamma: float,
+    regime: str = "classical",
+) -> Array:
+    """Calculate the labframe energy density"""
+    vsq = sum(v**2 for v in vel)
+    lorentz = 1.0 / np.sqrt(1.0 - vsq)
+    if regime == "classical":
+        return pre / (gamma - 1.0) + 0.5 * vsq
+    elif regime == "srhd":
+        return np.asarray(
+            rho * lorentz**2 * enthalpy(rho, pre, gamma, regime) - pre - rho * lorentz
+        )
+    elif regime == "srmhd":
+        bsq = sum(b**2 for b in bfield)
+        return np.asarray(
+            rho * lorentz**2 * enthalpy(rho, pre, gamma, regime)
+            - pre
+            - rho * lorentz
+            + 0.5 * (bsq**2 + vsq * bsq - dot_product(vel, bfield) ** 2)
+        )
+    else:
+        raise NotImplementedError(f"Regime '{regime}' not implemented")
+
+
+def labframe_momentum(
+    rho: Array,
+    pre: Array,
+    vel: Sequence[Array],
+    bfield: Sequence[Array],
+    gamma: float,
+    regime: str = "classical",
+    mode: VectorMode | VectorComponent = VectorMode.All,
+) -> Array:
+    """Calculate the labframe momentum"""
+    # if user does not specify a component, return the momentum magnitude
+    # otherwise, return the component
+    if regime == "classical":
+        mom_vec = rho * vel
+    elif "sr" in regime:
+        h = enthalpy(
+            rho,
+            pre,
+            gamma,
+            regime,
+        )
+        d = labframe_density(rho, vel, regime)
+
+        if regime == "srmhd":
+            bsq = np.array((sum(b**2 for b in bfield)), dtype=float)
+            vdb = dot_product(vel, bfield)
+            magnetic_part = bsq * vel - vdb * bfield
+        else:
+            magnetic_part = 0.0
+
+        mom_vec = d * h * lorentz_factor(vel, regime) * vel + magnetic_part
+    else:
+        raise NotImplementedError(f"Regime '{regime}' not implemented")
+
+    if mode == VectorMode.Magnitude:
+        return np.asarray(np.sqrt(np.sum(mom_vec**2, axis=0)))
+    elif mode == VectorMode.All:
+        return mom_vec
+    else:
+        return np.asarray(mom_vec[int(mode.value)])
+
+
+def magnetic_pressure(bfields: Sequence[Array]) -> Array:
+    """Calculate magnetic pressure"""
+    bsq: Array = np.sum([b**2 for b in bfields], axis=0)
+    return 0.5 * bsq
+
+
+def total_pressure(
+    pre: Array, bfields: Sequence[Array], regime: str = "classical"
+) -> Array:
+    """calculate total pressure"""
+    if regime == "classical":
+        return pre
+    else:
+        return pre + magnetic_pressure(bfields)
+
+
+def enthalpy_density(
+    rho: Array,
+    pre: Array,
+    bfields: Sequence[Array],
+    adiabatic_index: float,
+    regime: str = "classical",
+) -> Array:
+    if regime == "classical":
+        return rho
+    elif regime == "srhd":
+        return rho * enthalpy(rho, pre, adiabatic_index)
+    elif regime == "srmhd":
+        return rho * enthalpy(rho, pre, adiabatic_index) + 2.0 * magnetic_pressure(
+            bfields
+        )
+    else:
+        raise NotImplementedError(f"Regime '{regime}' not implemented")
+
+
+def magnetization(rho: Array, bfields: Sequence[Array]) -> Array:
+    """Calculate magnetization"""
+    return np.asarray(dot_product(bfields, bfields) / rho)
 
 
 def is_isothermal(adiabatic_index: float) -> bool:
