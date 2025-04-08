@@ -52,17 +52,22 @@
 
 #include "build_options.hpp"
 #include "core/managers/io_manager.hpp"
+#include "core/traits.hpp"
 #include "core/types/containers/array_view.hpp"
 #include "core/types/containers/ndarray.hpp"
 #include "core/types/monad/maybe.hpp"
+#include "core/types/utility/enums.hpp"
 #include "geometry/mesh/mesh.hpp"
 #include "util/parallel/exec_policy.hpp"
 
 namespace simbi {
+    struct conserved_tag;
+    struct flux_tag;
     template <typename T, size_type Dims>
     class boundary_manager
     {
       public:
+        template <typename TagType = conserved_tag>
         void sync_boundaries(
             const ExecutionPolicy<>& policy,
             ndarray<T, Dims>& full_array,
@@ -75,7 +80,7 @@ namespace simbi {
         ) const
         {
             // Sync faces
-            sync_faces(
+            sync_faces<TagType>(
                 policy,
                 full_array,
                 interior_view,
@@ -100,6 +105,7 @@ namespace simbi {
             }
         }
 
+        template <typename TagType = conserved_tag>
         void sync_corners(
             const ExecutionPolicy<>& policy,
             ndarray<T, Dims>& full_array,
@@ -188,7 +194,8 @@ namespace simbi {
                 // Apply boundary conditions
                 data[idx] = data[interior_idx];
 
-                // Handle reflecting conditions for momentum/magnetic components
+                // Handle reflecting conditions for momentum/magnetic
+                // components
                 if constexpr (is_conserved_v<T>) {
                     for (int i = 0; i < num_boundaries; ++i) {
                         auto [dim, is_lower] = boundary_dims[i];
@@ -205,6 +212,7 @@ namespace simbi {
             });
         }
 
+        template <typename TagType = conserved_tag>
         void sync_faces(
             const ExecutionPolicy<>& policy,
             ndarray<T, Dims>& full_array,
@@ -215,18 +223,17 @@ namespace simbi {
             const real time
         ) const
         {
-            auto* data = full_array.data();
-            auto radii = [&]() {
+            auto* data       = full_array.data();
+            const auto radii = [fshape = full_array.shape(),
+                                ishape = interior_view.shape()]() {
                 uarray<Dims> rad;
                 for (size_type ii = 0; ii < Dims; ++ii) {
                     if constexpr (global::col_major) {
-                        rad[ii] = (full_array.shape()[ii] -
-                                   interior_view.shape()[ii]) /
-                                  2;
+                        rad[ii] = (fshape[ii] - ishape[ii]) / 2;
                     }
                     else {
-                        rad[ii] = (full_array.shape()[Dims - (ii + 1)] -
-                                   interior_view.shape()[Dims - (ii + 1)]) /
+                        rad[ii] = (fshape[Dims - (ii + 1)] -
+                                   ishape[Dims - (ii + 1)]) /
                                   2;
                     }
                 }
@@ -234,17 +241,22 @@ namespace simbi {
             }();
 
             // validate io_manager before kernel launch
-            if (!io_manager &&
-                std::any_of(conditions.begin(), conditions.end(), [](auto bc) {
-                    return bc == BoundaryCondition::DYNAMIC;
-                })) {
-                throw std::runtime_error(
-                    "IO Manager required for dynamic boundary conditions"
-                );
+            if constexpr (is_conserved_v<T> &&
+                          std::is_same_v<TagType, conserved_tag>) {
+                if (!io_manager &&
+                    std::any_of(
+                        conditions.begin(),
+                        conditions.end(),
+                        [](auto bc) { return bc == BoundaryCondition::DYNAMIC; }
+                    )) {
+                    throw std::runtime_error(
+                        "IO Manager required for dynamic boundary conditions"
+                    );
+                }
             }
 
             // copy necessary data to avoid pointer issues
-            const auto handle_dynamic_bc = [mesh, io_manager, time]() {
+            auto handle_dynamic_bc = [mesh, io_manager, time]() {
                 if constexpr (is_conserved_v<T>) {
                     return [=] DEV(
                                const auto& coords,
@@ -300,6 +312,7 @@ namespace simbi {
                  full_array,
                  interior_view,
                  radii,
+                 mesh,
                  this] DEV(size_type idx) {
                     auto coordinates = unravel_idx(idx, full_array.shape());
                     auto rshape      = interior_view.shape();
@@ -345,8 +358,11 @@ namespace simbi {
                         // Apply boundary condition
                         switch (conditions[bc_idx]) {
                             case BoundaryCondition::DYNAMIC: {
-                                if constexpr (is_conserved_v<T>) {
-                                    T result;
+                                if constexpr (is_conserved_v<T> &&
+                                              std::is_same_v<
+                                                  TagType,
+                                                  conserved_tag>) {
+                                    T result = data[interior_idx];
                                     handle_dynamic_bc(
                                         coordinates,
                                         static_cast<BoundaryFace>(bc_idx),
@@ -354,13 +370,24 @@ namespace simbi {
                                     );
                                     data[idx] = result;
                                 }
+                                else {
+                                    // default to outflow or maybe reflecting?
+                                    // TODO: add support for non-conserved types
+                                    data[idx] = data[interior_idx];
+                                    // data[idx] = apply_reflecting(
+                                    //     data[interior_idx],
+                                    //     boundary_dim + 1
+                                    // );
+                                }
                                 break;
                             }
                             case BoundaryCondition::REFLECTING:
                                 (void) handle_dynamic_bc;
                                 data[idx] = apply_reflecting(
                                     data[interior_idx],
-                                    boundary_dim + 1
+                                    boundary_dim + 1,
+                                    mesh->get_cell_from_global(interior_idx),
+                                    mesh->geometry()
                                 );
                                 break;
                             case BoundaryCondition::PERIODIC:
@@ -488,7 +515,7 @@ namespace simbi {
                                           : coords[dim] - tshape[dim];
                     break;
 
-                default:   // OUTFLOW
+                default:   // OUTFLOW or DYNAMIC
                     int_coords[dim] = (coords[dim] < radii[dim])
                                           ? radii[dim]
                                           : tshape[dim] + radii[dim] - 1;
@@ -503,11 +530,25 @@ namespace simbi {
         }
 
         template <typename U>
-        DUAL static U apply_reflecting(const U& val, int momentum_idx)
+        DUAL static U apply_reflecting(
+            const U& val,
+            int momentum_idx,
+            const auto& cell,
+            const Geometry geom
+        )
         {
             auto result = val;
             if constexpr (is_conserved_v<T>) {
-                result.mcomponent(momentum_idx) *= -1.0;
+                // m_\theta only changes sign at equator
+                if (geom == Geometry::SPHERICAL && !cell.at_pole()) {
+                    result.mcomponent(momentum_idx) *= -1.0;
+                    if constexpr (is_mhd<U>::value) {
+                        result.bcomponent(momentum_idx) *= -1.0;
+                    }
+                }
+                else {
+                    result.mcomponent(momentum_idx) *= -1.0;
+                }
             }
             return result;
         }
