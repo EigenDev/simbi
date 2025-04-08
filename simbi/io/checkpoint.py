@@ -3,6 +3,8 @@ from dataclasses import dataclass
 from typing import Sequence, Any, TypedDict
 from numpy.typing import NDArray
 from pathlib import Path
+
+from simbi.functional.reader import LazySimulationReader
 from ..functional.maybe import Maybe
 from ..physics import calculate_state_vector, StateVector
 from ..tools.utility import read_file
@@ -32,7 +34,7 @@ class CheckpointData:
 
     state: StateVector
     mesh: dict[str, NDArray[np.floating[Any]]]
-    setup: dict[str, Any]
+    metadata: dict[str, Any]
     staggered_bfields: Sequence[NDArray[np.floating[Any]]]
 
 
@@ -40,23 +42,18 @@ def load_checkpoint(filepath: Path | str) -> Maybe[CheckpointData]:
     """Load checkpoint with pure functional approach"""
 
     def extract_fields(
-        data: tuple[
-            dict[str, NDArray[np.floating[Any]]],
-            dict[str, Any],
-            dict[str, NDArray[np.floating[Any]]],
-        ],
+        reader: LazySimulationReader,
     ) -> Maybe[CheckpointData]:
-        fields, setup, mesh = data
-        dim = setup["dimensions"]
+        fields, metadata, mesh, immersed_bodies = reader
 
         return (
             Maybe.of(fields)
             .map(
                 lambda x: SimulationFields(
-                    velocity=[x[f"v{i}"] for i in range(1, dim + 1)],
+                    velocity=[x[f"v{i}"] for i in range(1, metadata["dimensions"] + 1)],
                     bfields=(
-                        [x[f"b{i}"] for i in range(1, dim + 1)]
-                        if "mhd" in setup["regime"]
+                        [x[f"b{i}_mean"] for i in range(1, metadata["dimensions"] + 1)]
+                        if "mhd" in metadata["regime"]
                         else []
                     ),
                     rho=x["rho"],
@@ -67,23 +64,25 @@ def load_checkpoint(filepath: Path | str) -> Maybe[CheckpointData]:
             .map(
                 lambda x: CheckpointData(
                     state=calculate_state_vector(
-                        adiabatic_index=setup["adiabatic_index"],
+                        adiabatic_index=metadata["adiabatic_index"],
                         rho=x["rho"],
                         velocity=x["velocity"],
                         pressure=x["pressure"],
                         chi=x["chi"],
-                        regime=setup["regime"],
+                        regime=metadata["regime"],
                         bfields=x["bfields"],
                     ),
                     staggered_bfields=(
-                        [fields[f"b{i}stag"] for i in range(1, 4)]
-                        if x["bfields"]
-                        else []
+                        [fields[f"b{i}"] for i in range(1, 4)] if x["bfields"] else []
                     ),
                     mesh=mesh,
-                    setup=setup,
+                    metadata=metadata,
                 )
             )
         )
 
-    return Maybe.of(filepath).map(lambda p: read_file(str(p))).bind(extract_fields)
+    return (
+        Maybe.of(filepath)
+        .map(lambda p: read_file(str(p), unpad=False))
+        .bind(extract_fields)
+    )
