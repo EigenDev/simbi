@@ -55,7 +55,6 @@
 #include "core/types/utility/enums.hpp"
 #include <cmath>
 #include <iostream>
-#include <vector>
 
 namespace simbi {
     namespace sim_type {
@@ -71,7 +70,7 @@ namespace simbi {
 
     template <typename T>
     concept VectorLike = requires(T t) {
-        // mMust have array-like access returning real
+        // must have array-like access returning real
         { t[0] } -> std::convertible_to<real>;
 
         // must have size() method returning size_type
@@ -104,7 +103,7 @@ namespace simbi {
             };
 
             // Wave speed components
-            real aL_, aR_, dL_, dR_, vjL_, vjR_, vkL_, vkR_, lamL_, lamR_;
+            real aL, aR, dL, dR, vjL, vjR, vkL, vkR, vnorm, lamL, lamR;
 
             ~anyHydro() = default;
 
@@ -132,6 +131,23 @@ namespace simbi {
                     std::copy(other.vals_, other.vals_ + nmem, vals_);
                 }
                 return *this;
+            }
+
+            // bool operator
+            DUAL bool operator==(const anyHydro& other) const
+            {
+                for (luint i = 0; i < nmem; i++) {
+                    if (vals_[i] != other.vals_[i]) {
+                        return false;
+                    }
+                }
+                return true;
+            }
+
+            // bool operator
+            DUAL bool operator!=(const anyHydro& other) const
+            {
+                return !(*this == other);
             }
 
             // Vector constructor with initialization list
@@ -330,6 +346,15 @@ namespace simbi {
 
             DUAL const real& chi() const { return vals_[Offsets::chi]; }
 
+            DUAL constexpr real vLtrans(const luint perm) const
+            {
+                return perm == 1 ? vjL : vkL;
+            }
+
+            DUAL constexpr real vRtrans(const luint perm) const
+            {
+                return perm == 1 ? vjR : vkR;
+            }
             // output the hydro state
             DUAL void print() const
             {
@@ -392,6 +417,9 @@ namespace simbi {
         using Base::chi;
         using Base::vals_;
         using typename Base::Offsets;
+
+        // stuff for MdZ CT Algo
+        real lamR, lamL, aL, aR, dL, dR, vjL, vjR, vkL, vkR;
 
         // Vector-based accessors
         DUAL real& dens() { return vals_[Offsets::density]; }
@@ -654,7 +682,7 @@ namespace simbi {
 
         DUAL const real& press() const { return vals_[Offsets::energy]; }
 
-        // need a dummy accessor for stroing alfven
+        // need a dummy accessor for sotring Alfven
         // velocity in HLLD calculations
         DUAL real& alfven() { return vals_[Offsets::chi]; }
 
@@ -955,37 +983,42 @@ namespace simbi {
             const real x1,
             const real x2,
             const real x3,
+            const auto error_type,
             PrettyTable& table
         ) const
         {
             std::ostringstream oss;
             oss << "Primitives in non-physical state.\n";
+            if (error_type) {
+                oss << "reason: " << error_type << "\n";
+            }
             if constexpr (Dims == 1) {
                 oss << "location: (" << x1 << "): \n";
             }
             else if constexpr (Dims == 2) {
                 if (x2 == INFINITY) {   // an effective 1D run
                     oss << "location: (" << x1 << "): \n";
-                    oss << "[" << ii << "]\n";
+                    oss << "index: [" << ii << "]\n";
                 }
                 else {
                     oss << "location: (" << x1 << ", " << x2 << "): \n";
-                    oss << "[" << ii << ", " << jj << "]\n";
+                    oss << "indices: [" << ii << ", " << jj << "]\n";
                 }
             }
             else {
                 if (x2 == INFINITY) {   // an effective 1D run
                     oss << "location: (" << x1 << "): \n";
-                    oss << "[" << ii << "]\n";
+                    oss << "indicies: [" << ii << "]\n";
                 }
                 else if (x3 == INFINITY) {
                     oss << "location: (" << x1 << ", " << x2 << "): \n";
-                    oss << "[" << ii << ", " << jj << "]\n";
+                    oss << "indices: [" << ii << ", " << jj << "]\n";
                 }
                 else {
                     oss << "location: (" << x1 << ", " << x2 << ", " << x3
                         << "): \n";
-                    oss << "[" << ii << ", " << jj << ", " << kk << "]\n";
+                    oss << "indices: [" << ii << ", " << jj << ", " << kk
+                        << "]\n";
                 }
             }
             // oss << "Density: " << rho() << "\n";
