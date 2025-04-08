@@ -49,11 +49,9 @@
 #ifndef CT_CALCULATOR_HPP
 #define CT_CALCULATOR_HPP
 
-#include "build_options.hpp"   // for DUAL
-#include "contact.hpp"         // for CTContact
-#include "stencil.hpp"         // for StencilView
-#include "uct_ct.hpp"          // for CTMdZ
-#include "zero.hpp"            // for CTZero
+#include "build_options.hpp"              // for DUAL
+#include "core/types/utility/enums.hpp"   // for Dir, BlockAx, Plane, Corner
+#include "stencil.hpp"                    // for StencilView
 
 namespace simbi {
     namespace scheme {
@@ -65,6 +63,8 @@ namespace simbi {
             static DUAL real calc_edge_emf(
                 const auto& vertical_flux,
                 const auto& horizontal_flux,
+                const auto& vertical_bfield,
+                const auto& horizontal_bfield,
                 const auto& prims,
                 const luint nhat
             )
@@ -72,35 +72,67 @@ namespace simbi {
                 using flux_t = decltype(vertical_flux);
                 using prim_t = decltype(prims);
                 // Create plane-aware stencil
-                ct::StencilView<B, P, C, flux_t, prim_t> stencil(
+                ct::StencilView<B, P, C, flux_t, prim_t> flux_stencil(
                     vertical_flux,
                     horizontal_flux,
                     prims
                 );
 
                 // Get fluxes using plane-specific directions
-                const auto fn = stencil.horizontal_flux(Dir::N);
-                const auto fs = stencil.horizontal_flux(Dir::S);
-                const auto fe = stencil.vertical_flux(Dir::E);
-                const auto fw = stencil.vertical_flux(Dir::W);
+                const auto fn = flux_stencil.horizontal_field(Dir::N);
+                const auto fs = flux_stencil.horizontal_field(Dir::S);
+                const auto fe = flux_stencil.vertical_field(Dir::E);
+                const auto fw = flux_stencil.vertical_field(Dir::W);
 
-                // Get corner primitives
-                const auto ene = stencil.prim(Dir::NE).ecomponent(nhat);
-                const auto enw = stencil.prim(Dir::NW).ecomponent(nhat);
-                const auto ese = stencil.prim(Dir::SE).ecomponent(nhat);
-                const auto esw = stencil.prim(Dir::SW).ecomponent(nhat);
+                if constexpr (comp_ct_type == CTTYPE::MdZ) {
+                    using bfield_t = decltype(vertical_bfield);
+                    ct::StencilView<B, P, C, bfield_t, prim_t> bfield_stencil(
+                        vertical_bfield,
+                        horizontal_bfield,
+                        prims
+                    );
 
-                return CTScheme::compute_emf(
-                    fw,
-                    fe,
-                    fs,
-                    fn,
-                    esw,
-                    ese,
-                    enw,
-                    ene,
-                    nhat
-                );
+                    // Get corner primitives
+                    const auto bn = bfield_stencil.horizontal_field(Dir::N);
+                    const auto bs = bfield_stencil.horizontal_field(Dir::S);
+                    const auto be = bfield_stencil.vertical_field(Dir::E);
+                    const auto bw = bfield_stencil.vertical_field(Dir::W);
+
+                    return CTScheme::compute_emf(
+                        fw,
+                        fe,
+                        fs,
+                        fn,
+                        bw,
+                        be,
+                        bs,
+                        bn,
+                        nhat
+                    );
+                }
+                else {
+                    // Get corner primitives
+                    const auto ene =
+                        flux_stencil.prim(Dir::NE).ecomponent(nhat);
+                    const auto enw =
+                        flux_stencil.prim(Dir::NW).ecomponent(nhat);
+                    const auto ese =
+                        flux_stencil.prim(Dir::SE).ecomponent(nhat);
+                    const auto esw =
+                        flux_stencil.prim(Dir::SW).ecomponent(nhat);
+
+                    return CTScheme::compute_emf(
+                        fw,
+                        fe,
+                        fs,
+                        fn,
+                        esw,
+                        ese,
+                        enw,
+                        ene,
+                        nhat
+                    );
+                }
             }
         };
 

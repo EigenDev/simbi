@@ -50,6 +50,7 @@
 #define STENCIL_HPP
 
 #include "build_options.hpp"              // for global::on_gpu
+#include "core/types/alias/alias.hpp"     // for uarray
 #include "core/types/utility/enums.hpp"   // for Dir, Plane
 
 namespace simbi {
@@ -103,28 +104,28 @@ namespace simbi {
           public:
             // Constructor for creating stencil around a point
             StencilView(
-                const Flux& vertical_flux,
-                const Flux& horizontal_flux,
+                const Flux& vertical_field,
+                const Flux& horizontal_field,
                 const Primitive& primitives
             )
-                : v_flux_(vertical_flux),
-                  h_flux_(horizontal_flux),
+                : v_field_(vertical_field),
+                  h_field_(horizontal_field),
                   prims_(primitives),
                   coordinates(primitives.position())
             {
             }
 
             // Get flux at stencil point based on plane-aware directions
-            DUAL constexpr auto vertical_flux(Dir dir) const
+            DUAL constexpr auto vertical_field(Dir dir) const
             {
                 auto [di, dj, dk] = get_vertical_offsets(dir, coordinates);
-                return v_flux_.at(di, dj, dk);
+                return v_field_.at(di, dj, dk);
             }
 
-            DUAL constexpr auto horizontal_flux(Dir dir) const
+            DUAL constexpr auto horizontal_field(Dir dir) const
             {
                 auto [di, dj, dk] = get_horizontal_offsets(dir, coordinates);
-                return h_flux_.at(di, dj, dk);
+                return h_field_.at(di, dj, dk);
             }
 
             // Get primitive at stencil point
@@ -302,8 +303,8 @@ namespace simbi {
                 }
             }
 
-            alignas(64) const Flux& v_flux_;
-            alignas(64) const Flux& h_flux_;
+            alignas(64) const Flux& v_field_;
+            alignas(64) const Flux& h_field_;
             alignas(64) const Primitive& prims_;
             alignas(64) const uarray<3> coordinates;
 

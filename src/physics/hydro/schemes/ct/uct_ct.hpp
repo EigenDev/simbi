@@ -54,7 +54,7 @@
 namespace simbi {
     namespace ct {
         // the Constrained Transport scheme
-        // encompassing Upwind Corner Transport - Constrained Transpoty
+        // encompassing Upwind Corner Transport - Constrained Transport
         // described in Mignone and DelZanna 2021.
         struct CTMdZ {
             template <typename Flux>
@@ -79,10 +79,10 @@ namespace simbi {
                     compute_transverse_velocities(fw, fe, fs, fn, nhat);
 
                 // Compute fluxes and dissipation
-                const auto f_we   = compute_emf_flux(aw, ae, vw, ve, bw, be);
-                const auto f_ns   = compute_emf_flux(an, as, vn, vs, bn, bs);
-                const auto phi_we = compute_dissipation(dw, de, bw, be);
-                const auto phi_ns = compute_dissipation(dn, ds, bn, bs);
+                const auto f_we   = compute_emf_flux(aw, vw, bw, ae, ve, be);
+                const auto f_ns   = compute_emf_flux(an, vn, bn, as, vs, bs);
+                const auto phi_we = compute_dissipation(dw, bw, de, be);
+                const auto phi_ns = compute_dissipation(dn, bn, ds, bs);
 
                 const auto sign = nhat == 2 ? -1.0 : 1.0;
                 return sign * ((f_ns - phi_ns) - (f_we + phi_we));
@@ -142,10 +142,10 @@ namespace simbi {
                 // check for stationary flow
                 if (lPh == lMh || lPv == lMv) {
                     return std::make_tuple(
-                        fw.vcomponent(nhat),
-                        fe.vcomponent(nhat),
-                        fs.vcomponent(nhat),
-                        fn.vcomponent(nhat)
+                        fw.vnorm,
+                        fe.vnorm,
+                        fs.vnorm,
+                        fn.vnorm
                     );
                 }
 
@@ -177,9 +177,9 @@ namespace simbi {
             }
 
             static DUAL auto
-            compute_disspipation(real dL, real bL, real dR, real bR) -> real
+            compute_dissipation(real dL, real bL, real dR, real bR) -> real
             {
-                return (dL * bL) + (dR * bR);
+                return (dL * bL) - (dR * bR);
             }
         };
     }   // namespace ct

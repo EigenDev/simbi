@@ -52,7 +52,6 @@
 #include "build_options.hpp"
 #include "core/types/containers/vector_field.hpp"
 #include "core/types/utility/enums.hpp"
-#include "geometry/mesh/mesh.hpp"
 #include "physics/hydro/schemes/ct/ct_calculator.hpp"
 
 namespace simbi {
@@ -84,6 +83,9 @@ namespace simbi {
                 const auto& fri,
                 const auto& gri,
                 const auto& hri,
+                const auto& bstag1,
+                const auto& bstag2,
+                const auto& bstag3,
                 const auto& prims
             )
             {
@@ -94,75 +96,75 @@ namespace simbi {
                     left_field[l_dir - 1] = ct_algo::template calc_edge_emf<
                         BlockAx::K,
                         Plane::JK,
-                        Corner::SW>(hri, gri, prims, l_dir);
+                        Corner::SW>(hri, gri, bstag3, bstag2, prims, l_dir);
 
                     // E_{2, i-1/2, j ,k-1/2}
                     left_field[m_dir - 1] = ct_algo::template calc_edge_emf<
                         BlockAx::K,
                         Plane::IK,
-                        Corner::SW>(hri, fri, prims, m_dir);
+                        Corner::SW>(hri, fri, bstag3, bstag1, prims, m_dir);
 
                     // E_{1, i, j+1/2,k-1/2}
                     right_field[l_dir - 1] = ct_algo::template calc_edge_emf<
                         BlockAx::K,
                         Plane::JK,
-                        Corner::SE>(hri, gri, prims, l_dir);
+                        Corner::SE>(hri, gri, bstag3, bstag2, prims, l_dir);
 
                     // E_{2, i+1/2, j ,k-1/2}
                     right_field[m_dir - 1] = ct_algo::template calc_edge_emf<
                         BlockAx::K,
                         Plane::IK,
-                        Corner::SE>(hri, fri, prims, m_dir);
+                        Corner::SE>(hri, fri, bstag3, bstag1, prims, m_dir);
                 }
                 else if constexpr (l_dir == 2 && m_dir == 3) {   // updating B1
                     // E_{2, i-1/2, j,k-1/2}
                     left_field[l_dir - 1] = ct_algo::template calc_edge_emf<
                         BlockAx::I,
                         Plane::IK,
-                        Corner::SW>(hri, fri, prims, l_dir);
+                        Corner::SW>(hri, fri, bstag3, bstag1, prims, l_dir);
 
                     // E_{3, i-1/2, j-1/2, k}
                     left_field[m_dir - 1] = ct_algo::template calc_edge_emf<
                         BlockAx::I,
                         Plane::IJ,
-                        Corner::SW>(gri, fri, prims, m_dir);
+                        Corner::SW>(gri, fri, bstag2, bstag1, prims, m_dir);
 
                     // E_{2, i-1/2, j,k+1/2}
                     right_field[l_dir - 1] = ct_algo::template calc_edge_emf<
                         BlockAx::I,
                         Plane::IK,
-                        Corner::NW>(hri, fri, prims, l_dir);
+                        Corner::NW>(hri, fri, bstag3, bstag1, prims, l_dir);
 
                     // E_{3, i-1/2, j+1/2, k}
                     right_field[m_dir - 1] = ct_algo::template calc_edge_emf<
                         BlockAx::I,
                         Plane::IJ,
-                        Corner::NW>(gri, fri, prims, m_dir);
+                        Corner::NW>(gri, fri, bstag2, bstag1, prims, m_dir);
                 }
                 else {   // updating B2
                     // E_{3, i-1/2, j-1/2, k}
                     left_field[l_dir - 1] = ct_algo::template calc_edge_emf<
                         BlockAx::J,
                         Plane::IJ,
-                        Corner::SW>(gri, fri, prims, l_dir);
+                        Corner::SW>(gri, fri, bstag2, bstag1, prims, l_dir);
 
                     // E_{1, i, j-1/2, k-1/2}
                     left_field[m_dir - 1] = ct_algo::template calc_edge_emf<
                         BlockAx::J,
                         Plane::JK,
-                        Corner::SW>(hri, gri, prims, m_dir);
+                        Corner::SW>(hri, gri, bstag3, bstag2, prims, m_dir);
 
                     // E_{3, i+1/2, j-1/2, k}
                     right_field[l_dir - 1] = ct_algo::template calc_edge_emf<
                         BlockAx::J,
                         Plane::IJ,
-                        Corner::SE>(gri, fri, prims, l_dir);
+                        Corner::SE>(gri, fri, bstag2, bstag1, prims, l_dir);
 
                     // E_{1, i, j-1/2, k+1/2}
                     right_field[m_dir - 1] = ct_algo::template calc_edge_emf<
                         BlockAx::J,
                         Plane::JK,
-                        Corner::NW>(hri, gri, prims, m_dir);
+                        Corner::NW>(hri, gri, bstag3, bstag2, prims, m_dir);
                 }
             }
         };
