@@ -215,15 +215,26 @@ namespace simbi {
                 emit_troubled_cells(sim_state_t& sim_state, PrettyTable& table)
                 {
                     auto unwravel_idx = [&](luint idx,
-                                            std::vector<luint>& shape) {
-                        std::vector<luint> coords(3);
-                        for (luint ii = 0; ii < shape.size(); ++ii) {
-                            coords.push_back(idx % shape[ii]);
-                            idx /= shape[ii];
+                                            const std::vector<luint>& shape) {
+                        std::vector<luint> coords(shape.size());
+
+                        if (global::col_major) {
+                            // Column-major order (Fortran-style)
+                            luint stride = 1;
+                            for (luint ii = 0; ii < shape.size(); ++ii) {
+                                coords[ii] = (idx / stride) % shape[ii];
+                                stride *= shape[ii];
+                            }
                         }
-                        if (!global::col_major) {
-                            std::reverse(coords.begin(), coords.end());
+                        else {
+                            // Row-major order (C-style)
+                            luint stride = 1;
+                            for (int ii = shape.size() - 1; ii >= 0; --ii) {
+                                coords[ii] = (idx / stride) % shape[ii];
+                                stride *= shape[ii];
+                            }
                         }
+
                         return std::make_tuple(coords[0], coords[1], coords[2]);
                     };
 
@@ -235,7 +246,7 @@ namespace simbi {
                             shape.push_back(sim_state.ny());
                             shape.push_back(sim_state.nx());
                             // unravel the index
-                            auto [ii, jj, kk] = unwravel_idx(idx, shape);
+                            auto [kk, jj, ii] = unwravel_idx(idx, shape);
                             auto cell         = sim_state.mesh()
                                             .get_cell_from_indices(ii, jj, kk);
                             prim->error_at(
@@ -245,8 +256,18 @@ namespace simbi {
                                 cell.centroid_coordinate(0),
                                 cell.centroid_coordinate(1),
                                 cell.centroid_coordinate(2),
+                                prim.error(),
                                 table
                             );
+                            // std::cout << "idx: " << idx << std::endl;
+                            // std::cout
+                            //     << sim_state.primitives().at(ii, jj, kk - 2)
+                            //     << std::endl;
+                            // std::cout
+                            //     << sim_state.primitives().at(ii, jj, kk - 1)
+                            //     << std::endl;
+                            // std::cin.get();
+
                             return typename sim_state_t::primitive_t{};
                         });
                         ++idx;
@@ -400,9 +421,11 @@ namespace simbi {
                         }
                         // Write to a file at every checkpoint interval
                         if (sim_state.time_to_write_checkpoint()) {
-                            table.setProgress(static_cast<int>(
-                                (sim_state.time() / end_time) * 100.0
-                            ));
+                            table.setProgress(
+                                static_cast<int>(
+                                    (sim_state.time() / end_time) * 100.0
+                                )
+                            );
                             io::write_to_file(sim_state, table);
                             sim_state.time_manager()
                                 .update_next_checkpoint_time();
