@@ -173,7 +173,7 @@ namespace simbi {
         DEV real kkc_fmu49(
             const real mu,
             const real beesq,
-            const real beedrsq,
+            const real rsbsq,
             const real r
         )
         {
@@ -184,7 +184,7 @@ namespace simbi {
             const real x = 1.0 / (1.0 + mu * beesq);
 
             // Equation (38)
-            const real rbar_sq = r * r * x * x + mu * x * (1.0 + x) * beedrsq;
+            const real rbar_sq = r * r * x * x + mu * x * (1.0 + x) * rsbsq;
 
             return mu * std::sqrt(hlim * hlim + rbar_sq) - 1.0;
         }
@@ -195,7 +195,6 @@ namespace simbi {
          *
          * @param mu minimization variable
          * @param r vector of rescaled momentum
-         * @param rparr parallel component of rescaled momentum vector
          * @param beesq rescaled magnetic field squared
          * @param beedr inner product between rescaled magnetic field & momentum
          * @param qterm rescaled gas energy density
@@ -206,49 +205,110 @@ namespace simbi {
         DEV real kkc_fmu44(
             const real mu,
             const real r,
-            const real rparr,
-            const real rperp,
+            const real rperp_sq,
             const real beesq,
-            const real beedrsq,
+            const real rsbsq,
             const real qterm,
             const real dterm,
             const real gamma
         )
         {
+            constexpr real h0 = 1.0;
             // Equation (26)
             const real x = 1.0 / (1.0 + mu * beesq);
 
             // Equation (38)
-            const real rbar_sq = r * r * x * x + mu * x * (1.0 + x) * beedrsq;
+            const real rbar_sq = r * r * x * x + mu * x * (1.0 + x) * rsbsq;
 
             // Equation (39)
             const real qbar =
-                qterm - 0.5 * (beesq + mu * mu * x * x * beesq * rperp * rperp);
+                qterm - 0.5 * (beesq + mu * mu * x * x * beesq * rperp_sq);
 
-            // Equation (32) inverted and squared
-            const real vsq  = mu * mu * rbar_sq;
-            const real gbsq = vsq / std::abs(1.0 - vsq);
-            const real g    = std::sqrt(1.0 + gbsq);
+            // Equation (32) & (33)
+            const real z_upper = r / h0;
+            const real v_limit = z_upper / std::sqrt(1.0 + z_upper * z_upper);
+            const real vsq     = my_min(mu * mu * rbar_sq, v_limit * v_limit);
+            const real gbsq    = vsq / (1.0 - vsq);
+
+            const real g = std::sqrt(1.0 + gbsq);
 
             // Equation (41)
             const real rhohat = dterm / g;
 
             // Equation (42)
-            const real epshat = g * (qbar - mu * rbar_sq) + gbsq / (1.0 + g);
+            const real eps = g * (qbar - mu * rbar_sq) + gbsq / (1.0 + g);
+
+            // zero-temperature limit for gamma-law EoS
+            constexpr auto pfloor = 1.0e-3;
+            const real eps_min    = pfloor / (rhohat * (gamma - 1.0));
+            const real epshat     = my_max(eps, eps_min);
 
             // Equation (43)
             const real phat = (gamma - 1.0) * rhohat * epshat;
             const real ahat = phat / (rhohat * (1.0 + epshat));
 
             // Equation (46) - (48)
-            const real vhatA = (1.0 + ahat) * (1.0 + epshat) / g;
-            const real vhatB = (1.0 + ahat) * (1.0 + qbar - mu * rbar_sq);
-            const real vhat  = my_max(vhatA, vhatB);
+            const real nu_hatA = (1.0 + ahat) * (1.0 + epshat) / g;
+            const real nu_hatB = (1.0 + ahat) * (1.0 + qbar - mu * rbar_sq);
+            const real nu_hat =
+                (eps < eps_min) ? nu_hatA : my_max(nu_hatA, nu_hatB);
 
             // Equation (45)
-            const real muhat = 1.0 / (vhat + rbar_sq * mu);
+            const real muhat = 1.0 / (nu_hat + rbar_sq * mu);
 
             return mu - muhat;
+        }
+
+        real find_mu_plus(const real beesq, const real rsbsq, const real r)
+        {
+            constexpr real h0 = 1.0;
+
+            // If r < h0, we can use 1/h0 as upper bound
+            if (r < h0) {
+                return 1.0 / h0;   // Since h0 = 1.0, this is just 1.0
+            }
+
+            // otherwise, we need to find \mu^\plus where fa(\mu^\plus) = 0
+            // here, we'll start with a reasonably large upper bound
+            real mu_lower = 0.0;
+            real mu_upper = 2.0;   // Start with a guess
+
+            // ensure upper bound gives positive fa
+            real f_upper = kkc_fmu49(mu_upper, beesq, rsbsq, r);
+            while (f_upper < 0.0) {
+                mu_upper *= 2.0;
+                f_upper = kkc_fmu49(mu_upper, beesq, rsbsq, r);
+            }
+
+            // now we find the root using bisection
+            const int max_iter = 50;
+            int iter           = 0;
+            real mu_mid, f_mid;
+            real f_lower = kkc_fmu49(mu_lower, beesq, rsbsq, r);
+
+            while (iter < max_iter && (mu_upper - mu_lower) > global::epsilon) {
+                mu_mid = 0.5 * (mu_lower + mu_upper);
+                f_mid  = kkc_fmu49(mu_mid, beesq, rsbsq, r);
+
+                if (std::abs(f_mid) < global::epsilon) {
+                    // found a good enough root (!)
+                    break;
+                }
+
+                if (f_mid * f_lower < 0.0) {
+                    mu_upper = mu_mid;
+                    f_upper  = f_mid;
+                }
+                else {
+                    mu_lower = mu_mid;
+                    f_lower  = f_mid;
+                }
+
+                iter++;
+            }
+
+            // we add a small safety margin to ensure the root is contained
+            return mu_mid * 1.000001;
         }
 
         /**

@@ -663,7 +663,6 @@ namespace simbi {
          *
          * @param mu minimization variable
          * @param r vector of rescaled momentum
-         * @param rparr parallel component of rescaled momentum vector
          * @param beesq rescaled magnetic field squared
          * @param beedr inner product between rescaled magnetic field & momentum
          * @param qterm rescaled gas energy density
@@ -674,7 +673,6 @@ namespace simbi {
         DEV real kkc_fmu44(
             const real mu,
             const real r,
-            const real rparr,
             const real rperp,
             const real beesq,
             const real beedrsq,
@@ -682,6 +680,8 @@ namespace simbi {
             const real dterm,
             const real gamma
         );
+
+        real find_mu_plus(const real beesq, const real beedrsq, const real r);
 
         //-------------------Inline for Speed -------------------------
         /**
