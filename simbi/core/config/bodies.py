@@ -1,4 +1,4 @@
-from typing import Optional
+from typing import Optional, Sequence
 from dataclasses import dataclass
 
 
@@ -6,8 +6,8 @@ from dataclasses import dataclass
 class ImmersedBodyConfig:
     body_type: str
     mass: float
-    velocity: list[float]
-    position: list[float]
+    velocity: Sequence[float]
+    position: Sequence[float]
     radius: float
     specifics: Optional[dict[str, float | int | bool]] = None
 
@@ -29,7 +29,7 @@ class BinaryConfig:
     eccentricity: float
     mass_ratio: float
     total_mass: float
-    components: list[BinaryComponentConfig]
+    components: Sequence[BinaryComponentConfig]
 
 
 @dataclass(frozen=True)
