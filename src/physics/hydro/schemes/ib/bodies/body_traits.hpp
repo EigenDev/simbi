@@ -119,11 +119,17 @@ namespace simbi::ib::traits {
             total_accreted_energy_ += energy;
         }
 
+        DUAL void add_accreted_angular_momentum(T angular_momentum)
+        {
+            total_accreted_angular_momentum_ += angular_momentum;
+        }
+
       private:
         Params params_;
-        T total_accreted_mass_     = T(0);
-        T total_accreted_momentum_ = T(0);
-        T total_accreted_energy_   = T(0);
+        T total_accreted_mass_             = T(0);
+        T total_accreted_momentum_         = T(0);
+        T total_accreted_energy_           = T(0);
+        T total_accreted_angular_momentum_ = T(0);
     };
 
     // rigid
