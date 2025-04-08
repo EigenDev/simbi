@@ -56,7 +56,10 @@ void SRHD<dim>::cons2prim_impl()
 
                 if (iter >= global::MAX_ITER || !std::isfinite(peq)) {
                     loc->store(true);
-                    return simbi::Nothing;
+                    return simbi::None(
+                        "cons2prim iterations max exceeded or non-finite "
+                        "pressure"
+                    );
                 }
                 iter++;
 
@@ -64,7 +67,7 @@ void SRHD<dim>::cons2prim_impl()
 
             if (peq < 0) {
                 loc->store(true);
-                return simbi::Nothing;
+                return simbi::None("negative pressure");
             }
 
             const auto inv_et   = 1.0 / (tau + d + peq);

@@ -1,4 +1,5 @@
 #include "core/managers/boundary_manager.hpp"
+#include "core/types/containers/array.hpp"
 #include <cmath>   // for max, min
 
 using namespace simbi;
@@ -19,6 +20,8 @@ Newtonian<dim>::Newtonian(
       isothermal_(init_conditions.isothermal),
       sound_speed_squared_(init_conditions.sound_speed_squared)
 {
+    this->context_.gamma               = gamma;
+    this->context_.is_isothermal       = gamma == 1.0;
     this->context_.ambient_sound_speed = std::sqrt(sound_speed_squared_);
 }
 
@@ -47,7 +50,7 @@ void Newtonian<dim>::cons2prim_impl()
             if (pre < 0 || !std::isfinite(pre)) {
                 // store the invalid state
                 loc->store(true);
-                return simbi::Nothing;
+                return simbi::None("negative or non-finite pressure");
             }
 
             return primitive_t{rho, vel, pre, chi};
@@ -83,36 +86,63 @@ DUAL Newtonian<dim>::eigenvals_t Newtonian<dim>::calc_eigenvals(
     switch (this->solver_type()) {
         case Solver::HLLC: {
             // Pressure-based wave speed estimates (Batten et al. 1997)
-            const real pvrs = 0.5 * (pL + pR) - 0.5 * (vR - vL) *
-                                                    (rhoL + rhoR) * 0.5 *
-                                                    (csL + csR);
+            const auto rho_bar = 0.5 * (rhoL + rhoR);
+            const auto c_bar   = 0.5 * (csL + csR);
+            const real pvrs =
+                0.5 * (pL + pR) - 0.5 * (vR - vL) * rho_bar * c_bar;
             const real pmin = my_min(pL, pR);
             const real pmax = my_max(pL, pR);
 
             real pStar;
-            if (pmax / pmin <= 2.0 && pmin <= pvrs && pvrs <= pmax) {
+            // define Q_user as in Toro's book
+            // Section 9.5.1, Equations (9.46) and (9.47)
+            constexpr auto q_user = 2.0;
+            if (pmax / pmin <= q_user && pmin <= pvrs && pvrs <= pmax) {
                 // PVRS estimate if pressure ratio is small
                 pStar = pvrs;
+                // aStar = 0.5 * (vL + vR) - 0.5 * (pR - pL) / (rho_bar *
+                // c_bar);
             }
-            else {
+            else if (pvrs <= pmin) {   // use the two rarefaction approximation
                 if (isothermal_) {
                     // Isothermal case - simplified wave speed estimate
                     pStar = (rhoL * csL * pR + rhoR * csR * pL -
                              rhoL * rhoR * csL * csR * (vR - vL)) /
                             (rhoL * csL + rhoR * csR);
+                    // aStar = 0.5 * (vL + vR) + 0.5 * (pR - pL) /
+                    //                               (rhoL * csL + rhoR * csR);
                 }
                 else {
                     // Two-rarefaction approximation for adiabatic case
                     const real gamma_factor = (gamma - 1.0) / (2.0 * gamma);
                     const real pL_pow       = std::pow(pL, gamma_factor);
                     const real pR_pow       = std::pow(pR, gamma_factor);
+                    // const real pLR          = std::pow(pL / pR,
+                    // gamma_factor);
 
                     pStar = std::pow(
                         (csL + csR - 0.5 * (gamma - 1.0) * (vR - vL)) /
                             (csL / pL_pow + csR / pR_pow),
-                        2.0 * gamma / (gamma - 1.0)
+                        1.0 / gamma_factor
                     );
+                    // aStar = (pLR * vL / csL + vR / csR +
+                    //          2.0 * (pLR - 1.0) / (gamma - 1.0)) /
+                    //         (pLR / csL + 1.0 / csR);
                 }
+            }
+            else {   // use the two-shock approximation
+                // alpha_K and beta_K take the place of A_K and B_K in Toro's
+                // book
+                const real alpha_L = 2.0 / ((gamma + 1) * rhoL);
+                const real alpha_R = 2.0 / ((gamma + 1) * rhoR);
+                const real beta_L  = (gamma - 1) / (gamma + 1) * pL;
+                const real beta_R  = (gamma - 1) / (gamma + 1) * pR;
+                const real p0      = my_max(0.0, pvrs);
+                const real gL      = std::sqrt(alpha_L / (p0 + beta_L));
+                const real gR      = std::sqrt(alpha_R / (p0 + beta_R));
+                pStar = (gL * pL + gR * pR - (vR - vL)) / (gL + gR);
+                // aStar = 0.5 * (vL + vR) +
+                //         0.5 * ((pStar - pR) * gR - (pStar - pL) * gL);
             }
 
             // Compute wave speeds using pressure estimate

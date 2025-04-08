@@ -50,19 +50,19 @@
 #ifndef RMHD_HPP
 #define RMHD_HPP
 
-#include "base.hpp"                             // for HydroBase
-#include "build_options.hpp"                    // for real, HD, lint, luint
-#include "core/managers/boundary_manager.hpp"   // for BoundaryManager
-#include "core/types/containers/ndarray.hpp"    // for ndarray
-#include "core/types/monad/maybe.hpp"           // for Maybe
-#include "core/types/utility/enums.hpp"         // for TIMESTEP_TYPE
-#include "geometry/mesh/mesh.hpp"               // for Mesh
-#include "physics/hydro/schemes/ct/ct_calculator.hpp"   // for anyPrimitive
+#include "base.hpp"                               // for HydroBase
+#include "build_options.hpp"                      // for real, HD, lint, luint
+#include "core/managers/boundary_manager.hpp"     // for BoundaryManager
+#include "core/types/containers/ndarray.hpp"      // for ndarray
+#include "core/types/monad/maybe.hpp"             // for Maybe
+#include "core/types/utility/enums.hpp"           // for TIMESTEP_TYPE
+#include "physics/hydro/schemes/ct/contact.hpp"   // for CTContact
+#include "physics/hydro/schemes/ct/uct_ct.hpp"    // for CTMdz
+#include "physics/hydro/schemes/ct/zero.hpp"      // for CTZero
 #include "physics/hydro/types/generic_structs.hpp"   // for Eigenvals, mag_four_vec
 #include "util/parallel/exec_policy.hpp"             // for ExecutionPolicy
 #include "util/tools/helpers.hpp"                    // for my_min, my_max, ...
 #include <functional>                                // for function
-#include <optional>                                  // for optional
 #include <type_traits>                               // for conditional_t
 #include <vector>                                    // for vector
 
@@ -91,7 +91,10 @@ namespace simbi {
         using ct_scheme_t = std::conditional_t<
             comp_ct_type == CTTYPE::MdZ,
             ct::CTMdZ,
-            ct::CTContact>;
+            std::conditional_t<
+                comp_ct_type == CTTYPE::ZERO,
+                ct::CTZero,
+                ct::CTContact>>;
 
         template <typename T>
         using RiemannFuncPointer = conserved_t (T::*)(

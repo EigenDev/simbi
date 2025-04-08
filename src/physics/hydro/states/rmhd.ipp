@@ -1,6 +1,9 @@
+#include "build_options.hpp"
 #include "geometry/vector_calculus.hpp"             // for curl_component
 #include "physics/hydro/schemes/ct/emf_field.hpp"   // for EMField
-#include <cmath>                                    // for max, min
+#include "physics/hydro/types/generic_structs.hpp"
+#include "util/tools/helpers.hpp"
+#include <cmath>   // for max, min
 
 using namespace simbi;
 using namespace simbi::util;
@@ -31,31 +34,28 @@ RMHD<dim>::~RMHD() = default;
 //-----------------------------------------------------------------------------------------
 //                          Get The Primitive
 //-----------------------------------------------------------------------------------------
-/**
- * Return the primitive
- * variables density , three-velocity, pressure
- *
- * @param  p execution policy class
- * @return none
- */
 template <int dim>
 void RMHD<dim>::cons2prim_impl()
 {
-    // functional-style implementation
     shared_atomic_bool local_failure;
+
+    auto message = [](auto iter) -> const char* {
+        if (iter >= global::MAX_ITER) {
+            return "cons2prim iterations max exceeded";
+        }
+        else {
+            return "non-finite mu";
+        }
+    };
     this->prims_.transform(
         [gamma = this->gamma,
-         loc   = &local_failure] DEV(auto& prim, const auto& c)
-            -> Maybe<primitive_t> {
-            const real d    = c.dens();
-            const real m1   = c.mcomponent(1);
-            const real m2   = c.mcomponent(2);
-            const real m3   = c.mcomponent(3);
-            const real tau  = c.nrg();
-            const real b1   = c.bcomponent(1);
-            const real b2   = c.bcomponent(2);
-            const real b3   = c.bcomponent(3);
-            const real dchi = c.chi();
+         loc   = &local_failure,
+         message] DEV(auto& prim, const auto& c) -> Maybe<primitive_t> {
+            const real d      = c.dens();
+            const auto mom    = c.momentum();
+            const real tau    = c.nrg();
+            const auto bfield = c.bfield();
+            const real dchi   = c.chi();
 
             //==================================================================
             // ATTEMPT TO RECOVER PRIMITIVES USING KASTAUN ET AL. 2021
@@ -65,144 +65,105 @@ void RMHD<dim>::cons2prim_impl()
             const real invd   = 1.0 / d;
             const real isqrtd = std::sqrt(invd);
             const real q      = tau * invd;
-            const real r1     = m1 * invd;
-            const real r2     = m2 * invd;
-            const real r3     = m3 * invd;
-            const real rsq    = r1 * r1 + r2 * r2 + r3 * r3;
+            const auto rvec   = mom * invd;
+            const auto rsq    = rvec.dot(rvec);
             const real rmag   = std::sqrt(rsq);
-            const real h1     = b1 * isqrtd;
-            const real h2     = b2 * isqrtd;
-            const real h3     = b3 * isqrtd;
-            const real beesq  = h1 * h1 + h2 * h2 + h3 * h3 + global::epsilon;
-            const real rdb    = r1 * h1 + r2 * h2 + r3 * h3;
+            const auto hvec   = bfield * isqrtd;
+            const auto beesq  = hvec.dot(hvec) + global::epsilon;
+            const auto rdb    = rvec.dot(hvec);
             const real rdbsq  = rdb * rdb;
             // r-parallel Eq. (25.a)
-            const real rp1 = (rdb / beesq) * h1;
-            const real rp2 = (rdb / beesq) * h2;
-            const real rp3 = (rdb / beesq) * h3;
+            const auto rparr = rdb / beesq * hvec;
             // r-perpendicular, Eq. (25.b)
-            const real rq1 = r1 - rp1;
-            const real rq2 = r2 - rp2;
-            const real rq3 = r3 - rp3;
-
-            const real rparr = std::sqrt(rp1 * rp1 + rp2 * rp2 + rp3 * rp3);
-            const real rq    = std::sqrt(rq1 * rq1 + rq2 * rq2 + rq3 * rq3);
+            const auto rperp = rvec - rparr;
+            const auto rpsq  = rperp.dot(rperp);
 
             // We use the false position method to solve for the roots
-            real y1 = 0.0;
-            real y2 = 1.0;
-            real f1 = kkc_fmu49(y1, beesq, rdbsq, rmag);
-            real f2 = kkc_fmu49(y2, beesq, rdbsq, rmag);
-
-            bool good_guesses = false;
-            // if good guesses, use them
-            if (std::abs(f1) + std::abs(f2) < 2.0 * global::epsilon) {
-                good_guesses = true;
-            }
-
-            int iter = 0.0;
-            // compute yy in case the initial bracket is not good
-            real yy = static_cast<real>(0.5) * (y1 + y2);
-            real f;
-            if (!good_guesses) {
-                do {
-                    yy = (y1 * f2 - y2 * f1) / (f2 - f1);
-                    f  = kkc_fmu49(yy, beesq, rdbsq, rmag);
-                    if (f * f2 < 0.0) {
-                        y1 = y2;
-                        f1 = f2;
-                        y2 = yy;
-                        f2 = f;
-                    }
-                    else {
-                        // use Illinois algorithm to avoid stagnation
-                        f1 = 0.5 * f1;
-                        y2 = yy;
-                        f2 = f;
-                    }
-
-                    if (iter >= global::MAX_ITER || !std::isfinite(f)) {
-                        loc->store(true);
-                        return simbi::Nothing;
-                    }
-                    iter++;
-                } while (std::abs(y1 - y2) > global::epsilon &&
-                         std::abs(f) > global::epsilon);
-            }
-
-            // We found good brackets. Now we can solve for the roots
-            y1 = 0.0;
-            y2 = yy;
+            real mu_lower = 0.0;
+            real mu_upper = find_mu_plus(beesq, rdbsq, rmag);
+            real f_lower  = kkc_fmu49(mu_lower, beesq, rdbsq, rmag);
+            real f_upper  = kkc_fmu49(mu_upper, beesq, rdbsq, rmag);
 
             // Evaluate the master function (Eq. 44) at the roots
-            f1   = kkc_fmu44(y1, rmag, rparr, rq, beesq, rdbsq, q, d, gamma);
-            f2   = kkc_fmu44(y2, rmag, rparr, rq, beesq, rdbsq, q, d, gamma);
-            iter = 0.0;
+            f_lower =
+                kkc_fmu44(mu_lower, rmag, rpsq, beesq, rdbsq, q, d, gamma);
+            f_upper =
+                kkc_fmu44(mu_upper, rmag, rpsq, beesq, rdbsq, q, d, gamma);
+            size_type iter = 0.0;
+            real mu, ff;
             do {
-                yy = (y1 * f2 - y2 * f1) / (f2 - f1);
-                f  = kkc_fmu44(yy, rmag, rparr, rq, beesq, rdbsq, q, d, gamma);
-                if (f * f2 < 0.0) {
-                    y1 = y2;
-                    f1 = f2;
-                    y2 = yy;
-                    f2 = f;
+                mu = (mu_lower * f_upper - mu_upper * f_lower) /
+                     (f_upper - f_lower);
+                ff = kkc_fmu44(mu, rmag, rpsq, beesq, rdbsq, q, d, gamma);
+                if (ff * f_upper < 0.0) {
+                    mu_lower = mu_upper;
+                    f_lower  = f_upper;
+                    mu_upper = mu;
+                    f_upper  = ff;
                 }
                 else {
                     // use Illinois algorithm to avoid stagnation
-                    f1 = 0.5 * f1;
-                    y2 = yy;
-                    f2 = f;
+                    f_lower  = 0.5 * f_lower;
+                    mu_upper = mu;
+                    f_upper  = ff;
                 }
-                if (iter >= global::MAX_ITER || !std::isfinite(f)) {
+                if (iter >= global::MAX_ITER || !std::isfinite(ff)) {
                     loc->store(true);
-                    return simbi::Nothing;
+                    return simbi::None(message(iter));
                 }
                 iter++;
-            } while (std::abs(y1 - y2) > global::epsilon &&
-                     std::abs(f) > global::epsilon);
+            } while (std::abs(mu_lower - mu_upper) > global::epsilon &&
+                     std::abs(ff) > global::epsilon);
 
-            if (!std::isfinite(yy)) {
+            if (!std::isfinite(mu)) {
                 loc->store(true);
-                return simbi::Nothing;
+                return simbi::None("non-finite mu");
             }
 
             // Ok, we have the roots. Now we can compute the primitive
             // variables Equation (26)
-            const real x = 1.0 / (1.0 + yy * beesq);
+            const real x = 1.0 / (1.0 + mu * beesq);
 
             // Equation (38)
-            const real rbar_sq = rsq * x * x + yy * x * (1.0 + x) * rdbsq;
+            const real rbar_sq = rsq * x * x + mu * x * (1.0 + x) * rdbsq;
 
             // Equation (39)
             const real qbar =
-                q - 0.5 * (beesq + yy * yy * x * x * beesq * rq * rq);
+                q - 0.5 * (beesq + mu * mu * x * x * beesq * rpsq);
 
-            // Equation (32) inverted and squared
-            const real vsq  = yy * yy * rbar_sq;
-            const real gbsq = vsq / std::abs(1.0 - vsq);
+            // Equation (32)
+            const real vsq  = mu * mu * rbar_sq;
+            const real gbsq = vsq / (1.0 - vsq);
             const real w    = std::sqrt(1.0 + gbsq);
 
             // Equation (41)
             const real rhohat = d / w;
 
             // Equation (42)
-            const real epshat = w * (qbar - yy * rbar_sq) + gbsq / (1.0 + w);
+            const real eps = w * (qbar - mu * rbar_sq) + gbsq / (1.0 + w);
+            // zero-temperature limit for gamma-law EoS
+            constexpr auto pfloor = 1.0e-3;
+            const real epshat = my_max(eps, pfloor / (rhohat * (gamma - 1.0)));
 
             // Equation (43)
             const real pg = (gamma - 1.0) * rhohat * epshat;
 
-            // velocities Eq. (68)
-            real v1 = yy * x * (r1 + h1 * rdb * yy);
-            real v2 = yy * x * (r2 + h2 * rdb * yy);
-            real v3 = yy * x * (r3 + h3 * rdb * yy);
-
-            if constexpr (global::using_four_velocity) {
-                v1 *= w;
-                v2 *= w;
-                v3 *= w;
+            if (!std::isfinite(pg) || pg < 0.0) {
+                loc->store(true);
+                return simbi::None("negative or non-finite pressure");
             }
 
-            return primitive_t{rhohat, v1, v2, v3, pg, b1, b2, b3, dchi / d};
+            // velocities Eq. (68)
+            auto vel = mu * x * (rvec + hvec * rdb * mu);
+            if (vel.norm() > 1.0) {
+                loc->store(true);
+                return simbi::None("velocity exceeds speed of light");
+            }
+            if constexpr (global::using_four_velocity) {
+                vel *= w;
+            }
+
+            return primitive_t{rhohat, vel, pg, dchi / d, bfield};
         },
         this->full_policy(),
         this->cons_
@@ -224,15 +185,11 @@ void RMHD<dim>::cons2prim_impl()
 template <int dim>
 DEV auto RMHD<dim>::cons2prim_single(const auto& cons) const
 {
-    const real d    = cons.dens();
-    const real m1   = cons.mcomponent(1);
-    const real m2   = cons.mcomponent(2);
-    const real m3   = cons.mcomponent(3);
-    const real tau  = cons.nrg();
-    const real b1   = cons.bcomponent(1);
-    const real b2   = cons.bcomponent(2);
-    const real b3   = cons.bcomponent(3);
-    const real dchi = cons.chi();
+    const real d      = cons.dens();
+    const auto mom    = cons.momentum();
+    const real tau    = cons.nrg();
+    const auto bfield = cons.bfield();
+    const real dchi   = cons.chi();
 
     //==================================================================
     // ATTEMPT TO RECOVER PRIMITIVES USING KASTAUN ET AL. 2021
@@ -242,112 +199,107 @@ DEV auto RMHD<dim>::cons2prim_single(const auto& cons) const
     const real invd   = 1.0 / d;
     const real isqrtd = std::sqrt(invd);
     const real q      = tau * invd;
-    const real r1     = m1 * invd;
-    const real r2     = m2 * invd;
-    const real r3     = m3 * invd;
-    const real rsq    = r1 * r1 + r2 * r2 + r3 * r3;
+    const auto rvec   = mom * invd;
+    const auto rsq    = rvec.dot(rvec);
     const real rmag   = std::sqrt(rsq);
-    const real h1     = b1 * isqrtd;
-    const real h2     = b2 * isqrtd;
-    const real h3     = b3 * isqrtd;
-    const real beesq  = h1 * h1 + h2 * h2 + h3 * h3;
-    const real rdb    = r1 * h1 + r2 * h2 + r3 * h3;
+    const auto hvec   = bfield * isqrtd;
+    const auto beesq  = hvec.dot(hvec) + global::epsilon;
+    const auto rdb    = rvec.dot(hvec);
     const real rdbsq  = rdb * rdb;
-    // r-parallel
-    const real rp1 = (rdb / beesq) * h1;
-    const real rp2 = (rdb / beesq) * h2;
-    const real rp3 = (rdb / beesq) * h3;
-    // r-perpendicular
-    const real rq1 = r1 - rp1;
-    const real rq2 = r2 - rp2;
-    const real rq3 = r3 - rp3;
-
-    const real rparr = std::sqrt(rp1 * rp1 + rp2 * rp2 + rp3 * rp3);
-    const real rq    = std::sqrt(rq1 * rq1 + rq2 * rq2 + rq3 * rq3);
+    // r-parallel Eq. (25.a)
+    const auto rparr = rdb / beesq * hvec;
+    // r-perpendicular, Eq. (25.b)
+    const auto rperp = rvec - rparr;
+    const auto rpsq  = rperp.dot(rperp);
 
     // We use the false position method to solve for the roots
-    real y1 = 0.0;
-    real y2 = 1.0;
-    real f1 = kkc_fmu49(y1, beesq, rdbsq, rmag);
-    real f2 = kkc_fmu49(y2, beesq, rdbsq, rmag);
+    real mu_lower = 0.0;
+    real mu_upper = 1.0;
+    real f_lower  = kkc_fmu49(mu_lower, beesq, rdbsq, rmag);
+    real f_upper  = kkc_fmu49(mu_upper, beesq, rdbsq, rmag);
 
     bool good_guesses = false;
     // if good guesses, use them
-    if (std::abs(f1) + std::abs(f2) < 2.0 * global::epsilon) {
+    if (std::abs(f_lower) + std::abs(f_upper) < 2.0 * global::epsilon) {
         good_guesses = true;
     }
 
     int iter = 0.0;
-    // compute yy in case the initial bracket is good
-    real yy = 0.5 * (y1 + y2);
-    real f;
+    // compute mu in case the initial bracket is not good
+    real mu = static_cast<real>(0.5) * (mu_lower + mu_upper);
+    real ff;
     if (!good_guesses) {
         do {
-            yy = (y1 * f2 - y2 * f1) / (f2 - f1);
-            f  = kkc_fmu49(yy, beesq, rdbsq, rmag);
-            if (f * f2 < 0.0) {
-                y1 = y2;
-                f1 = f2;
-                y2 = yy;
-                f2 = f;
+            mu =
+                (mu_lower * f_upper - mu_upper * f_lower) / (f_upper - f_lower);
+            ff = kkc_fmu49(mu, beesq, rdbsq, rmag);
+            if (ff * f_upper < 0.0) {
+                mu_lower = mu_upper;
+                f_lower  = f_upper;
+                mu_upper = mu;
+                f_upper  = ff;
             }
             else {
                 // use Illinois algorithm to avoid stagnation
-                f1 = 0.5 * f1;
-                y2 = yy;
-                f2 = f;
+                f_lower  = 0.5 * f_lower;
+                mu_upper = mu;
+                f_upper  = ff;
             }
 
-            if (iter >= global::MAX_ITER || !std::isfinite(f)) {
-                break;
+            if (iter >= global::MAX_ITER || !std::isfinite(ff)) {
+                return primitive_t{};
             }
             iter++;
-        } while (std::abs(y1 - y2) > global::epsilon &&
-                 std::abs(f) > global::epsilon);
+        } while (std::abs(mu_lower - mu_upper) > global::epsilon &&
+                 std::abs(ff) > global::epsilon);
     }
 
     // We found good brackets. Now we can solve for the roots
-    y1 = 0.0;
-    y2 = yy;
+    mu_lower = 0.0;
+    mu_upper = mu;
 
     // Evaluate the master function (Eq. 44) at the roots
-    f1   = kkc_fmu44(y1, rmag, rparr, rq, beesq, rdbsq, q, d, gamma);
-    f2   = kkc_fmu44(y2, rmag, rparr, rq, beesq, rdbsq, q, d, gamma);
-    iter = 0.0;
+    f_lower = kkc_fmu44(mu_lower, rmag, rpsq, beesq, rdbsq, q, d, gamma);
+    f_upper = kkc_fmu44(mu_upper, rmag, rpsq, beesq, rdbsq, q, d, gamma);
+    iter    = 0.0;
     do {
-        yy = (y1 * f2 - y2 * f1) / (f2 - f1);
-        f  = kkc_fmu44(yy, rmag, rparr, rq, beesq, rdbsq, q, d, gamma);
-        if (f * f2 < 0.0) {
-            y1 = y2;
-            f1 = f2;
-            y2 = yy;
-            f2 = f;
+        mu = (mu_lower * f_upper - mu_upper * f_lower) / (f_upper - f_lower);
+        ff = kkc_fmu44(mu, rmag, rpsq, beesq, rdbsq, q, d, gamma);
+        if (ff * f_upper < 0.0) {
+            mu_lower = mu_upper;
+            f_lower  = f_upper;
+            mu_upper = mu;
+            f_upper  = ff;
         }
         else {
             // use Illinois algorithm to avoid stagnation
-            f1 = 0.5 * f1;
-            y2 = yy;
-            f2 = f;
+            f_lower  = 0.5 * f_lower;
+            mu_upper = mu;
+            f_upper  = ff;
         }
-        if (iter >= global::MAX_ITER || !std::isfinite(f)) {
-            break;
+        if (iter >= global::MAX_ITER || !std::isfinite(ff)) {
+            return primitive_t{};
         }
         iter++;
-    } while (std::abs(y1 - y2) > global::epsilon &&
-             std::abs(f) > global::epsilon);
+    } while (std::abs(mu_lower - mu_upper) > global::epsilon &&
+             std::abs(ff) > global::epsilon);
 
-    // Ok, we have the roots. Now we can compute the primitive variables
-    // Equation (26)
-    const real x = 1.0 / (1.0 + yy * beesq);
+    if (!std::isfinite(mu)) {
+        return primitive_t{};
+    }
+
+    // Ok, we have the roots. Now we can compute the primitive
+    // variables Equation (26)
+    const real x = 1.0 / (1.0 + mu * beesq);
 
     // Equation (38)
-    const real rbar_sq = rsq * x * x + yy * x * (1.0 + x) * rdbsq;
+    const real rbar_sq = rsq * x * x + mu * x * (1.0 + x) * rdbsq;
 
     // Equation (39)
-    const real qbar = q - 0.5 * (beesq + yy * yy * x * x * beesq * rq * rq);
+    const real qbar = q - 0.5 * (beesq + mu * mu * x * x * beesq * rpsq);
 
     // Equation (32) inverted and squared
-    const real vsq  = yy * yy * rbar_sq;
+    const real vsq  = mu * mu * rbar_sq;
     const real gbsq = vsq / std::abs(1.0 - vsq);
     const real w    = std::sqrt(1.0 + gbsq);
 
@@ -355,22 +307,22 @@ DEV auto RMHD<dim>::cons2prim_single(const auto& cons) const
     const real rhohat = d / w;
 
     // Equation (42)
-    const real epshat = w * (qbar - yy * rbar_sq) + gbsq / (1.0 + w);
+    const real epshat = w * (qbar - mu * rbar_sq) + gbsq / (1.0 + w);
 
     // Equation (43)
     const real pg = (gamma - 1.0) * rhohat * epshat;
 
-    // velocities Eq. (68)
-    real v1 = yy * x * (r1 + h1 * rdb * yy);
-    real v2 = yy * x * (r2 + h2 * rdb * yy);
-    real v3 = yy * x * (r3 + h3 * rdb * yy);
-
-    if constexpr (global::VelocityType == global::Velocity::FourVelocity) {
-        v1 *= w;
-        v2 *= w;
-        v3 *= w;
+    if (!std::isfinite(pg) || pg < 0.0) {
+        return primitive_t{};
     }
-    return primitive_t{d / w, v1, v2, v3, pg, b1, b2, b3, dchi / d};
+
+    // velocities Eq. (68)
+    auto vel = mu * x * (rvec + hvec * rdb * mu);
+    if constexpr (global::using_four_velocity) {
+        vel *= w;
+    }
+
+    return primitive_t{rhohat, vel, pg, dchi / d, bfield};
 }
 
 //----------------------------------------------------------------------------------------------------------
@@ -1126,14 +1078,15 @@ DUAL RMHD<dim>::conserved_t RMHD<dim>::calc_hlld_flux(
             real dp;
             // Use the secant method to solve for the pressure
             do {
-                auto f1 = hlld_vdiff(p1, r, lam, bn, nhat, prAL, prAR, prC);
+                auto f_lower =
+                    hlld_vdiff(p1, r, lam, bn, nhat, prAL, prAR, prC);
 
-                dp = (p1 - p0) / (f1 - f0) * f1;
+                dp = (p1 - p0) / (f_lower - f0) * f_lower;
                 p0 = p1;
-                f0 = f1;
+                f0 = f_lower;
                 p1 -= dp;
 
-                if (iter++ > num_tries || !std::isfinite(f1)) {
+                if (iter++ > num_tries || !std::isfinite(f_lower)) {
                     hlld_success = false;
                     break;
                 }
@@ -1261,24 +1214,26 @@ DUAL RMHD<dim>::conserved_t RMHD<dim>::calc_hlld_flux(
         net_flux.lamR       = aRp;
         net_flux.lamL       = aLm;
         if (vface <= aLm) {
-            net_flux.aL  = 1.0;
-            net_flux.aR  = 0.0;
-            net_flux.dL  = 0.0;
-            net_flux.dR  = 0.0;
-            net_flux.vjL = prL.vcomponent(nj);
-            net_flux.vkL = prL.vcomponent(nk);
-            net_flux.vjR = 0.0;
-            net_flux.vkR = 0.0;
+            net_flux.aL    = 1.0;
+            net_flux.aR    = 0.0;
+            net_flux.dL    = 0.0;
+            net_flux.dR    = 0.0;
+            net_flux.vjL   = prL.vcomponent(nj);
+            net_flux.vkL   = prL.vcomponent(nk);
+            net_flux.vjR   = 0.0;
+            net_flux.vkR   = 0.0;
+            net_flux.vnorm = prL.vcomponent(nhat);
         }
         else if (vface >= aRp) {
-            net_flux.aL  = 0.0;
-            net_flux.aR  = 1.0;
-            net_flux.dL  = 0.0;
-            net_flux.dR  = 0.0;
-            net_flux.vjL = 0.0;
-            net_flux.vkL = 0.0;
-            net_flux.vjR = prR.vcomponent(nj);
-            net_flux.vkR = prR.vcomponent(nk);
+            net_flux.aL    = 0.0;
+            net_flux.aR    = 1.0;
+            net_flux.dL    = 0.0;
+            net_flux.dR    = 0.0;
+            net_flux.vjL   = 0.0;
+            net_flux.vkL   = 0.0;
+            net_flux.vjR   = prR.vcomponent(nj);
+            net_flux.vkR   = prR.vcomponent(nk);
+            net_flux.vnorm = prR.vcomponent(nhat);
         }
         else {
             // if Bn is zero, then the HLLC solver admits a jummp in the
@@ -1296,6 +1251,8 @@ DUAL RMHD<dim>::conserved_t RMHD<dim>::calc_hlld_flux(
             net_flux.vkL = prL.vcomponent(nk);
             net_flux.vjR = prR.vcomponent(nj);
             net_flux.vkR = prR.vcomponent(nk);
+            net_flux.vnorm =
+                0.5 * (prL.vcomponent(nhat) + prR.vcomponent(nhat));
         }
     }
     else {
@@ -1308,19 +1265,19 @@ template <int dim>
 void RMHD<dim>::sync_flux_boundaries()
 {
     // sync only in perpendicular directions
-    this->conserved_boundary_manager().sync_boundaries(
+    this->conserved_boundary_manager().template sync_boundaries<flux_tag>(
         this->full_xvertex_policy(),
         fri,
         fri.contract({1, 1, 0}),
         this->bcs()
     );
-    this->conserved_boundary_manager().sync_boundaries(
+    this->conserved_boundary_manager().template sync_boundaries<flux_tag>(
         this->full_yvertex_policy(),
         gri,
         gri.contract({1, 0, 1}),
         this->bcs()
     );
-    this->conserved_boundary_manager().sync_boundaries(
+    this->conserved_boundary_manager().template sync_boundaries<flux_tag>(
         this->full_zvertex_policy(),
         hri,
         hri.contract({0, 1, 1}),
@@ -1349,6 +1306,43 @@ void RMHD<dim>::sync_magnetic_boundaries()
         bstag3.contract({0, 1, 1}),
         this->bcs()
     );
+
+    // check if the magnetic field is divergence free
+    // for (size_type kk = 0; kk < this->mesh().grid().active_gridsize(2); kk++)
+    // {
+    //     for (size_type jj = 0; jj < this->mesh().grid().active_gridsize(1);
+    //          jj++) {
+    //         for (size_type ii = 0; ii <
+    //         this->mesh().grid().active_gridsize(0);
+    //              ii++) {
+    //             const auto cell =
+    //                 this->mesh().get_cell_from_indices(ii, jj, kk);
+    //             const auto b1L = bstag1.at(ii + 0, jj + 1, kk + 1);
+    //             const auto b1R = bstag1.at(ii + 1, jj + 1, kk + 1);
+    //             const auto b2L = bstag2.at(ii + 1, jj + 0, kk + 1);
+    //             const auto b2R = bstag2.at(ii + 1, jj + 1, kk + 1);
+    //             const auto b3L = bstag3.at(ii + 1, jj + 1, kk + 0);
+    //             const auto b3R = bstag3.at(ii + 1, jj + 1, kk + 1);
+    //             const auto divB =
+    //                 divergence(cell, b1L, b1R, b2L, b2R, b3L, b3R);
+
+    //             if (!goes_to_zero(divB)) {
+    //                 printf(
+    //                     "b3L: %f, b3R: %f, b3L(ghost): %f, b3R(ghost) %f\n",
+    //                     b3L,
+    //                     b3R,
+    //                     bstag3.at(ii, jj, kk + 0),
+    //                     bstag3.at(ii, jj, kk + 1)
+    //                 );
+    //                 std::cout << "[" << this->current_iter() << "] "
+    //                           << "Divergence of B is not zero at (" << ii
+    //                           << ", " << jj << ", " << kk << ") " << divB
+    //                           << std::endl;
+    //                 std::cin.get();
+    //             }
+    //         }
+    //     }
+    // }
 }
 
 template <int dim>
@@ -1462,8 +1456,29 @@ void RMHD<dim>::update_magnetic_component(const ExecutionPolicy<>& policy)
             fri,
             gri,
             hri,
+            bstag1,
+            bstag2,
+            bstag3,
             prim
         );
+
+        // if (nhat == 3) {
+        //     const auto res =
+        //         b_view.value() -
+        //         this->time_step() * curl_component<nhat>(cell, efield);
+        //     if (ii == 0 && jj == 0 && kk == 0) {
+        //         std::cout << "iter: " << this->current_iter() << std::endl;
+        //         std::cout << "B3 at k-1/2: " << b_view.value() << " -> " <<
+        //         res
+        //                   << std::endl;
+        //     }
+        //     else if (ii == 0 && jj == 0 && kk == 1) {
+        //         std::cout << "iter: " << this->current_iter() << std::endl;
+        //         std::cout << "B3 at k+1/2: " << b_view.value() << " -> " <<
+        //         res
+        //                   << std::endl;
+        //     }
+        // }
         return b_view.value() -
                this->time_step() * curl_component<nhat>(cell, efield);
     };
@@ -1596,6 +1611,7 @@ template <int dim>
 void RMHD<dim>::init_simulation()
 {
     init_riemann_solver();
+    this->apply_boundary_conditions();
     const auto& xP = this->full_xvertex_policy();
     const auto& yP = this->full_yvertex_policy();
     const auto& zP = this->full_zvertex_policy();
