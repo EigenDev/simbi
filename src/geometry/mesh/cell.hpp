@@ -494,9 +494,16 @@ namespace simbi {
             return 0.0;
         }
 
-        DUAL bool at_pole(real val) const
+        DUAL bool at_pole() const { return at_north_pole() || at_south_pole(); }
+
+        DUAL bool at_north_pole() const
         {
-            return std::abs(std::sin(val)) < POLAR_TOL;
+            return std::abs(std::sin(x2L())) < POLAR_TOL;
+        }
+
+        DUAL bool at_south_pole() const
+        {
+            return std::abs(std::sin(x2R())) < POLAR_TOL;
         }
 
         DUAL auto max_cell_width() const
@@ -515,6 +522,16 @@ namespace simbi {
         // accessors
         DUAL constexpr auto geometry() const { return geo_info_.geometry(); }
         DUAL constexpr auto centroid() const { return centroid_; }
+        DUAL constexpr auto cartesian_centroid() const
+        {
+            switch (geo_info_.geometry()) {
+                case Geometry::SPHERICAL:
+                    return vecops::spherical_to_cartesian(centroid_);
+                case Geometry::CYLINDRICAL:
+                    return vecops::cylindrical_to_cartesian(centroid_);
+                default: return centroid_;
+            }
+        }
         DUAL constexpr auto volume() const { return dV_; }
         DUAL constexpr auto width(const size_type ii) const
         {
