@@ -1,16 +1,16 @@
-import numpy as np 
-import astropy.units as units 
-cimport numpy as np 
+import numpy as np
+import astropy.units as units
+cimport numpy as np
 cimport rad_hydro
 
 def py_calc_fnu(
-    fields:         dict, 
+    fields:         dict,
     tbin_edges:     np.ndarray,
     flux_array:     np.ndarray,
-    mesh:           dict, 
-    qscales:        dict, 
+    mesh:           dict,
+    qscales:        dict,
     sim_info:       dict,
-    checkpoint_idx:      int,
+    checkpoint_index:      int,
     data_dim:       int,
 ):
     """
@@ -24,7 +24,7 @@ def py_calc_fnu(
     mesh:       a dictionary for the mesh central zones
     qscales:    a dictionary for the physical quantitiy scales in the problem
     sim_info:   a dictionary for the importnat simulation information like time, dt_chckpt, etc
-    checkpoint_idx:  the checkpoint index value
+    checkpoint_index:  the checkpoint index value
     data_dim:   the dimensions of the checkpoint data
     """
     flattened_mesh = np.asanyarray(
@@ -33,7 +33,7 @@ def py_calc_fnu(
          mesh['x3']], dtype=object
     )
 
-    cdef sim_conditions sim_cond 
+    cdef sim_conditions sim_cond
     cdef quant_scales quant_scales
 
     # Set the sim conditions
@@ -47,12 +47,12 @@ def py_calc_fnu(
     sim_cond.eps_e        = sim_info['eps_e']
     sim_cond.eps_b        = sim_info['eps_b']
     sim_cond.d_L          = sim_info['d_L']
-   
+
     # set the dimensional scales
     quant_scales.time_scale    = qscales['time_scale']
     quant_scales.pre_scale     = qscales['pre_scale']
     quant_scales.rho_scale     = qscales['rho_scale']
-    quant_scales.v_scale       = 1.0 
+    quant_scales.v_scale       = 1.0
     quant_scales.length_scale  = qscales['length_scale']
 
     cdef vector[double] fnu = flux_array[:]
@@ -64,18 +64,18 @@ def py_calc_fnu(
         fields['p'][:].flat,
         flattened_mesh,
         tbin_edges / (1 + sim_info['z']),
-        fnu, 
-        checkpoint_idx,
+        fnu,
+        checkpoint_index,
         data_dim
     )
     flux_array[:] = np.ascontiguousarray(fnu)
 
 def py_log_events(
-    fields:         dict, 
+    fields:         dict,
     photon_distro:  np.ndarray,
     x_mu:           np.ndarray,
-    mesh:           dict, 
-    qscales:        dict, 
+    mesh:           dict,
+    qscales:        dict,
     sim_info:       dict,
     data_dim:       int):
 
@@ -91,7 +91,7 @@ def py_log_events(
          mesh['x3'].flat], dtype=object
     )
 
-    cdef sim_conditions sim_cond 
+    cdef sim_conditions sim_cond
     cdef quant_scales quant_scales
 
     # Set the sim conditions
@@ -110,7 +110,7 @@ def py_log_events(
     quant_scales.time_scale    = qscales['time_scale']
     quant_scales.pre_scale     = qscales['pre_scale']
     quant_scales.rho_scale     = qscales['rho_scale']
-    quant_scales.v_scale       = 1.0 
+    quant_scales.v_scale       = 1.0
     quant_scales.length_scale  = qscales['length_scale']
 
     photon_flat   = photon_distro[:].flat
@@ -124,4 +124,3 @@ def py_log_events(
         x_mu_flat,
         data_dim
     )
-

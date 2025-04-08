@@ -391,7 +391,8 @@ namespace sogbo_rad {
     {
         std::random_device
             rd;   // Will be used to obtain a seed for the random number engine
-        std::mt19937 gen(rd()
+        std::mt19937 gen(
+            rd()
         );   // Standard mersenne_twister_engine seeded with rd()
         std::uniform_real_distribution<> dis(0.0, 1.0);
 
@@ -456,7 +457,8 @@ namespace sogbo_rad {
                                              ii;   // index for current zone
                     const auto beta =
                         calc_beta(gb[central_idx]);   // velocity in units of c
-                    const auto w = calc_lorentz_factor(gb[central_idx]
+                    const auto w = calc_lorentz_factor(
+                        gb[central_idx]
                     );   // Lorentz factor
                     const auto t_emitter =
                         t_prime / w;   // time in emitter frame
@@ -484,7 +486,8 @@ namespace sogbo_rad {
                         (mu_rhat_prime + beta) / (1.0 + beta * mu_rhat_prime);
                     const double rot_angle =
                         std::acos(mu_rhat_prime) -
-                        std::acos(mu_rhat_beam
+                        std::acos(
+                            mu_rhat_beam
                         );   // rotation angle from initial emission direction
                              // to beaming direction
                     const auto nhat_beamed =
@@ -508,7 +511,8 @@ namespace sogbo_rad {
                         rho[central_idx] * qscales.rho_scale *
                         units::g_per_cm3 /
                         constants::m_p;   // electron number density
-                    const auto nu_g      = calc_gyration_frequency(bfield
+                    const auto nu_g = calc_gyration_frequency(
+                        bfield
                     );   // gyration frequency // distance to source
                     const auto gamma_min = calc_minimum_lorentz(
                         eps_e,
@@ -597,7 +601,7 @@ namespace sogbo_rad {
      * calculartions
      * @param flux_array a flattened 1D array in which the summed frequencies in
      * each bin will live
-     * @param checkpoint_idx  the integer index of the checkpoint file
+     * @param checkpoint_index  the integer index of the checkpoint file
      *
      */
     void calc_fnu(
@@ -609,7 +613,7 @@ namespace sogbo_rad {
         const std::vector<std::vector<double>>& mesh,
         const std::vector<double>& tbin_edges,
         std::vector<double>& flux_array,
-        const int checkpoint_idx,
+        const int checkpoint_index,
         const int data_dim
     )
     {
@@ -697,7 +701,8 @@ namespace sogbo_rad {
                                              ii;   // index for current zone
                     const auto beta =
                         calc_beta(gb[central_idx]);   // velocity in units of c
-                    const auto w = calc_lorentz_factor(gb[central_idx]
+                    const auto w = calc_lorentz_factor(
+                        gb[central_idx]
                     );   // Lorentz factor
                     const auto t_emitter =
                         t_prime / w;   // time in emitter frame
@@ -717,7 +722,8 @@ namespace sogbo_rad {
                         rho[central_idx] * qscales.rho_scale *
                         units::g_per_cm3 /
                         constants::m_p;   // electron number density
-                    const auto nu_g      = calc_gyration_frequency(bfield
+                    const auto nu_g = calc_gyration_frequency(
+                        bfield
                     );   // gyration frequency // distance to source
                     const auto gamma_min = calc_minimum_lorentz(
                         eps_e,
@@ -802,7 +808,7 @@ namespace sogbo_rad {
                                 // must be accounted for
                                 const auto dt_day = dt.to(units::day);
                                 const auto dt_obs = t2 - t1;
-                                const double trat = (checkpoint_idx > 0)
+                                const double trat = (checkpoint_index > 0)
                                                         ? dt_day.value / dt_obs
                                                         : 1.0;
                                 // Sum the fluxes in the given time bin

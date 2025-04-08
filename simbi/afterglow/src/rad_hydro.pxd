@@ -17,15 +17,15 @@ cdef extern from "rad_units.hpp" namespace "sogbo_rad":
         vector[double] &gb,
         vector[vector[double]] &mesh,
         vector[double] &tbin_edges,
-        vector[double] &flux_array, 
-        int checkpoint_idx,
+        vector[double] &flux_array,
+        int checkpoint_index,
         int data_dim
     )
 
     cdef void log_events(
         sim_conditions args,
         quant_scales   qscales,
-        vector[vector[double]] &fields, 
+        vector[vector[double]] &fields,
         vector[vector[double]] &mesh,
         vector[double] &photon_distribution,
         vector[double] &four_position,

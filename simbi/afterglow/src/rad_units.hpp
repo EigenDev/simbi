@@ -236,7 +236,7 @@ namespace sogbo_rad {
         const std::vector<std::vector<double>>& mesh,
         const std::vector<double>& tbin_edges,
         std::vector<double>& flux_array,
-        const int checkpoint_idx,
+        const int checkpoint_index,
         const int data_dim
     );
 

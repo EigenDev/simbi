@@ -282,7 +282,7 @@ def run(parser: argparse.ArgumentParser, args: argparse.Namespace, *_):
                     mesh=mesh,
                     qscales=scales_dict,
                     sim_info=sim_info,
-                    checkpoint_idx=idx,
+                    checkpoint_index=idx,
                     data_dim=dim,
                 )
             else:
