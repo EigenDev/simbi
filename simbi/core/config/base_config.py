@@ -1,5 +1,6 @@
 import argparse
 import abc
+import halo
 import math
 import numpy as np
 from ..types.typing import InitialStateType
@@ -381,11 +382,11 @@ class BaseConfig(metaclass=abc.ABCMeta):
         return adiabatic_index == 1.0
 
     @simbi_property(group="sim_state")
-    def sound_speed(self) -> float:
-        """if the simulation is determined to be isothermal, the user should define the sound speed or we error out"""
+    def ambient_sound_speed(self) -> float:
+        """if the simulation is determined to be isothermal, the user should define the ambient sound speed or we error out"""
         if self.isothermal:
             raise NotImplementedError(
-                "For isothermal simulations (gamma=1), the sound speed must be defined. "
+                "For isothermal simulations (gamma=1), the ambient sound speed *must* be defined. "
                 "Override the sound_speed to get rid of this error"
             )
 
@@ -396,8 +397,13 @@ class BaseConfig(metaclass=abc.ABCMeta):
         """buffer zone parameters for disk simulations"""
         return {}
 
+    @classmethod
     def set_logdir(cls, value: str) -> None:
         setattr(cls, "log_directory", value)
+
+    @classmethod
+    def set_checkpoint_file(cls, value: str) -> None:
+        setattr(cls, "checkpoint_file", value)
 
     @final
     @classmethod
@@ -412,11 +418,13 @@ class BaseConfig(metaclass=abc.ABCMeta):
     @classmethod
     def parse_args_and_update_configuration(cls) -> None:
         args = cls.cli_manager.main_parser.parse_args()
+        var_args = cls.cli_manager.parse_args()
         # update any dynamic_arg values with the values
         # that were parsed from the command line
         for arg in cls.dynamic_args:
-            if arg.name in vars(args):
-                arg.value = getattr(args, arg.name)
+            arg_name = arg.name.replace("-", "_")
+            if arg_name in var_args:
+                arg.value = getattr(args, arg_name)
 
         for name in PropertyBase.registry:
             if hasattr(args, name.replace("-", "_")):
@@ -466,11 +474,14 @@ class BaseConfig(metaclass=abc.ABCMeta):
             "gravity": self.gravity_sources,
             "boundary": self.boundary_sources,
         }
+        spinner = halo.Halo("Attemptying to compile source code", spinner="dots")
+        spinner.start()
         compiled = self.source_manager.compile_sources(
             type(self).__name__.lower(), sources
         )
         for name, path in compiled.items():
             setattr(self, f"{name}_source_lib", str(path))
+        spinner.succeed("Source code compiled successfully")
 
     def __getattribute__(self, name: str) -> Any:
         """Validate property access. (Sometimes we make mistakes in our configs :P)"""
@@ -492,7 +503,7 @@ class BaseConfig(metaclass=abc.ABCMeta):
 
     def _collect_properties(self) -> dict[str, dict[str, Any]]:
         """Collect all property values group by category"""
-        settings: dict[str, Any] = {
+        settings: dict[str, dict[str, Any]] = {
             "sim_state": {},
             "mesh": {},
             "grid": {},
@@ -526,6 +537,27 @@ class BaseConfig(metaclass=abc.ABCMeta):
             if len(resolution) < 3:
                 resolution += (1,) * (3 - len(resolution))
             settings["grid"]["resolution"] = resolution
+
+        # lastly, convert any dynamic arguments to their values
+        for gr in settings.values():
+            for name, value in gr.items():
+                if isinstance(value, DynamicArg):
+                    gr[name] = value.value
+                elif isinstance(value, (list, tuple)) and any(
+                    isinstance(x, DynamicArg) for x in value
+                ):
+                    gr[name] = tuple(
+                        x.value if isinstance(x, DynamicArg) else x for x in value
+                    )
+                elif isinstance(value, (list, tuple)) and any(
+                    isinstance(x, (list, tuple))
+                    and any(isinstance(y, DynamicArg) for y in x)
+                    for x in value
+                ):
+                    gr[name] = tuple(
+                        tuple(y.value if isinstance(y, DynamicArg) else y for y in x)
+                        for x in value
+                    )
 
         return settings
 
