@@ -76,7 +76,7 @@ namespace simbi {
                 const auto ew   = fw.ecomponent(nhat);
                 const auto ee   = fe.ecomponent(nhat);
                 const auto eavg = static_cast<real>(0.25) * (es + en + ew + ee);
-                const auto one_eighth = static_cast<real>(0.125);
+                constexpr auto one_eighth = static_cast<real>(0.125);
 
                 // j + 1/4
                 const real de_dqjL = [&] {
@@ -122,6 +122,7 @@ namespace simbi {
                     return enw - ew + ene - ee;
                 }();
 
+                // Eqn. (42)
                 return (
                     eavg + one_eighth * (de_dqjL - de_dqjR + de_dqkL - de_dqkR)
                 );
