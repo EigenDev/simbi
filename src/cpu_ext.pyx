@@ -16,18 +16,18 @@ cdef ConfigDict convert_python_to_config_dict(py_dict):
             continue
 
         cpp_key: string = key.encode("utf-8")
-        if isinstance(value, bool):
+        if isinstance(value, (bool, np.uint8)):
             result[cpp_key] = ConfigValue(<cbool>value)
-        elif isinstance(value, int):
+        elif isinstance(value, (int, np.int32)):
             result[cpp_key] = ConfigValue(<int>value)
-        elif isinstance(value, float):
+        elif isinstance(value, (float, np.float64, np.float32)):
             result[cpp_key] = ConfigValue(<double>value)
         elif isinstance(value, str):
             result[cpp_key] = ConfigValue(<string>value.encode("utf-8"))
-        elif isinstance(value, tuple) and len(value) == 2 and all(isinstance(x, (int, float)) for x in value):
+        elif "bounds" in key:
             tuple_type = pair[double, double](value[0], value[1])
             result[cpp_key] = ConfigValue(tuple_type)
-        elif isinstance(value, (list, tuple, np.ndarray)) and all(isinstance(x, (list, tuple, np.ndarray)) for x in value):
+        elif isinstance(value, (list, tuple, np.ndarray)) and all(isinstance(x, (list, tuple, np.ndarray, np.flatiter)) for x in value):
             # Convert nested lists
             for x in value:
                 vec_of_vec_floating.push_back([<double>y for y in x])
