@@ -24,6 +24,7 @@ DERIVED = [
     "pmag",
     "sigma",
     "enthalpy_density",
+    "mdot",
 ]
 FIELD_CHOICES = [
     "rho",
