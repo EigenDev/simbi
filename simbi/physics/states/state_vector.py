@@ -35,6 +35,7 @@ class StateVector:
             # Pre-allocate for [density, mx, my, mz, E, Bx, By, Bz, density_chi]
             nvars = 9
             result = np.empty((nvars,) + self.density.shape, dtype=np.float64)
+            # Assuming momentum is in the order [mx, my, mz]
             result[0] = self.density
             result[1:4] = self.momentum
             result[4] = self.energy
