@@ -37,28 +37,88 @@ class SimulationBundle:
 
 
 def try_checkpoint_initialization(
-    config: InitializationConfig,
+    setup: tuple[InitializationConfig, dict[str, Any]],
 ) -> Maybe[SimulationBundle]:
     """Try to initialize from checkpoint"""
+    config = setup[0]
     if config.checkpoint_file is None:
         return Maybe(None)
 
-    return (
+    # a user might have settings in their problem
+    # class that are not present inside the checkpoint
+    # metdata. If this happens, we use the defaults
+    # given inside the problem
+
+    def overwrite_if_needed(
+        settings: dict[str, Any], metadata: dict[str, Any]
+    ) -> dict[str, Any]:
+        meta_set = {key for key in metadata.keys()}
+        overwrite = settings.copy()
+        overwrite.update({k: metadata[k] for k in overwrite.keys() if k in meta_set})
+        non_intersecting = set(settings.keys()) - meta_set
+        if "bounds" in non_intersecting:
+            if metadata["effective_dimensions"] == 3:
+                overwrite["bounds"] = (
+                    (float(metadata["x1min"]), float(metadata["x1max"])),
+                    (float(metadata["x2min"]), float(metadata["x2max"])),
+                    (float(metadata["x3min"]), float(metadata["x3max"])),
+                )
+            elif metadata["effective_dimensions"] == 2:
+                overwrite["bounds"] = (
+                    (float(metadata["x1min"]), float(metadata["x1max"])),
+                    (float(metadata["x2min"]), float(metadata["x2max"])),
+                )
+            else:
+                overwrite["bounds"] = (
+                    (float(metadata["x1min"]), float(metadata["x1max"])),
+                )
+        elif "resolution" in non_intersecting:
+            nghosts = 2 * (1 + (metadata["spatial_order"] == "plm"))
+            overwrite["resolution"] = (
+                int(metadata["nx"] - nghosts),
+                int(metadata["ny"] - nghosts),
+                int(metadata["nz"] - nghosts),
+            )
+        elif "checkpoint_index" in non_intersecting:
+            try:
+                overwrite["checkpoint_index"] = int(metadata["checkpoint_index"])
+            except KeyError:  # for legacy reasons
+                overwrite["checkpoint_index"] = int(metadata["checkpoint_idx"])
+        elif "default_start_time" in non_intersecting:
+            overwrite["default_start_time"] = metadata["time"]
+            overwrite["isothermal"] = bool(metadata["adiabatic_index"] == 1.0)
+        return overwrite
+
+    settings = setup[1]
+
+    res = (
         Maybe.of(config.checkpoint_file)
         .bind(load_checkpoint)
         .map(
             lambda chkpt: SimulationBundle(
-                mesh_config=MeshSettings.from_dict(chkpt.setup),
-                grid_config=GridSettings.from_dict(
-                    chkpt.setup, spatial_order=chkpt.setup["spatial_order"]
+                mesh_config=MeshSettings.from_dict(
+                    overwrite_if_needed(settings["mesh"], chkpt.metadata)
                 ),
-                io_config=IOSettings.from_dict(chkpt.setup),
-                sim_config=SimulationSettings.from_dict(chkpt.setup),
+                grid_config=GridSettings.from_dict(
+                    overwrite_if_needed(settings["grid"], chkpt.metadata),
+                    spatial_order=chkpt.metadata["spatial_order"],
+                ),
+                io_config=IOSettings.from_dict(
+                    overwrite_if_needed(settings["io"], chkpt.metadata)
+                ),
+                sim_config=SimulationSettings.from_dict(
+                    overwrite_if_needed(settings["sim_state"], chkpt.metadata)
+                ),
                 state=chkpt.state.to_numpy(),
                 staggered_bfields=chkpt.staggered_bfields,
             )
         )
     )
+
+    if res.is_error():
+        raise ValueError("Error loading checkpoint") from res.error
+
+    return res
 
 
 def try_fresh_initialization(
@@ -98,7 +158,7 @@ def initialize_simulation(
 ) -> Maybe[SimulationBundle]:
     """Initialize simulation using chain of responsibility"""
     return (
-        Maybe.of(config)
+        Maybe.of((config, settings))
         .bind(try_checkpoint_initialization)
         .or_else(try_fresh_initialization(config, settings))
     )
