@@ -258,7 +258,7 @@ namespace simbi {
             // copy necessary data to avoid pointer issues
             auto handle_dynamic_bc = [mesh, io_manager, time]() {
                 if constexpr (is_conserved_v<T>) {
-                    return [mesh, io_manager,time] DEV(
+                    return [mesh, io_manager, time] DEV(
                                const auto& coords,
                                const BoundaryFace face,
                                T& result
@@ -437,7 +437,8 @@ namespace simbi {
             }
             return ii;
         }
-        uarray<Dims> unravel_idx(size_type idx, const uarray<Dims>& shape) const
+        DEV uarray<Dims>
+        unravel_idx(size_type idx, const uarray<Dims>& shape) const
         {
             return memory_layout_coordinates<Dims>(idx, shape);
         }

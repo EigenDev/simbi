@@ -360,7 +360,7 @@ namespace simbi {
         }
 
         template <size_type Dims>
-        DUAL static auto
+        DEV static auto
         memory_layout_coordinates(auto idx, const uarray<Dims>& shape)
             -> uarray<Dims>
         {

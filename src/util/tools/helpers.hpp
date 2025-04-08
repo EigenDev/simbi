@@ -681,7 +681,8 @@ namespace simbi {
             const real gamma
         );
 
-        real find_mu_plus(const real beesq, const real beedrsq, const real r);
+        DEV real
+        find_mu_plus(const real beesq, const real beedrsq, const real r);
 
         //-------------------Inline for Speed -------------------------
         /**

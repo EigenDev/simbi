@@ -359,7 +359,7 @@ namespace simbi {
 
         template <typename... Args>
             requires ValidSourceParams<Dims, Args...>
-        void call_boundary_source(BoundaryFace face, Args&&... args) const
+        DEV void call_boundary_source(BoundaryFace face, Args&&... args) const
         {
             switch (face) {
                 case BoundaryFace::X1_INNER:

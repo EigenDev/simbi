@@ -151,10 +151,10 @@ namespace simbi {
         }
 
         // Iterator support - host only
-        T* begin() { return data_; }
-        const T* begin() const { return data_; }
-        T* end() { return data_ + N; }
-        const T* end() const { return data_ + N; }
+        DUAL T* begin() { return data_; }
+        DUAL const T* begin() const { return data_; }
+        DUAL T* end() { return data_ + N; }
+        DUAL const T* end() const { return data_ + N; }
 
       private:
         T data_[N];

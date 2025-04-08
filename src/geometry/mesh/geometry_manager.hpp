@@ -92,7 +92,7 @@ namespace simbi {
         // Constructors
         GeometryManager() = default;
 
-        DUAL GeometryManager(const InitialConditions& init)
+        GeometryManager(const InitialConditions& init)
             : geometry_(geometry_map.at(init.coord_system)),
               spacing_types_{
                 str2cell.at(init.x1_spacing),

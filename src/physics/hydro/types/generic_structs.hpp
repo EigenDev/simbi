@@ -280,7 +280,7 @@ namespace simbi {
                     );
                 }
                 else {
-                    static const ZeroMagneticVectorView zero_view;
+                    const ZeroMagneticVectorView zero_view;
                     return zero_view;
                     // return magnetic_vector_t<real, 3>{0.0, 0.0, 0.0};
                 }
@@ -1037,7 +1037,14 @@ namespace simbi {
 
         DUAL constexpr WaveSpeeds() : data{} {}
 
-        DUAL constexpr WaveSpeeds(real v1p, real v1m, real v2p, real v2m, real v3p, real v3m)
+        DUAL constexpr WaveSpeeds(
+            real v1p,
+            real v1m,
+            real v2p,
+            real v2m,
+            real v3p,
+            real v3m
+        )
             : data{v1p, v1m, v2p, v2m, v3p, v3m}
         {
         }
