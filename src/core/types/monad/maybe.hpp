@@ -55,12 +55,17 @@
 
 namespace simbi {
     struct nothing_t {
-        constexpr explicit nothing_t(int) {}
+        constexpr explicit nothing_t(int) : error_message(nullptr) {}
+        constexpr explicit nothing_t(const char* message)
+            : error_message(message)
+        {
+        }
 
-        nothing_t() = delete;
+        const char* error_message;
     };
 
     inline constexpr nothing_t Nothing{0};
+    using None = nothing_t;
 
     template <typename T>
     class Maybe
@@ -68,32 +73,42 @@ namespace simbi {
       public:
         using value_type = T;
 
-        DUAL constexpr Maybe() : valid{false} {}
+        DUAL constexpr Maybe() : valid{false}, error_message(nullptr) {}
 
-        DUAL constexpr Maybe(nothing_t) : valid{false} {}
+        DUAL constexpr Maybe(nothing_t nothing)
+            : valid{false}, error_message(nothing.error_message)
+        {
+        }
 
-        DUAL constexpr Maybe(const T& value) : valid{true}, thisValue{value} {}
+        DUAL constexpr Maybe(const T& value)
+            : valid{true}, this_value{value}, error_message(nullptr)
+        {
+        }
 
         DUAL constexpr Maybe(T&& value)
-            : valid{true}, thisValue{std::move(value)}
+            : valid{true}, this_value{std::move(value)}, error_message(nullptr)
         {
         }
 
         // Constructor deduced from the value
         template <typename U>
         DUAL constexpr Maybe(U&& value)
-            : valid{true}, thisValue{std::forward<U>(value)}
+            : valid{true},
+              this_value{std::forward<U>(value)},
+              error_message(nullptr)
         {
             static_assert(std::is_convertible_v<U, T>);
         }
 
         DUAL constexpr bool has_value() const { return valid; }
 
-        DUAL constexpr const T& value() const& { return thisValue; }
+        DUAL constexpr const T& value() const& { return this_value; }
 
-        DUAL constexpr T& value() & { return thisValue; }
+        DUAL constexpr T& value() & { return this_value; }
 
-        DUAL constexpr T value() && { return std::move(thisValue); }
+        DUAL constexpr T value() && { return std::move(this_value); }
+
+        DUAL constexpr const char* error() const { return error_message; }
 
         template <typename U>
         DUAL constexpr T unwrap_or(U&& default_value) const&
@@ -102,7 +117,7 @@ namespace simbi {
                 std::is_convertible_v<U, T>,
                 "U must be convertible to T"
             );
-            return valid ? thisValue
+            return valid ? this_value
                          : static_cast<T>(std::forward<U>(default_value));
         }
 
@@ -113,7 +128,7 @@ namespace simbi {
                 std::is_convertible_v<U, T>,
                 "U must be convertible to T"
             );
-            return valid ? std::move(thisValue)
+            return valid ? std::move(this_value)
                          : static_cast<T>(std::forward<U>(default_value));
         }
 
@@ -122,7 +137,7 @@ namespace simbi {
         {
             using result_type = std::invoke_result_t<F, const T&>;
             if (valid) {
-                return Maybe<result_type>{f(thisValue)};
+                return Maybe<result_type>{f(this_value)};
             }
             else {
                 return Maybe<result_type>{Nothing};
@@ -134,7 +149,7 @@ namespace simbi {
         {
             using result_type = std::invoke_result_t<F, T&&>;
             if (valid) {
-                return Maybe<result_type>{f(std::move(thisValue))};
+                return Maybe<result_type>{f(std::move(this_value))};
             }
             else {
                 return Maybe<result_type>{Nothing};
@@ -146,7 +161,7 @@ namespace simbi {
         {
             using result_type = std::invoke_result_t<F, const T&>;
             if (valid) {
-                return f(thisValue);
+                return f(this_value);
             }
             else {
                 return Maybe<result_type>{Nothing};
@@ -158,7 +173,7 @@ namespace simbi {
         {
             using result_type = std::invoke_result_t<F, T&&>;
             if (valid) {
-                return f(std::move(thisValue));
+                return f(std::move(this_value));
             }
             else {
                 return Maybe<result_type>{Nothing};
@@ -170,7 +185,7 @@ namespace simbi {
         {
             using result_type = std::invoke_result_t<F>;
             if (valid) {
-                return Maybe<T>{thisValue};
+                return Maybe<T>{this_value};
             }
             else {
                 return Maybe<result_type>{f()};
@@ -182,7 +197,7 @@ namespace simbi {
         {
             using result_type = std::invoke_result_t<F>;
             if (valid) {
-                return Maybe<T>{std::move(thisValue)};
+                return Maybe<T>{std::move(this_value)};
             }
             else {
                 return Maybe<result_type>{f()};
@@ -193,7 +208,7 @@ namespace simbi {
         DUAL constexpr T unwrap_or_else(F&& f) const&
         {
             if (valid) {
-                return thisValue;
+                return this_value;
             }
             else {
                 return f();
@@ -204,7 +219,7 @@ namespace simbi {
         DUAL constexpr T unwrap_or_else(F&& f) &&
         {
             if (valid) {
-                return std::move(thisValue);
+                return std::move(this_value);
             }
             else {
                 return f();
@@ -215,7 +230,7 @@ namespace simbi {
         DUAL constexpr auto match(F&& f) const&
         {
             if (valid) {
-                return f(thisValue);
+                return f(this_value);
             }
             else {
                 return f();
@@ -226,7 +241,7 @@ namespace simbi {
         DUAL constexpr auto match(F&& f) &&
         {
             if (valid) {
-                return f(std::move(thisValue));
+                return f(std::move(this_value));
             }
             else {
                 return f();
@@ -240,7 +255,7 @@ namespace simbi {
                 return false;
             }
             if (valid) {
-                return thisValue == other.thisValue;
+                return this_value == other.this_value;
             }
             return true;
         }
@@ -258,7 +273,7 @@ namespace simbi {
                 return valid < other.valid;
             }
             if (valid) {
-                return thisValue < other.thisValue;
+                return this_value < other.this_value;
             }
             return false;
         }
@@ -282,24 +297,24 @@ namespace simbi {
         }
 
         // reference access operators
-        DUAL constexpr T* operator->() { return std::addressof(thisValue); }
+        DUAL constexpr T* operator->() { return std::addressof(this_value); }
 
         DUAL constexpr const T* operator->() const
         {
-            return std::addressof(thisValue);
+            return std::addressof(this_value);
         }
 
-        DUAL constexpr T& operator*() & { return thisValue; }
+        DUAL constexpr T& operator*() & { return this_value; }
 
-        DUAL constexpr const T& operator*() const& { return thisValue; }
+        DUAL constexpr const T& operator*() const& { return this_value; }
 
         // in-place construction
         template <typename... Args>
         DUAL T& emplace(Args&&... args)
         {
-            thisValue = T(std::forward<Args>(args)...);
-            valid     = true;
-            return thisValue;
+            this_value = T(std::forward<Args>(args)...);
+            valid      = true;
+            return this_value;
         }
 
         // Math overloads with scalar types
@@ -307,7 +322,7 @@ namespace simbi {
         DUAL constexpr Maybe<T> operator+(const U& rhs) const
         {
             if (valid) {
-                return Maybe<T>{thisValue + rhs};
+                return Maybe<T>{this_value + rhs};
             }
             return Maybe<T>{Nothing};
         }
@@ -316,7 +331,7 @@ namespace simbi {
         DUAL constexpr Maybe<T> operator-(const U& rhs) const
         {
             if (valid) {
-                return Maybe<T>{thisValue - rhs};
+                return Maybe<T>{this_value - rhs};
             }
             return Maybe<T>{Nothing};
         }
@@ -325,7 +340,7 @@ namespace simbi {
         DUAL constexpr Maybe<T> operator*(const U& rhs) const
         {
             if (valid) {
-                return Maybe<T>{thisValue * rhs};
+                return Maybe<T>{this_value * rhs};
             }
             return Maybe<T>{Nothing};
         }
@@ -334,7 +349,7 @@ namespace simbi {
         DUAL constexpr Maybe<T> operator/(const U& rhs) const
         {
             if (valid) {
-                return Maybe<T>{thisValue / rhs};
+                return Maybe<T>{this_value / rhs};
             }
             return Maybe<T>{Nothing};
         }
@@ -343,14 +358,15 @@ namespace simbi {
         DUAL constexpr explicit operator bool() const { return valid; }
 
         // implicit conversion to T
-        DUAL constexpr operator T() const { return thisValue; }
+        DUAL constexpr operator T() const { return this_value; }
 
         // implicit conversion to T
-        // DUAL constexpr operator T() && { return std::move(thisValue); }
+        // DUAL constexpr operator T() && { return std::move(this_value); }
 
       private:
         bool valid;
-        T thisValue;
+        T this_value;
+        const char* error_message;
     };
 
     // Deduction guide
