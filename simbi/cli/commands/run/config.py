@@ -63,7 +63,7 @@ def _configure_single_state(
     parser: ArgumentParser,
     args: Namespace,
     argv: Optional[Sequence],
-) -> Tuple[Hydro, Dict[str, Any], str]:
+) -> Tuple[Optional[Hydro], Dict[str, Any], str]:
     """Configure single hydro state"""
 
     # Import problem class
@@ -87,6 +87,8 @@ def _configure_single_state(
     _setup_logging(problem_class, args)
 
     # Create hydro state
+    if args.checkpoint is not None:
+        BaseConfig.set_checkpoint_file(args.checkpoint)
     state: Hydro = Hydro(problem_class)
     kwarg_dict = _build_kwargs_dict(problem_class, args)
 
@@ -153,8 +155,8 @@ def configure_state(
     setup_classes = _get_setup_classes(script)
     if not setup_classes:
         raise ValueError("Invalid simbi configuration")
-
-    type_check_input(script)
+    if args.type_check:
+        type_check_input(script)
 
     states = []
     state_docs = []
