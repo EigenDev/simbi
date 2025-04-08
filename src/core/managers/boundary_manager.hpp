@@ -258,7 +258,7 @@ namespace simbi {
             // copy necessary data to avoid pointer issues
             auto handle_dynamic_bc = [mesh, io_manager, time]() {
                 if constexpr (is_conserved_v<T>) {
-                    return [=] DEV(
+                    return [mesh, io_manager,time] DEV(
                                const auto& coords,
                                const BoundaryFace face,
                                T& result
