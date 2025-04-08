@@ -1,9 +1,8 @@
 import numpy as np
 from dataclasses import dataclass
-from typing import Optional, Sequence
+from typing import Sequence, Any
 from ..functional.maybe import Maybe
 from numpy.typing import NDArray
-from typing import Optional, Any
 from .calculations import calculate_state_vector
 from ..physics.states.state_vector import StateVector
 
