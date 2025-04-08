@@ -53,6 +53,8 @@ class Maybe(Generic[T]):
 
     def or_else(self, default: "Maybe[T]") -> "Maybe[T]":
         """Get value or return default"""
+        if self._error:
+            return self
         return self if self._value is not None else default
 
     @property
