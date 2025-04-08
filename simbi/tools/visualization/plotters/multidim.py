@@ -4,6 +4,7 @@ import matplotlib.colors as mcolors
 from typing import Any
 from numpy.typing import NDArray
 from matplotlib.collections import QuadMesh
+import matplotlib.patches as mpatches
 from itertools import cycle
 from ..utils.formatting import PlotFormatter
 from ..utils.io import DataManager
@@ -75,7 +76,7 @@ class MultidimPlotter(BasePlotter, DataHandlerMixin, AnimationMixin, Coordinates
                 color_range = next(self.config["style"].color_range)
                 var = self.get_variable(data.fields, field)
 
-                if self.config["plot"].ndim == 3:
+                if var.ndim == 3:
                     var = self._handle_3d_projection(var, data.mesh)
 
                 xx, yy = self.transform_coordinates(data.mesh, data.setup)
@@ -106,6 +107,16 @@ class MultidimPlotter(BasePlotter, DataHandlerMixin, AnimationMixin, Coordinates
                                 idx,
                                 label=next(labels),
                             )
+
+            # plot any immersed bodies that might exist,
+            # on top of the current plot
+            if data.immersed_bodies:
+                self._plot_immersed_bodies(
+                    self.axes,
+                    data.immersed_bodies,
+                    data.setup,
+                )
+
             self.formatter.set_axes_properties(
                 self.fig, self.axes, data.setup, self.config
             )
@@ -212,3 +223,40 @@ class MultidimPlotter(BasePlotter, DataHandlerMixin, AnimationMixin, Coordinates
                 if base[i] < -2 * x2max:  # Wrap around if needed
                     base[i] += 4 * x2max
         return base
+
+    def _plot_circle(
+        self,
+        axes: Any,
+        center: tuple[float, float],
+        radius: float,
+        color: str,
+        linestyle: str,
+    ) -> None:
+        """Plot a circle on the given axes"""
+        ...
+        # circle = mpatches.Circle(
+        #     center, radius, color=color, linestyle=linestyle, alpha=0.5
+        # )
+        # axes.add_patch(circle)
+        # axes.set_aspect("equal", adjustable="box")
+        # axes.autoscale_view()
+
+    def _plot_immersed_bodies(
+        self,
+        axes: Any,
+        immersed_bodies: dict[str, Any],
+        setup: dict[str, Any],
+    ) -> None:
+        """Plot immersed bodies on top of the current plot"""
+        for body in immersed_bodies.values():
+            if body["type"] == "accretor":
+                radius = body["accretion_radius"]
+            else:
+                radius = body["radius"]
+            self._plot_circle(
+                axes,
+                body["position"],
+                radius,
+                "black",
+                "--",
+            )

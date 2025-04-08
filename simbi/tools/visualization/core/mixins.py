@@ -1,6 +1,7 @@
 from matplotlib.animation import FuncAnimation
-from typing import Dict, Any
-from ..core.constants import DERIVED, FIELD_ALIASES
+import matplotlib.patches as mpatches
+from typing import Any
+from ..core.constants import FIELD_ALIASES
 from ....functional.helpers import calc_any_mean
 from ... import utility as util
 import numpy as np
@@ -10,17 +11,16 @@ from numpy.typing import NDArray
 class DataHandlerMixin:
     """Mixin for data handling operations"""
 
-    def get_variable(self, fields: Dict[str, np.ndarray], field: str) -> np.ndarray:
+    def get_variable(self, fields: dict[str, np.ndarray], field: str) -> np.ndarray:
         """Extract and transform variable data"""
-        if field in DERIVED:
-            var = util.prims2var(fields, field)
-        elif field in FIELD_ALIASES:
+        if field in FIELD_ALIASES:
             var = fields[FIELD_ALIASES[field]]
         else:
-            var = fields["v1"] if field == "v" else fields[field]
+            var = fields[field]
 
         if self.config["style"].units:
             self._apply_units(var, field)
+
         return var
 
     def _apply_units(self, var: np.ndarray, field: str) -> None:
@@ -36,15 +36,17 @@ class AnimationMixin:
 
     def update_frame(self, frame: int) -> tuple:
         """Update plot for animation frame"""
-        fields, setup, mesh = util.read_file(self.data_manager.file_list[frame])
+        fields, metadata, mesh, immersed_bodies = util.read_file(
+            self.data_manager.file_list[frame]
+        )
 
         # Update plot title
-        self._update_title(setup)
+        self._update_title(metadata)
 
         # Update data
         for idx, field in enumerate(self.config["plot"].fields):
             var = self.get_variable(fields, field)
-            self._update_plot_data(idx, var, mesh, setup)
+            self._update_plot_data(idx, var, mesh, metadata, immersed_bodies)
 
         return (self.frames,)
 
@@ -81,6 +83,7 @@ class AnimationMixin:
         var: np.ndarray,
         mesh: dict[str, NDArray[np.floating[Any]]],
         setup: dict[str, Any],
+        immersed_bodies: dict[str, Any] | None = None,
     ) -> None:
         """Update plot data"""
         if self.config["plot"].ndim == 1:
@@ -103,6 +106,26 @@ class AnimationMixin:
                 # else:
                 #     drawing.norm = mcolors.Normalize(vmin=vmin, vmax=vmax)
                 drawing.set_array(var.ravel())
+            if immersed_bodies:
+                # Clear previous patches
+                for patch in self.axes.patches:
+                    patch.remove()
+
+                for body in immersed_bodies.values():
+                    if body["type"] == "accretor":
+                        radius = body["accretion_radius"]
+                    else:
+                        radius = body["radius"]
+                    # circle = mpatches.Circle(
+                    #     body["position"],
+                    #     radius,
+                    #     color="black",
+                    #     linestyle="--",
+                    #     alpha=0.5,
+                    # )
+                    # self.axes.add_patch(circle)
+                    # self.axes.set_aspect("equal", adjustable="box")
+                    # self.axes.autoscale_view()
 
 
 class CoordinatesMixin:
@@ -152,7 +175,7 @@ class CoordinatesMixin:
 
     def _get_slice_indices(
         self, mesh: dict[str, NDArray[np.floating[Any]]], setup: dict[str, Any]
-    ) -> tuple:
+    ) -> Any:
         """Get indices for slice through higher dimensions"""
         for xkcoord in map(float, self.config["multidim"].coords["xk"].split(",")):
             for xjcoord in map(float, self.config["multidim"].coords["xj"].split(",")):
@@ -162,7 +185,9 @@ class CoordinatesMixin:
                 xj, xk = self._get_permuted_indices(mesh, setup)
                 jidx = util.find_nearest(mesh.get(xj, np.linspace(0, 1)), xjcoord)[0]
                 kidx = util.find_nearest(mesh.get(xk, np.linspace(0, 1)), xkcoord)[0]
-                if self.config["plot"].ndim == 2:
+                if mesh["effective_dimensions"] == 1:
+                    return (None, None, None)
+                elif mesh["effective_dimensions"] == 2:
                     return jidx
                 else:
                     if self.config["multidim"].slice_along == "x1":
@@ -175,9 +200,9 @@ class CoordinatesMixin:
 
     def _transform_polar(self, mesh: dict, setup: dict[str, Any]) -> tuple:
         """Handle polar coordinate transforms"""
-        x1c = calc_any_mean(mesh["x1v"], setup["x1_spacing"])
-        x2c = calc_any_mean(mesh["x2v"], setup["x2_spacing"])
-        xx, yy = np.meshgrid(x1c, x2c)[::-1]
+        # x1c = calc_any_mean(mesh["x1v"], setup["x1_spacing"])
+        # x2c = calc_any_mean(mesh["x2v"], setup["x2_spacing"])
+        xx, yy = np.meshgrid(mesh["x1v"], mesh["x2v"])[::-1]
         if self.config["multidim"].bipolar:
             xx *= -1
         return xx, yy
