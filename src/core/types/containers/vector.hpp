@@ -49,7 +49,8 @@
 #ifndef VECTOR_HPP
 #define VECTOR_HPP
 
-#include "build_options.hpp"   // for real, lint, luint
+#include "build_options.hpp"              // for real, lint, luint
+#include "core/types/utility/enums.hpp"   // for Geometry
 #include <cmath>
 #include <type_traits>
 
@@ -239,8 +240,8 @@ namespace simbi {
 
         // vector-to-vector operations w/ type promotions
         template <typename U, size_type OtherDims, VectorType OtherType>
-        DUAL constexpr auto dot(const VectorOps<U, OtherDims, OtherType>& other
-        ) const
+        DUAL constexpr auto
+        dot(const VectorOps<U, OtherDims, OtherType>& other) const
         {
             using result_type = promote_t<T, U>;
             result_type sum{0};
@@ -425,8 +426,8 @@ namespace simbi {
 
         // if less than 3D, the cross product is simply the magnitude
         template <typename U, VectorType OtherType>
-        DUAL constexpr auto cross(const VectorOps<U, Dims, OtherType>& other
-        ) const
+        DUAL constexpr auto
+        cross(const VectorOps<U, Dims, OtherType>& other) const
             requires(Dims < 3)
         {
             if (Dims == 1) {
@@ -885,6 +886,163 @@ namespace simbi {
                 return rotate_3D(vec, angle);
             }
         }
+
+        template <typename Vec>
+        auto constexpr spherical_to_cartesian(const Vec& vec)
+        {
+            if constexpr (Vec::dimensions == 1) {
+                return vec;
+            }
+            else if constexpr (Vec::dimensions == 2) {   // r-theta, not r-phi
+                return Vector<real, 2, VectorType::SPATIAL>{
+                  vec[0] * std::sin(vec[1]),
+                  vec[0] * std::cos(vec[1])
+                };
+            }
+            else {
+                return Vector<real, 3, VectorType::SPATIAL>{
+                  vec[0] * std::sin(vec[1]) * std::cos(vec[2]),
+                  vec[0] * std::sin(vec[1]) * std::sin(vec[2]),
+                  vec[0] * std::cos(vec[1])
+                };
+            }
+        }
+
+        template <typename Vec>
+        auto constexpr cylindrical_to_cartesian(const Vec& vec)
+        {
+            if constexpr (Vec::dimensions == 1) {
+                return vec;
+            }
+            else if constexpr (Vec::dimensions == 2) {
+                return Vector<real, 2, VectorType::SPATIAL>{
+                  vec[0] * std::cos(vec[1]),
+                  vec[0] * std::sin(vec[1])
+                };
+            }
+            else {
+                return Vector<real, 3, VectorType::SPATIAL>{
+                  vec[0] * std::cos(vec[1]),
+                  vec[0] * std::sin(vec[1]),
+                  vec[2]
+                };
+            }
+        }
+
+        template <typename Vec>
+        auto constexpr cartesian_to_spherical(const Vec& vec)
+        {
+            if constexpr (Vec::dimensions == 1) {
+                return vec;
+            }
+            else if constexpr (Vec::dimensions == 2) {
+                return Vector<real, 2, VectorType::SPATIAL>{
+                  vec.norm(),
+                  std::atan2(vec[1], vec[0])
+                };
+            }
+            else {
+                return Vector<real, 3, VectorType::SPATIAL>{
+                  vec.norm(),
+                  std::acos(vec[2] / vec.norm()),
+                  std::atan2(vec[1], vec[0])
+                };
+            }
+        }
+
+        template <typename Vec>
+        auto constexpr centralize_cartesian_to_spherical(const Vec& vec)
+        {
+            if constexpr (Vec::dimensions == 1) {
+                return vec;
+            }
+            else if constexpr (Vec::dimensions == 2) {
+                return Vector<real, 2, VectorType::SPATIAL>{
+                  vec.norm(),
+                  0.0,
+                };
+            }
+            else {
+                return Vector<real, 3, VectorType::SPATIAL>{
+                  vec.norm(),
+                  0.0,
+                  0.0
+                };
+            }
+        }
+
+        template <typename Vec>
+        auto constexpr centralize_cartesian_to_cylindrical(const Vec& vec)
+        {
+            if constexpr (Vec::dimensions == 1) {
+                return vec;
+            }
+            else if constexpr (Vec::dimensions == 2) {
+                return Vector<real, 2, VectorType::SPATIAL>{
+                  vec.norm(),
+                  0.0,
+                };
+            }
+            else {
+                return Vector<real, 3, VectorType::SPATIAL>{
+                  vec.norm(),
+                  0.0,
+                  0.0
+                };
+            }
+        }
+
+        template <typename Vec>
+        auto constexpr cartesian_to_cylindrical(const Vec& vec)
+        {
+            if constexpr (Vec::dimensions == 1) {
+                return vec;
+            }
+            else if constexpr (Vec::dimensions == 2) {
+                return Vector<real, 2, VectorType::SPATIAL>{
+                  vec.norm(),
+                  std::atan2(vec[1], vec[0])
+                };
+            }
+            else {
+                return Vector<real, 3, VectorType::SPATIAL>{
+                  vec.norm(),
+                  std::atan2(vec[1], vec[0]),
+                  vec[2]
+                };
+            }
+        }
+
+        // convert a cartesian vector to a curvlinear
+        // coordinate system
+        template <typename Vec>
+        auto to_geometry(const Vec& vec, Geometry geometry)
+        {
+            if (geometry == Geometry::SPHERICAL) {
+                return cartesian_to_spherical(vec);
+            }
+            else if (geometry == Geometry::CYLINDRICAL) {
+                return cartesian_to_cylindrical(vec);
+            }
+            else {
+                return vec;
+            }
+        }
+
+        // project some vector onto the mesh
+        // using the mesh basis vectors
+        template <typename Vec>
+        auto centralize(const Vec& vec, Geometry mesh_geometry)
+        {
+            switch (mesh_geometry) {
+                case Geometry::SPHERICAL:
+                    return centralize_cartesian_to_spherical(vec);
+                case Geometry::CYLINDRICAL:
+                    return centralize_cartesian_to_cylindrical(vec);
+                default: return vec;
+            }
+        }
+
     }   // namespace vecops
 
 }   // namespace simbi
