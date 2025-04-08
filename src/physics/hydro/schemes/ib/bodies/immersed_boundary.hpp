@@ -55,7 +55,7 @@
 #include "core/types/containers/vector.hpp"    // for spatial_vector_t
 #include "core/types/utility/enums.hpp"        // for BodyType
 #include "physics/hydro/types/generic_structs.hpp"
-
+#include "physics/hydro/schemes/ib/bodies/body_traits.hpp"
 namespace simbi {
     template <size_type Dims>
     class Mesh;
@@ -206,14 +206,6 @@ namespace simbi {
             // Cut cell data
             ndarray<CellInfo, Dims> cell_info_;
 
-            DUAL auto cut_cell_indices() const
-            {
-                return cell_info_.filter_indices(
-                    [](const auto& cell) { return cell.is_cut; },
-                    this->get_default_policy()
-                );
-            }
-
             DUAL T compute_volume_fraction(
                 const T distance,
                 const auto& mesh_cell
@@ -267,6 +259,7 @@ namespace simbi {
             }
 
           public:
+
             // constructor
             DUAL ImmersedBody(
                 const MeshType& mesh,
@@ -289,6 +282,14 @@ namespace simbi {
                 update_cut_cells();
             }
             ~ImmersedBody() = default;
+
+            DUAL ndarray<size_type, 1> cut_cell_indices() const
+            {
+                return cell_info_.filter_indices(
+                    []DEV(const auto& cell) -> bool { return cell.is_cut; },
+                    this->get_default_policy()
+                );
+            }
 
             DUAL void advance_position(const T dt)
             {
@@ -395,6 +396,26 @@ namespace simbi {
                     this->get_default_policy()
                 );
             }
+
+            DUAL bool has_gravitational_capability() const {
+                return has_trait<traits::Gravitational>();
+            }
+
+            DUAL bool has_elastic_capability() const {
+                return has_trait<traits::Elastic>();
+            }
+
+            // DUAL bool has_accretion_capability() const {
+            //     return has_trait<traits::Accretion>();
+            // }
+
+            DUAL bool has_deformable_capability() const {
+                return has_trait<traits::Deformable>();
+            }
+
+
+
+
 
             // read-only accesors
             DUAL auto position() const { return this->position_; }

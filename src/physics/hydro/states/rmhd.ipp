@@ -39,18 +39,9 @@ void RMHD<dim>::cons2prim_impl()
 {
     shared_atomic_bool local_failure;
 
-    auto message = [](auto iter) -> const char* {
-        if (iter >= global::MAX_ITER) {
-            return "cons2prim iterations max exceeded";
-        }
-        else {
-            return "non-finite mu";
-        }
-    };
     this->prims_.transform(
         [gamma = this->gamma,
-         loc   = &local_failure,
-         message] DEV(auto& prim, const auto& c) -> Maybe<primitive_t> {
+         loc   = &local_failure] DEV(auto& prim, const auto& c) -> Maybe<primitive_t> {
             const real d      = c.dens();
             const auto mom    = c.momentum();
             const real tau    = c.nrg();
@@ -109,7 +100,14 @@ void RMHD<dim>::cons2prim_impl()
                 }
                 if (iter >= global::MAX_ITER || !std::isfinite(ff)) {
                     loc->store(true);
-                    return simbi::None(message(iter));
+                    return simbi::None([iter]() -> const char* {
+                        if (iter >= global::MAX_ITER) {
+                            return "cons1prim iterations max exceeded";
+                        }
+                        else {
+                            return "non-finite mu";
+                        }
+                    }());
                 }
                 iter++;
             } while (std::abs(mu_lower - mu_upper) > global::epsilon &&

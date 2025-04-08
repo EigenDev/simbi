@@ -107,7 +107,7 @@ namespace simbi {
                                                      : policy.streams[dev_idx];
 
                 // Launch kernel with appropriate stream
-                launch(policy, dev_idx, stream, [=] DEV() {
+                launch(policy, dev_idx, stream, [=] DEV() mutable {
                     for (auto idx : range(
                              device_first,
                              device_last,

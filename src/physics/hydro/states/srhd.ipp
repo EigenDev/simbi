@@ -531,7 +531,7 @@ void SRHD<dim>::init_simulation()
     pressure_guesses_.resize(this->cons_.size())
         .reshape(this->get_shape(this->full_policy()));
     pressure_guesses_.transform(
-        [](auto& p, const auto& cons) {
+        [] DEV(auto& p, const auto& cons) {
             const auto d = cons.dens();
             const auto s = cons.momentum().norm();
             const auto e = cons.nrg();

@@ -87,8 +87,7 @@ namespace simbi::ib {
                 const auto& other = other_ref.get();
                 if (&other != &body) {
                     // Check if other body has gravitational trait
-                    if (auto* grav_body = dynamic_cast<
-                            const GravitationalForcePolicy<T, Dims>*>(&other)) {
+                    if (other.has_gravitational_capability()) {
 
                         const auto r = other.position() - body.position();
                         const auto r2 =

@@ -240,7 +240,13 @@ namespace simbi {
             DEV T atomicAdd(T* address, T val)
             {
 #if GPU_CODE
-                return devAtomicAddReal(address, val);
+                // if integral type, use standard atomicAdd
+                if constexpr (std::is_integral_v<T>) {
+                    return devAtomicAddInt(address, val);
+                }
+                else {
+                    return devAtomicAddReal(address, val);
+                }
 #endif
             };
 

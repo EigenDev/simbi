@@ -53,18 +53,17 @@
 #include "build_options.hpp"
 #include "util/tools/helpers.hpp"   // for unravel_idx
 #include <tuple>
+#include <type_traits>
 
 namespace simbi {
 
     // Device-side operator for pointwise operations
-    template <typename F, typename... Arrays>
+    template <typename F, typename T, typename... Arrays>
     class DeviceOperator
     {
       public:
-        DUAL DeviceOperator(F op, void* target, Arrays*... arrays)
-            : op_(op),
-              target_(static_cast<typename F::value_type*>(target)),
-              arrays_(std::make_tuple(arrays...))
+        DUAL DeviceOperator(F op, T* target, Arrays*... arrays)
+            : op_(op), target_(target), arrays_(std::make_tuple(arrays...))
         {
         }
 
@@ -81,7 +80,7 @@ namespace simbi {
         }
 
         F op_;
-        typename F::value_type* target_;
+        T* target_;
         std::tuple<Arrays*...> arrays_;
     };
 }   // namespace simbi

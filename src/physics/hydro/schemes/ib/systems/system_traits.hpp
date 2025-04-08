@@ -98,9 +98,18 @@ namespace simbi::ibsystem::traits {
             }
             else {
                 // TODO: implement eccentric orbits
-                throw std::runtime_error(
-                    "Non-circular orbits not yet implemented"
-                );
+                if constexpr (global::on_gpu) {
+                    printf("Non-circular orbits not yet implemented\n");
+                    return {
+                      spatial_vector_t<T, Dims>(),
+                      spatial_vector_t<T, Dims>()
+                    };
+                }
+                else {
+                    throw std::runtime_error(
+                        "Non-circular orbits not yet implemented"
+                    );
+                }
             }
         }
 

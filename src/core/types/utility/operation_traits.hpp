@@ -97,8 +97,10 @@ namespace simbi {
         )
         {
             if constexpr (global::on_gpu) {
-                DeviceOperator<F, Arrays...> device_op(op, data, arrays...);
-                parallel_for(policy, [=] DEV(size_t ii) { device_op(ii); });
+                DeviceOperator<F, T, Arrays...> device_op(op, data, arrays...);
+                parallel_for(policy, [=] DEV(size_type ii) mutable {
+                    device_op(ii);
+                });
             }
             else {
                 parallel_for(policy, [&](size_t ii) {
@@ -121,8 +123,10 @@ namespace simbi {
         )
         {
             if constexpr (global::on_gpu) {
-                DeviceOperator<F, Arrays...> device_op(op, data, arrays...);
-                parallel_for(policy, [=] DEV(size_t ii) { device_op(ii); });
+                DeviceOperator<F, T, Arrays...> device_op(op, data, arrays...);
+                parallel_for(policy, [=] DEV(size_type ii) mutable {
+                    device_op(ii);
+                });
             }
             else {
                 parallel_for(policy, [&](size_t ii) {

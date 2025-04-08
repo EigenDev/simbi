@@ -140,17 +140,17 @@ namespace simbi {
         auto data() const -> const T* { return mem_.data(); }
         auto fill(T value) -> void
         {
-            if constexpr (global::on_gpu) {
-                mem_.ensure_device_synced();
-                parallel_for(
-                    [=, this] DEV(size_type ii) { mem_[ii] = value; },
-                    this->size()
-                );
-                mem_.sync_to_host();
-            }
-            else {
-                std::fill(mem_.data(), mem_.data() + this->size(), value);
-            }
+            // if constexpr (global::on_gpu) {
+            //     mem_.ensure_device_synced();
+            //     parallel_for(
+            //         [=, this] DEV(size_type ii) { mem_[ii] = value; },
+            //         this->size()
+            //     );
+            //     mem_.sync_to_host();
+            // }
+            // else {
+            std::fill(mem_.data(), mem_.data() + this->size(), value);
+            // }
         }
 
         template <typename... Indices>
@@ -586,8 +586,8 @@ namespace simbi {
             ndarray<size_type, 1> indices(this->size());
 
             if constexpr (global::on_gpu) {
-                size_type count = 0;
-                mem_.ensure_device_synced();
+                int count = 0;
+                // mem_.ensure_device_synced();
                 indices.sync_to_device();
                 auto indices_ptr = indices.data();
                 auto arr         = mem_.data();
@@ -595,8 +595,8 @@ namespace simbi {
 
                 parallel_for(policy, [=, this] DEV(size_type idx) {
                     if (op(arr[idx])) {
-                        size_type current_count =
-                            gpu::api::atomicAdd<size_type>(count_ptr, 1);
+                        auto current_count =
+                            gpu::api::atomicAdd<int>(count_ptr, 1);
                         indices_ptr[current_count] = idx;
                     }
                 });

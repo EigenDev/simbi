@@ -141,6 +141,11 @@ __device__ __forceinline__ real devAtomicMinReal(real* addr, real value)
     return old;
 }
 
+__device__ __forceinline__ auto devAtomicAddInt(int* addr, int value)
+{
+    return atomicAdd(addr, value);
+}
+
 __device__ __forceinline__ real devAtomicAddReal(real* addr, real value)
 {
 #if FLOAT_PRECISION

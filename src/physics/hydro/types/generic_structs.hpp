@@ -1033,14 +1033,14 @@ namespace simbi {
 
     struct WaveSpeeds {
         static constexpr size_t size = 6;
+        real data[size];
 
-        union {
-            struct {
-                real v1p, v1m, v2p, v2m, v3p, v3m;
-            };
+        DUAL constexpr WaveSpeeds() : data{} {}
 
-            real data[size];
-        };
+        DUAL constexpr WaveSpeeds(real v1p, real v1m, real v2p, real v2m, real v3p, real v3m)
+            : data{v1p, v1m, v2p, v2m, v3p, v3m}
+        {
+        }
 
         // Array access
         DUAL constexpr real& operator[](size_t i) { return data[i]; }

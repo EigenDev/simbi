@@ -10,7 +10,7 @@ endforeach
 gpu_flags = [
     '-DGPU_CODE=1',
     '-DMANAGED_MEMORY',
-]   
+]
 
 # Get CUDA paths
 cuda_path = run_command('which', 'nvcc', check: false).stdout().strip()
@@ -28,11 +28,12 @@ gpu_settings = {
         'compiler': 'nvcc',
         'arch': f'-arch=sm_@gpu_arch@',
         'args': [
-            f'-arch=sm_@gpu_arch@', 
+            f'-arch=sm_@gpu_arch@',
             '-x',
             'cu',
             '-dc',
-            '--extended-lambda', 
+            '--extended-lambda',
+            '-w',
             '--expt-relaxed-constexpr',
             '-std=c++20',
             '--compiler-options',

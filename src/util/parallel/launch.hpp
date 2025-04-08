@@ -53,19 +53,12 @@
 #include "util/parallel/exec_policy.hpp"   // for ExecutionPolicy
 
 namespace simbi {
-    // Launch function object with no configuration
-    // Launch with no configuration
-    template <typename Function, typename... Arguments>
-    void launch(Function f, Arguments... args)
-    {
-        f(args...);
-    }
-
-    // Launch with explicit (or partial) configuration
+    // Launch with explicit configuration
     template <typename Function, typename... Arguments>
     void launch(
         const ExecutionPolicy<>& policy,
         const int device,
+        const simbiStream_t stream,
         Function f,
         Arguments... args
     )
@@ -78,7 +71,7 @@ namespace simbi {
                 policy.get_device_grid_size(device),
                 policy.block_size,
                 policy.shared_mem_bytes,
-                policy.streams[device % policy.streams.size()]>>>(f, args...);
+                stream>>>(f, args...);
         }
         else {
             Kernel<<<
