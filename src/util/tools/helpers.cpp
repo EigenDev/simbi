@@ -259,7 +259,7 @@ namespace simbi {
             return mu - muhat;
         }
 
-        real find_mu_plus(const real beesq, const real rsbsq, const real r)
+        DEV real find_mu_plus(const real beesq, const real rsbsq, const real r)
         {
             constexpr real h0 = 1.0;
 
