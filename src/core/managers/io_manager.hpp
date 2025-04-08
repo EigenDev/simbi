@@ -142,6 +142,7 @@ namespace simbi {
               gravity_source_lib_(init.gravity_source_lib),
               boundary_source_lib_(init.boundary_source_lib),
               checkpoint_zones_(determine_checkpoint_zones(init)),
+              checkpoint_idx_(init.checkpoint_index),
               hsource_handle_(nullptr, LibraryDeleter()),
               gsource_handle_(nullptr, LibraryDeleter()),
               bsource_handle_(nullptr, LibraryDeleter())
@@ -334,7 +335,7 @@ namespace simbi {
         auto& boundary_source_lib() { return boundary_source_lib_; }
         auto current_iter() const { return current_iter_; }
         auto checkpoint_zones() const { return checkpoint_zones_; }
-        auto checkpoint_idx() const { return checkpoint_idx_; }
+        auto checkpoint_index() const { return checkpoint_idx_; }
 
         template <typename... Args>
             requires ValidSourceParams<Dims, Args...>
@@ -400,7 +401,7 @@ namespace simbi {
             const auto [xag, yag, zag] = init.active_zones();
             return (zag > 1) ? zag : (yag > 1) ? yag : xag;
         }
-    };
+    };   // namespace simbi
 }   // namespace simbi
 
 #endif
