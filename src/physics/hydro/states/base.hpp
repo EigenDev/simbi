@@ -193,8 +193,6 @@ namespace simbi {
               gamma(gamma_)
 
         {
-            context_.gamma         = gamma_;
-            context_.is_isothermal = (gamma_ == 1.0);
             init_gravitational_system(init_conditions);
         }
 
@@ -549,9 +547,9 @@ namespace simbi {
         {
             return (*io_manager_).checkpoint_zones();
         }
-        DUAL auto checkpoint_idx() const
+        DUAL auto checkpoint_index() const
         {
-            return (*io_manager_).checkpoint_idx();
+            return (*io_manager_).checkpoint_index();
         }
 
         // accessors from execution manager class
@@ -613,7 +611,7 @@ namespace simbi {
             // the checkpoint identifier is the current checkpoint index
             // otherwise it is the current time
             return time_manager_.log_time_enabled()
-                       ? io().checkpoint_idx()
+                       ? io().checkpoint_index()
                        : time_manager_.checkpoint_time();
         }
 
@@ -645,7 +643,12 @@ namespace simbi {
         bool has_been_interrupted() const { return was_interrupted_; }
         bool is_in_initial_primitive_state() const
         {
-            return time() == 0.0 || checkpoint_idx() == 0;
+            return time() == 0.0 || checkpoint_index() == 0;
+        }
+
+        auto gravitational_system() const
+        {
+            return gravitational_system_.get();
         }
 
         // accessors from mesh class
