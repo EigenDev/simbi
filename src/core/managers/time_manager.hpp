@@ -67,6 +67,9 @@ namespace simbi {
               dlogt_(init.dlogt),
               checkpoint_interval_(init.checkpoint_interval)
         {
+            if (t_ != 0.0) {
+                update_next_checkpoint_time();
+            }
         }
 
         // simple accessors
