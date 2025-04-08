@@ -63,7 +63,7 @@
 struct InitialConditions {
     real time, checkpoint_interval, dlogt;
     real plm_theta, gamma, cfl, tend, sound_speed_squared;
-    luint nx, ny, nz, checkpoint_idx;
+    luint nx, ny, nz, checkpoint_index;
     bool quirk_smoothing, homologous, mesh_motion, isothermal;
     std::vector<std::vector<real>> bfield;
     std::string data_directory, coord_system, solver;
@@ -194,8 +194,8 @@ struct InitialConditions {
             init.tend = init.get<real>("tend", 1.0);
             init.checkpoint_interval =
                 init.get<real>("checkpoint_interval", 0.1);
-            init.dlogt          = init.get<real>("dlogt", 0.0);
-            init.checkpoint_idx = init.get<luint>("checkpoint_index", 0);
+            init.dlogt            = init.get<real>("dlogt", 0.0);
+            init.checkpoint_index = init.get<luint>("checkpoint_index", 0);
 
             // Solver settings
             init.solver        = init.get<std::string>("solver", "hllc");
@@ -334,8 +334,8 @@ struct InitialConditions {
             init.gamma      = init.get<real>("adiabatic_index", 5.0 / 3.0);
             init.isothermal = init.get<bool>("isothermal", false);
 
-            if (init.isothermal) {
-                real sound_speed         = init.get<real>("sound_speed", 1.0);
+            real sound_speed = init.get<real>("sound_speed", 1.0);
+            if (sound_speed != 0.0) {
                 init.sound_speed_squared = sound_speed * sound_speed;
             }
 
@@ -373,11 +373,9 @@ struct InitialConditions {
                         !body_dict.at("body_type").is_string()) {
                         continue;   // Skip invalid body entries
                     }
-
                     const std::string type_str =
                         body_dict.at("body_type").get<std::string>();
                     simbi::BodyType body_type = string_to_body_type(type_str);
-
                     // create property map
                     simbi::ConfigDict props;
 
