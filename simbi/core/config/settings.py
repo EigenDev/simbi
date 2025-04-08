@@ -1,6 +1,6 @@
 import dataclasses
 from enum import Enum
-from dataclasses import dataclass, asdict, field
+from dataclasses import dataclass, asdict, field, fields
 from typing import Optional, Sequence, Callable, Any, TypeVar, Self
 from pathlib import Path
 from simbi.core.config.bodies import ImmersedBodyConfig
@@ -220,7 +220,7 @@ class IOSettings(BaseSettings):
     def to_execution_dict(self) -> dict[str, Any]:
         """convert the settings to execution format dict"""
         return {
-            "data_directory": f"{self.data_directory}/",
+            "data_directory": f"{Path(self.data_directory)}/",
             "checkpoint_file": (
                 str(self.checkpoint_file) if self.checkpoint_file else ""
             ),
@@ -274,7 +274,7 @@ class SimulationSettings(BaseSettings):
             dlogt=setup["dlogt"],
             solver=Solver(setup["solver"]),
             bodies=setup["immersed_bodies"],
-            sound_speed=setup["sound_speed"],
+            sound_speed=setup["ambient_sound_speed"],
             isothermal=setup["isothermal"],
             body_system=get_first_existing_key(
                 setup, ["gravitational_system", "elastic_system", "rigid_system"], None
@@ -295,7 +295,7 @@ class SimulationSettings(BaseSettings):
             "quirk_smoothing": self.quirk_smoothing,
             "is_mhd": self.is_mhd,
             "dlogt": self.dlogt,
-            "solver": self.solver,
+            "solver": self.solver.value,
             "bodies": [asdict(x) for x in self.bodies],
             "sound_speed": self.sound_speed,
             "isothermal": self.isothermal,
