@@ -141,14 +141,17 @@ namespace simbi {
             return callable->invoke(std::forward<Args>(args)...);
         }
 
-        explicit operator bool() const noexcept { return callable != nullptr; }
+        DUAL explicit operator bool() const noexcept
+        {
+            return callable != nullptr;
+        }
 
-        bool operator==(std::nullptr_t) const noexcept
+        DUAL bool operator==(std::nullptr_t) const noexcept
         {
             return callable == nullptr;
         }
 
-        bool operator!=(std::nullptr_t) const noexcept
+        DUAL bool operator!=(std::nullptr_t) const noexcept
         {
             return callable != nullptr;
         }
