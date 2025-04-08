@@ -9,6 +9,8 @@
 #include "core/types/utility/config_dict.hpp"
 #include "physics/hydro/types/generic_structs.hpp"
 
+using namespace simbi::ib::concepts;
+
 namespace simbi {
     template <size_type Dims>
     class Mesh;
@@ -91,9 +93,9 @@ namespace simbi::ibsystem {
             const T dt
         )
         {
-            auto res = conserved_t{};
+            auto state = conserved_t{};
             for (auto& body : bodies_) {
-                res += body->apply_forces_to_fluid(
+                state += body->apply_forces_to_fluid(
                     prim,
                     mesh_cell,
                     coords,
@@ -102,9 +104,9 @@ namespace simbi::ibsystem {
                 );
             }
 
-            // apply accretion if the body is an accreting body
+            // apply accretion only if the body has accretion traits
             for (auto& body : bodies_) {
-                res += body->accrete_from_cell(
+                state += body->accrete_from_cell(
                     prim,
                     mesh_cell,
                     coords,
@@ -112,7 +114,7 @@ namespace simbi::ibsystem {
                     dt
                 );
             }
-            return res;
+            return state;
         }
 
         // Update positions (advance positions for all bodies)
