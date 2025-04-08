@@ -51,7 +51,8 @@
 
 #include "build_options.hpp"                        // for real, DUAL
 #include "core/types/containers/vector_field.hpp"   // for Vector, VectorField
-
+#include <iostream>                                 // for cout, cin
+#include <vector>                                   // for vector
 using namespace simbi::vector_field;
 
 namespace simbi {
@@ -217,7 +218,23 @@ namespace simbi {
             const auto dtheta = cell.x2R() - cell.x2L();
             const auto dphi   = cell.x3R() - cell.x3L();
             if constexpr (C == CurlComponent::X1) {
-                return (1.0 / (r * sint)) *
+                if (cell.at_pole()) {
+                    // At exact pole, use limiting formula
+                    const auto at_north_pole = cell.at_north_pole();
+                    const real pole_sign     = at_north_pole ? 1.0 : -1.0;
+
+                    // Use one-sided difference for B_phi derivative
+                    //
+                    // Should be 0
+                    const real B_phi_pole = vec_field.left()[2];
+                    const real B_phi_next = at_north_pole ? vec_field.right()[2]
+                                                          : vec_field.left()[2];
+
+                    // Calculate proper derivative at pole
+                    return pole_sign * 2.0 / r * (B_phi_next - B_phi_pole) /
+                           dtheta;
+                }
+                return (1.0 / (cell.x1L() * sint)) *
                        ((1.0 / dtheta) *
                             (vec_field.right()[2] * std::sin(cell.x2R()) -
                              vec_field.left()[2] * std::sin(cell.x2L())) -
@@ -225,8 +242,12 @@ namespace simbi {
                             (vec_field.right()[1] - vec_field.left()[1]));
             }
             else if constexpr (C == CurlComponent::X2) {
+                if (cell.at_pole()) {
+                    return 0.0;
+                }
+
                 return (1.0 / r) *
-                       ((1.0 / (dphi * sint)) *
+                       ((1.0 / (dphi * std::sin(cell.x2L()))) *
                             (vec_field.right()[0] - vec_field.left()[0]) -
                         (1.0 / dr) * (vec_field.right()[2] * cell.x1R() -
                                       vec_field.left()[2] * cell.x1L()));
@@ -237,6 +258,31 @@ namespace simbi {
                                       vec_field.left()[1] * cell.x1L()) -
                         (1.0 / dtheta) *
                             (vec_field.right()[0] - vec_field.left()[0]));
+                // if (res != 0) {
+                //     const auto theta_part =
+                //         (1.0 / dr) * (vec_field.right()[1] * cell.x1R() -
+                //                       vec_field.left()[1] * cell.x1L());
+                //     const auto r_part = (1.0 / dtheta) *
+                //     (vec_field.right()[0] -
+                //                                           vec_field.left()[0]);
+
+                // printf(
+                //     "[E_theta] R: %f, L: %f\n",
+                //     vec_field.right()[1],
+                //     vec_field.left()[1]
+                // );
+                // printf("X1R: %f, X1L: %f\n", cell.x1R(), cell.x1L());
+                // printf(
+                //     "[E_r] R: %f, L: %f\n",
+                //     vec_field.right()[0],
+                //     vec_field.left()[0]
+                // );
+                // printf("X2R: %f, X2L: %f\n", cell.x2R(), cell.x2L());
+                // printf("r_part: %f, theta_part: %f\n", r_part,
+                // theta_part); std::cin.get();
+                // }
+
+                // return res;
             }
         }
 
@@ -257,6 +303,80 @@ namespace simbi {
                 default:
                     return curl_cartesian_component<
                         static_cast<CurlComponent>(nhat - 1)>(cell, vec_field);
+            }
+        }
+
+        template <typename... Args>
+        DUAL real
+        divergence_cartesian(const auto& cell, const Args... components)
+        {
+            auto to_real = [](auto val) { return static_cast<real>(val); };
+            real res     = 0.0;
+            std::vector<real> vals = {to_real(components)...};
+            // first two components L/R for the x1 direction
+            res += (1.0 / cell.width(0)) * (vals[1] - vals[0]);
+            // next two components L/R for the x2 direction
+            res += (1.0 / cell.width(1)) * (vals[3] - vals[2]);
+            // last two components L/R for the x3 direction
+            res += (1.0 / cell.width(2)) * (vals[5] - vals[4]);
+            return res;
+        }
+
+        template <typename... Args>
+        DUAL real
+        divergence_spherical(const auto& cell, const Args... components)
+        {
+            auto to_real = [](auto val) { return static_cast<real>(val); };
+            real res     = 0.0;
+            std::vector<real> vals = {to_real(components)...};
+            const auto r           = cell.centroid_coordinate(0);
+            const auto sint        = std::sin(cell.centroid_coordinate(1));
+            const auto dr          = cell.x1R() - cell.x1L();
+            const auto dtheta      = cell.x2R() - cell.x2L();
+            const auto dphi        = cell.x3R() - cell.x3L();
+            // first two components L/R for the r direction
+            res += (1.0 / (r * r)) * (1.0 / dr) *
+                   (vals[1] * cell.x1R() * cell.x1R() -
+                    vals[0] * cell.x1L() * cell.x1L());
+            // next two components L/R for the theta direction
+            res += (1.0 / (r * sint)) * (1.0 / dtheta) *
+                   (vals[3] * std::sin(cell.x2R()) -
+                    vals[2] * std::sin(cell.x2L()));
+            // last two components L/R for the phi direction
+            res += (1.0 / (r * sint)) * (1.0 / dphi) * (vals[5] - vals[4]);
+            return res;
+        }
+
+        template <typename... Args>
+        DUAL real
+        divergence_cylindrical(const auto& cell, const Args... components)
+        {
+            auto to_real = [](auto val) { return static_cast<real>(val); };
+            real res     = 0.0;
+            std::vector<real> vals = {to_real(components)...};
+            const auto x1mean      = cell.centroid_coordinate(0);
+            const auto dr          = cell.x1R() - cell.x1L();
+            const auto dphi        = cell.x2R() - cell.x2L();
+            const auto dz          = cell.x3R() - cell.x3L();
+            // first two components L/R for the r direction
+            res += (1.0 / x1mean) * (1.0 / dr) *
+                   (vals[1] * cell.x1R() - vals[0] * cell.x1L());
+            // next two components L/R for the phi direction
+            res += (1.0 / x1mean) * (1.0 / dphi) * (vals[3] - vals[2]);
+            // last two components L/R for the z direction
+            res += (1.0 / dz) * (vals[5] - vals[4]);
+            return res;
+        }
+
+        template <typename... Args>
+        DUAL real divergence(const auto& cell, const Args... components)
+        {
+            switch (cell.geometry()) {
+                case Geometry::CARTESIAN:
+                    return divergence_cartesian(cell, components...);
+                case Geometry::CYLINDRICAL:
+                    return divergence_cylindrical(cell, components...);
+                default: return divergence_spherical(cell, components...);
             }
         }
     }   // namespace vector_calculus
