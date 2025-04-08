@@ -140,6 +140,7 @@ class PlotFormatter:
             else:
                 theta_min = 0
                 theta_max = (360 / pi) * setup["x2max"]
+            # ax.set_yscale("log" if setup["x1_spacing"] == "log" else "linear")
             ax.set_theta_zero_location("N")
             ax.set_theta_direction(-1)
             ax.set_thetamin(theta_min)
@@ -147,11 +148,13 @@ class PlotFormatter:
             ax.set_rmin(setup["x1min"])
             ax.set_rmax(config["style"].xmax or setup["x1max"])
 
+            # ax.grid(True)
+
             kwargs = {"y": 0.8 if half_sphere else 1.03}
             fig.suptitle(f"{config['plot'].setup} t = {setup['time']:.2f}", **kwargs)
         else:
             if config["plot"].plot_type == "temporal":
-                weight_string = get_field_str(
+                weight_string: str = get_field_str(
                     [config["plot"].weight], normalized=False
                 ).replace(r"$", "")
                 ax.set_xlabel(r"$t$")
@@ -169,8 +172,13 @@ class PlotFormatter:
                 else:
                     ax.legend()
                 ax.set_title(f"{config['plot'].setup} t = {setup['time']:.2f}")
+                PlotFormatter.set_scale(
+                    ax,
+                    config["style"].semilogx or setup["x1_spacing"] == "log",
+                    config["style"].semilogy or setup["x2_spacing"] == "log",
+                )
             elif config["plot"].plot_type == "histogram":
-                ax.set_xlabel(rf"$\Gamma\beta$")
+                ax.set_xlabel(r"$\Gamma\beta$")
                 if config["plot"].hist_type == "kinetic":
                     ax.set_ylabel(r"$E_k (> \Gamma\beta)$")
                 elif config["plot"].hist_type == "enthalpy":
