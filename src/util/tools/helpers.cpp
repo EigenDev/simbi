@@ -283,7 +283,7 @@ namespace simbi {
             // now we find the root using bisection
             const int max_iter = 50;
             int iter           = 0;
-            real mu_mid, f_mid;
+            real f_mid, mu_mid = 1.0;
             real f_lower = kkc_fmu49(mu_lower, beesq, rsbsq, r);
 
             while (iter < max_iter && (mu_upper - mu_lower) > global::epsilon) {
