@@ -173,7 +173,7 @@ namespace simbi::ibsystem {
             T gamma,
             T total_mass,
             T semi_major_axis,
-            config::binary_pair<T> body_components,
+            config::binary_pair_t<T> body_components,
             T eccentricity         = T(0),
             T mass_ratio           = T(1),
             bool prescribed_motion = true

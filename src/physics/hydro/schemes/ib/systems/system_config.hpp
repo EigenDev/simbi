@@ -34,12 +34,12 @@ namespace simbi::ibsystem::config {
     };
 
     template <typename T>
-    using binary_pair =
+    using binary_pair_t =
         std::pair<GravitationalComponent<T>, GravitationalComponent<T>>;
 
     template <typename T>
     struct BinaryConfig {
-        binary_pair<T> binary_pair;
+        binary_pair_t<T> binary_pair;
         T semi_major                  = 1.0;
         T eccentricity                = 0.0;
         T mass_ratio                  = 1.0;    // q = m2/m1
