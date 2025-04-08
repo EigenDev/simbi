@@ -54,6 +54,7 @@
 #include "core/types/containers/ndarray.hpp"   // for ndarray
 #include "core/types/containers/vector.hpp"    // for spatial_vector_t
 #include "core/types/utility/enums.hpp"        // for BodyType
+#include "physics/hydro/types/generic_structs.hpp"
 
 namespace simbi {
     template <size_type Dims>
@@ -61,12 +62,6 @@ namespace simbi {
 
     template <size_type Dims>
     class Cell;
-
-    template <size_type Dims, Regime R>
-    struct anyConserved;
-
-    template <size_type Dims, Regime R>
-    struct anyPrimitive;
 
     namespace ib {
         // base class for all immersed boundary bodies
@@ -421,6 +416,9 @@ namespace simbi {
             {
                 this->velocity_ = velocity;
             }
+
+            DUAL void set_mass(const T mass) { this->mass_ = mass; }
+            DUAL void set_radius(const T radius) { this->radius_ = radius; }
         };
     }   // namespace ib
 
