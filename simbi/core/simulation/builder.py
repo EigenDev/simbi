@@ -39,6 +39,7 @@ class SimStateBuilder:
             raise ValueError(
                 f"Detected a run wtih effective dimensions {effective_dim}, but the user is inserting undefined bounds. Please remove the bounds: {bounds[-ndef:]} from your configuration"
             )
+
         return (*bounds_copy, *tuple(defaults))
 
     @staticmethod
@@ -48,24 +49,25 @@ class SimStateBuilder:
         grid = bundle.grid_config
         io = bundle.io_config
 
-        SimStateBuilder.prepare_data_directory(io.data_directory)
-
+        SimStateBuilder.prepare_data_directory(Path(io.data_directory))
+        effective_dim = mesh.effective_dim(grid.resolution)
         # Get bounds with defaults
         x1bounds, x2bounds, x3bounds = SimStateBuilder.get_bounds(
-            mesh.bounds, mesh.effective_dim(grid.resolution)
+            mesh.bounds, effective_dim
         )
 
         bcs = pipe(
             mesh.boundary_conditions,
-            lambda bcs: BoundaryManager.validate_conditions(bcs, mesh.dimensionality),
+            lambda bcs: BoundaryManager.validate_conditions(bcs, effective_dim),
             lambda bcs: BoundaryManager.extrapolate_conditions_if_needed(
-                bcs, mesh.dimensionality
+                bcs, mesh.dimensionality, mesh.coord_system
             ),
             lambda bcs: BoundaryManager.check_and_fix_curvlinear_conditions(
                 conditions=bcs,
                 coord_system=mesh.coord_system,
                 contains_boundary_source_terms=io.boundary_source_lib is not None,
                 dim=mesh.dimensionality,
+                effective_dim=mesh.effective_dim(grid.resolution),
             ),
         )
 
