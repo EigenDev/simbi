@@ -84,7 +84,7 @@ namespace simbi::ib::concepts {
     concept HasAccretionProperties = requires(const Body& b) {
         { b.accretion_efficiency() } -> std::convertible_to<T>;
         { b.accretion_radius() } -> std::convertible_to<T>;
-        { b.total_accreted_mass() } -> std::convertible_to<T>;
+        // { b.total_accreted_mass() } -> std::convertible_to<T>;
     };
 
     // Combined concept for a complete immersed body

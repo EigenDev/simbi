@@ -83,6 +83,8 @@ namespace simbi::ib {
             virtual void update_material_state(T dt)                   = 0;
             virtual void set_position(const spatial_vector_t<T, Dims>& pos) {}
             virtual void set_velocity(const spatial_vector_t<T, Dims>& vel) {}
+            virtual void set_mass(const T mass) {}
+            virtual void set_radius(const T radius) {}
 
             // Fluid interaction
             virtual Conserved apply_forces_to_fluid(
@@ -168,6 +170,12 @@ namespace simbi::ib {
             void set_velocity(const spatial_vector_t<T, Dims>& vel) override
             {
                 body_.set_velocity(vel);
+            }
+
+            void set_mass(const T mass) override { body_.set_mass(mass); }
+            void set_radius(const T radius) override
+            {
+                body_.set_radius(radius);
             }
 
             void
@@ -278,6 +286,94 @@ namespace simbi::ib {
                 }
                 return Conserved{};
             }
+
+            T stiffness() const override
+            {
+                if constexpr (concepts::HasElasticProperties<BodyType, T>) {
+                    return body_.stiffness();
+                }
+                return Concept::stiffness();
+            }
+
+            T damping() const override
+            {
+                if constexpr (concepts::HasElasticProperties<BodyType, T>) {
+                    return body_.damping();
+                }
+                return Concept::damping();
+            }
+
+            T rest_length() const override
+            {
+                if constexpr (concepts::HasElasticProperties<BodyType, T>) {
+                    return body_.rest_length();
+                }
+                return Concept::rest_length();
+            }
+
+            T youngs_modulus() const override
+            {
+                if constexpr (concepts::HasDeformableProperties<BodyType, T>) {
+                    return body_.youngs_modulus();
+                }
+                return Concept::youngs_modulus();
+            }
+
+            T poisson_ratio() const override
+            {
+                if constexpr (concepts::HasDeformableProperties<BodyType, T>) {
+                    return body_.poisson_ratio();
+                }
+                return Concept::poisson_ratio();
+            }
+
+            T yield_strength() const override
+            {
+                if constexpr (concepts::HasDeformableProperties<BodyType, T>) {
+                    return body_.yield_strength();
+                }
+                return Concept::yield_strength();
+            }
+
+            bool is_permanently_deformed() const override
+            {
+                if constexpr (concepts::HasDeformableProperties<BodyType, T>) {
+                    return body_.is_permanently_deformed();
+                }
+                return Concept::is_permanently_deformed();
+            }
+
+            T stored_elastic_energy() const override
+            {
+                if constexpr (concepts::HasDeformableProperties<BodyType, T>) {
+                    return body_.stored_elastic_energy();
+                }
+                return Concept::stored_elastic_energy();
+            }
+
+            T accretion_efficiency() const override
+            {
+                if constexpr (concepts::HasAccretionProperties<BodyType, T>) {
+                    return body_.accretion_efficiency();
+                }
+                return Concept::accretion_efficiency();
+            }
+
+            T accretion_radius() const override
+            {
+                if constexpr (concepts::HasAccretionProperties<BodyType, T>) {
+                    return body_.accretion_radius();
+                }
+                return Concept::accretion_radius();
+            }
+
+            T total_accreted_mass() const override
+            {
+                if constexpr (concepts::HasAccretionProperties<BodyType, T>) {
+                    return body_.total_accreted_mass();
+                }
+                return Concept::total_accreted_mass();
+            }
         };
 
         // The actual implementation
@@ -355,6 +451,62 @@ namespace simbi::ib {
             return concept_->has_gravitational_capability();
         }
 
+        bool has_elastic_capability() const
+        {
+            return concept_->has_elastic_capability();
+        }
+
+        bool has_accretion_capability() const
+        {
+            return concept_->has_accretion_capability();
+        }
+
+        bool has_deformable_capability() const
+        {
+            return concept_->has_deformable_capability();
+        }
+
+        // Optional properties
+        T softening_length() const { return concept_->softening_length(); }
+
+        bool two_way_coupling() const { return concept_->two_way_coupling(); }
+
+        T stiffness() const { return concept_->stiffness(); }
+
+        T damping() const { return concept_->damping(); }
+
+        T rest_length() const { return concept_->rest_length(); }
+
+        T youngs_modulus() const { return concept_->youngs_modulus(); }
+
+        T poisson_ratio() const { return concept_->poisson_ratio(); }
+
+        T yield_strength() const { return concept_->yield_strength(); }
+
+        bool is_permanently_deformed() const
+        {
+            return concept_->is_permanently_deformed();
+        }
+
+        T stored_elastic_energy() const
+        {
+            return concept_->stored_elastic_energy();
+        }
+
+        T accretion_efficiency() const
+        {
+            return concept_->accretion_efficiency();
+        }
+
+        T accretion_radius() const { return concept_->accretion_radius(); }
+
+        T total_accreted_mass() const
+        {
+            return concept_->total_accreted_mass();
+        }
+
+        // Setters for position and velocity
+
         void set_position(const spatial_vector_t<T, Dims>& pos)
         {
             concept_->set_position(pos);
@@ -364,6 +516,9 @@ namespace simbi::ib {
         {
             concept_->set_velocity(vel);
         }
+
+        void set_mass(const T mass) { concept_->set_mass(mass); }
+        void set_radius(const T radius) { concept_->set_radius(radius); }
     };
 }   // namespace simbi::ib
 #endif   // ANY_HPP
