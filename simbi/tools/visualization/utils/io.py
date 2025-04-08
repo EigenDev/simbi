@@ -1,4 +1,4 @@
-from typing import Tuple, Dict, Any
+from typing import Any, Generator, Optional
 from dataclasses import dataclass
 import numpy as np
 from pathlib import Path
@@ -9,9 +9,10 @@ from ...utility import read_file as util_read_file
 class SimulationData:
     """Container for simulation data"""
 
-    fields: Dict[str, np.ndarray]
-    setup: Dict[str, Any]
-    mesh: Dict[str, np.ndarray]
+    fields: dict[str, np.ndarray]
+    setup: dict[str, Any]
+    mesh: dict[str, np.ndarray]
+    immersed_bodies: Optional[dict[str, Any]]
 
 
 class DataManager:
@@ -27,18 +28,18 @@ class DataManager:
     @staticmethod
     def read_file(path: str) -> SimulationData:
         """Read simulation data from file"""
-        path = Path(path)
-        if not path.exists():
+        fpath = Path(path)
+        if not fpath.exists():
             raise FileNotFoundError(f"File {path} not found")
 
         try:
-            fields, setup, mesh = util_read_file(path)
-            return SimulationData(fields, setup, mesh)
+            fields, setup, mesh, immersed_bodies = util_read_file(path)
+            return SimulationData(fields, setup, mesh, immersed_bodies)
         except Exception as e:
             raise IOError(f"Failed to read {path}: {str(e)}")
 
     @staticmethod
-    def get_file_list(files: str, sort: bool = False) -> Tuple[list, int]:
+    def get_file_list(files: str, sort: bool = False) -> tuple[list, int]:
         """Get sorted list of files and frame count"""
         if isinstance(files, dict):
             file_list = {k: sorted(v) if sort else v for k, v in files.items()}
@@ -49,7 +50,7 @@ class DataManager:
 
         return file_list, frame_count
 
-    def iter_files(self) -> SimulationData:
+    def iter_files(self) -> Generator[SimulationData, None, None]:
         """Iterate over files and yield simulation data"""
         if not self.movie_mode:
             for file in self.file_list:
