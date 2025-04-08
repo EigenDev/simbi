@@ -52,7 +52,7 @@ class CLIManager:
         """Parse arguments and return values"""
         args = vars(self.main_parser.parse_args())
         return {
-            arg.name: args[arg.name.replace("-", "_")]
+            arg.name.replace("-", "_"): args[arg.name.replace("-", "_")]
             for arg in self.dynamic_args
             if arg.name.replace("-", "_") in args
         }
