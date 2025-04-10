@@ -1,11 +1,14 @@
-from matplotlib.animation import FuncAnimation
-import matplotlib.patches as mpatches
+import math
 from typing import Any
-from ..core.constants import FIELD_ALIASES
+
+import matplotlib.patches as mpatches
+import numpy as np
+from matplotlib.animation import FuncAnimation
+from numpy.typing import NDArray
+
 from ....functional.helpers import calc_any_mean
 from ... import utility as util
-import numpy as np
-from numpy.typing import NDArray
+from ..core.constants import FIELD_ALIASES
 
 
 class DataHandlerMixin:
@@ -64,8 +67,18 @@ class AnimationMixin:
     def _update_title(self, setup: dict) -> None:
         """Update plot title"""
         time = setup["time"] * (util.time_scale if self.config["style"].units else 1.0)
+        time_unit = ""
+        if self.config["style"].orbital_params is not None:
+            p = self.config["style"].orbital_params
+            time = setup["time"] / (
+                2.0
+                * math.pi
+                * math.sqrt(float(p["separation"]) ** 3 / float(p["mass"]))
+            )
+            time_unit = "orbit(s)"
+
         setup_name = self.config["plot"].setup
-        title = rf"{setup_name} t = {time:.1f}"
+        title = rf"{setup_name} t = {time:.1f} {time_unit}"
         if setup["is_cartesian"] or self.config["multidim"].slice_along:
             if isinstance(self.axes, list):
                 self.axes[0].set_title(title)
@@ -200,8 +213,6 @@ class CoordinatesMixin:
 
     def _transform_polar(self, mesh: dict, setup: dict[str, Any]) -> tuple:
         """Handle polar coordinate transforms"""
-        # x1c = calc_any_mean(mesh["x1v"], setup["x1_spacing"])
-        # x2c = calc_any_mean(mesh["x2v"], setup["x2_spacing"])
         xx, yy = np.meshgrid(mesh["x1v"], mesh["x2v"])[::-1]
         if self.config["multidim"].bipolar:
             xx *= -1

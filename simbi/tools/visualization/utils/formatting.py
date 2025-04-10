@@ -1,18 +1,20 @@
-from typing import Optional, List, Tuple
+import math
 from dataclasses import dataclass
-from matplotlib.collections import QuadMesh
+from itertools import cycle
+from math import pi
+from typing import Any, List, Optional, Tuple
+
 import matplotlib.colors as mcolors
-from matplotlib.colorbar import Colorbar, ColorbarBase
 import matplotlib.pyplot as plt
 import numpy as np
-from itertools import cycle
-from ..config import Config
-from matplotlib.axes import Axes
-from typing import Any
 from cycler import cycler
+from matplotlib.axes import Axes
+from matplotlib.collections import QuadMesh
+from matplotlib.colorbar import Colorbar, ColorbarBase
 from mpl_toolkits.axes_grid1 import make_axes_locatable
-from math import pi
+
 from ...utility import get_field_str
+from ..config import Config
 
 
 @dataclass
@@ -190,7 +192,18 @@ class PlotFormatter:
             else:
                 ax.set_xlabel(rf"${config['style'].xlabel}$")
                 ax.set_ylabel(rf"${config['style'].ylabel}$")
-                ax.set_title(f"{config['plot'].setup} t = {setup['time']:.2f}")
+                time = setup["time"]
+                time_unit = ""
+                if config["style"].orbital_params is not None:
+                    p = config["style"].orbital_params
+                    time = setup["time"] / (
+                        2.0
+                        * math.pi
+                        * math.sqrt(float(p["separation"]) ** 3 / float(p["mass"]))
+                    )
+                    time_unit = "orbit(s)"
+
+                ax.set_title(f"{config['plot'].setup} t = {time:.2f}{time_unit}")
                 if any(config["style"].xlims):
                     ax.set_xlim(config["style"].xlims)
                 if any(config["style"].ylims):

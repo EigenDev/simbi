@@ -70,6 +70,7 @@ class StyleGroup:
     xlabel: str = "x"
     ylabel: str = "y"
     dpi: int = 300
+    orbital_params: Optional[dict[str, float]] = None
 
 
 @dataclass

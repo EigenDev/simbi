@@ -166,6 +166,16 @@ class PlottingArgumentBuilder:
                     "type": str,
                 },
             ),
+            (
+                ["--orbital-params"],
+                {
+                    "help": "orbital parameters for plotting",
+                    "default": None,
+                    "action": ParseKVAction,
+                    "nargs": "+",
+                    "type": str,
+                },
+            ),
         ]
 
     def _build_style_arguments(self) -> None:
@@ -618,6 +628,7 @@ class PlottingArgumentBuilder:
                 bipolar=args["bipolar"],
                 color_range=args["cbar_range"],
                 xmax=args["xmax"],
+                orbital_params=args["orbital_params"],
             ),
             "animation": AnimationGroup(
                 frame_rate=args["frame_rate"],
