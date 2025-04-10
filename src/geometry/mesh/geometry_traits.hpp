@@ -165,27 +165,22 @@ namespace simbi {
 
             // geometric source terms in momentum
             for (int qq = 0; qq < Dims; qq++) {
+                const auto r = cell.centroid_coordinate(0);
                 if (qq == 0) {
                     cons[qq + 1] =
                         pt * (cell.a1R() - cell.a1L()) / cell.volume() +
-                        wgam2 * (v2 * v2 + v3 * v3) /
-                            cell.centroid_coordinate(0) -
-                        (bmu[1] * bmu[1] + bmu[3] * bmu[3]) /
-                            cell.centroid_coordinate(0);
+                        wgam2 * (v2 * v2 + v3 * v3) / r -
+                        (bmu[1] * bmu[1] + bmu[3] * bmu[3]) / r;
                 }
                 else if (qq == 1) {
                     cons[qq + 1] =
                         pt * (cell.a2R() - cell.a2L()) / cell.volume() -
-                        wgam2 * (v2 * v1 - v3 * v3 * cot) /
-                            cell.centroid_coordinate(0) +
-                        (bmu[1] * bmu[0] - bmu[3] * bmu[3] * cot) /
-                            cell.centroid_coordinate(0);
+                        wgam2 * (v2 * v1 - v3 * v3 * cot) / r +
+                        (bmu[1] * bmu[0] - bmu[3] * bmu[3] * cot) / r;
                 }
                 else {
-                    cons[qq + 1] = -wgam2 * v3 * (v1 + cot * v2) /
-                                       cell.centroid_coordinate(0) +
-                                   bmu[3] * (bmu[0] + cot * bmu[1]) /
-                                       cell.centroid_coordinate(0);
+                    cons[qq + 1] = -wgam2 * v3 * (v1 + cot * v2) / r +
+                                   bmu[3] * (bmu[0] + cot * bmu[1]) / r;
                 }
             }
         }
