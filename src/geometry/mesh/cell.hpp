@@ -333,12 +333,12 @@ namespace simbi {
             const real dx      = (geo_info_.max_bound(axis) - min_val) /
                             grid_info_.active_gridsize(axis);
 
-            const real xl = my_max<real>(min_val + (idx - 0.5) * dx, min_val);
             if (is_left) {
-                return xl;
+                return min_val + idx * dx;
             }
-
-            return xl + dx * (idx == 0 ? 0.5 : 1.0);
+            else {
+                return min_val + (idx + 1) * dx;
+            }
         }
 
         // Helper for log spacing
@@ -347,20 +347,18 @@ namespace simbi {
         {
             const int axis     = dir - 1;
             const real min_val = geo_info_.min_bound(axis);
-            const real dlogx =
-                (std::log10(geo_info_.max_bound(axis) / min_val)) /
-                grid_info_.active_gridsize(axis);
-
-            const real xl = my_max<real>(
-                min_val * std::pow(10.0, (idx - 0.5) * dlogx),
-                min_val
-            );
+            const real max_val = geo_info_.max_bound(axis);
+            const real dlogx   = (std::log10(max_val / min_val)) /
+                               grid_info_.active_gridsize(axis);
 
             if (is_left) {
-                return xl;
+                // Left face of cell idx
+                return min_val * std::pow(10.0, idx * dlogx);
             }
-
-            return xl * std::pow(10.0, dlogx * (idx == 0 ? 0.5 : 1.0));
+            else {
+                // Right face of cell idx
+                return min_val * std::pow(10.0, (idx + 1) * dlogx);
+            }
         }
 
         template <GridDirection Dir>
