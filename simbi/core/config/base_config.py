@@ -11,6 +11,7 @@ from ..config.initialization import InitializationConfig
 from ..simulation.state_init import SimulationBundle, initialize_simulation
 from numpy.typing import NDArray
 from pathlib import Path
+from ...functional import pipe
 from ...functional import Maybe
 from .bodies import GravitationalSystemConfig, ImmersedBodyConfig
 from typing import (
@@ -467,6 +468,69 @@ class BaseConfig(metaclass=abc.ABCMeta):
                     setattr(cls, "spatial_order", "plm")
                     setattr(cls, "temporal_order", "rk2")
 
+    def _validate_boundary_sources(
+        self, settings: dict[str, Any]
+    ) -> Maybe[dict[str, Any]]:
+        """Validate that boundary sources exist for dimensions with 'dynamic' boundary conditions"""
+        # If no boundary sources are provided, no validation needed
+        if not settings.get("sim_state", {}).get("boundary_sources"):
+            return Maybe.of(settings)
+
+        # Extract dimensions and boundary conditions
+        dimensionality = settings["sim_state"]["dimensionality"]
+        boundary_conditions = settings["mesh"]["boundary_conditions"]
+
+        # Convert single-string boundary conditions to a sequence of the same condition
+        if isinstance(boundary_conditions, str):
+            boundary_conditions = (boundary_conditions,) * dimensionality
+
+        # Handle case of different boundary conditions per dimension
+        # Convert to list of (inner, outer) tuples
+        bc_by_dimension = []
+        if len(boundary_conditions) == dimensionality:
+            # Same BC for inner and outer on each dimension
+            bc_by_dimension = [(bc, bc) for bc in boundary_conditions]
+        else:
+            # Separate inner/outer BCs for each dimension
+            for i in range(dimensionality):
+                inner_bc = (
+                    boundary_conditions[i][0]
+                    if isinstance(boundary_conditions[i], (list, tuple))
+                    else boundary_conditions[i]
+                )
+                outer_bc = (
+                    boundary_conditions[i][1]
+                    if isinstance(boundary_conditions[i], (list, tuple))
+                    else boundary_conditions[i]
+                )
+                bc_by_dimension.append((inner_bc, outer_bc))
+
+        # Get the source code and check for required functions
+        source_code = settings["sim_state"]["boundary_sources"]
+        missing_sources = []
+
+        # Check each dimension and boundary
+        for i in range(1, dimensionality + 1):
+            inner_bc, outer_bc = bc_by_dimension[i - 1]
+
+            # Check if dynamic BCs require corresponding source functions
+            if inner_bc == "dynamic" and f"bx{i}_inner_source" not in source_code:
+                missing_sources.append(f"bx{i}_inner_source")
+
+            if outer_bc == "dynamic" and f"bx{i}_outer_source" not in source_code:
+                missing_sources.append(f"bx{i}_outer_source")
+
+        if missing_sources:
+            return Maybe(
+                None,
+                ValueError(
+                    f"Missing required boundary source functions for dynamic boundaries: {missing_sources}. "
+                    f"When using 'dynamic' boundary conditions, you must provide corresponding source functions."
+                ),
+            )
+
+        return Maybe.of(settings)
+
     def _compile_source_terms(self) -> None:
         """If the user provided source code, try to compile it"""
         sources = {
@@ -474,7 +538,21 @@ class BaseConfig(metaclass=abc.ABCMeta):
             "gravity": self.gravity_sources,
             "boundary": self.boundary_sources,
         }
-        spinner = halo.Halo("Attemptying to compile source code", spinner="dots")
+
+        if self.boundary_sources:
+            ...
+            # TODO: Implement
+            # self.validate_boundary_sources()
+        if self.gravity_sources:
+            ...
+            # TODO: Implement
+            # self.validate_gravity_sources()
+        if self.hydro_sources:
+            ...
+            # TODO: Implement
+            # self.validate_hydro_sources()
+
+        spinner = halo.Halo("Attempting to compile source code", spinner="dots")
         spinner.start()
         compiled = self.source_manager.compile_sources(
             type(self).__name__.lower(), sources
@@ -576,6 +654,7 @@ class BaseConfig(metaclass=abc.ABCMeta):
 
     def _validate_settings(self, settings: dict[str, Any]) -> Maybe[dict[str, Any]]:
         cleaned_settings = self._validate_bodies(settings)
+        cleaned_settings = self._validate_boundary_sources(cleaned_settings.unwrap())
         return self.validator.validate(cleaned_settings.unwrap())
 
     def _create_bundle(self, settings: dict[str, Any]) -> Maybe[SimulationBundle]:
