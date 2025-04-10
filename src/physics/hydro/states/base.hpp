@@ -80,7 +80,7 @@ namespace simbi {
 
         template <typename D>
         struct WaveSpeedFunctor {
-            // pointers work better in gpu
+            // pointers work better on gpu
             const D* derived_ptr;
 
             DUAL WaveSpeedFunctor(const D* d) : derived_ptr(d) {}
