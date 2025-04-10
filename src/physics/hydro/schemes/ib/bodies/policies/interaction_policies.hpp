@@ -175,6 +175,8 @@ namespace simbi::ib {
                 // Bondi-Hoyle radius modification
                 // from: Ruffert & Arnett (1994) -
                 // https://ui.adsabs.harvard.edu/abs/1994ApJ...427..351R/abstract
+                // and: Ruffert (1994) Eq. (14)
+                // https://ui.adsabs.harvard.edu/abs/1994ApJ...427..342R/abstract
                 effective_r_bondi = r_bondi / (1.0 + mach_number * mach_number);
 
                 // directional dependence - enhance upstream, reduce downstream
