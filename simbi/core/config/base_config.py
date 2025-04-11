@@ -11,7 +11,6 @@ from ..config.initialization import InitializationConfig
 from ..simulation.state_init import SimulationBundle, initialize_simulation
 from numpy.typing import NDArray
 from pathlib import Path
-from ...functional import pipe
 from ...functional import Maybe
 from .bodies import GravitationalSystemConfig, ImmersedBodyConfig
 from typing import (
@@ -473,7 +472,7 @@ class BaseConfig(metaclass=abc.ABCMeta):
     ) -> Maybe[dict[str, Any]]:
         """Validate that boundary sources exist for dimensions with 'dynamic' boundary conditions"""
         # If no boundary sources are provided, no validation needed
-        if not settings.get("sim_state", {}).get("boundary_sources"):
+        if not self.boundary_sources:
             return Maybe.of(settings)
 
         # Extract dimensions and boundary conditions
@@ -520,6 +519,8 @@ class BaseConfig(metaclass=abc.ABCMeta):
             if outer_bc == "dynamic" and f"bx{i}_outer_source" not in source_code:
                 missing_sources.append(f"bx{i}_outer_source")
 
+        print(missing_sources)
+        zzz = input("zzz")
         if missing_sources:
             return Maybe(
                 None,
@@ -654,6 +655,7 @@ class BaseConfig(metaclass=abc.ABCMeta):
 
     def _validate_settings(self, settings: dict[str, Any]) -> Maybe[dict[str, Any]]:
         cleaned_settings = self._validate_bodies(settings)
+        print("validating settings")
         cleaned_settings = self._validate_boundary_sources(cleaned_settings.unwrap())
         return self.validator.validate(cleaned_settings.unwrap())
 
