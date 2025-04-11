@@ -773,7 +773,7 @@ namespace simbi {
         DUAL auto calc_magnetic_four_vector() const
         {
             if constexpr (R != Regime::RMHD) {
-                static const ZeroMagneticFourVectorView zero_view;
+                const ZeroMagneticFourVectorView zero_view;
                 return zero_view.cache();
             }
             return bfield().as_fourvec(velocity(), lorentz_factor());

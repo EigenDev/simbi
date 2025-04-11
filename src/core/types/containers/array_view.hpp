@@ -284,6 +284,110 @@ namespace simbi {
             uarray<Dims> offsets_;
         };
 
+        template <typename DT>
+        class device_stencil_view
+        {
+          public:
+            DUAL device_stencil_view(
+                DT* data,
+                const uarray<Dims>& center_pos,
+                const uarray<Dims>& shape,
+                const uarray<Dims>& strides,
+                const uarray<Dims>& offsets
+            )
+                : data_(data),
+                  center_(center_pos),
+                  shape_(shape),
+                  strides_(strides),
+                  offsets_(offsets)
+            {
+            }
+
+            // Relative indexing from center
+            DUAL get_value_type_t<DT>& at(int i, int j = 0, int k = 0) const
+            {
+                iarray<Dims> coords;
+                size_type idx = 0;
+
+                if constexpr (global::col_major) {
+                    // Column major: (i,j,k) -> k fastest
+                    coords[0] = center_[0] + offsets_[0] + i;
+                    if constexpr (Dims >= 2) {
+                        coords[1] = center_[1] + offsets_[1] + j;
+                    }
+                    if constexpr (Dims >= 3) {
+                        coords[2] = center_[2] + offsets_[2] + k;
+                    }
+                }
+                else {
+                    // Row major: (i,j,k) -> i fastest
+                    coords[0] = center_[0] + offsets_[Dims - 1] + i;
+                    if constexpr (Dims >= 2) {
+                        coords[1] = center_[1] + offsets_[Dims - 2] + j;
+                    }
+                    if constexpr (Dims >= 3) {
+                        coords[2] = center_[2] + offsets_[Dims - 3] + k;
+                    }
+                }
+
+                // Calculate global linear index
+                for (size_type d = 0; d < Dims; ++d) {
+                    idx += coords[d] * strides_[d];
+                }
+
+                return access(data_[idx]);
+            }
+
+            // Get center position
+            DUAL const auto position() const
+            {
+                uarray<3> pos3d = {0, 0, 0};
+                pos3d[0]        = center_[0];
+                if constexpr (Dims > 1) {
+                    pos3d[1] = center_[1];
+                }
+                if constexpr (Dims > 2) {
+                    pos3d[2] = center_[2];
+                }
+                return pos3d;
+            }
+
+            // get global position
+            DUAL const auto global_position() const
+            {
+                uarray<3> pos3d = {0, 0, 0};
+                pos3d[0]        = center_[0] + offsets_[Dims - 1];
+                if constexpr (Dims > 1) {
+                    pos3d[1] = center_[1] + offsets_[Dims - 2];
+                }
+                if constexpr (Dims > 2) {
+                    pos3d[2] = center_[2] + offsets_[Dims - 3];
+                }
+                return pos3d;
+            }
+
+            // Direct value access at center
+            DUAL get_value_type_t<DT>& value() const { return at(0); }
+
+            // we also need special access method in case we get maybe type
+            DUAL auto& access(DT& val) const
+            {
+                if constexpr (has_value_type<DT>::value) {
+                    return val.value();
+                }
+                else {
+                    return val;
+                }
+            }
+
+          private:
+            DT* data_;   // Raw pointer instead of std::span
+            uarray<Dims> center_;
+            uarray<Dims> shape_;
+            uarray<Dims> strides_;
+            uarray<Dims> offsets_;
+        };
+
       protected:
         // non-owning pointer to source data
         const ndarray<T, Dims>* source_;

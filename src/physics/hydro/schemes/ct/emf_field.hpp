@@ -60,7 +60,7 @@ namespace simbi {
         class EMField : public vector_field::VectorField<real, 3>
         {
           public:
-            EMField(
+            DUAL EMField(
                 const general_vector_t<real, 3>& left,
                 const general_vector_t<real, 3>& right
             )
@@ -68,7 +68,7 @@ namespace simbi {
             {
             }
 
-            EMField()
+            DUAL EMField()
                 : vector_field::VectorField<real, 3>(
                       general_vector_t<real, 3>{0.0, 0.0, 0.0},
                       general_vector_t<real, 3>{0.0, 0.0, 0.0}
@@ -79,7 +79,7 @@ namespace simbi {
             ~EMField() = default;
 
             template <int l_dir, int m_dir>
-            void compute_edge_components(
+            DUAL void compute_edge_components(
                 const auto& fri,
                 const auto& gri,
                 const auto& hri,

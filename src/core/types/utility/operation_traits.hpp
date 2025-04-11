@@ -154,7 +154,16 @@ namespace simbi {
             // get underlying raw type from main view
             using main_t = typename MainView::raw_type;
             if constexpr (global::on_gpu) {
-                // TODO: Implement GPU stencil transform
+                // TODO: Implement GPU version
+                DeviceStencilOperator<F, MainView, DependentViews...> device_op(
+                    op,
+                    main_view,
+                    &dependent_views...
+                );
+
+                parallel_for(policy, [=] DEV(size_type idx) mutable {
+                    device_op(idx);
+                });
             }
             else {
                 parallel_for(policy, [=](size_type idx) {
