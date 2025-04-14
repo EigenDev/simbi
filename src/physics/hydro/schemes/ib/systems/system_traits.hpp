@@ -116,8 +116,8 @@ namespace simbi::ibsystem::traits {
         // Update positions and velocities at a given time
         DUAL void update_positions_and_velocities(
             T time,
-            std::vector<spatial_vector_t<T, Dims>>& positions,
-            std::vector<spatial_vector_t<T, Dims>>& velocities
+            ndarray<spatial_vector_t<T, Dims>>& positions,
+            ndarray<spatial_vector_t<T, Dims>>& velocities
         ) const
         {
             auto [r1, r2] = initial_positions();

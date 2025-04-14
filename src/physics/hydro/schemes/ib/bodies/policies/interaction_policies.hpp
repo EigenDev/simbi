@@ -24,7 +24,7 @@ namespace simbi::ib {
         }
 
         template <typename Body, typename Primitive>
-        auto apply_forces_to_fluid(
+        DEV auto apply_forces_to_fluid(
             Body& body,
             const Primitive& prim,
             const auto& mesh_cell,
@@ -108,23 +108,27 @@ namespace simbi::ib {
         }
 
         // Access to the accreting trait
-        const accr_trait_t& accreting_trait() const { return accr_trait_; }
-        accr_trait_t& accreting_trait() { return accr_trait_; }
+        DEV const accr_trait_t& accreting_trait() const { return accr_trait_; }
+        DEV accr_trait_t& accreting_trait() { return accr_trait_; }
 
         // Forward trait methods
-        T accretion_efficiency() const
+        DEV T accretion_efficiency() const
         {
             return accr_trait_.accretion_efficiency();
         }
-        T accretion_radius() const { return accr_trait_.accretion_radius(); }
-        T total_accreted_mass() const
+        DEV T accretion_radius() const
+        {
+            return accr_trait_.accretion_radius();
+        }
+        DEV T total_accreted_mass() const
         {
             return accr_trait_.total_accreted_mass();
         }
 
         // calc fluid forces on the body
         template <typename Body>
-        void calculate_fluid_forces(Body& body, const auto& mesh, const T dt)
+        DEV void
+        calculate_fluid_forces(Body& body, const auto& mesh, const T dt)
         {
             // do nothing
         }
@@ -132,7 +136,7 @@ namespace simbi::ib {
         // cubic spline smoothing kernel
         // from: Monaghan (1992) -
         // https://doi.org/10.1146/annurev.aa.30.090192.002551
-        T smoothing_kernel(const T r_norm)
+        DEV T smoothing_kernel(const T r_norm)
         {
             if (r_norm >= 1.0) {
                 return 0.0;
@@ -141,7 +145,7 @@ namespace simbi::ib {
             return q * q * (1.0 + 2.0 * r_norm);
         };
 
-        auto calculate_radial_accretion_profile(
+        DEV auto calculate_radial_accretion_profile(
             const T distance,
             const T r_bondi,
             const T accretion_efficiency,
@@ -353,7 +357,7 @@ namespace simbi::ib {
         }
 
         template <typename Body, typename Primitive>
-        auto accrete_from_cell(
+        DEV auto accrete_from_cell(
             Body& body,
             const Primitive& prim,
             const auto& mesh_cell,
@@ -495,7 +499,7 @@ namespace simbi::ib {
         }
 
         template <typename Body, typename Primitive>
-        auto apply_forces_to_fluid(
+        DEV auto apply_forces_to_fluid(
             Body& body,
             const Primitive& prim,
             const auto& mesh_cell,

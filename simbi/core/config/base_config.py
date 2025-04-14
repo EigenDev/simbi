@@ -655,8 +655,7 @@ class BaseConfig(metaclass=abc.ABCMeta):
 
     def _validate_settings(self, settings: dict[str, Any]) -> Maybe[dict[str, Any]]:
         cleaned_settings = self._validate_bodies(settings)
-        print("validating settings")
-        cleaned_settings = self._validate_boundary_sources(cleaned_settings.unwrap())
+        # cleaned_settings = self._validate_boundary_sources(cleaned_settings.unwrap())
         return self.validator.validate(cleaned_settings.unwrap())
 
     def _create_bundle(self, settings: dict[str, Any]) -> Maybe[SimulationBundle]:

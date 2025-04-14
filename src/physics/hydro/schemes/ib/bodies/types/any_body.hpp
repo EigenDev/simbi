@@ -2,7 +2,9 @@
 #define ANY_BODY_HPP
 
 #include "body_concepts.hpp"
+#include "build_options.hpp"
 #include "core/types/containers/vector.hpp"
+#include "core/types/utility/managed.hpp"
 #include "geometry/mesh/cell.hpp"
 #include "physics/hydro/types/context.hpp"
 #include "physics/hydro/types/generic_structs.hpp"
@@ -13,7 +15,7 @@ namespace simbi::ib {
     class AnyBody;
 
     template <typename T, size_type Dims>
-    class BodyReference
+    class BodyReference : public Managed<global::managed_memory>
     {
       private:
         AnyBody<T, Dims>* body_;
@@ -23,6 +25,7 @@ namespace simbi::ib {
         using Primitive = anyPrimitive<Dims, Regime::NEWTONIAN>;
         using CellType  = Cell<Dims>;
 
+        BodyReference() : body_(nullptr) {}
         BodyReference(AnyBody<T, Dims>& body) : body_(&body) {}
 
         spatial_vector_t<T, Dims> position() const { return body_->position(); }
@@ -33,10 +36,8 @@ namespace simbi::ib {
 
         void advance_position(T dt) { body_->advance_position(dt); }
         void advance_velocity(T dt) { body_->advance_velocity(dt); }
-        void calculate_forces(
-            const std::vector<BodyReference<T, Dims>>& others,
-            T dt
-        )
+        void
+        calculate_forces(const ndarray<BodyReference<T, Dims>>& others, T dt)
         {
             body_->calculate_forces(others, dt);
         }
@@ -56,7 +57,7 @@ namespace simbi::ib {
 
     // Main type erasure class
     template <typename T, size_type Dims>
-    class AnyBody
+    class AnyBody : public Managed<global::managed_memory>
     {
       private:
         using BodyRef   = BodyReference<T, Dims>;
@@ -79,8 +80,8 @@ namespace simbi::ib {
             virtual void advance_position(T dt) = 0;
             virtual void advance_velocity(T dt) = 0;
             virtual void
-            calculate_forces(const std::vector<BodyRef>& others, T dt) = 0;
-            virtual void update_material_state(T dt)                   = 0;
+            calculate_forces(const ndarray<BodyRef>& others, T dt) = 0;
+            virtual void update_material_state(T dt)               = 0;
             virtual void set_position(const spatial_vector_t<T, Dims>& pos) {}
             virtual void set_velocity(const spatial_vector_t<T, Dims>& vel) {}
             virtual void set_mass(const T mass) {}
@@ -178,11 +179,10 @@ namespace simbi::ib {
                 body_.set_radius(radius);
             }
 
-            void
-            calculate_forces(const std::vector<BodyRef>& others, T dt) override
+            void calculate_forces(const ndarray<BodyRef>& others, T dt) override
             {
                 // Convert references to actual body references
-                std::vector<std::reference_wrapper<BodyType>> body_refs;
+                ndarray<std::reference_wrapper<BodyType>> body_refs;
 
                 // convert the references to the actual body references
                 // this is necessary because the calculate_forces method
@@ -377,14 +377,15 @@ namespace simbi::ib {
         };
 
         // The actual implementation
-        std::unique_ptr<Concept> concept_;
+        util::smart_ptr<Concept> concept_;
 
       public:
         // Constructor from any type that satisfies the ImmersedBody concept
         template <concepts::ImmersedBody<T, Dims> BodyType, typename... Args>
         AnyBody(std::in_place_type_t<BodyType>, Args&&... args)
             : concept_(
-                  std::make_unique<Model<BodyType>>(std::forward<Args>(args)...)
+                  util::make_unique<Model<BodyType>>(std::forward<Args>(args)...
+                  )
               )
         {
         }
@@ -406,7 +407,7 @@ namespace simbi::ib {
 
         void advance_position(T dt) { concept_->advance_position(dt); }
         void advance_velocity(T dt) { concept_->advance_velocity(dt); }
-        void calculate_forces(const std::vector<BodyRef>& others, T dt)
+        void calculate_forces(const ndarray<BodyRef>& others, T dt)
         {
             concept_->calculate_forces(others, dt);
         }
@@ -519,6 +520,6 @@ namespace simbi::ib {
 
         void set_mass(const T mass) { concept_->set_mass(mass); }
         void set_radius(const T radius) { concept_->set_radius(radius); }
-    };
+    };   // class AnyBody
 }   // namespace simbi::ib
 #endif   // ANY_HPP

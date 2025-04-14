@@ -71,7 +71,7 @@ namespace simbi::ibsystem {
         requires traits::AtLeastTwoDimensional<Dims>
     struct BinaryTypeImpl<T, Dims> {
         using type =
-            std::unique_ptr<ibsystem::dynamics::BinaryDynamics<T, Dims>>;
+            util::smart_ptr<ibsystem::dynamics::BinaryDynamics<T, Dims>>;
     };
 
     template <typename T, size_type Dims>
@@ -143,7 +143,7 @@ namespace simbi::ibsystem {
             binary_config_    = config;
             auto binary_trait = ibsystem::traits::BinaryTrait<T, Dims>(config);
             binary_dynamics_ =
-                std::make_unique<ibsystem::dynamics::BinaryDynamics<T, Dims>>(
+                util::make_unique<ibsystem::dynamics::BinaryDynamics<T, Dims>>(
                     grav_trait_.config(),
                     binary_trait
                 );
@@ -167,7 +167,7 @@ namespace simbi::ibsystem {
             }
         }
 
-        static std::unique_ptr<GravitationalSystem<T, Dims>>
+        static util::smart_ptr<GravitationalSystem<T, Dims>>
         create_binary_system(
             const typename Base::MeshType& mesh,
             T gamma,
@@ -192,7 +192,7 @@ namespace simbi::ibsystem {
             binary_config.binary_pair  = body_components;
 
             // Create system
-            auto system = std::make_unique<GravitationalSystem<T, Dims>>(
+            auto system = util::make_unique<GravitationalSystem<T, Dims>>(
                 mesh,
                 gamma,
                 grav_config
@@ -216,7 +216,7 @@ namespace simbi::ibsystem {
             if constexpr (Dims >= 2) {
                 if (binary_dynamics_) {
                     // Extract pointers to bodies
-                    std::vector<ib::AnyBody<T, Dims>*> body_ptrs;
+                    ndarray<ib::AnyBody<T, Dims>*> body_ptrs;
                     for (auto& body : this->bodies_) {
                         body_ptrs.push_back(body.get());
                     }

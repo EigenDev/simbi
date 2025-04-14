@@ -71,7 +71,7 @@ namespace simbi::ib {
       public:
         using MeshType = Mesh<Dims>;
         // Main build method - constructs a body of the specific type
-        static std::unique_ptr<AnyBody<T, Dims>> build(
+        static util::smart_ptr<AnyBody<T, Dims>> build(
             BodyType type,
             const MeshType& mesh,
             const spatial_vector_t<T, Dims>& position,
@@ -218,7 +218,7 @@ namespace simbi::ib {
         }
 
         // Build a gravitational body
-        static std::unique_ptr<AnyBody<T, Dims>> build_gravitational_body(
+        static util::smart_ptr<AnyBody<T, Dims>> build_gravitational_body(
             const MeshType& mesh,
             const spatial_vector_t<T, Dims>& position,
             const spatial_vector_t<T, Dims>& velocity,
@@ -232,7 +232,7 @@ namespace simbi::ib {
             auto material_params = build_rigid_material_params(props);
             auto motion_params   = build_dynamic_motion_params(props);
 
-            return std::make_unique<AnyBody<T, Dims>>(
+            return util::make_unique<AnyBody<T, Dims>>(
                 std::in_place_type<GravitationalBody<T, Dims>>,
                 mesh,
                 position,
@@ -248,7 +248,7 @@ namespace simbi::ib {
 
         // Build a gravitational sink body (combines gravitational and
         // accretion)
-        static std::unique_ptr<AnyBody<T, Dims>> build_gravitational_sink_body(
+        static util::smart_ptr<AnyBody<T, Dims>> build_gravitational_sink_body(
             const MeshType& mesh,
             const spatial_vector_t<T, Dims>& position,
             const spatial_vector_t<T, Dims>& velocity,
@@ -262,7 +262,7 @@ namespace simbi::ib {
             auto material_params = build_rigid_material_params(props);
             auto motion_params   = build_dynamic_motion_params(props);
 
-            return std::make_unique<AnyBody<T, Dims>>(
+            return util::make_unique<AnyBody<T, Dims>>(
                 std::in_place_type<GravitationalSinkBody<T, Dims>>,
                 mesh,
                 position,
@@ -276,12 +276,12 @@ namespace simbi::ib {
             );
         }
 
-        static std::unique_ptr<AnyBody<T, Dims>> build_elastic_body(...)
+        static util::smart_ptr<AnyBody<T, Dims>> build_elastic_body(...)
         {
             // TODO: Implement elastic body construction
         }
 
-        static std::unique_ptr<AnyBody<T, Dims>> build_rigid_body(...)
+        static util::smart_ptr<AnyBody<T, Dims>> build_rigid_body(...)
         {
             // TODO: Implement rigid body construction
         }

@@ -21,12 +21,11 @@ namespace simbi::ibsystem::dynamics {
         }
 
         // update the system for prescribed trajectory
-        void
-        update_prescribed(std::vector<ib::AnyBody<T, Dims>*> bodies, T time)
+        void update_prescribed(ndarray<ib::AnyBody<T, Dims>*> bodies, T time)
         {
             // Use binary trait to calculate new positions and velocities
-            std::vector<spatial_vector_t<T, Dims>> positions(bodies.size());
-            std::vector<spatial_vector_t<T, Dims>> velocities(bodies.size());
+            ndarray<spatial_vector_t<T, Dims>> positions(bodies.size());
+            ndarray<spatial_vector_t<T, Dims>> velocities(bodies.size());
 
             binary_trait_
                 .update_positions_and_velocities(time, positions, velocities);
@@ -39,10 +38,11 @@ namespace simbi::ibsystem::dynamics {
         }
 
         // update the system using numerical integration
-        void update_numerical(std::vector<ib::AnyBody<T, Dims>*> bodies, T dt)
+        void update_numerical(ndarray<ib::AnyBody<T, Dims>*> bodies, T dt)
         {
             // TODO: use leapfrog, symplectic, etc here
-            throw std::runtime_error("Numerical integration not implemented yet"
+            throw std::runtime_error(
+                "Numerical integration not implemented yet"
             );
         }
 

@@ -3,6 +3,7 @@
 
 #include "../body_traits.hpp"
 #include "build_options.hpp"
+#include "core/types/containers/ndarray.hpp"
 #include "core/types/containers/vector.hpp"
 
 namespace simbi::ib {
@@ -21,20 +22,20 @@ namespace simbi::ib {
         RigidMaterialPolicy(const Params& params = {}) : trait_(params) {}
 
         // Access to the trait
-        const trait_t& rigid_trait() const { return trait_; }
-        trait_t& rigid_trait() { return trait_; }
+        DEV const trait_t& rigid_trait() const { return trait_; }
+        DEV trait_t& rigid_trait() { return trait_; }
 
         // Forward trait methods
-        T density() const { return trait_.density(); }
-        T restitution_coefficient() const
+        DEV T density() const { return trait_.density(); }
+        DEV T restitution_coefficient() const
         {
             return trait_.restitution_coefficient();
         }
-        bool infinitely_rigid() const { return trait_.infinitely_rigid(); }
+        DEV bool infinitely_rigid() const { return trait_.infinitely_rigid(); }
 
         // Implementation for material response
         template <typename Body>
-        void update_material_state(Body& body, const T dt)
+        DEV void update_material_state(Body& body, const T dt)
         {
             // For rigid bodies, we don't need to track internal deformation
             // This method can be empty or do minimal work
@@ -45,7 +46,7 @@ namespace simbi::ib {
 
         // Implementation for collision handling
         template <typename Body>
-        void handle_collision_response(Body& body)
+        DEV void handle_collision_response(Body& body)
         {
             // Iterate through the cut cells to check for collisions
             for (const auto& idx : body.cut_cell_indices()) {
@@ -111,31 +112,31 @@ namespace simbi::ib {
         }
 
         // Access to the trait
-        const trait_t& deformable_trait() const { return trait_; }
-        trait_t& deformable_trait() { return trait_; }
+        DEV const trait_t& deformable_trait() const { return trait_; }
+        DEV trait_t& deformable_trait() { return trait_; }
 
         // Forward core trait methods
-        T youngs_modulus() const { return trait_.youngs_modulus(); }
-        T poisson_ratio() const { return trait_.poisson_ratio(); }
-        T yield_strength() const { return trait_.yield_strength(); }
-        T failure_strain() const { return trait_.failure_strain(); }
-        bool plastic_deformation() const
+        DEV T youngs_modulus() const { return trait_.youngs_modulus(); }
+        DEV T poisson_ratio() const { return trait_.poisson_ratio(); }
+        DEV T yield_strength() const { return trait_.yield_strength(); }
+        DEV T failure_strain() const { return trait_.failure_strain(); }
+        DEV bool plastic_deformation() const
         {
             return trait_.plastic_deformation();
         }
-        T stored_elastic_energy() const
+        DEV T stored_elastic_energy() const
         {
             return trait_.stored_elastic_energy();
         }
-        bool is_permanently_deformed() const
+        DEV bool is_permanently_deformed() const
         {
             return trait_.is_permanently_deformed();
         }
-        bool is_failed() const { return trait_.is_failed(); }
+        DEV bool is_failed() const { return trait_.is_failed(); }
 
         // Implementation for updating material state
         template <typename Body>
-        void update_material_state(Body& body, const T dt)
+        DEV void update_material_state(Body& body, const T dt)
         {
             T total_strain_energy = 0;
             T max_strain          = 0;
@@ -199,7 +200,7 @@ namespace simbi::ib {
 
         // Calculate elastic restoring force
         template <typename Body>
-        spatial_vector_t<T, Dims>
+        DEV spatial_vector_t<T, Dims>
         calculate_elastic_force(const Body& body) const
         {
             spatial_vector_t<T, Dims> force;
@@ -217,7 +218,7 @@ namespace simbi::ib {
 
       private:
         trait_t trait_;
-        std::vector<DeformationPoint> deformation_points_;
+        ndarray<DeformationPoint> deformation_points_;
 
         // Initialize a simplified deformation mesh
         void init_deformation_mesh(int num_points)

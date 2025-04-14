@@ -7,6 +7,7 @@
 #include "build_options.hpp"                   // for
 #include "core/types/containers/vector.hpp"    // for spatial_vector_t
 #include "core/types/utility/config_dict.hpp"
+#include "core/types/utility/managed.hpp"
 #include "physics/hydro/types/generic_structs.hpp"
 
 using namespace simbi::ib::concepts;
@@ -18,7 +19,7 @@ namespace simbi {
 
 namespace simbi::ibsystem {
     template <typename T, size_type Dims>
-    class BodySystem
+    class BodySystem : public Managed<global::managed_memory>
     {
       protected:
         using MeshType    = Mesh<Dims>;
@@ -27,7 +28,7 @@ namespace simbi::ibsystem {
         using PrimArray   = typename ib::concepts::StateType<Dims>::PrimArray;
         using conserved_t = anyConserved<Dims, Regime::NEWTONIAN>;
 
-        std::vector<std::unique_ptr<ib::AnyBody<T, Dims>>> bodies_;
+        ndarray<util::smart_ptr<ib::AnyBody<T, Dims>>> bodies_;
         MeshType mesh_;
 
       public:
@@ -65,9 +66,9 @@ namespace simbi::ibsystem {
         }
 
         // Get a vector of body references
-        std::vector<BodyRef> get_body_references()
+        ndarray<BodyRef> get_body_references()
         {
-            std::vector<BodyRef> refs;
+            ndarray<BodyRef> refs;
             refs.reserve(bodies_.size());
             for (auto& body : bodies_) {
                 refs.emplace_back(*body);
@@ -85,7 +86,7 @@ namespace simbi::ibsystem {
         }
 
         // Apply forces to fluid
-        auto apply_forces_to_fluid(
+        DEV auto apply_forces_to_fluid(
             const auto& prim,
             const auto& mesh_cell,
             const auto& coords,

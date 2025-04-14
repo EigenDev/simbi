@@ -72,7 +72,7 @@ namespace simbi {
                 is_synced_ = other.is_synced_;
 
                 // Allocate and copy host data
-                host_data_ = util::make_unique<T[]>(size_);
+                host_data_ = util::make_unique_array<T[]>(size_);
                 if (size_ > 0 && other.host_data_) {
                     std::copy(
                         other.host_data_.get(),
@@ -127,7 +127,7 @@ namespace simbi {
                 is_synced_ = other.is_synced_;
 
                 // Allocate and copy host data
-                host_data_ = util::make_unique<T[]>(size_);
+                host_data_ = util::make_unique_array<T[]>(size_);
                 if (size_ > 0 && other.host_data_) {
                     std::copy(
                         other.host_data_.get(),
@@ -170,7 +170,7 @@ namespace simbi {
         void allocate(size_type size)
         {
             this->size_ = size;
-            host_data_  = util::make_unique<T[]>(size);
+            host_data_  = util::make_unique_array<T[]>(size);
             if constexpr (global::on_gpu) {
                 T* device_ptr;
                 gpu::api::malloc(

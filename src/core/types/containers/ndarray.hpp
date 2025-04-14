@@ -311,6 +311,34 @@ namespace simbi {
             }
         }
 
+        template <typename... Args>
+        void emplace_back(Args&&... args)
+        {
+            // Check if we need to grow capacity
+            if (this->size_ >= capacity_) {
+                // Grow by doubling capacity (common strategy)
+                size_type new_capacity = (capacity_ == 0) ? 1 : capacity_ * 2;
+                resize_capacity(new_capacity);
+            }
+
+            // Construct the new value in place
+            new (mem_.host_data() + this->size_) T(std::forward<Args>(args)...);
+
+            // Increment size
+            this->size_ += 1;
+
+            // Update shape - increase first dimension
+            this->shape_[0] += 1;
+
+            // Recompute strides (may not be necessary if only size changes)
+            this->strides_ = this->compute_strides(this->shape_);
+
+            // If using GPU, synchronize just the changed element
+            if constexpr (global::on_gpu) {
+                mem_.sync_to_device();
+            }
+        }
+
         void reserve(size_type capacity)
         {
             if (capacity > capacity_) {

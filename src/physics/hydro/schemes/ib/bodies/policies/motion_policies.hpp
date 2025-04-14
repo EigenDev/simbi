@@ -19,7 +19,7 @@ namespace simbi::ib {
         DynamicMotionPolicy(const Params& params = {}) : params_(params) {}
 
         template <typename Body>
-        void advance_position(Body& body, const auto dt)
+        DEV void advance_position(Body& body, const auto dt)
         {
             if (params_.live_motion) {
                 body.position_ += body.velocity_ * dt;
@@ -27,7 +27,7 @@ namespace simbi::ib {
         }
 
         template <typename Body>
-        void advance_velocity(Body& body, const auto dt)
+        DEV void advance_velocity(Body& body, const auto dt)
         {
             body.velocity_ += body.force_ / body.mass_ * dt;
         }
@@ -52,19 +52,19 @@ namespace simbi::ib {
         StaticMotionPolicy(const Params& params = {}) : params_(params) {}
 
         template <typename Body>
-        void advance_position(Body& body, const auto dt)
+        DEV void advance_position(Body& body, const auto dt)
         {
             // do nothing, it's static!
         }
 
         template <typename Body>
-        void advance_velocity(Body& body, const auto dt)
+        DEV void advance_velocity(Body& body, const auto dt)
         {
             // do nothing, it's static!
         }
 
-        const Params& params() const { return params_; }
-        Params& params() { return params_; }
+        DEV const Params& params() const { return params_; }
+        DEV Params& params() { return params_; }
 
       private:
         Params params_;
@@ -81,19 +81,19 @@ namespace simbi::ib {
         PrescribedMotionPolicy(const Params& params = {}) : params_(params) {}
 
         template <typename Body>
-        void advance_position(Body& body, const auto dt)
+        DEV void advance_position(Body& body, const auto dt)
         {
             body.position_ += body.velocity_ * dt;
         }
 
         template <typename Body>
-        void advance_velocity(Body& body, const auto dt)
+        DEV void advance_velocity(Body& body, const auto dt)
         {
             body.velocity_ += params_.force / body.mass_ * dt;
         }
 
-        const Params& params() const { return params_; }
-        Params& params() { return params_; }
+        DEV const Params& params() const { return params_; }
+        DEV Params& params() { return params_; }
 
       private:
         Params params_;

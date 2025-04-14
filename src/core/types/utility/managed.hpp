@@ -58,6 +58,10 @@ namespace simbi {
     class Managed
     {
       public:
+        // virt destructor for polymorphic use
+        virtual ~Managed() = default;
+
+        // bare bones new and delete
         static constexpr void* operator new(std::size_t len)
         {
             if constexpr (gpu_managed) {
@@ -69,7 +73,7 @@ namespace simbi {
             return ::operator new(len);
         }
 
-        static constexpr void operator delete(void* ptr)
+        static constexpr void operator delete(void* ptr) noexcept
         {
             if constexpr (gpu_managed) {
                 gpu::api::deviceSynch();
@@ -79,6 +83,82 @@ namespace simbi {
                 ::operator delete(ptr);
             }
         }
+
+        // array support bc why not?
+        static constexpr void* operator new[](std::size_t len)
+        {
+            if constexpr (gpu_managed) {
+                void* ptr = nullptr;
+                gpu::api::mallocManaged(&ptr, len);
+                gpu::api::deviceSynch();
+                return ptr;
+            }
+            return ::operator new[](len);
+        }
+
+        static constexpr void operator delete[](void* ptr) noexcept
+        {
+            if constexpr (gpu_managed) {
+                gpu::api::deviceSynch();
+                gpu::api::free(ptr);
+            }
+            else {
+                ::operator delete[](ptr);
+            }
+        }
+
+        // sized delete as well
+        static constexpr void
+        operator delete(void* ptr, std::size_t size) noexcept
+        {
+            if constexpr (gpu_managed) {
+                gpu::api::deviceSynch();
+                gpu::api::free(ptr);
+            }
+            else {
+                ::operator delete(ptr, size);
+            }
+        }
+
+        // sized array delete
+        static constexpr void
+        operator delete[](void* ptr, std::size_t size) noexcept
+        {
+            if constexpr (gpu_managed) {
+                gpu::api::deviceSynch();
+                gpu::api::free(ptr);
+            }
+            else {
+                ::operator delete[](ptr, size);
+            }
+        }
+
+        // placement new
+        static constexpr void*
+        operator new(std::size_t size, void* ptr) noexcept
+        {
+            return ptr;
+        }
+
+        static constexpr void operator delete(void* ptr, void* place) noexcept
+        {
+            // placement delete is a no-op ;^]
+        }
+
+        // memory prefetching methods (TODO: revisit this)
+        // void prefetch_to_device(int device = 0) const
+        // {
+        //     if constexpr (gpu_managed) {
+        //         gpu::api::prefetchToDevice(this, sizeof(*this), device);
+        //     }
+        // }
+
+        // void prefetch_to_host() const
+        // {
+        //     if constexpr (gpu_managed) {
+        //         gpu::api::prefetchToHost(this, sizeof(*this));
+        //     }
+        // }
     };
 }   // namespace simbi
 #endif

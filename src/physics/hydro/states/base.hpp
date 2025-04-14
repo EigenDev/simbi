@@ -152,8 +152,7 @@ namespace simbi {
         ExecutionPolicyManager<Dims> exec_policy_manager_;
         TimeManager time_manager_;
         SolverManager solver_config_;
-        std::unique_ptr<IOManager<Dims>> io_manager_;
-        IOManager<Dims>* io_manager_ptr;
+        util::smart_ptr<IOManager<Dims>> io_manager_;
         boundary_manager<conserved_t, Dims> conserved_boundary_manager_;
 
         bool was_interrupted_{false};
@@ -172,9 +171,8 @@ namespace simbi {
         // Common state members
         ndarray<Maybe<primitive_t>, Dims> prims_;
         ndarray<conserved_t, Dims> cons_;
-        std::unique_ptr<ibsystem::GravitationalSystem<real, Dims>>
+        util::smart_ptr<ibsystem::GravitationalSystem<real, Dims>>
             gravitational_system_;
-        ibsystem::GravitationalSystem<real, Dims>* gravitational_system_ptr_;
         HydroContext context_;
 
         HydroBase() = default;
@@ -194,12 +192,11 @@ namespace simbi {
               time_manager_(init_conditions),
               solver_config_(init_conditions),
               io_manager_(
-                  std::make_unique<IOManager<Dims>>(
+                  util::make_unique<IOManager<Dims>>(
                       solver_config_,
                       init_conditions
                   )
               ),
-              io_manager_ptr(io_manager_.get()),
               // protected references to commonly used values
               gamma(gamma_)
         {
@@ -213,7 +210,7 @@ namespace simbi {
             }
 
             conserved_t res;
-            const auto* iof = io_manager_ptr;
+            const auto* iof = io_manager_.get();
             if constexpr (Dims == 1) {
                 const auto x1c = cell.centroid()[0];
                 iof->call_hydro_source(x1c, time(), res.data());
@@ -238,7 +235,7 @@ namespace simbi {
             const auto c = cell.centroid();
 
             conserved_t gravity;
-            const auto* iof = io_manager_ptr;
+            const auto* iof = io_manager_.get();
             if constexpr (Dims > 1) {
                 if constexpr (Dims > 2) {
                     iof->call_gravity_source(
@@ -389,11 +386,11 @@ namespace simbi {
                 }
             }
             else if (!init.immersed_bodies.empty()) {
-                gravitational_system_ =
-                    std::make_unique<ibsystem::GravitationalSystem<real, Dims>>(
-                        mesh_,
-                        init.gamma
-                    );
+                gravitational_system_ = util::make_unique<
+                    ibsystem::GravitationalSystem<real, Dims>>(
+                    mesh_,
+                    init.gamma
+                );
 
                 for (const auto& [body_type, props] : init.immersed_bodies) {
                     // Extract common properties
@@ -416,7 +413,6 @@ namespace simbi {
 
                 gravitational_system_->init_system();
             }
-            gravitational_system_ptr_ = gravitational_system_.get();
         }
 
         void simulate(
@@ -599,7 +595,7 @@ namespace simbi {
         auto total_zones() const { return mesh_.grid().total_zones(); }
         DUAL auto has_immersed_bodies() const
         {
-            return gravitational_system_ptr_ != nullptr;
+            return gravitational_system_ != nullptr;
         };
 
         auto checkpoint_identifier() const

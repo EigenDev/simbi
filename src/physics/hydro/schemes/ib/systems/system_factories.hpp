@@ -15,13 +15,13 @@ namespace simbi::ibsystem::factory {
     class BinaryFactory
     {
       public:
-        static std::vector<std::unique_ptr<ib::AnyBody<T, Dims>>> create(
+        static ndarray<util::smart_ptr<ib::AnyBody<T, Dims>>> create(
             const Mesh<Dims>& mesh,
             const config::GravitationalConfig<T> grav_config,
             const config::BinaryConfig<T>& binary_config
         )
         {
-            std::vector<std::unique_ptr<ib::AnyBody<T, Dims>>> bodies;
+            ndarray<util::smart_ptr<ib::AnyBody<T, Dims>>> bodies;
             bodies.reserve(2);
 
             // components

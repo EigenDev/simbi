@@ -49,8 +49,7 @@ namespace simbi::ib::concepts {
         { b.advance_velocity(dt) } -> std::same_as<void>;
         {
             b.calculate_forces(
-                std::declval<const std::vector<std::reference_wrapper<Body>>&>(
-                ),
+                std::declval<const ndarray<std::reference_wrapper<Body>>&>(),
                 dt
             )
         } -> std::same_as<void>;

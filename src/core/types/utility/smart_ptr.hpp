@@ -61,27 +61,77 @@ namespace simbi {
     template <typename>
     class function;
 
+    // control blocks for type erasure
+    class control_block_base
+    {
+      public:
+        virtual ~control_block_base()  = default;
+        virtual void destroy()         = 0;
+        virtual void increment()       = 0;
+        virtual long decrement()       = 0;
+        virtual long use_count() const = 0;
+    };
+
+    template <typename T, typename Deleter>
+    class typed_control_block : public control_block_base
+    {
+      private:
+        T* ptr;
+        Deleter deleter;
+        std::atomic<long> count;
+
+      public:
+        typed_control_block(T* p, Deleter d)
+            : ptr(p), deleter(std::move(d)), count(1)
+        {
+        }
+
+        void destroy() override { deleter(ptr); }
+        void increment() override
+        {
+            count.fetch_add(1, std::memory_order_relaxed);
+        }
+        long decrement() override
+        {
+            return count.fetch_sub(1, std::memory_order_acq_rel) - 1;
+        }
+        long use_count() const override
+        {
+            return count.load(std::memory_order_relaxed);
+        }
+    };
+
+    // control blocks for array types
+    template <typename T, typename Deleter>
+    class typed_control_block<T[], Deleter> : public control_block_base
+    {
+      private:
+        T* ptr;
+        Deleter deleter;
+        std::atomic<long> count;
+
+      public:
+        typed_control_block(T* p, Deleter d)
+            : ptr(p), deleter(std::move(d)), count(1)
+        {
+        }
+
+        void destroy() override { deleter(ptr); }
+        void increment() override
+        {
+            count.fetch_add(1, std::memory_order_relaxed);
+        }
+        long decrement() override
+        {
+            return count.fetch_sub(1, std::memory_order_acq_rel) - 1;
+        }
+        long use_count() const override
+        {
+            return count.load(std::memory_order_relaxed);
+        }
+    };
+
     namespace util {
-
-        struct refcnt {
-            std::atomic<int> count;
-
-            refcnt() : count(1) {}
-
-            refcnt(const refcnt&)            = delete;
-            refcnt& operator=(const refcnt&) = delete;
-
-            void inc() { count.fetch_add(1, std::memory_order_relaxed); }
-
-            int release()
-            {
-                return count.fetch_sub(1, std::memory_order_acq_rel) - 1;
-            }
-
-            int get() const { return count.load(std::memory_order_relaxed); }
-
-            bool is_zero() const { return get() == 0; }
-        };
 
         // Default deleter for scalar types
         template <typename ptrT>
@@ -100,16 +150,17 @@ namespace simbi {
         {
           private:
             using deleter_t = delete_policy;
-            using refcnt_t  = refcnt;
+            template <typename U, typename D>
+            friend class smart_ptr;
 
             ptrT* pData;
-            refcnt_t* pRef;
+            control_block_base* ctrl;
 
-            void release() noexcept
+            void release()
             {
-                if (pRef && pRef->release() == 0) {
-                    deleter_t()(pData);
-                    delete pRef;
+                if (ctrl && ctrl->decrement() == 0) {
+                    ctrl->destroy();   // Type-erased destruction
+                    delete ctrl;
                 }
             }
 
@@ -117,37 +168,98 @@ namespace simbi {
             using ptr_t = ptrT;
 
             // Default constructor
-            constexpr smart_ptr() noexcept : pData(nullptr), pRef(nullptr) {}
+            constexpr smart_ptr() noexcept : pData(nullptr), ctrl(nullptr) {}
 
             // Constructor from raw pointer
-            explicit smart_ptr(ptr_t* pData) : pData(pData), pRef(new refcnt())
+            explicit smart_ptr(ptr_t* pData)
+                : pData(pData),
+                  ctrl(new typed_control_block<ptrT, delete_policy>(
+                      pData,
+                      delete_policy()
+                  ))
             {
             }
 
             // Constructor from nullptr
             constexpr smart_ptr(std::nullptr_t) noexcept
-                : pData(nullptr), pRef(nullptr)
+                : pData(nullptr), ctrl(nullptr)
             {
             }
 
             // Copy Constructor
             smart_ptr(const smart_ptr& other) noexcept
-                : pData(other.pData), pRef(other.pRef)
+                : pData(other.pData), ctrl(other.ctrl)
             {
-                if (pRef) {
-                    pRef->inc();
+                if (ctrl) {
+                    ctrl->increment();
                 }
             }
 
             // Move Constructor
             smart_ptr(smart_ptr&& other) noexcept
-                : pData(other.pData), pRef(other.pRef)
+                : pData(other.pData), ctrl(other.ctrl)
             {
                 other.pData = nullptr;
-                other.pRef  = nullptr;
+                other.ctrl  = nullptr;
             }
 
+            // template <typename D>
+            // smart_ptr(ptr_t* pData, D&& deleter)
+            //     : pData(pData),
+            //       ctrl(new refcnt()),
+            //       custom_deleter(std::forward<D>(deleter))
+            // {
+            // }
+
             ~smart_ptr() { release(); }
+
+            // add support for derived-to-base conversion
+            template <
+                typename U,
+                typename = std::enable_if_t<std::is_convertible_v<U*, ptr_t*>>>
+            smart_ptr(const smart_ptr<U>& other) noexcept
+                : pData(static_cast<ptrT*>(other.get())),
+                  ctrl(other.get_control_block())
+            {
+                if (ctrl) {
+                    ctrl->increment();
+                }
+            }
+
+            // safehguard ref management
+            long use_count() const noexcept
+            {
+                return ctrl ? ctrl->use_count() : 0;
+            }
+
+            bool unique() const noexcept { return use_count() == 1; }
+
+            control_block_base* get_control_block() const noexcept
+            {
+                return ctrl;
+            }
+
+            // template <typename U = ptrT>
+            // control_block<U>* get_control_block() const noexcept
+            // {
+            //     // For same type, just return the control block
+            //     if constexpr (std::is_same_v<U, ptrT>) {
+            //         return ctrl;
+            //     }
+            //     // For base-of relationship, perform conversion with
+            //     // static_assert
+            //     else {
+            //         static_assert(
+            //             std::is_convertible_v<ptrT*, U*>,
+            //             "Invalid control block conversion - types are not "
+            //             "compatible"
+            //         );
+            //         // This reinterpret_cast is safe because the control
+            //         blocks
+            //         // follow the same inheritance relationship
+            //         return reinterpret_cast<control_block<U>*>(ctrl);
+            //     }
+            // }
 
             // Copy Assignment
             smart_ptr& operator=(const smart_ptr& other) noexcept
@@ -155,9 +267,9 @@ namespace simbi {
                 if (this != &other) {
                     release();
                     pData = other.pData;
-                    pRef  = other.pRef;
-                    if (pRef) {
-                        pRef->inc();
+                    ctrl  = other.ctrl;
+                    if (ctrl) {
+                        ctrl->increment();
                     }
                 }
                 return *this;
@@ -169,9 +281,9 @@ namespace simbi {
                 if (this != &other) {
                     release();
                     pData       = other.pData;
-                    pRef        = other.pRef;
+                    ctrl        = other.ctrl;
                     other.pData = nullptr;
-                    other.pRef  = nullptr;
+                    other.ctrl  = nullptr;
                 }
                 return *this;
             }
@@ -181,7 +293,7 @@ namespace simbi {
             {
                 release();
                 pData = nullptr;
-                pRef  = nullptr;
+                ctrl  = nullptr;
                 return *this;
             }
 
@@ -194,18 +306,18 @@ namespace simbi {
             void swap(smart_ptr& other) noexcept
             {
                 if constexpr (global::on_gpu) {
-                    refcnt_t* pr = pRef;
-                    ptr_t* pd    = pData;
+                    control_block_base* pr = ctrl;
+                    ptr_t* pd              = pData;
 
-                    pRef  = other.pRef;
+                    ctrl  = other.ctrl;
                     pData = other.pData;
 
-                    other.pRef  = pr;
+                    other.ctrl  = pr;
                     other.pData = pd;
                 }
                 else {
                     std::swap(pData, other.pData);
-                    std::swap(pRef, other.pRef);
+                    std::swap(ctrl, other.ctrl);
                 }
             }
 
@@ -231,19 +343,19 @@ namespace simbi {
             DUAL ptr_t* get() const noexcept { return pData; }
 
             // Check if the smart pointer is valid
-            constexpr explicit operator bool() const noexcept
+            DUAL constexpr explicit operator bool() const noexcept
             {
                 return pData != nullptr;
             }
 
             // comparison with nullptr
-            constexpr bool operator==(std::nullptr_t) const noexcept
+            DUAL constexpr bool operator==(std::nullptr_t) const noexcept
             {
                 return pData == nullptr;
             }
 
             // comparison with nullptr
-            constexpr bool operator!=(std::nullptr_t) const noexcept
+            DUAL constexpr bool operator!=(std::nullptr_t) const noexcept
             {
                 return pData != nullptr;
             }
@@ -265,41 +377,44 @@ namespace simbi {
         {
           private:
             using deleter_t = deleter;
-            using refcnt_t  = refcnt;
 
             ptrT* pData;
-            refcnt_t* pRef;
+            control_block_base* ctrl;
 
             void release() noexcept
             {
-                if (pRef && pRef->release() == 0) {
-                    deleter_t()(pData);
-                    delete pRef;
+                if (ctrl && ctrl->decrement() == 0) {
+                    ctrl->destroy();
+                    delete ctrl;
                 }
             }
 
           public:
             using ptr_t = ptrT;
 
-            constexpr smart_ptr() noexcept : pData(nullptr), pRef(nullptr) {}
+            constexpr smart_ptr() noexcept : pData(nullptr), ctrl(nullptr) {}
 
-            explicit smart_ptr(ptr_t* pData) : pData(pData), pRef(new refcnt())
+            explicit smart_ptr(ptr_t* pData)
+                : pData(pData),
+                  ctrl(
+                      new typed_control_block<ptrT[], deleter>(pData, deleter())
+                  )
             {
             }
 
             smart_ptr(const smart_ptr& other) noexcept
-                : pData(other.pData), pRef(other.pRef)
+                : pData(other.pData), ctrl(other.ctrl)
             {
-                if (pRef) {
-                    pRef->inc();
+                if (ctrl) {
+                    ctrl->increment();
                 }
             }
 
             smart_ptr(smart_ptr&& other) noexcept
-                : pData(other.pData), pRef(other.pRef)
+                : pData(other.pData), ctrl(other.ctrl)
             {
                 other.pData = nullptr;
-                other.pRef  = nullptr;
+                other.ctrl  = nullptr;
             }
 
             ~smart_ptr() { release(); }
@@ -309,9 +424,9 @@ namespace simbi {
                 if (this != &other) {
                     release();
                     pData = other.pData;
-                    pRef  = other.pRef;
-                    if (pRef) {
-                        pRef->inc();
+                    ctrl  = other.ctrl;
+                    if (ctrl) {
+                        ctrl->increment();
                     }
                 }
                 return *this;
@@ -322,9 +437,9 @@ namespace simbi {
                 if (this != &other) {
                     release();
                     pData       = other.pData;
-                    pRef        = other.pRef;
+                    ctrl        = other.ctrl;
                     other.pData = nullptr;
-                    other.pRef  = nullptr;
+                    other.ctrl  = nullptr;
                 }
                 return *this;
             }
@@ -338,18 +453,18 @@ namespace simbi {
             void swap(smart_ptr& other) noexcept
             {
                 if constexpr (global::on_gpu) {
-                    refcnt_t* pr = pRef;
-                    ptr_t* pd    = pData;
+                    control_block_base* pr = ctrl;
+                    ptr_t* pd              = pData;
 
-                    pRef  = other.pRef;
+                    ctrl  = other.ctrl;
                     pData = other.pData;
 
-                    other.pRef  = pr;
+                    other.ctrl  = pr;
                     other.pData = pd;
                 }
                 else {
                     std::swap(pData, other.pData);
-                    std::swap(pRef, other.pRef);
+                    std::swap(ctrl, other.ctrl);
                 }
             }
 
@@ -406,15 +521,16 @@ namespace simbi {
         };
 
         template <typename T, typename... Args>
-        constexpr smart_ptr<T> make_unique(Args&&... args)
+        smart_ptr<T> make_unique(Args&&... args)
         {
             return smart_ptr<T>(new T(std::forward<Args>(args)...));
         }
 
         template <typename T>
-        constexpr smart_ptr<T> make_unique(std::size_t size)
+        constexpr smart_ptr<T> make_unique_array(size_t size)
         {
-            return smart_ptr<T>(new std::remove_extent<T>::type[size]());
+            using element_t = std::remove_extent_t<T>;
+            return smart_ptr<T>(new element_t[size]());
         }
 
     }   // namespace util

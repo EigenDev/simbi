@@ -290,30 +290,30 @@ namespace simbi {
                 );
             }
 
-            void advance_position(const T dt)
+            DEV void advance_position(const T dt)
             {
                 MotionP::advance_position(*this, dt);
                 update_cut_cells();
             }
 
-            void advance_velocity(const T dt)
+            DEV void advance_velocity(const T dt)
             {
                 MotionP::advance_velocity(*this, dt);
             }
 
-            void calculate_forces(const auto& other_bodies, const T dt)
+            DEV void calculate_forces(const auto& other_bodies, const T dt)
             {
                 this->force_ = spatial_vector_t<T, Dims>();
                 ForceP::calculate_forces(*this, other_bodies, dt);
                 FluidP::calculate_fluid_forces(*this, this->mesh_, dt);
             }
 
-            void update_material_state(const T dt)
+            DEV void update_material_state(const T dt)
             {
                 MaterialP::update_material_state(*this, dt);
             }
 
-            anyConserved<Dims, Regime::NEWTONIAN> apply_forces_to_fluid(
+            DEV anyConserved<Dims, Regime::NEWTONIAN> apply_forces_to_fluid(
                 const auto& prim,
                 const auto& mesh_cell,
                 const auto& coords,
@@ -331,7 +331,7 @@ namespace simbi {
                 );
             }
 
-            anyConserved<Dims, Regime::NEWTONIAN> accrete_from_cell(
+            DEV anyConserved<Dims, Regime::NEWTONIAN> accrete_from_cell(
                 const auto& prim,
                 const auto& mesh_cell,
                 const auto& coords,
@@ -398,12 +398,12 @@ namespace simbi {
 #endif
             }
 
-            bool has_gravitational_capability() const
+            DEV bool has_gravitational_capability() const
             {
                 return has_trait<traits::Gravitational>();
             }
 
-            bool has_elastic_capability() const
+            DEV bool has_elastic_capability() const
             {
                 return has_trait<traits::Elastic>();
             }
@@ -412,34 +412,34 @@ namespace simbi {
             //     return has_trait<traits::Accretion>();
             // }
 
-            bool has_deformable_capability() const
+            DEV bool has_deformable_capability() const
             {
                 return has_trait<traits::Deformable>();
             }
 
             // read-only accesors
-            auto position() const { return this->position_; }
-            auto velocity() const { return this->velocity_; }
-            auto force() const { return this->force_; }
-            auto mass() const { return this->mass_; }
-            auto radius() const { return this->radius_; }
-            auto fluid_velocity() const { return this->fluid_velocity_; }
-            auto cell_info() const { return this->cell_info_; }
-            auto mesh() const { return this->mesh_; }
+            DEV auto position() const { return this->position_; }
+            DEV auto velocity() const { return this->velocity_; }
+            DEV auto force() const { return this->force_; }
+            DEV auto mass() const { return this->mass_; }
+            DEV auto radius() const { return this->radius_; }
+            DEV auto fluid_velocity() const { return this->fluid_velocity_; }
+            DEV auto cell_info() const { return this->cell_info_; }
+            DEV auto mesh() const { return this->mesh_; }
 
             // setters for position and velocity
-            void set_position(const auto& position)
+            DEV void set_position(const auto& position)
             {
                 this->position_ = position;
                 update_cut_cells();
             }
-            void set_velocity(const auto& velocity)
+            DEV void set_velocity(const auto& velocity)
             {
                 this->velocity_ = velocity;
             }
 
-            void set_mass(const T mass) { this->mass_ = mass; }
-            void set_radius(const T radius) { this->radius_ = radius; }
+            DEV void set_mass(const T mass) { this->mass_ = mass; }
+            DEV void set_radius(const T radius) { this->radius_ = radius; }
         };
     }   // namespace ib
 

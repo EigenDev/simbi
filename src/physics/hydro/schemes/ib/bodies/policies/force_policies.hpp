@@ -69,13 +69,14 @@ namespace simbi::ib {
 
         GravitationalForcePolicy(const Params& params = {}) : trait_(params) {}
 
-        const trait_t& gravitational_trait() const { return trait_; }
-        trait_t& gravitational_trait() { return trait_; }
-        T softening_length() const { return trait_.softening_length(); }
+        DEV const trait_t& gravitational_trait() const { return trait_; }
+        DEV trait_t& gravitational_trait() { return trait_; }
+        DEV T softening_length() const { return trait_.softening_length(); }
 
         // Calculate gravitational forces
         template <typename Body>
-        void calculate_forces(Body& body, const auto& other_bodies, const T dt)
+        DEV void
+        calculate_forces(Body& body, const auto& other_bodies, const T dt)
         {
             body.force_ = spatial_vector_t<T, Dims>();
 
@@ -112,7 +113,7 @@ namespace simbi::ib {
         };
 
         template <typename Body>
-        spatial_vector_t<T, Dims> calculate_prescribed_force(
+        DEV spatial_vector_t<T, Dims> calculate_prescribed_force(
             const Body& body,
             const auto& other_bodies
         ) const
@@ -158,7 +159,8 @@ namespace simbi::ib {
         NullForcePolicy(const trait_t& trait) : trait_(trait) {}
 
         template <typename Body>
-        void calculate_forces(Body& body, const auto& other_bodies, const T dt)
+        DEV void
+        calculate_forces(Body& body, const auto& other_bodies, const T dt)
         {
             // do nothing
         }

@@ -1,6 +1,7 @@
 #ifndef SYSTEM_CONFIG_HPP
 #define SYSTEM_CONFIG_HPP
 
+#include "core/types/containers/ndarray.hpp"
 #include "core/types/utility/enums.hpp"
 #include <string>
 #include <utility>
@@ -55,9 +56,9 @@ namespace simbi::ibsystem::config {
     template <typename T>
     struct PlanetaryConfig {
         T central_mass = T(1.0);
-        std::vector<T> planet_masses;
-        std::vector<T> planet_semi_majors;
-        std::vector<T> planet_eccentricities;
+        ndarray<T> planet_masses;
+        ndarray<T> planet_semi_majors;
+        ndarray<T> planet_eccentricities;
     };
 }   // namespace simbi::ibsystem::config
 #endif   // SYSTEM_CONFIG_HPP
