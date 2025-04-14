@@ -368,7 +368,7 @@ namespace simbi {
             auto stride = 1;
             if constexpr (global::col_major) {
                 // Column major: shape=(nk,nj,ni)
-                // Want [k,j,i] where i is fastest
+                // Want [k,j,i] where k is fastest
                 for (size_type ii = 0; ii < Dims; ++ii) {
                     coords[Dims - 1 - ii] =
                         (idx / stride) % shape[Dims - 1 - ii];
@@ -383,7 +383,6 @@ namespace simbi {
                     stride *= shape[ii];
                 }
             }
-
             return coords;
         }
     }   // namespace helpers

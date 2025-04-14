@@ -211,7 +211,7 @@ namespace simbi::ibsystem {
             return system;
         }
 
-        DUAL void update_system(const T time, const T dt)
+        void update_system(const T time, const T dt)
         {
             if constexpr (Dims >= 2) {
                 if (binary_dynamics_) {
@@ -245,7 +245,7 @@ namespace simbi::ibsystem {
         }
 
         // Calculate time step based on orbital dynamics
-        DUAL T get_orbital_timestep(T cfl) const
+        T get_orbital_timestep(T cfl) const
         {
             T orbital_dt = std::numeric_limits<T>::infinity();
 
@@ -295,7 +295,7 @@ namespace simbi::ibsystem {
         }
 
         // Initialize system state
-        DUAL void init_system()
+        void init_system()
         {
             // Calculate initial forces
             this->calculate_forces(0.0);
@@ -310,7 +310,7 @@ namespace simbi::ibsystem {
         }
 
         // Check conservation errors
-        DUAL void check_conservation_errors() const
+        void check_conservation_errors() const
         {
             if (std::abs(initial_energy_) < 1e-10) {
                 return;
@@ -355,7 +355,7 @@ namespace simbi::ibsystem {
 
       private:
         // Integration methods
-        DUAL void integrate_leapfrog(const T dt)
+        void integrate_leapfrog(const T dt)
         {
             // First half kick - update velocities
             this->calculate_forces(dt);
@@ -369,7 +369,7 @@ namespace simbi::ibsystem {
             this->advance_velocities(0.5 * dt);
         }
 
-        DUAL void integrate_symplectic_euler(const T dt)
+        void integrate_symplectic_euler(const T dt)
         {
             // Calculate forces first
             this->calculate_forces(dt);
@@ -382,7 +382,7 @@ namespace simbi::ibsystem {
         }
 
         // Conservation tracking methods
-        DUAL void compute_center_of_mass()
+        void compute_center_of_mass()
         {
             com_        = spatial_vector_t<T, Dims>();
             total_mass_ = 0;
@@ -400,7 +400,7 @@ namespace simbi::ibsystem {
             }
         }
 
-        DUAL void update_conserved_quantities()
+        void update_conserved_quantities()
         {
             // Reset energy
             total_energy_ = 0;

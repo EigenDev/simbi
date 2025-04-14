@@ -64,6 +64,7 @@
 #include "physics/hydro/schemes/ib/systems/system_config.hpp"   // for system_config
 #include "physics/hydro/types/context.hpp"           // for HydroContext
 #include "physics/hydro/types/generic_structs.hpp"   // for anyConserved, anyPrimitive
+#include "util/tools/device_api.hpp"
 #include <list>
 
 namespace simbi {
@@ -83,16 +84,16 @@ namespace simbi {
             // pointers work better on gpu
             const D* derived_ptr;
 
-            DUAL WaveSpeedFunctor(const D* d) : derived_ptr(d) {}
+            WaveSpeedFunctor(const D* d) : derived_ptr(d) {}
 
             template <typename T>
-            DUAL real
+            DEV real
             operator()(const real acc, const T& prim, const luint gid) const
             {
                 auto speeds   = derived_ptr->get_wave_speeds(prim);
                 auto cell     = derived_ptr->mesh().get_cell_from_global(gid);
                 auto local_dt = calc_local_dt(speeds, cell);
-                return std::min(acc, local_dt);
+                return my_min(acc, local_dt);
             }
         };
 
@@ -116,19 +117,25 @@ namespace simbi {
             time_manager_.set_dt(std::min(gas_dt, orbital_dt));
         }
 
-        DUAL conserved_t ib_sources(
+        DEV conserved_t ib_sources(
             const auto& prim,
             const auto& cell,
             std::tuple<size_type, size_type, size_type>&& coords
         )
         {
-            return gravitational_system_->apply_forces_to_fluid(
-                prim,
-                cell,
-                coords,
-                context_,
-                time_step()
-            );
+            if constexpr (global::on_gpu) {
+                // TODO: implement gpu ib_sources
+                return conserved_t{};
+            }
+            else {
+                return gravitational_system_->apply_forces_to_fluid(
+                    prim,
+                    cell,
+                    coords,
+                    context_,
+                    time_step()
+                );
+            }
         }
 
       private:
@@ -145,6 +152,7 @@ namespace simbi {
         TimeManager time_manager_;
         SolverManager solver_config_;
         std::unique_ptr<IOManager<Dims>> io_manager_;
+        IOManager<Dims>* io_manager_ptr;
         boundary_manager<conserved_t, Dims> conserved_boundary_manager_;
 
         bool was_interrupted_{false};
@@ -165,6 +173,7 @@ namespace simbi {
         ndarray<conserved_t, Dims> cons_;
         std::unique_ptr<ibsystem::GravitationalSystem<real, Dims>>
             gravitational_system_;
+        ibsystem::GravitationalSystem<real, Dims>* gravitational_system_ptr_;
         HydroContext context_;
 
         HydroBase() = default;
@@ -189,6 +198,7 @@ namespace simbi {
                       init_conditions
                   )
               ),
+              io_manager_ptr(io_manager_.get()),
               // protected references to commonly used values
               gamma(gamma_)
 
@@ -196,14 +206,14 @@ namespace simbi {
             init_gravitational_system(init_conditions);
         }
 
-        DUAL conserved_t hydro_sources(const auto& cell) const
+        DEV conserved_t hydro_sources(const auto& cell) const
         {
             if (null_sources()) {
                 return conserved_t{};
             }
 
             conserved_t res;
-            const auto iof = io_manager_.get();
+            const auto* iof = io_manager_ptr;
             if constexpr (Dims == 1) {
                 const auto x1c = cell.centroid()[0];
                 iof->call_hydro_source(x1c, time(), res.data());
@@ -219,7 +229,7 @@ namespace simbi {
             return res;
         }
 
-        DUAL conserved_t
+        DEV conserved_t
         gravity_sources(const auto& prims, const auto& cell) const
         {
             if (null_gravity()) {
@@ -228,7 +238,7 @@ namespace simbi {
             const auto c = cell.centroid();
 
             conserved_t gravity;
-            const auto iof = io_manager_.get();
+            const auto* iof = io_manager_ptr;
             if constexpr (Dims > 1) {
                 if constexpr (Dims > 2) {
                     iof->call_gravity_source(
@@ -277,13 +287,13 @@ namespace simbi {
             );
         }
 
-        static DUAL real calc_local_dt(const auto& speeds, const auto& cell)
+        DEV static real calc_local_dt(const auto& speeds, const auto& cell)
         {
             auto dt = INFINITY;
             for (size_type ii = 0; ii < Dims; ++ii) {
                 auto dx    = cell.width(ii);
-                auto dt_dx = dx / std::min(speeds[2 * ii], speeds[2 * ii + 1]);
-                dt         = std::min<real>(dt, dt_dx);
+                auto dt_dx = dx / my_min(speeds[2 * ii], speeds[2 * ii + 1]);
+                dt         = my_min<real>(dt, dt_dx);
             }
             return dt;
         };
@@ -406,6 +416,7 @@ namespace simbi {
 
                 gravitational_system_->init_system();
             }
+            gravitational_system_ptr_ = gravitational_system_.get();
         }
 
         void simulate(
@@ -419,7 +430,7 @@ namespace simbi {
 
             cons_.resize(this->total_zones()).reshape({nz(), ny(), nx()});
             prims_.resize(this->total_zones()).reshape({nz(), ny(), nx()});
-            // Copy the state array into real& profile variables
+            // Move the state array
             for (size_type ii = 0; ii < this->total_zones(); ii++) {
                 for (int q = 0; q < conserved_t::nmem; q++) {
                     cons_[ii][q] = state_[q][ii];
@@ -446,7 +457,7 @@ namespace simbi {
             });
         }
 
-        DUAL void advance_system()
+        void advance_system()
         {
             auto& derived = static_cast<Derived&>(*this);
 
@@ -480,115 +491,97 @@ namespace simbi {
             prims_.sync_to_host();
         }
         // accessors
-        DUAL const auto& primitives() const { return prims_; }
-        DUAL const auto& conserveds() const { return cons_; }
-        DUAL const auto& state() const { return state_; }
+        const auto& primitives() const { return prims_; }
+        const auto& conserveds() const { return cons_; }
+        const auto& state() const { return state_; }
         DUAL const auto& mesh() const { return mesh_; }
-        DUAL const auto& exec_policy_manager() const
-        {
-            return exec_policy_manager_;
-        }
-        DUAL const auto& time_manager() const { return time_manager_; }
-        DUAL auto& time_manager() { return time_manager_; }
-        DUAL const auto& solver_config() const { return solver_config_; }
-        DUAL const auto& io() const { return *io_manager_; }
-        DUAL auto& io() { return *io_manager_; }
-        DUAL const auto& conserved_boundary_manager() const
+        const auto& exec_policy_manager() const { return exec_policy_manager_; }
+        const auto& time_manager() const { return time_manager_; }
+        auto& time_manager() { return time_manager_; }
+        const auto& solver_config() const { return solver_config_; }
+        const auto& io() const { return *io_manager_; }
+        auto& io() { return *io_manager_; }
+        const auto& conserved_boundary_manager() const
         {
             return conserved_boundary_manager_;
         }
 
-        DUAL auto adiabatic_index() const { return gamma; }
+        auto adiabatic_index() const { return gamma; }
 
         // accessors from solver manager class
         DUAL auto solver_type() const { return solver_config_.solver_type(); }
         DUAL auto using_pcm() const { return solver_config_.is_pcm(); }
-        DUAL auto using_rk1() const { return solver_config_.is_rk1(); }
+        auto using_rk1() const { return solver_config_.is_rk1(); }
         DUAL auto quirk_smoothing() const { return solver_config_.is_quirk(); }
         DUAL auto null_gravity() const { return solver_config_.null_gravity(); }
         DUAL auto null_sources() const { return solver_config_.null_sources(); }
         DUAL auto plm_theta() const { return solver_config_.plm_theta(); }
         DUAL auto step() const { return solver_config_.step(); }
-        DUAL auto& bcs() { return solver_config_.boundary_conditions(); }
-        DUAL const auto& bcs() const
-        {
-            return solver_config_.boundary_conditions();
-        }
-        DUAL auto spatial_order() const
-        {
-            return solver_config_.spatial_order();
-        }
-        DUAL auto temporal_order() const
-        {
-            return solver_config_.temporal_order();
-        }
+        auto& bcs() { return solver_config_.boundary_conditions(); }
+        const auto& bcs() const { return solver_config_.boundary_conditions(); }
+        auto spatial_order() const { return solver_config_.spatial_order(); }
+        auto temporal_order() const { return solver_config_.temporal_order(); }
 
         // accessors from time manager class
         DUAL auto time() const { return time_manager_.time(); }
         DUAL auto dt() const { return time_manager_.dt(); }
-        DUAL auto tend() const { return time_manager_.tend(); }
-        DUAL auto checkpoint_interval() const
+        auto tend() const { return time_manager_.tend(); }
+        auto checkpoint_interval() const
         {
             return time_manager_.checkpoint_interval();
         }
-        DUAL auto dlogt() const { return time_manager_.dlogt(); }
-        DUAL auto time_to_write_checkpoint() const
+        auto dlogt() const { return time_manager_.dlogt(); }
+        auto time_to_write_checkpoint() const
         {
             return time_manager_.time_to_write_checkpoint();
         }
 
         // accessors from io manager class
-        DUAL auto data_directory() const
-        {
-            return (*io_manager_).data_directory();
-        }
-        DUAL auto current_iter() const { return (*io_manager_).current_iter(); }
-        DUAL auto checkpoint_zones() const
+        auto data_directory() const { return (*io_manager_).data_directory(); }
+        auto current_iter() const { return (*io_manager_).current_iter(); }
+        auto checkpoint_zones() const
         {
             return (*io_manager_).checkpoint_zones();
         }
-        DUAL auto checkpoint_index() const
+        auto checkpoint_index() const
         {
             return (*io_manager_).checkpoint_index();
         }
 
         // accessors from execution manager class
-        DUAL auto full_policy() const
-        {
-            return exec_policy_manager_.full_policy();
-        }
+        auto full_policy() const { return exec_policy_manager_.full_policy(); }
 
-        DUAL auto interior_policy() const
+        auto interior_policy() const
         {
             return exec_policy_manager_.interior_policy();
         }
 
-        DUAL auto full_xvertex_policy() const
+        auto full_xvertex_policy() const
         {
             return exec_policy_manager_.full_xvertex_policy();
         }
 
-        DUAL auto full_yvertex_policy() const
+        auto full_yvertex_policy() const
         {
             return exec_policy_manager_.full_yvertex_policy();
         }
 
-        DUAL auto full_zvertex_policy() const
+        auto full_zvertex_policy() const
         {
             return exec_policy_manager_.full_zvertex_policy();
         }
 
-        DUAL auto xvertex_policy() const
+        auto xvertex_policy() const
         {
             return exec_policy_manager_.xvertex_policy();
         }
 
-        DUAL auto yvertex_policy() const
+        auto yvertex_policy() const
         {
             return exec_policy_manager_.yvertex_policy();
         }
 
-        DUAL auto zvertex_policy() const
+        auto zvertex_policy() const
         {
             return exec_policy_manager_.zvertex_policy();
         }
@@ -596,16 +589,16 @@ namespace simbi {
         // some mixed accesors
         DUAL auto time_step() const { return dt() * step(); }
         // accessors from grid manager class
-        DUAL auto nx() const { return mesh_.grid().total_gridsize(0); }
-        DUAL auto ny() const { return mesh_.grid().total_gridsize(1); }
-        DUAL auto nz() const { return mesh_.grid().total_gridsize(2); }
-        DUAL auto total_zones() const { return mesh_.grid().total_zones(); }
+        auto nx() const { return mesh_.grid().total_gridsize(0); }
+        auto ny() const { return mesh_.grid().total_gridsize(1); }
+        auto nz() const { return mesh_.grid().total_gridsize(2); }
+        auto total_zones() const { return mesh_.grid().total_zones(); }
         DUAL auto has_immersed_bodies() const
         {
-            return gravitational_system_ != nullptr;
+            return gravitational_system_ptr_ != nullptr;
         };
 
-        DUAL auto checkpoint_identifier() const
+        auto checkpoint_identifier() const
         {
             // if log-time checkpointing is enabled
             // the checkpoint identifier is the current checkpoint index
@@ -627,15 +620,9 @@ namespace simbi {
         }
 
         // allow derived classes to check/set failure state
-        DUAL bool is_in_failure_state() const
-        {
-            return in_failure_state_.load();
-        }
+        bool is_in_failure_state() const { return in_failure_state_.load(); }
 
-        DUAL void set_failure_state(bool state)
-        {
-            in_failure_state_.store(state);
-        }
+        void set_failure_state(bool state) { in_failure_state_.store(state); }
 
         void was_interrupted() { was_interrupted_ = true; }
         void has_crashed() { has_crashed_ = true; }
@@ -652,10 +639,10 @@ namespace simbi {
         }
 
         // accessors from mesh class
-        DUAL auto halo_radius() const { return mesh_.halo_radius(); }
+        auto halo_radius() const { return mesh_.halo_radius(); }
 
         // utility method for derived classes
-        DUAL bool check_and_set_failure(bool condition) const
+        bool check_and_set_failure(bool condition) const
         {
             if (condition) {
                 set_failure_state(true);

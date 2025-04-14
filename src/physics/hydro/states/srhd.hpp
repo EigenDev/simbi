@@ -147,7 +147,7 @@ namespace simbi {
             pressure_guesses_.sync_to_device();
         }
 
-        auto calc_star_state(
+        DUAL auto calc_star_state(
             const auto& uL,
             const auto& uR,
             const auto& fL,

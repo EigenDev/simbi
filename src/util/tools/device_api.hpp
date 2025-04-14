@@ -134,7 +134,7 @@ namespace simbi {
         namespace api {
             void copyHostToDevice(void* to, const void* from, size_t bytes);
             void copyDeviceToHost(void* to, const void* from, size_t bytes);
-            void copyDevToDev(void* to, const void* from, size_t bytes);
+            void copyDeviceToDevice(void* to, const void* from, size_t bytes);
             void malloc(void* obj, size_t bytes);
             void mallocManaged(void* obj, size_t bytes);
             void free(void* obj);
@@ -186,6 +186,12 @@ namespace simbi {
                 size_t bytes,
                 simbiStream_t stream
             );
+            void asyncCopyDeviceToDevice(
+                void* dst,
+                const void* src,
+                size_t bytes,
+                simbiStream_t stream
+            );
             void hostRegister(void* ptr, size_t size, unsigned int flags);
             void hostUnregister(void* ptr);
 
@@ -231,7 +237,13 @@ namespace simbi {
             DEV T atomicMin(T* address, T val)
             {
 #if GPU_CODE
-                return devAtomicMinReal(address, val);
+                // if floating type, use custom atomic min
+                if constexpr (std::is_floating_point_v<T>) {
+                    return devAtomicMinReal(address, val);
+                }
+                else {
+                    return devAtomicMin(address, val);
+                }
 
 #endif
             };

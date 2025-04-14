@@ -94,7 +94,7 @@ namespace simbi {
     };
 
     enum class BoundaryCondition {
-        REFLECTING,
+        REFLECTING = 0,
         OUTFLOW,
         DYNAMIC,
         PERIODIC,

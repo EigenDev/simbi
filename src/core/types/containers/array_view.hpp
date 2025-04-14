@@ -70,6 +70,8 @@ namespace simbi {
         using raw_type = T;
         using value_type =
             typename std::conditional_t<is_maybe_v<T>, get_value_type_t<T>, T>;
+        static constexpr size_type dim = Dims;
+
         DUAL array_view(
             const ndarray<T, Dims>& source,
             T* data,

@@ -118,31 +118,32 @@ namespace simbi {
                 });
 
                 // Optional halo exchange between devices
-                if (policy.config.halo_radius > 0 &&
-                    dev_idx < num_devices - 1) {
-                    const size_type halo_size =
-                        policy.config.halo_radius *
-                        sizeof(typename std::invoke_result_t<F, index_type>);
+                // if (policy.config.halo_radius > 0 &&
+                //     dev_idx < num_devices - 1) {
+                //     const size_type halo_size =
+                //         policy.config.halo_radius *
+                //         sizeof(typename std::invoke_result_t<F, index_type>);
 
-                    if (policy.config.halo_mode == HaloExchangeMode::ASYNC) {
-                        // Async halo exchange
-                        gpu::api::peerCopyAsync(
-                            // Right halo of current device to left halo of next
-                            // device
-                            static_cast<void*>(
-                                reinterpret_cast<char*>(device_first) +
-                                device_last - halo_size
-                            ),
-                            policy.devices[dev_idx],
-                            static_cast<void*>(reinterpret_cast<char*>(
-                                device_first + total_work / num_devices
-                            )),
-                            policy.devices[dev_idx + 1],
-                            halo_size,
-                            stream
-                        );
-                    }
-                }
+                //     if (policy.config.halo_mode == HaloExchangeMode::ASYNC) {
+                //         // Async halo exchange
+                //         gpu::api::peerCopyAsync(
+                //             // Right halo of current device to left halo of
+                //             next
+                //             // device
+                //             static_cast<void*>(
+                //                 reinterpret_cast<char*>(device_first) +
+                //                 device_last - halo_size
+                //             ),
+                //             policy.devices[dev_idx],
+                //             static_cast<void*>(reinterpret_cast<char*>(
+                //                 device_first + total_work / num_devices
+                //             )),
+                //             policy.devices[dev_idx + 1],
+                //             halo_size,
+                //             stream
+                //         );
+                //     }
+                // }
             }
 
             // Cleanup streams

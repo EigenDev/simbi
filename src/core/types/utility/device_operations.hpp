@@ -63,19 +63,19 @@ namespace simbi {
     class DeviceOperator
     {
       public:
-        DUAL DeviceOperator(F op, T* target, Arrays*... arrays)
+        DeviceOperator(F op, T* target, Arrays*... arrays)
             : op_(op), target_(target), arrays_(std::make_tuple(arrays...))
         {
         }
 
-        DUAL void operator()(size_type idx)
+        DEV void operator()(size_type idx)
         {
             apply_tuple(idx, std::make_index_sequence<sizeof...(Arrays)>{});
         }
 
       private:
         template <size_t... Is>
-        DUAL void apply_tuple(size_type idx, std::index_sequence<Is...>)
+        DEV void apply_tuple(size_type idx, std::index_sequence<Is...>)
         {
             target_[idx] = op_(target_[idx], std::get<Is>(arrays_)[idx]...);
         }
@@ -85,35 +85,168 @@ namespace simbi {
         std::tuple<Arrays*...> arrays_;
     };
 
+    // template <typename F, typename MainView, typename... DependentViews>
+    // class DeviceStencilOperator
+    // {
+    //   public:
+    //     using main_t = typename MainView::raw_type;
+
+    //     DeviceStencilOperator(
+    //         F op,
+    //         MainView* main_view,
+    //         DependentViews*... dependent_views
+    //     )
+    //         : op_(op),
+    //           // Extract and store all data needed on device
+    //           main_data_(main_view->data()),
+    //           main_shape_(main_view->shape()),
+    //           main_strides_(main_view->strides()),
+    //           main_offsets_(main_view->offsets()),
+    //           dependent_views_(std::make_tuple(dependent_views...))
+    //     {
+    //         // Extract and store data for each dependent view too
+    //         extract_dependent_data(
+    //             std::make_index_sequence<sizeof...(DependentViews)>{}
+    //         );
+    //     }
+
+    //     DEV void operator()(size_type idx)
+    //     {
+    //         // Get local coordinates by manually unraveling the index
+    //         auto pos = unravel_idx<MainView::dim>(idx, main_shape_);
+
+    //         // printf("pos: %ld\n", pos[0]);
+
+    //         // Create device-side stencil view for center position using
+    //         stored
+    //         // data
+    //         typename MainView::template device_stencil_view<main_t>
+    //         center_view(
+    //             main_data_,
+    //             pos,
+    //             main_shape_,
+    //             main_strides_,
+    //             main_offsets_
+    //         );
+
+    //         // Apply operation with stencil views
+    //         apply_stencil_op(
+    //             center_view,
+    //             idx,
+    //             std::make_index_sequence<sizeof...(DependentViews)>{}
+    //         );
+    //     }
+
+    //   private:
+    //     // Extract data for all dependent views
+    //     template <size_t... Is>
+    //     void extract_dependent_data(std::index_sequence<Is...>)
+    //     {
+    //         // Initialize arrays with data (initializer_list trick)
+    //         int dummy[] = {
+    //           (dependent_data_[Is]   =
+    //           std::get<Is>(dependent_views_)->data(),
+    //            dependent_shapes_[Is] =
+    //            std::get<Is>(dependent_views_)->shape(),
+    //            dependent_strides_[Is] =
+    //                std::get<Is>(dependent_views_)->strides(),
+    //            dependent_offsets_[Is] =
+    //                std::get<Is>(dependent_views_)->offsets(),
+    //            0)...
+    //         };
+    //         (void) dummy;   // Suppress unused variable warning
+    //     }
+
+    //     template <size_t... Is>
+    //     DEV void
+    //     apply_stencil_op(typename MainView::template
+    //     device_stencil_view<main_t>& center_view, size_type idx,
+    //     std::index_sequence<Is...>)
+    //     {
+    //         // Apply operation to the center value using dependent views
+    //         center_view.value() =
+    //             op_(center_view, create_dependent_view<Is>(idx)...);
+    //     }
+
+    //     template <size_t I>
+    //     DEV auto create_dependent_view(size_type idx)
+    //     {
+    //         using view_t =
+    //             std::tuple_element_t<I, std::tuple<DependentViews*...>>;
+    //         using actual_view_t = typename std::remove_pointer<view_t>::type;
+    //         using raw_t         = typename actual_view_t::raw_type;
+
+    //         // Manually unravel the index for this dependent view
+    //         auto pos = unravel_idx<MainView::dim>(idx, main_shape_);
+
+    //         return typename MainView::template device_stencil_view<raw_t>(
+    //             dependent_data_[I],
+    //             pos,
+    //             dependent_shapes_[I],
+    //             dependent_strides_[I],
+    //             dependent_offsets_[I]
+    //         );
+    //     }
+
+    //     F op_;
+
+    //     // Store all data needed on device directly
+    //     main_t* main_data_;
+    //     uarray<MainView::dim> main_shape_;
+    //     uarray<MainView::dim> main_strides_;
+    //     uarray<MainView::dim> main_offsets_;
+
+    //     // Array of pointers and properties for dependent views
+    //     std::tuple<DependentViews*...> dependent_views_;   // Only used on
+    //     host
+
+    //     // Device-accessible arrays for dependent view data
+    //     std::array<void*, sizeof...(DependentViews)> dependent_data_;
+    //     std::array<uarray<MainView::dim>, sizeof...(DependentViews)>
+    //         dependent_shapes_;
+    //     std::array<uarray<MainView::dim>, sizeof...(DependentViews)>
+    //         dependent_strides_;
+    //     std::array<uarray<MainView::dim>, sizeof...(DependentViews)>
+    //         dependent_offsets_;
+    // };
+
     template <typename F, typename MainView, typename... DependentViews>
     class DeviceStencilOperator
     {
       public:
         using main_t = typename MainView::raw_type;
 
-        DUAL DeviceStencilOperator(
+        DeviceStencilOperator(
             F op,
             MainView* main_view,
             DependentViews*... dependent_views
         )
             : op_(op),
               main_view_(main_view),
+              main_view_data_(main_view->data()),
+              main_view_shape_(main_view->shape()),
+              main_view_strides_(main_view->strides()),
+              main_view_offsets_(main_view->offsets()),
               dependent_views_(std::make_tuple(dependent_views...))
         {
+            // Extract and store data for each dependent view
+            extract_dependent_data(
+                std::make_index_sequence<sizeof...(DependentViews)>{}
+            );
         }
 
-        DUAL void operator()(size_type idx)
+        DEV void operator()(size_type idx)
         {
             // Get local coordinates
-            auto pos = main_view_->get_local_coords(idx);
+            const auto pos = unravel_idx<MainView::dim>(idx, main_view_shape_);
 
             // Create device-side stencil view for center position
             typename MainView::template device_stencil_view<main_t> center_view(
-                main_view_->data(),
+                main_view_data_,
                 pos,
-                main_view_->shape(),
-                main_view_->strides(),
-                main_view_->offsets()
+                main_view_shape_,
+                main_view_strides_,
+                main_view_offsets_
             );
 
             // Apply operation with stencil views
@@ -125,8 +258,23 @@ namespace simbi {
         }
 
       private:
+        // Extract data for all dependent views
         template <size_t... Is>
-        DUAL void
+        void extract_dependent_data(std::index_sequence<Is...>)
+        {
+            // Using parameter pack expansion to initialize arrays
+            (void) std::initializer_list<int>{
+              (dependent_data_[Is]   = std::get<Is>(dependent_views_)->data(),
+               dependent_shapes_[Is] = std::get<Is>(dependent_views_)->shape(),
+               dependent_strides_[Is] =
+                   std::get<Is>(dependent_views_)->strides(),
+               dependent_offsets_[Is] =
+                   std::get<Is>(dependent_views_)->offsets(),
+               0)...
+            };
+        }
+        template <size_t... Is>
+        DEV void
         apply_stencil_op(typename MainView::template device_stencil_view<main_t>& center_view, size_type idx, std::index_sequence<Is...>)
         {
             center_view.value() =
@@ -134,30 +282,40 @@ namespace simbi {
         }
 
         template <size_t I>
-        DUAL auto create_dependent_view(size_type idx)
+        DEV auto create_dependent_view(size_type idx)
         {
             using view_t =
                 std::tuple_element_t<I, std::tuple<DependentViews*...>>;
-
-            // Dereference the pointer type to get the actual view type
             using actual_view_t = typename std::remove_pointer<view_t>::type;
+            using raw_t         = typename actual_view_t::raw_type;
 
-            // Now get raw_type from the actual view type
-            using raw_t = typename actual_view_t::raw_type;
+            // Manually unravel the index for this dependent view
+            auto pos = unravel_idx<MainView::dim>(idx, main_view_shape_);
 
             return typename MainView::template device_stencil_view<raw_t>(
-                std::get<I>(dependent_views_)->data(),
-                std::get<I>(dependent_views_)
-                    ->get_local_coords(idx, main_view_->shape()),
-                std::get<I>(dependent_views_)->shape(),
-                std::get<I>(dependent_views_)->strides(),
-                std::get<I>(dependent_views_)->offsets()
+                static_cast<raw_t*>(dependent_data_[I]),
+                pos,
+                dependent_shapes_[I],
+                dependent_strides_[I],
+                dependent_offsets_[I]
             );
         }
 
         F op_;
         MainView* main_view_;
+        main_t* main_view_data_;
+        uarray<MainView::dim> main_view_shape_;
+        uarray<MainView::dim> main_view_strides_;
+        uarray<MainView::dim> main_view_offsets_;
         std::tuple<DependentViews*...> dependent_views_;
+
+        std::array<void*, sizeof...(DependentViews)> dependent_data_;
+        std::array<uarray<MainView::dim>, sizeof...(DependentViews)>
+            dependent_shapes_;
+        std::array<uarray<MainView::dim>, sizeof...(DependentViews)>
+            dependent_strides_;
+        std::array<uarray<MainView::dim>, sizeof...(DependentViews)>
+            dependent_offsets_;
     };
 }   // namespace simbi
 

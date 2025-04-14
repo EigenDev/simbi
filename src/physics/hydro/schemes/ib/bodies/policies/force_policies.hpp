@@ -51,7 +51,7 @@
 #define FORCE_POLICIES_HPP
 
 #include "../body_traits.hpp"                 // for traits::Gravitational
-#include "build_options.hpp"                  // for DUAL, size_type
+#include "build_options.hpp"                  // for , size_type
 #include "core/types/containers/vector.hpp"   // for spatial_vectir_t
 #include <cmath>                              // for std::sqrt
 
@@ -67,19 +67,15 @@ namespace simbi::ib {
       public:
         using Params = typename trait_t::Params;
 
-        DUAL GravitationalForcePolicy(const Params& params = {})
-            : trait_(params)
-        {
-        }
+        GravitationalForcePolicy(const Params& params = {}) : trait_(params) {}
 
-        DUAL const trait_t& gravitational_trait() const { return trait_; }
-        DUAL trait_t& gravitational_trait() { return trait_; }
-        DUAL T softening_length() const { return trait_.softening_length(); }
+        const trait_t& gravitational_trait() const { return trait_; }
+        trait_t& gravitational_trait() { return trait_; }
+        T softening_length() const { return trait_.softening_length(); }
 
         // Calculate gravitational forces
         template <typename Body>
-        DUAL void
-        calculate_forces(Body& body, const auto& other_bodies, const T dt)
+        void calculate_forces(Body& body, const auto& other_bodies, const T dt)
         {
             body.force_ = spatial_vector_t<T, Dims>();
 
@@ -116,7 +112,7 @@ namespace simbi::ib {
         };
 
         template <typename Body>
-        DUAL spatial_vector_t<T, Dims> calculate_prescribed_force(
+        spatial_vector_t<T, Dims> calculate_prescribed_force(
             const Body& body,
             const auto& other_bodies
         ) const
@@ -162,8 +158,7 @@ namespace simbi::ib {
         NullForcePolicy(const trait_t& trait) : trait_(trait) {}
 
         template <typename Body>
-        DUAL void
-        calculate_forces(Body& body, const auto& other_bodies, const T dt)
+        void calculate_forces(Body& body, const auto& other_bodies, const T dt)
         {
             // do nothing
         }

@@ -4,7 +4,7 @@
 #include "../bodies/types/any_body.hpp"        // for AnyBody
 #include "../bodies/types/body_concepts.hpp"   // for concepts
 #include "body_factory.hpp"                    // for BodyFactory
-#include "build_options.hpp"                   // for DUAL
+#include "build_options.hpp"                   // for
 #include "core/types/containers/vector.hpp"    // for spatial_vector_t
 #include "core/types/utility/config_dict.hpp"
 #include "physics/hydro/types/generic_structs.hpp"
@@ -32,9 +32,9 @@ namespace simbi::ibsystem {
 
       public:
         BodySystem() = default;
-        DUAL BodySystem(const MeshType& mesh) : mesh_(mesh) {}
+        BodySystem(const MeshType& mesh) : mesh_(mesh) {}
 
-        DUAL void add_body(
+        void add_body(
             BodyType type,
             const spatial_vector_t<T, Dims>& position,
             const spatial_vector_t<T, Dims>& velocity,
@@ -56,7 +56,7 @@ namespace simbi::ibsystem {
         }
 
         // Get a reference to a specific body
-        DUAL BodyRef body_at(size_t index)
+        BodyRef body_at(size_t index)
         {
             if (index >= bodies_.size()) {
                 throw std::out_of_range("Body index out of range");
@@ -65,7 +65,7 @@ namespace simbi::ibsystem {
         }
 
         // Get a vector of body references
-        DUAL std::vector<BodyRef> get_body_references()
+        std::vector<BodyRef> get_body_references()
         {
             std::vector<BodyRef> refs;
             refs.reserve(bodies_.size());
@@ -76,7 +76,7 @@ namespace simbi::ibsystem {
         }
 
         // Apply forces to all bodies
-        DUAL void calculate_forces(T dt)
+        void calculate_forces(T dt)
         {
             auto refs = get_body_references();
             for (auto& body : bodies_) {
@@ -85,7 +85,7 @@ namespace simbi::ibsystem {
         }
 
         // Apply forces to fluid
-        DUAL auto apply_forces_to_fluid(
+        auto apply_forces_to_fluid(
             const auto& prim,
             const auto& mesh_cell,
             const auto& coords,
@@ -118,7 +118,7 @@ namespace simbi::ibsystem {
         }
 
         // Update positions (advance positions for all bodies)
-        DUAL void advance_positions(T dt)
+        void advance_positions(T dt)
         {
             for (auto& body : bodies_) {
                 body->advance_position(dt);
@@ -126,7 +126,7 @@ namespace simbi::ibsystem {
         }
 
         // Update velocities
-        DUAL void advance_velocities(T dt)
+        void advance_velocities(T dt)
         {
             for (auto& body : bodies_) {
                 body->advance_velocity(dt);
@@ -134,7 +134,7 @@ namespace simbi::ibsystem {
         }
 
         // Update material states
-        DUAL void update_material_states(T dt)
+        void update_material_states(T dt)
         {
             for (auto& body : bodies_) {
                 body->update_material_state(dt);
@@ -142,12 +142,12 @@ namespace simbi::ibsystem {
         }
 
         // Size accessor
-        DUAL size_t size() const { return bodies_.size(); }
+        size_t size() const { return bodies_.size(); }
 
         // Access to bodies (const)
-        DUAL const auto& bodies() const { return bodies_; }
+        const auto& bodies() const { return bodies_; }
 
-        DUAL const auto& mesh() const { return mesh_; }
+        const auto& mesh() const { return mesh_; }
     };
 }   // namespace simbi::ibsystem
 

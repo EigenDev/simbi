@@ -60,7 +60,7 @@ py3.extension_module(
     dependencies: general_dependencies,
     override_options: ['cython_language=cpp'],
     install: true,
-    install_dir: py_install_dir,
+    install_dir: py_install_dir
 )
 
 #Check and configure GPU compilation

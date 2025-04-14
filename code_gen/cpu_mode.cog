@@ -29,6 +29,7 @@ namespace global {
 #define SHARED     const
 #define __shared__ static
 #define EXTERN     static
+#define STATIC_VAR static
 
 // Alias data types on host
 namespace simbi {

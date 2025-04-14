@@ -53,6 +53,7 @@
 #include "core/traits.hpp"
 #include "core/types/containers/vector.hpp"
 #include "core/types/utility/enums.hpp"
+#include "util/tools/algorithms.hpp"
 #include <cmath>
 #include <iostream>
 
@@ -112,23 +113,23 @@ namespace simbi {
             DUAL constexpr anyHydro() : vals_{} {}
 
             // Base from base
-            DUAL constexpr anyHydro(const anyHydro& other)
+            DUAL constexpr anyHydro(const anyHydro& other) : vals_{}
             {
-                std::copy(other.vals_, other.vals_ + nmem, vals_);
+                algorithms::copy(other.vals_, other.vals_ + nmem, vals_);
             }
 
             // Move constructor
-            DUAL constexpr anyHydro(anyHydro&& other) noexcept
+            DUAL constexpr anyHydro(anyHydro&& other) noexcept : vals_{}
             {
-                std::move(other.vals_, other.vals_ + nmem, vals_);
-                std::fill_n(other.vals_, nmem, real{0});
+                algorithms::move(other.vals_, other.vals_ + nmem, vals_);
+                algorithms::fill_n(other.vals_, nmem, real{0});
             }
 
             // Copy-assignment operator
             DUAL anyHydro& operator=(const anyHydro& other)
             {
                 if (this != &other) {
-                    std::copy(other.vals_, other.vals_ + nmem, vals_);
+                    algorithms::copy(other.vals_, other.vals_ + nmem, vals_);
                 }
                 return *this;
             }
@@ -159,7 +160,7 @@ namespace simbi {
                 const VType& velocity,
                 const real edensity,
                 const real chi      = 0.0,
-                const BType& bfield = {}
+                const BType& bfield = BType{}
             )
                 requires VectorLike<VType> && VectorLike<BType>
                 : vals_{}   // Zero initialize first
@@ -169,20 +170,18 @@ namespace simbi {
                 vals_[Offsets::chi]     = chi;
 
                 // Copy vectors
-                std::copy_n(velocity.data(), Dims, vals_ + Offsets::velocity);
-                if constexpr (sim_type::MHD<R>) {
-                    std::copy_n(bfield.data(), 3, vals_ + Offsets::bfield);
-                }
-            }
-
-            DUAL constexpr anyHydro(std::initializer_list<real> values)
-                : vals_{}
-            {
-                std::copy_n(
-                    values.begin(),
-                    std::min(values.size(), static_cast<size_t>(nmem)),
-                    vals_
+                algorithms::copy_n(
+                    velocity.data(),
+                    Dims,
+                    vals_ + Offsets::velocity
                 );
+                if constexpr (sim_type::MHD<R>) {
+                    algorithms::copy_n(
+                        bfield.data(),
+                        3,
+                        vals_ + Offsets::bfield
+                    );
+                }
             }
 
             template <typename... Args>
@@ -201,7 +200,7 @@ namespace simbi {
             DUAL Derived& operator=(Derived&& other) noexcept
             {
                 if (this != &other) {
-                    std::move(other.vals_, other.vals_ + nmem, vals_);
+                    algorithms::move(other.vals_, other.vals_ + nmem, vals_);
                 }
                 return *derived();
             }
@@ -209,7 +208,7 @@ namespace simbi {
             DUAL Derived& operator=(const Derived& other)
             {
                 if (this != &other) {
-                    std::copy(other.vals_, other.vals_ + nmem, vals_);
+                    algorithms::copy(other.vals_, other.vals_ + nmem, vals_);
                 }
                 return *derived();
             }
@@ -272,7 +271,7 @@ namespace simbi {
 
             // generic accessors
             // Magnetic field for MHD runs
-            DUAL auto bfield() const
+            DEV auto bfield() const
             {
                 if constexpr (sim_type::MHD<R>) {
                     return const_magnetic_vector_view_t<real, 3>(
@@ -280,8 +279,15 @@ namespace simbi {
                     );
                 }
                 else {
-                    const ZeroMagneticVectorView zero_view;
-                    return zero_view;
+                    if constexpr (!global::on_gpu) {
+                        static const ZeroMagneticVectorView zero_view;
+                        return zero_view;
+                    }
+                    else {
+                        const ZeroMagneticVectorView zero_view;
+                        return zero_view;
+                    }
+
                     // return magnetic_vector_t<real, 3>{0.0, 0.0, 0.0};
                 }
             }
@@ -770,11 +776,18 @@ namespace simbi {
             return velocity() * rho();
         }
 
-        DUAL auto calc_magnetic_four_vector() const
+        DEV auto calc_magnetic_four_vector() const
         {
             if constexpr (R != Regime::RMHD) {
-                const ZeroMagneticFourVectorView zero_view;
-                return zero_view.cache();
+                if constexpr (!global::on_gpu) {
+                    static const ZeroMagneticFourVectorView zero_view;
+                    return zero_view.cache();
+                }
+                else {
+                    ZeroMagneticFourVectorView zero_view;
+                    return zero_view.cache();
+                    // return magnetic_four_vector_t<real>{};
+                }
             }
             return bfield().as_fourvec(velocity(), lorentz_factor());
         }
@@ -1050,11 +1063,11 @@ namespace simbi {
         }
 
         // Array access
-        DUAL constexpr real& operator[](size_t i) { return data[i]; }
+        DUAL constexpr real& operator[](size_t ii) { return data[ii]; }
 
-        DUAL constexpr const real& operator[](size_t i) const
+        DUAL constexpr const real& operator[](size_t ii) const
         {
-            return data[i];
+            return data[ii];
         }
     };
 

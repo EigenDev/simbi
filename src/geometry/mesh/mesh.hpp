@@ -69,9 +69,7 @@ namespace simbi {
         // Constructors
         Mesh() = default;
 
-        DUAL Mesh(const InitialConditions& init) : geometry_(init), grid_(init)
-        {
-        }
+        Mesh(const InitialConditions& init) : geometry_(init), grid_(init) {}
 
         DUAL auto get_cell_from_indices(
             const luint ii,
@@ -188,10 +186,7 @@ namespace simbi {
         DUAL auto homologous() const { return geometry_.homologous(); }
         DUAL auto expansion_term() const { return geometry_.expansion_term(); }
         DUAL auto mesh_is_moving() const { return geometry_.mesh_is_moving(); }
-        DUAL auto geometry_to_c_str() const
-        {
-            return geometry_.geometry_to_c_str();
-        }
+        auto geometry_to_c_str() const { return geometry_.geometry_to_c_str(); }
 
         DUAL auto size() const { return grid_.active_zones(); }
     };

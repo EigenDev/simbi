@@ -58,7 +58,7 @@ namespace simbi {
     template <typename T, size_type Dims>
     struct array_properties {
         // Ctor
-        array_properties(
+        DUAL array_properties(
             const uarray<Dims>& shape,
             const uarray<Dims>& strides,
             const uarray<Dims>& offsets,
@@ -80,13 +80,12 @@ namespace simbi {
         array_properties& operator=(const array_properties&) = default;
 
         // helper to compute local coordinates from linear index
-        DUAL uarray<Dims> get_local_coords(size_type idx) const
+        DEV uarray<Dims> get_local_coords(size_type idx) const
         {
             return helpers::memory_layout_coordinates<Dims>(idx, shape_);
         }
 
-        DUAL uarray<Dims>
-        get_local_coords(size_type idx, const auto shape) const
+        DEV uarray<Dims> get_local_coords(size_type idx, const auto shape) const
         {
             return helpers::memory_layout_coordinates<Dims>(idx, shape);
         }

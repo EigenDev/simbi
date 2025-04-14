@@ -69,7 +69,7 @@ namespace simbi {
         std::vector<int> devices_;
 
         // GPU configuration methods
-        DUAL luint get_block_dims(const std::string& key) const
+        luint get_block_dims(const std::string& key) const
         {
             if (const char* val = std::getenv(key.c_str())) {
                 return static_cast<luint>(std::stoi(val));
@@ -137,23 +137,14 @@ namespace simbi {
         }
 
         // Access methods
-        DUAL const auto& full_policy() const { return full_policy_; }
-        DUAL const auto& interior_policy() const { return interior_policy_; }
-        DUAL const auto& xvertex_policy() const { return xvertex_policy_; }
-        DUAL const auto& yvertex_policy() const { return yvertex_policy_; }
-        DUAL const auto& zvertex_policy() const { return zvertex_policy_; }
-        DUAL const auto& full_xvertex_policy() const
-        {
-            return fullxvertex_policy_;
-        }
-        DUAL const auto& full_yvertex_policy() const
-        {
-            return fullyvertex_policy_;
-        }
-        DUAL const auto& full_zvertex_policy() const
-        {
-            return fullzvertex_policy_;
-        }
+        const auto& full_policy() const { return full_policy_; }
+        const auto& interior_policy() const { return interior_policy_; }
+        const auto& xvertex_policy() const { return xvertex_policy_; }
+        const auto& yvertex_policy() const { return yvertex_policy_; }
+        const auto& zvertex_policy() const { return zvertex_policy_; }
+        const auto& full_xvertex_policy() const { return fullxvertex_policy_; }
+        const auto& full_yvertex_policy() const { return fullyvertex_policy_; }
+        const auto& full_zvertex_policy() const { return fullzvertex_policy_; }
 
         void compute_execution_policies(
             const GridManager& grid,

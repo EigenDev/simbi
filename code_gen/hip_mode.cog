@@ -104,6 +104,8 @@ void store_atomic_bool(T& var, bool value)
 #define DUAL   __host__ __device__
 #define STATIC __host__ __device__ inline
 #define EXTERN extern __shared__
+#define STATIC_VAR __device__ volatile
+#define SHARED __shared__
 
 #if FLOAT_PRECISION
 using atomic_cast = unsigned int;

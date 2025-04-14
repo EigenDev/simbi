@@ -50,12 +50,12 @@
 #ifndef IMMERSED_BOUNDARY_HPP
 #define IMMERSED_BOUNDARY_HPP
 
-#include "build_options.hpp"                   // for DUAL, DEV, real, size_type
+#include "build_options.hpp"                   // for , DEV, real, size_type
 #include "core/types/containers/ndarray.hpp"   // for ndarray
 #include "core/types/containers/vector.hpp"    // for spatial_vector_t
 #include "core/types/utility/enums.hpp"        // for BodyType
-#include "physics/hydro/types/generic_structs.hpp"
 #include "physics/hydro/schemes/ib/bodies/body_traits.hpp"
+#include "physics/hydro/types/generic_structs.hpp"
 namespace simbi {
     template <size_type Dims>
     class Mesh;
@@ -81,7 +81,7 @@ namespace simbi {
           public:
             BaseBody()  = default;
             ~BaseBody() = default;
-            DUAL BaseBody(
+            BaseBody(
                 const MeshType& mesh,
                 const spatial_vector_t<T, Dims>& position,
                 const spatial_vector_t<T, Dims>& velocity,
@@ -97,25 +97,25 @@ namespace simbi {
             }
 
             // accessors
-            DUAL auto position() const { return position_; }
-            DUAL auto velocity() const { return velocity_; }
-            DUAL auto mass() const { return mass_; }
-            DUAL auto radius() const { return radius_; }
-            DUAL auto force() const { return force_; }
-            DUAL auto fluid_velocity() const { return fluid_velocity_; }
+            auto position() const { return position_; }
+            auto velocity() const { return velocity_; }
+            auto mass() const { return mass_; }
+            auto radius() const { return radius_; }
+            auto force() const { return force_; }
+            auto fluid_velocity() const { return fluid_velocity_; }
             void interpolate_fluid_velocity(const auto& prim_state) {}
 
             // reference to various body properties that are needed by the
             // policies
-            DUAL auto& force_ref() { return force_; }
-            DUAL auto& fluid_velocity_ref() { return fluid_velocity_; }
-            DUAL auto& position_ref() { return position_; }
-            DUAL auto& velocity_ref() { return velocity_; }
-            DUAL auto& mass_ref() { return mass_; }
-            DUAL auto& radius_ref() { return radius_; }
+            auto& force_ref() { return force_; }
+            auto& fluid_velocity_ref() { return fluid_velocity_; }
+            auto& position_ref() { return position_; }
+            auto& velocity_ref() { return velocity_; }
+            auto& mass_ref() { return mass_; }
+            auto& radius_ref() { return radius_; }
 
             // default policy based on mesh size and whatnot
-            DUAL auto get_default_policy() const
+            auto get_default_policy() const
             {
                 auto grid_sizes = array_t<luint, 3>{
                   mesh_.grid().active_gridsize(0),
@@ -166,7 +166,7 @@ namespace simbi {
             };
 
             template <template <typename> class Trait>
-            DUAL static constexpr bool has_trait()
+            static constexpr bool has_trait()
             {
                 return has_trait_impl<
                     Trait,
@@ -178,7 +178,7 @@ namespace simbi {
 
           private:
             template <template <typename> class Trait, typename... Policies>
-            DUAL static constexpr bool has_trait_impl()
+            static constexpr bool has_trait_impl()
             {
                 return (has_policy_trait<Trait, Policies>::value || ...);
             }
@@ -206,7 +206,7 @@ namespace simbi {
             // Cut cell data
             ndarray<CellInfo, Dims> cell_info_;
 
-            DUAL T compute_volume_fraction(
+            T compute_volume_fraction(
                 const T distance,
                 const auto& mesh_cell
             ) const
@@ -231,7 +231,7 @@ namespace simbi {
                 }
             }
 
-            DUAL T compute_spherical_volume_fraction(
+            T compute_spherical_volume_fraction(
                 const T distance,
                 const auto& mesh_cell
             ) const
@@ -240,7 +240,7 @@ namespace simbi {
                 return 1.0 - std::abs(distance) / mesh_cell.max_cell_width();
             }
 
-            DUAL T compute_cylindrical_volume_fraction(
+            T compute_cylindrical_volume_fraction(
                 const T distance,
                 const auto& mesh_cell
             ) const
@@ -249,7 +249,7 @@ namespace simbi {
                 return 1.0 - std::abs(distance) / mesh_cell.max_cell_width();
             }
 
-            DUAL T compute_cartesian_volume_fraction(
+            T compute_cartesian_volume_fraction(
                 const T distance,
                 const auto& mesh_cell
             ) const
@@ -259,9 +259,8 @@ namespace simbi {
             }
 
           public:
-
             // constructor
-            DUAL ImmersedBody(
+            ImmersedBody(
                 const MeshType& mesh,
                 const spatial_vector_t<T, Dims>& position,
                 const spatial_vector_t<T, Dims>& velocity,
@@ -283,38 +282,38 @@ namespace simbi {
             }
             ~ImmersedBody() = default;
 
-            DUAL ndarray<size_type, 1> cut_cell_indices() const
+            ndarray<size_type, 1> cut_cell_indices() const
             {
                 return cell_info_.filter_indices(
-                    []DEV(const auto& cell) -> bool { return cell.is_cut; },
+                    [] DEV(const auto& cell) -> bool { return cell.is_cut; },
                     this->get_default_policy()
                 );
             }
 
-            DUAL void advance_position(const T dt)
+            void advance_position(const T dt)
             {
                 MotionP::advance_position(*this, dt);
                 update_cut_cells();
             }
 
-            DUAL void advance_velocity(const T dt)
+            void advance_velocity(const T dt)
             {
                 MotionP::advance_velocity(*this, dt);
             }
 
-            DUAL void calculate_forces(const auto& other_bodies, const T dt)
+            void calculate_forces(const auto& other_bodies, const T dt)
             {
                 this->force_ = spatial_vector_t<T, Dims>();
                 ForceP::calculate_forces(*this, other_bodies, dt);
                 FluidP::calculate_fluid_forces(*this, this->mesh_, dt);
             }
 
-            DUAL void update_material_state(const T dt)
+            void update_material_state(const T dt)
             {
                 MaterialP::update_material_state(*this, dt);
             }
 
-            DUAL anyConserved<Dims, Regime::NEWTONIAN> apply_forces_to_fluid(
+            anyConserved<Dims, Regime::NEWTONIAN> apply_forces_to_fluid(
                 const auto& prim,
                 const auto& mesh_cell,
                 const auto& coords,
@@ -332,7 +331,7 @@ namespace simbi {
                 );
             }
 
-            DUAL anyConserved<Dims, Regime::NEWTONIAN> accrete_from_cell(
+            anyConserved<Dims, Regime::NEWTONIAN> accrete_from_cell(
                 const auto& prim,
                 const auto& mesh_cell,
                 const auto& coords,
@@ -351,8 +350,9 @@ namespace simbi {
             }
 
             // IBM specific methods
-            DUAL void update_cut_cells()
+            void update_cut_cells()
             {
+#if !GPU_CODE
                 cell_info_.transform_with_indices(
                     [=, this] DEV(auto& cell, size_type idx) {
                         const auto mesh_cell =
@@ -395,51 +395,51 @@ namespace simbi {
                     },
                     this->get_default_policy()
                 );
+#endif
             }
 
-            DUAL bool has_gravitational_capability() const {
+            bool has_gravitational_capability() const
+            {
                 return has_trait<traits::Gravitational>();
             }
 
-            DUAL bool has_elastic_capability() const {
+            bool has_elastic_capability() const
+            {
                 return has_trait<traits::Elastic>();
             }
 
-            // DUAL bool has_accretion_capability() const {
+            //  bool has_accretion_capability() const {
             //     return has_trait<traits::Accretion>();
             // }
 
-            DUAL bool has_deformable_capability() const {
+            bool has_deformable_capability() const
+            {
                 return has_trait<traits::Deformable>();
             }
 
-
-
-
-
             // read-only accesors
-            DUAL auto position() const { return this->position_; }
-            DUAL auto velocity() const { return this->velocity_; }
-            DUAL auto force() const { return this->force_; }
-            DUAL auto mass() const { return this->mass_; }
-            DUAL auto radius() const { return this->radius_; }
-            DUAL auto fluid_velocity() const { return this->fluid_velocity_; }
-            DUAL auto cell_info() const { return this->cell_info_; }
-            DUAL auto mesh() const { return this->mesh_; }
+            auto position() const { return this->position_; }
+            auto velocity() const { return this->velocity_; }
+            auto force() const { return this->force_; }
+            auto mass() const { return this->mass_; }
+            auto radius() const { return this->radius_; }
+            auto fluid_velocity() const { return this->fluid_velocity_; }
+            auto cell_info() const { return this->cell_info_; }
+            auto mesh() const { return this->mesh_; }
 
             // setters for position and velocity
-            DUAL void set_position(const auto& position)
+            void set_position(const auto& position)
             {
                 this->position_ = position;
                 update_cut_cells();
             }
-            DUAL void set_velocity(const auto& velocity)
+            void set_velocity(const auto& velocity)
             {
                 this->velocity_ = velocity;
             }
 
-            DUAL void set_mass(const T mass) { this->mass_ = mass; }
-            DUAL void set_radius(const T radius) { this->radius_ = radius; }
+            void set_mass(const T mass) { this->mass_ = mass; }
+            void set_radius(const T radius) { this->radius_ = radius; }
         };
     }   // namespace ib
 

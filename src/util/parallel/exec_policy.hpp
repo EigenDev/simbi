@@ -147,8 +147,9 @@ namespace simbi {
         constexpr auto get_full_extent() const
         {
             if constexpr (global::on_gpu) {
-                return block_size.z * grid_size.z * block_size.x *
-                       block_size.y * grid_size.x * grid_size.y;
+                return nzones;
+                // return block_size.z * grid_size.z * block_size.x *
+                // block_size.y * grid_size.x * grid_size.y;
             }
             else {
                 return nzones;

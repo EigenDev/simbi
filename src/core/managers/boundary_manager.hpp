@@ -124,92 +124,102 @@ namespace simbi {
                 return rad;
             }();
 
-            parallel_for(policy, [=, this] DEV(size_type idx) {
-                auto coords = unravel_idx(idx, full_array.shape());
-                auto rshape = interior_view.shape();
-                // reverse shape if row major
-                if constexpr (!global::col_major) {
-                    std::reverse(rshape.begin(), rshape.end());
-                }
-
-                // Only process corner points
-                if (!is_corner_point(coords, rshape, radii)) {
-                    return;
-                }
-
-                // Find which dimensions are at boundaries
-                simbi::array_t<std::pair<int, bool>, Dims> boundary_dims;
-                int num_boundaries = 0;
-
-                for (size_type dim = 0; dim < Dims; ++dim) {
-                    if (coords[dim] < radii[dim]) {
-                        boundary_dims[num_boundaries++] = {
-                          dim,
-                          true
-                        };   // true = lower bound
+            parallel_for(
+                policy,
+                [data,
+                 radii,
+                 full_shape     = full_array.shape(),
+                 full_strides   = full_array.strides(),
+                 interior_shape = interior_view.shape(),
+                 conditions_ptr = conditions.data(),
+                 this] DEV(size_type idx) {
+                    auto coords = unravel_idx(idx, full_shape);
+                    auto rshape = interior_shape;
+                    // reverse shape if row major
+                    if constexpr (!global::col_major) {
+                        std::reverse(rshape.begin(), rshape.end());
                     }
-                    else if (coords[dim] >= rshape[dim] + radii[dim]) {
-                        boundary_dims[num_boundaries++] = {
-                          dim,
-                          false
-                        };   // false = upper bound
+
+                    // Only process corner points
+                    if (!is_corner_point(coords, rshape, radii)) {
+                        return;
                     }
-                }
 
-                // Get interior indices for each boundary dimension
-                size_type interior_idx = 0;
-                auto int_coords        = coords;
+                    // Find which dimensions are at boundaries
+                    simbi::array_t<std::pair<int, bool>, Dims> boundary_dims;
+                    int num_boundaries = 0;
 
-                for (int i = 0; i < num_boundaries; ++i) {
-                    auto [dim, is_lower] = boundary_dims[i];
-                    const auto bc_idx    = 2 * dim + (is_lower ? 0 : 1);
-                    const auto bc        = conditions[bc_idx];
-
-                    // Update coordinate based on boundary condition
-                    switch (bc) {
-                        case BoundaryCondition::REFLECTING:
-                            int_coords[dim] =
-                                (is_lower) ? 2 * radii[dim] - coords[dim] - 1
-                                           : 2 * (rshape[dim] + radii[dim]) -
-                                                 coords[dim] - 1;
-                            break;
-                        case BoundaryCondition::PERIODIC:
-                            int_coords[dim] = (is_lower)
-                                                  ? rshape[dim] + coords[dim]
-                                                  : coords[dim] - rshape[dim];
-                            break;
-                        default:   // OUTFLOW
-                            int_coords[dim] =
-                                (is_lower) ? radii[dim]
-                                           : rshape[dim] + radii[dim] - 1;
+                    for (size_type dim = 0; dim < Dims; ++dim) {
+                        if (coords[dim] < radii[dim]) {
+                            boundary_dims[num_boundaries++] = {
+                              dim,
+                              true
+                            };   // true = lower bound
+                        }
+                        else if (coords[dim] >= rshape[dim] + radii[dim]) {
+                            boundary_dims[num_boundaries++] = {
+                              dim,
+                              false
+                            };   // false = upper bound
+                        }
                     }
-                }
 
-                // Calculate interior linear index
-                for (size_type d = 0; d < Dims; d++) {
-                    interior_idx += int_coords[d] * full_array.strides()[d];
-                }
-                // std::cout << coords << " -> " << int_coords << std::endl;
+                    // Get interior indices for each boundary dimension
+                    size_type interior_idx = 0;
+                    auto int_coords        = coords;
 
-                // Apply boundary conditions
-                data[idx] = data[interior_idx];
-
-                // Handle reflecting conditions for momentum/magnetic
-                // components
-                if constexpr (is_conserved_v<T>) {
                     for (int i = 0; i < num_boundaries; ++i) {
                         auto [dim, is_lower] = boundary_dims[i];
                         const auto bc_idx    = 2 * dim + (is_lower ? 0 : 1);
-                        if (conditions[bc_idx] ==
-                            BoundaryCondition::REFLECTING) {
-                            data[idx].mcomponent(dim + 1) *= -1.0;
-                            if constexpr (is_relativistic_mhd<T>::value) {
-                                data[idx].bcomponent(dim + 1) *= -1.0;
+                        const auto bc        = conditions_ptr[bc_idx];
+
+                        // Update coordinate based on boundary condition
+                        switch (bc) {
+                            case BoundaryCondition::REFLECTING:
+                                int_coords[dim] =
+                                    (is_lower)
+                                        ? 2 * radii[dim] - coords[dim] - 1
+                                        : 2 * (rshape[dim] + radii[dim]) -
+                                              coords[dim] - 1;
+                                break;
+                            case BoundaryCondition::PERIODIC:
+                                int_coords[dim] =
+                                    (is_lower) ? rshape[dim] + coords[dim]
+                                               : coords[dim] - rshape[dim];
+                                break;
+                            default:   // OUTFLOW
+                                int_coords[dim] =
+                                    (is_lower) ? radii[dim]
+                                               : rshape[dim] + radii[dim] - 1;
+                        }
+                    }
+
+                    // Calculate interior linear index
+                    for (size_type d = 0; d < Dims; d++) {
+                        interior_idx += int_coords[d] * full_strides[d];
+                    }
+                    // std::cout << coords << " -> " << int_coords << std::endl;
+
+                    // Apply boundary conditions
+                    data[idx] = data[interior_idx];
+
+                    // Handle reflecting conditions for momentum/magnetic
+                    // components
+                    if constexpr (is_conserved_v<T>) {
+                        for (int i = 0; i < num_boundaries; ++i) {
+                            auto [dim, is_lower] = boundary_dims[i];
+                            const auto bc_idx    = 2 * dim + (is_lower ? 0 : 1);
+                            if (conditions_ptr[bc_idx] ==
+                                BoundaryCondition::REFLECTING) {
+                                data[idx].mcomponent(dim + 1) *= -1.0;
+                                if constexpr (is_relativistic_mhd<T>::value) {
+                                    data[idx].bcomponent(dim + 1) *= -1.0;
+                                }
                             }
                         }
                     }
                 }
-            });
+            );
         }
 
         template <typename TagType = conserved_tag>
@@ -308,14 +318,15 @@ namespace simbi {
                 policy,
                 [data,
                  handle_dynamic_bc,
-                 conditions,
-                 full_array,
-                 interior_view,
+                 conditions_ptr = conditions.data(),
+                 full_shape     = full_array.shape(),
+                 full_strides   = full_array.strides(),
+                 interior_shape = interior_view.shape(),
                  radii,
                  mesh,
                  this] DEV(size_type idx) {
-                    auto coordinates = unravel_idx(idx, full_array.shape());
-                    auto rshape      = interior_view.shape();
+                    auto coordinates = unravel_idx(idx, full_shape);
+                    auto rshape      = interior_shape;
                     // reverse shape if row major
                     if constexpr (!global::col_major) {
                         std::reverse(rshape.begin(), rshape.end());
@@ -346,17 +357,18 @@ namespace simbi {
                     // Process boundary point
                     if (boundary_dim >= 0) {
                         size_t bc_idx = 2 * boundary_dim + (is_lower ? 0 : 1);
+                        const auto bc = conditions_ptr[bc_idx];
                         const auto interior_idx = get_interior_idx(
                             coordinates,
                             boundary_dim,
-                            interior_view.shape(),
-                            full_array.strides(),
+                            interior_shape,
+                            full_strides,
                             radii,
-                            conditions[bc_idx]
+                            bc
                         );
 
                         // Apply boundary condition
-                        switch (conditions[bc_idx]) {
+                        switch (bc) {
                             case BoundaryCondition::DYNAMIC: {
                                 if constexpr (is_conserved_v<T> &&
                                               std::is_same_v<
@@ -371,7 +383,7 @@ namespace simbi {
                                     data[idx] = result;
                                 }
                                 else {
-                                    // default to outflow or maybe reflecting?
+                                    // default to outflow or maybe reflecting ?
                                     // TODO: add support for non-conserved types
                                     data[idx] = data[interior_idx];
                                     // data[idx] = apply_reflecting(
@@ -404,46 +416,13 @@ namespace simbi {
         }
 
       private:
-        size_type
-        reflecting_idx(size_type ii, size_type ni, size_type radius) const
-        {
-            if (ii < radius) {
-                return 2 * radius - ii - 1;
-            }
-            else if (ii >= ni + radius) {
-                return 2 * (ni + radius) - ii - 1;
-            }
-            return ii;
-        }
-        size_type
-        periodic_idx(size_type ii, size_type ni, size_type radius) const
-        {
-            if (ii < radius) {
-                return ni + ii;
-            }
-            else if (ii >= ni + radius) {
-                return ii - ni;
-            }
-            return ii;
-        }
-        size_type
-        outflow_idx(size_type ii, size_type ni, size_type radius) const
-        {
-            if (ii < radius) {
-                return radius;
-            }
-            else if (ii >= ni + radius) {
-                return ni + radius - 1;
-            }
-            return ii;
-        }
         DEV uarray<Dims>
         unravel_idx(size_type idx, const uarray<Dims>& shape) const
         {
             return memory_layout_coordinates<Dims>(idx, shape);
         }
 
-        DUAL static bool is_boundary_point(
+        DEV static bool is_boundary_point(
             const uarray<Dims>& coordinates,
             const uarray<Dims>& shape,
             const uarray<Dims>& radii
@@ -461,7 +440,7 @@ namespace simbi {
             return boundary_count == 1;
         }
 
-        DUAL static bool is_corner_point(
+        DEV static bool is_corner_point(
             const uarray<Dims>& coordinates,
             const uarray<Dims>& shape,
             const uarray<Dims>& radii
@@ -483,7 +462,7 @@ namespace simbi {
             return false;
         }
 
-        DUAL size_type get_interior_idx(
+        DEV size_type get_interior_idx(
             const uarray<Dims>& coords,
             size_type dim,
             const uarray<Dims>& shape,
@@ -498,10 +477,17 @@ namespace simbi {
             auto tshape = shape;
             // get inverted copy of shape if we are in row major
             if constexpr (!global::col_major) {
-                std::reverse(tshape.begin(), tshape.end());
+                if constexpr (!global::on_gpu) {
+                    std::reverse(tshape.begin(), tshape.end());
+                }
+                else {
+                    for (size_type i = 0; i < Dims; i++) {
+                        tshape[i] = shape[Dims - (i + 1)];
+                    }
+                }
             }
 
-            // Adjust coordinate based on boundary condition
+            // // Adjust coordinate based on boundary condition
             switch (bc) {
                 case BoundaryCondition::REFLECTING:
                     int_coords[dim] =
@@ -522,7 +508,7 @@ namespace simbi {
                                           : tshape[dim] + radii[dim] - 1;
             }
 
-            // Calculate linear index directly
+            // // Calculate linear index directly
             size_type idx = 0;
             for (size_type i = 0; i < Dims; i++) {
                 idx += int_coords[i] * strides[i];
@@ -531,7 +517,7 @@ namespace simbi {
         }
 
         template <typename U>
-        DUAL static U apply_reflecting(
+        DEV static U apply_reflecting(
             const U& val,
             int momentum_idx,
             const auto& cell,
@@ -555,13 +541,13 @@ namespace simbi {
         }
 
         template <typename U>
-        DUAL static U apply_periodic(const U& val)
+        DEV static U apply_periodic(const U& val)
         {
             return val;
         }
 
         template <typename U>
-        DUAL static U apply_outflow(const U& val)
+        DEV static U apply_outflow(const U& val)
         {
             return val;
         }

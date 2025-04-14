@@ -73,10 +73,10 @@ namespace simbi {
         }
 
         // simple accessors
-        real time() const { return t_; }
-        real dt() const { return dt_; }
+        DUAL real time() const { return t_; }
+        DUAL real dt() const { return dt_; }
         real tend() const { return tend_; }
-        real dlogt() const { return dlogt_; }
+        DUAL real dlogt() const { return dlogt_; }
         real checkpoint_interval() const { return checkpoint_interval_; }
 
         // simple mutators

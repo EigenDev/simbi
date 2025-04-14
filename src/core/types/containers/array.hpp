@@ -76,8 +76,6 @@ namespace simbi {
         constexpr array_t(const std::initializer_list<T>& values)
         {
             if (values.size() != N) {
-                std::cout << "value size: " << values.size() << std::endl;
-                std::cout << "N: " << N << std::endl;
                 throw std::length_error("Invalid initializer list size");
             }
             for (size_type i = 0; i < N; ++i) {

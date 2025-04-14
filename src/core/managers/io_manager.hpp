@@ -339,7 +339,7 @@ namespace simbi {
 
         template <typename... Args>
             requires ValidSourceParams<Dims, Args...>
-        auto call_hydro_source(Args&&... args) const
+        DEV auto call_hydro_source(Args&&... args) const
         {
             if (solver_manager_.null_sources()) {
                 return;
@@ -349,7 +349,7 @@ namespace simbi {
 
         template <typename... Args>
             requires ValidSourceParams<Dims, Args...>
-        auto call_gravity_source(Args&&... args) const
+        DEV auto call_gravity_source(Args&&... args) const
         {
             if (solver_manager_.null_gravity()) {
                 return;

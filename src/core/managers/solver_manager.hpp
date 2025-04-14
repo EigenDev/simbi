@@ -169,7 +169,7 @@ namespace simbi {
         ndarray<BoundaryCondition> bcs_;
 
       public:
-        DUAL SolverManager(const InitialConditions& init)
+        SolverManager(const InitialConditions& init)
             : solver_type_(get_solver(init.solver)),
               spatial_order_(init.spatial_order),
               temporal_order_(init.temporal_order),
@@ -182,22 +182,23 @@ namespace simbi {
             set_boundary_conditions(init.boundary_conditions);
         }
 
-        DUAL void set_boundary_conditions(const std::vector<std::string>& bcs)
-        {
-            for (auto&& bc : bcs) {
-                bcs_.push_back(get_boundary_condition(bc));
-            }
-        }
-
         // turn boundary conditions into a container of c strings
         // for use in the C API (e.g. HDF5)
-        DUAL auto boundary_conditions_c_str() const
+        auto boundary_conditions_c_str() const
         {
             std::vector<const char*> c_strs;
             for (size_type ii = 0; ii < bcs_.size(); ++ii) {
                 c_strs.push_back(get_boundary_name(bcs_[ii]).data());
             }
             return c_strs;
+        }
+
+        void set_boundary_conditions(const std::vector<std::string>& bcs)
+        {
+            for (auto&& bc : bcs) {
+                bcs_.push_back(get_boundary_condition(bc));
+            }
+            bcs_.sync_to_device();
         }
 
         // Accessors

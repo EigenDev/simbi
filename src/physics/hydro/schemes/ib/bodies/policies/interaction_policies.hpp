@@ -2,7 +2,7 @@
 #define INTERACTION_POLICIES_HPP
 
 #include "../body_traits.hpp"                 // for Accreting
-#include "build_options.hpp"                  // for DUAL, size_type, real
+#include "build_options.hpp"                  // for , size_type, real
 #include "core/types/containers/vector.hpp"   // for spatial_vector_t
 #include <cmath>                              // for M_PI
 
@@ -18,7 +18,7 @@ namespace simbi::ib {
 
       public:
         using Params = typename trait_t::Params;
-        DUAL GravitationalFluidInteractionPolicy(const Params& params = {})
+        GravitationalFluidInteractionPolicy(const Params& params = {})
             : trait_(params)
         {
         }
@@ -72,13 +72,12 @@ namespace simbi::ib {
 
         // fluid forces are nill here
         template <typename Body>
-        DUAL void
-        calculate_fluid_forces(Body& body, const auto& mesh, const T dt)
+        void calculate_fluid_forces(Body& body, const auto& mesh, const T dt)
         {
             // do nada
         }
 
-        DUAL const trait_t& trait() const { return trait_; }
+        const trait_t& trait() const { return trait_; }
 
       private:
         trait_t trait_;
@@ -103,33 +102,29 @@ namespace simbi::ib {
             gravParams grav_params;
         };
 
-        DUAL AccretingFluidInteractionPolicy(const Params& params = {})
+        AccretingFluidInteractionPolicy(const Params& params = {})
             : Base(params.grav_params), accr_trait_(params.accretion_params)
         {
         }
 
         // Access to the accreting trait
-        DUAL const accr_trait_t& accreting_trait() const { return accr_trait_; }
-        DUAL accr_trait_t& accreting_trait() { return accr_trait_; }
+        const accr_trait_t& accreting_trait() const { return accr_trait_; }
+        accr_trait_t& accreting_trait() { return accr_trait_; }
 
         // Forward trait methods
-        DUAL T accretion_efficiency() const
+        T accretion_efficiency() const
         {
             return accr_trait_.accretion_efficiency();
         }
-        DUAL T accretion_radius() const
-        {
-            return accr_trait_.accretion_radius();
-        }
-        DUAL T total_accreted_mass() const
+        T accretion_radius() const { return accr_trait_.accretion_radius(); }
+        T total_accreted_mass() const
         {
             return accr_trait_.total_accreted_mass();
         }
 
         // calc fluid forces on the body
         template <typename Body>
-        DUAL void
-        calculate_fluid_forces(Body& body, const auto& mesh, const T dt)
+        void calculate_fluid_forces(Body& body, const auto& mesh, const T dt)
         {
             // do nothing
         }
@@ -137,7 +132,7 @@ namespace simbi::ib {
         // cubic spline smoothing kernel
         // from: Monaghan (1992) -
         // https://doi.org/10.1146/annurev.aa.30.090192.002551
-        DUAL T smoothing_kernel(const T r_norm)
+        T smoothing_kernel(const T r_norm)
         {
             if (r_norm >= 1.0) {
                 return 0.0;
@@ -146,7 +141,7 @@ namespace simbi::ib {
             return q * q * (1.0 + 2.0 * r_norm);
         };
 
-        DUAL auto calculate_radial_accretion_profile(
+        auto calculate_radial_accretion_profile(
             const T distance,
             const T r_bondi,
             const T accretion_efficiency,
@@ -358,7 +353,7 @@ namespace simbi::ib {
         }
 
         template <typename Body, typename Primitive>
-        DUAL auto accrete_from_cell(
+        auto accrete_from_cell(
             Body& body,
             const Primitive& prim,
             const auto& mesh_cell,

@@ -76,7 +76,7 @@ namespace simbi {
         DUAL constexpr Maybe() : valid{false}, error_message(nullptr) {}
 
         DUAL constexpr Maybe(nothing_t nothing)
-            : valid{false}, error_message(nothing.error_message)
+            : valid{false}, this_value{}, error_message(nothing.error_message)
         {
         }
 
@@ -98,6 +98,66 @@ namespace simbi {
               error_message(nullptr)
         {
             static_assert(std::is_convertible_v<U, T>);
+        }
+
+        // Copy assignment operator
+        DUAL constexpr Maybe& operator=(const Maybe& other)
+        {
+            if (this != &other) {
+                valid = other.valid;
+
+                if (valid) {
+                    this_value    = other.this_value;
+                    error_message = nullptr;
+                }
+                else {
+                    // Default construct this_value when invalid
+                    this_value    = T{};
+                    error_message = other.error_message;
+                }
+            }
+            return *this;
+        }
+
+        // Move assignment operator
+        DUAL constexpr Maybe& operator=(Maybe&& other) noexcept
+        {
+            if (this != &other) {
+                valid = other.valid;
+
+                if (valid) {
+                    this_value    = std::move(other.this_value);
+                    error_message = nullptr;
+                }
+                else {
+                    // Default construct this_value when invalid
+                    this_value    = T{};
+                    error_message = other.error_message;
+                }
+
+                // Clear the source
+                other.valid         = false;
+                other.error_message = nullptr;
+            }
+            return *this;
+        }
+
+        // Value assignment operator
+        DUAL constexpr Maybe& operator=(const T& value)
+        {
+            valid         = true;
+            this_value    = value;
+            error_message = nullptr;
+            return *this;
+        }
+
+        // Move value assignment operator
+        DUAL constexpr Maybe& operator=(T&& value)
+        {
+            valid         = true;
+            this_value    = std::move(value);
+            error_message = nullptr;
+            return *this;
         }
 
         DUAL constexpr bool has_value() const { return valid; }
@@ -205,7 +265,7 @@ namespace simbi {
         }
 
         template <typename F>
-        DUAL constexpr T unwrap_or_else(F&& f) const&
+        constexpr T unwrap_or_else(F&& f) const&
         {
             if (valid) {
                 return this_value;
@@ -216,7 +276,7 @@ namespace simbi {
         }
 
         template <typename F>
-        DUAL constexpr T unwrap_or_else(F&& f) &&
+        constexpr T unwrap_or_else(F&& f) &&
         {
             if (valid) {
                 return std::move(this_value);
@@ -372,6 +432,12 @@ namespace simbi {
     // Deduction guide
     template <typename T>
     Maybe(T) -> Maybe<std::decay_t<T>>;
+
+    template <typename T>
+    DUAL inline Maybe<T> make_maybe(const T& value)
+    {
+        return Maybe<T>(value);
+    }
 
     // Hash support
     // template <typename T>

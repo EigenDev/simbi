@@ -108,17 +108,8 @@ namespace simbi {
     template <typename T, typename U>
     using promote_t = std::common_type_t<T, U>;
 
-    template <VectorType A, VectorType B>
-    struct promote_vector_type {
-        static constexpr VectorType value =
-            (A == VectorType::MAGNETIC_FOUR || B == VectorType::MAGNETIC_FOUR)
-                ? VectorType::MAGNETIC_FOUR
-            : (A == VectorType::SPACETIME || B == VectorType::SPACETIME)
-                ? VectorType::SPACETIME
-            : (A == VectorType::MAGNETIC || B == VectorType::MAGNETIC)
-                ? VectorType::MAGNETIC
-                : VectorType::SPATIAL;
-    };
+    template <VectorType T, VectorType U>
+    constexpr auto promote_vector_t = T == U ? T : VectorType::GENERAL;
 
     // forward declarations
     template <typename T, size_type Dims, VectorType Type>
@@ -240,7 +231,7 @@ namespace simbi {
 
         // vector-to-vector operations w/ type promotions
         template <typename U, size_type OtherDims, VectorType OtherType>
-        DUAL constexpr auto
+        DUAL constexpr promote_t<T, U>
         dot(const VectorOps<U, OtherDims, OtherType>& other) const
         {
             using result_type = promote_t<T, U>;
@@ -253,7 +244,10 @@ namespace simbi {
 
         // binary operations w/ type promotions
         template <typename U, size_type OtherDims, VectorType OtherType>
-        DUAL constexpr auto
+        DUAL constexpr Vector<
+            promote_t<T, U>,
+            Dims,
+            promote_vector_t<Type, OtherType>>
         operator+(const VectorOps<U, OtherDims, OtherType>& other) const
         {
             using result_type = promote_t<T, U>;
@@ -267,7 +261,10 @@ namespace simbi {
         }
 
         template <typename U, size_type OtherDims, VectorType OtherType>
-        DUAL constexpr auto
+        DUAL constexpr Vector<
+            promote_t<T, U>,
+            Dims,
+            promote_vector_t<Type, OtherType>>
         operator-(const VectorOps<U, OtherDims, OtherType>& other) const
         {
             using result_type = promote_t<T, U>;
@@ -303,18 +300,23 @@ namespace simbi {
         }
 
         template <typename U>
-        DUAL constexpr auto operator*(const U scalar) const
+        DUAL constexpr Vector<promote_t<T, U>, Dims, Type>
+        operator*(const U scalar) const
         {
             using result_type = promote_t<T, U>;
             Vector<result_type, Dims, Type> result;
+
+            // Manual component-wise multiplication
             for (size_type ii = 0; ii < Dims; ++ii) {
-                result[ii] = (*this)[ii] * scalar;
+                result[ii] = static_cast<result_type>((*this)[ii]) * scalar;
             }
+
             return result;
         }
 
         template <typename U>
-        DUAL constexpr auto operator/(const U scalar) const
+        DUAL constexpr Vector<promote_t<T, U>, Dims, Type>
+        operator/(const U scalar) const
         {
             using result_type = promote_t<T, U>;
             Vector<result_type, Dims, Type> result;
@@ -345,7 +347,7 @@ namespace simbi {
         }
 
         // unary operations
-        DUAL constexpr auto operator-() const
+        DUAL constexpr Vector<T, Dims, Type> operator-() const
         {
             Vector<T, Dims, Type> result;
             for (size_type ii = 0; ii < Dims; ++ii) {
@@ -391,7 +393,11 @@ namespace simbi {
             template <typename, size_type, VectorType> class Vec_t,
             typename U,
             VectorType OtherType>
-        DUAL constexpr auto cross(const Vec_t<U, Dims, OtherType>& other) const
+        DUAL constexpr Vector<
+            promote_t<T, U>,
+            Dims,
+            promote_vector_t<Type, OtherType>>
+        cross(const Vec_t<U, Dims, OtherType>& other) const
             requires(Dims == 3)
         {
             using result_type = promote_t<T, U>;
@@ -409,7 +415,7 @@ namespace simbi {
             template <typename, size_type, VectorType> class Vec_t,
             typename U,
             VectorType OtherType>
-        DUAL constexpr auto
+        DUAL constexpr promote_t<T, U>
         cross(size_type ii, const Vec_t<U, Dims, OtherType>& other) const
             requires(Dims == 3)
         {
@@ -426,7 +432,7 @@ namespace simbi {
 
         // if less than 3D, the cross product is simply the magnitude
         template <typename U, VectorType OtherType>
-        DUAL constexpr auto
+        DUAL constexpr promote_t<T, U>
         cross(const VectorOps<U, Dims, OtherType>& other) const
             requires(Dims < 3)
         {
@@ -802,10 +808,10 @@ namespace simbi {
     class ZeroMagneticVectorView : public const_magnetic_vector_view_t<real, 3>
     {
       private:
-        static constexpr real zero_storage[3] = {0.0, 0.0, 0.0};
+        const real zero_storage[3] = {0.0, 0.0, 0.0};
 
       public:
-        ZeroMagneticVectorView()
+        DUAL ZeroMagneticVectorView()
             : const_magnetic_vector_view_t<real, 3>(zero_storage)
         {
         }
@@ -815,10 +821,10 @@ namespace simbi {
         : public const_magnetic_four_vector_view_t<real>
     {
       private:
-        static constexpr real zero_storage[4] = {0.0, 0.0, 0.0, 0.0};
+        const real zero_storage[4] = {0.0, 0.0, 0.0, 0.0};
 
       public:
-        ZeroMagneticFourVectorView()
+        DUAL ZeroMagneticFourVectorView()
             : const_magnetic_four_vector_view_t<real>(zero_storage)
         {
         }
@@ -826,30 +832,38 @@ namespace simbi {
 
     // set of unit vectors in the x1, x2, x3 directions
     namespace unit_vectors {
-        static constexpr unit_vector_t<1> x1_1D{1};
-        static constexpr unit_vector_t<1> x2_1D{0};
-        static constexpr unit_vector_t<1> x3_1D{0};
-
-        static constexpr unit_vector_t<2> x1_2D{1, 0};
-        static constexpr unit_vector_t<2> x2_2D{0, 1};
-        static constexpr unit_vector_t<2> x3_2D{0, 0};
-
-        static constexpr unit_vector_t<3> x1_3D{1, 0, 0};
-        static constexpr unit_vector_t<3> x2_3D{0, 1, 0};
-        static constexpr unit_vector_t<3> x3_3D{0, 0, 1};
-
-        // Helper to get unit vector by index
         template <size_type Dims>
-        static constexpr const auto& get(size_type i)
+        DUAL constexpr auto get(size_type i)
         {
             if constexpr (Dims == 1) {
-                return x1_1D;
+                // Return a vector directly instead of referencing static data
+                return (i == 1) ? Vector<luint, 1, VectorType::SPATIAL>{1}
+                                : Vector<luint, 1, VectorType::SPATIAL>{0};
             }
             else if constexpr (Dims == 2) {
-                return (i == 1) ? x1_2D : x2_2D;
+                if (i == 1) {
+                    return Vector<luint, 2, VectorType::SPATIAL>{1, 0};
+                }
+                else if (i == 2) {
+                    return Vector<luint, 2, VectorType::SPATIAL>{0, 1};
+                }
+                else {
+                    return Vector<luint, 2, VectorType::SPATIAL>{0, 0};
+                }
             }
             else {
-                return (i == 1) ? x1_3D : (i == 2) ? x2_3D : x3_3D;
+                if (i == 1) {
+                    return Vector<luint, 3, VectorType::SPATIAL>{1, 0, 0};
+                }
+                else if (i == 2) {
+                    return Vector<luint, 3, VectorType::SPATIAL>{0, 1, 0};
+                }
+                else if (i == 3) {
+                    return Vector<luint, 3, VectorType::SPATIAL>{0, 0, 1};
+                }
+                else {
+                    return Vector<luint, 3, VectorType::SPATIAL>{0, 0, 0};
+                }
             }
         }
     }   // namespace unit_vectors

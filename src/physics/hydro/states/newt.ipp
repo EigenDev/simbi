@@ -1,5 +1,6 @@
 #include "core/managers/boundary_manager.hpp"
 #include "core/types/containers/array.hpp"
+#include "util/tools/device_api.hpp"
 #include <cmath>   // for max, min
 
 using namespace simbi;
@@ -58,6 +59,7 @@ void Newtonian<dim>::cons2prim_impl()
         this->full_policy(),
         this->cons_
     );
+
     if (local_failure.load()) {
         this->set_failure_state(true);
     }
@@ -228,7 +230,7 @@ DUAL Newtonian<dim>::conserved_t Newtonian<dim>::calc_hlle_flux(
         }
     }();
 
-    // Upwind the scalar concentration
+    // // Upwind the scalar concentration
     if (net_flux.dens() < 0.0) {
         net_flux.chi() = prR.chi() * net_flux.dens();
     }
@@ -443,7 +445,7 @@ void Newtonian<dim>::advance_impl()
 
             auto vface = cell.velocity(q);
 
-            if (!this->using_pcm()) {
+            if (this->using_pcm()) {
                 const auto& pLL = prim.at(q - 2, 0, 0);
                 const auto& pRR = prim.at(q + 1, 0, 0);
                 // compute the reconstructed states
@@ -462,7 +464,7 @@ void Newtonian<dim>::advance_impl()
                 // Y-direction flux
                 const auto& pL_y = prim.at(0, q - 1, 0);
                 const auto& pR_y = prim.at(0, q - 0, 0);
-                if (!this->using_pcm()) {
+                if (this->using_pcm()) {
                     const auto& pLL_y = prim.at(0, q - 2, 0);
                     const auto& pRR_y = prim.at(0, q + 1, 0);
                     const auto pLr_y =
@@ -484,7 +486,7 @@ void Newtonian<dim>::advance_impl()
                     // Z-direction flux
                     const auto& pL_z = prim.at(0, 0, q - 1);
                     const auto& pR_z = prim.at(0, 0, q - 0);
-                    if (!this->using_pcm()) {
+                    if (this->using_pcm()) {
                         const auto& pLL_z = prim.at(0, 0, q - 2);
                         const auto& pRR_z = prim.at(0, 0, q + 1);
                         const auto pLr_z =
@@ -514,7 +516,8 @@ void Newtonian<dim>::advance_impl()
             cell
         );
 
-        // if immersed boundary is present, add the force term
+        // if immersed boundaries are present, include their effects
+        // on the fluid
         if (this->has_immersed_bodies()) {
             delta_con += this->ib_sources(
                 prim.value(),
@@ -522,6 +525,7 @@ void Newtonian<dim>::advance_impl()
                 std::make_tuple(ii, jj, kk)
             );
         }
+
         // Return updated conserved values
         return con.value() + delta_con;
     };
@@ -544,7 +548,8 @@ template <int dim>
 void Newtonian<dim>::init_simulation()
 {
     init_riemann_solver();
+    this->sync_to_device();
     this->apply_boundary_conditions();
     // use parent's sync to device method
-    this->sync_to_device();
+    // this->sync_to_device();
 };

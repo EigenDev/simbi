@@ -328,65 +328,6 @@ DUAL SRHD<dim>::conserved_t SRHD<dim>::calc_hllc_flux(
 }
 
 //===================================================================================================================
-//                                           SOURCE TERMS
-//===================================================================================================================
-// template <int dim>
-// DUAL SRHD<dim>::conserved_t SRHD<dim>::hydro_sources(const auto& cell) const
-// {
-//     if (null_sources) {
-//         return conserved_t{};
-//     }
-//     const auto x1c = cell.centroid_coordinate(0);
-//     const auto x2c = cell.centroid_coordinate(1);
-//     const auto x3c = cell.centroid_coordinate(2);
-
-//     conserved_t res;
-//     if constexpr (dim == 1) {
-//         hydro_source(x1c, t, res);
-//     }
-//     else if constexpr (dim == 2) {
-//         hydro_source(x1c, x2c, t, res);
-//     }
-//     else {
-//         hydro_source(x1c, x2c, x3c, t, res);
-//     }
-
-//     return res;
-// }
-
-// template <int dim>
-// DUAL SRHD<dim>::conserved_t
-// SRHD<dim>::this->gravity_sources(const auto& prims, const auto& cell) const
-// {
-//     if (null_gravity) {
-//         return conserved_t{};
-//     }
-//     const auto x1c = cell.centroid_coordinate(0);
-
-//     conserved_t res;
-//     // gravity only changes the momentum and energy
-//     if constexpr (dim > 1) {
-//         const auto x2c = cell.centroid_coordinate(1);
-//         if constexpr (dim > 2) {
-//             const auto x3c = cell.centroid_coordinate(2);
-//             gravity_source(x1c, x2c, x3c, t, res);
-//             res[dimensions + 1] =
-//                 res[1] * prims[1] + res[2] * prims[2] + res[3] * prims[3];
-//         }
-//         else {
-//             gravity_source(x1c, x2c, t, res);
-//             res[dimensions + 1] = res[1] * prims[1] + res[2] * prims[2];
-//         }
-//     }
-//     else {
-//         gravity_source(x1c, t, res);
-//         res[dimensions + 1] = res[1] * prims[1];
-//     }
-
-//     return res;
-// }
-
-//===================================================================================================================
 //                                            UDOT CALCULATIONS
 //===================================================================================================================
 template <int dim>
@@ -529,7 +470,7 @@ void SRHD<dim>::init_simulation()
     init_riemann_solver();
     this->apply_boundary_conditions();
     pressure_guesses_.resize(this->cons_.size())
-        .reshape(this->get_shape(this->full_policy()));
+        .reshape({this->nz(), this->ny(), this->nx()});
     pressure_guesses_.transform(
         [] DEV(auto& p, const auto& cons) {
             const auto d = cons.dens();

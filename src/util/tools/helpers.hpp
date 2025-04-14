@@ -391,7 +391,7 @@ namespace simbi {
         std::string getColorCode(Color color);
 
         // display the CPU / GPU device properties
-        void anyDisplayProps();
+        void display_device_properties();
 
         /**
          * @brief perform the reduction within the warp

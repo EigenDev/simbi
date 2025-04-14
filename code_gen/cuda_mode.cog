@@ -51,11 +51,13 @@ class atomic_bool_gpu
 using shared_atomic_bool = atomic_bool_gpu;
 using atomic_bool        = atomic_bool_gpu;
 
-#define DEV    __device__
-#define KERNEL __global__
-#define DUAL   __host__ __device__
-#define STATIC __host__ __device__ inline
-#define EXTERN extern __shared__
+#define DEV        __device__
+#define KERNEL     __global__
+#define DUAL       __host__ __device__
+#define STATIC     __host__ __device__ inline
+#define EXTERN     extern __shared_
+#define STATIC_VAR __device__ volatile
+#define SHARED     __shared__
 
 #if FLOAT_PRECISION
 using atomic_cast = int;
@@ -75,11 +77,9 @@ using sig_bool = volatile bool;
 
 namespace global {
 #if SHARED_MEMORY
-#define SHARED __device__
     // shorthand flag for using gpu shared memory
     constexpr bool on_sm = true;
 #else
-#define SHARED __device__ const
     // shorthand flag for using gpu shared memory
     constexpr bool on_sm = false;
 #endif
@@ -164,6 +164,12 @@ __device__ __forceinline__ real devAtomicAddReal(real* addr, real value)
     } while (assumed != old);
     return __longlong_as_double(old);
 #endif
+}
+
+template <typename T>
+__device__ __forceinline__ T devAtomicMin(T* addr, T value)
+{
+    return atomicMin(addr, value);
 }
 
 constexpr auto devMemcpy               = cudaMemcpy;

@@ -95,7 +95,7 @@ namespace simbi {
             return str;
         }
 
-        void anyDisplayProps()
+        void display_device_properties()
         {
 // Adapted from:
 // https://stackoverflow.com/questions/5689028/how-to-get-card-specs-programmatically-in-cuda

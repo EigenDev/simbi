@@ -348,8 +348,7 @@ namespace simbi {
                 auto start_time = steady_clock::now();
                 CursorManager cursor_manager;
 
-                // Display device properties
-                anyDisplayProps();
+                display_device_properties();
 
                 // use pretty table to print the results
                 PrettyTable table;

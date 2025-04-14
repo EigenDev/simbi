@@ -140,17 +140,7 @@ namespace simbi {
         auto data() const -> const T* { return mem_.data(); }
         auto fill(T value) -> void
         {
-            // if constexpr (global::on_gpu) {
-            //     mem_.ensure_device_synced();
-            //     parallel_for(
-            //         [=, this] DEV(size_type ii) { mem_[ii] = value; },
-            //         this->size()
-            //     );
-            //     mem_.sync_to_host();
-            // }
-            // else {
-            std::fill(mem_.data(), mem_.data() + this->size(), value);
-            // }
+            std::fill(mem_.host_data(), mem_.host_data() + this->size(), value);
         }
 
         template <typename... Indices>
@@ -262,17 +252,70 @@ namespace simbi {
             // fill(fill_value);
         }
 
-        auto push_back(T value) -> void
+        void resize_capacity(size_type new_capacity)
         {
-            size_type new_size = this->size_ + 1;
+            if (new_capacity <= capacity_) {
+                return;
+            }
+
+            // Allocate new memory with larger capacity
             memory_manager<T> new_mem;
-            new_mem.allocate(new_size);
-            std::copy(mem_.data(), mem_.data() + this->size_, new_mem.data());
-            new_mem[new_size - 1] = value;
-            mem_                  = std::move(new_mem);
-            this->size_           = new_size;
+            new_mem.allocate(new_capacity);
+
+            // Copy existing data
+            if (this->size_ > 0) {
+                std::copy(
+                    mem_.host_data(),
+                    mem_.host_data() + this->size_,
+                    new_mem.host_data()
+                );
+            }
+
+            // Replace old memory with new
+            mem_      = std::move(new_mem);
+            capacity_ = new_capacity;
+
+            // If using GPU, sync the new data
+            if constexpr (global::on_gpu) {
+                mem_.sync_to_device();
+            }
         }
 
+        auto push_back(T value) -> void
+        {
+            // Check if we need to grow capacity
+            if (this->size_ >= capacity_) {
+                // Grow by doubling capacity (common strategy)
+                size_type new_capacity = (capacity_ == 0) ? 1 : capacity_ * 2;
+                resize_capacity(new_capacity);
+            }
+
+            // Add the new value
+            mem_[this->size_] = value;
+
+            // Increment size
+            this->size_ += 1;
+
+            // Update shape - increase first dimension
+            this->shape_[0] += 1;
+
+            // Recompute strides (may not be necessary if only size changes)
+            this->strides_ = this->compute_strides(this->shape_);
+
+            // If using GPU, synchronize just the changed element
+            if constexpr (global::on_gpu) {
+                // Ideally sync just the changed element, but this might require
+                // additional API support
+                mem_.sync_to_device();
+            }
+        }
+
+        void reserve(size_type capacity)
+        {
+            if (capacity > capacity_) {
+                resize_capacity(capacity);
+            }
+        }
         T* host_data() { return mem_.host_data(); }
 
         T* host_data() const { return mem_.host_data(); }
@@ -524,20 +567,48 @@ namespace simbi {
         U reduce(U init, F reduce_op, const ExecutionPolicy<>& policy) const
         {
             if constexpr (global::on_gpu) {
+                // Allocate shared memory in the kernel for partial reductions
+                const size_t shared_mem_size = 1024;
+
                 ndarray<U> result(1, init);
                 result.sync_to_device();
                 auto result_ptr = result.data();
                 auto arr        = mem_.data();
+                size_type size  = this->size_;
 
-                parallel_for(policy, [=, this] DEV(size_type idx) {
-                    U current_min = result_ptr[0];
-                    while (true) {
-                        U next_min = reduce_op(current_min, arr[idx], idx);
-                        if (result_ptr[0] == current_min) {
-                            result_ptr[0] = next_min;
-                            break;
+                // First pass: each thread block computes a partial reduction
+                parallel_for(policy, [=] DEV(size_type idx) {
+                    SHARED U shared_data[shared_mem_size];
+
+                    // Each thread initializes with its own value
+                    U thread_val =
+                        idx < size ? reduce_op(init, arr[idx], idx) : init;
+
+                    // Block-level reduction
+                    size_type tid    = threadIdx.x;
+                    shared_data[tid] = thread_val;
+                    gpu::api::synchronize();
+
+                    // Reduce within block
+                    for (size_type s = blockDim.x / 2; s > 0; s >>= 1) {
+                        if (tid < s && idx + s < size) {
+                            shared_data[tid] =
+                                my_min(shared_data[tid], shared_data[tid + s]);
                         }
-                        current_min = result_ptr[0];
+                        gpu::api::synchronize();
+                    }
+
+                    // printf(
+                    //     "idx: %ld, shared_data[0]: %f, arr[idx]: "
+                    //     "%f, thread_val: %f\n",
+                    //     idx,
+                    //     shared_data[0],
+                    //     arr[idx]->rho(),
+                    //     thread_val
+                    // );
+                    // Write block result to global memory
+                    if (tid == 0) {
+                        gpu::api::atomicMin(&result_ptr[0], shared_data[0]);
                     }
                 });
 
@@ -622,6 +693,7 @@ namespace simbi {
 
       private:
         memory_manager<T> mem_;
+        size_type capacity_ = 0;
     };
 }   // namespace simbi
 #endif
