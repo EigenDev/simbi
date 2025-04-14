@@ -103,7 +103,7 @@ namespace simbi {
         {
           public:
             // Constructor for creating stencil around a point
-            StencilView(
+            DEV StencilView(
                 const Flux& vertical_field,
                 const Flux& horizontal_field,
                 const Primitive& primitives
@@ -116,20 +116,20 @@ namespace simbi {
             }
 
             // Get flux at stencil point based on plane-aware directions
-            DUAL constexpr auto vertical_field(Dir dir) const
+            DEV constexpr auto vertical_field(Dir dir) const
             {
                 auto [di, dj, dk] = get_vertical_offsets(dir, coordinates);
                 return v_field_.at(di, dj, dk);
             }
 
-            DUAL constexpr auto horizontal_field(Dir dir) const
+            DEV constexpr auto horizontal_field(Dir dir) const
             {
                 auto [di, dj, dk] = get_horizontal_offsets(dir, coordinates);
                 return h_field_.at(di, dj, dk);
             }
 
             // Get primitive at stencil point
-            DUAL constexpr auto prim(Dir dir) const
+            DEV constexpr auto prim(Dir dir) const
             {
                 auto [di, dj, dk] = get_plane_offsets(dir);
                 if constexpr (P == Plane::IJ) {

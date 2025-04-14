@@ -41,7 +41,8 @@ void RMHD<dim>::cons2prim_impl()
 
     this->prims_.transform(
         [gamma = this->gamma,
-         loc   = &local_failure] DEV(auto& prim, const auto& c) -> Maybe<primitive_t> {
+         loc   = &local_failure] DEV(auto& prim, const auto& c)
+            -> Maybe<primitive_t> {
             const real d      = c.dens();
             const auto mom    = c.momentum();
             const real tau    = c.nrg();
@@ -1614,12 +1615,33 @@ void RMHD<dim>::init_simulation()
     const auto& yP = this->full_yvertex_policy();
     const auto& zP = this->full_zvertex_policy();
     // allocate space for Riemann fluxes
-    fri.resize(xP.get_real_extent()).reshape(this->get_shape(xP));
-    gri.resize(yP.get_real_extent()).reshape(this->get_shape(yP));
-    hri.resize(zP.get_real_extent()).reshape(this->get_shape(zP));
+    fri.resize(xP.get_real_extent())
+        .reshape(
+            {this->active_nz() + 2,
+             this->active_ny() + 2,
+             this->active_nx() + 1}
+        );
+    gri.resize(yP.get_real_extent())
+        .reshape(
+            {this->active_nz() + 2,
+             this->active_ny() + 1,
+             this->active_nx() + 2}
+        );
+    hri.resize(zP.get_real_extent())
+        .reshape(
+            {this->active_nz() + 1,
+             this->active_ny() + 2,
+             this->active_nx() + 2}
+        );
 
-    bstag1.reshape(this->get_shape(xP));
-    bstag2.reshape(this->get_shape(yP));
-    bstag3.reshape(this->get_shape(zP));
+    bstag1.reshape(
+        {this->active_nz() + 2, this->active_ny() + 2, this->active_nx() + 1}
+    );
+    bstag2.reshape(
+        {this->active_nz() + 2, this->active_ny() + 1, this->active_nx() + 2}
+    );
+    bstag3.reshape(
+        {this->active_nz() + 1, this->active_ny() + 2, this->active_nx() + 2}
+    );
     sync_all_to_device();
 };

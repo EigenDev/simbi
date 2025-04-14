@@ -201,7 +201,6 @@ namespace simbi {
               io_manager_ptr(io_manager_.get()),
               // protected references to commonly used values
               gamma(gamma_)
-
         {
             init_gravitational_system(init_conditions);
         }
@@ -424,6 +423,7 @@ namespace simbi {
             const std::function<real(real)> adot
         )
         {
+
             auto& derived = static_cast<Derived&>(*this);
             // load the user-defined functions if any
             io().load_functions();
@@ -592,6 +592,9 @@ namespace simbi {
         auto nx() const { return mesh_.grid().total_gridsize(0); }
         auto ny() const { return mesh_.grid().total_gridsize(1); }
         auto nz() const { return mesh_.grid().total_gridsize(2); }
+        auto active_nx() const { return mesh_.grid().active_gridsize(0); }
+        auto active_ny() const { return mesh_.grid().active_gridsize(1); }
+        auto active_nz() const { return mesh_.grid().active_gridsize(2); }
         auto total_zones() const { return mesh_.grid().total_zones(); }
         DUAL auto has_immersed_bodies() const
         {

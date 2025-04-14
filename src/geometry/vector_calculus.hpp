@@ -49,7 +49,7 @@
 #ifndef VECTOR_CALCULUS_HPP
 #define VECTOR_CALCULUS_HPP
 
-#include "build_options.hpp"                        // for real, DUAL
+#include "build_options.hpp"                        // for real, DEV
 #include "core/types/containers/vector_field.hpp"   // for Vector, VectorField
 #include <iostream>                                 // for cout, cin
 #include <vector>                                   // for vector
@@ -64,7 +64,7 @@ namespace simbi {
             X3 = 2
         };
 
-        DUAL general_vector_t<real, 3>
+        DEV general_vector_t<real, 3>
         curl_cartesian(const auto& cell, const VectorField<real, 3>& vec_field)
         {
             return general_vector_t<real, 3>{
@@ -83,7 +83,7 @@ namespace simbi {
             };
         }
 
-        DUAL general_vector_t<real, 3> curl_cylindrical(
+        DEV general_vector_t<real, 3> curl_cylindrical(
             const auto& cell,
             const VectorField<real, 3>& vec_field
         )
@@ -106,7 +106,7 @@ namespace simbi {
             };
         }
 
-        DUAL general_vector_t<real, 3>
+        DEV general_vector_t<real, 3>
         curl_spherical(const auto& cell, const VectorField<real, 3>& vec_field)
         {
             const auto r      = cell.centroid_coordinate(0);
@@ -134,7 +134,7 @@ namespace simbi {
             return general_vector_t<real, 3>{rcomp, tcomp, pcomp};
         }
 
-        DUAL general_vector_t<real, 3>
+        DEV general_vector_t<real, 3>
         curl(auto& cell, VectorField<real, 3>& vec_field)
         {
             switch (cell.geometry()) {
@@ -150,7 +150,7 @@ namespace simbi {
 
         // Component-wise curl functions
         template <CurlComponent C>
-        DUAL real curl_cartesian_component(
+        DEV real curl_cartesian_component(
             const auto& cell,
             const VectorField<real, 3>& vec_field
         )
@@ -176,7 +176,7 @@ namespace simbi {
         }
 
         template <CurlComponent C>
-        DUAL real curl_cylindrical_component(
+        DEV real curl_cylindrical_component(
             const auto& cell,
             const VectorField<real, 3>& vec_field
         )
@@ -207,7 +207,7 @@ namespace simbi {
         }
 
         template <CurlComponent C>
-        DUAL real curl_spherical_component(
+        DEV real curl_spherical_component(
             const auto& cell,
             const VectorField<real, 3>& vec_field
         )
@@ -287,7 +287,7 @@ namespace simbi {
         }
 
         template <int nhat>
-        DUAL real
+        DEV real
         curl_component(const auto& cell, VectorField<real, 3>& vec_field)
         {
             switch (cell.geometry()) {
@@ -307,7 +307,7 @@ namespace simbi {
         }
 
         template <typename... Args>
-        DUAL real
+        DEV real
         divergence_cartesian(const auto& cell, const Args... components)
         {
             auto to_real = [](auto val) { return static_cast<real>(val); };
@@ -323,7 +323,7 @@ namespace simbi {
         }
 
         template <typename... Args>
-        DUAL real
+        DEV real
         divergence_spherical(const auto& cell, const Args... components)
         {
             auto to_real = [](auto val) { return static_cast<real>(val); };
@@ -348,7 +348,7 @@ namespace simbi {
         }
 
         template <typename... Args>
-        DUAL real
+        DEV real
         divergence_cylindrical(const auto& cell, const Args... components)
         {
             auto to_real = [](auto val) { return static_cast<real>(val); };
@@ -369,7 +369,7 @@ namespace simbi {
         }
 
         template <typename... Args>
-        DUAL real divergence(const auto& cell, const Args... components)
+        DEV real divergence(const auto& cell, const Args... components)
         {
             switch (cell.geometry()) {
                 case Geometry::CARTESIAN:

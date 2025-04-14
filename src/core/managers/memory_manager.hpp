@@ -233,24 +233,20 @@ namespace simbi {
         // access operators
         DUAL T& operator[](size_type ii)
         {
-// if accessing from the host, get the host data
+// if accessing from the device, get the device data
 #if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
-            printf("calling non-const device side data\n");
             return device_data()[ii];
 #else
-            // printf("calling host side data\n");
             return host_data()[ii];
 #endif
         }
 
         DUAL T& operator[](size_type ii) const
         {
-// if accessing from the host, get the host data
+// if accessing from the device, get the device data
 #if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
-            printf("calling const device side data\n");
             return device_data()[ii];
 #else
-            // printf("calling const host side data\n");
             return host_data()[ii];
 #endif
         }

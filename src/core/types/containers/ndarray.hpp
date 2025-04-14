@@ -94,7 +94,7 @@ namespace simbi {
         explicit ndarray(std::vector<T>&& data)
         {
             mem_.allocate(data.size());
-            std::copy(data.begin(), data.end(), mem_.data());
+            std::copy(data.begin(), data.end(), mem_.host_data());
             this->size_     = data.size();
             this->shape_[0] = data.size();
             // fill the remaining dimensions with 1
@@ -109,6 +109,7 @@ namespace simbi {
             // clear and release the vector
             data.clear();
             data.shrink_to_fit();
+            sync_to_device();
         }
 
         ndarray(const size_type sz)

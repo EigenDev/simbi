@@ -67,7 +67,7 @@ namespace simbi {
 
           public:
             // constructor
-            VectorField(
+            DEV VectorField(
                 const general_vector_t<T, Dims>& left,
                 const general_vector_t<T, Dims>& right
             )
@@ -76,10 +76,13 @@ namespace simbi {
             }
 
             // get the left field
-            const general_vector_t<T, Dims>& left() const { return left_field; }
+            DEV const general_vector_t<T, Dims>& left() const
+            {
+                return left_field;
+            }
 
             // get the right field
-            const general_vector_t<T, Dims>& right() const
+            DEV const general_vector_t<T, Dims>& right() const
             {
                 return right_field;
             }
