@@ -56,6 +56,7 @@
 #include "util/tools/algorithms.hpp"
 #include <cmath>
 #include <iostream>
+#include <limits>
 
 namespace simbi {
     namespace sim_type {
@@ -1009,7 +1010,8 @@ namespace simbi {
                 oss << "location: (" << x1 << "): \n";
             }
             else if constexpr (Dims == 2) {
-                if (x2 == INFINITY) {   // an effective 1D run
+                if (x2 == std::numeric_limits<real>::infinity(
+                          )) {   // an effective 1D run
                     oss << "location: (" << x1 << "): \n";
                     oss << "index: [" << ii << "]\n";
                 }
@@ -1019,11 +1021,12 @@ namespace simbi {
                 }
             }
             else {
-                if (x2 == INFINITY) {   // an effective 1D run
+                if (x2 == std::numeric_limits<real>::infinity(
+                          )) {   // an effective 1D run
                     oss << "location: (" << x1 << "): \n";
                     oss << "indicies: [" << ii << "]\n";
                 }
-                else if (x3 == INFINITY) {
+                else if (x3 == std::numeric_limits<real>::infinity()) {
                     oss << "location: (" << x1 << ", " << x2 << "): \n";
                     oss << "indices: [" << ii << ", " << jj << "]\n";
                 }

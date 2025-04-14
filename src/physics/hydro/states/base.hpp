@@ -64,7 +64,8 @@
 #include "physics/hydro/schemes/ib/systems/system_config.hpp"   // for system_config
 #include "physics/hydro/types/context.hpp"           // for HydroContext
 #include "physics/hydro/types/generic_structs.hpp"   // for anyConserved, anyPrimitive
-#include "util/tools/device_api.hpp"
+
+#include <limits>
 #include <list>
 
 namespace simbi {
@@ -103,13 +104,13 @@ namespace simbi {
             auto functor        = WaveSpeedFunctor<Derived>(&derived);
 
             const auto gas_dt = prims_.reduce(
-                                    static_cast<real>(INFINITY),
+                                    std::numeric_limits<real>::infinity(),
                                     functor,
                                     this->full_policy()
                                 ) *
                                 cfl_;
 
-            real orbital_dt = INFINITY;
+            real orbital_dt = std::numeric_limits<real>::infinity();
             if (gravitational_system_) {
                 orbital_dt = gravitational_system_->get_orbital_timestep(cfl_);
             }
@@ -288,7 +289,7 @@ namespace simbi {
 
         DEV static real calc_local_dt(const auto& speeds, const auto& cell)
         {
-            auto dt = INFINITY;
+            auto dt = std::numeric_limits<real>::infinity();
             for (size_type ii = 0; ii < Dims; ++ii) {
                 auto dx    = cell.width(ii);
                 auto dt_dx = dx / my_min(speeds[2 * ii], speeds[2 * ii + 1]);

@@ -4,6 +4,7 @@
 #include "physics/hydro/types/generic_structs.hpp"
 #include "util/tools/helpers.hpp"
 #include <cmath>   // for max, min
+#include <limits>
 
 using namespace simbi;
 using namespace simbi::util;
@@ -949,7 +950,7 @@ DUAL real RMHD<dim>::hlld_vdiff(
     eqn54ok &= (lam[1] - kR[0]) > -global::epsilon;
 
     if (!eqn54ok) {
-        return INFINITY;
+        return std::numeric_limits<real>::infinity();
     }
 
     // Fill in the Alfven (L / R) and Contact Prims

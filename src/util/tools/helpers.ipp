@@ -26,7 +26,7 @@ namespace simbi {
         KERNEL void deviceReduceKernel(T* self, real* dt_min, lint nmax)
         {
 #if GPU_CODE
-            real min  = INFINITY;
+            real min  = std::numeric_limits<real>::infinity();
             luint ii  = blockIdx.x * blockDim.x + threadIdx.x;
             luint jj  = blockIdx.y * blockDim.y + threadIdx.y;
             luint kk  = blockIdx.z * blockDim.z + threadIdx.z;
@@ -63,7 +63,7 @@ namespace simbi {
         deviceReduceWarpAtomicKernel(T* self, real* dt_min, lint nmax)
         {
 #if GPU_CODE
-            real min        = INFINITY;
+            real min        = std::numeric_limits<real>::infinity();
             const luint ii  = blockIdx.x * blockDim.x + threadIdx.x;
             const luint tid = threadIdx.z * blockDim.x * blockDim.y +
                               threadIdx.y * blockDim.x + threadIdx.x;
