@@ -445,7 +445,7 @@ void Newtonian<dim>::advance_impl()
 
             auto vface = cell.velocity(q);
 
-            if (this->using_pcm()) {
+            if (!this->using_pcm()) {
                 const auto& pLL = prim.at(q - 2, 0, 0);
                 const auto& pRR = prim.at(q + 1, 0, 0);
                 // compute the reconstructed states
@@ -464,7 +464,7 @@ void Newtonian<dim>::advance_impl()
                 // Y-direction flux
                 const auto& pL_y = prim.at(0, q - 1, 0);
                 const auto& pR_y = prim.at(0, q - 0, 0);
-                if (this->using_pcm()) {
+                if (!this->using_pcm()) {
                     const auto& pLL_y = prim.at(0, q - 2, 0);
                     const auto& pRR_y = prim.at(0, q + 1, 0);
                     const auto pLr_y =
@@ -486,7 +486,7 @@ void Newtonian<dim>::advance_impl()
                     // Z-direction flux
                     const auto& pL_z = prim.at(0, 0, q - 1);
                     const auto& pR_z = prim.at(0, 0, q - 0);
-                    if (this->using_pcm()) {
+                    if (!this->using_pcm()) {
                         const auto& pLL_z = prim.at(0, 0, q - 2);
                         const auto& pRR_z = prim.at(0, 0, q + 1);
                         const auto pLr_z =
