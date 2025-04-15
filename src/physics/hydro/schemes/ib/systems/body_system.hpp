@@ -8,6 +8,7 @@
 #include "core/types/containers/vector.hpp"    // for spatial_vector_t
 #include "core/types/utility/config_dict.hpp"
 #include "core/types/utility/managed.hpp"
+#include "physics/hydro/schemes/ib/bodies/types/gravitational.hpp"
 #include "physics/hydro/types/generic_structs.hpp"
 
 using namespace simbi::ib::concepts;
@@ -21,6 +22,12 @@ namespace simbi::ibsystem {
     template <typename T, size_type Dims>
     class BodySystem : public Managed<global::managed_memory>
     {
+      private:
+        // using tagged union to represent different body types
+        using BodyVariant = std::variant<
+            ib::GravitationalSinkBody<T, Dims>,
+            ib::GravitationalBody<T, Dims>>;
+
       protected:
         using MeshType    = Mesh<Dims>;
         using BodyRef     = ib::BodyReference<T, Dims>;
@@ -28,7 +35,7 @@ namespace simbi::ibsystem {
         using PrimArray   = typename ib::concepts::StateType<Dims>::PrimArray;
         using conserved_t = anyConserved<Dims, Regime::NEWTONIAN>;
 
-        ndarray<util::smart_ptr<ib::AnyBody<T, Dims>>> bodies_;
+        ndarray<BodyVariant> bodies_;
         MeshType mesh_;
 
       public:
@@ -56,32 +63,13 @@ namespace simbi::ibsystem {
             bodies_.push_back(std::move(body));
         }
 
-        // Get a reference to a specific body
-        BodyRef body_at(size_t index)
-        {
-            if (index >= bodies_.size()) {
-                throw std::out_of_range("Body index out of range");
-            }
-            return BodyRef(*bodies_[index]);
-        }
-
-        // Get a vector of body references
-        ndarray<BodyRef> get_body_references()
-        {
-            ndarray<BodyRef> refs;
-            refs.reserve(bodies_.size());
-            for (auto& body : bodies_) {
-                refs.emplace_back(*body);
-            }
-            return refs;
-        }
-
-        // Apply forces to all bodies
         void calculate_forces(T dt)
         {
-            auto refs = get_body_references();
             for (auto& body : bodies_) {
-                body->calculate_forces(refs, dt);
+                std::visit(
+                    [&](auto& b) { b.calculate_forces(bodies_, dt); },
+                    body
+                );
             }
         }
 
