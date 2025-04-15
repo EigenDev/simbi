@@ -214,43 +214,43 @@ namespace simbi::ibsystem {
         }
 
         // accesor functions for universal properties
-        const ndarray<spatial_vector_t<T, Dims>>& positions() const
+        DEV const ndarray<spatial_vector_t<T, Dims>>& positions() const
         {
             return positions_;
         }
-        const ndarray<spatial_vector_t<T, Dims>>& velocities() const
+        DEV const ndarray<spatial_vector_t<T, Dims>>& velocities() const
         {
             return velocities_;
         }
-        const ndarray<spatial_vector_t<T, Dims>>& forces() const
+        DEV const ndarray<spatial_vector_t<T, Dims>>& forces() const
         {
             return forces_;
         }
-        const ndarray<T>& masses() const { return masses_; }
-        const ndarray<T>& radii() const { return radii_; }
-        const ndarray<BodyType>& body_types() const { return body_types_; }
-        const ndarray<BodyCapability>& capabilities() const
+        DEV const ndarray<T>& masses() const { return masses_; }
+        DEV const ndarray<T>& radii() const { return radii_; }
+        DEV const ndarray<BodyType>& body_types() const { return body_types_; }
+        DEV const ndarray<BodyCapability>& capabilities() const
         {
             return capabilities_;
         }
 
         // Mutable access (for algorithms)
-        ndarray<spatial_vector_t<T, Dims>>& positions_mut()
+        DEV ndarray<spatial_vector_t<T, Dims>>& positions_mut()
         {
             return positions_;
         }
-        ndarray<spatial_vector_t<T, Dims>>& velocities_mut()
+        DEV ndarray<spatial_vector_t<T, Dims>>& velocities_mut()
         {
             return velocities_;
         }
-        ndarray<spatial_vector_t<T, Dims>>& forces_mut() { return forces_; }
-        ndarray<T>& masses_mut() { return masses_; }
+        DEV ndarray<spatial_vector_t<T, Dims>>& forces_mut() { return forces_; }
+        DEV ndarray<T>& masses_mut() { return masses_; }
 
         // Size information
-        size_t size() const { return positions_.size(); }
+        DEV size_t size() const { return positions_.size(); }
 
         // Capability checking
-        bool has_capability(size_t body_idx, BodyCapability cap) const
+        DEV bool has_capability(size_t body_idx, BodyCapability cap) const
         {
             if (body_idx >= capabilities_.size()) {
                 return false;
@@ -258,7 +258,7 @@ namespace simbi::ibsystem {
             return ibsystem::has_capability(capabilities_[body_idx], cap);
         }
 
-        auto total_mass() const
+        DEV auto total_mass() const
         {
             T total_mass = 0;
             for (size_t i = 0; i < masses_.size(); ++i) {
@@ -270,7 +270,7 @@ namespace simbi::ibsystem {
         // specialized property access
 
         // grav properties
-        T softening_length(size_t body_idx) const
+        DEV T softening_length(size_t body_idx) const
         {
             auto it = grav_property_map_.find(body_idx);
             if (it == grav_property_map_.end()) {
@@ -279,7 +279,7 @@ namespace simbi::ibsystem {
             return grav_softening_lengths_[it->second];
         }
 
-        bool two_way_coupling(size_t body_idx) const
+        DEV bool two_way_coupling(size_t body_idx) const
         {
             auto it = grav_property_map_.find(body_idx);
             if (it == grav_property_map_.end()) {
@@ -289,7 +289,7 @@ namespace simbi::ibsystem {
         }
 
         // accretion properties
-        T accretion_efficiency(size_t body_idx) const
+        DEV T accretion_efficiency(size_t body_idx) const
         {
             auto it = accr_property_map_.find(body_idx);
             if (it == accr_property_map_.end()) {
@@ -298,7 +298,7 @@ namespace simbi::ibsystem {
             return accr_efficiencies_[it->second];
         }
 
-        T accretion_radius(size_t body_idx) const
+        DEV T accretion_radius(size_t body_idx) const
         {
             auto it = accr_property_map_.find(body_idx);
             if (it == accr_property_map_.end()) {
@@ -307,7 +307,7 @@ namespace simbi::ibsystem {
             return accr_radii_[it->second];
         }
 
-        T total_accreted_mass(size_t body_idx) const
+        DEV T total_accreted_mass(size_t body_idx) const
         {
             auto it = accr_property_map_.find(body_idx);
             if (it == accr_property_map_.end()) {
@@ -364,22 +364,6 @@ namespace simbi::ibsystem {
                        ) != nullptr;
             }
             return false;
-        }
-
-        // specific system updates
-        void update_binary_state(T time)
-        {
-            // just do the prescribed motion for now
-            // Use binary trait to calculate new positions and velocities
-            ndarray<spatial_vector_t<T, Dims>> positions(size());
-            ndarray<spatial_vector_t<T, Dims>> velocities(size());
-
-            update_positions_and_velocities(time, positions, velocities);
-
-            // Update bodies
-            for (size_t ii = 0; ii < size(); ++ii) {
-                this->positions_mut()[ii] = positions[ii];
-            }
         }
 
       private:
