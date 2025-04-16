@@ -51,11 +51,24 @@ class LazySimulationReader:
         """create a dictionary that lazily loads fields when accessed."""
         pipeline = self.create_field_pipeline()
 
+        dimensions = self.metadata["dimensions"]
+
         # create a dictionary-like object that loads data when accessed
         class LazyFieldDict(dict[str, Any]):
             def __getitem__(self, key: str) -> Array:
                 if key in pipeline:
                     return pipeline[key]()
+                elif key == "v":
+                    # if I am in 1D, just get v1
+                    # but if I am in 2D or 3D, get
+                    # the velocity magnitude
+                    if dimensions == 1:
+                        return pipeline["v1"]()
+                    else:
+                        # get the velocity magnitude
+                        return np.sqrt(
+                            sum(pipeline[f"v{i}"]() ** 2 for i in range(1, 4))
+                        )
                 raise KeyError(f"Field '{key}' not found")
 
             def __contains__(self, key: object) -> bool:

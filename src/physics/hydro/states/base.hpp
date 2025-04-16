@@ -225,40 +225,35 @@ namespace simbi {
             if (null_gravity()) {
                 return conserved_t{};
             }
-            const auto c = cell.centroid();
 
+            const auto c = cell.centroid();
             conserved_t gravity;
             const auto* iof = io_manager_.get();
-            if constexpr (Dims > 1) {
-                if constexpr (Dims > 2) {
-                    iof->call_gravity_source(
-                        c[0],
-                        c[1],
-                        c[2],
-                        time(),
-                        gravity.data()
-                    );
-                }
-                else {
-                    iof->call_gravity_source(
-                        c[0],
-                        c[1],
-                        time(),
-                        gravity.data()
-                    );
-                }
-            }
-            else {
+            if constexpr (Dims == 1) {
                 iof->call_gravity_source(c[0], time(), gravity.data());
             }
+            else if constexpr (Dims == 2) {
+                iof->call_gravity_source(c[0], c[1], time(), gravity.data());
+            }
+            else {
+                iof->call_gravity_source(
+                    c[0],
+                    c[1],
+                    c[2],
+                    time(),
+                    gravity.data()
+                );
+            }
+
+            const auto dp    = prims.rho() * gravity.momentum();
+            const auto v_old = prims.velocity();
+            const auto v_new = (prims.spatial_momentum() + dp) / prims.rho();
+            const auto v_avg = 0.5 * (v_old + v_new);
+            const auto dE    = dp.dot(v_avg);
 
             // gravity source term is rho * g_vec for momentum and
             // rho * v.dot(g_vec) for energy
-            return {
-              0.0,
-              prims.rho() * gravity.momentum(),
-              prims.velocity().dot(gravity.momentum())
-            };
+            return {0.0, dp, dE};
         }
 
         void apply_boundary_conditions()

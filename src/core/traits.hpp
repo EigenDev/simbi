@@ -49,7 +49,8 @@
 #ifndef TRAITS_HPP
 #define TRAITS_HPP
 
-#include "core/types/utility/enums.hpp"   // for Regime
+#include <functional>
+#include <tuple>
 #include <type_traits>
 
 //==========================================================================
@@ -79,7 +80,8 @@ template <typename F, typename T>
 struct has_index_param {
   private:
     template <typename U>
-    static auto test(int
+    static auto test(
+        int
     ) -> decltype(std::declval<U>()(std::declval<T>(), std::size_t{}), std::true_type{});
 
     template <typename>
@@ -155,4 +157,41 @@ inline constexpr bool is_mhd_v = is_mhd<T>::value;
 template <typename T>
 inline constexpr bool is_relativistic_mhd_v = is_relativistic_mhd<T>::value;
 
+template <typename T>
+struct function_traits;
+
+// Specialization for regular function types
+template <typename Ret, typename... Args>
+struct function_traits<Ret(Args...)> {
+    using return_type                  = Ret;
+    using signature                    = Ret(Args...);
+    static constexpr std::size_t arity = sizeof...(Args);
+
+    // Get argument type by index
+    template <std::size_t I>
+    using arg_type = std::tuple_element_t<I, std::tuple<Args...>>;
+};
+
+// Specialization for function pointers
+template <typename Ret, typename... Args>
+struct function_traits<Ret (*)(Args...)> : function_traits<Ret(Args...)> {
+};
+
+// Specialization for member function pointers
+template <typename Class, typename Ret, typename... Args>
+struct function_traits<Ret (Class::*)(Args...)>
+    : function_traits<Ret(Args...)> {
+};
+
+// Specialization for const member function pointers
+template <typename Class, typename Ret, typename... Args>
+struct function_traits<Ret (Class::*)(Args...) const>
+    : function_traits<Ret(Args...)> {
+};
+
+// Specialization for std::function
+template <typename Ret, typename... Args>
+struct function_traits<std::function<Ret(Args...)>>
+    : function_traits<Ret(Args...)> {
+};
 #endif

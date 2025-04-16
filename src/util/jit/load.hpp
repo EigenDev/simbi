@@ -7,8 +7,8 @@
 #include "util/jit/source_code.hpp"
 
 namespace simbi::jit {
-    template <typename Signature>
-    Result<DeviceCallable<Signature>>
+    template <size_type Dims>
+    Result<DeviceCallable<Dims>>
     compile_and_load(const SourceCode& source, const std::string& func_name)
     {
         return jit::compile_to_ir(source)
@@ -16,8 +16,8 @@ namespace simbi::jit {
             .and_then([&func_name](devModule_t module) {
                 return get_device_function_address(module, func_name);
             })
-            .map([](void* func_addr) {
-                return DeviceCallable<Signature>(func_addr);
+            .map([&func_name](void* func_addr) {
+                return DeviceCallable<Dims>(func_name, func_addr);
             });
     }
 }   // namespace simbi::jit

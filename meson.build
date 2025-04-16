@@ -23,12 +23,12 @@ py3 = import('python').find_installation('python3', required: true)
 py_install_dir = meson.current_source_dir() + '/simbi/libs'
 
 #show maximum of five errors before stopping the build
-cc = meson.get_compiler('cpp')
-if cc.get_id() == 'clang'
-    add_project_arguments('-ferror-limit=1', language : 'cpp')
-elif cc.get_id() == 'gcc'
-    add_project_arguments('-fmax-errors=1', language : 'cpp')
-endif
+# cc = meson.get_compiler('cpp')
+# if cc.get_id() == 'clang'
+#     add_project_arguments('-ferror-limit=1', language : 'cpp')
+# elif cc.get_id() == 'gcc'
+#     add_project_arguments('-fmax-errors=1', language : 'cpp')
+# endif
 #Build configuration
 conf_data = configuration_data()
 foreach opt : ['four_velocity', 'column_major', 'progress_bar', 'shared_memory']

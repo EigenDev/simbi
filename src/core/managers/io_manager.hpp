@@ -52,12 +52,15 @@
 #include "build_options.hpp"
 #include "core/managers/solver_manager.hpp"         // for SolverManager
 #include "core/types/utility/init_conditions.hpp"   // for InitialConditions
-#include "util/jit/func_registry.hpp"               // for FunctionRegistry
+#include "util/jit/device_callable.hpp"
+#include "util/jit/func_registry.hpp"   // for FunctionRegistry
 #include "util/jit/load.hpp"
 #include "util/jit/source_code.hpp"
-#include "util/tools/helpers.hpp"   // for real_func
-#include <dlfcn.h>                  // for dlopen, dlclose, dlsym
+#include <dlfcn.h>   // for dlopen, dlclose, dlsym
 #include <string>
+
+using namespace simbi::jit;
+
 namespace simbi {
 
     template <size_type D>
@@ -77,13 +80,13 @@ namespace simbi {
     struct FunctionSignature {
         using type = std::conditional_t<
             D == 1,
-            void (*)(real, real, real*),   // 1D: x1, t, res
+            void(real, real, real*),   // 1D: x1, t, res
             std::conditional_t<
                 D == 2,
-                void (*)(real, real, real, real*),   // 2D: x1, x2, t, res
-                void (*)(real, real, real, real, real*)>>;   // 3D: x1,
-                                                             // x2, x3,
-                                                             // t, res
+                void(real, real, real, real*),           // 2D: x1, x2, t, res
+                void(real, real, real, real, real*)>>;   // 3D: x1,
+                                                         // x2, x3,
+                                                         // t, res
     };
 
     template <size_type D>
@@ -128,25 +131,7 @@ namespace simbi {
         std::shared_ptr<void> gsource_handle_;
         std::shared_ptr<void> bsource_handle_;
 
-        using function_t = typename helpers::real_func<Dims>::type;
-
-        // hydrodynamic source functions
-        function_t hydro_source_;
-
-        // gravity source functions
-        function_t gravity_source_;
-
-        // boundary source functions at x1 boundaries
-        function_t bx1_inner_source_;
-        function_t bx1_outer_source_;
-        // boundary source functions at x2 boundaries
-        function_t bx2_inner_source_;
-        function_t bx2_outer_source_;
-        // boundary source functions at x3 boundaries
-        function_t bx3_inner_source_;
-        function_t bx3_outer_source_;
-
-        jit::FunctionRegistry function_registry_;
+        jit::FunctionRegistry<Dims> function_registry_;
 
       public:
         // move constructor and assignment
@@ -167,7 +152,8 @@ namespace simbi {
               checkpoint_idx_(init.checkpoint_index),
               hsource_handle_(nullptr, LibraryDeleter()),
               gsource_handle_(nullptr, LibraryDeleter()),
-              bsource_handle_(nullptr, LibraryDeleter())
+              bsource_handle_(nullptr, LibraryDeleter()),
+              function_registry_()
         {
             setup_hydro_source(init.hydro_source_code);
             setup_gravity_source(init.gravity_source_code);
@@ -184,16 +170,13 @@ namespace simbi {
             }
 
             auto source = jit::SourceCode(hydro_source_code, "hydro_source");
-            auto result = jit::compile_and_load<function_signature_t<Dims>>(
-                source,
-                source.name
-            );
+            auto result = jit::compile_and_load<Dims>(source, source.name);
 
             if (result.is_ok()) {
-                // store in registry
+                // Store in registry using new model
                 function_registry_ = function_registry_.with_function(
                     source.name,
-                    result.value()
+                    DeviceCallable<Dims>(source.name, result.value())
                 );
             }
             else {
@@ -211,17 +194,13 @@ namespace simbi {
 
             auto source =
                 jit::SourceCode(gravity_source_code, "gravity_source");
-
-            auto result = jit::compile_and_load<function_signature_t<Dims>>(
-                source,
-                source.name
-            );
+            auto result = jit::compile_and_load<Dims>(source, source.name);
 
             if (result.is_ok()) {
-                // store in registry
+                // Store in registry using new model
                 function_registry_ = function_registry_.with_function(
                     source.name,
-                    result.value()
+                    DeviceCallable<Dims>(source.name, result.value())
                 );
             }
             else {
@@ -239,38 +218,26 @@ namespace simbi {
 
             auto source =
                 jit::SourceCode(boundary_source_code, "boundary_source");
-
-            auto result = jit::compile_and_load<function_signature_t<Dims>>(
-                source,
-                source.name
-            );
+            auto result = jit::compile_and_load<Dims>(source, source.name);
 
             if (result.is_ok()) {
-                // store in registry
-                function_registry_ = function_registry_.with_function(
-                    "bx1_inner_source",
-                    result.value()
-                );
-                function_registry_ = function_registry_.with_function(
-                    "bx1_outer_source",
-                    result.value()
-                );
-                function_registry_ = function_registry_.with_function(
-                    "bx2_inner_source",
-                    result.value()
-                );
-                function_registry_ = function_registry_.with_function(
-                    "bx2_outer_source",
-                    result.value()
-                );
-                function_registry_ = function_registry_.with_function(
-                    "bx3_inner_source",
-                    result.value()
-                );
-                function_registry_ = function_registry_.with_function(
-                    "bx3_outer_source",
-                    result.value()
-                );
+                auto callable =
+                    DeviceCallable<Dims>(source.name, result.value());
+
+                // Register for all boundary faces
+                const std::array<std::string, 6> boundary_names = {
+                  "bx1_inner_source",
+                  "bx1_outer_source",
+                  "bx2_inner_source",
+                  "bx2_outer_source",
+                  "bx3_inner_source",
+                  "bx3_outer_source"
+                };
+
+                for (const auto& name : boundary_names) {
+                    function_registry_ =
+                        function_registry_.with_function(name, callable);
+                }
             }
             else {
                 std::cerr << "Error compiling boundary source code: "
@@ -280,171 +247,9 @@ namespace simbi {
 
         void load_functions()
         {
-            // Load the symbol based on the dimension
-            using f2arg = void (*)(real, real, real[]);
-            using f3arg = void (*)(real, real, real, real[]);
-            using f4arg = void (*)(real, real, real, real, real[]);
-
-            //=================================================================
-            // Check if the hydro source library is set
-            //=================================================================
-            if (!hydro_source_lib_.empty()) {
-                // Load the shared library
-                void* handle = dlopen(hydro_source_lib_.c_str(), RTLD_LAZY);
-                if (!handle) {
-                    std::cerr << "Cannot open library: " << dlerror() << '\n';
-                    return;
-                }
-                hsource_handle_ =
-                    std::shared_ptr<void>(handle, LibraryDeleter());
-
-                // Clear any existing error
-                dlerror();
-
-                const std::vector<std::pair<const char*, function_t&>> symbols =
-                    {
-                      {"hydro_source", hydro_source_},
-                    };
-
-                bool success = true;
-                for (const auto& [symbol, func] : symbols) {
-                    void* source            = dlsym(handle, symbol);
-                    const char* dlsym_error = dlerror();
-                    // if can't load symbol, print error and
-                    // set null_sources to true
-                    if (dlsym_error) {
-                        std::cerr << "Cannot load symbol '" << symbol
-                                  << "': " << dlsym_error << '\n';
-                        success = false;
-                        dlclose(handle);
-                        break;
-                    }
-
-                    // Assign the function pointer based on the dimension
-                    if constexpr (Dims == 1) {
-                        func = reinterpret_cast<f2arg>(source);
-                    }
-                    else if constexpr (Dims == 2) {
-                        func = reinterpret_cast<f3arg>(source);
-                    }
-                    else if constexpr (Dims == 3) {
-                        func = reinterpret_cast<f4arg>(source);
-                    }
-                }
-                if (success) {
-                    solver_manager_.set_null_sources(false);
-                }
-            }
-
-            //=================================================================
-            // Check if the gravity source library is set
-            //=================================================================
-            if (!gravity_source_lib_.empty()) {
-                void* handle = dlopen(gravity_source_lib_.c_str(), RTLD_LAZY);
-                if (!handle) {
-                    std::cerr << "Cannot open library: " << dlerror() << '\n';
-                    return;
-                }
-                gsource_handle_ =
-                    std::shared_ptr<void>(handle, LibraryDeleter());
-
-                // Clear any existing error
-                dlerror();
-
-                // Load the symbol based on the dimension
-                const std::vector<std::pair<const char*, function_t&>>
-                    g_symbols = {
-                      {"gravity_source", gravity_source_},
-                    };
-
-                bool success = true;
-                for (const auto& [symbol, func] : g_symbols) {
-                    void* source            = dlsym(handle, symbol);
-                    const char* dlsym_error = dlerror();
-                    // if can't load symbol, print error
-                    if (dlsym_error) {
-                        std::cerr << "Cannot load symbol '" << symbol
-                                  << "': " << dlsym_error << '\n';
-                        success = false;
-                        dlclose(handle);
-                        break;
-                    }
-
-                    // Assign the function pointer based on the dimension
-                    if constexpr (Dims == 1) {
-                        func = reinterpret_cast<f2arg>(source);
-                    }
-                    else if constexpr (Dims == 2) {
-                        func = reinterpret_cast<f3arg>(source);
-                    }
-                    else if constexpr (Dims == 3) {
-                        func = reinterpret_cast<f4arg>(source);
-                    }
-                }
-                if (success) {
-                    solver_manager_.set_null_gravity(false);
-                }
-            }
-
-            //=================================================================
-            // Check if the boundary source library is set
-            //=================================================================
-            if (!boundary_source_lib_.empty()) {
-                void* handle = dlopen(boundary_source_lib_.c_str(), RTLD_LAZY);
-                if (!handle) {
-                    std::cerr << "Cannot open library: " << dlerror() << '\n';
-                    return;
-                }
-                bsource_handle_ =
-                    std::shared_ptr<void>(handle, LibraryDeleter());
-
-                // Clear any existing error
-                dlerror();
-
-                // Load the symbol based on the dimension
-                const std::vector<std::pair<const char*, function_t&>>
-                    b_symbols = {
-                      {"bx1_inner_source", bx1_inner_source_},
-                      {"bx1_outer_source", bx1_outer_source_},
-                      {"bx2_inner_source", bx2_inner_source_},
-                      {"bx2_outer_source", bx2_outer_source_},
-                      {"bx3_inner_source", bx3_inner_source_},
-                      {"bx3_outer_source", bx3_outer_source_},
-                    };
-
-                for (const auto& [symbol, func] : b_symbols) {
-                    void* source            = dlsym(handle, symbol);
-                    const char* dlsym_error = dlerror();
-                    // if can't load symbol, print error
-                    if (dlsym_error) {
-                        // erro out  only  if the boundary
-                        // condition is set to dynamic
-                        for (size_type ii = 0; ii < 2 * Dims; ++ii) {
-                            if (symbol == b_symbols[ii].first &&
-                                solver_manager_.boundary_conditions()[ii] ==
-                                    BoundaryCondition::DYNAMIC) {
-                                std::cerr << "Cannot load symbol '" << symbol
-                                          << "': " << dlsym_error << '\n';
-                                solver_manager_.boundary_conditions()[ii] =
-                                    BoundaryCondition::OUTFLOW;
-                                dlclose(handle);
-                            }
-                        }
-                    }
-                    else {
-                        // Assign the function pointer based on the dimension
-                        if constexpr (Dims == 1) {
-                            func = reinterpret_cast<f2arg>(source);
-                        }
-                        else if constexpr (Dims == 2) {
-                            func = reinterpret_cast<f3arg>(source);
-                        }
-                        else if constexpr (Dims == 3) {
-                            func = reinterpret_cast<f4arg>(source);
-                        }
-                    }
-                }
-            }
+            load_hydro_functions();
+            load_gravity_functions();
+            load_boundary_functions();
         }
 
         void increment_iter() { current_iter_++; }
@@ -463,62 +268,61 @@ namespace simbi {
         auto checkpoint_zones() const { return checkpoint_zones_; }
         auto checkpoint_index() const { return checkpoint_idx_; }
 
+        // call 'em
         template <typename... Args>
-            requires ValidSourceParams<Dims, Args...>
-        DEV auto call_hydro_source(Args&&... args) const
+            requires(sizeof...(Args) == Dims + 2)
+        DEV void call_hydro_source(Args&&... args) const
         {
             if (solver_manager_.null_sources()) {
                 return;
             }
-            hydro_source_(std::forward<Args>(args)...);
+            auto hydro_source =
+                function_registry_.get_function_or_noop("hydro_source");
+            hydro_source(std::forward<Args>(args)...);
         }
 
         template <typename... Args>
-            requires ValidSourceParams<Dims, Args...>
-        DEV auto call_gravity_source(Args&&... args) const
+            requires(sizeof...(Args) == Dims + 2)
+        DEV void call_gravity_source(Args&&... args) const
         {
             if (solver_manager_.null_gravity()) {
                 return;
             }
-            gravity_source_(std::forward<Args>(args)...);
+            auto gravity_source =
+                function_registry_.get_function_or_noop("gravity_source");
+            gravity_source(std::forward<Args>(args)...);
         }
 
         template <typename... Args>
-            requires ValidSourceParams<Dims, Args...>
+            requires(sizeof...(Args) == Dims + 2)
         DEV void call_boundary_source(BoundaryFace face, Args&&... args) const
         {
+            std::string func_name;
+
             switch (face) {
                 case BoundaryFace::X1_INNER:
-                    if (bx1_inner_source_) {
-                        bx1_inner_source_(std::forward<Args>(args)...);
-                    }
+                    func_name = "bx1_inner_source";
                     break;
                 case BoundaryFace::X1_OUTER:
-                    if (bx1_outer_source_) {
-                        bx1_outer_source_(std::forward<Args>(args)...);
-                    }
+                    func_name = "bx1_outer_source";
                     break;
                 case BoundaryFace::X2_INNER:
-                    if (bx2_inner_source_) {
-                        bx2_inner_source_(std::forward<Args>(args)...);
-                    }
+                    func_name = "bx2_inner_source";
                     break;
                 case BoundaryFace::X2_OUTER:
-                    if (bx2_outer_source_) {
-                        bx2_outer_source_(std::forward<Args>(args)...);
-                    }
+                    func_name = "bx2_outer_source";
                     break;
                 case BoundaryFace::X3_INNER:
-                    if (bx3_inner_source_) {
-                        bx3_inner_source_(std::forward<Args>(args)...);
-                    }
+                    func_name = "bx3_inner_source";
                     break;
                 case BoundaryFace::X3_OUTER:
-                    if (bx3_outer_source_) {
-                        bx3_outer_source_(std::forward<Args>(args)...);
-                    }
+                    func_name = "bx3_outer_source";
                     break;
             }
+
+            auto boundary_source =
+                function_registry_.get_function_or_noop(func_name);
+            boundary_source(std::forward<Args>(args)...);
         }
 
       private:
@@ -526,6 +330,274 @@ namespace simbi {
         {
             const auto [xag, yag, zag] = init.active_zones();
             return (zag > 1) ? zag : (yag > 1) ? yag : xag;
+        }
+
+        // helper methods to load functions from shared libraries
+        void load_hydro_functions()
+        {
+            if (hydro_source_lib_.empty()) {
+                return;
+            }
+
+            // load the shared library
+            void* handle = dlopen(hydro_source_lib_.c_str(), RTLD_LAZY);
+            if (!handle) {
+                std::cerr << "Cannot open library: " << dlerror() << '\n';
+                return;
+            }
+            hsource_handle_ = std::shared_ptr<void>(handle, LibraryDeleter());
+
+            // clear any existing error
+            dlerror();
+
+            // load the function
+            void* source            = dlsym(handle, "hydro_source");
+            const char* dlsym_error = dlerror();
+
+            if (dlsym_error) {
+                std::cerr << "Cannot load symbol 'hydro_source': "
+                          << dlsym_error << '\n';
+                solver_manager_.set_null_sources(true);
+                return;
+            }
+
+            // create a callable wrapped around the function pointer
+            using FuncPtr = user_function_ptr_t<Dims>;
+            auto func_ptr = reinterpret_cast<FuncPtr>(source);
+
+            // store in registry
+            function_registry_ = function_registry_.with_function(
+                "hydro_source",
+                DeviceCallable<Dims>(
+                    "hydro_source",
+                    [func_ptr](auto&&... args) {
+                        func_ptr(std::forward<decltype(args)>(args)...);
+                    }
+                )
+            );
+
+            solver_manager_.set_null_sources(false);
+        }
+
+        void load_gravity_functions()
+        {
+            if (gravity_source_lib_.empty()) {
+                return;
+            }
+
+            // load the shared library
+            void* handle = dlopen(gravity_source_lib_.c_str(), RTLD_LAZY);
+            if (!handle) {
+                std::cerr << "Cannot open library: " << dlerror() << '\n';
+                return;
+            }
+            gsource_handle_ = std::shared_ptr<void>(handle, LibraryDeleter());
+
+            // clear any existing error
+            dlerror();
+
+            // load the function
+            void* source            = dlsym(handle, "gravity_source");
+            const char* dlsym_error = dlerror();
+
+            if (dlsym_error) {
+                std::cerr << "Cannot load symbol 'gravity_source': "
+                          << dlsym_error << '\n';
+                solver_manager_.set_null_gravity(true);
+                return;
+            }
+
+            // create a callable wrapped around the function pointer
+            using FuncPtr = user_function_ptr_t<Dims>;
+            auto func_ptr = reinterpret_cast<FuncPtr>(source);
+
+            // store in registry
+            function_registry_ = function_registry_.with_function(
+                "gravity_source",
+                DeviceCallable<Dims>(
+                    "gravity_source",
+                    [func_ptr](auto&&... args) {
+                        func_ptr(std::forward<decltype(args)>(args)...);
+                    }
+                )
+            );
+
+            solver_manager_.set_null_gravity(false);
+        }
+
+        void load_boundary_functions()
+        {
+            if (boundary_source_lib_.empty()) {
+                return;
+            }
+
+            // Load the shared library
+            void* handle = dlopen(boundary_source_lib_.c_str(), RTLD_LAZY);
+            if (!handle) {
+                std::cerr << "Cannot open boundary library: " << dlerror()
+                          << '\n';
+                return;
+            }
+            bsource_handle_ = std::shared_ptr<void>(handle, LibraryDeleter());
+
+            // Clear any existing error
+            dlerror();
+
+            // Define all boundary function names
+            const std::array<std::string, 6> boundary_function_names = {
+              "bx1_inner_source",
+              "bx1_outer_source",
+              "bx2_inner_source",
+              "bx2_outer_source",
+              "bx3_inner_source",
+              "bx3_outer_source"
+            };
+
+            // Only try to load functions for dimensions that exist
+            const size_type num_faces = 2 * Dims;   // 2 faces per dimension
+
+            // Track which functions were loaded
+            std::unordered_map<std::string, bool> loaded_functions;
+
+            // Load each boundary function
+            for (size_type i = 0; i < num_faces; ++i) {
+                const std::string& func_name = boundary_function_names[i];
+                void* func_ptr               = dlsym(handle, func_name.c_str());
+                const char* dlsym_error      = dlerror();
+
+                if (dlsym_error) {
+                    // Function not found, but only report error if this
+                    // boundary uses DYNAMIC condition
+                    if (solver_manager_.boundary_conditions()[i] ==
+                        BoundaryCondition::DYNAMIC) {
+                        std::cerr << "Cannot load boundary function '"
+                                  << func_name << "': " << dlsym_error << '\n';
+                        std::cerr << "Falling back to OUTFLOW boundary "
+                                     "condition for this face."
+                                  << '\n';
+
+                        // Fall back to OUTFLOW for this boundary
+                        solver_manager_.boundary_conditions()[i] =
+                            BoundaryCondition::OUTFLOW;
+                    }
+                    loaded_functions[func_name] = false;
+                }
+                else {
+                    // Successfully loaded function - create callable
+                    using FuncPtr     = user_function_ptr_t<Dims>;
+                    auto function_ptr = reinterpret_cast<FuncPtr>(func_ptr);
+
+                    // Create callable with appropriate signature
+                    auto callable = DeviceCallable<Dims>(
+                        func_name,
+                        [function_ptr](auto&&... args) {
+                            function_ptr(std::forward<decltype(args)>(args)...);
+                        }
+                    );
+
+                    // Store in registry
+                    function_registry_ = function_registry_.with_function(
+                        func_name,
+                        std::move(callable)
+                    );
+
+                    loaded_functions[func_name] = true;
+                }
+            }
+
+            // Check if we should try a generic "boundary_source" function
+            bool need_generic_function = false;
+            for (size_type i = 0; i < num_faces; ++i) {
+                const std::string& func_name = boundary_function_names[i];
+                if (solver_manager_.boundary_conditions()[i] ==
+                        BoundaryCondition::DYNAMIC &&
+                    !loaded_functions[func_name]) {
+                    need_generic_function = true;
+                    break;
+                }
+            }
+
+            // Try loading a generic boundary source function if any DYNAMIC
+            // boundaries don't have their specific function loaded
+            if (need_generic_function) {
+                void* generic_func      = dlsym(handle, "boundary_source");
+                const char* dlsym_error = dlerror();
+
+                if (dlsym_error) {
+                    std::cerr
+                        << "Cannot load generic 'boundary_source' function: "
+                        << dlsym_error << '\n';
+
+                    // Fall back to OUTFLOW for all DYNAMIC boundaries without a
+                    // function
+                    for (size_type i = 0; i < num_faces; ++i) {
+                        const std::string& func_name =
+                            boundary_function_names[i];
+                        if (solver_manager_.boundary_conditions()[i] ==
+                                BoundaryCondition::DYNAMIC &&
+                            !loaded_functions[func_name]) {
+                            std::cerr << "No boundary function for "
+                                      << func_name
+                                      << ". Falling back to OUTFLOW." << '\n';
+                            solver_manager_.boundary_conditions()[i] =
+                                BoundaryCondition::OUTFLOW;
+                        }
+                    }
+                }
+                else {
+                    // Successfully loaded generic function
+                    using FuncPtr     = user_function_ptr_t<Dims>;
+                    auto function_ptr = reinterpret_cast<FuncPtr>(generic_func);
+
+                    // Create callable
+                    auto callable = DeviceCallable<Dims>(
+                        "boundary_source",
+                        [function_ptr](auto&&... args) {
+                            function_ptr(std::forward<decltype(args)>(args)...);
+                        }
+                    );
+
+                    // Register the generic function for any DYNAMIC boundaries
+                    // without specific functions
+                    for (size_type i = 0; i < num_faces; ++i) {
+                        const std::string& func_name =
+                            boundary_function_names[i];
+                        if (solver_manager_.boundary_conditions()[i] ==
+                                BoundaryCondition::DYNAMIC &&
+                            !loaded_functions[func_name]) {
+
+                            // Store the generic function under the specific
+                            // name
+                            function_registry_ =
+                                function_registry_.with_function(
+                                    func_name,
+                                    callable
+                                );
+
+                            loaded_functions[func_name] = true;
+                        }
+                    }
+                }
+            }
+
+            // Log what was loaded
+            std::cout << "Boundary functions loaded:" << std::endl;
+            for (size_type i = 0; i < num_faces; ++i) {
+                const std::string& func_name = boundary_function_names[i];
+                std::cout << "  " << func_name << ": "
+                          << (loaded_functions[func_name] ? "Yes" : "No");
+
+                if (solver_manager_.boundary_conditions()[i] ==
+                    BoundaryCondition::DYNAMIC) {
+                    std::cout << " (DYNAMIC)";
+                }
+                else {
+                    std::cout << " ("
+                              << solver_manager_.boundary_conditions_c_str()[i]
+                              << ")";
+                }
+                std::cout << std::endl;
+            }
         }
     };   // namespace simbi
 }   // namespace simbi

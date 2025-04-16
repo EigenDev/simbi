@@ -5,14 +5,48 @@
 #include <variant>
 
 namespace simbi {
+    struct Error {
+        std::string message;
+        explicit Error(std::string msg) : message(std::move(msg)) {}
+    };
     template <typename T>
     class Result
     {
         bool success_;
         // succes value or error message
-        std::variant<T, std::string> data_;
+        std::variant<T, Error> data_;
 
       public:
+        // ctor
+        Result(bool success, std::variant<T, Error> data)
+            : success_(success), data_(std::move(data))
+        {
+        }
+
+        // move ctor
+        Result(Result&& other) noexcept
+            : success_(other.success_), data_(std::move(other.data_))
+        {
+            other.success_ = false;
+        }
+
+        // copy ctor
+        Result(const Result& other)
+            : success_(other.success_), data_(other.data_)
+        {
+        }
+
+        // move assignment
+        Result& operator=(Result&& other) noexcept
+        {
+            if (this != &other) {
+                success_       = other.success_;
+                data_          = std::move(other.data_);
+                other.success_ = false;
+            }
+            return *this;
+        }
+
         static Result<T> ok(T value)
         {
             return Result<T>(true, std::move(value));
@@ -20,7 +54,7 @@ namespace simbi {
 
         static Result<T> error(std::string msg)
         {
-            return Result<T>(false, std::move(msg));
+            return Result<T>(false, Error(std::move(msg)));
         }
 
         // function application (map)
@@ -34,7 +68,7 @@ namespace simbi {
             }
             else {
                 return Result<std::invoke_result_t<Func, T>>::error(
-                    std::get<std::string>(data_)
+                    std::get<Error>(data_).message
                 );
             }
         }
@@ -48,7 +82,7 @@ namespace simbi {
             }
             else {
                 return std::invoke_result_t<Func, T>::error(
-                    std::get<std::string>(data_)
+                    std::get<Error>(data_).message
                 );
             }
         }
@@ -58,7 +92,7 @@ namespace simbi {
         const T& value() const { return std::get<T>(data_); }
         const std::string& error() const
         {
-            return std::get<std::string>(data_);
+            return std::get<Error>(data_).message;
         }
     };
 }   // namespace simbi

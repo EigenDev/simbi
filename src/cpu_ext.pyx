@@ -49,6 +49,8 @@ cdef ConfigDict convert_python_to_config_dict(py_dict):
             for x in value:
                 vec_dict.push_back(convert_python_to_config_dict(x))
             result[cpp_key] = ConfigValue(vec_dict)
+        elif callable(value):
+            pass
         else:
             raise ValueError(f"Unsupported type: {type(value)} for variable: {key}")
 

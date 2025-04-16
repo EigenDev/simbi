@@ -2,70 +2,81 @@
 #define DEVICE_CALLABLE_HPP
 
 #include "build_options.hpp"   // for real, luint, global::managed_memory
-#include <functional>          // for std::function
+#include "core/types/alias/function.hpp"
+#include <functional>   // for std::function
 
 namespace simbi::jit {
-    template <typename Signature>
+    template <size_type Dims>
     class DeviceCallable
     {
       private:
-        using FunctionType = Signature;
+        // cpu functions
+        std::function<user_function_t<Dims>> cpu_function_;
 
-        // cpu function pointer
-        std::function<FunctionType> cpu_function_;
+        // gpu functions
+        void* device_function_ptr_ = nullptr;
+        bool has_dev_function_     = false;
 
-        // gpu function pointer
-        void* device_function_ptr_;
-        bool has_dev_function_{false};
+        // function name for diagnostics
+        std::string function_name_;
 
       public:
-        // cpu ctor
-        DeviceCallable(std::function<Signature> func)
-            : cpu_function_(std::move(func)), device_function_ptr_(nullptr)
+        // Default constructor
+        DeviceCallable() = default;
+
+        // CPU constructor
+        DeviceCallable(
+            std::string name,
+            std::function<user_function_t<Dims>> func
+        )
+            : cpu_function_(std::move(func)), function_name_(std::move(name))
         {
         }
 
-        // gpu ctor
-        DeviceCallable(devFunction_t func)
-            : device_function_ptr_(func), has_dev_function_(true)
+        // GPU constructor
+        DeviceCallable(std::string name, void* func)
+            : device_function_ptr_(func),
+              has_dev_function_(func != nullptr),
+              function_name_(std::move(name))
         {
         }
 
-        // call operator for cpu
+        // Call operator with dimension-aware dispatch
         template <typename... Args>
-        auto operator()(Args&&... args) const -> std::enable_if_t<
-            !global::on_gpu,
-            std::invoke_result_t<std::function<Signature>, Args...>>
+            requires(sizeof...(Args) == Dims + 2)
+        DEV void operator()(Args&&... args) const
         {
-            return cpu_func_(std::forward<Args>(args)...);
-        }
-
-        // call operator for gpu
-        template <typename... Args>
-        DEV auto operator()(dim3 grid, dim3 block, Args&&... args) const
-            -> std::enable_if_t<
-                global::on_gpu,
-                std::invoke_result_t<devFunction_t, Args...>>
-        {
-            if (!has_dev_function_) {
-                printf("Device function not set.");
+            if constexpr (global::on_gpu) {
+                if (!has_dev_function_) {
+                    printf(
+                        "Device function '%s' not set\n",
+                        function_name_.c_str()
+                    );
+                    return;
+                }
+                auto func_ptr = reinterpret_cast<user_function_ptr_t<Dims>>(
+                    device_function_ptr_
+                );
+                func_ptr(std::forward<Args>(args)...);
             }
-
-            void* kernel_args[] = {
-              &args...,
-            };
-
-            // cast to the appropriate function pointer type and call
-            using DeviceFuncType = Signature*;
-            auto func_ptr =
-                reinterpret_cast<DeviceFuncType>(device_function_ptr_);
-            func_ptr(std::forward<Args>(args)...);
+            else {
+                if (!cpu_function_) {
+                    // In CPU context, we can throw
+                    throw std::runtime_error(
+                        "CPU function '" + function_name_ + "' not set"
+                    );
+                }
+                cpu_function_(std::forward<Args>(args)...);
+            }
         }
 
         bool is_callable() const
         {
-            return has_dev_function_ || static_cast<bool>(cpu_function_);
+            return (global::on_gpu && has_dev_function_) ||
+                   (!global::on_gpu && static_cast<bool>(cpu_function_));
         }
+
+        const std::string& name() const { return function_name_; }
     };
 }   // namespace simbi::jit
 

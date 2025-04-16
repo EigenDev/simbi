@@ -267,7 +267,7 @@ class BaseConfig(metaclass=abc.ABCMeta):
     def log_output_dir(self) -> Union[str, Path]:
         return "."
 
-    @simbi_class_property(group="mesh")
+    @simbi_property(group="mesh")
     def scale_factor_derivative(cls) -> Optional[Callable[[float], float]]:
         return None
 
