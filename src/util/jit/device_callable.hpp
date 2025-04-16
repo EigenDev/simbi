@@ -1,9 +1,8 @@
 #ifndef DEVICE_CALLABLE_HPP
 #define DEVICE_CALLABLE_HPP
 
-#include "build_options.hpp"   // for real, luint, global::managed_memory, use...
-#include "util/tools/device_api.hpp"   // for devFunction_t, DEV, dim3
-#include <functional>                  // for std::function
+#include "build_options.hpp"   // for real, luint, global::managed_memory
+#include <functional>          // for std::function
 
 namespace simbi::jit {
     template <typename Signature>
