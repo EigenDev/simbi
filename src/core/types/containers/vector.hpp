@@ -871,7 +871,7 @@ namespace simbi {
     namespace vecops {
         // helpers to rotate vectors by some angle
         template <typename Vec, typename T>
-        static constexpr auto rotate_2D(const Vec& vec, const T& angle)
+        DEV static constexpr auto rotate_2D(const Vec& vec, const T& angle)
         {
             return Vector<T, 2, VectorType::SPATIAL>{
               vec[0] * std::cos(angle) - vec[1] * std::sin(angle),
@@ -880,7 +880,7 @@ namespace simbi {
         }
 
         template <typename Vec, typename T>
-        static constexpr auto rotate_3D(const Vec& vec, const T& angle)
+        DEV static constexpr auto rotate_3D(const Vec& vec, const T& angle)
         {
             return Vector<T, 3, VectorType::SPATIAL>{
               vec[0] * std::cos(angle) - vec[1] * std::sin(angle),
@@ -891,7 +891,7 @@ namespace simbi {
 
         // general rotation function that checks the dimension at compile-time
         template <typename Vec, typename T>
-        static constexpr auto rotate(const Vec& vec, const T& angle)
+        DEV static constexpr auto rotate(const Vec& vec, const T& angle)
         {
             if constexpr (Vec::dimensions == 2) {
                 return rotate_2D(vec, angle);
@@ -902,7 +902,7 @@ namespace simbi {
         }
 
         template <typename Vec>
-        auto constexpr spherical_to_cartesian(const Vec& vec)
+        DEV auto constexpr spherical_to_cartesian(const Vec& vec)
         {
             if constexpr (Vec::dimensions == 1) {
                 return vec;
@@ -923,7 +923,7 @@ namespace simbi {
         }
 
         template <typename Vec>
-        auto constexpr cylindrical_to_cartesian(const Vec& vec)
+        DEV auto constexpr cylindrical_to_cartesian(const Vec& vec)
         {
             if constexpr (Vec::dimensions == 1) {
                 return vec;
@@ -944,7 +944,7 @@ namespace simbi {
         }
 
         template <typename Vec>
-        auto constexpr cartesian_to_spherical(const Vec& vec)
+        DEV auto constexpr cartesian_to_spherical(const Vec& vec)
         {
             if constexpr (Vec::dimensions == 1) {
                 return vec;
@@ -965,7 +965,7 @@ namespace simbi {
         }
 
         template <typename Vec>
-        auto constexpr centralize_cartesian_to_spherical(const Vec& vec)
+        DEV auto constexpr centralize_cartesian_to_spherical(const Vec& vec)
         {
             if constexpr (Vec::dimensions == 1) {
                 return vec;
@@ -986,7 +986,7 @@ namespace simbi {
         }
 
         template <typename Vec>
-        auto constexpr centralize_cartesian_to_cylindrical(const Vec& vec)
+        DEV auto constexpr centralize_cartesian_to_cylindrical(const Vec& vec)
         {
             if constexpr (Vec::dimensions == 1) {
                 return vec;
@@ -1007,7 +1007,7 @@ namespace simbi {
         }
 
         template <typename Vec>
-        auto constexpr cartesian_to_cylindrical(const Vec& vec)
+        DEV auto constexpr cartesian_to_cylindrical(const Vec& vec)
         {
             if constexpr (Vec::dimensions == 1) {
                 return vec;
@@ -1030,7 +1030,7 @@ namespace simbi {
         // convert a cartesian vector to a curvlinear
         // coordinate system
         template <typename Vec>
-        auto to_geometry(const Vec& vec, Geometry geometry)
+        DEV auto to_geometry(const Vec& vec, Geometry geometry)
         {
             if (geometry == Geometry::SPHERICAL) {
                 return cartesian_to_spherical(vec);
@@ -1046,7 +1046,7 @@ namespace simbi {
         // project some vector onto the mesh
         // using the mesh basis vectors
         template <typename Vec>
-        auto centralize(const Vec& vec, Geometry mesh_geometry)
+        DEV auto centralize(const Vec& vec, Geometry mesh_geometry)
         {
             switch (mesh_geometry) {
                 case Geometry::SPHERICAL:

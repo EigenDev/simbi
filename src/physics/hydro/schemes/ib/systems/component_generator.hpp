@@ -12,8 +12,7 @@ namespace simbi::ibsystem {
     util::smart_ptr<ComponentBodySystem<T, Dims>>
     create_body_system_from_config(
         const Mesh<Dims>& mesh,
-        const InitialConditions& init,
-        T gamma
+        const InitialConditions& init
     )
     {
         auto system = util::make_unique<ComponentBodySystem<T, Dims>>(mesh);
@@ -66,12 +65,12 @@ namespace simbi::ibsystem {
 
                         if (binary_components.size() != 2) {
                             throw std::runtime_error(
-                                "Binary system must have exactly 2 components"
+                                "Binary system must have exactly 2 components "
                             );
                         }
 
-                        // Calculate individual masses based on total mass and
-                        // mass ratio
+                        // Calculate individual masses based on total mass
+                        // and // mass ratio
                         T m1 = total_mass / (1.0 + mass_ratio);
                         T m2 = total_mass - m1;
 

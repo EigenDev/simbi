@@ -27,6 +27,7 @@ namespace simbi::ibsystem::functions {
         if (system.size() < 2) {
             return orbital_dt;
         }
+        printf("system size is %zu\n", system.size());
 
         for (size_type idx = 0; idx < system.size(); ++idx) {
             // Get the body properties

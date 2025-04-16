@@ -57,20 +57,21 @@ namespace simbi::ibsystem {
         }
     };
 
-    inline BodyCapability operator|(BodyCapability lhs, BodyCapability rhs)
+    DUAL inline BodyCapability operator|(BodyCapability lhs, BodyCapability rhs)
     {
         return static_cast<BodyCapability>(
             static_cast<uint32_t>(lhs) | static_cast<uint32_t>(rhs)
         );
     }
 
-    inline BodyCapability& operator|=(BodyCapability& lhs, BodyCapability rhs)
+    DUAL inline BodyCapability&
+    operator|=(BodyCapability& lhs, BodyCapability rhs)
     {
         lhs = lhs | rhs;
         return lhs;
     }
 
-    inline bool has_capability(BodyCapability caps, BodyCapability query)
+    DUAL inline bool has_capability(BodyCapability caps, BodyCapability query)
     {
         return (static_cast<uint32_t>(caps) & static_cast<uint32_t>(query)) !=
                0;
@@ -179,7 +180,8 @@ namespace simbi::ibsystem {
             grav_two_way_coupling_.push_back(two_way_coupling);
 
             // Store mapping from body index to property index
-            grav_property_map_[body_idx] = grav_softening_lengths_.size() - 1;
+            grav_map_keys_.push_back(body_idx);
+            grav_map_values_.push_back(grav_softening_lengths_.size() - 1);
         }
 
         // add accretion capability to a body
@@ -210,47 +212,73 @@ namespace simbi::ibsystem {
             );   // Initialize accreted mass to 0
 
             // Store mapping from body index to property index
-            accr_property_map_[body_idx] = accr_efficiencies_.size() - 1;
+            accr_map_keys_.push_back(body_idx);
+            accr_map_values_.push_back(accr_efficiencies_.size() - 1);
+        }
+
+        // Find property index for a body in gravitational maps
+        DUAL size_t find_grav_property_index(size_t body_idx) const
+        {
+            for (size_t i = 0; i < grav_map_keys_.size(); ++i) {
+                if (grav_map_keys_[i] == body_idx) {
+                    return grav_map_values_[i];
+                }
+            }
+            return size_t(-1);   // Not found
+        }
+
+        // Find property index for a body in accretion maps
+        DUAL size_t find_accr_property_index(size_t body_idx) const
+        {
+            for (size_t i = 0; i < accr_map_keys_.size(); ++i) {
+                if (accr_map_keys_[i] == body_idx) {
+                    return accr_map_values_[i];
+                }
+            }
+            return size_t(-1);   // Not found
         }
 
         // accesor functions for universal properties
-        DEV const ndarray<spatial_vector_t<T, Dims>>& positions() const
+        DUAL const ndarray<spatial_vector_t<T, Dims>>& positions() const
         {
             return positions_;
         }
-        DEV const ndarray<spatial_vector_t<T, Dims>>& velocities() const
+        DUAL const ndarray<spatial_vector_t<T, Dims>>& velocities() const
         {
             return velocities_;
         }
-        DEV const ndarray<spatial_vector_t<T, Dims>>& forces() const
+        DUAL const ndarray<spatial_vector_t<T, Dims>>& forces() const
         {
             return forces_;
         }
-        DEV const ndarray<T>& masses() const { return masses_; }
-        DEV const ndarray<T>& radii() const { return radii_; }
-        DEV const ndarray<BodyType>& body_types() const { return body_types_; }
-        DEV const ndarray<BodyCapability>& capabilities() const
+        DUAL const ndarray<T>& masses() const { return masses_; }
+        DUAL const ndarray<T>& radii() const { return radii_; }
+        DUAL const ndarray<BodyType>& body_types() const { return body_types_; }
+        DUAL const ndarray<BodyCapability>& capabilities() const
         {
             return capabilities_;
         }
 
         // Mutable access (for algorithms)
-        DEV ndarray<spatial_vector_t<T, Dims>>& positions_mut()
+        DUAL ndarray<spatial_vector_t<T, Dims>>& positions_mut()
         {
             return positions_;
         }
-        DEV ndarray<spatial_vector_t<T, Dims>>& velocities_mut()
+        DUAL ndarray<spatial_vector_t<T, Dims>>& velocities_mut()
         {
             return velocities_;
         }
-        DEV ndarray<spatial_vector_t<T, Dims>>& forces_mut() { return forces_; }
-        DEV ndarray<T>& masses_mut() { return masses_; }
+        DUAL ndarray<spatial_vector_t<T, Dims>>& forces_mut()
+        {
+            return forces_;
+        }
+        DUAL ndarray<T>& masses_mut() { return masses_; }
 
         // Size information
-        DEV size_t size() const { return positions_.size(); }
+        DUAL size_t size() const { return positions_.size(); }
 
         // Capability checking
-        DEV bool has_capability(size_t body_idx, BodyCapability cap) const
+        DUAL bool has_capability(size_t body_idx, BodyCapability cap) const
         {
             if (body_idx >= capabilities_.size()) {
                 return false;
@@ -258,7 +286,7 @@ namespace simbi::ibsystem {
             return ibsystem::has_capability(capabilities_[body_idx], cap);
         }
 
-        DEV auto total_mass() const
+        DUAL T total_mass() const
         {
             T total_mass = 0;
             for (size_t i = 0; i < masses_.size(); ++i) {
@@ -270,57 +298,57 @@ namespace simbi::ibsystem {
         // specialized property access
 
         // grav properties
-        DEV T softening_length(size_t body_idx) const
+        DUAL T softening_length(size_t body_idx) const
         {
-            auto it = grav_property_map_.find(body_idx);
-            if (it == grav_property_map_.end()) {
+            size_t prop_idx = find_grav_property_index(body_idx);
+            if (prop_idx == size_t(-1)) {
                 return T(0);
             }
-            return grav_softening_lengths_[it->second];
+            return grav_softening_lengths_[prop_idx];
         }
 
-        DEV bool two_way_coupling(size_t body_idx) const
+        DUAL bool two_way_coupling(size_t body_idx) const
         {
-            auto it = grav_property_map_.find(body_idx);
-            if (it == grav_property_map_.end()) {
+            size_t prop_idx = find_grav_property_index(body_idx);
+            if (prop_idx == size_t(-1)) {
                 return false;
             }
-            return grav_two_way_coupling_[it->second];
+            return grav_two_way_coupling_[prop_idx];
         }
 
         // accretion properties
-        DEV T accretion_efficiency(size_t body_idx) const
+        DUAL T accretion_efficiency(size_t body_idx) const
         {
-            auto it = accr_property_map_.find(body_idx);
-            if (it == accr_property_map_.end()) {
+            size_t prop_idx = find_accr_property_index(body_idx);
+            if (prop_idx == size_t(-1)) {
                 return T(0);
             }
-            return accr_efficiencies_[it->second];
+            return accr_efficiencies_[prop_idx];
         }
 
-        DEV T accretion_radius(size_t body_idx) const
+        DUAL T accretion_radius(size_t body_idx) const
         {
-            auto it = accr_property_map_.find(body_idx);
-            if (it == accr_property_map_.end()) {
+            size_t prop_idx = find_accr_property_index(body_idx);
+            if (prop_idx == size_t(-1)) {
                 return radii_[body_idx];
             }
-            return accr_radii_[it->second];
+            return accr_radii_[prop_idx];
         }
 
-        DEV T total_accreted_mass(size_t body_idx) const
+        DUAL T total_accreted_mass(size_t body_idx) const
         {
-            auto it = accr_property_map_.find(body_idx);
-            if (it == accr_property_map_.end()) {
+            size_t prop_idx = find_accr_property_index(body_idx);
+            if (prop_idx == size_t(-1)) {
                 return T(0);
             }
-            return accr_total_masses_[it->second];
+            return accr_total_masses_[prop_idx];
         }
 
         void add_accreted_mass(size_t body_idx, T mass)
         {
-            auto it = accr_property_map_.find(body_idx);
-            if (it != accr_property_map_.end()) {
-                accr_total_masses_[it->second] += mass;
+            size_t prop_idx = find_accr_property_index(body_idx);
+            if (prop_idx != size_t(-1)) {
+                accr_total_masses_[prop_idx] += mass;
             }
         }
 
@@ -383,16 +411,20 @@ namespace simbi::ibsystem {
         ndarray<size_t> grav_body_indices_;
         ndarray<T> grav_softening_lengths_;
         ndarray<bool> grav_two_way_coupling_;
-        std::unordered_map<size_t, size_t>
-            grav_property_map_;   // body_idx -> prop_idx
+
+        // GPU-friendly map replacement for grav_property_map_
+        ndarray<size_t> grav_map_keys_;     // body indices
+        ndarray<size_t> grav_map_values_;   // property indices
 
         // accretion properties
         ndarray<size_t> accr_body_indices_;
         ndarray<T> accr_efficiencies_;
         ndarray<T> accr_radii_;
         ndarray<T> accr_total_masses_;
-        std::unordered_map<size_t, size_t>
-            accr_property_map_;   // body_idx -> prop_idx
+
+        // GPU-friendly map replacement for accr_property_map_
+        ndarray<size_t> accr_map_keys_;     // body indices
+        ndarray<size_t> accr_map_values_;   // property indices
 
         // TODO: add more specialized properties can be added following this
         // pattern

@@ -597,7 +597,7 @@ namespace simbi {
         {
             if constexpr (global::on_gpu) {
                 // Allocate shared memory in the kernel for partial reductions
-                const size_t shared_mem_size = 1024;
+                constexpr size_t shared_mem_size = 1024;
 
                 ndarray<U> result(1, init);
                 result.sync_to_device();

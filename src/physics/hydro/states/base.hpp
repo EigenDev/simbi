@@ -64,6 +64,7 @@
 #include "physics/hydro/schemes/ib/systems/component_generator.hpp"
 #include "physics/hydro/types/context.hpp"           // for HydroContext
 #include "physics/hydro/types/generic_structs.hpp"   // for anyConserved, anyPrimitive
+#include "util/tools/device_api.hpp"
 #include <limits>
 #include <list>
 
@@ -108,7 +109,6 @@ namespace simbi {
                                     this->full_policy()
                                 ) *
                                 cfl_;
-
             real system_dt = std::numeric_limits<real>::infinity();
             if (body_system_) {
                 system_dt = ibsystem::functions::get_system_timestep(
@@ -116,7 +116,6 @@ namespace simbi {
                     cfl_
                 );
             }
-
             time_manager_.set_dt(std::min(gas_dt, system_dt));
         }
 
@@ -293,8 +292,10 @@ namespace simbi {
 
         void init_body_system(const InitialConditions& init)
         {
-            body_system_ =
-                ibsystem::create_body_system_from_config(mesh_, init, gamma_);
+            body_system_ = ibsystem::create_body_system_from_config<real, Dims>(
+                mesh_,
+                init
+            );
         }
 
         void simulate(
@@ -302,7 +303,6 @@ namespace simbi {
             const std::function<real(real)> adot
         )
         {
-
             auto& derived = static_cast<Derived&>(*this);
             // load the user-defined functions if any
             io().load_functions();
@@ -315,7 +315,6 @@ namespace simbi {
                     cons_[ii][q] = state_[q][ii];
                 }
             }
-
             deallocate_state();
 
             // Initialize simulation
