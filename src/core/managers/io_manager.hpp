@@ -132,6 +132,9 @@ namespace simbi {
         std::shared_ptr<void> bsource_handle_;
 
         jit::FunctionRegistry<Dims> function_registry_;
+        DeviceCallable<Dims> hydro_source_function_;
+        DeviceCallable<Dims> gravity_source_function_;
+        std::array<DeviceCallable<Dims>, 2 * Dims> boundary_functions_;
 
       public:
         // move constructor and assignment
@@ -153,11 +156,22 @@ namespace simbi {
               hsource_handle_(nullptr, LibraryDeleter()),
               gsource_handle_(nullptr, LibraryDeleter()),
               bsource_handle_(nullptr, LibraryDeleter()),
-              function_registry_()
+              function_registry_(),
+              hydro_source_function_("hydro_source", nullptr),
+              gravity_source_function_("gravity_source", nullptr)
         {
             setup_hydro_source(init.hydro_source_code);
             setup_gravity_source(init.gravity_source_code);
             setup_boundary_source(init.boundary_source_code);
+
+            for (size_type ii = 0; ii < boundary_functions_.size(); ++ii) {
+                std::string part = (ii % 2 == 0) ? "inner" : "outer";
+
+                boundary_functions_[ii] = DeviceCallable<Dims>(
+                    "bx" + std::to_string(ii) + "_" + part + "_source",
+                    nullptr
+                );
+            }
         }
 
         // shared_ptr cleans up libraries
@@ -245,11 +259,40 @@ namespace simbi {
             }
         }
 
+        // After loading all functions, prepare GPU-accessible function cache
+        void prepare_gpu_functions()
+        {
+            // Look up functions from registry and cache them
+            hydro_source_function_ =
+                function_registry_.get_function_or_noop("hydro_source");
+            gravity_source_function_ =
+                function_registry_.get_function_or_noop("gravity_source");
+
+            // Cache boundary functions
+            const std::array<std::string, 6> boundary_names = {
+              "bx1_inner_source",
+              "bx1_outer_source",
+              "bx2_inner_source",
+              "bx2_outer_source",
+              "bx3_inner_source",
+              "bx3_outer_source"
+            };
+
+            for (size_type i = 0;
+                 i < std::min<size_type>(boundary_names.size(), 2 * Dims);
+                 ++i) {
+                boundary_functions_[i] =
+                    function_registry_.get_function_or_noop(boundary_names[i]);
+            }
+        }
         void load_functions()
         {
             load_hydro_functions();
             load_gravity_functions();
             load_boundary_functions();
+
+            // prepare gpu-accessible function cache
+            prepare_gpu_functions();
         }
 
         void increment_iter() { current_iter_++; }
@@ -276,9 +319,7 @@ namespace simbi {
             if (solver_manager_.null_sources()) {
                 return;
             }
-            auto hydro_source =
-                function_registry_.get_function_or_noop("hydro_source");
-            hydro_source(std::forward<Args>(args)...);
+            hydro_source_function_(std::forward<Args>(args)...);
         }
 
         template <typename... Args>
@@ -288,41 +329,18 @@ namespace simbi {
             if (solver_manager_.null_gravity()) {
                 return;
             }
-            auto gravity_source =
-                function_registry_.get_function_or_noop("gravity_source");
-            gravity_source(std::forward<Args>(args)...);
+            gravity_source_function_(std::forward<Args>(args)...);
         }
 
         template <typename... Args>
             requires(sizeof...(Args) == Dims + 2)
         DEV void call_boundary_source(BoundaryFace face, Args&&... args) const
         {
-            std::string func_name;
-
-            switch (face) {
-                case BoundaryFace::X1_INNER:
-                    func_name = "bx1_inner_source";
-                    break;
-                case BoundaryFace::X1_OUTER:
-                    func_name = "bx1_outer_source";
-                    break;
-                case BoundaryFace::X2_INNER:
-                    func_name = "bx2_inner_source";
-                    break;
-                case BoundaryFace::X2_OUTER:
-                    func_name = "bx2_outer_source";
-                    break;
-                case BoundaryFace::X3_INNER:
-                    func_name = "bx3_inner_source";
-                    break;
-                case BoundaryFace::X3_OUTER:
-                    func_name = "bx3_outer_source";
-                    break;
+            // Convert enum to array index
+            int idx = static_cast<int>(face);
+            if (idx >= 0 && idx < boundary_functions_.size()) {
+                boundary_functions_[idx](std::forward<Args>(args)...);
             }
-
-            auto boundary_source =
-                function_registry_.get_function_or_noop(func_name);
-            boundary_source(std::forward<Args>(args)...);
         }
 
       private:

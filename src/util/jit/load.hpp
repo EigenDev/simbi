@@ -14,7 +14,7 @@ namespace simbi::jit {
         return jit::compile_to_ir(source)
             .and_then([](const std::string& ir) { return load_module(ir); })
             .and_then([&func_name](devModule_t module) {
-                return get_device_function_address(module, func_name);
+                return get_function(module, func_name);
             })
             .map([&func_name](void* func_addr) {
                 return DeviceCallable<Dims>(func_name, func_addr);
