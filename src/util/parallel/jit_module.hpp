@@ -68,6 +68,12 @@ namespace simbi {
             ~JITModule();
             std::string
             compile(const std::string& source, const std::string& prog_name);
+            bool load_module_and_get_function(
+                const std::string& ptx,
+                const std::string& function_name,
+                devFunction_t* function
+            );
+            bool ensure_context_initialized();
         };
 
     }   // namespace detail

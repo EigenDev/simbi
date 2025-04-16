@@ -1,14 +1,21 @@
 #include "util/parallel/jit_module.hpp"
 #include "util/tools/device_api.hpp"
+#include <iostream>
 #include <stdexcept>
 #include <vector>
 
 using namespace simbi;
 using namespace simbi::detail;
 
-JITModule::JITModule() : module(nullptr) {}
+JITModule::JITModule() : module(nullptr) { ensure_context_initialized(); }
 
-JITModule::~JITModule() { gpu::api::moduleUnload(module); }
+JITModule::~JITModule()
+{
+    if (module) {
+        gpu::api::moduleUnload(module);
+        module = nullptr;
+    }
+}
 
 std::string
 JITModule::compile(const std::string& source, const std::string& program_name)
@@ -49,4 +56,66 @@ JITModule::compile(const std::string& source, const std::string& program_name)
 
     // return the ptx or llvm ir code
     return std::string(ir.begin(), ir.end());
+}
+
+bool JITModule::load_module_and_get_function(
+    const std::string& ptx,
+    const std::string& functionName,
+    devFunction_t* function
+)
+{
+    if (!ensure_context_initialized()) {
+        return false;
+    }
+
+    try {
+        // Clean up old module if present
+        if (module) {
+            gpu::api::moduleUnload(module);
+            module = nullptr;
+        }
+
+        // Load the new module
+        gpu::api::moduleLoadData(&module, ptx.c_str());
+
+        // Get the function
+        gpu::api::getFunction(function, module, functionName.c_str());
+
+        // Store the function in our map
+        functionMap[functionName] = ptx;
+
+        return true;
+    }
+    catch (const std::exception& e) {
+        std::cerr << "Error loading module or function: " << e.what()
+                  << std::endl;
+        return false;
+    }
+}
+
+bool JITModule::ensure_context_initialized()
+{
+    static bool initialized = false;
+    if (!initialized) {
+        simbi_device_t device;
+        simbi_context_t context;
+
+        auto status = simbi_init(0);
+        if (status != simbi_success) {
+            return false;
+        }
+
+        status = gpu::api::device_get(&device, 0);
+        if (status != simbi_success) {
+            return false;
+        }
+
+        status = gpu::api::context_create(&context, 0, device);
+        if (status != simbi_success) {
+            return false;
+        }
+
+        initialized = true;
+    }
+    return initialized;
 }

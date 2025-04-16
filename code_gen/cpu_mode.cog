@@ -78,7 +78,7 @@ namespace simbi {
     using devProp_t       = int;
     using devEvent_t      = std::chrono::high_resolution_clock::time_point;
     using devModule_t     = void*;
-    using devFunction_t   = int;
+    using devFunction_t   = void*;
     using devContext_t    = int;
     using devProgram_t    = int;
 

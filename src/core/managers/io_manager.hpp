@@ -49,10 +49,14 @@
 #ifndef IO_MANAGER_HPP
 #define IO_MANAGER_HPP
 
+#include "build_options.hpp"
 #include "core/managers/solver_manager.hpp"         // for SolverManager
 #include "core/types/utility/init_conditions.hpp"   // for InitialConditions
-#include "util/tools/helpers.hpp"                   // for real_func
-#include <dlfcn.h>   // for dlopen, dlclose, dlsym
+#include "util/jit/func_registry.hpp"               // for FunctionRegistry
+#include "util/jit/load.hpp"
+#include "util/jit/source_code.hpp"
+#include "util/tools/helpers.hpp"   // for real_func
+#include <dlfcn.h>                  // for dlopen, dlclose, dlsym
 #include <string>
 namespace simbi {
 
@@ -68,6 +72,22 @@ namespace simbi {
                                                                // x2, x3, t,
                                                                // res
     };
+
+    template <size_type D>
+    struct FunctionSignature {
+        using type = std::conditional_t<
+            D == 1,
+            void (*)(real, real, real*),   // 1D: x1, t, res
+            std::conditional_t<
+                D == 2,
+                void (*)(real, real, real, real*),   // 2D: x1, x2, t, res
+                void (*)(real, real, real, real, real*)>>;   // 3D: x1,
+                                                             // x2, x3,
+                                                             // t, res
+    };
+
+    template <size_type D>
+    using function_signature_t = typename FunctionSignature<D>::type;
 
     template <size_type D, typename... Args>
     concept ValidSourceParams = requires(Args... args) {
@@ -126,6 +146,8 @@ namespace simbi {
         function_t bx3_inner_source_;
         function_t bx3_outer_source_;
 
+        jit::FunctionRegistry function_registry_;
+
       public:
         // move constructor and assignment
         IOManager(IOManager&& other) noexcept            = default;
@@ -147,10 +169,114 @@ namespace simbi {
               gsource_handle_(nullptr, LibraryDeleter()),
               bsource_handle_(nullptr, LibraryDeleter())
         {
+            setup_hydro_source(init.hydro_source_code);
+            setup_gravity_source(init.gravity_source_code);
+            setup_boundary_source(init.boundary_source_code);
         }
 
         // shared_ptr cleans up libraries
         ~IOManager() = default;
+
+        void setup_hydro_source(const std::string& hydro_source_code)
+        {
+            if (hydro_source_code.empty()) {
+                return;
+            }
+
+            auto source = jit::SourceCode(hydro_source_code, "hydro_source");
+            auto result = jit::compile_and_load<function_signature_t<Dims>>(
+                source,
+                source.name
+            );
+
+            if (result.is_ok()) {
+                // store in registry
+                function_registry_ = function_registry_.with_function(
+                    source.name,
+                    result.value()
+                );
+            }
+            else {
+                std::cerr << "Error compiling hydro source code: "
+                          << result.error() << '\n';
+                solver_manager_.set_null_sources(true);
+            }
+        }
+
+        void setup_gravity_source(const std::string& gravity_source_code)
+        {
+            if (gravity_source_code.empty()) {
+                return;
+            }
+
+            auto source =
+                jit::SourceCode(gravity_source_code, "gravity_source");
+
+            auto result = jit::compile_and_load<function_signature_t<Dims>>(
+                source,
+                source.name
+            );
+
+            if (result.is_ok()) {
+                // store in registry
+                function_registry_ = function_registry_.with_function(
+                    source.name,
+                    result.value()
+                );
+            }
+            else {
+                std::cerr << "Error compiling gravity source code: "
+                          << result.error() << '\n';
+                solver_manager_.set_null_gravity(true);
+            }
+        }
+
+        void setup_boundary_source(const std::string& boundary_source_code)
+        {
+            if (boundary_source_code.empty()) {
+                return;
+            }
+
+            auto source =
+                jit::SourceCode(boundary_source_code, "boundary_source");
+
+            auto result = jit::compile_and_load<function_signature_t<Dims>>(
+                source,
+                source.name
+            );
+
+            if (result.is_ok()) {
+                // store in registry
+                function_registry_ = function_registry_.with_function(
+                    "bx1_inner_source",
+                    result.value()
+                );
+                function_registry_ = function_registry_.with_function(
+                    "bx1_outer_source",
+                    result.value()
+                );
+                function_registry_ = function_registry_.with_function(
+                    "bx2_inner_source",
+                    result.value()
+                );
+                function_registry_ = function_registry_.with_function(
+                    "bx2_outer_source",
+                    result.value()
+                );
+                function_registry_ = function_registry_.with_function(
+                    "bx3_inner_source",
+                    result.value()
+                );
+                function_registry_ = function_registry_.with_function(
+                    "bx3_outer_source",
+                    result.value()
+                );
+            }
+            else {
+                std::cerr << "Error compiling boundary source code: "
+                          << result.error() << '\n';
+            }
+        }
 
         void load_functions()
         {

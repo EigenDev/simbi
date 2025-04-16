@@ -64,9 +64,7 @@
 #include "physics/hydro/schemes/ib/systems/component_generator.hpp"
 #include "physics/hydro/types/context.hpp"           // for HydroContext
 #include "physics/hydro/types/generic_structs.hpp"   // for anyConserved, anyPrimitive
-#include "util/tools/device_api.hpp"
 #include <limits>
-#include <list>
 
 namespace simbi {
     template <typename Derived, size_type Dims, Regime R>

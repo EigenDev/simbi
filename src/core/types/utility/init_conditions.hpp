@@ -69,6 +69,7 @@ struct InitialConditions {
     std::string data_directory, coord_system, solver;
     std::string x1_spacing, x2_spacing, x3_spacing, regime;
     std::string hydro_source_lib, gravity_source_lib, boundary_source_lib;
+    std::string hydro_source_code, gravity_source_code, boundary_source_code;
     std::string spatial_order, temporal_order;
     std::vector<std::string> boundary_conditions;
     std::pair<real, real> x1bounds;
