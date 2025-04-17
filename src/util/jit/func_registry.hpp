@@ -35,8 +35,7 @@ namespace simbi::jit {
         }
 
         // Safe lookup - returns a no-op function if not found
-        DEV DeviceCallable<D>
-        get_function_or_noop(const std::string& name) const
+        DeviceCallable<D> get_function_or_noop(const std::string& name) const
         {
             auto it = functions_.find(name);
             if (it == functions_.end()) {

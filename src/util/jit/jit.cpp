@@ -2,13 +2,14 @@
 #include "build_options.hpp"
 #include "core/types/monad/result.hpp"
 #include "util/tools/device_api.hpp"
+#include <iostream>
 #include <vector>
-
 namespace simbi::jit {
     // compile source to ir / ptx
     Result<std::string> compile_to_ir(const SourceCode& source)
     {
         if constexpr (global::on_gpu) {
+            gpu::api::profilerStart();
             // compile the source code into ptx code
             devProgram_t program;
 
@@ -22,8 +23,11 @@ namespace simbi::jit {
                 nullptr
             );
 
+            std::cout << "source code: " << source.code << std::endl;
+            std::cout << "source name: " << source.name << std::endl;
+
             // compile the program
-            if (gpu::api::program(program, 0, nullptr)) {
+            if (gpu::api::compileProgram(program, 0, nullptr)) {
                 // get the log
                 size_t log_size;
                 gpu::api::getProgramLogSize(program, &log_size);
@@ -91,7 +95,7 @@ namespace simbi::jit {
     )
     {
         if constexpr (!global::on_gpu) {
-            return Result<void*>::error(
+            return Result<devFunction_t>::error(
                 "Cannot get device function address in CPU mode"
             );
         }
