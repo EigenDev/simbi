@@ -3,6 +3,7 @@
 #include <cuda/atomic>
 #include <cuda_runtime.h>
 #include <nvrtc.h>
+#include <cuda_profiler_api.h>
 #define CUDA_CODE 1
 
 class atomic_bool_gpu
@@ -197,6 +198,8 @@ constexpr auto devMemcpyPeerAsync      = cudaMemcpyPeerAsync;
 constexpr auto devMemcpyAsync          = cudaMemcpyAsync;
 constexpr auto devHostRegister         = cudaHostRegister;
 constexpr auto devHostUnregister       = cudaHostUnregister;
+constexpr auto devProfilerStart        = cudaProfilerStart;
+constexpr auto devProfilerStop         = cudaProfilerStop;
 
 using devProp_t       = cudaDeviceProp;
 using devError_t      = cudaError_t;

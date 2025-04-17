@@ -3,7 +3,7 @@ import abc
 import halo
 import math
 import numpy as np
-from ..types.typing import InitialStateType
+from ..types.typing import InitialStateType, ExpressionDict
 from ..types.dynarg import DynamicArg
 from ..managers.validator import ConfigValidator
 from ..managers.body_validator import BodyConfigValidator
@@ -28,13 +28,12 @@ from ..managers.property import (
     InstanceProperty,
 )
 from ..managers import (
-    SourceManager,
     CLIManager,
     ProblemIO,
     PropertyBase,
     simbi_property,
     simbi_derived_property,
-    simbi_class_property,
+    # simbi_class_property,
     class_register,
 )
 
@@ -75,9 +74,6 @@ class ConfigNamespace(DynamicArgNamespace):
 class BaseConfig(metaclass=abc.ABCMeta):
     config: ClassVar[DynamicArgNamespace]
     cli_manager: CLIManager
-    source_manager: SourceManager = SourceManager(
-        Path(__file__).resolve().parent.parent.parent / "src" / "libs"
-    )
     dynamic_args: list[DynamicArg] = []
     base_properties: dict[str, Any] = {}
     validator: ConfigValidator = ConfigValidator()
@@ -113,10 +109,6 @@ class BaseConfig(metaclass=abc.ABCMeta):
             cls.dynamic_args.append(arg)
 
     def __init__(self) -> None:
-        # Compile source terms if any
-        if any([self.hydro_sources, self.gravity_sources, self.boundary_sources]):
-            self._compile_source_terms()
-
         # Create config namespace that preserves DynamicArg instances but returns raw values
         dynamic_args = {
             name: arg
@@ -281,33 +273,45 @@ class BaseConfig(metaclass=abc.ABCMeta):
         """list of immersed bodies (IB method of Peskin (2002))"""
         return []
 
-    @simbi_property(group="misc")
-    def gravity_sources(cls) -> Optional[str]:
-        return None
+    @simbi_property(group="io")
+    def bx1_inner_expressions(self) -> dict[str, ExpressionDict]:
+        """Expressions for the inner boundary condition in x1 direction"""
+        return {}
 
-    @simbi_property(group="misc")
-    def hydro_sources(cls) -> Optional[str]:
-        return None
+    @simbi_property(group="io")
+    def bx1_outer_expressions(self) -> ExpressionDict:
+        """Expressions for the outer boundary condition in x1 direction"""
+        return {}
 
-    @simbi_property(group="misc")
-    def boundary_sources(cls) -> Optional[str]:
-        return None
+    @simbi_property(group="io")
+    def bx2_inner_expressions(self) -> ExpressionDict:
+        """Expressions for the inner boundary condition in x2 direction"""
+        return {}
 
-    # store the shared library path to the compiled source terms
-    @final
-    @simbi_derived_property(depends_on=["hydro_sources"], group="io")
-    def hydro_source_lib(self, hydro_sources: Optional[str]) -> Optional[Path]:
-        return self.source_manager.get_library_path("hydro")
+    @simbi_property(group="io")
+    def bx2_outer_expressions(self) -> ExpressionDict:
+        """Expressions for the outer boundary condition in x2 direction"""
+        return {}
 
-    @final
-    @simbi_derived_property(depends_on=["gravity_sources"], group="io")
-    def gravity_source_lib(self, gravity_sources: Optional[str]) -> Optional[Path]:
-        return self.source_manager.get_library_path("gravity")
+    @simbi_property(group="io")
+    def bx3_inner_expressions(self) -> ExpressionDict:
+        """Expressions for the inner boundary condition in x3 direction"""
+        return {}
 
-    @final
-    @simbi_derived_property(depends_on=["boundary_sources"], group="io")
-    def boundary_source_lib(self, boundary_sources: Optional[str]) -> Optional[Path]:
-        return self.source_manager.get_library_path("boundary")
+    @simbi_property(group="io")
+    def bx3_outer_expressions(self) -> ExpressionDict:
+        """Expressions for the outer boundary condition in x3 direction"""
+        return {}
+
+    @simbi_property(group="io")
+    def hydro_source_expressions(self) -> ExpressionDict:
+        """Expressions for hydro source terms"""
+        return {}
+
+    @simbi_property(group="io")
+    def gravity_source_expressions(self) -> ExpressionDict:
+        """Expressions for gravity source terms"""
+        return {}
 
     @simbi_derived_property(depends_on=["regime"], group="sim_state")
     def is_mhd(self, regime: str) -> bool:
@@ -519,8 +523,6 @@ class BaseConfig(metaclass=abc.ABCMeta):
             if outer_bc == "dynamic" and f"bx{i}_outer_source" not in source_code:
                 missing_sources.append(f"bx{i}_outer_source")
 
-        print(missing_sources)
-        zzz = input("zzz")
         if missing_sources:
             return Maybe(
                 None,
@@ -531,36 +533,6 @@ class BaseConfig(metaclass=abc.ABCMeta):
             )
 
         return Maybe.of(settings)
-
-    def _compile_source_terms(self) -> None:
-        """If the user provided source code, try to compile it"""
-        sources = {
-            "hydro": self.hydro_sources,
-            "gravity": self.gravity_sources,
-            "boundary": self.boundary_sources,
-        }
-
-        if self.boundary_sources:
-            ...
-            # TODO: Implement
-            # self.validate_boundary_sources()
-        if self.gravity_sources:
-            ...
-            # TODO: Implement
-            # self.validate_gravity_sources()
-        if self.hydro_sources:
-            ...
-            # TODO: Implement
-            # self.validate_hydro_sources()
-
-        spinner = halo.Halo("Attempting to compile source code", spinner="dots")
-        spinner.start()
-        compiled = self.source_manager.compile_sources(
-            type(self).__name__.lower(), sources
-        )
-        for name, path in compiled.items():
-            setattr(self, f"{name}_source_lib", str(path))
-        spinner.succeed("Source code compiled successfully")
 
     def __getattribute__(self, name: str) -> Any:
         """Validate property access. (Sometimes we make mistakes in our configs :P)"""
@@ -598,7 +570,6 @@ class BaseConfig(metaclass=abc.ABCMeta):
 
                 value = getattr(self, name)
                 settings[group.value][name] = value
-
         # if boundary conditions or resolution are given as single values,
         # turn them into sequences
         if isinstance(res := settings["grid"]["resolution"], int):

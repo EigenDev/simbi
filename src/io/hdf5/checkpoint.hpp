@@ -120,7 +120,7 @@ namespace simbi {
         {
             const auto full_filename = data_directory + filename;
             table.postInfo("[Writing checkpoint: " + full_filename + "]");
-            table.print();
+            // table.print();
 
             // Create a new file using the default property list.
             H5::H5File file(full_filename, H5F_ACC_TRUNC);

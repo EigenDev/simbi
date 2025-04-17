@@ -56,6 +56,9 @@ class SimStateBuilder:
             mesh.bounds, effective_dim
         )
 
+        has_boundary_source_terms = (
+            io.bx1_outer_expressions is not None or io.bx1_inner_expressions is not None
+        )
         bcs = pipe(
             mesh.boundary_conditions,
             lambda bcs: BoundaryManager.validate_conditions(bcs, effective_dim),
@@ -65,7 +68,7 @@ class SimStateBuilder:
             lambda bcs: BoundaryManager.check_and_fix_curvlinear_conditions(
                 conditions=bcs,
                 coord_system=mesh.coord_system,
-                contains_boundary_source_terms=io.boundary_source_lib is not None,
+                contains_boundary_source_terms=has_boundary_source_terms,
                 dim=mesh.dimensionality,
                 effective_dim=mesh.effective_dim(grid.resolution),
             ),

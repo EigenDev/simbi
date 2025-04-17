@@ -1,9 +1,11 @@
 import dataclasses
 from enum import Enum
 from dataclasses import dataclass, asdict, field, fields
+import textwrap
 from typing import Optional, Sequence, Callable, Any, TypeVar, Self
 from pathlib import Path
 from simbi.core.config.bodies import ImmersedBodyConfig
+from simbi.core.types.typing import ExpressionDict
 from simbi.functional.helpers import to_tuple_of_tuples
 from ...core.config.bodies import BodySystemConfig
 from .constants import (
@@ -196,9 +198,14 @@ class IOSettings(BaseSettings):
     checkpoint_interval: float
     checkpoint_index: int
     log_output: bool
-    hydro_source_lib: Optional[Path] = None
-    gravity_source_lib: Optional[Path] = None
-    boundary_source_lib: Optional[Path] = None
+    hydro_expressions: Optional[ExpressionDict] = None
+    gravity_expressions: Optional[ExpressionDict] = None
+    bx1_outer_expressions: Optional[ExpressionDict] = None
+    bx1_inner_expressions: Optional[ExpressionDict] = None
+    bx2_outer_expressions: Optional[ExpressionDict] = None
+    bx2_inner_expressions: Optional[ExpressionDict] = None
+    bx3_outer_expressions: Optional[ExpressionDict] = None
+    bx3_inner_expressions: Optional[ExpressionDict] = None
 
     @staticmethod
     def try_get_path(path: str) -> Optional[Path]:
@@ -212,9 +219,14 @@ class IOSettings(BaseSettings):
             checkpoint_interval=setup["checkpoint_interval"],
             checkpoint_index=setup["checkpoint_index"],
             log_output=setup["log_output"],
-            hydro_source_lib=IOSettings.try_get_path(setup["hydro_source_lib"]),
-            gravity_source_lib=IOSettings.try_get_path(setup["gravity_source_lib"]),
-            boundary_source_lib=IOSettings.try_get_path(setup["boundary_source_lib"]),
+            hydro_expressions=setup.get("hydro_expressions"),
+            gravity_expressions=setup.get("gravity_expressions"),
+            bx1_outer_expressions=setup.get("bx1_outer_expressions"),
+            bx1_inner_expressions=setup.get("bx1_inner_expressions"),
+            bx2_outer_expressions=setup.get("bx2_outer_expressions"),
+            bx2_inner_expressions=setup.get("bx2_inner_expressions"),
+            bx3_outer_expressions=setup.get("bx3_outer_expressions"),
+            bx3_inner_expressions=setup.get("bx3_inner_expressions"),
         )
 
     def to_execution_dict(self) -> dict[str, Any]:
@@ -227,15 +239,14 @@ class IOSettings(BaseSettings):
             "checkpoint_interval": self.checkpoint_interval,
             "checkpoint_index": self.checkpoint_index,
             "log_output": self.log_output,
-            "hydro_source_lib": (
-                str(self.hydro_source_lib) if self.hydro_source_lib else ""
-            ),
-            "gravity_source_lib": (
-                str(self.gravity_source_lib) if self.gravity_source_lib else ""
-            ),
-            "boundary_source_lib": (
-                str(self.boundary_source_lib) if self.boundary_source_lib else ""
-            ),
+            "hydro_expressions": self.hydro_expressions,
+            "gravity_expressions": self.gravity_expressions,
+            "bx1_outer_expressions": self.bx1_outer_expressions,
+            "bx1_inner_expressions": self.bx1_inner_expressions,
+            "bx2_outer_expressions": self.bx2_outer_expressions,
+            "bx2_inner_expressions": self.bx2_inner_expressions,
+            "bx3_outer_expressions": self.bx3_outer_expressions,
+            "bx3_inner_expressions": self.bx3_inner_expressions,
         }
 
 

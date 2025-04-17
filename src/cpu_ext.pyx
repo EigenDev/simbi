@@ -7,6 +7,7 @@ cdef ConfigDict convert_python_to_config_dict(py_dict):
     cdef ConfigDict result
     cdef vector[double] vec_of_floating
     cdef vector[string] vec_of_strings
+    cdef vector[int] vec_of_integers
     cdef vector[vector[double]] vec_of_vec_floating
     cdef cpplist[ConfigDict] vec_dict
     cdef pair[double, double] tuple_type
@@ -32,11 +33,16 @@ cdef ConfigDict convert_python_to_config_dict(py_dict):
             for x in value:
                 vec_of_vec_floating.push_back([<double>y for y in x])
             result[cpp_key] = ConfigValue(vec_of_vec_floating)
-        elif isinstance(value, (list, tuple, np.ndarray)) and all(isinstance(x, (int, float)) for x in value):
+        elif isinstance(value, (list, tuple, np.ndarray)) and all(isinstance(x, float) for x in value):
             # Convert numeric lists
             for x in value:
                 vec_of_floating.push_back(<double>x)
             result[cpp_key] = ConfigValue(vec_of_floating)
+        elif isinstance(value, (list, tuple, np.ndarray)) and all(isinstance(x, int) for x in value):
+            # Convert integer lists
+            for x in value:
+                vec_of_integers.push_back(<int>x)
+            result[cpp_key] = ConfigValue(vec_of_integers)
         elif isinstance(value, (list, tuple, np.ndarray)) and all(isinstance(x, str) for x in value):
             # Convert string lists
             for x in value:

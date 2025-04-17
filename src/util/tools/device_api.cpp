@@ -285,9 +285,9 @@ namespace simbi {
                 devProgram_t* program,
                 const char* source,
                 const char* prog_name,
-                int num_options,
-                const char** options,
-                const char** option_vals
+                int num_headers,
+                const char* const* headers,
+                const char* const* include_names
             )
             {
 #if GPU_CODE
@@ -295,24 +295,35 @@ namespace simbi {
                     program,
                     source,
                     prog_name,
-                    num_options,
-                    options,
-                    option_vals
+                    num_headers,
+                    headers,
+                    include_names
                 ));
                 error::check_err(status, "Failed to create program");
 #endif
             }
 
-            int
-            program(devProgram_t program, int num_options, const char** options)
+            int compileProgram(
+                devProgram_t program,
+                int num_options,
+                const char* const* options
+            )
             {
 #if GPU_CODE
                 auto status = error::status_t(
                     devCompileProgram(program, num_options, options)
                 );
-                error::check_err(status, "Failed to program");
+                error::check_err(status, "Failed to JIT compile program");
 #endif
                 return 0;
+            }
+
+            void profilerStart()
+            {
+#if GPU_CODE
+                auto status = error::status_t(devProfilerStart());
+                error::check_err(status, "Failed to start profiler");
+#endif
             }
 
             void getProgramLogSize(devProgram_t program, size_t* size)

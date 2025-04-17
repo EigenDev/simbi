@@ -49,6 +49,7 @@ cdef extern from "build_options.hpp":
             ConfigValue(vector[double] value) except +
             ConfigValue(vector[vector[double]] value) except +
             ConfigValue(vector[string] value) except +
+            ConfigValue(vector[int] value) except +
             ConfigValue(ConfigDict value) except +
             ConfigValue(cpplist[ConfigDict] value) except +
             ConfigValue(pair[double, double] value) except +

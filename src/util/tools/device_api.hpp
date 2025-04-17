@@ -200,15 +200,16 @@ namespace simbi {
                 devProgram_t* program,
                 const char* source,
                 const char* prog_name,
-                int num_options,
-                const char** options,
-                const char** option_vals
+                int num_headers,
+                const char* const* headers,
+                const char* const* include_names
             );
-            int program(
+            int compileProgram(
                 devProgram_t program,
                 int num_options,
-                const char** options
+                const char* const* options
             );
+            void profilerStart();
             void getProgramLogSize(devProgram_t program, size_t* size);
             void getProgramLog(devProgram_t program, char* log);
             void getProgramIRSize(devProgram_t program, size_t* size);

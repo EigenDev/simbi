@@ -69,7 +69,6 @@ struct InitialConditions {
     std::string data_directory, coord_system, solver;
     std::string x1_spacing, x2_spacing, x3_spacing, regime;
     std::string hydro_source_lib, gravity_source_lib, boundary_source_lib;
-    std::string hydro_source_code, gravity_source_code, boundary_source_code;
     std::string spatial_order, temporal_order;
     std::vector<std::string> boundary_conditions;
     std::pair<real, real> x1bounds;
@@ -78,6 +77,13 @@ struct InitialConditions {
     bool enable_peer_access{true}, managed_memory{false};
     simbi::ConfigDict config;
     std::vector<std::pair<simbi::BodyType, simbi::ConfigDict>> immersed_bodies;
+
+    // user-defined expressions to be evaluated
+    simbi::ConfigDict bx1_outer_expressions, bx1_inner_expressions;
+    simbi::ConfigDict bx2_outer_expressions, bx2_inner_expressions;
+    simbi::ConfigDict bx3_outer_expressions, bx3_inner_expressions;
+    simbi::ConfigDict hydro_source_expressions;
+    simbi::ConfigDict gravity_source_expressions;
 
     std::tuple<lint, lint, lint> active_zones() const
     {
@@ -182,6 +188,9 @@ struct InitialConditions {
 
             // Build immersed bodies (if present)
             build_immersed_bodies(init);
+
+            // Build source expressions
+            build_source_expressions(init);
 
             return init;
         }
@@ -356,6 +365,47 @@ struct InitialConditions {
                 init.get<std::string>("gravity_source_lib", "");
             init.boundary_source_lib =
                 init.get<std::string>("boundary_source_lib", "");
+        }
+
+        static void build_source_expressions(InitialConditions& init)
+        {
+            // Load expressions for boundary conditions
+            if (init.contains("bx1_inner_expressions")) {
+                init.bx1_inner_expressions =
+                    init.get_dict("bx1_inner_expressions");
+            }
+            if (init.contains("bx1_outer_expressions")) {
+                init.bx1_outer_expressions =
+                    init.get_dict("bx1_outer_expressions");
+            }
+            if (init.contains("bx2_inner_expressions")) {
+                init.bx2_inner_expressions =
+                    init.get_dict("bx2_inner_expressions");
+            }
+            if (init.contains("bx2_outer_expressions")) {
+                init.bx2_outer_expressions =
+                    init.get_dict("bx2_outer_expressions");
+            }
+            if (init.contains("bx3_inner_expressions")) {
+                init.bx3_inner_expressions =
+                    init.get_dict("bx3_inner_expressions");
+            }
+            if (init.contains("bx3_outer_expressions")) {
+                init.bx3_outer_expressions =
+                    init.get_dict("bx3_outer_expressions");
+            }
+
+            // Load expressions for hydro sources
+            if (init.contains("hydro_source_expressions")) {
+                init.hydro_source_expressions =
+                    init.get_dict("hydro_source_expressions");
+            }
+
+            // Load expressions for gravity sources
+            if (init.contains("gravity_source_expressions")) {
+                init.gravity_source_expressions =
+                    init.get_dict("gravity_source_expressions");
+            }
         }
 
         static void build_immersed_bodies(InitialConditions& init)

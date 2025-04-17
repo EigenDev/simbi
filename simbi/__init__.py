@@ -28,6 +28,8 @@ from .core.config.bodies import (
     BinaryConfig,
     BinaryComponentConfig,
 )
+
+from .core.protocol.expression import Expr, serialize_expressions
 from .detail import bcolors
 
 logger = logging.logger
@@ -59,5 +61,7 @@ __all__ = [
     "compute_num_polar_zones",
     "calc_centroid",
     "calc_any_mean",
+    "Expr",
+    "serialize_expressions",
 ]
 __version__ = ".".join(map(str, __version_tuple__))

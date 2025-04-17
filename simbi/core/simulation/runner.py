@@ -107,7 +107,21 @@ class SimulationRunner:
             return x
 
         for key, param in sim_state.items():
-            if key not in ["bfield", "staggered_bfields", "bodies", "body_system"]:
+            if key in [
+                "bx1_inner_expressions",
+                "bx1_outer_expressions",
+                "bx2_inner_expressions",
+                "bx2_outer_expressions",
+                "bx3_inner_expressions",
+                "bx3_outer_expressions",
+                "gravity_source_expressions",
+                "hydro_source_expressions",
+            ]:
+                if not param:
+                    continue
+                val_str = "user-defined source expressions"
+                logger.info(f"{key.ljust(30, '.')} {val_str}")
+            elif key not in ["bfield", "staggered_bfields", "bodies", "body_system"]:
                 val_str = format_param(param)
                 logger.info(f"{key.ljust(30, '.')} {val_str}")
 

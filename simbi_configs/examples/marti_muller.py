@@ -1,5 +1,5 @@
-from simbi import BaseConfig, DynamicArg, simbi_property, simbi_class_property
-from simbi.typing import InitialStateType
+from simbi import BaseConfig, DynamicArg, simbi_property, serialize_expressions, Expr
+from simbi.typing import InitialStateType, ExpressionDict
 from typing import Sequence, Callable, Generator
 
 
@@ -68,23 +68,28 @@ class MartiMuller(BaseConfig):
         return lambda t: 0.5
 
     @simbi_property
-    def boundary_sources(self) -> str:
-        return f"""
-    #include <cmath>
-extern "C" {{
-    void bx1_outer_source(double x, double t, double arr[]){{
-        double rho_ambient = 0.1;
-        double v_ambient   = 0.0;
-        double lorentz     = 1.0 / std::sqrt(1.0 - v_ambient * v_ambient);
-        double pressure    = 1.e-10;
-        double enthalpy    = 1.0 + {self.adiabatic_index} * pressure / rho_ambient / ({self.adiabatic_index} - 1.0);
-        double d = rho_ambient * lorentz;
-        double m = d * lorentz * v_ambient * enthalpy;
-        double e = d * lorentz * enthalpy - pressure - d;
-        arr[0] = d;   // density
-        arr[1] = m;   // x1-momentum
-        arr[2] = e;   // energy
-        arr[3] = 0.0; // scalar concentration
-    }}
-}}
-        """
+    def bx1_outer_expressions(self) -> ExpressionDict:
+        x = Expr.x1()
+        t = Expr.t()
+        gamma = float(self.config.adiabatic_index)
+
+        rho_ambient = 0.1
+        v_ambient = 0.0
+        pressure = 1e-10
+
+        # build expressions
+        lorentz = 1.0 / (1.0 - v_ambient * v_ambient) ** 0.5
+        enthalpy = 1.0 + gamma * pressure / rho_ambient / (gamma - 1.0)
+
+        # final expressions for each component
+        density = Expr(rho_ambient * lorentz)
+        momentum = Expr(rho_ambient * lorentz * lorentz * enthalpy * v_ambient)
+        energy = Expr(
+            rho_ambient * lorentz * lorentz * enthalpy
+            - pressure
+            - rho_ambient * lorentz
+        )
+        scalar = Expr(0.0)
+
+        # serialize into our format
+        return serialize_expressions([density, momentum, energy, scalar])

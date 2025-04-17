@@ -42,8 +42,8 @@ def type_check_input(file: Path) -> None:
         spinner.start()
         # wait a few seconds before moving forward
         # to give user a chance to read the message
-        time.sleep(1.1)
-        spinner.stop()
+        time.sleep(1)
+        spinner.succeed("Type checking completed successfully")
     except Exception as e:
         spinner.stop()
         raise e

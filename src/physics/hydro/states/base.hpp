@@ -297,8 +297,6 @@ namespace simbi {
         )
         {
             auto& derived = static_cast<Derived&>(*this);
-            // load the user-defined functions if any
-            io().load_functions();
 
             cons_.resize(this->total_zones()).reshape({nz(), ny(), nx()});
             prims_.resize(this->total_zones()).reshape({nz(), ny(), nx()});

@@ -9,4 +9,5 @@ __all__ = [
     "PrimitiveStateFunc",
     "StateGenerator",
     "FloatorArray",
+    "ExpressionDict",
 ]

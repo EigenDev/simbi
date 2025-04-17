@@ -330,7 +330,7 @@ namespace simbi {
                     table.setProgress(
                         static_cast<int>((sim_state.time() / end_time) * 100.0)
                     );
-                    table.print();
+                    // table.print();
                 };
             };
 

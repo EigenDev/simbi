@@ -1,4 +1,3 @@
-from .source import SourceManager
 from .cli import CLIManager
 from .problem_io import ProblemIO
 from .property import (
@@ -10,7 +9,6 @@ from .property import (
 )
 
 __all__ = [
-    "SourceManager",
     "CLIManager",
     "ProblemIO",
     "simbi_property",

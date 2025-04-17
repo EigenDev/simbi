@@ -7,7 +7,7 @@ from ..types.typing import (
     PureHydroStateGenerator,
     GasStateGenerator,
 )
-from typing import Sequence, Optional, Union, Any, Generator, TypeGuard, cast
+from typing import Sequence, Optional, Union, Any, TypeGuard, cast
 from ...functional import Maybe, to_iterable
 from numpy.typing import NDArray
 from pathlib import Path
@@ -17,7 +17,7 @@ def is_mhd_generator(gen: InitialStateType) -> TypeGuard[MHDStateGenerators]:
     """Type guard to narrow generator function type for MHD problems"""
     try:
         return isinstance(gen, tuple) and len(gen) == 4
-    except:
+    except TypeError:
         return False
 
 
@@ -34,7 +34,7 @@ class InitializationConfig:
 
     initial_primitive_gen: InitialStateType
     resolution: Sequence[int]
-    bounds: Union[Sequence[Sequence[float]] | Sequence[float]]
+    bounds: Union[Sequence[Sequence[float]], Sequence[float]]
     checkpoint_file: Optional[str | Path] = None
 
     def evaluate(

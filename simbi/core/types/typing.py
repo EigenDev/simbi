@@ -33,3 +33,5 @@ PrimitiveStateFunc = (
 StateGenerator = GasStateGenerator | GeneratorTuple
 
 FloatOrArray = Union[float, NDArray[np.floating[Any]]]
+
+ExpressionDict = dict[str, object]
