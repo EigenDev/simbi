@@ -1,21 +1,36 @@
 from __future__ import annotations
-from typing import Any, Callable, Dict, List, Optional, Set, Tuple, TypeVar, Union
+from typing import Any, Callable, Optional, Set, TypeVar, Union
 import math
 
 # type defs for clarity
 NodeId = int
 OpType = str
-NodeAttrs = Dict[str, Any]
-NodeDef = Tuple[OpType, Tuple[NodeId, ...], NodeAttrs]
+NodeAttrs = dict[str, Any]
+NodeDef = tuple[OpType, tuple[NodeId, ...], NodeAttrs]
 T = TypeVar("T")
-GraphInputs = Dict[str, float]
+GraphInputs = dict[str, float]
+
+__all__ = [
+    "ExprGraph",
+    "Expr",
+    "constant",
+    "variable",
+    "parameter",
+    "sqrt",
+    "sin",
+    "cos",
+]
+
+X1_ALIASES = ["x", "r", "x1"]
+X2_ALIASES = ["y", "theta", "x2", "phi"]
+X3_ALIASES = ["z", "phi", "x3"]
 
 
 class ExprGraph:
     """Immutable directed acyclic graph of expressions."""
 
     def __init__(self) -> None:
-        self._nodes: Dict[NodeId, NodeDef] = {}
+        self._nodes: dict[NodeId, NodeDef] = {}
         self._next_id: int = 0
 
     def add_node(self, op_type: str, *inputs: NodeId, **attrs: Any) -> NodeId:
@@ -29,11 +44,11 @@ class ExprGraph:
         """Get node definition by ID."""
         return self._nodes.get(node_id)
 
-    def compile(self, outputs: List[Expr]) -> CompiledExpr:
+    def compile(self, outputs: list[Expr]) -> CompiledExpr:
         """Prepare the graph for evaluation with specific outputs."""
         return CompiledExpr(self, outputs)
 
-    def nodes(self) -> Dict[NodeId, NodeDef]:
+    def nodes(self) -> dict[NodeId, NodeDef]:
         """Get all nodes in the graph (immutable copy)."""
         return dict(self._nodes)
 
@@ -55,7 +70,7 @@ class Expr:
         """Get the node ID in the graph."""
         return self._node_id
 
-    # Arithmetic operators
+    # arithmetic operators
     def __add__(self, other: Union[Expr, float, int]) -> Expr:
         other_expr = self._ensure_expr(other)
         return Expr(
@@ -93,7 +108,7 @@ class Expr:
     def __neg__(self) -> Expr:
         return Expr(self._graph, self._graph.add_node("negate", self._node_id))
 
-    # Comparison operators
+    # comparison operators
     def __lt__(self, other: Union[Expr, float, int]) -> Expr:
         other_expr = self._ensure_expr(other)
         return Expr(
@@ -108,13 +123,20 @@ class Expr:
 
     def _ensure_expr(self, value: Union[Expr, float, int]) -> Expr:
         """Convert a value to an expression in this graph."""
-        if isinstance(value, Expr) and value._graph is self._graph:
-            return value
+        if isinstance(value, Expr):
+            if value._graph is self._graph:
+                return value
+            else:
+                raise ValueError(
+                    "Expressions from different graphs cannot be combined directly. "
+                    "Consider creating a new graph and rebuilding both expressions."
+                )
+
         return constant(float(value), self._graph)
 
     # pattern matching
     def match(
-        self, patterns: Dict[str, Callable[[Expr, Tuple[NodeId, ...], NodeAttrs], T]]
+        self, patterns: dict[str, Callable[[Expr, tuple[NodeId, ...], NodeAttrs], T]]
     ) -> Optional[T]:
         """Pattern match on node type."""
         node_def = self._graph.get_node(self._node_id)
@@ -125,7 +147,7 @@ class Expr:
         handler = patterns.get(op, patterns.get("default"))
         return handler(self, inputs, attrs) if handler else None
 
-    # Function composition
+    # function composition
     def pipe(self, *funcs: Callable[[Expr], Expr]) -> Expr:
         """Apply a sequence of functions to this expression."""
         result = self
@@ -134,7 +156,7 @@ class Expr:
         return result
 
 
-# Factory functions
+# factory functions
 def constant(value: float, graph: Optional[ExprGraph] = None) -> Expr:
     """Create a constant expression."""
     g = graph or ExprGraph()
@@ -153,7 +175,7 @@ def parameter(idx: int, graph: Optional[ExprGraph] = None) -> Expr:
     return Expr(g, g.add_node("parameter", param_idx=idx))
 
 
-# Math functions
+# math functions
 def sqrt(expr: Expr) -> Expr:
     """Square root function."""
     return Expr(expr._graph, expr._graph.add_node("sqrt", expr._node_id))
@@ -169,8 +191,67 @@ def cos(expr: Expr) -> Expr:
     return Expr(expr._graph, expr._graph.add_node("cos", expr._node_id))
 
 
-# Higher-order functions
-def map_expr(f: Callable[[Expr], Expr], exprs: List[Expr]) -> List[Expr]:
+def tan(expr: Expr) -> Expr:
+    """Tangent functions"""
+    return Expr(expr._graph, expr._graph.add_node("tan", expr._node_id))
+
+
+def log(expr: Expr) -> Expr:
+    """Natural log"""
+    return Expr(expr._graph, expr._graph.add_node("log", expr._node_id))
+
+
+def log10(expr: Expr) -> Expr:
+    """Base 10 log"""
+    return Expr(expr._graph, expr._graph.add_node("log10", expr._node_id))
+
+
+def asin(expr: Expr) -> Expr:
+    """Inverse sine function."""
+    return Expr(expr._graph, expr._graph.add_node("asin", expr._node_id))
+
+
+def acos(expr: Expr) -> Expr:
+    """Inverse cosine function"""
+    return Expr(expr._graph, expr._graph.add_node("acos", expr._node_id))
+
+
+def atan(expr: Expr) -> Expr:
+    """Inverse tangent function"""
+    return Expr(expr._graph, expr._graph.add_node("atan", expr._node_id))
+
+
+def exp(expr: Expr) -> Expr:
+    """Exponential function."""
+    return Expr(expr._graph, expr._graph.add_node("exp", expr._node_id))
+
+
+def max_expr(expr1: Expr, expr2: Expr) -> Expr:
+    """Maximum of two expressions."""
+    return Expr(
+        expr1._graph, expr1._graph.add_node("max", expr1._node_id, expr2._node_id)
+    )
+
+
+def min_expr(expr1: Expr, expr2: Expr) -> Expr:
+    """Minimum of two expressions."""
+    return Expr(
+        expr1._graph, expr1._graph.add_node("min", expr1._node_id, expr2._node_id)
+    )
+
+
+def if_then_else(condition: Expr, true_case: Expr, false_case: Expr) -> Expr:
+    """If-then-else expression."""
+    return Expr(
+        condition._graph,
+        condition._graph.add_node(
+            "if_then_else", condition._node_id, true_case._node_id, false_case._node_id
+        ),
+    )
+
+
+# higher-order functions
+def map_expr(f: Callable[[Expr], Expr], exprs: list[Expr]) -> list[Expr]:
     """Map a function over expressions."""
     return [f(expr) for expr in exprs]
 
@@ -187,21 +268,21 @@ def compose(*funcs: Callable[[T], T]) -> Callable[[T], T]:
     return composed
 
 
-# Evaluator
+# evaluator
 class CompiledExpr:
     """Compiled expression for efficient evaluation."""
 
-    def __init__(self, graph: ExprGraph, outputs: List[Expr]) -> None:
+    def __init__(self, graph: ExprGraph, outputs: list[Expr]) -> None:
         self._graph: ExprGraph = graph
-        self._output_ids: List[NodeId] = [out._node_id for out in outputs]
-        # Topologically sort nodes for evaluation
-        self._eval_order: List[NodeId] = self._sort_nodes()
+        self._output_ids: list[NodeId] = [out._node_id for out in outputs]
+        # topologically sort nodes for evaluation
+        self._eval_order: list[NodeId] = self._sort_nodes()
 
-    def _sort_nodes(self) -> List[NodeId]:
+    def _sort_nodes(self) -> list[NodeId]:
         """Topologically sort nodes for evaluation."""
-        # Identify nodes needed for outputs
+        # identify nodes needed for outputs
         needed_nodes: Set[NodeId] = set()
-        to_process: List[NodeId] = list(self._output_ids)
+        to_process: list[NodeId] = list(self._output_ids)
 
         while to_process:
             node_id = to_process.pop()
@@ -214,8 +295,8 @@ class CompiledExpr:
                 _, inputs, _ = node_def
                 to_process.extend(inputs)
 
-        # Topological sort
-        result: List[NodeId] = []
+        # topological sort
+        result: list[NodeId] = []
         visited: Set[NodeId] = set()
         temp_visited: Set[NodeId] = set()
 
@@ -242,12 +323,12 @@ class CompiledExpr:
 
         return result
 
-    def evaluate(self, **inputs: float) -> List[float]:
+    def evaluate(self, **inputs: float) -> list[float]:
         """Evaluate the expression with given inputs."""
-        # Map from node IDs to computed values
-        values: Dict[NodeId, float] = {}
+        # map from node IDs to computed values
+        values: dict[NodeId, float] = {}
 
-        # Evaluate nodes in topological order
+        # evaluate nodes in topological order
         for node_id in self._eval_order:
             node_def = self._graph.get_node(node_id)
             if not node_def:
@@ -255,13 +336,14 @@ class CompiledExpr:
 
             op, input_ids, attrs = node_def
 
-            # Handle different node types
+            # handle different node types
             if op == "constant":
                 values[node_id] = attrs["value"]
             elif op == "variable":
                 values[node_id] = inputs.get(attrs["name"], 0.0)
             elif op == "parameter":
                 values[node_id] = inputs.get(f"param_{attrs['param_idx']}", 0.0)
+            # basic arithmetic
             elif op == "add":
                 values[node_id] = values[input_ids[0]] + values[input_ids[1]]
             elif op == "subtract":
@@ -271,9 +353,10 @@ class CompiledExpr:
             elif op == "divide":
                 denominator = values[input_ids[1]]
                 if denominator == 0.0:
-                    values[node_id] = 0.0  # Handle division by zero
+                    values[node_id] = 0.0  # we handle division by zero
                 else:
                     values[node_id] = values[input_ids[0]] / denominator
+            # math functions
             elif op == "power":
                 values[node_id] = values[input_ids[0]] ** values[input_ids[1]]
             elif op == "negate":
@@ -281,24 +364,48 @@ class CompiledExpr:
             elif op == "sqrt":
                 val = values[input_ids[0]]
                 if val < 0.0:
-                    values[node_id] = 0.0  # Handle negative sqrt
+                    values[node_id] = 0.0  # we handle negative sqrt
                 else:
                     values[node_id] = math.sqrt(val)
             elif op == "sin":
                 values[node_id] = math.sin(values[input_ids[0]])
             elif op == "cos":
                 values[node_id] = math.cos(values[input_ids[0]])
-            # More operations can be added here
+            elif op == "tan":
+                values[node_id] = math.tan(values[input_ids[0]])
+            elif op == "log":
+                values[node_id] = math.log(values[input_ids[0]])
+            elif op == "log10":
+                values[node_id] = math.log10(values[input_ids[0]])
+            elif op == "asin":
+                values[node_id] = math.asin(values[input_ids[0]])
+            elif op == "acos":
+                values[node_id] = math.acos(values[input_ids[0]])
+            elif op == "atan":
+                values[node_id] = math.atan(values[input_ids[0]])
+            elif op == "exp":
+                values[node_id] = math.exp(values[input_ids[0]])
+            # binary ops
+            elif op == "max":
+                values[node_id] = max(values[input_ids[0]], values[input_ids[1]])
+            elif op == "min":
+                values[node_id] = min(values[input_ids[0]], values[input_ids[1]])
+            elif op == "if_then_else":
+                condition = values[input_ids[0]]
+                if condition:
+                    values[node_id] = values[input_ids[1]]
+                else:
+                    values[node_id] = values[input_ids[2]]
 
-        # Return output values
+        # return output values
         return [values[out_id] for out_id in self._output_ids]
 
-    def serialize(self) -> Dict[str, Any]:
+    def serialize(self) -> dict[str, object]:
         """Serialize the compiled expression for C++ evaluation."""
-        expressions: List[Dict[str, Any]] = []
+        expressions: list[dict[str, Any]] = []
 
-        # Map from our internal node ids to serialized indices
-        node_map: Dict[NodeId, int] = {}
+        # map from our internal node ids to serialized indices
+        node_map: dict[NodeId, int] = {}
 
         for node_id in self._eval_order:
             node_def = self._graph.get_node(node_id)
@@ -309,15 +416,15 @@ class CompiledExpr:
             node_idx = len(expressions)
             node_map[node_id] = node_idx
 
-            # Convert to serialized format
+            # convert to serialized format
             if op == "constant":
                 expressions.append({"op": "CONSTANT", "value": attrs["value"]})
             elif op == "variable":
-                if attrs["name"] == "x":
+                if attrs["name"] in X1_ALIASES:
                     expressions.append({"op": "VARIABLE_X1"})
-                elif attrs["name"] == "y":
+                elif attrs["name"] in X2_ALIASES:
                     expressions.append({"op": "VARIABLE_X2"})
-                elif attrs["name"] == "z":
+                elif attrs["name"] in X3_ALIASES:
                     expressions.append({"op": "VARIABLE_X3"})
                 elif attrs["name"] == "t":
                     expressions.append({"op": "VARIABLE_T"})
@@ -371,9 +478,71 @@ class CompiledExpr:
                 expressions.append(
                     {"op": "COS", "left": node_map[input_ids[0]], "right": -1}
                 )
-            # Add other operations as needed
+            elif op == "tan":
+                expressions.append(
+                    {"op": "TAN", "left": node_map[input_ids[0]], "right": -1}
+                )
+            elif op == "log":
+                expressions.append(
+                    {"op": "LOG", "left": node_map[input_ids[0]], "right": -1}
+                )
+            elif op == "log10":
+                expressions.append(
+                    {"op": "LOG10", "left": node_map[input_ids[0]], "right": -1}
+                )
+            elif op == "asin":
+                expressions.append(
+                    {"op": "ASIN", "left": node_map[input_ids[0]], "right": -1}
+                )
+            elif op == "acos":
+                expressions.append(
+                    {"op": "ACOS", "left": node_map[input_ids[0]], "right": -1}
+                )
+            elif op == "atan":
+                expressions.append(
+                    {"op": "ATAN", "left": node_map[input_ids[0]], "right": -1}
+                )
+            elif op == "exp":
+                expressions.append(
+                    {"op": "EXP", "left": node_map[input_ids[0]], "right": -1}
+                )
+            elif op == "power":
+                expressions.append(
+                    {
+                        "op": "POW",
+                        "left": node_map[input_ids[0]],
+                        "right": node_map[input_ids[1]],
+                    }
+                )
+            elif op == "max":
+                expressions.append(
+                    {
+                        "op": "MAX",
+                        "left": node_map[input_ids[0]],
+                        "right": node_map[input_ids[1]],
+                    }
+                )
+            elif op == "min":
+                expressions.append(
+                    {
+                        "op": "MIN",
+                        "left": node_map[input_ids[0]],
+                        "right": node_map[input_ids[1]],
+                    }
+                )
+            elif op == "if_then_else":
+                expressions.append(
+                    {
+                        "op": "IF_THEN_ELSE",
+                        "condition": node_map[input_ids[0]],
+                        "true_case": node_map[input_ids[1]],
+                        "false_case": node_map[input_ids[2]],
+                    }
+                )
+            else:
+                raise ValueError(f"Unknown operation: {op}")
 
-        # Map output indices
+        # map output indices
         output_indices = [node_map[out_id] for out_id in self._output_ids]
 
         return {"expressions": expressions, "output_indices": output_indices}

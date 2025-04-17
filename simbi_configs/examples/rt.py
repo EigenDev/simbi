@@ -1,5 +1,7 @@
 import math
-from simbi import BaseConfig, DynamicArg, simbi_property, simbi_class_property
+from simbi.core.types.typing import ExpressionDict
+import simbi.expression as expr
+from simbi import BaseConfig, DynamicArg, simbi_property
 from simbi.typing import InitialStateType
 from typing import Sequence, Any, Generator
 
@@ -71,16 +73,17 @@ class RayleighTaylor(BaseConfig):
     def adiabatic_index(self) -> float:
         return 7.0 / 5.0
 
-    @simbi_class_property
-    def gravity_sources(self) -> str:
-        return f"""
-extern "C" {{   
-    void gravity_source(double x, double y, double t, double arr[]) {{
-        arr[1] = 0.0;
-        arr[2] = -0.1;
-    }}
-}}
-    """
+    @simbi_property
+    def gravity_source_expressions(self) -> ExpressionDict:
+        graph = expr.ExprGraph()
+        x = expr.variable("x", graph)
+        y = expr.variable("y", graph)
+        t = expr.variable("t", graph)
+
+        x_comp = expr.constant(0.0, graph)
+        y_comp = expr.constant(-self.g0, graph)
+        compiled_expr = graph.compile([x_comp, y_comp])
+        return compiled_expr.serialize()
 
     @simbi_property
     def regime(self) -> str:

@@ -1,4 +1,5 @@
-from simbi import BaseConfig, DynamicArg, simbi_property, serialize_expressions, Expr
+import simbi.expression as expr
+from simbi import BaseConfig, DynamicArg, simbi_property
 from simbi.typing import InitialStateType, ExpressionDict
 from typing import Sequence, Callable, Generator
 
@@ -69,27 +70,36 @@ class MartiMuller(BaseConfig):
 
     @simbi_property
     def bx1_outer_expressions(self) -> ExpressionDict:
-        x = Expr.x1()
-        t = Expr.t()
-        gamma = float(self.config.adiabatic_index)
+        graph = expr.ExprGraph()
 
-        rho_ambient = 0.1
-        v_ambient = 0.0
-        pressure = 1e-10
+        x = expr.variable("x1", graph)
+        t = expr.variable("t", graph)
+
+        # const values
+        gamma = expr.constant(float(self.config.adiabatic_index), graph)
+        rho_ambient = expr.constant(0.1, graph)
+        v_ambient = expr.constant(0.0, graph)
+        pressure = expr.constant(1e-10, graph)
 
         # build expressions
-        lorentz = 1.0 / (1.0 - v_ambient * v_ambient) ** 0.5
-        enthalpy = 1.0 + gamma * pressure / rho_ambient / (gamma - 1.0)
+        v_squared = v_ambient * v_ambient
+        one = expr.constant(1.0, graph)
+        lorentz = one / (one - v_squared) ** 0.5
+
+        gamma_minus_1 = gamma - one
+        enthalpy = one + gamma * pressure / rho_ambient / gamma_minus_1
 
         # final expressions for each component
-        density = Expr(rho_ambient * lorentz)
-        momentum = Expr(rho_ambient * lorentz * lorentz * enthalpy * v_ambient)
-        energy = Expr(
+        density = rho_ambient * lorentz
+        momentum = rho_ambient * lorentz * lorentz * enthalpy * v_ambient
+        energy = (
             rho_ambient * lorentz * lorentz * enthalpy
             - pressure
             - rho_ambient * lorentz
         )
-        scalar = Expr(0.0)
+        scalar = expr.constant(0.0, graph)
 
-        # serialize into our format
-        return serialize_expressions([density, momentum, energy, scalar])
+        # compile the expressions
+        compiled_expr = graph.compile([density, momentum, energy, scalar])
+
+        return compiled_expr.serialize()

@@ -50,11 +50,12 @@
 #define BASE_HPP
 
 #include "build_options.hpp"   // for real, luint, global::managed_memory, use...
-#include "core/managers/boundary_manager.hpp"       // for boundary_manager
-#include "core/managers/exec_policy_manager.hpp"    // for ExecutionPolicy
-#include "core/managers/io_manager.hpp"             // for IOManager
-#include "core/managers/solver_manager.hpp"         // for SolverManager
-#include "core/managers/time_manager.hpp"           // for TimeManager
+#include "core/managers/boundary_manager.hpp"      // for boundary_manager
+#include "core/managers/exec_policy_manager.hpp"   // for ExecutionPolicy
+#include "core/managers/io_manager.hpp"            // for IOManager
+#include "core/managers/solver_manager.hpp"        // for SolverManager
+#include "core/managers/time_manager.hpp"          // for TimeManager
+#include "core/types/containers/vector.hpp"
 #include "core/types/utility/init_conditions.hpp"   // for InitialConditions
 #include "core/types/utility/managed.hpp"           // for Managed
 #include "geometry/mesh/mesh.hpp"                   // for Mesh
@@ -227,13 +228,18 @@ namespace simbi {
             }
 
             const auto c = cell.centroid();
-            conserved_t gravity;
+            spatial_vector_t<real, Dims> gravity_vec;
             const auto* iof = io_manager_.get();
             if constexpr (Dims == 1) {
-                iof->call_gravity_source(c[0], time(), gravity.data());
+                iof->call_gravity_source(c[0], time(), gravity_vec.data());
             }
             else if constexpr (Dims == 2) {
-                iof->call_gravity_source(c[0], c[1], time(), gravity.data());
+                iof->call_gravity_source(
+                    c[0],
+                    c[1],
+                    time(),
+                    gravity_vec.data()
+                );
             }
             else {
                 iof->call_gravity_source(
@@ -241,13 +247,14 @@ namespace simbi {
                     c[1],
                     c[2],
                     time(),
-                    gravity.data()
+                    gravity_vec.data()
                 );
             }
 
-            const auto dp    = prims.rho() * gravity.momentum();
+            const auto dp    = prims.labframe_density() * gravity_vec;
             const auto v_old = prims.velocity();
-            const auto v_new = (prims.spatial_momentum() + dp) / prims.rho();
+            const auto v_new =
+                (prims.spatial_momentum(gamma_) + dp) / prims.rho();
             const auto v_avg = 0.5 * (v_old + v_new);
             const auto dE    = dp.dot(v_avg);
 

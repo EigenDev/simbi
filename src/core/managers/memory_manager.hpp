@@ -164,6 +164,22 @@ namespace simbi {
             return *this;
         }
 
+        // move assignment
+        memory_manager& operator=(memory_manager&& other) noexcept
+        {
+            if (this != &other) {
+                host_data_   = std::move(other.host_data_);
+                device_data_ = std::move(other.device_data_);
+                size_        = other.size_;
+                is_synced_   = other.is_synced_;
+
+                // clear the other
+                other.size_      = 0;
+                other.is_synced_ = true;
+            }
+            return *this;
+        }
+
         // destructor (not default so GPU doesn't complain)
         ~memory_manager() {};
 

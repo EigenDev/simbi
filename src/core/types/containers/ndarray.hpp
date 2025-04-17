@@ -89,8 +89,11 @@ namespace simbi {
             this->strides_ = this->compute_strides(this->shape_);
             fill(fill_value);
         }
-        ndarray(const ndarray&)     = default;
-        ndarray(ndarray&&) noexcept = default;
+        ndarray(const ndarray&)                = default;
+        ndarray(ndarray&&) noexcept            = default;
+        ndarray& operator=(const ndarray&)     = default;
+        ndarray& operator=(ndarray&&) noexcept = default;
+
         explicit ndarray(std::vector<T>&& data)
         {
             mem_.allocate(data.size());

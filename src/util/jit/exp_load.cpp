@@ -1,4 +1,5 @@
 #include "exp_load.hpp"
+#include "core/types/containers/ndarray.hpp"
 #include "core/types/utility/config_dict.hpp"
 #include "core/types/utility/expression.hpp"
 #include <iostream>
@@ -58,9 +59,9 @@ namespace simbi::expression {
         return ExprOp::CONSTANT;
     }
 
-    std::vector<ExprNode> load_expressions(const ConfigDict& expr_data)
+    ndarray<ExprNode> load_expressions(const ConfigDict& expr_data)
     {
-        std::vector<ExprNode> nodes;
+        ndarray<ExprNode> nodes;
 
         // get the expressions array
         if (!expr_data.contains("expressions") ||
@@ -121,31 +122,38 @@ namespace simbi::expression {
         return nodes;
     }
 
-    std::vector<int> get_output_indices(const ConfigDict& expr_data)
+    ndarray<int> get_output_indices(const ConfigDict& expr_data)
     {
-        std::vector<int> indices;
+        ndarray<int> indices;
 
         if (expr_data.contains("output_indices") &&
             expr_data.at("output_indices").is_array_of_ints()) {
-            return expr_data.at("output_indices").get<std::vector<int>>();
+            auto res =
+                ndarray(expr_data.at("output_indices").get<std::vector<int>>());
+            res.sync_to_device();
+            return res;
         }
 
         return indices;
     }
 
-    std::vector<real> get_parameters(const ConfigDict& expr_data)
+    ndarray<real> get_parameters(const ConfigDict& expr_data)
     {
-        std::vector<real> params;
+        ndarray<real> params;
 
         if (expr_data.contains("parameters") &&
             expr_data.at("parameters").is_array()) {
-            return expr_data.at("parameters").get<std::vector<real>>();
+            auto res =
+                ndarray(expr_data.at("parameters").get<std::vector<real>>());
+            res.sync_to_device();
+            return res;
         }
 
+        params.sync_to_device();
         return params;
     }
 
-    std::tuple<std::vector<ExprNode>, std::vector<int>, std::vector<real>>
+    std::tuple<ndarray<ExprNode>, ndarray<int>, ndarray<real>>
     load_expression_data(const ConfigDict& data)
     {
         return {

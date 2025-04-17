@@ -110,46 +110,44 @@ namespace simbi {
 
         // expressions for all boundaries
         bool using_bx1_inner_expressions_{false};
-        std::vector<expression::ExprNode> bx1_inner_expr_nodes_;
-        std::vector<int> bx1_inner_output_indices_;
-        std::vector<real> bx1_inner_parameters_;
+        ndarray<expression::ExprNode> bx1_inner_expr_nodes_;
+        ndarray<int> bx1_inner_output_indices_;
+        ndarray<real> bx1_inner_parameters_;
 
         bool using_bx1_outer_expressions_{false};
-        std::vector<expression::ExprNode> bx1_outer_expr_nodes_;
-        std::vector<int> bx1_outer_output_indices_;
-        std::vector<real> bx1_outer_parameters_;
+        ndarray<expression::ExprNode> bx1_outer_expr_nodes_;
+        ndarray<int> bx1_outer_output_indices_;
+        ndarray<real> bx1_outer_parameters_;
 
         bool using_bx2_inner_expressions_{false};
-        std::vector<expression::ExprNode> bx2_inner_expr_nodes_;
-        std::vector<int> bx2_inner_output_indices_;
-        std::vector<real> bx2_inner_parameters_;
+        ndarray<expression::ExprNode> bx2_inner_expr_nodes_;
+        ndarray<int> bx2_inner_output_indices_;
+        ndarray<real> bx2_inner_parameters_;
 
         bool using_bx2_outer_expressions_{false};
-        std::vector<expression::ExprNode> bx2_outer_expr_nodes_;
-        std::vector<int> bx2_outer_output_indices_;
-        std::vector<real> bx2_outer_parameters_;
+        ndarray<expression::ExprNode> bx2_outer_expr_nodes_;
+        ndarray<int> bx2_outer_output_indices_;
+        ndarray<real> bx2_outer_parameters_;
 
         bool using_bx3_inner_expressions_{false};
-        std::vector<expression::ExprNode> bx3_inner_expr_nodes_;
-        std::vector<int> bx3_inner_output_indices_;
-        std::vector<real> bx3_inner_parameters_;
+        ndarray<expression::ExprNode> bx3_inner_expr_nodes_;
+        ndarray<int> bx3_inner_output_indices_;
+        ndarray<real> bx3_inner_parameters_;
 
         bool using_bx3_outer_expressions_{false};
-        std::vector<expression::ExprNode> bx3_outer_expr_nodes_;
-        std::vector<int> bx3_outer_output_indices_;
-        std::vector<real> bx3_outer_parameters_;
+        ndarray<expression::ExprNode> bx3_outer_expr_nodes_;
+        ndarray<int> bx3_outer_output_indices_;
+        ndarray<real> bx3_outer_parameters_;
 
         // hydro source expressions
-        bool using_hydro_source_expressions_{false};
-        std::vector<expression::ExprNode> hydro_source_expr_nodes_;
-        std::vector<int> hydro_source_output_indices_;
-        std::vector<real> hydro_source_parameters_;
+        ndarray<expression::ExprNode> hydro_source_expr_nodes_;
+        ndarray<int> hydro_source_output_indices_;
+        ndarray<real> hydro_source_parameters_;
 
         // gravity source expressions
-        bool using_gravity_source_expressions_{false};
-        std::vector<expression::ExprNode> gravity_source_expr_nodes_;
-        std::vector<int> gravity_source_output_indices_;
-        std::vector<real> gravity_source_parameters_;
+        ndarray<expression::ExprNode> gravity_source_expr_nodes_;
+        ndarray<int> gravity_source_output_indices_;
+        ndarray<real> gravity_source_parameters_;
 
       public:
         // move constructor and assignment
@@ -167,6 +165,8 @@ namespace simbi {
               checkpoint_idx_(init.checkpoint_index)
         {
             setup_boundary_expressions(init);
+            setup_hydro_source_expressions(init);
+            setup_gravity_source_expressions(init);
         }
 
         // shared_ptr cleans up libraries
@@ -187,12 +187,76 @@ namespace simbi {
             requires(sizeof...(Args) == Dims + 2)
         DEV void call_hydro_source(Args&&... args) const
         {
+            // extract the coordinates and results array from args
+            real coords[3] = {0.0, 0.0, 0.0};
+            real t         = 0.0;
+            real* results  = nullptr;
+
+            if constexpr (Dims == 1) {
+                //  1D: args are (x1, t, results*)
+                std::tie(coords[0], t, results) =
+                    std::forward_as_tuple(std::forward<Args>(args)...);
+            }
+            else if constexpr (Dims == 2) {
+                //  2D: args are (x1, x2, t, results*)
+                std::tie(coords[0], coords[1], t, results) =
+                    std::forward_as_tuple(std::forward<Args>(args)...);
+            }
+            else if constexpr (Dims == 3) {
+                //  3D: args are (x1, x2, x3, t, results*)
+                std::tie(coords[0], coords[1], coords[2], t, results) =
+                    std::forward_as_tuple(std::forward<Args>(args)...);
+            }
+
+            expression::evaluate_expr_vector(
+                hydro_source_expr_nodes_.data(),
+                hydro_source_output_indices_.data(),
+                hydro_source_output_indices_.size(),
+                coords[0],
+                coords[1],
+                coords[2],
+                t,
+                hydro_source_parameters_.data(),
+                results
+            );
         }
 
         template <typename... Args>
             requires(sizeof...(Args) == Dims + 2)
         DEV void call_gravity_source(Args&&... args) const
         {
+            // extract the coordinates and results array from args
+            real coords[3] = {0.0, 0.0, 0.0};
+            real t         = 0.0;
+            real* results  = nullptr;
+
+            if constexpr (Dims == 1) {
+                //  1D: args are (x1, t, results*)
+                std::tie(coords[0], t, results) =
+                    std::forward_as_tuple(std::forward<Args>(args)...);
+            }
+            else if constexpr (Dims == 2) {
+                //  2D: args are (x1, x2, t, results*)
+                std::tie(coords[0], coords[1], t, results) =
+                    std::forward_as_tuple(std::forward<Args>(args)...);
+            }
+            else if constexpr (Dims == 3) {
+                //  3D: args are (x1, x2, x3, t, results*)
+                std::tie(coords[0], coords[1], coords[2], t, results) =
+                    std::forward_as_tuple(std::forward<Args>(args)...);
+            }
+
+            expression::evaluate_expr_vector(
+                gravity_source_expr_nodes_.data(),
+                gravity_source_output_indices_.data(),
+                gravity_source_output_indices_.size(),
+                coords[0],
+                coords[1],
+                coords[2],
+                t,
+                gravity_source_parameters_.data(),
+                results
+            );
         }
 
         template <typename... Args>
@@ -327,66 +391,99 @@ namespace simbi {
         {
             if (init.bx1_inner_expressions.size() > 0) {
                 // load the expressions :)))
-                std::tie(
-                    bx1_inner_expr_nodes_,
-                    bx1_inner_output_indices_,
-                    bx1_inner_parameters_
-                ) = expression::load_expression_data(init.bx1_inner_expressions
-                );
-
+                auto [node, indices, params] =
+                    expression::load_expression_data(init.bx1_inner_expressions
+                    );
+                bx1_inner_expr_nodes_        = std::move(node);
+                bx1_inner_output_indices_    = std::move(indices);
+                bx1_inner_parameters_        = std::move(params);
                 using_bx1_inner_expressions_ = true;
             }
             if (init.bx1_outer_expressions.size() > 0) {
                 // load the expressions :)))
-                std::tie(
-                    bx1_outer_expr_nodes_,
-                    bx1_outer_output_indices_,
-                    bx1_outer_parameters_
-                ) = expression::load_expression_data(init.bx1_outer_expressions
-                );
+                auto [node, indices, params] =
+                    expression::load_expression_data(init.bx1_outer_expressions
+                    );
+                bx1_outer_expr_nodes_        = std::move(node);
+                bx1_outer_output_indices_    = std::move(indices);
+                bx1_outer_parameters_        = std::move(params);
                 using_bx1_outer_expressions_ = true;
             }
 
             if (init.bx2_inner_expressions.size() > 0) {
                 // load the expressions :)))
-                std::tie(
-                    bx2_inner_expr_nodes_,
-                    bx2_inner_output_indices_,
-                    bx2_inner_parameters_
-                ) = expression::load_expression_data(init.bx2_inner_expressions
-                );
+                auto [node, indices, params] =
+                    expression::load_expression_data(init.bx2_inner_expressions
+                    );
+                bx2_inner_expr_nodes_        = std::move(node);
+                bx2_inner_output_indices_    = std::move(indices);
+                bx2_inner_parameters_        = std::move(params);
                 using_bx2_inner_expressions_ = true;
             }
             if (init.bx2_outer_expressions.size() > 0) {
                 // load the expressions :)))
-                std::tie(
-                    bx2_outer_expr_nodes_,
-                    bx2_outer_output_indices_,
-                    bx2_outer_parameters_
-                ) = expression::load_expression_data(init.bx2_outer_expressions
-                );
+                auto [node, indices, params] =
+                    expression::load_expression_data(init.bx2_outer_expressions
+                    );
+                bx2_outer_expr_nodes_        = std::move(node);
+                bx2_outer_output_indices_    = std::move(indices);
+                bx2_outer_parameters_        = std::move(params);
                 using_bx2_outer_expressions_ = true;
             }
 
             if (init.bx3_inner_expressions.size() > 0) {
                 // load the expressions :)))
-                std::tie(
-                    bx3_inner_expr_nodes_,
-                    bx3_inner_output_indices_,
-                    bx3_inner_parameters_
-                ) = expression::load_expression_data(init.bx3_inner_expressions
-                );
+                auto [node, indices, params] =
+                    expression::load_expression_data(init.bx3_inner_expressions
+                    );
+                bx3_inner_expr_nodes_        = std::move(node);
+                bx3_inner_output_indices_    = std::move(indices);
+                bx3_inner_parameters_        = std::move(params);
                 using_bx3_inner_expressions_ = true;
             }
             if (init.bx3_outer_expressions.size() > 0) {
                 // load the expressions :)))
-                std::tie(
-                    bx3_outer_expr_nodes_,
-                    bx3_outer_output_indices_,
-                    bx3_outer_parameters_
-                ) = expression::load_expression_data(init.bx3_outer_expressions
-                );
+                auto [node, indices, params] =
+                    expression::load_expression_data(init.bx3_outer_expressions
+                    );
+                bx3_outer_expr_nodes_        = std::move(node);
+                bx3_outer_output_indices_    = std::move(indices);
+                bx3_outer_parameters_        = std::move(params);
                 using_bx3_outer_expressions_ = true;
+            }
+        }
+
+        void setup_gravity_source_expressions(const InitialConditions& init)
+        {
+            if (init.gravity_source_expressions.size() > 0) {
+                // load the expressions :)))
+                auto [node, indices, params] = expression::load_expression_data(
+                    init.gravity_source_expressions
+                );
+                gravity_source_expr_nodes_     = std::move(node);
+                gravity_source_output_indices_ = std::move(indices);
+                gravity_source_parameters_     = std::move(params);
+                solver_manager_.set_null_gravity(false);
+            }
+            else {
+                solver_manager_.set_null_gravity(true);
+            }
+        }
+
+        void setup_hydro_source_expressions(const InitialConditions& init)
+        {
+            if (init.hydro_source_expressions.size() > 0) {
+                // load the expressions :)))
+                auto [node, indices, params] = expression::load_expression_data(
+                    init.hydro_source_expressions
+                );
+                hydro_source_expr_nodes_     = std::move(node);
+                hydro_source_output_indices_ = std::move(indices);
+                hydro_source_parameters_     = std::move(params);
+                solver_manager_.set_null_sources(false);
+            }
+            else {
+                solver_manager_.set_null_sources(true);
             }
         }
     };   // namespace simbi
