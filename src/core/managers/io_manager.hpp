@@ -268,7 +268,7 @@ namespace simbi {
             const spatial_vector_t<real, Dims>& coords,
             real t,
             real dt,
-            Conserved& conserved_data
+            const Conserved& conserved_data
         ) const
         {
             auto local_results = conserved_data;
@@ -276,11 +276,6 @@ namespace simbi {
             switch (face) {
                 case BoundaryFace::X1_INNER:
                     if (using_bx1_inner_expressions_) {
-                        // thread-local params to prevent race conditions
-                        auto params = bx1_inner_parameters_;
-                        for (size_type ii = 0; ii < params.size(); ii++) {
-                            params[ii] = local_results[ii];
-                        }
                         expression::evaluate_expr_vector(
                             bx1_inner_expr_nodes_.data(),
                             bx1_inner_output_indices_.data(),
@@ -289,7 +284,7 @@ namespace simbi {
                             coords[1],
                             coords[2],
                             t,
-                            params.data(),
+                            conserved_data.data(),
                             local_results.data(),
                             dt
                         );
@@ -298,11 +293,6 @@ namespace simbi {
 
                 case BoundaryFace::X1_OUTER:
                     if (using_bx1_outer_expressions_) {
-                        // thread-local params to prevent race conditions
-                        auto params = bx1_outer_parameters_;
-                        for (size_type ii = 0; ii < params.size(); ii++) {
-                            params[ii] = local_results[ii];
-                        }
                         expression::evaluate_expr_vector(
                             bx1_outer_expr_nodes_.data(),
                             bx1_outer_output_indices_.data(),
@@ -311,7 +301,7 @@ namespace simbi {
                             coords[1],
                             coords[2],
                             t,
-                            params.data(),
+                            conserved_data.data(),
                             local_results.data(),
                             dt
                         );
@@ -320,11 +310,6 @@ namespace simbi {
 
                 case BoundaryFace::X2_INNER:
                     if (using_bx2_inner_expressions_) {
-                        // thread-local params to prevent race conditions
-                        auto params = bx2_inner_parameters_;
-                        for (size_type ii = 0; ii < params.size(); ii++) {
-                            params[ii] = local_results[ii];
-                        }
                         expression::evaluate_expr_vector(
                             bx2_inner_expr_nodes_.data(),
                             bx2_inner_output_indices_.data(),
@@ -333,7 +318,7 @@ namespace simbi {
                             coords[1],
                             coords[2],
                             t,
-                            params.data(),
+                            conserved_data.data(),
                             local_results.data(),
                             dt
                         );
@@ -341,11 +326,6 @@ namespace simbi {
                     return local_results;
                 case BoundaryFace::X2_OUTER:
                     if (using_bx2_outer_expressions_) {
-                        // thread-local params to prevent race conditions
-                        auto params = bx2_outer_parameters_;
-                        for (size_type ii = 0; ii < params.size(); ii++) {
-                            params[ii] = local_results[ii];
-                        }
                         expression::evaluate_expr_vector(
                             bx2_outer_expr_nodes_.data(),
                             bx2_outer_output_indices_.data(),
@@ -354,7 +334,7 @@ namespace simbi {
                             coords[1],
                             coords[2],
                             t,
-                            params.data(),
+                            conserved_data.data(),
                             local_results.data(),
                             dt
                         );
@@ -362,11 +342,6 @@ namespace simbi {
                     return local_results;
                 case BoundaryFace::X3_INNER:
                     if (using_bx3_inner_expressions_) {
-                        // thread-local params to prevent race conditions
-                        auto params = bx3_inner_parameters_;
-                        for (size_type ii = 0; ii < params.size(); ii++) {
-                            params[ii] = local_results[ii];
-                        }
                         expression::evaluate_expr_vector(
                             bx3_inner_expr_nodes_.data(),
                             bx3_inner_output_indices_.data(),
@@ -375,7 +350,7 @@ namespace simbi {
                             coords[1],
                             coords[2],
                             t,
-                            params.data(),
+                            conserved_data.data(),
                             local_results.data(),
                             dt
                         );
@@ -383,11 +358,6 @@ namespace simbi {
                     return local_results;
                 case BoundaryFace::X3_OUTER:
                     if (using_bx3_outer_expressions_) {
-                        // thread-local params to prevent race conditions
-                        auto params = bx3_outer_parameters_;
-                        for (size_type ii = 0; ii < params.size(); ii++) {
-                            params[ii] = local_results[ii];
-                        }
                         expression::evaluate_expr_vector(
                             bx3_outer_expr_nodes_.data(),
                             bx3_outer_output_indices_.data(),
@@ -396,7 +366,7 @@ namespace simbi {
                             coords[1],
                             coords[2],
                             t,
-                            params.data(),
+                            conserved_data.data(),
                             local_results.data(),
                             dt
                         );
