@@ -130,8 +130,7 @@ namespace simbi::expression {
             return ndarray<int>{};
         }
 
-        auto res =
-            ndarray(expr_data.at("output_indices").get<std::vector<int>>());
+        ndarray res(expr_data.at("output_indices").get<std::vector<int>>());
         res.sync_to_device();
         return res;
     }
@@ -143,7 +142,7 @@ namespace simbi::expression {
             return ndarray<real>{};
         }
 
-        auto res = ndarray(expr_data.at("parameters").get<std::vector<real>>());
+        ndarray res(expr_data.at("parameters").get<std::vector<real>>());
         res.sync_to_device();
         return res;
     }
@@ -155,8 +154,7 @@ namespace simbi::expression {
             return ndarray<real>{};
         }
 
-        auto res =
-            ndarray(expr_data.at("parameter_extent").get<std::vector<real>>());
+        ndarray res(expr_data.at("parameter_extent").get<std::vector<real>>());
         res.sync_to_device();
         return res;
     }
