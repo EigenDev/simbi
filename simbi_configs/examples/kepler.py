@@ -1,5 +1,4 @@
 import math
-from simbi.core.protocol.expression import Expr
 import simbi.expression as expr
 from simbi import BaseConfig, DynamicArg, simbi_property, ImmersedBodyConfig
 from typing import Any, Sequence, Generator
@@ -179,100 +178,102 @@ class KeplerianRingTest(BaseConfig):
     def boundary_conditions(self) -> str:
         return "outflow"
 
-    # def apply_buffer_damping(
-    #     self,
-    #     x1: expr.Expr,
-    #     x2: expr.Expr,
-    #     t: expr.Expr,
-    #     dt: expr.Expr,  # Add timestep as parameter
-    #     inner: list[expr.Expr],
-    #     r_buffer: expr.Expr,
-    #     r_outer: expr.Expr,
-    #     tau: expr.Expr,
-    # ) -> list[expr.Expr]:
-    #     """Calculate buffer damping source terms for fluid variables."""
-    #     # Radius calculation
-    #     r = expr.sqrt(x1 * x1 + x2 * x2)
+    def apply_buffer_damping(
+        self,
+        x1: expr.Expr,
+        x2: expr.Expr,
+        t: expr.Expr,
+        dt: expr.Expr,  # Add timestep as parameter
+        inner: list[expr.Expr],
+        r_buffer: expr.Expr,
+        r_outer: expr.Expr,
+        tau: expr.Expr,
+    ) -> list[expr.Expr]:
+        """Calculate buffer damping source terms for fluid variables."""
+        # Radius calculation
+        r = expr.sqrt(x1 * x1 + x2 * x2)
 
-    #     if r <= r_buffer:
-    #         return inner
+        if r <= r_buffer:
+            return inner
 
-    #     # calculate damping strength (0 inside buffer, increasing outward)
-    #     s = (r - r_buffer) / (r_outer - r_buffer)
-    #     # quadratic smoothing
-    #     alpha = s * s
+        # calculate damping strength (0 inside buffer, increasing outward)
+        s = (r - r_buffer) / (r_outer - r_buffer)
+        # quadratic smoothing
+        alpha = s * s
 
-    #     # Calculate target state (background state)
-    #     rho_bg = expr.constant(1e-8, r.graph)  # Background density
-    #     vk = expr.sqrt(1.0 / r)  # Keplerian velocity
-    #     vx_bg = -vk * (x2 / r)  # Background velocity x
-    #     vy_bg = vk * (x1 / r)  # Background velocity y
+        # Calculate target state (background state)
+        rho_bg = expr.constant(1e-8, r.graph)  # Background density
+        vk = expr.sqrt(1.0 / r)  # Keplerian velocity
+        vx_bg = -vk * (x2 / r)  # Background velocity x
+        vy_bg = vk * (x1 / r)  # Background velocity y
 
-    #     # calculate relaxation terms
-    #     # form: -(current - target) * (dt/tau) * alpha
-    #     damping_factor = -(dt / tau) * alpha
+        # calculate relaxation terms
+        # form: -(current - target) * (dt/tau) * alpha
+        damping_factor = -(dt / tau) * alpha
 
-    #     rho_damping = damping_factor * (inner[0] - rho_bg)
+        rho_damping = damping_factor * (inner[0] - rho_bg)
+        if rho_damping <= 0.0:
+            rho_damping = inner[0]
 
-    #     # momentum
-    #     vx = inner[1] / inner[0]  # mx/rho
-    #     vy = inner[2] / inner[0]  # my/rho
+        # momentum
+        vx = inner[1] / inner[0]  # mx/rho
+        vy = inner[2] / inner[0]  # my/rho
 
-    #     # damp velocities
-    #     vx_damping = damping_factor * (vx - vx_bg)
-    #     vy_damping = damping_factor * (vy - vy_bg)
+        # damp velocities
+        vx_damping = damping_factor * (vx - vx_bg)
+        vy_damping = damping_factor * (vy - vy_bg)
 
-    #     mx_damping = inner[0] * vx_damping  # rho * velocity_damping
-    #     my_damping = inner[0] * vy_damping  # rho * velocity_damping
+        mx_damping = inner[0] * vx_damping  # rho * velocity_damping
+        my_damping = inner[0] * vy_damping  # rho * velocity_damping
 
-    #     # energy damping
-    #     # for isothermal gas, this gets ignored
-    #     gamma = expr.constant(self.adiabatic_index, r.graph)
-    #     e_int_bg = (
-    #         rho_bg
-    #         * expr.constant(0.01, r.graph) ** 2
-    #         / (gamma - expr.constant(1.0, r.graph))
-    #     )
-    #     e_damping = damping_factor * (inner[3] - e_int_bg)
+        # energy damping
+        # for isothermal gas, this gets ignored
+        gamma = expr.constant(self.adiabatic_index, r.graph)
+        e_int_bg = (
+            rho_bg
+            * expr.constant(0.01, r.graph) ** 2
+            / (gamma - expr.constant(1.0, r.graph))
+        )
+        e_damping = damping_factor * (inner[3] - e_int_bg)
 
-    #     return [rho_damping, mx_damping, my_damping, e_damping]
+        return [rho_damping, mx_damping, my_damping, e_damping]
 
-    # @simbi_property
-    # def bx1_inner_expressions(self) -> ExpressionDict:
-    #     graph = expr.ExprGraph()
-    #     x1 = expr.variable("x1", graph)
-    #     x2 = expr.variable("x2", graph)
-    #     t = expr.variable("t", graph)
-    #     dt = expr.variable("dt", graph)
+    @simbi_property
+    def bx1_inner_expressions(self) -> ExpressionDict:
+        graph = expr.ExprGraph()
+        x1 = expr.variable("x1", graph)
+        x2 = expr.variable("x2", graph)
+        t = expr.variable("t", graph)
+        dt = expr.variable("dt", graph)
 
-    #     # current state values
-    #     current = [
-    #         expr.parameter(0, graph),  # density
-    #         expr.parameter(1, graph),  # momentum x
-    #         expr.parameter(2, graph),  # momentum y
-    #         expr.parameter(3, graph),  # energy
-    #     ]
+        # current state values
+        current = [
+            expr.parameter(0, graph),  # density
+            expr.parameter(1, graph),  # momentum x
+            expr.parameter(2, graph),  # momentum y
+            expr.parameter(3, graph),  # energy
+        ]
 
-    #     # buffer parameters as constants
-    #     r_buffer = expr.constant(self.buffer_parameters["r_buffer"], graph)
-    #     r_outer = expr.constant(self.buffer_parameters["r_outer"], graph)
-    #     tau = expr.constant(self.buffer_parameters["damp_time"], graph)
+        # buffer parameters as constants
+        r_buffer = expr.constant(self.buffer_parameters["r_buffer"], graph)
+        r_outer = expr.constant(self.buffer_parameters["r_outer"], graph)
+        tau = expr.constant(self.buffer_parameters["damp_time"], graph)
 
-    #     source_terms = self.apply_buffer_damping(
-    #         x1, x2, t, dt, current, r_buffer, r_outer, tau
-    #     )
+        source_terms = self.apply_buffer_damping(
+            x1, x2, t, dt, current, r_buffer, r_outer, tau
+        )
 
-    #     compiled_exp = graph.compile(source_terms)
-    #     return compiled_exp.serialize()
+        compiled_exp = graph.compile(source_terms)
+        return compiled_exp.serialize()
 
-    # @simbi_property
-    # def bx1_outer_expressions(self) -> ExpressionDict:
-    #     return self.bx1_inner_expressions
+    @simbi_property
+    def bx1_outer_expressions(self) -> ExpressionDict:
+        return self.bx1_inner_expressions
 
-    # @simbi_property
-    # def bx2_inner_expressions(self) -> ExpressionDict:
-    #     return self.bx1_inner_expressions
+    @simbi_property
+    def bx2_inner_expressions(self) -> ExpressionDict:
+        return self.bx1_inner_expressions
 
-    # @simbi_property
-    # def bx2_outer_expressions(self) -> ExpressionDict:
-    #     return self.bx1_inner_expressions
+    @simbi_property
+    def bx2_outer_expressions(self) -> ExpressionDict:
+        return self.bx1_inner_expressions
