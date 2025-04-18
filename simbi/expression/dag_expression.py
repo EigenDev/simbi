@@ -29,6 +29,19 @@ __all__ = [
     "max_expr",
     "min_expr",
     "if_then_else",
+    "sinh",
+    "cosh",
+    "tanh",
+    "asinh",
+    "acosh",
+    "atanh",
+    "atan2",
+    "bitwise_and",
+    "bitwise_or",
+    "bitwise_xor",
+    "bitwise_not",
+    "bitwise_left_shift",
+    "bitwise_right_shift",
 ]
 
 X1_ALIASES = ["x", "r", "x1"]
@@ -323,6 +336,49 @@ def min_expr(expr1: Expr, expr2: Expr) -> Expr:
     )
 
 
+def bitwise_and(expr1: Expr, expr2: Expr) -> Expr:
+    return Expr(
+        expr1._graph,
+        expr1._graph.add_node("bitwise_and", expr1._node_id, expr2._node_id),
+    )
+
+
+def bitwise_or(expr1: Expr, expr2: Expr) -> Expr:
+    return Expr(
+        expr1._graph,
+        expr1._graph.add_node("bitwise_or", expr1._node_id, expr2._node_id),
+    )
+
+
+def bitwise_xor(expr1: Expr, expr2: Expr) -> Expr:
+    return Expr(
+        expr1._graph,
+        expr1._graph.add_node("bitwise_xor", expr1._node_id, expr2._node_id),
+    )
+
+
+def bitwise_not(expr: Expr) -> Expr:
+    return Expr(expr._graph, expr._graph.add_node("bitwise_not", expr._node_id))
+
+
+def bitwise_left_shift(expr1: Expr, expr2: Expr) -> Expr:
+    return Expr(
+        expr1._graph,
+        expr1._graph.add_node("bitwise_left_shift", expr1._node_id, expr2._node_id),
+    )
+
+
+def bitwise_right_shift(expr1: Expr, expr2: Expr) -> Expr:
+    return Expr(
+        expr1._graph,
+        expr1._graph.add_node("bitwise_right_shift", expr1._node_id, expr2._node_id),
+    )
+
+
+def sgn(expr: Expr) -> Expr:
+    return Expr(expr._graph, expr._graph.add_node("sgn", expr._node_id))
+
+
 def if_then_else(condition: Expr, true_case: Expr, false_case: Expr) -> Expr:
     """If-then-else expression."""
     return Expr(
@@ -337,18 +393,6 @@ def if_then_else(condition: Expr, true_case: Expr, false_case: Expr) -> Expr:
 def map_expr(f: Callable[[Expr], Expr], exprs: list[Expr]) -> list[Expr]:
     """Map a function over expressions."""
     return [f(expr) for expr in exprs]
-
-
-def compose(*funcs: Callable[[T], T]) -> Callable[[T], T]:
-    """Function composition."""
-
-    def composed(x: T) -> T:
-        result = x
-        for f in reversed(funcs):
-            result = f(result)
-        return result
-
-    return composed
 
 
 # evaluator
@@ -456,6 +500,8 @@ class CompiledExpr:
                 values[node_id] = math.cos(values[input_ids[0]])
             elif op == "tan":
                 values[node_id] = math.tan(values[input_ids[0]])
+            elif op == "sgn":
+                values[node_id] = math.copysign(1, values[input_ids[0]])
             elif op == "log":
                 values[node_id] = math.log(values[input_ids[0]])
             elif op == "log10":
@@ -468,11 +514,38 @@ class CompiledExpr:
                 values[node_id] = math.atan(values[input_ids[0]])
             elif op == "exp":
                 values[node_id] = math.exp(values[input_ids[0]])
+            elif op == "sinh":
+                values[node_id] = math.sinh(values[input_ids[0]])
+            elif op == "cosh":
+                values[node_id] = math.cosh(values[input_ids[0]])
+            elif op == "tanh":
+                values[node_id] = math.tanh(values[input_ids[0]])
+            elif op == "asinh":
+                values[node_id] = math.asinh(values[input_ids[0]])
+            elif op == "acosh":
+                values[node_id] = math.acosh(values[input_ids[0]])
+            elif op == "atanh":
+                values[node_id] = math.atanh(values[input_ids[0]])
+            elif op == "atan2":
+                values[node_id] = math.atan2(values[input_ids[0]], values[input_ids[1]])
             # binary ops
             elif op == "max":
                 values[node_id] = max(values[input_ids[0]], values[input_ids[1]])
             elif op == "min":
                 values[node_id] = min(values[input_ids[0]], values[input_ids[1]])
+            # bitwise ops
+            elif op == "bitwise_and":
+                values[node_id] = int(values[input_ids[0]]) & int(values[input_ids[1]])
+            elif op == "bitwise_or":
+                values[node_id] = int(values[input_ids[0]]) | int(values[input_ids[1]])
+            elif op == "bitwise_xor":
+                values[node_id] = int(values[input_ids[0]]) ^ int(values[input_ids[1]])
+            elif op == "bitwise_not":
+                values[node_id] = ~int(values[input_ids[0]])
+            elif op == "bitwise_left_shift":
+                values[node_id] = int(values[input_ids[0]]) << int(values[input_ids[1]])
+            elif op == "bitwise_right_shift":
+                values[node_id] = int(values[input_ids[0]]) >> int(values[input_ids[1]])
             elif op == "if_then_else":
                 condition = values[input_ids[0]]
                 if condition:
@@ -587,6 +660,42 @@ class CompiledExpr:
                 expressions.append(
                     {"op": "ATAN", "left": node_map[input_ids[0]], "right": -1}
                 )
+            elif op == "atan2":
+                expressions.append(
+                    {
+                        "op": "ATAN2",
+                        "left": node_map[input_ids[0]],
+                        "right": node_map[input_ids[1]],
+                    }
+                )
+            elif op == "sinh":
+                expressions.append(
+                    {"op": "SINH", "left": node_map[input_ids[0]], "right": -1}
+                )
+            elif op == "cosh":
+                expressions.append(
+                    {"op": "COSH", "left": node_map[input_ids[0]], "right": -1}
+                )
+            elif op == "tanh":
+                expressions.append(
+                    {"op": "TANH", "left": node_map[input_ids[0]], "right": -1}
+                )
+            elif op == "asinh":
+                expressions.append(
+                    {"op": "ASINH", "left": node_map[input_ids[0]], "right": -1}
+                )
+            elif op == "acosh":
+                expressions.append(
+                    {"op": "ACOSH", "left": node_map[input_ids[0]], "right": -1}
+                )
+            elif op == "atanh":
+                expressions.append(
+                    {"op": "ATANH", "left": node_map[input_ids[0]], "right": -1}
+                )
+            elif op == "sgn":
+                expressions.append(
+                    {"op": "SGN", "left": node_map[input_ids[0]], "right": -1}
+                )
             elif op == "exp":
                 expressions.append(
                     {"op": "EXP", "left": node_map[input_ids[0]], "right": -1}
@@ -611,6 +720,50 @@ class CompiledExpr:
                 expressions.append(
                     {
                         "op": "MIN",
+                        "left": node_map[input_ids[0]],
+                        "right": node_map[input_ids[1]],
+                    }
+                )
+            elif op == "bitwise_and":
+                expressions.append(
+                    {
+                        "op": "BITWISE_AND",
+                        "left": node_map[input_ids[0]],
+                        "right": node_map[input_ids[1]],
+                    }
+                )
+            elif op == "bitwise_or":
+                expressions.append(
+                    {
+                        "op": "BITWISE_OR",
+                        "left": node_map[input_ids[0]],
+                        "right": node_map[input_ids[1]],
+                    }
+                )
+            elif op == "bitwise_xor":
+                expressions.append(
+                    {
+                        "op": "BITWISE_XOR",
+                        "left": node_map[input_ids[0]],
+                        "right": node_map[input_ids[1]],
+                    }
+                )
+            elif op == "bitwise_not":
+                expressions.append(
+                    {"op": "BITWISE_NOT", "left": node_map[input_ids[0]], "right": -1}
+                )
+            elif op == "bitwise_left_shift":
+                expressions.append(
+                    {
+                        "op": "BITWISE_LEFT_SHIFT",
+                        "left": node_map[input_ids[0]],
+                        "right": node_map[input_ids[1]],
+                    }
+                )
+            elif op == "bitwise_right_shift":
+                expressions.append(
+                    {
+                        "op": "BITWISE_RIGHT_SHIFT",
                         "left": node_map[input_ids[0]],
                         "right": node_map[input_ids[1]],
                     }

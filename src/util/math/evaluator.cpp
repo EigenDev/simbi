@@ -1,5 +1,7 @@
 #include "evaluator.hpp"
 #include "build_options.hpp"
+#include "util/math/expression.hpp"
+#include "util/tools/helpers.hpp"
 #include <cmath>
 
 // Error handling macro - customize behavior based on compile flags
@@ -481,6 +483,93 @@ namespace simbi::expression {
                 return std::tan(value);
             }
 
+            case ExprOp::SINH: {
+                real value = evaluate_expr(
+                    nodes,
+                    node.children.left,
+                    x1,
+                    x2,
+                    x3,
+                    t,
+                    dt,
+                    parameters
+                );
+                return std::sinh(value);
+            }
+            case ExprOp::COSH: {
+                real value = evaluate_expr(
+                    nodes,
+                    node.children.left,
+                    x1,
+                    x2,
+                    x3,
+                    t,
+                    dt,
+                    parameters
+                );
+                return std::cosh(value);
+            }
+            case ExprOp::TANH: {
+                real value = evaluate_expr(
+                    nodes,
+                    node.children.left,
+                    x1,
+                    x2,
+                    x3,
+                    t,
+                    dt,
+                    parameters
+                );
+                return std::tanh(value);
+            }
+            case ExprOp::ASINH: {
+                real value = evaluate_expr(
+                    nodes,
+                    node.children.left,
+                    x1,
+                    x2,
+                    x3,
+                    t,
+                    dt,
+                    parameters
+                );
+                return std::asinh(value);
+            }
+            case ExprOp::ACOSH: {
+                real value = evaluate_expr(
+                    nodes,
+                    node.children.left,
+                    x1,
+                    x2,
+                    x3,
+                    t,
+                    dt,
+                    parameters
+                );
+                if (value < 1.0) {
+                    HANDLE_ERROR("Arc hyperbolic cosine argument out of range");
+                }
+                return std::acosh(value);
+            }
+            case ExprOp::ATANH: {
+                real value = evaluate_expr(
+                    nodes,
+                    node.children.left,
+                    x1,
+                    x2,
+                    x3,
+                    t,
+                    dt,
+                    parameters
+                );
+                if (value <= -1.0 || value >= 1.0) {
+                    HANDLE_ERROR(
+                        "Arc hyperbolic tangent argument out of range"
+                    );
+                }
+                return std::atanh(value);
+            }
+
             case ExprOp::LOG: {
                 real value = evaluate_expr(
                     nodes,
@@ -608,6 +697,20 @@ namespace simbi::expression {
                 return std::atan(value);
             }
 
+            case ExprOp::SGN: {
+                real value = evaluate_expr(
+                    nodes,
+                    node.children.left,
+                    x1,
+                    x2,
+                    x3,
+                    t,
+                    dt,
+                    parameters
+                );
+                return helpers::sgn(value);
+            }
+
             // conditional operation
             case ExprOp::IF_THEN_ELSE: {
                 real condition = evaluate_expr(
@@ -644,6 +747,141 @@ namespace simbi::expression {
                         parameters
                     );
                 }
+            }
+
+            // bitwise operations
+            case ExprOp::BITWISE_AND: {
+                real left = evaluate_expr(
+                    nodes,
+                    node.children.left,
+                    x1,
+                    x2,
+                    x3,
+                    t,
+                    dt,
+                    parameters
+                );
+                real right = evaluate_expr(
+                    nodes,
+                    node.children.right,
+                    x1,
+                    x2,
+                    x3,
+                    t,
+                    dt,
+                    parameters
+                );
+                return static_cast<int>(left) & static_cast<int>(right);
+            }
+
+            case ExprOp::BITWISE_OR: {
+                real left = evaluate_expr(
+                    nodes,
+                    node.children.left,
+                    x1,
+                    x2,
+                    x3,
+                    t,
+                    dt,
+                    parameters
+                );
+                real right = evaluate_expr(
+                    nodes,
+                    node.children.right,
+                    x1,
+                    x2,
+                    x3,
+                    t,
+                    dt,
+                    parameters
+                );
+                return static_cast<int>(left) | static_cast<int>(right);
+            }
+
+            case ExprOp::BITWISE_XOR: {
+                real left = evaluate_expr(
+                    nodes,
+                    node.children.left,
+                    x1,
+                    x2,
+                    x3,
+                    t,
+                    dt,
+                    parameters
+                );
+                real right = evaluate_expr(
+                    nodes,
+                    node.children.right,
+                    x1,
+                    x2,
+                    x3,
+                    t,
+                    dt,
+                    parameters
+                );
+                return static_cast<int>(left) ^ static_cast<int>(right);
+            }
+
+            case ExprOp::BITWISE_NOT: {
+                real value = evaluate_expr(
+                    nodes,
+                    node.children.left,
+                    x1,
+                    x2,
+                    x3,
+                    t,
+                    dt,
+                    parameters
+                );
+                return ~static_cast<int>(value);
+            }
+
+            case ExprOp::BITWISE_LEFT_SHIFT: {
+                real left = evaluate_expr(
+                    nodes,
+                    node.children.left,
+                    x1,
+                    x2,
+                    x3,
+                    t,
+                    dt,
+                    parameters
+                );
+                real right = evaluate_expr(
+                    nodes,
+                    node.children.right,
+                    x1,
+                    x2,
+                    x3,
+                    t,
+                    dt,
+                    parameters
+                );
+                return static_cast<int>(left) << static_cast<int>(right);
+            }
+
+            case ExprOp::BITWISE_RIGHT_SHIFT: {
+                real left = evaluate_expr(
+                    nodes,
+                    node.children.left,
+                    x1,
+                    x2,
+                    x3,
+                    t,
+                    dt,
+                    parameters
+                );
+                real right = evaluate_expr(
+                    nodes,
+                    node.children.right,
+                    x1,
+                    x2,
+                    x3,
+                    t,
+                    dt,
+                    parameters
+                );
+                return static_cast<int>(left) >> static_cast<int>(right);
             }
 
             default: {
@@ -788,7 +1026,14 @@ namespace simbi::expression {
                 case ExprOp::SQRT:
                 case ExprOp::ASIN:
                 case ExprOp::ACOS:
-                case ExprOp::ATAN: {
+                case ExprOp::ATAN:
+                case ExprOp::SINH:
+                case ExprOp::COSH:
+                case ExprOp::TANH:
+                case ExprOp::ASINH:
+                case ExprOp::ACOSH:
+                case ExprOp::ATANH:
+                case ExprOp::SGN: {
                     // push operand onto stack
                     if (stack_top >= MAX_STACK - 1) {
                         // stack overflow
@@ -797,6 +1042,31 @@ namespace simbi::expression {
                     stack[stack_top++] = {node.children.left, 0.0, false};
 
                     // mark this entry as waiting for operand
+                    entry.evaluated = false;
+                } break;
+
+                // for bitwise operations
+                case ExprOp::BITWISE_AND:
+                case ExprOp::BITWISE_OR:
+                case ExprOp::BITWISE_XOR:
+                case ExprOp::BITWISE_NOT:
+                case ExprOp::BITWISE_LEFT_SHIFT:
+                case ExprOp::BITWISE_RIGHT_SHIFT: {
+                    // push right child onto stack (will be evaluated first)
+                    if (stack_top >= MAX_STACK - 1) {
+                        // stack overflow
+                        return 0.0;
+                    }
+                    stack[stack_top++] = {node.children.right, 0.0, false};
+
+                    // push left child onto stack
+                    if (stack_top >= MAX_STACK - 1) {
+                        // stack overflow
+                        return 0.0;
+                    }
+                    stack[stack_top++] = {node.children.left, 0.0, false};
+
+                    // mark this entry as waiting for children
                     entry.evaluated = false;
                 } break;
 
@@ -988,6 +1258,58 @@ namespace simbi::expression {
                         entry.evaluated = true;
                     } break;
 
+                    case ExprOp::SINH: {
+                        real operand    = stack[--stack_top].value;
+                        entry.value     = std::sinh(operand);
+                        entry.evaluated = true;
+                    } break;
+
+                    case ExprOp::COSH: {
+                        real operand    = stack[--stack_top].value;
+                        entry.value     = std::cosh(operand);
+                        entry.evaluated = true;
+                    } break;
+
+                    case ExprOp::TANH: {
+                        real operand    = stack[--stack_top].value;
+                        entry.value     = std::tanh(operand);
+                        entry.evaluated = true;
+                    } break;
+
+                    case ExprOp::ASINH: {
+                        real operand    = stack[--stack_top].value;
+                        entry.value     = std::asinh(operand);
+                        entry.evaluated = true;
+                    } break;
+
+                    case ExprOp::ACOSH: {
+                        real operand = stack[--stack_top].value;
+                        if (operand < 1.0) {
+                            entry.value = 0.0;   // Handle acosh out of range
+                        }
+                        else {
+                            entry.value = std::acosh(operand);
+                        }
+                        entry.evaluated = true;
+                    } break;
+
+                    case ExprOp::ATANH: {
+                        real operand = stack[--stack_top].value;
+                        if (operand <= -1.0 || operand >= 1.0) {
+                            entry.value = 0.0;   // Handle atanh out of range
+                        }
+                        else {
+                            entry.value = std::atanh(operand);
+                        }
+                        entry.evaluated = true;
+                    } break;
+
+                    case ExprOp::SGN: {
+                        real operand    = stack[--stack_top].value;
+                        entry.value     = helpers::sgn(operand);
+                        entry.evaluated = true;
+                    } break;
+
                     case ExprOp::LOG: {
                         real operand = stack[--stack_top].value;
                         if (operand <= 0.0) {
@@ -1041,6 +1363,53 @@ namespace simbi::expression {
                     case ExprOp::ATAN: {
                         real operand    = stack[--stack_top].value;
                         entry.value     = std::atan(operand);
+                        entry.evaluated = true;
+                    } break;
+
+                    // bitwise operations
+                    case ExprOp::BITWISE_AND: {
+                        real right = stack[--stack_top].value;
+                        real left  = stack[--stack_top].value;
+                        entry.value =
+                            static_cast<int>(left) & static_cast<int>(right);
+                        entry.evaluated = true;
+                    } break;
+
+                    case ExprOp::BITWISE_OR: {
+                        real right = stack[--stack_top].value;
+                        real left  = stack[--stack_top].value;
+                        entry.value =
+                            static_cast<int>(left) | static_cast<int>(right);
+                        entry.evaluated = true;
+                    } break;
+
+                    case ExprOp::BITWISE_XOR: {
+                        real right = stack[--stack_top].value;
+                        real left  = stack[--stack_top].value;
+                        entry.value =
+                            static_cast<int>(left) ^ static_cast<int>(right);
+                        entry.evaluated = true;
+                    } break;
+
+                    case ExprOp::BITWISE_NOT: {
+                        real operand    = stack[--stack_top].value;
+                        entry.value     = ~static_cast<int>(operand);
+                        entry.evaluated = true;
+                    } break;
+
+                    case ExprOp::BITWISE_LEFT_SHIFT: {
+                        real right  = stack[--stack_top].value;
+                        real left   = stack[--stack_top].value;
+                        entry.value = static_cast<int>(left)
+                                      << static_cast<int>(right);
+                        entry.evaluated = true;
+                    } break;
+
+                    case ExprOp::BITWISE_RIGHT_SHIFT: {
+                        real right = stack[--stack_top].value;
+                        real left  = stack[--stack_top].value;
+                        entry.value =
+                            static_cast<int>(left) >> static_cast<int>(right);
                         entry.evaluated = true;
                     } break;
 

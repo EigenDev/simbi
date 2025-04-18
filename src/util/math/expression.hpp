@@ -49,6 +49,20 @@ namespace simbi::expression {
         SQRT,    // square root
         MIN,     // minimum of two values
         MAX,     // maximum of two values
+        SINH,
+        COSH,
+        TANH,
+        ASINH,
+        ACOSH,
+        ATANH,
+        SGN,
+        // bitwise operations
+        BITWISE_AND,           // bitwise AND
+        BITWISE_OR,            // bitwise OR
+        BITWISE_XOR,           // bitwise XOR
+        BITWISE_NOT,           // bitwise NOT
+        BITWISE_LEFT_SHIFT,    // left shift
+        BITWISE_RIGHT_SHIFT,   // right shift
 
         // special operations
         IF_THEN_ELSE   // ternary conditional operation
