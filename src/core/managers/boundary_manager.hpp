@@ -274,40 +274,17 @@ namespace simbi {
                     return [mesh, io_manager, time, time_step] DEV(
                                const auto& coords,
                                const BoundaryFace face,
-                               T& result
+                               const T& result
                            ) {
                         const auto physical_coords =
                             mesh->retrieve_cell(coords).centroid();
-                        if constexpr (Dims == 1) {
-                            io_manager->call_boundary_source(
-                                face,
-                                physical_coords[0],
-                                time,
-                                time_step,
-                                result.data()
-                            );
-                        }
-                        else if constexpr (Dims == 2) {
-                            io_manager->call_boundary_source(
-                                face,
-                                physical_coords[0],
-                                physical_coords[1],
-                                time,
-                                time_step,
-                                result.data()
-                            );
-                        }
-                        else {
-                            io_manager->call_boundary_source(
-                                face,
-                                physical_coords[0],
-                                physical_coords[1],
-                                physical_coords[2],
-                                time,
-                                time_step,
-                                result.data()
-                            );
-                        }
+                        return io_manager->call_boundary_source(
+                            face,
+                            physical_coords,
+                            time,
+                            time_step,
+                            result
+                        );
                     };
                 }
                 else {
@@ -317,7 +294,11 @@ namespace simbi {
                     (void) time;
                     (void) time_step;
                     // Return a no-op lambda when T is not conserved
-                    return [] DEV(const auto&, const BoundaryFace, auto&) {};
+                    return [] DEV(
+                               const auto& coords,
+                               const BoundaryFace fc,
+                               const auto& val
+                           ) { return val; };
                 }
             }();
 
@@ -381,13 +362,12 @@ namespace simbi {
                                               std::is_same_v<
                                                   TagType,
                                                   conserved_tag>) {
-                                    T result = data[interior_idx];
-                                    handle_dynamic_bc(
+                                    T dynamic_conserved = handle_dynamic_bc(
                                         coordinates,
                                         static_cast<BoundaryFace>(bc_idx),
-                                        result
+                                        data[interior_idx]
                                     );
-                                    data[idx] = result;
+                                    data[idx] = dynamic_conserved;
                                 }
                                 else {
                                     // default to outflow or maybe reflecting ?

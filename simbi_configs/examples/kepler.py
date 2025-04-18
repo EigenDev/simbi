@@ -176,7 +176,7 @@ class KeplerianRingTest(BaseConfig):
 
     @simbi_property
     def boundary_conditions(self) -> str:
-        return "outflow"
+        return "dynamic"
 
     def apply_buffer_damping(
         self,
@@ -268,12 +268,84 @@ class KeplerianRingTest(BaseConfig):
 
     @simbi_property
     def bx1_outer_expressions(self) -> ExpressionDict:
-        return self.bx1_inner_expressions
+        graph = expr.ExprGraph()
+        x1 = expr.variable("x1", graph)
+        x2 = expr.variable("x2", graph)
+        t = expr.variable("t", graph)
+        dt = expr.variable("dt", graph)
+
+        # current state values
+        current = [
+            expr.parameter(0, graph),  # density
+            expr.parameter(1, graph),  # momentum x
+            expr.parameter(2, graph),  # momentum y
+            expr.parameter(3, graph),  # energy
+        ]
+
+        # buffer parameters as constants
+        r_buffer = expr.constant(self.buffer_parameters["r_buffer"], graph)
+        r_outer = expr.constant(self.buffer_parameters["r_outer"], graph)
+        tau = expr.constant(self.buffer_parameters["damp_time"], graph)
+
+        source_terms = self.apply_buffer_damping(
+            x1, x2, t, dt, current, r_buffer, r_outer, tau
+        )
+
+        compiled_exp = graph.compile(source_terms)
+        return compiled_exp.serialize()
 
     @simbi_property
     def bx2_inner_expressions(self) -> ExpressionDict:
-        return self.bx1_inner_expressions
+        graph = expr.ExprGraph()
+        x1 = expr.variable("x1", graph)
+        x2 = expr.variable("x2", graph)
+        t = expr.variable("t", graph)
+        dt = expr.variable("dt", graph)
+
+        # current state values
+        current = [
+            expr.parameter(0, graph),  # density
+            expr.parameter(1, graph),  # momentum x
+            expr.parameter(2, graph),  # momentum y
+            expr.parameter(3, graph),  # energy
+        ]
+
+        # buffer parameters as constants
+        r_buffer = expr.constant(self.buffer_parameters["r_buffer"], graph)
+        r_outer = expr.constant(self.buffer_parameters["r_outer"], graph)
+        tau = expr.constant(self.buffer_parameters["damp_time"], graph)
+
+        source_terms = self.apply_buffer_damping(
+            x1, x2, t, dt, current, r_buffer, r_outer, tau
+        )
+
+        compiled_exp = graph.compile(source_terms)
+        return compiled_exp.serialize()
 
     @simbi_property
     def bx2_outer_expressions(self) -> ExpressionDict:
-        return self.bx1_inner_expressions
+        graph = expr.ExprGraph()
+        x1 = expr.variable("x1", graph)
+        x2 = expr.variable("x2", graph)
+        t = expr.variable("t", graph)
+        dt = expr.variable("dt", graph)
+
+        # current state values
+        current = [
+            expr.parameter(0, graph),  # density
+            expr.parameter(1, graph),  # momentum x
+            expr.parameter(2, graph),  # momentum y
+            expr.parameter(3, graph),  # energy
+        ]
+
+        # buffer parameters as constants
+        r_buffer = expr.constant(self.buffer_parameters["r_buffer"], graph)
+        r_outer = expr.constant(self.buffer_parameters["r_outer"], graph)
+        tau = expr.constant(self.buffer_parameters["damp_time"], graph)
+
+        source_terms = self.apply_buffer_damping(
+            x1, x2, t, dt, current, r_buffer, r_outer, tau
+        )
+
+        compiled_exp = graph.compile(source_terms)
+        return compiled_exp.serialize()

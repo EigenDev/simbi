@@ -54,6 +54,7 @@
 #include "core/types/containers/vector.hpp"
 #include "core/types/utility/enums.hpp"
 #include "util/tools/algorithms.hpp"
+#include "util/tools/helpers.hpp"
 #include <cmath>
 #include <iostream>
 #include <limits>
@@ -884,6 +885,9 @@ namespace simbi {
         DUAL constexpr real energy(const real gamma) const
         {
             if constexpr (R == Regime::NEWTONIAN) {
+                if (helpers::goes_to_zero(gamma - 1.0)) {
+                    return 0.0;
+                }
                 return press() / (gamma - 1.0) + 0.5 * rho() * vsquared();
             }
             else if constexpr (R == Regime::SRHD) {
