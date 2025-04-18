@@ -1,6 +1,7 @@
 #include "core/managers/boundary_manager.hpp"
 #include "core/types/containers/array.hpp"
 #include "util/tools/device_api.hpp"
+#include "util/tools/helpers.hpp"
 #include <cmath>   // for max, min
 
 using namespace simbi;
@@ -22,7 +23,7 @@ Newtonian<dim>::Newtonian(
       sound_speed_squared_(init_conditions.sound_speed_squared)
 {
     this->context_.gamma               = gamma;
-    this->context_.is_isothermal       = gamma == 1.0;
+    this->context_.is_isothermal       = goes_to_zero(gamma - 1.0);
     this->context_.ambient_sound_speed = std::sqrt(sound_speed_squared_);
 }
 

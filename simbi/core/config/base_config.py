@@ -274,7 +274,7 @@ class BaseConfig(metaclass=abc.ABCMeta):
         return []
 
     @simbi_property(group="io")
-    def bx1_inner_expressions(self) -> dict[str, ExpressionDict]:
+    def bx1_inner_expressions(self) -> ExpressionDict:
         """Expressions for the inner boundary condition in x1 direction"""
         return {}
 

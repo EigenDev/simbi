@@ -275,6 +275,7 @@ namespace simbi {
                             : Nothing,
                 mesh_,
                 time(),
+                time_step(),
                 need_corners
             );
         }

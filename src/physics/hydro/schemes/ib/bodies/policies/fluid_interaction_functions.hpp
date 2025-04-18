@@ -35,7 +35,6 @@ namespace simbi::body_functions {
             // Calculate distance vector from body to cell
             const auto r  = mesh_cell.cartesian_centroid() - body_position;
             const auto r2 = r.dot(r) + softening_length * softening_length;
-
             // Gravitational force on fluid element (G = 1)
             const auto f_cart = body_mass * r / (r2 * std::sqrt(r2));
 
@@ -54,8 +53,6 @@ namespace simbi::body_functions {
             // Apply two-way coupling if enabled
             if (two_way_coupling) {
                 // TODO: update this in a functional way
-                // body_force_ref -=
-                //     ff_hat * prim.labframe_density() * mesh_cell.volume();
             }
 
             return conserved_t{0.0, dp, dE};

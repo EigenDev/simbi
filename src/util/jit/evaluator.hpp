@@ -13,6 +13,7 @@ namespace simbi::expression {
         real x2                = 0.0,
         real x3                = 0.0,
         real t                 = 0.0,
+        real dt                = 0.0,
         const real* parameters = nullptr
     );
 
@@ -24,6 +25,7 @@ namespace simbi::expression {
         real x2                = 0.0,
         real x3                = 0.0,
         real t                 = 0.0,
+        real dt                = 0.0,
         const real* parameters = nullptr
     );
 
@@ -35,6 +37,7 @@ namespace simbi::expression {
         const real* x2_values,
         const real* x3_values,
         real t,
+        real dt,
         const real* parameters,
         real* results,
         int count
@@ -50,7 +53,8 @@ namespace simbi::expression {
         real x3,
         real t,
         const real* parameters,
-        real* results   // array to store results
+        real* results,
+        real dt = 0.0
     );
 }   // namespace simbi::expression
 

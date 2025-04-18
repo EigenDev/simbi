@@ -19,6 +19,16 @@ __all__ = [
     "sqrt",
     "sin",
     "cos",
+    "tan",
+    "log",
+    "log10",
+    "asin",
+    "acos",
+    "atan",
+    "exp",
+    "max_expr",
+    "min_expr",
+    "if_then_else",
 ]
 
 X1_ALIASES = ["x", "r", "x1"]
@@ -84,6 +94,20 @@ class Expr:
             self._graph.add_node("subtract", self._node_id, other_expr._node_id),
         )
 
+    def __radd__(self, other: Union[Expr, float, int]) -> Expr:
+        other_expr = self._ensure_expr(other)
+        return Expr(
+            self._graph,
+            self._graph.add_node("add", other_expr._node_id, self._node_id),
+        )
+
+    def __rsub__(self, other: Union[Expr, float, int]) -> Expr:
+        other_expr = self._ensure_expr(other)
+        return Expr(
+            self._graph,
+            self._graph.add_node("subtract", other_expr._node_id, self._node_id),
+        )
+
     def __mul__(self, other: Union[Expr, float, int]) -> Expr:
         other_expr = self._ensure_expr(other)
         return Expr(
@@ -91,11 +115,25 @@ class Expr:
             self._graph.add_node("multiply", self._node_id, other_expr._node_id),
         )
 
+    def __rmul__(self, other: Union[Expr, float, int]) -> Expr:
+        other_expr = self._ensure_expr(other)
+        return Expr(
+            self._graph,
+            self._graph.add_node("multiply", other_expr._node_id, self._node_id),
+        )
+
     def __truediv__(self, other: Union[Expr, float, int]) -> Expr:
         other_expr = self._ensure_expr(other)
         return Expr(
             self._graph,
             self._graph.add_node("divide", self._node_id, other_expr._node_id),
+        )
+
+    def __rtruediv__(self, other: Union[Expr, float, int]) -> Expr:
+        other_expr = self._ensure_expr(other)
+        return Expr(
+            self._graph,
+            self._graph.add_node("divide", other_expr._node_id, self._node_id),
         )
 
     def __pow__(self, other: Union[Expr, float, int]) -> Expr:
@@ -108,6 +146,9 @@ class Expr:
     def __neg__(self) -> Expr:
         return Expr(self._graph, self._graph.add_node("negate", self._node_id))
 
+    def __pos__(self) -> Expr:
+        return self
+
     # comparison operators
     def __lt__(self, other: Union[Expr, float, int]) -> Expr:
         other_expr = self._ensure_expr(other)
@@ -119,6 +160,18 @@ class Expr:
         other_expr = self._ensure_expr(other)
         return Expr(
             self._graph, self._graph.add_node("gt", self._node_id, other_expr._node_id)
+        )
+
+    def __le__(self, other: Union[Expr, float, int]) -> Expr:
+        other_expr = self._ensure_expr(other)
+        return Expr(
+            self._graph, self._graph.add_node("le", self._node_id, other_expr._node_id)
+        )
+
+    def __ge__(self, other: Union[Expr, float, int]) -> Expr:
+        other_expr = self._ensure_expr(other)
+        return Expr(
+            self._graph, self._graph.add_node("ge", self._node_id, other_expr._node_id)
         )
 
     def _ensure_expr(self, value: Union[Expr, float, int]) -> Expr:
@@ -219,6 +272,36 @@ def acos(expr: Expr) -> Expr:
 def atan(expr: Expr) -> Expr:
     """Inverse tangent function"""
     return Expr(expr._graph, expr._graph.add_node("atan", expr._node_id))
+
+
+def atan2(expr1: Expr, expr2: Expr) -> Expr:
+    return Expr(
+        expr1._graph, expr1._graph.add_node("atan2", expr1._node_id, expr2._node_id)
+    )
+
+
+def sinh(expr: Expr) -> Expr:
+    return Expr(expr._graph, expr._graph.add_node("sinh", expr._node_id))
+
+
+def cosh(expr: Expr) -> Expr:
+    return Expr(expr._graph, expr._graph.add_node("cosh", expr._node_id))
+
+
+def tanh(expr: Expr) -> Expr:
+    return Expr(expr._graph, expr._graph.add_node("tanh", expr._node_id))
+
+
+def asinh(expr: Expr) -> Expr:
+    return Expr(expr._graph, expr._graph.add_node("asinh", expr._node_id))
+
+
+def acosh(expr: Expr) -> Expr:
+    return Expr(expr._graph, expr._graph.add_node("acosh", expr._node_id))
+
+
+def atanh(expr: Expr) -> Expr:
+    return Expr(expr._graph, expr._graph.add_node("atanh", expr._node_id))
 
 
 def exp(expr: Expr) -> Expr:
@@ -428,6 +511,8 @@ class CompiledExpr:
                     expressions.append({"op": "VARIABLE_X3"})
                 elif attrs["name"] == "t":
                     expressions.append({"op": "VARIABLE_T"})
+                elif attrs["name"] == "dt":
+                    expressions.append({"op": "VARIABLE_DT"})
             elif op == "parameter":
                 expressions.append({"op": "PARAMETER", "param_idx": attrs["param_idx"]})
             elif op == "add":
@@ -545,4 +630,14 @@ class CompiledExpr:
         # map output indices
         output_indices = [node_map[out_id] for out_id in self._output_ids]
 
-        return {"expressions": expressions, "output_indices": output_indices}
+        max_param_idx = -1
+        for node_id in self._eval_order:
+            node_def = self._graph.get_node(node_id)
+            if node_def and node_def[0] == "parameter":
+                max_param_idx = max(max_param_idx, node_def[2].get("param_idx", -1))
+
+        return {
+            "expressions": expressions,
+            "output_indices": output_indices,
+            "param_count": max_param_idx + 1,
+        }

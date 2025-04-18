@@ -12,6 +12,7 @@ namespace simbi::expression {
         VARIABLE_X2,   // represents x2 variable (2D)
         VARIABLE_X3,   // represents x3 variable (3D)
         VARIABLE_T,    // represents time variable
+        VARIABLE_DT,   // represents time step variable
         PARAMETER,     // runtime parameter reference
 
         // arithmetic operations

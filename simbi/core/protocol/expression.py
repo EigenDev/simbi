@@ -401,6 +401,15 @@ class Expr:
         return Expr("VARIABLE_T")
 
     @staticmethod
+    def dt() -> "Expr":
+        """Time step variable.
+
+        Returns:
+            Time step expression
+        """
+        return Expr("VARIABLE_DT")
+
+    @staticmethod
     def param(idx: int) -> "Expr":
         """Parameter reference.
 

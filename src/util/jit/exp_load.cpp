@@ -17,6 +17,7 @@ namespace simbi::expression {
           {"VARIABLE_X2", ExprOp::VARIABLE_X2},
           {"VARIABLE_X3", ExprOp::VARIABLE_X3},
           {"VARIABLE_T", ExprOp::VARIABLE_T},
+          {"VARIABLE_DT", ExprOp::VARIABLE_DT},
           {"PARAMETER", ExprOp::PARAMETER},
           {"ADD", ExprOp::ADD},
           {"SUBTRACT", ExprOp::SUBTRACT},
@@ -140,7 +141,6 @@ namespace simbi::expression {
     ndarray<real> get_parameters(const ConfigDict& expr_data)
     {
         ndarray<real> params;
-
         if (expr_data.contains("parameters") &&
             expr_data.at("parameters").is_array()) {
             auto res =
@@ -153,13 +153,24 @@ namespace simbi::expression {
         return params;
     }
 
+    ndarray<real> get_parameter_extent(const ConfigDict& expr_data)
+    {
+        ndarray<real> params;
+        if (expr_data.contains("param_count")) {
+            const auto param_count = expr_data.at("param_count").get<int>();
+            params.resize(param_count);
+        }
+        params.sync_to_device();
+        return params;
+    }
+
     std::tuple<ndarray<ExprNode>, ndarray<int>, ndarray<real>>
     load_expression_data(const ConfigDict& data)
     {
         return {
           load_expressions(data),
           get_output_indices(data),
-          get_parameters(data)
+          get_parameter_extent(data)
         };
     }
 }   // namespace simbi::expression

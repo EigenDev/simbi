@@ -19,6 +19,7 @@ namespace simbi::expression {
         real x2,
         real x3,
         real t,
+        real dt,
         const real* parameters
     )
     {
@@ -41,6 +42,8 @@ namespace simbi::expression {
 
             case ExprOp::VARIABLE_T: return t;
 
+            case ExprOp::VARIABLE_DT: return dt;
+
             case ExprOp::PARAMETER:
                 if (parameters == nullptr) {
                     HANDLE_ERROR("Parameter array is null");
@@ -56,6 +59,7 @@ namespace simbi::expression {
                     x2,
                     x3,
                     t,
+                    dt,
                     parameters
                 );
                 real right = evaluate_expr(
@@ -65,6 +69,7 @@ namespace simbi::expression {
                     x2,
                     x3,
                     t,
+                    dt,
                     parameters
                 );
                 return left + right;
@@ -78,6 +83,7 @@ namespace simbi::expression {
                     x2,
                     x3,
                     t,
+                    dt,
                     parameters
                 );
                 real right = evaluate_expr(
@@ -87,6 +93,7 @@ namespace simbi::expression {
                     x2,
                     x3,
                     t,
+                    dt,
                     parameters
                 );
                 return left - right;
@@ -100,6 +107,7 @@ namespace simbi::expression {
                     x2,
                     x3,
                     t,
+                    dt,
                     parameters
                 );
                 real right = evaluate_expr(
@@ -109,6 +117,7 @@ namespace simbi::expression {
                     x2,
                     x3,
                     t,
+                    dt,
                     parameters
                 );
                 return left * right;
@@ -122,6 +131,7 @@ namespace simbi::expression {
                     x2,
                     x3,
                     t,
+                    dt,
                     parameters
                 );
                 real right = evaluate_expr(
@@ -131,6 +141,7 @@ namespace simbi::expression {
                     x2,
                     x3,
                     t,
+                    dt,
                     parameters
                 );
                 if (right == 0.0) {
@@ -147,6 +158,7 @@ namespace simbi::expression {
                     x2,
                     x3,
                     t,
+                    dt,
                     parameters
                 );
                 real exponent = evaluate_expr(
@@ -156,6 +168,7 @@ namespace simbi::expression {
                     x2,
                     x3,
                     t,
+                    dt,
                     parameters
                 );
                 // Handle potential domain errors
@@ -177,6 +190,7 @@ namespace simbi::expression {
                     x2,
                     x3,
                     t,
+                    dt,
                     parameters
                 );
                 return -value;
@@ -191,6 +205,7 @@ namespace simbi::expression {
                     x2,
                     x3,
                     t,
+                    dt,
                     parameters
                 );
                 real right = evaluate_expr(
@@ -200,6 +215,7 @@ namespace simbi::expression {
                     x2,
                     x3,
                     t,
+                    dt,
                     parameters
                 );
                 return left < right ? 1.0 : 0.0;
@@ -213,6 +229,7 @@ namespace simbi::expression {
                     x2,
                     x3,
                     t,
+                    dt,
                     parameters
                 );
                 real right = evaluate_expr(
@@ -222,6 +239,7 @@ namespace simbi::expression {
                     x2,
                     x3,
                     t,
+                    dt,
                     parameters
                 );
                 return left > right ? 1.0 : 0.0;
@@ -235,6 +253,7 @@ namespace simbi::expression {
                     x2,
                     x3,
                     t,
+                    dt,
                     parameters
                 );
                 real right = evaluate_expr(
@@ -244,6 +263,7 @@ namespace simbi::expression {
                     x2,
                     x3,
                     t,
+                    dt,
                     parameters
                 );
                 return left == right ? 1.0 : 0.0;
@@ -257,6 +277,7 @@ namespace simbi::expression {
                     x2,
                     x3,
                     t,
+                    dt,
                     parameters
                 );
                 real right = evaluate_expr(
@@ -266,6 +287,7 @@ namespace simbi::expression {
                     x2,
                     x3,
                     t,
+                    dt,
                     parameters
                 );
                 return left <= right ? 1.0 : 0.0;
@@ -279,6 +301,7 @@ namespace simbi::expression {
                     x2,
                     x3,
                     t,
+                    dt,
                     parameters
                 );
                 real right = evaluate_expr(
@@ -288,6 +311,7 @@ namespace simbi::expression {
                     x2,
                     x3,
                     t,
+                    dt,
                     parameters
                 );
                 return left >= right ? 1.0 : 0.0;
@@ -302,6 +326,7 @@ namespace simbi::expression {
                     x2,
                     x3,
                     t,
+                    dt,
                     parameters
                 );
                 // short-circuit evaluation
@@ -315,6 +340,7 @@ namespace simbi::expression {
                     x2,
                     x3,
                     t,
+                    dt,
                     parameters
                 );
                 return (left != 0.0 && right != 0.0) ? 1.0 : 0.0;
@@ -328,6 +354,7 @@ namespace simbi::expression {
                     x2,
                     x3,
                     t,
+                    dt,
                     parameters
                 );
                 // short-circuit evaluation
@@ -341,6 +368,7 @@ namespace simbi::expression {
                     x2,
                     x3,
                     t,
+                    dt,
                     parameters
                 );
                 return (left != 0.0 || right != 0.0) ? 1.0 : 0.0;
@@ -354,6 +382,7 @@ namespace simbi::expression {
                     x2,
                     x3,
                     t,
+                    dt,
                     parameters
                 );
                 return value == 0.0 ? 1.0 : 0.0;
@@ -368,6 +397,7 @@ namespace simbi::expression {
                     x2,
                     x3,
                     t,
+                    dt,
                     parameters
                 );
                 real right = evaluate_expr(
@@ -377,6 +407,7 @@ namespace simbi::expression {
                     x2,
                     x3,
                     t,
+                    dt,
                     parameters
                 );
                 return left < right ? left : right;
@@ -390,6 +421,7 @@ namespace simbi::expression {
                     x2,
                     x3,
                     t,
+                    dt,
                     parameters
                 );
                 real right = evaluate_expr(
@@ -399,6 +431,7 @@ namespace simbi::expression {
                     x2,
                     x3,
                     t,
+                    dt,
                     parameters
                 );
                 return left > right ? left : right;
@@ -413,6 +446,7 @@ namespace simbi::expression {
                     x2,
                     x3,
                     t,
+                    dt,
                     parameters
                 );
                 return std::sin(value);
@@ -426,6 +460,7 @@ namespace simbi::expression {
                     x2,
                     x3,
                     t,
+                    dt,
                     parameters
                 );
                 return std::cos(value);
@@ -439,6 +474,7 @@ namespace simbi::expression {
                     x2,
                     x3,
                     t,
+                    dt,
                     parameters
                 );
                 return std::tan(value);
@@ -452,6 +488,7 @@ namespace simbi::expression {
                     x2,
                     x3,
                     t,
+                    dt,
                     parameters
                 );
                 if (value <= 0.0) {
@@ -468,6 +505,7 @@ namespace simbi::expression {
                     x2,
                     x3,
                     t,
+                    dt,
                     parameters
                 );
                 if (value <= 0.0) {
@@ -484,6 +522,7 @@ namespace simbi::expression {
                     x2,
                     x3,
                     t,
+                    dt,
                     parameters
                 );
                 return std::exp(value);
@@ -497,6 +536,7 @@ namespace simbi::expression {
                     x2,
                     x3,
                     t,
+                    dt,
                     parameters
                 );
                 return std::abs(value);
@@ -510,6 +550,7 @@ namespace simbi::expression {
                     x2,
                     x3,
                     t,
+                    dt,
                     parameters
                 );
                 if (value < 0.0) {
@@ -526,6 +567,7 @@ namespace simbi::expression {
                     x2,
                     x3,
                     t,
+                    dt,
                     parameters
                 );
                 if (value < -1.0 || value > 1.0) {
@@ -542,6 +584,7 @@ namespace simbi::expression {
                     x2,
                     x3,
                     t,
+                    dt,
                     parameters
                 );
                 if (value < -1.0 || value > 1.0) {
@@ -558,6 +601,7 @@ namespace simbi::expression {
                     x2,
                     x3,
                     t,
+                    dt,
                     parameters
                 );
                 return std::atan(value);
@@ -572,6 +616,7 @@ namespace simbi::expression {
                     x2,
                     x3,
                     t,
+                    dt,
                     parameters
                 );
                 if (condition != 0.0) {
@@ -582,6 +627,7 @@ namespace simbi::expression {
                         x2,
                         x3,
                         t,
+                        dt,
                         parameters
                     );
                 }
@@ -593,6 +639,7 @@ namespace simbi::expression {
                         x2,
                         x3,
                         t,
+                        dt,
                         parameters
                     );
                 }
@@ -614,6 +661,7 @@ namespace simbi::expression {
         real x2,
         real x3,
         real t,
+        real dt,
         const real* parameters
     )
     {
@@ -675,6 +723,11 @@ namespace simbi::expression {
 
                 case ExprOp::VARIABLE_T:
                     entry.value     = t;
+                    entry.evaluated = true;
+                    break;
+
+                case ExprOp::VARIABLE_DT:
+                    entry.value     = dt;
                     entry.evaluated = true;
                     break;
 
@@ -1026,6 +1079,7 @@ namespace simbi::expression {
         const real* x2_values,
         const real* x3_values,
         real t,
+        real dt,
         const real* parameters,
         real* results,
         int count
@@ -1039,6 +1093,7 @@ namespace simbi::expression {
                 x2_values ? x2_values[i] : 0.0,
                 x3_values ? x3_values[i] : 0.0,
                 t,
+                dt,
                 parameters
             );
         }
@@ -1054,7 +1109,8 @@ namespace simbi::expression {
         real x3,
         real t,
         const real* parameters,
-        real* results
+        real* results,
+        real dt
     )
     {
         for (int i = 0; i < num_components; ++i) {
@@ -1065,6 +1121,7 @@ namespace simbi::expression {
                 x2,
                 x3,
                 t,
+                dt,
                 parameters
             );
         }

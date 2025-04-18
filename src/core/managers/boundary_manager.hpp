@@ -76,6 +76,7 @@ namespace simbi {
             const Maybe<const IOManager<Dims>*> io_manager = Nothing,
             const Mesh<Dims>& mesh                         = {},
             const real time                                = 0.0,
+            const real time_step                           = 0.0,
             const bool need_corners                        = false
         ) const
         {
@@ -87,7 +88,8 @@ namespace simbi {
                 conditions,
                 io_manager.unwrap_or(nullptr),
                 &mesh,
-                time
+                time,
+                time_step
             );
 
             // Sync corners if needed
@@ -230,7 +232,8 @@ namespace simbi {
             const ndarray<BoundaryCondition>& conditions,
             const IOManager<Dims>* io_manager,
             const Mesh<Dims>* mesh,
-            const real time
+            const real time,
+            const real time_step
         ) const
         {
             auto* data       = full_array.data();
@@ -266,9 +269,9 @@ namespace simbi {
             }
 
             // copy necessary data to avoid pointer issues
-            auto handle_dynamic_bc = [mesh, io_manager, time]() {
+            auto handle_dynamic_bc = [mesh, io_manager, time, time_step]() {
                 if constexpr (is_conserved_v<T>) {
-                    return [mesh, io_manager, time] DEV(
+                    return [mesh, io_manager, time, time_step] DEV(
                                const auto& coords,
                                const BoundaryFace face,
                                T& result
@@ -280,6 +283,7 @@ namespace simbi {
                                 face,
                                 physical_coords[0],
                                 time,
+                                time_step,
                                 result.data()
                             );
                         }
@@ -289,6 +293,7 @@ namespace simbi {
                                 physical_coords[0],
                                 physical_coords[1],
                                 time,
+                                time_step,
                                 result.data()
                             );
                         }
@@ -299,6 +304,7 @@ namespace simbi {
                                 physical_coords[1],
                                 physical_coords[2],
                                 time,
+                                time_step,
                                 result.data()
                             );
                         }
@@ -309,6 +315,7 @@ namespace simbi {
                     (void) mesh;
                     (void) io_manager;
                     (void) time;
+                    (void) time_step;
                     // Return a no-op lambda when T is not conserved
                     return [] DEV(const auto&, const BoundaryFace, auto&) {};
                 }
