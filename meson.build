@@ -22,7 +22,7 @@ add_project_arguments(
 py3 = import('python').find_installation('python3', required: true)
 py_install_dir = meson.current_source_dir() + '/simbi/libs'
 
-#show maximum of five errors before stopping the build
+#show maximum of n errors before stopping the build
 # cc = meson.get_compiler('cpp')
 # if cc.get_id() == 'clang'
 #     add_project_arguments('-ferror-limit=1', language : 'cpp')
