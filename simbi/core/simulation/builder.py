@@ -63,7 +63,7 @@ class SimStateBuilder:
             mesh.boundary_conditions,
             lambda bcs: BoundaryManager.validate_conditions(bcs, effective_dim),
             lambda bcs: BoundaryManager.extrapolate_conditions_if_needed(
-                bcs, mesh.dimensionality, mesh.coord_system
+                bcs, mesh.dimensionality, mesh.coord_system, bundle.sim_config.regime
             ),
             lambda bcs: BoundaryManager.check_and_fix_curvlinear_conditions(
                 conditions=bcs,
