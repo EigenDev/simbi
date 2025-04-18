@@ -251,16 +251,18 @@ namespace simbi {
                 );
             }
 
-            const auto dp    = prims.labframe_density() * gravity_vec;
+            const auto dp_dt = prims.labframe_density() * gravity_vec;
             const auto v_old = prims.velocity();
-            const auto v_new =
-                (prims.spatial_momentum(gamma_) + dp) / prims.rho();
+            const auto v_new = (prims.spatial_momentum(gamma_) + dp_dt) /
+                               prims.labframe_density();
             const auto v_avg = 0.5 * (v_old + v_new);
-            const auto dE    = dp.dot(v_avg);
+            const auto dE_dt = dp_dt.dot(v_avg);
 
             // gravity source term is rho * g_vec for momentum and
             // rho * v.dot(g_vec) for energy
-            return {0.0, dp, dE};
+            // here, we return the force and power to later
+            // be multiplied by the timestep
+            return {0.0, dp_dt, dE_dt};
         }
 
         void apply_boundary_conditions()
