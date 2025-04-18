@@ -84,31 +84,14 @@ namespace simbi {
         }
 
         // Copy constructor
-        DUAL constexpr array_t(const array_t& other)
-        {
-            for (size_type i = 0; i < N; ++i) {
-                data_[i] = other.data_[i];
-            }
-        }
-
+        constexpr array_t(const array_t& other) = default;
         // Move constructor
-        DUAL constexpr array_t(array_t&& other)
-        {
-            for (size_type i = 0; i < N; ++i) {
-                data_[i] = other.data_[i];
-            }
-        }
+        constexpr array_t(array_t&& other) = default;
 
         // Copy assignment
-        DUAL constexpr array_t& operator=(const array_t& other)
-        {
-            if (this != &other) {
-                for (size_type i = 0; i < N; ++i) {
-                    data_[i] = other.data_[i];
-                }
-            }
-            return *this;
-        }
+        constexpr array_t& operator=(const array_t& other) = default;
+        // Move assignment
+        constexpr array_t& operator=(array_t&& other) = default;
 
         // Accessors
         DUAL constexpr size_type size() const { return N; }
