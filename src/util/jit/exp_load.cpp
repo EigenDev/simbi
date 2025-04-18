@@ -125,43 +125,40 @@ namespace simbi::expression {
 
     ndarray<int> get_output_indices(const ConfigDict& expr_data)
     {
-        ndarray<int> indices;
-
-        if (expr_data.contains("output_indices") &&
-            expr_data.at("output_indices").is_array_of_ints()) {
-            auto res =
-                ndarray(expr_data.at("output_indices").get<std::vector<int>>());
-            res.sync_to_device();
-            return res;
+        if (!(expr_data.contains("output_indices") &&
+              expr_data.at("output_indices").is_array_of_ints())) {
+            return ndarray<int>{};
         }
 
-        return indices;
+        auto res =
+            ndarray(expr_data.at("output_indices").get<std::vector<int>>());
+        res.sync_to_device();
+        return res;
     }
 
     ndarray<real> get_parameters(const ConfigDict& expr_data)
     {
-        ndarray<real> params;
-        if (expr_data.contains("parameters") &&
-            expr_data.at("parameters").is_array()) {
-            auto res =
-                ndarray(expr_data.at("parameters").get<std::vector<real>>());
-            res.sync_to_device();
-            return res;
+        if (!(expr_data.contains("parameters") &&
+              expr_data.at("parameters").is_array())) {
+            return ndarray<real>{};
         }
 
-        params.sync_to_device();
-        return params;
+        auto res = ndarray(expr_data.at("parameters").get<std::vector<real>>());
+        res.sync_to_device();
+        return res;
     }
 
     ndarray<real> get_parameter_extent(const ConfigDict& expr_data)
     {
-        ndarray<real> params;
-        if (expr_data.contains("param_count")) {
-            const auto param_count = expr_data.at("param_count").get<int>();
-            params.resize(param_count);
+        if (!(expr_data.contains("parameter_extent") &&
+              expr_data.at("parameter_extent").is_array())) {
+            return ndarray<real>{};
         }
-        params.sync_to_device();
-        return params;
+
+        auto res =
+            ndarray(expr_data.at("parameter_extent").get<std::vector<real>>());
+        res.sync_to_device();
+        return res;
     }
 
     std::tuple<ndarray<ExprNode>, ndarray<int>, ndarray<real>>

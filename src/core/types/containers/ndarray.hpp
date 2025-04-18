@@ -115,6 +115,29 @@ namespace simbi {
             sync_to_device();
         }
 
+        // move assignment from std::vector
+        ndarray& operator=(std::vector<T>&& data)
+        {
+            mem_.allocate(data.size());
+            std::copy(data.begin(), data.end(), mem_.host_data());
+            this->size_     = data.size();
+            this->shape_[0] = data.size();
+            // fill the remaining dimensions with 1
+            for (size_type ii = 1; ii < Dims; ++ii) {
+                this->shape_[ii] = 1;
+            }
+            this->strides_ = this->compute_strides(this->shape_);
+            // check values after copy
+            for (size_type ii = 0; ii < this->size(); ++ii) {
+                assert(mem_[ii] == data[ii]);
+            }
+            // clear and release the vector
+            data.clear();
+            data.shrink_to_fit();
+            sync_to_device();
+            return *this;
+        }
+
         ndarray(const size_type sz)
         {
             mem_.allocate(sz);
@@ -141,7 +164,7 @@ namespace simbi {
         }
 
         auto data() -> T* { return mem_.data(); }
-        auto data() const -> const T* { return mem_.data(); }
+        DUAL auto data() const -> const T* { return mem_.data(); }
         auto fill(T value) -> void
         {
             std::fill(mem_.host_data(), mem_.host_data() + this->size(), value);

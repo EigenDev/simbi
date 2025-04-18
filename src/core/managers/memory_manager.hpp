@@ -207,7 +207,7 @@ namespace simbi {
             }
             return host_data_.get();
         }
-        T* data() const
+        DUAL T* data() const
         {
             if constexpr (global::on_gpu) {
                 return device_data_.get();

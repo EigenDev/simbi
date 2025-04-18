@@ -81,7 +81,7 @@ class RayleighTaylor(BaseConfig):
         t = expr.variable("t", graph)
 
         x_comp = expr.constant(0.0, graph)
-        y_comp = expr.constant(-self.g0, graph) - t
+        y_comp = expr.constant(-self.g0, graph)
         compiled_expr = graph.compile([x_comp, y_comp])
         return compiled_expr.serialize()
 

@@ -52,6 +52,7 @@
 #include "build_options.hpp"
 #include "core/managers/solver_manager.hpp"         // for SolverManager
 #include "core/types/utility/init_conditions.hpp"   // for InitialConditions
+#include "core/types/utility/managed.hpp"
 #include "physics/hydro/types/generic_structs.hpp"
 #include "util/jit/evaluator.hpp"
 #include "util/jit/exp_load.hpp"
@@ -99,7 +100,7 @@ namespace simbi {
     };
 
     template <size_type Dims>
-    class IOManager
+    class IOManager : public Managed<global::managed_memory>
     {
       private:
         SolverManager& solver_manager_;
@@ -226,6 +227,7 @@ namespace simbi {
             requires(sizeof...(Args) == Dims + 2)
         DEV void call_gravity_source(Args&&... args) const
         {
+
             // extract the coordinates and results array from args
             real coords[3] = {0.0, 0.0, 0.0};
             real t         = 0.0;

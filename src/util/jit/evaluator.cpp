@@ -1,4 +1,5 @@
 #include "evaluator.hpp"
+#include "build_options.hpp"
 #include <cmath>
 
 // Error handling macro - customize behavior based on compile flags
@@ -1114,16 +1115,32 @@ namespace simbi::expression {
     )
     {
         for (int i = 0; i < num_components; ++i) {
-            results[i] = evaluate_expr(
-                nodes,
-                root_indices[i],
-                x1,
-                x2,
-                x3,
-                t,
-                dt,
-                parameters
-            );
+            if constexpr (global::on_gpu) {
+                // gpu version uses non-recursive evaluation
+                // this avoids stack overflow issues
+                results[i] = evaluate_expr_nonrecursive(
+                    nodes,
+                    root_indices[i],
+                    x1,
+                    x2,
+                    x3,
+                    t,
+                    dt,
+                    parameters
+                );
+            }
+            else {
+                results[i] = evaluate_expr(
+                    nodes,
+                    root_indices[i],
+                    x1,
+                    x2,
+                    x3,
+                    t,
+                    dt,
+                    parameters
+                );
+            }
         }
     }
 
