@@ -54,8 +54,8 @@
 #include "core/types/utility/init_conditions.hpp"   // for InitialConditions
 #include "core/types/utility/managed.hpp"
 #include "physics/hydro/types/generic_structs.hpp"
-#include "util/jit/evaluator.hpp"
-#include "util/jit/exp_load.hpp"
+#include "util/math/evaluator.hpp"
+#include "util/math/exp_load.hpp"
 #include <string>
 
 namespace simbi {

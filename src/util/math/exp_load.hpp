@@ -3,7 +3,7 @@
 
 #include "core/types/containers/ndarray.hpp"
 #include "core/types/utility/config_dict.hpp"
-#include "core/types/utility/expression.hpp"
+#include "util/math/expression.hpp"
 #include <string>
 
 namespace simbi::expression {

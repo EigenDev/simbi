@@ -2,7 +2,7 @@
 #define EVALUATOR_HPP
 
 #include "build_options.hpp"
-#include "core/types/utility/expression.hpp"
+#include "util/math/expression.hpp"
 
 namespace simbi::expression {
     // main evaluation function with parameter support

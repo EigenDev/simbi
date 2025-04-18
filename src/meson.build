@@ -6,8 +6,8 @@ sources = files(
     'physics/hydro/states/srhd.cpp',
     'physics/hydro/states/newt.cpp',
     'util/tools/device_api.cpp',
-    'util/jit/exp_load.cpp',
-    'util/jit/evaluator.cpp',
+    'util/math/exp_load.cpp',
+    'util/math/evaluator.cpp',
 )
 
 headers = files(
