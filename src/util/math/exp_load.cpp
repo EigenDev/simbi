@@ -147,15 +147,13 @@ namespace simbi::expression {
         return res;
     }
 
-    ndarray<real> get_parameter_extent(const ConfigDict& expr_data)
+    ndarray<real> get_parameter_array(const ConfigDict& expr_data)
     {
-        if (!(expr_data.contains("parameter_extent") &&
-              expr_data.at("parameter_extent").is_array())) {
+        if (!expr_data.contains("param_count")) {
             return ndarray<real>{};
         }
 
-        auto res =
-            ndarray(expr_data.at("parameter_extent").get<std::vector<real>>());
+        auto res = ndarray<real>(expr_data.at("param_count").get<int>());
         res.sync_to_device();
         return res;
     }
@@ -166,7 +164,7 @@ namespace simbi::expression {
         return {
           load_expressions(data),
           get_output_indices(data),
-          get_parameter_extent(data)
+          get_parameter_array(data)
         };
     }
 }   // namespace simbi::expression

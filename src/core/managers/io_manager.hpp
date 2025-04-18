@@ -53,7 +53,6 @@
 #include "core/managers/solver_manager.hpp"         // for SolverManager
 #include "core/types/utility/init_conditions.hpp"   // for InitialConditions
 #include "core/types/utility/managed.hpp"
-#include "physics/hydro/types/generic_structs.hpp"
 #include "util/math/evaluator.hpp"
 #include "util/math/exp_load.hpp"
 #include <string>
@@ -288,11 +287,11 @@ namespace simbi {
                     std::forward_as_tuple(std::forward<Args>(args)...);
             }
 
-            const auto nvars = bx1_inner_parameters_.size();
             // Determine which boundary we're evaluating
             switch (face) {
                 case BoundaryFace::X1_INNER:
                     if (using_bx1_inner_expressions_) {
+                        const auto nvars = bx1_inner_parameters_.size();
                         for (size_type ii = 0; ii < nvars; ii++) {
                             bx1_inner_parameters_[ii] = results[ii];
                         }
@@ -313,6 +312,7 @@ namespace simbi {
 
                 case BoundaryFace::X1_OUTER:
                     if (using_bx1_outer_expressions_) {
+                        const auto nvars = bx1_outer_parameters_.size();
                         for (size_type ii = 0; ii < nvars; ii++) {
                             bx1_outer_parameters_[ii] = results[ii];
                         }
@@ -333,6 +333,7 @@ namespace simbi {
 
                 case BoundaryFace::X2_INNER:
                     if (using_bx2_inner_expressions_) {
+                        const auto nvars = bx2_inner_parameters_.size();
                         for (size_type ii = 0; ii < nvars; ii++) {
                             bx2_inner_parameters_[ii] = results[ii];
                         }
@@ -352,6 +353,7 @@ namespace simbi {
                     break;
                 case BoundaryFace::X2_OUTER:
                     if (using_bx2_outer_expressions_) {
+                        const auto nvars = bx2_outer_parameters_.size();
                         for (size_type ii = 0; ii < nvars; ii++) {
                             bx2_outer_parameters_[ii] = results[ii];
                         }
@@ -371,6 +373,7 @@ namespace simbi {
                     break;
                 case BoundaryFace::X3_INNER:
                     if (using_bx3_inner_expressions_) {
+                        const auto nvars = bx3_inner_parameters_.size();
                         for (size_type ii = 0; ii < nvars; ii++) {
                             bx3_inner_parameters_[ii] = results[ii];
                         }
@@ -390,6 +393,7 @@ namespace simbi {
                     break;
                 case BoundaryFace::X3_OUTER:
                     if (using_bx3_outer_expressions_) {
+                        const auto nvars = bx3_outer_parameters_.size();
                         for (size_type ii = 0; ii < nvars; ii++) {
                             bx3_outer_parameters_[ii] = results[ii];
                         }
