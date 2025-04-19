@@ -54,14 +54,9 @@
 #include "core/managers/memory_manager.hpp"        // for memory_manager
 #include "core/traits.hpp"                         // for is_maybe
 #include "core/types/alias/alias.hpp"              // for uarray
-#include "core/types/containers/array.hpp"         // for array
 #include "core/types/containers/array_view.hpp"    // for array_view"
 #include "core/types/containers/collapsable.hpp"   // for collapsable
-#include "core/types/monad/maybe.hpp"              // for Maybe
-#include "core/types/utility/enums.hpp"            // for BoundaryCondition
-#include "core/types/utility/idx_sequence.hpp"     // for make_idx_sequence
 #include "core/types/utility/operation_traits.hpp"   // for OperationTraits, PoinwiseOp
-#include "core/types/utility/smart_ptr.hpp"          // for smart_ptr<T[]>
 #include "util/parallel/exec_policy.hpp"             // for ExecutionPolicy
 #include "util/parallel/parallel_for.hpp"            // for parallel_for
 #include "util/tools/helpers.hpp"                    // for unravel_index
@@ -328,11 +323,13 @@ namespace simbi {
 
             // Recompute strides (may not be necessary if only size changes)
             this->strides_ = this->compute_strides(this->shape_);
+        }
 
+        auto push_back_with_sync(T value) -> void
+        {
+            push_back(value);
             // If using GPU, synchronize just the changed element
             if constexpr (global::on_gpu) {
-                // Ideally sync just the changed element, but this might require
-                // additional API support
                 mem_.sync_to_device();
             }
         }
