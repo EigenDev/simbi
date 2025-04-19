@@ -3,6 +3,7 @@
 
 #include "build_options.hpp"
 #include "component_body_system.hpp"
+#include "core/types/containers/vector.hpp"
 #include "physics/hydro/schemes/ib/bodies/policies/fluid_interaction_functions.hpp"
 #include "physics/hydro/types/context.hpp"
 
@@ -109,11 +110,11 @@ namespace simbi::ibsystem::functions {
         // Loop over all bodies and apply their respective forces
         for (size_type body_idx = 0; body_idx < system.size(); ++body_idx) {
             // Get the body properties
-            const auto& position = system.positions()[body_idx];
+            const auto position = system.position_at(body_idx);
             // const auto& velocity = system.velocities()[body_idx];
             // const auto& force = system.forces()[body_idx];
-            const auto& mass = system.masses()[body_idx];
-            // const auto& radius   = system.radii()[body_idx];
+            const auto mass = system.mass_at(body_idx);
+            // const auto& radius = system.radius_at(body_idx);
 
             if (system.has_capability(
                     body_idx,
@@ -139,15 +140,13 @@ namespace simbi::ibsystem::functions {
                     ibsystem::BodyCapability::ACCRETION
                 )) {
                 // Get the body properties
-                const auto& position = system.positions()[body_idx];
-                const auto& velocity = system.velocities()[body_idx];
+                const auto position = system.position_at(body_idx);
+                const auto velocity = system.velocity_at(body_idx);
                 // const auto& force    = system.forces()[body_idx];
-                const auto& mass = system.masses()[body_idx];
+                const auto mass = system.mass_at(body_idx);
                 // const auto& radius   = system.radii()[body_idx];
-                const auto& accretion_efficiency =
-                    system.accretion_efficiency(body_idx);
-                const auto& accretion_radius =
-                    system.accretion_radius(body_idx);
+                const auto accr_eff = system.accretion_efficiency(body_idx);
+                const auto accretion_radius = system.accretion_radius(body_idx);
                 // const auto& total_accreted_mass =
                 //     system.total_accreted_mass(body_idx);
                 //
@@ -157,7 +156,7 @@ namespace simbi::ibsystem::functions {
                     velocity,
                     mass,
                     // total_accreted_mass,
-                    accretion_efficiency,
+                    accr_eff,
                     accretion_radius,
                     // total_accreted_mass,
                     prim,
