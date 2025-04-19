@@ -64,3 +64,12 @@ class BodyType(str, ExtendedEnum):
     # TODO: Implement these later
     POROUS = "porous"
     PASSIVE = "passive"
+
+
+class BodyCapability(int, ExtendedEnum):
+    NONE = (0,)
+    GRAVITATIONAL = (1 << 0,)
+    ACCRETION = (1 << 1,)
+    ELASTIC = (1 << 2,)
+    DEFORMABLE = (1 << 3,)
+    RIGID = (1 << 4,)

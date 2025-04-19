@@ -1,9 +1,8 @@
 import h5py
 import numpy as np
 from types import TracebackType
-from typing import Any, Callable, Optional, Union, Sequence
+from typing import Any, Callable, Optional, Union, Sequence, Literal
 from numpy.typing import NDArray
-from _collections_abc import dict_keys
 from ..physics.calculations import (
     VectorComponent,
     enthalpy_density,
@@ -18,6 +17,19 @@ from ..physics.calculations import (
 )
 
 Array = NDArray[np.floating[Any]]
+
+
+class BodyCapability(int):
+    NONE = 0
+    GRAVITATIONAL = 1 << 0
+    ACCRETION = 1 << 1
+    ELASTIC = 1 << 2
+    DEFORMABLE = 1 << 3
+    RIGID = 1 << 4
+
+
+def has_capability(body_type: BodyCapability, capability: Literal[2]) -> bool:
+    return bool(body_type & capability)
 
 
 def vector(ndim: int, name: str) -> Sequence[str]:
@@ -209,10 +221,8 @@ class LazySimulationReader:
             position = body_group["position"][...]
             velocity = body_group["velocity"][...]
             force = body_group["force"][...]
-
+            body_type = BodyCapability(body_group.attrs["capabilities"])
             # Check body type
-            body_type = body_group.attrs["type"].decode("utf-8")
-
             self._immersed_bodies_cache[f"body_{i}"] = {
                 "mass": mass,
                 "radius": radius,
@@ -223,7 +233,7 @@ class LazySimulationReader:
             }
 
             # For accretors, read additional properties
-            if body_type == "accretor":
+            if has_capability(body_type, BodyCapability.ACCRETION):
                 self._immersed_bodies_cache[f"body_{i}"].update(
                     {
                         # "accretion_rate": body_group["accretion_rate"][...],

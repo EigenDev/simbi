@@ -45,8 +45,8 @@ namespace simbi::body_functions {
             const auto dp = prim.labframe_density() * ff_hat * dt;
 
             const auto v_old = prim.velocity();
-            const auto v_new =
-                (prim.spatial_momentum(context.gamma) + dp) / prim.rho();
+            const auto v_new = (prim.spatial_momentum(context.gamma) + dp) /
+                               prim.labframe_density();
             const auto v_avg = 0.5 * (v_old + v_new);
             const auto dE    = dp.dot(v_avg);
 

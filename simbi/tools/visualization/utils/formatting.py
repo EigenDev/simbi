@@ -208,6 +208,7 @@ class PlotFormatter:
                     ax.set_xlim(config["style"].xlims)
                 if any(config["style"].ylims):
                     ax.set_ylim(config["style"].ylims)
+                ax.set_aspect("equal", adjustable="box")
 
     @staticmethod
     def format_cartesian_colorbar(

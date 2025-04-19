@@ -6,6 +6,8 @@ import numpy as np
 from matplotlib.animation import FuncAnimation
 from numpy.typing import NDArray
 
+from simbi.functional.reader import BodyCapability, has_capability
+
 from ....functional.helpers import calc_any_mean
 from ... import utility as util
 from ..core.constants import FIELD_ALIASES
@@ -125,20 +127,20 @@ class AnimationMixin:
                     patch.remove()
 
                 for body in immersed_bodies.values():
-                    if body["type"] == "accretor":
+                    if has_capability(body["type"], BodyCapability.ACCRETION):
                         radius = body["accretion_radius"]
                     else:
                         radius = body["radius"]
-                    # circle = mpatches.Circle(
-                    #     body["position"],
-                    #     radius,
-                    #     color="black",
-                    #     linestyle="--",
-                    #     alpha=0.5,
-                    # )
-                    # self.axes.add_patch(circle)
-                    # self.axes.set_aspect("equal", adjustable="box")
-                    # self.axes.autoscale_view()
+                    circle = mpatches.Circle(
+                        body["position"],
+                        radius,
+                        color="black",
+                        linestyle="--",
+                        alpha=0.5,
+                    )
+                    self.axes.add_patch(circle)
+                    self.axes.set_aspect("equal", adjustable="box")
+                    self.axes.autoscale_view()
 
 
 class CoordinatesMixin:

@@ -50,12 +50,12 @@
 #define IO_MANAGER_HPP
 
 #include "build_options.hpp"
-#include "core/managers/solver_manager.hpp"         // for SolverManager
+#include "core/managers/solver_manager.hpp"   // for SolverManager
+#include "core/types/containers/vector.hpp"
 #include "core/types/utility/init_conditions.hpp"   // for InitialConditions
 #include "core/types/utility/managed.hpp"
-#include "physics/hydro/types/generic_structs.hpp"
-#include "util/jit/evaluator.hpp"
-#include "util/jit/exp_load.hpp"
+#include "util/math/evaluator.hpp"
+#include "util/math/exp_load.hpp"
 #include <string>
 
 namespace simbi {
@@ -262,40 +262,20 @@ namespace simbi {
             );
         }
 
-        template <typename... Args>
-            requires(sizeof...(Args) == Dims + 3)
-        DEV void call_boundary_source(BoundaryFace face, Args&&... args) const
+        template <typename Conserved>
+        DEV Conserved call_boundary_source(
+            BoundaryFace face,
+            const spatial_vector_t<real, Dims>& coords,
+            real t,
+            real dt,
+            const Conserved& conserved_data
+        ) const
         {
-            // extract the coordinates and results array from args
-            real coords[3] = {0.0, 0.0, 0.0};
-            real t         = 0.0;
-            real dt        = 0.0;
-            real* results  = nullptr;
-
-            if constexpr (Dims == 1) {
-                //  1D: args are (x1, t, results*)
-                std::tie(coords[0], t, dt, results) =
-                    std::forward_as_tuple(std::forward<Args>(args)...);
-            }
-            else if constexpr (Dims == 2) {
-                //  2D: args are (x1, x2, t, results*)
-                std::tie(coords[0], coords[1], t, dt, results) =
-                    std::forward_as_tuple(std::forward<Args>(args)...);
-            }
-            else if constexpr (Dims == 3) {
-                //  3D: args are (x1, x2, x3, t, results*)
-                std::tie(coords[0], coords[1], coords[2], t, dt, results) =
-                    std::forward_as_tuple(std::forward<Args>(args)...);
-            }
-
-            const auto nvars = bx1_inner_parameters_.size();
+            auto local_results = conserved_data;
             // Determine which boundary we're evaluating
             switch (face) {
                 case BoundaryFace::X1_INNER:
                     if (using_bx1_inner_expressions_) {
-                        for (size_type ii = 0; ii < nvars; ii++) {
-                            bx1_inner_parameters_[ii] = results[ii];
-                        }
                         expression::evaluate_expr_vector(
                             bx1_inner_expr_nodes_.data(),
                             bx1_inner_output_indices_.data(),
@@ -304,18 +284,15 @@ namespace simbi {
                             coords[1],
                             coords[2],
                             t,
-                            bx1_inner_parameters_.data(),
-                            results,
+                            conserved_data.data(),
+                            local_results.data(),
                             dt
                         );
                     }
-                    break;
+                    return local_results;
 
                 case BoundaryFace::X1_OUTER:
                     if (using_bx1_outer_expressions_) {
-                        for (size_type ii = 0; ii < nvars; ii++) {
-                            bx1_outer_parameters_[ii] = results[ii];
-                        }
                         expression::evaluate_expr_vector(
                             bx1_outer_expr_nodes_.data(),
                             bx1_outer_output_indices_.data(),
@@ -324,18 +301,15 @@ namespace simbi {
                             coords[1],
                             coords[2],
                             t,
-                            bx1_outer_parameters_.data(),
-                            results,
+                            conserved_data.data(),
+                            local_results.data(),
                             dt
                         );
                     }
-                    break;
+                    return local_results;
 
                 case BoundaryFace::X2_INNER:
                     if (using_bx2_inner_expressions_) {
-                        for (size_type ii = 0; ii < nvars; ii++) {
-                            bx2_inner_parameters_[ii] = results[ii];
-                        }
                         expression::evaluate_expr_vector(
                             bx2_inner_expr_nodes_.data(),
                             bx2_inner_output_indices_.data(),
@@ -344,17 +318,14 @@ namespace simbi {
                             coords[1],
                             coords[2],
                             t,
-                            bx2_inner_parameters_.data(),
-                            results,
+                            conserved_data.data(),
+                            local_results.data(),
                             dt
                         );
                     }
-                    break;
+                    return local_results;
                 case BoundaryFace::X2_OUTER:
                     if (using_bx2_outer_expressions_) {
-                        for (size_type ii = 0; ii < nvars; ii++) {
-                            bx2_outer_parameters_[ii] = results[ii];
-                        }
                         expression::evaluate_expr_vector(
                             bx2_outer_expr_nodes_.data(),
                             bx2_outer_output_indices_.data(),
@@ -363,17 +334,14 @@ namespace simbi {
                             coords[1],
                             coords[2],
                             t,
-                            bx2_outer_parameters_.data(),
-                            results,
+                            conserved_data.data(),
+                            local_results.data(),
                             dt
                         );
                     }
-                    break;
+                    return local_results;
                 case BoundaryFace::X3_INNER:
                     if (using_bx3_inner_expressions_) {
-                        for (size_type ii = 0; ii < nvars; ii++) {
-                            bx3_inner_parameters_[ii] = results[ii];
-                        }
                         expression::evaluate_expr_vector(
                             bx3_inner_expr_nodes_.data(),
                             bx3_inner_output_indices_.data(),
@@ -382,17 +350,14 @@ namespace simbi {
                             coords[1],
                             coords[2],
                             t,
-                            bx3_inner_parameters_.data(),
-                            results,
+                            conserved_data.data(),
+                            local_results.data(),
                             dt
                         );
                     }
-                    break;
+                    return local_results;
                 case BoundaryFace::X3_OUTER:
                     if (using_bx3_outer_expressions_) {
-                        for (size_type ii = 0; ii < nvars; ii++) {
-                            bx3_outer_parameters_[ii] = results[ii];
-                        }
                         expression::evaluate_expr_vector(
                             bx3_outer_expr_nodes_.data(),
                             bx3_outer_output_indices_.data(),
@@ -401,11 +366,12 @@ namespace simbi {
                             coords[1],
                             coords[2],
                             t,
-                            bx3_outer_parameters_.data(),
-                            results,
+                            conserved_data.data(),
+                            local_results.data(),
                             dt
                         );
                     }
+                    return local_results;
             }
         }
 

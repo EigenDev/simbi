@@ -50,7 +50,11 @@
 #define CHECKPOINT_HPP
 
 #include "build_options.hpp"
+#include "physics/hydro/schemes/ib/serialization/body_serialization.hpp"
 #include <string>
+
+using namespace simbi::ibsystem;
+
 namespace simbi {
     namespace io {
         // forward declaration
@@ -371,127 +375,75 @@ namespace simbi {
             }
             sim_info.close();
 
-            // write the immersed boudary data if it exists
-            // if (state.gravitational_system()) {
-            //     // create dataset for simulation information
-            //     H5::Group ib_group = file.createGroup("immersed_bodies");
+            // write the immersed boundary data if it exists
+            if (state.has_immersed_bodies()) {
+                // Create group for immersed bodies
+                H5::Group ib_group = file.createGroup("immersed_bodies");
 
-            //     // write simulation information in attributes and then close
-            //     the
-            //     // file
-            //     auto& ib_data          =
-            //     state.gravitational_system()->bodies(); auto ib_size =
-            //     ib_data.size(); auto bodies_count_attr =
-            //     ib_group.createAttribute(
-            //         "count",
-            //         int_type,
-            //         scalar_dataspace
-            //     );
-            //     bodies_count_attr.write(int_type, &ib_size);
-            //     bodies_count_attr.close();
+                // Write body count
+                auto& body_system = *state.body_system();
+                auto body_count   = body_system.size();
 
-            //     // for each body, we need to write its basic properties
-            //     // such as the mass, radius, velocity, position, force, and
-            //     type
-            //     // and then write the data to the file
-            //     for (size_t i = 0; i < ib_size; ++i) {
-            //         auto& body    = ib_data[i];
-            //         auto mass     = body->mass();
-            //         auto radius   = body->radius();
-            //         auto velocity = body->velocity();
-            //         auto position = body->position();
-            //         auto force    = body->force();
+                auto bodies_count_attr = ib_group.createAttribute(
+                    "count",
+                    int_type,
+                    scalar_dataspace
+                );
+                bodies_count_attr.write(int_type, &body_count);
+                bodies_count_attr.close();
 
-            //         // Create a subgroup for this specific body
-            //         std::string body_group_name = "body_" +
-            //         std::to_string(i); H5::Group body_group =
-            //             ib_group.createGroup(body_group_name);
+                // Write each body's data
+                for (size_t body_idx = 0; body_idx < body_count; ++body_idx) {
+                    // Create a subgroup for this specific body
+                    std::string body_group_name =
+                        "body_" + std::to_string(body_idx);
+                    H5::Group body_group =
+                        ib_group.createGroup(body_group_name);
 
-            //         // Write scalar properties
-            //         body_group
-            //             .createDataSet(
-            //                 "mass",
-            //                 real_type,
-            //                 H5::DataSpace(H5S_SCALAR)
-            //             )
-            //             .write(&mass, real_type);
-            //         body_group
-            //             .createDataSet(
-            //                 "radius",
-            //                 real_type,
-            //                 H5::DataSpace(H5S_SCALAR)
-            //             )
-            //             .write(&radius, real_type);
+                    // Get all serializable properties for this body
+                    auto properties =
+                        body_system.get_serializable_properties(body_idx);
 
-            //         // Create dimensions for vector data
-            //         hsize_t vec_dims[1] = {T::dimensions};
-            //         H5::DataSpace vec_space(1, vec_dims);
+                    // Write each property using the appropriate serialization
+                    // trait
+                    for (const auto& prop_variant : properties) {
+                        std::visit(
+                            [&body_group](const auto& prop) {
+                                using PropType =
+                                    std::decay_t<decltype(prop.extractor(0))>;
 
-            //         // Write vector properties as simple arrays
-            //         body_group.createDataSet("velocity", real_type,
-            //         vec_space)
-            //             .write(velocity.data(), real_type);
-            //         body_group.createDataSet("position", real_type,
-            //         vec_space)
-            //             .write(position.data(), real_type);
-            //         body_group.createDataSet("force", real_type, vec_space)
-            //             .write(force.data(), real_type);
+                                // Extract the property value for this body
+                                PropType value = prop.extractor(0);
 
-            //         // If this is an accreting body, write accretion-specific
-            //         // properties
-            //         if (body->has_accretion_capability()) {
-            //             const auto accretion_efficiency =
-            //                 body->accretion_efficiency();
-            //             const auto accretion_radius =
-            //             body->accretion_radius(); const auto
-            //             total_accreted_mass =
-            //                 body->total_accreted_mass();
+                                // Use the appropriate serialization trait to
+                                // write the value
+                                PropertySerializationTrait<PropType>::
+                                    write_to_h5(body_group, prop.name, value);
+                            },
+                            prop_variant
+                        );
+                    }
 
-            //             body_group
-            //                 .createDataSet(
-            //                     "accretion_efficiency",
-            //                     real_type,
-            //                     H5::DataSpace(H5S_SCALAR)
-            //                 )
-            //                 .write(&accretion_efficiency, real_type);
-            //             body_group
-            //                 .createDataSet(
-            //                     "accretion_radius",
-            //                     real_type,
-            //                     H5::DataSpace(H5S_SCALAR)
-            //                 )
-            //                 .write(&accretion_radius, real_type);
-            //             body_group
-            //                 .createDataSet(
-            //                     "total_accreted_mass",
-            //                     real_type,
-            //                     H5::DataSpace(H5S_SCALAR)
-            //                 )
-            //                 .write(&total_accreted_mass, real_type);
-            //         }
+                    // Add capability flags as attributes
+                    auto caps         = body_system.capabilities()[body_idx];
+                    uint32_t caps_int = static_cast<uint32_t>(caps);
 
-            //         // Store body type as a string attribute
-            //         std::string body_type = body->has_accretion_capability()
-            //                                     ? "accretor"
-            //                                     : "standard";
-            //         auto type_attr        = body_group.createAttribute(
-            //             "type",
-            //             H5::StrType(H5::PredType::C_S1, body_type.length() +
-            //             1), scalar_dataspace
-            //         );
-            //         type_attr.write(
-            //             H5::StrType(H5::PredType::C_S1, body_type.length() +
-            //             1), body_type.c_str()
-            //         );
-            //         type_attr.close();
+                    auto caps_attr = body_group.createAttribute(
+                        "capabilities",
+                        int_type,
+                        scalar_dataspace
+                    );
+                    caps_attr.write(int_type, &caps_int);
+                    caps_attr.close();
 
-            //         // Close this body's group
-            //         body_group.close();
-            //     }
+                    // Close this body's group
+                    body_group.close();
+                }
 
-            //     // Close the immersed_bodies group
-            //     ib_group.close();
-            // }
+                // Close the immersed_bodies group
+                ib_group.close();
+            }
+
             // close the file
             file.close();
         }

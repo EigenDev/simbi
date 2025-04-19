@@ -1,4 +1,5 @@
-from typing import Sequence, Any
+from typing import Sequence
+from ..config.constants import Regime
 from ...functional.helpers import to_iterable
 
 
@@ -28,7 +29,7 @@ class BoundaryManager:
 
     @classmethod
     def extrapolate_conditions_if_needed(
-        cls, conditions: Sequence[str], dim: int, coord_system: str
+        cls, conditions: Sequence[str], dim: int, coord_system: str, regime: Regime
     ) -> Sequence[str]:
         if coord_system == "spherical":
             return conditions
@@ -38,7 +39,7 @@ class BoundaryManager:
         if number_of_given_bcs != 2 * dim:
             if number_of_given_bcs == 1:
                 bcs *= 2 * dim
-            elif number_of_given_bcs == 2 * (dim - 1):
+            elif number_of_given_bcs == 2 * (dim - 1) and regime == Regime.SRMHD:
                 bcs += ["outflow", "outflow"]
             else:
                 bcs = list(bc for bc in bcs for _ in range(2))

@@ -1,7 +1,6 @@
 #include "exp_load.hpp"
 #include "core/types/containers/ndarray.hpp"
 #include "core/types/utility/config_dict.hpp"
-#include "core/types/utility/expression.hpp"
 #include <iostream>
 #include <unordered_map>
 
@@ -147,14 +146,17 @@ namespace simbi::expression {
         return res;
     }
 
-    ndarray<real> get_parameter_extent(const ConfigDict& expr_data)
+    ndarray<real> get_parameter_array(const ConfigDict& expr_data)
     {
-        if (!(expr_data.contains("parameter_extent") &&
-              expr_data.at("parameter_extent").is_array())) {
+        if (!expr_data.contains("param_count")) {
             return ndarray<real>{};
         }
 
+<<<<<<< HEAD:src/util/jit/exp_load.cpp
         ndarray res(expr_data.at("parameter_extent").get<std::vector<real>>());
+=======
+        auto res = ndarray<real>(expr_data.at("param_count").get<int>());
+>>>>>>> 3b29337c15a1133f6db4dc98d0a2a4c6acdc347b:src/util/math/exp_load.cpp
         res.sync_to_device();
         return res;
     }
@@ -165,7 +167,7 @@ namespace simbi::expression {
         return {
           load_expressions(data),
           get_output_indices(data),
-          get_parameter_extent(data)
+          get_parameter_array(data)
         };
     }
 }   // namespace simbi::expression
