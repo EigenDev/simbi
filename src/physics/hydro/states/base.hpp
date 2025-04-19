@@ -519,7 +519,7 @@ namespace simbi {
             return time() == 0.0 || checkpoint_index() == 0;
         }
 
-        auto gravitational_system() const { return body_system_.get(); }
+        auto body_system() const { return body_system_.get(); }
 
         // accessors from mesh class
         auto halo_radius() const { return mesh_.halo_radius(); }
