@@ -14,6 +14,17 @@
 #endif
 
 namespace simbi::expression {
+    enum class EvalError {
+        NONE,
+        INVALID_NODE_INDEX,
+        NULL_PARAMETER_ARRAY,
+        DIVISION_BY_ZERO,
+        ZERO_TO_NEGATIVE_POWER,
+        NEGATIVE_BASE_NON_INTEGER_EXPONENT,
+        STACK_OVERFLOW,
+        INFINITE_LOOP,
+        UNKNOWN_OPERATION
+    };
 
     DEV real evaluate_expr(
         const ExprNode* nodes,
@@ -904,541 +915,540 @@ namespace simbi::expression {
         const real* parameters
     )
     {
-        // based on expected expression depth (doubtful it will be more than 64)
+        // define constants for memory limits
+        // max number of nodes in expression tree
+        constexpr int MAX_NODES = 1024;
+        // max number of nodes in evaluation stack
         constexpr int MAX_STACK = 64;
 
-        // stack to track nodes to evaluate
+        // node evaluation status tracking
+        bool node_evaluated[MAX_NODES] = {false};
+        real node_values[MAX_NODES]    = {0.0};
+
+        // track nodes currently being evaluated to detect dependencies
+        // (this avoids circular dependencies)
+        bool in_progress[MAX_NODES] = {false};
+
+        // stack entry structure with a clearer design
         struct StackEntry {
-            int node_idx;
-            real value;
-            bool evaluated;
+            int node_idx;   // Index of the node being evaluated
+            /// 0. inital, 1. evaluating children, 2. computing result
+            int phase;                // current phase of evaluation
+            int children_needed;      // number of children required
+            int children_evaluated;   // number of children already evaluated
+            // values of evaluated children (max 3 for ternary ops)
+            real child_values[3];
         };
 
+        // initialize stack with root node
         StackEntry stack[MAX_STACK];
-        int stack_top = 0;
+        int stack_size = 0;
 
-        // push root node
-        stack[stack_top++] = {node_idx, 0.0, false};
+        // check node index validity
+        if (node_idx < 0 || node_idx >= MAX_NODES) {
+            HANDLE_ERROR("Invalid node index");
+        }
 
-        while (stack_top > 0) {
-            // check current stack entry
-            StackEntry& entry = stack[stack_top - 1];
+        // push the root node to start evaluation
+        stack[stack_size++]   = {node_idx, 0, 0, 0, {0.0, 0.0, 0.0}};
+        in_progress[node_idx] = true;
 
-            // if already evaluated, pop and use result
-            if (entry.evaluated) {
-                stack_top--;
-                if (stack_top > 0) {
-                    // Pass result to parent
-                    stack[stack_top - 1].value     = entry.value;
-                    stack[stack_top - 1].evaluated = true;
+        // main evaluation loop
+        while (stack_size > 0) {
+            // guard against stack overflow
+            if (stack_size >= MAX_STACK) {
+                HANDLE_ERROR("Expression evaluation stack overflow");
+            }
+
+            // get current stack entry (without popping yet)
+            StackEntry& entry = stack[stack_size - 1];
+
+            // get the corresponding node
+            const ExprNode& node = nodes[entry.node_idx];
+
+            // check if this node was already evaluated previously
+            if (node_evaluated[entry.node_idx]) {
+                // skip processing, just use cached value
+                real result = node_values[entry.node_idx];
+                // no longer in progress, so we can pop it
+                in_progress[entry.node_idx] = false;
+                stack_size--;
+
+                // pass result to parent if stack isn't empty
+                if (stack_size > 0) {
+                    StackEntry& parent = stack[stack_size - 1];
+                    parent.child_values[parent.children_evaluated++] = result;
+                    // parent is now in child evaluation phase
+                    parent.phase = 1;
                 }
                 continue;
             }
 
-            const ExprNode& node = nodes[entry.node_idx];
+            // process node based on its phase
+            bool process_next = true;
 
-            // process based on operation type
-            switch (node.op) {
-                // leaf nodes that can be evaluated immediately
-                case ExprOp::CONSTANT:
-                    entry.value     = node.value;
-                    entry.evaluated = true;
-                    break;
+            while (process_next) {
+                process_next = false;
 
-                case ExprOp::VARIABLE_X1:
-                    entry.value     = x1;
-                    entry.evaluated = true;
-                    break;
+                switch (entry.phase) {
+                    case 0: {   // initial processing phase
+                        // simple cases - constants and variables
+                        if (node.op == ExprOp::CONSTANT ||
+                            node.op == ExprOp::VARIABLE_X1 ||
+                            node.op == ExprOp::VARIABLE_X2 ||
+                            node.op == ExprOp::VARIABLE_X3 ||
+                            node.op == ExprOp::VARIABLE_T ||
+                            node.op == ExprOp::VARIABLE_DT ||
+                            node.op == ExprOp::PARAMETER) {
 
-                case ExprOp::VARIABLE_X2:
-                    entry.value     = x2;
-                    entry.evaluated = true;
-                    break;
+                            // determine value based on operation type
+                            real value = 0.0;
+                            switch (node.op) {
+                                case ExprOp::CONSTANT:
+                                    value = node.value;
+                                    break;
+                                case ExprOp::VARIABLE_X1: value = x1; break;
+                                case ExprOp::VARIABLE_X2: value = x2; break;
+                                case ExprOp::VARIABLE_X3: value = x3; break;
+                                case ExprOp::VARIABLE_T: value = t; break;
+                                case ExprOp::VARIABLE_DT: value = dt; break;
+                                case ExprOp::PARAMETER:
+                                    if (parameters == nullptr) {
+                                        HANDLE_ERROR("Parameter array is null");
+                                    }
+                                    value = parameters[node.param_idx];
+                                    break;
+                                default: break;
+                            }
 
-                case ExprOp::VARIABLE_X3:
-                    entry.value     = x3;
-                    entry.evaluated = true;
-                    break;
+                            // cache result and pop from stack
+                            node_values[entry.node_idx]    = value;
+                            node_evaluated[entry.node_idx] = true;
+                            in_progress[entry.node_idx]    = false;
+                            stack_size--;
 
-                case ExprOp::VARIABLE_T:
-                    entry.value     = t;
-                    entry.evaluated = true;
-                    break;
-
-                case ExprOp::VARIABLE_DT:
-                    entry.value     = dt;
-                    entry.evaluated = true;
-                    break;
-
-                case ExprOp::PARAMETER:
-                    if (parameters == nullptr) {
-                        entry.value = 0.0;
-                    }
-                    else {
-                        entry.value = parameters[node.param_idx];
-                    }
-                    entry.evaluated = true;
-                    break;
-
-                // for binary operations, we need to evaluate both children
-                case ExprOp::ADD:
-                case ExprOp::SUBTRACT:
-                case ExprOp::MULTIPLY:
-                case ExprOp::DIVIDE:
-                case ExprOp::POWER:
-                case ExprOp::LT:
-                case ExprOp::GT:
-                case ExprOp::EQ:
-                case ExprOp::LE:
-                case ExprOp::GE:
-                case ExprOp::AND:
-                case ExprOp::OR:
-                case ExprOp::MIN:
-                case ExprOp::MAX: {
-                    // push right child onto stack (will be evaluated first)
-                    if (stack_top >= MAX_STACK - 1) {
-                        // stack overflow (!)
-                        return 0.0;
-                    }
-                    stack[stack_top++] = {node.children.right, 0.0, false};
-
-                    // push left child onto stack
-                    if (stack_top >= MAX_STACK - 1) {
-                        // stack overflow (!)
-                        return 0.0;
-                    }
-                    stack[stack_top++] = {node.children.left, 0.0, false};
-
-                    // ,ark this entry as waiting for children
-                    entry.evaluated = false;
-                } break;
-
-                // for unary operations, we need to evaluate the operand
-                case ExprOp::NEG:
-                case ExprOp::NOT:
-                case ExprOp::SIN:
-                case ExprOp::COS:
-                case ExprOp::TAN:
-                case ExprOp::LOG:
-                case ExprOp::LOG10:
-                case ExprOp::EXP:
-                case ExprOp::ABS:
-                case ExprOp::SQRT:
-                case ExprOp::ASIN:
-                case ExprOp::ACOS:
-                case ExprOp::ATAN:
-                case ExprOp::SINH:
-                case ExprOp::COSH:
-                case ExprOp::TANH:
-                case ExprOp::ASINH:
-                case ExprOp::ACOSH:
-                case ExprOp::ATANH:
-                case ExprOp::SGN: {
-                    // push operand onto stack
-                    if (stack_top >= MAX_STACK - 1) {
-                        // stack overflow
-                        return 0.0;
-                    }
-                    stack[stack_top++] = {node.children.left, 0.0, false};
-
-                    // mark this entry as waiting for operand
-                    entry.evaluated = false;
-                } break;
-
-                // for bitwise operations
-                case ExprOp::BITWISE_AND:
-                case ExprOp::BITWISE_OR:
-                case ExprOp::BITWISE_XOR:
-                case ExprOp::BITWISE_NOT:
-                case ExprOp::BITWISE_LEFT_SHIFT:
-                case ExprOp::BITWISE_RIGHT_SHIFT: {
-                    // push right child onto stack (will be evaluated first)
-                    if (stack_top >= MAX_STACK - 1) {
-                        // stack overflow
-                        return 0.0;
-                    }
-                    stack[stack_top++] = {node.children.right, 0.0, false};
-
-                    // push left child onto stack
-                    if (stack_top >= MAX_STACK - 1) {
-                        // stack overflow
-                        return 0.0;
-                    }
-                    stack[stack_top++] = {node.children.left, 0.0, false};
-
-                    // mark this entry as waiting for children
-                    entry.evaluated = false;
-                } break;
-
-                // for ternary operations
-                case ExprOp::IF_THEN_ELSE: {
-                    // push condition onto stack
-                    if (stack_top >= MAX_STACK - 1) {
-                        // stack overflow
-                        return 0.0;
-                    }
-                    stack[stack_top++] = {node.ternary.condition, 0.0, false};
-
-                    // the rest will be handled after condition is evaluated
-                    entry.evaluated = false;
-                } break;
-
-                default:
-                    // unknown operation
-                    entry.value     = 0.0;
-                    entry.evaluated = true;
-                    break;
-            }
-
-            // continue evaluation if this node has been marked as evaluated
-            if (entry.evaluated) {
-                continue;
-            }
-
-            // for nodes waiting on children/operands
-            if (stack[stack_top - 1].evaluated) {
-                // child/operand has been evaluated
-
-                switch (node.op) {
-                    // binary operations
-                    case ExprOp::ADD: {
-                        real right      = stack[--stack_top].value;
-                        real left       = stack[--stack_top].value;
-                        entry.value     = left + right;
-                        entry.evaluated = true;
-                    } break;
-
-                    case ExprOp::SUBTRACT: {
-                        real right      = stack[--stack_top].value;
-                        real left       = stack[--stack_top].value;
-                        entry.value     = left - right;
-                        entry.evaluated = true;
-                    } break;
-
-                    case ExprOp::MULTIPLY: {
-                        real right      = stack[--stack_top].value;
-                        real left       = stack[--stack_top].value;
-                        entry.value     = left * right;
-                        entry.evaluated = true;
-                    } break;
-
-                    case ExprOp::DIVIDE: {
-                        real right = stack[--stack_top].value;
-                        real left  = stack[--stack_top].value;
-                        if (right == 0.0) {
-                            entry.value = 0.0;   // Handle division by zero
+                            // pass value to parent if stack isn't empty
+                            if (stack_size > 0) {
+                                StackEntry& parent = stack[stack_size - 1];
+                                parent
+                                    .child_values[parent.children_evaluated++] =
+                                    value;
+                            }
                         }
                         else {
-                            entry.value = left / right;
-                        }
-                        entry.evaluated = true;
-                    } break;
-
-                    case ExprOp::POWER: {
-                        real exponent = stack[--stack_top].value;
-                        real base     = stack[--stack_top].value;
-                        // Handle potential domain errors
-                        if (base == 0.0 && exponent <= 0.0) {
-                            entry.value =
-                                0.0;   // Zero raised to zero or negative power
-                        }
-                        else if (base < 0.0 &&
-                                 std::floor(exponent) != exponent) {
-                            entry.value = 0.0;   // Negative base with
-                                                 // non-integer exponent
-                        }
-                        else {
-                            entry.value = std::pow(base, exponent);
-                        }
-                        entry.evaluated = true;
-                    } break;
-
-                    case ExprOp::LT: {
-                        real right      = stack[--stack_top].value;
-                        real left       = stack[--stack_top].value;
-                        entry.value     = (left < right) ? 1.0 : 0.0;
-                        entry.evaluated = true;
-                    } break;
-
-                    case ExprOp::GT: {
-                        real right      = stack[--stack_top].value;
-                        real left       = stack[--stack_top].value;
-                        entry.value     = (left > right) ? 1.0 : 0.0;
-                        entry.evaluated = true;
-                    } break;
-
-                    case ExprOp::EQ: {
-                        real right      = stack[--stack_top].value;
-                        real left       = stack[--stack_top].value;
-                        entry.value     = (left == right) ? 1.0 : 0.0;
-                        entry.evaluated = true;
-                    } break;
-
-                    case ExprOp::LE: {
-                        real right      = stack[--stack_top].value;
-                        real left       = stack[--stack_top].value;
-                        entry.value     = (left <= right) ? 1.0 : 0.0;
-                        entry.evaluated = true;
-                    } break;
-
-                    case ExprOp::GE: {
-                        real right      = stack[--stack_top].value;
-                        real left       = stack[--stack_top].value;
-                        entry.value     = (left >= right) ? 1.0 : 0.0;
-                        entry.evaluated = true;
-                    } break;
-
-                    case ExprOp::AND: {
-                        real right  = stack[--stack_top].value;
-                        real left   = stack[--stack_top].value;
-                        entry.value = (left != 0.0 && right != 0.0) ? 1.0 : 0.0;
-                        entry.evaluated = true;
-                    } break;
-
-                    case ExprOp::OR: {
-                        real right  = stack[--stack_top].value;
-                        real left   = stack[--stack_top].value;
-                        entry.value = (left != 0.0 || right != 0.0) ? 1.0 : 0.0;
-                        entry.evaluated = true;
-                    } break;
-
-                    case ExprOp::MIN: {
-                        real right      = stack[--stack_top].value;
-                        real left       = stack[--stack_top].value;
-                        entry.value     = (left < right) ? left : right;
-                        entry.evaluated = true;
-                    } break;
-
-                    case ExprOp::MAX: {
-                        real right      = stack[--stack_top].value;
-                        real left       = stack[--stack_top].value;
-                        entry.value     = (left > right) ? left : right;
-                        entry.evaluated = true;
-                    } break;
-
-                    // unary operations
-                    case ExprOp::NEG: {
-                        real operand    = stack[--stack_top].value;
-                        entry.value     = -operand;
-                        entry.evaluated = true;
-                    } break;
-
-                    case ExprOp::SQRT: {
-                        real operand = stack[--stack_top].value;
-                        if (operand < 0.0) {
-                            entry.value = 0.0;   // Handle sqrt of negative
-                        }
-                        else {
-                            entry.value = std::sqrt(operand);
-                        }
-                        entry.evaluated = true;
-                    } break;
-
-                    case ExprOp::ABS: {
-                        real operand    = stack[--stack_top].value;
-                        entry.value     = std::abs(operand);
-                        entry.evaluated = true;
-                    } break;
-
-                    case ExprOp::SIN: {
-                        real operand    = stack[--stack_top].value;
-                        entry.value     = std::sin(operand);
-                        entry.evaluated = true;
-                    } break;
-
-                    case ExprOp::COS: {
-                        real operand    = stack[--stack_top].value;
-                        entry.value     = std::cos(operand);
-                        entry.evaluated = true;
-                    } break;
-
-                    case ExprOp::TAN: {
-                        real operand    = stack[--stack_top].value;
-                        entry.value     = std::tan(operand);
-                        entry.evaluated = true;
-                    } break;
-
-                    case ExprOp::SINH: {
-                        real operand    = stack[--stack_top].value;
-                        entry.value     = std::sinh(operand);
-                        entry.evaluated = true;
-                    } break;
-
-                    case ExprOp::COSH: {
-                        real operand    = stack[--stack_top].value;
-                        entry.value     = std::cosh(operand);
-                        entry.evaluated = true;
-                    } break;
-
-                    case ExprOp::TANH: {
-                        real operand    = stack[--stack_top].value;
-                        entry.value     = std::tanh(operand);
-                        entry.evaluated = true;
-                    } break;
-
-                    case ExprOp::ASINH: {
-                        real operand    = stack[--stack_top].value;
-                        entry.value     = std::asinh(operand);
-                        entry.evaluated = true;
-                    } break;
-
-                    case ExprOp::ACOSH: {
-                        real operand = stack[--stack_top].value;
-                        if (operand < 1.0) {
-                            entry.value = 0.0;   // Handle acosh out of range
-                        }
-                        else {
-                            entry.value = std::acosh(operand);
-                        }
-                        entry.evaluated = true;
-                    } break;
-
-                    case ExprOp::ATANH: {
-                        real operand = stack[--stack_top].value;
-                        if (operand <= -1.0 || operand >= 1.0) {
-                            entry.value = 0.0;   // Handle atanh out of range
-                        }
-                        else {
-                            entry.value = std::atanh(operand);
-                        }
-                        entry.evaluated = true;
-                    } break;
-
-                    case ExprOp::SGN: {
-                        real operand    = stack[--stack_top].value;
-                        entry.value     = helpers::sgn(operand);
-                        entry.evaluated = true;
-                    } break;
-
-                    case ExprOp::LOG: {
-                        real operand = stack[--stack_top].value;
-                        if (operand <= 0.0) {
-                            entry.value = 0.0;   // Handle log of non-positive
-                        }
-                        else {
-                            entry.value = std::log(operand);
-                        }
-                        entry.evaluated = true;
-                    } break;
-
-                    case ExprOp::LOG10: {
-                        real operand = stack[--stack_top].value;
-                        if (operand <= 0.0) {
-                            entry.value = 0.0;   // Handle log10 of non-positive
-                        }
-                        else {
-                            entry.value = std::log10(operand);
-                        }
-                        entry.evaluated = true;
-                    } break;
-
-                    case ExprOp::EXP: {
-                        real operand    = stack[--stack_top].value;
-                        entry.value     = std::exp(operand);
-                        entry.evaluated = true;
-                    } break;
-
-                    case ExprOp::ASIN: {
-                        real operand = stack[--stack_top].value;
-                        if (operand < -1.0 || operand > 1.0) {
-                            entry.value = 0.0;   // Handle asin out of range
-                        }
-                        else {
-                            entry.value = std::asin(operand);
-                        }
-                        entry.evaluated = true;
-                    } break;
-
-                    case ExprOp::ACOS: {
-                        real operand = stack[--stack_top].value;
-                        if (operand < -1.0 || operand > 1.0) {
-                            entry.value = 0.0;   // Handle acos out of range
-                        }
-                        else {
-                            entry.value = std::acos(operand);
-                        }
-                        entry.evaluated = true;
-                    } break;
-
-                    case ExprOp::ATAN: {
-                        real operand    = stack[--stack_top].value;
-                        entry.value     = std::atan(operand);
-                        entry.evaluated = true;
-                    } break;
-
-                    // bitwise operations
-                    case ExprOp::BITWISE_AND: {
-                        real right = stack[--stack_top].value;
-                        real left  = stack[--stack_top].value;
-                        entry.value =
-                            static_cast<int>(left) & static_cast<int>(right);
-                        entry.evaluated = true;
-                    } break;
-
-                    case ExprOp::BITWISE_OR: {
-                        real right = stack[--stack_top].value;
-                        real left  = stack[--stack_top].value;
-                        entry.value =
-                            static_cast<int>(left) | static_cast<int>(right);
-                        entry.evaluated = true;
-                    } break;
-
-                    case ExprOp::BITWISE_XOR: {
-                        real right = stack[--stack_top].value;
-                        real left  = stack[--stack_top].value;
-                        entry.value =
-                            static_cast<int>(left) ^ static_cast<int>(right);
-                        entry.evaluated = true;
-                    } break;
-
-                    case ExprOp::BITWISE_NOT: {
-                        real operand    = stack[--stack_top].value;
-                        entry.value     = ~static_cast<int>(operand);
-                        entry.evaluated = true;
-                    } break;
-
-                    case ExprOp::BITWISE_LEFT_SHIFT: {
-                        real right  = stack[--stack_top].value;
-                        real left   = stack[--stack_top].value;
-                        entry.value = static_cast<int>(left)
-                                      << static_cast<int>(right);
-                        entry.evaluated = true;
-                    } break;
-
-                    case ExprOp::BITWISE_RIGHT_SHIFT: {
-                        real right = stack[--stack_top].value;
-                        real left  = stack[--stack_top].value;
-                        entry.value =
-                            static_cast<int>(left) >> static_cast<int>(right);
-                        entry.evaluated = true;
-                    } break;
-
-                    // ternary operation (if-then-else)
-                    case ExprOp::IF_THEN_ELSE: {
-                        real condition = stack[--stack_top].value;
-                        if (condition != 0.0) {
-                            // push 'then' branch
-                            stack[stack_top++] =
-                                {node.ternary.then_expr, 0.0, false};
-                        }
-                        else {
-                            // push 'else' branch
-                            stack[stack_top++] =
-                                {node.ternary.else_expr, 0.0, false};
+                            // for operations requiring child evaluation
+                            // move to child evaluation phase
+                            entry.phase = 1;
+                            // continue to next phase immediately
+                            process_next = true;
                         }
                     } break;
 
-                    default:
-                        // unknown op !
-                        entry.value     = 0.0;
-                        entry.evaluated = true;
-                        break;
+                    case 1: {   // child evaluation phase
+                        // determine children needed based on operation type
+                        if (entry.children_needed == 0) {
+                            // first time in this phase - figure out how many
+                            // children we need
+                            switch (node.op) {
+                                // unary operations
+                                case ExprOp::NEG:
+                                case ExprOp::SQRT:
+                                case ExprOp::SIN:
+                                case ExprOp::COS:
+                                case ExprOp::TAN:
+                                case ExprOp::LOG:
+                                case ExprOp::LOG10:
+                                case ExprOp::EXP:
+                                case ExprOp::ABS:
+                                case ExprOp::ASIN:
+                                case ExprOp::ACOS:
+                                case ExprOp::ATAN:
+                                case ExprOp::SGN:
+                                case ExprOp::SINH:
+                                case ExprOp::COSH:
+                                case ExprOp::TANH:
+                                case ExprOp::ASINH:
+                                case ExprOp::ACOSH:
+                                case ExprOp::ATANH:
+                                case ExprOp::NOT:
+                                case ExprOp::BITWISE_NOT:
+                                    entry.children_needed = 1;
+                                    break;
+
+                                // binary ops
+                                case ExprOp::ADD:
+                                case ExprOp::SUBTRACT:
+                                case ExprOp::MULTIPLY:
+                                case ExprOp::DIVIDE:
+                                case ExprOp::POWER:
+                                case ExprOp::MIN:
+                                case ExprOp::MAX:
+                                case ExprOp::LT:
+                                case ExprOp::LE:
+                                case ExprOp::GT:
+                                case ExprOp::GE:
+                                case ExprOp::EQ:
+                                case ExprOp::AND:
+                                case ExprOp::OR:
+                                case ExprOp::BITWISE_AND:
+                                case ExprOp::BITWISE_OR:
+                                case ExprOp::BITWISE_XOR:
+                                case ExprOp::BITWISE_LEFT_SHIFT:
+                                case ExprOp::BITWISE_RIGHT_SHIFT:
+                                    entry.children_needed = 2;
+                                    break;
+
+                                // ternary operation
+                                case ExprOp::IF_THEN_ELSE:
+                                    entry.children_needed = 3;
+                                    break;
+
+                                default:
+                                    HANDLE_ERROR("Unknown operation type");
+                                    break;
+                            }
+                        }
+
+                        // evaluate required children
+                        bool need_more_children = false;
+
+                        if (entry.children_evaluated < entry.children_needed) {
+                            // we still need to evaluate more children
+                            int child_idx = -1;
+
+                            // determine which child to evaluate next
+                            if (entry.children_needed == 1) {
+                                // unary op - we need the left child
+                                child_idx = node.children.left;
+                            }
+                            else if (entry.children_needed == 2) {
+                                // binary op - need both left and right
+                                if (entry.children_evaluated == 0) {
+                                    // Process left child first
+                                    child_idx = node.children.left;
+                                }
+                                else {
+                                    // Then process right child
+                                    child_idx = node.children.right;
+                                }
+                            }
+                            else if (entry.children_needed == 3) {
+                                // ternary op (if-then-else)
+                                if (entry.children_evaluated == 0) {
+                                    // First evaluate condition
+                                    child_idx = node.ternary.condition;
+                                }
+                                else if (entry.children_evaluated == 1) {
+                                    // then evaluate either then or else branch
+                                    // based on condition
+                                    if (entry.child_values[0] != 0.0) {
+                                        child_idx = node.ternary.then_expr;
+                                    }
+                                    else {
+                                        child_idx = node.ternary.else_expr;
+                                    }
+                                }
+                            }
+
+                            // validate child index
+                            if (child_idx < 0 || child_idx >= MAX_NODES) {
+                                HANDLE_ERROR("Invalid child node index");
+                            }
+
+                            // check if child already evaluated
+                            if (node_evaluated[child_idx]) {
+                                // use cached value
+                                entry.child_values[entry.children_evaluated++] =
+                                    node_values[child_idx];
+                                // continue in this phase
+                                process_next = true;
+                            }
+                            // check if child is currently being evaluated
+                            // (would cause circular dependency)
+                            else if (in_progress[child_idx]) {
+                                HANDLE_ERROR(
+                                    "Circular dependency in expression"
+                                );
+                            }
+                            else {
+                                // push child onto stack
+                                in_progress[child_idx] = true;
+                                stack[stack_size++] =
+                                    {child_idx, 0, 0, 0, {0.0, 0.0, 0.0}};
+                                need_more_children = true;
+                            }
+                        }
+
+                        // if all children are evaluated, move to result phase
+                        if (!need_more_children &&
+                            entry.children_evaluated >= entry.children_needed) {
+                            // move to result computation phase
+                            entry.phase  = 2;
+                            process_next = true;
+                        }
+                    } break;
+
+                    case 2: {   // result computation phase
+                        // calculate result based on operation type
+                        real result = 0.0;
+
+                        switch (node.op) {
+                            // process each operation type...
+                            case ExprOp::ADD:
+                                result = entry.child_values[0] +
+                                         entry.child_values[1];
+                                break;
+                            case ExprOp::SUBTRACT:
+                                result = entry.child_values[0] -
+                                         entry.child_values[1];
+                                break;
+                            case ExprOp::MULTIPLY:
+                                result = entry.child_values[0] *
+                                         entry.child_values[1];
+                                break;
+                            case ExprOp::DIVIDE:
+                                if (entry.child_values[1] == 0.0) {
+                                    HANDLE_ERROR("Division by zero");
+                                }
+                                result = entry.child_values[0] /
+                                         entry.child_values[1];
+                                break;
+                            case ExprOp::POWER:
+                                if (entry.child_values[0] < 0.0 &&
+                                    entry.child_values[1] !=
+                                        static_cast<int>(entry.child_values[1]
+                                        )) {
+                                    HANDLE_ERROR(
+                                        "Negative base with non-integer "
+                                        "exponent"
+                                    );
+                                }
+                                result = std::pow(
+                                    entry.child_values[0],
+                                    entry.child_values[1]
+                                );
+                                break;
+                            case ExprOp::NEG:
+                                result = -entry.child_values[0];
+                                break;
+                            case ExprOp::MIN:
+                                result = std::min(
+                                    entry.child_values[0],
+                                    entry.child_values[1]
+                                );
+                                break;
+                            case ExprOp::MAX:
+                                result = std::max(
+                                    entry.child_values[0],
+                                    entry.child_values[1]
+                                );
+                                break;
+                            case ExprOp::LT:
+                                result = entry.child_values[0] <
+                                                 entry.child_values[1]
+                                             ? 1.0
+                                             : 0.0;
+                                break;
+                            case ExprOp::LE:
+                                result = entry.child_values[0] <=
+                                                 entry.child_values[1]
+                                             ? 1.0
+                                             : 0.0;
+                                break;
+                            case ExprOp::GT:
+                                result = entry.child_values[0] >
+                                                 entry.child_values[1]
+                                             ? 1.0
+                                             : 0.0;
+                                break;
+                            case ExprOp::GE:
+                                result = entry.child_values[0] >=
+                                                 entry.child_values[1]
+                                             ? 1.0
+                                             : 0.0;
+                                break;
+                            case ExprOp::EQ:
+                                result = entry.child_values[0] ==
+                                                 entry.child_values[1]
+                                             ? 1.0
+                                             : 0.0;
+                                break;
+                            case ExprOp::AND:
+                                result = entry.child_values[0] != 0.0 &&
+                                                 entry.child_values[1] != 0.0
+                                             ? 1.0
+                                             : 0.0;
+                                break;
+                            case ExprOp::OR:
+                                result = entry.child_values[0] != 0.0 ||
+                                                 entry.child_values[1] != 0.0
+                                             ? 1.0
+                                             : 0.0;
+                                break;
+                            case ExprOp::NOT:
+                                result =
+                                    entry.child_values[0] == 0.0 ? 1.0 : 0.0;
+                                break;
+                            case ExprOp::BITWISE_AND:
+                                result =
+                                    static_cast<int>(entry.child_values[0]) &
+                                    static_cast<int>(entry.child_values[1]);
+                                break;
+                            case ExprOp::BITWISE_OR:
+                                result =
+                                    static_cast<int>(entry.child_values[0]) |
+                                    static_cast<int>(entry.child_values[1]);
+                                break;
+                            case ExprOp::BITWISE_XOR:
+                                result =
+                                    static_cast<int>(entry.child_values[0]) ^
+                                    static_cast<int>(entry.child_values[1]);
+                                break;
+                            case ExprOp::BITWISE_NOT:
+                                result =
+                                    ~static_cast<int>(entry.child_values[0]);
+                                break;
+                            case ExprOp::BITWISE_LEFT_SHIFT:
+                                result =
+                                    static_cast<int>(entry.child_values[0])
+                                    << static_cast<int>(entry.child_values[1]);
+                                break;
+                            case ExprOp::BITWISE_RIGHT_SHIFT:
+                                result =
+                                    static_cast<int>(entry.child_values[0]) >>
+                                    static_cast<int>(entry.child_values[1]);
+                                break;
+                            case ExprOp::IF_THEN_ELSE:
+                                if (entry.child_values[0] != 0.0) {
+                                    result = entry.child_values[1];
+                                }
+                                else {
+                                    result = entry.child_values[2];
+                                }
+                                break;
+                            case ExprOp::SIN:
+                                result = std::sin(entry.child_values[0]);
+                                break;
+                            case ExprOp::COS:
+                                result = std::cos(entry.child_values[0]);
+                                break;
+                            case ExprOp::TAN:
+                                result = std::tan(entry.child_values[0]);
+                                break;
+                            case ExprOp::SINH:
+                                result = std::sinh(entry.child_values[0]);
+                                break;
+                            case ExprOp::COSH:
+                                result = std::cosh(entry.child_values[0]);
+                                break;
+                            case ExprOp::TANH:
+                                result = std::tanh(entry.child_values[0]);
+                                break;
+                            case ExprOp::ASIN:
+                                if (entry.child_values[0] < -1.0 ||
+                                    entry.child_values[0] > 1.0) {
+                                    HANDLE_ERROR(
+                                        "Arc sine argument out of range"
+                                    );
+                                }
+                                result = std::asin(entry.child_values[0]);
+                                break;
+                            case ExprOp::ACOS:
+                                if (entry.child_values[0] < -1.0 ||
+                                    entry.child_values[0] > 1.0) {
+                                    HANDLE_ERROR(
+                                        "Arc cosine argument out of range"
+                                    );
+                                }
+                                result = std::acos(entry.child_values[0]);
+                                break;
+                            case ExprOp::ATAN:
+                                result = std::atan(entry.child_values[0]);
+                                break;
+                            case ExprOp::ASINH:
+                                result = std::asinh(entry.child_values[0]);
+                                break;
+                            case ExprOp::ACOSH:
+                                if (entry.child_values[0] < 1.0) {
+                                    HANDLE_ERROR(
+                                        "Arc hyperbolic cosine argument "
+                                        "out of range"
+                                    );
+                                }
+                                result = std::acosh(entry.child_values[0]);
+                                break;
+                            case ExprOp::ATANH:
+                                if (entry.child_values[0] <= -1.0 ||
+                                    entry.child_values[0] >= 1.0) {
+                                    HANDLE_ERROR(
+                                        "Arc hyperbolic tangent argument "
+                                        "out of range"
+                                    );
+                                }
+                                result = std::atanh(entry.child_values[0]);
+                                break;
+                            case ExprOp::ABS:
+                                result = std::abs(entry.child_values[0]);
+                                break;
+                            case ExprOp::LOG:
+                                if (entry.child_values[0] <= 0.0) {
+                                    HANDLE_ERROR(
+                                        "Logarithm of non-positive "
+                                        "number"
+                                    );
+                                }
+                                result = std::log(entry.child_values[0]);
+                                break;
+                            case ExprOp::LOG10:
+                                if (entry.child_values[0] <= 0.0) {
+                                    HANDLE_ERROR(
+                                        "Logarithm of non-positive "
+                                        "number"
+                                    );
+                                }
+                                result = std::log10(entry.child_values[0]);
+                                break;
+                            case ExprOp::EXP:
+                                result = std::exp(entry.child_values[0]);
+                                break;
+                            case ExprOp::SQRT:
+                                if (entry.child_values[0] < 0.0) {
+                                    HANDLE_ERROR(
+                                        "Square root of negative "
+                                        "number"
+                                    );
+                                }
+                                result = std::sqrt(entry.child_values[0]);
+                                break;
+                            case ExprOp::SGN:
+                                result = helpers::sgn(entry.child_values[0]);
+                                break;
+                            default:
+                                HANDLE_ERROR("Unknown operation type");
+                                break;
+                        }
+
+                        // cache the result
+                        node_values[entry.node_idx]    = result;
+                        node_evaluated[entry.node_idx] = true;
+                        in_progress[entry.node_idx]    = false;
+
+                        // pop from stack
+                        stack_size--;
+
+                        // pass result to parent if stack isn't empty
+                        if (stack_size > 0) {
+                            StackEntry& parent = stack[stack_size - 1];
+                            parent.child_values[parent.children_evaluated++] =
+                                result;
+                        }
+                    } break;
                 }
             }
         }
 
-        // return the final result
-        return stack[0].value;
+        // return cached result for root node
+        return node_evaluated[node_idx] ? node_values[node_idx] : 0.0;
     }
 
     // batch evaluation for multiple points
