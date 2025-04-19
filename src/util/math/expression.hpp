@@ -7,13 +7,13 @@ namespace simbi::expression {
     // expanded operation types to match python implementation :)
     enum class ExprOp : int {
         // constants and variables
-        CONSTANT,      // represents a literal value
-        VARIABLE_X1,   // represents x1 variable
-        VARIABLE_X2,   // represents x2 variable (2D)
-        VARIABLE_X3,   // represents x3 variable (3D)
-        VARIABLE_T,    // represents time variable
-        VARIABLE_DT,   // represents time step variable
-        PARAMETER,     // runtime parameter reference
+        CONSTANT = 0,   // represents a literal value
+        VARIABLE_X1,    // represents x1 variable
+        VARIABLE_X2,    // represents x2 variable (2D)
+        VARIABLE_X3,    // represents x3 variable (3D)
+        VARIABLE_T,     // represents time variable
+        VARIABLE_DT,    // represents time step variable
+        PARAMETER,      // runtime parameter reference
 
         // arithmetic operations
         ADD,        // binary addition
@@ -145,6 +145,8 @@ namespace simbi::expression {
             return node;
         }
     };
+
+    // node2cstring function to convert ExprNode to c string
 
 }   // namespace simbi::expression
 
