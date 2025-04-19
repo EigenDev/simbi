@@ -1,6 +1,7 @@
 import h5py
 import numpy as np
 from types import TracebackType
+from enum import IntEnum
 from typing import Any, Callable, Optional, Union, Sequence, Literal
 from numpy.typing import NDArray
 from ..physics.calculations import (
@@ -19,7 +20,7 @@ from ..physics.calculations import (
 Array = NDArray[np.floating[Any]]
 
 
-class BodyCapability(int):
+class BodyCapability(IntEnum):
     NONE = 0
     GRAVITATIONAL = 1 << 0
     ACCRETION = 1 << 1
@@ -28,7 +29,7 @@ class BodyCapability(int):
     RIGID = 1 << 4
 
 
-def has_capability(body_type: BodyCapability, capability: Literal[2]) -> bool:
+def has_capability(body_type: BodyCapability, capability: BodyCapability) -> bool:
     return bool(body_type & capability)
 
 
