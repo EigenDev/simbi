@@ -196,7 +196,7 @@ namespace simbi {
         void set_boundary_conditions(const std::vector<std::string>& bcs)
         {
             for (auto&& bc : bcs) {
-                bcs_.push_back(get_boundary_condition(bc));
+                bcs_.push_back_with_sync(get_boundary_condition(bc));
             }
             bcs_.sync_to_device();
         }
