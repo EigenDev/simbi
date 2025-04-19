@@ -273,8 +273,7 @@ namespace simbi {
                 cons_,
                 cons_.contract(halo_radius()),
                 bcs(),
-                io_manager_ ? Maybe<const IOManager<Dims>*>(io_manager_.get())
-                            : Nothing,
+                io_manager_.get(),
                 mesh_,
                 time(),
                 time_step(),
