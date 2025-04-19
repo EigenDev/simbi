@@ -271,7 +271,11 @@ namespace simbi {
             const Conserved& conserved_data
         ) const
         {
-            auto local_results = conserved_data;
+            auto local_results                     = conserved_data;
+            spatial_vector_t<real, 3> local_coords = {0.0, 0.0, 0.0};
+            for (size_type ii = 0; ii < Dims; ++ii) {
+                local_coords[ii] = coords[ii];
+            }
             // Determine which boundary we're evaluating
             switch (face) {
                 case BoundaryFace::X1_INNER:
@@ -280,9 +284,9 @@ namespace simbi {
                             bx1_inner_expr_nodes_.data(),
                             bx1_inner_output_indices_.data(),
                             bx1_inner_output_indices_.size(),
-                            coords[0],
-                            coords[1],
-                            coords[2],
+                            local_coords[0],
+                            local_coords[1],
+                            local_coords[2],
                             t,
                             conserved_data.data(),
                             local_results.data(),
@@ -297,14 +301,21 @@ namespace simbi {
                             bx1_outer_expr_nodes_.data(),
                             bx1_outer_output_indices_.data(),
                             bx1_outer_output_indices_.size(),
-                            coords[0],
-                            coords[1],
-                            coords[2],
+                            local_coords[0],
+                            local_coords[1],
+                            local_coords[2],
                             t,
                             conserved_data.data(),
                             local_results.data(),
                             dt
                         );
+                        // printf(
+                        //     "local results: %f, %f, %f, %f\n",
+                        //     local_results[0],
+                        //     local_results[1],
+                        //     local_results[2],
+                        //     local_results[3]
+                        // );
                     }
                     return local_results;
 
@@ -314,9 +325,9 @@ namespace simbi {
                             bx2_inner_expr_nodes_.data(),
                             bx2_inner_output_indices_.data(),
                             bx2_inner_output_indices_.size(),
-                            coords[0],
-                            coords[1],
-                            coords[2],
+                            local_coords[0],
+                            local_coords[1],
+                            local_coords[2],
                             t,
                             conserved_data.data(),
                             local_results.data(),
@@ -330,9 +341,9 @@ namespace simbi {
                             bx2_outer_expr_nodes_.data(),
                             bx2_outer_output_indices_.data(),
                             bx2_outer_output_indices_.size(),
-                            coords[0],
-                            coords[1],
-                            coords[2],
+                            local_coords[0],
+                            local_coords[1],
+                            local_coords[2],
                             t,
                             conserved_data.data(),
                             local_results.data(),
@@ -346,9 +357,9 @@ namespace simbi {
                             bx3_inner_expr_nodes_.data(),
                             bx3_inner_output_indices_.data(),
                             bx3_inner_output_indices_.size(),
-                            coords[0],
-                            coords[1],
-                            coords[2],
+                            local_coords[0],
+                            local_coords[1],
+                            local_coords[2],
                             t,
                             conserved_data.data(),
                             local_results.data(),
@@ -356,15 +367,15 @@ namespace simbi {
                         );
                     }
                     return local_results;
-                case BoundaryFace::X3_OUTER:
+                default:
                     if (using_bx3_outer_expressions_) {
                         expression::evaluate_expr_vector(
                             bx3_outer_expr_nodes_.data(),
                             bx3_outer_output_indices_.data(),
                             bx3_outer_output_indices_.size(),
-                            coords[0],
-                            coords[1],
-                            coords[2],
+                            local_coords[0],
+                            local_coords[1],
+                            local_coords[2],
                             t,
                             conserved_data.data(),
                             local_results.data(),
