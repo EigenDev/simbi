@@ -8,6 +8,7 @@
 #include "core/types/utility/enums.hpp"
 #include "core/types/utility/managed.hpp"
 #include "geometry/mesh/mesh.hpp"
+#include "physics/hydro/schemes/ib/serialization/body_serialization.hpp"
 #include "physics/hydro/types/generic_structs.hpp"
 
 namespace simbi::ibsystem {
@@ -89,6 +90,159 @@ namespace simbi::ibsystem {
 
         // ctor
         ComponentBodySystem(const MeshType& mesh) : mesh_(mesh) {}
+
+        template <typename PropertyType>
+        ndarray<PropertyDescriptor<PropertyType>>
+        get_property_descriptors(BodyCapability capability) const
+        {
+            ndarray<PropertyDescriptor<PropertyType>> descriptors;
+            if (has_capability(capability, BodyCapability::GRAVITATIONAL)) {
+                descriptors.push_back(
+                    PropertyDescriptor<PropertyType>{
+                      "softening_length",
+                      [this](size_t body_idx) {
+                          return softening_length(body_idx);
+                      },
+                      {{"description", "Softening length for gravity"}}
+                    }
+                );
+                descriptors.push_back(
+                    PropertyDescriptor<PropertyType>{
+                      "two_way_coupling",
+                      [this](size_t body_idx) {
+                          return two_way_coupling(body_idx);
+                      },
+                      {{"description", "Two-way coupling flag"}}
+                    }
+                );
+            }
+            if (has_capability(capability, BodyCapability::ACCRETION)) {
+                descriptors.push_back(
+                    PropertyDescriptor<PropertyType>{
+                      "accretion_efficiency",
+                      [this](size_t body_idx) {
+                          return accretion_efficiency(body_idx);
+                      },
+                      {{"description", "Accretion efficiency"}}
+                    }
+                );
+                descriptors.push_back(
+                    PropertyDescriptor<PropertyType>{
+                      "accretion_radius",
+                      [this](size_t body_idx) {
+                          return accretion_radius(body_idx);
+                      },
+                      {{"description", "Accretion radius"}}
+                    }
+                );
+            }
+            return descriptors;
+        }
+
+        // Method to generate all serializable properties for a body
+        ndarray<std::variant<
+            PropertyDescriptor<T>,
+            PropertyDescriptor<bool>,
+            PropertyDescriptor<std::string>,
+            PropertyDescriptor<spatial_vector_t<T, Dims>>>>
+        get_serializable_properties(size_t body_idx) const
+        {
+            using PropertyVariant = std::variant<
+                PropertyDescriptor<T>,
+                PropertyDescriptor<bool>,
+                PropertyDescriptor<std::string>,
+                PropertyDescriptor<spatial_vector_t<T, Dims>>>;
+
+            ndarray<PropertyVariant> properties;
+
+            // Universal properties for all bodies
+            properties.push_back(
+                PropertyDescriptor<T>{
+                  "mass",
+                  [this, body_idx](size_t) { return masses_[body_idx]; }
+                }
+            );
+
+            properties.push_back(
+                PropertyDescriptor<T>{
+                  "radius",
+                  [this, body_idx](size_t) { return radii_[body_idx]; }
+                }
+            );
+
+            properties.push_back(
+                PropertyDescriptor<spatial_vector_t<T, Dims>>{
+                  "position",
+                  [this, body_idx](size_t) { return positions_[body_idx]; }
+                }
+            );
+
+            properties.push_back(
+                PropertyDescriptor<spatial_vector_t<T, Dims>>{
+                  "velocity",
+                  [this, body_idx](size_t) { return velocities_[body_idx]; }
+                }
+            );
+
+            properties.push_back(
+                PropertyDescriptor<spatial_vector_t<T, Dims>>{
+                  "force",
+                  [this, body_idx](size_t) { return forces_[body_idx]; }
+                }
+            );
+
+            // Add capability-specific properties
+            if (has_capability(body_idx, BodyCapability::GRAVITATIONAL)) {
+                properties.push_back(
+                    PropertyDescriptor<T>{
+                      "softening_length",
+                      [this, body_idx](size_t) {
+                          return softening_length(body_idx);
+                      }
+                    }
+                );
+
+                properties.push_back(
+                    PropertyDescriptor<bool>{
+                      "two_way_coupling",
+                      [this, body_idx](size_t) {
+                          return two_way_coupling(body_idx);
+                      }
+                    }
+                );
+            }
+
+            if (has_capability(body_idx, BodyCapability::ACCRETION)) {
+                properties.push_back(
+                    PropertyDescriptor<T>{
+                      "accretion_efficiency",
+                      [this, body_idx](size_t) {
+                          return accretion_efficiency(body_idx);
+                      }
+                    }
+                );
+
+                properties.push_back(
+                    PropertyDescriptor<T>{
+                      "accretion_radius",
+                      [this, body_idx](size_t) {
+                          return accretion_radius(body_idx);
+                      }
+                    }
+                );
+
+                properties.push_back(
+                    PropertyDescriptor<T>{
+                      "total_accreted_mass",
+                      [this, body_idx](size_t) {
+                          return total_accreted_mass(body_idx);
+                      }
+                    }
+                );
+            }
+
+            return properties;
+        }
 
         // add a body to the system
         size_type add_body(
