@@ -1,64 +1,44 @@
 #ifndef SYSTEM_CONFIG_HPP
 #define SYSTEM_CONFIG_HPP
 
-#include "core/types/containers/ndarray.hpp"
-#include "core/types/utility/enums.hpp"
-#include <string>
-#include <utility>
+#include "build_options.hpp"
+#include "core/types/utility/managed.hpp"
 
-// houses pure data structures for a system
-namespace simbi::ibsystem::config {
-    // basic gravitational config
-    template <typename T>
-    struct GravitationalConfig {
-        bool prescribed_motion      = true;
-        std::string reference_frame = "center_of_mass";
+namespace simbi::ibsystem {
+    struct SystemConfig : public Managed<global::managed_memory> {
+        virtual ~SystemConfig() = default;
     };
 
     template <typename T>
-    struct GravitationalComponent {
-        T mass;
-        T radius;
-        T softening_length;
-        T accretion_efficiency = 0.01;
-        T accretion_radius     = 0.01;
-        bool two_way_coupling  = false;
-        bool is_an_accretor    = false;
-        BodyType body_type     = BodyType::GRAVITATIONAL;
+    struct BinarySystemConfig : public SystemConfig {
+        T semi_major;
+        T mass_ratio;
+        T eccentricity;
+        T orbital_period;
+        bool circular_orbit;
+        bool prescribed_motion;
+        std::pair<size_t, size_t> body_indices;
 
-        void configure()
+        BinarySystemConfig(
+            T semi_major,
+            T mass_ratio,
+            T eccentricity,
+            T orbital_period,
+            bool circular_orbit,
+            bool prescribed_motion,
+            size_t body1_idx,
+            size_t body2_idx
+        )
+            : semi_major(semi_major),
+              mass_ratio(mass_ratio),
+              eccentricity(eccentricity),
+              orbital_period(orbital_period),
+              circular_orbit(circular_orbit),
+              prescribed_motion(prescribed_motion),
+              body_indices(body1_idx, body2_idx)
         {
-            if (is_an_accretor) {
-                body_type = BodyType::GRAVITATIONAL_SINK;
-            }
         }
     };
+}   // namespace simbi::ibsystem
 
-    template <typename T>
-    using binary_pair_t =
-        std::pair<GravitationalComponent<T>, GravitationalComponent<T>>;
-
-    template <typename T>
-    struct BinaryConfig {
-        binary_pair_t<T> binary_pair;
-        T semi_major                  = 1.0;
-        T eccentricity                = 0.0;
-        T mass_ratio                  = 1.0;    // q = m2/m1
-        bool circular                 = true;   // shorthand for e = 0
-        bool equal_mass               = true;   // shorthand for q = 1
-        T total_mass                  = 1.0;
-        T inclination                 = 0.0;
-        T longitude_of_ascending_node = 0.0;
-        T argument_of_periapsis       = 0.0;
-        T true_anomaly                = 0.0;
-    };
-
-    template <typename T>
-    struct PlanetaryConfig {
-        T central_mass = T(1.0);
-        ndarray<T> planet_masses;
-        ndarray<T> planet_semi_majors;
-        ndarray<T> planet_eccentricities;
-    };
-}   // namespace simbi::ibsystem::config
 #endif   // SYSTEM_CONFIG_HPP

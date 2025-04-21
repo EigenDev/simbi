@@ -4,6 +4,7 @@
 #include "build_options.hpp"
 #include "core/types/utility/smart_ptr.hpp"
 #include "physics/hydro/schemes/ib/systems/component_body_system.hpp"
+#include "physics/hydro/types/generic_structs.hpp"
 #include "util/tools/helpers.hpp"
 
 namespace simbi::ibsystem {
@@ -14,19 +15,17 @@ namespace simbi::ibsystem {
         const InitialConditions& init
     )
     {
-        // create initial empty system
         auto system = util::make_unique<ComponentBodySystem<T, Dims>>(mesh);
-
         // check if body system configuration exists
         if (init.contains("body_system")) {
             const auto& sys_props = init.get_dict("body_system");
 
-            // process system configuration
+            // process system configuration :^]
             if (sys_props.contains("system_type")) {
                 const auto& system_type =
                     sys_props.at("system_type").get<std::string>();
 
-                // handle binary system configuration
+                // Handle binary system configuration
                 if (system_type == "binary" &&
                     sys_props.contains("binary_config")) {
                     if constexpr (Dims >= 2) {
@@ -59,47 +58,48 @@ namespace simbi::ibsystem {
                                 ? sys_props.at("prescribed_motion").get<bool>()
                                 : true;
 
-                        // get binary components
+                        // Get binary components
                         auto binary_components =
                             binary_props.at("components")
                                 .get<std::list<ConfigDict>>();
 
                         if (binary_components.size() != 2) {
                             throw std::runtime_error(
-                                "Binary system must have exactly 2 components"
+                                "Binary system must have exactly 2 components "
                             );
                         }
 
-                        // calculate individual masses based on total mass and
-                        // mass ratio
+                        // Calculate individual masses based on total mass
+                        // and // mass ratio
                         T m1 = total_mass / (1.0 + mass_ratio);
                         T m2 = total_mass - m1;
 
-                        // calculate positions based on semi-major axis
+                        // Calculate positions based on semi-major axis
+                        // For a circular orbit initially aligned with x-axis
                         T r1 = semi_major * mass_ratio / (1.0 + mass_ratio);
                         T r2 = semi_major - r1;
 
-                        // initial positions
+                        // Initial positions
                         spatial_vector_t<T, Dims> pos1, pos2;
                         pos1[0] = -r1;
                         pos2[0] = r2;
 
-                        // for dimensions > 1, set y to 0
+                        // For dimensions > 1, set y to 0
                         if constexpr (Dims > 1) {
                             pos1[1] = 0;
                             pos2[1] = 0;
                         }
 
-                        // for dimensions > 2, set z to 0
+                        // For dimensions > 2, set z to 0
                         if constexpr (Dims > 2) {
                             pos1[2] = 0;
                             pos2[2] = 0;
                         }
 
-                        // calculate orbital velocity - for circular orbit
+                        // Calculate orbital velocity - for circular orbit
                         T orbital_velocity = std::sqrt(total_mass / semi_major);
 
-                        // initial velocities (perpendicular to position)
+                        // Initial velocities (perpendicular to position)
                         spatial_vector_t<T, Dims> vel1, vel2;
 
                         if constexpr (Dims > 1) {
@@ -117,17 +117,16 @@ namespace simbi::ibsystem {
                             }
                         }
                         else {
-                            // cant't have orbital motion in 1D
+                            // Can't have orbital motion in 1D
                             vel1[0] = 0;
                             vel2[0] = 0;
                         }
 
-                        // process the first component
+                        // Process the first component
                         auto& comp1 = binary_components.front();
                         T radius1   = comp1.at("radius").get<T>();
 
-                        // create body with functional approach
-                        Body<T, Dims> body1(
+                        size_t body1_idx = system->add_body(
                             BodyType::GRAVITATIONAL,
                             pos1,
                             vel1,
@@ -135,30 +134,27 @@ namespace simbi::ibsystem {
                             radius1
                         );
 
-                        // add capabilities using functional approach
-                        body1 = body1.with_gravitational(
+                        // Add capabilities to first body
+                        system->add_gravitational_capability(
+                            body1_idx,
                             comp1.at("softening_length").get<T>(),
                             comp1.at("two_way_coupling").get<bool>()
                         );
 
-                        // add accretion if specified
+                        // Add accretion if specified
                         if (comp1.at("is_an_accretor").get<bool>()) {
-                            body1 = body1.with_accretion(
+                            system->add_accretion_capability(
+                                body1_idx,
                                 comp1.at("accretion_efficiency").get<T>(),
                                 comp1.at("accretion_radius").get<T>()
                             );
                         }
 
-                        // add body to system
-                        *system          = system->add_body(body1);
-                        size_t body1_idx = system->size() - 1;
-
-                        // process the second component
+                        // Process the second component
                         auto& comp2 = binary_components.back();
                         T radius2   = comp2.at("radius").get<T>();
 
-                        // create body with functional approach
-                        Body<T, Dims> body2(
+                        size_t body2_idx = system->add_body(
                             BodyType::GRAVITATIONAL,
                             pos2,
                             vel2,
@@ -166,23 +162,21 @@ namespace simbi::ibsystem {
                             radius2
                         );
 
-                        // add capabilities using functional approach
-                        body2 = body2.with_gravitational(
+                        // Add capabilities to second body
+                        system->add_gravitational_capability(
+                            body2_idx,
                             comp2.at("softening_length").get<T>(),
                             comp2.at("two_way_coupling").get<bool>()
                         );
 
-                        // add accretion if specified
+                        // Add accretion if specified
                         if (comp2.at("is_an_accretor").get<bool>()) {
-                            body2 = body2.with_accretion(
+                            system->add_accretion_capability(
+                                body2_idx,
                                 comp2.at("accretion_efficiency").get<T>(),
                                 comp2.at("accretion_radius").get<T>()
                             );
                         }
-
-                        // add body to system
-                        *system          = system->add_body(body2);
-                        size_t body2_idx = system->size() - 1;
 
                         const auto orbital_period =
                             2.0 * M_PI *
@@ -192,19 +186,18 @@ namespace simbi::ibsystem {
                             );
 
                         bool is_circular_orbit = goes_to_zero(eccentricity);
-
-                        // set system config using functional approach
-                        *system = system->template with_system_config<
-                            BinarySystemConfig<T>>(
-                            semi_major,
-                            mass_ratio,
-                            eccentricity,
-                            orbital_period,
-                            is_circular_orbit,
-                            prescribed_motion,
-                            body1_idx,
-                            body2_idx
-                        );
+                        // Store orbital parameters for later use
+                        system
+                            ->template set_system_config<BinarySystemConfig<T>>(
+                                semi_major,
+                                mass_ratio,
+                                eccentricity,
+                                orbital_period,
+                                is_circular_orbit,
+                                prescribed_motion,
+                                body1_idx,
+                                body2_idx
+                            );
                     }
                 }
             }
@@ -230,8 +223,9 @@ namespace simbi::ibsystem {
                     vel_vec[i] = velocity[i];
                 }
 
-                // create body with functional approach
-                Body<T, Dims> body(body_type, pos_vec, vel_vec, mass, radius);
+                // add basic body
+                size_t body_idx =
+                    system->add_body(body_type, pos_vec, vel_vec, mass, radius);
 
                 // add gravitational capability if properties exist
                 if (props.contains("softening_length") ||
@@ -245,7 +239,11 @@ namespace simbi::ibsystem {
                             ? props.at("two_way_coupling").get<bool>()
                             : false;
 
-                    body = body.with_gravitational(softening, two_way);
+                    system->add_gravitational_capability(
+                        body_idx,
+                        softening,
+                        two_way
+                    );
                 }
 
                 // add accretion capability if properties exist
@@ -270,12 +268,15 @@ namespace simbi::ibsystem {
                                 ? props.at("accretion_radius").get<T>()
                                 : radius;
 
-                        body = body.with_accretion(efficiency, accr_radius);
+                        system->add_accretion_capability(
+                            body_idx,
+                            efficiency,
+                            accr_radius
+                        );
                     }
                 }
 
-                // add body to system using functional approach
-                *system = system->add_body(body);
+                // TODO: add additional capabilities as needed
             }
         }
 

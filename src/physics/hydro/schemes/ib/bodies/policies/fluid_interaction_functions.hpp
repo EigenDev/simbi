@@ -5,14 +5,18 @@
 #ifndef FLUID_INTERACTION_FUNCTIONS_HPP
 #define FLUID_INTERACTION_FUNCTIONS_HPP
 
-#include "build_options.hpp"                  // for real, size_type, DEV
-#include "core/types/containers/vector.hpp"   // for spatial_vector_t
-#include "geometry/mesh/cell.hpp"
-#include "physics/hydro/schemes/ib/systems/component_body_system.hpp"
-#include "physics/hydro/types/context.hpp"
-#include <cmath>
+#include "build_options.hpp"   // for real, size_type, DEV
+#include "core/types/containers/array.hpp"
+#include "core/types/containers/vector.hpp"            // for spatial_vector_t
+#include "geometry/mesh/cell.hpp"                      // for Cell
+#include "physics/hydro/schemes/ib/systems/body.hpp"   // for Body
+#include "physics/hydro/schemes/ib/systems/component_body_system.hpp"   // for ComponentBodySystem
+#include "physics/hydro/types/context.hpp"   // for HydroContext
+#include <cmath>                             // for std::sqrt
+#include <tuple>                             // for std::tuple
 
 using namespace simbi::vecops;
+using namespace simbi::ibsystem;
 
 namespace simbi::body_functions {
     namespace gravitational {
@@ -510,6 +514,55 @@ namespace simbi::body_functions {
             system.positions_mut()[body2_idx]  = vecops::rotate(pos2, phi);
             system.velocities_mut()[body1_idx] = vecops::rotate(vel1, phi);
             system.velocities_mut()[body2_idx] = vecops::rotate(vel2, phi);
+        }
+
+        template <typename T, size_type Dims>
+        array_t<Body<T, Dims>, 2> calculate_binary_motion(
+            const ibsystem::ComponentBodySystem<T, Dims>& system,
+            T time
+        )
+        {
+            // get binary config
+            auto config = system.template get_system_config<
+                ibsystem::BinarySystemConfig<T>>();
+            if (!config || !config->prescribed_motion) {
+                return {Body<T, Dims>(), Body<T, Dims>()};
+            }
+
+            // Extract parameters
+            const auto [body1_idx, body2_idx] = config->body_indices;
+            // const T orbital_period            = config->orbital_period;
+            const T semi_major = config->semi_major;
+            // const T ecc                       = config->eccentricity;
+
+            // Calculate masses
+            const auto& bodies = system.bodies();
+            const auto body1   = bodies[body1_idx];
+            const auto body2   = bodies[body2_idx];
+            const T m1         = body1.mass;
+            const T m2         = body2.mass;
+            const T total_mass = m1 + m2;
+            const T mass_ratio = m2 / m1;
+
+            // Calculate positions and velocities
+            auto [pos1, pos2] = initial_positions<Dims>(semi_major, mass_ratio);
+            auto [vel1, vel2] = initial_velocities<Dims>(
+                semi_major,
+                total_mass,
+                mass_ratio,
+                config->circular_orbit
+            );
+
+            T phi_dot = std::sqrt(total_mass / std::pow(semi_major, T(3)));
+            T phi     = phi_dot * time;
+
+            // Update positions and velocities
+            return {
+              body1.update_position(vecops::rotate(pos1, phi))
+                  .update_velocity(vecops::rotate(vel1, phi)),
+              body2.update_position(vecops::rotate(pos2, phi))
+                  .update_velocity(vecops::rotate(vel2, phi))
+            };
         }
 
         // Calculate orbital timestep
