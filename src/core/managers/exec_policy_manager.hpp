@@ -53,6 +53,7 @@
 #include "core/types/utility/init_conditions.hpp"   // for InitialConditions
 #include "geometry/mesh/grid_manager.hpp"           // for GridManager
 #include "util/parallel/exec_policy.hpp"            // for ExecutionPolicy
+#include <numeric>
 
 namespace simbi {
     template <size_type Dims>
