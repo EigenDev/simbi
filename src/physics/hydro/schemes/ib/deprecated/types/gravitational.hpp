@@ -2,10 +2,10 @@
 #define GRAVITATIONAL_HPP
 
 #include "../immersed_boundary.hpp"
-#include "physics/hydro/schemes/ib/bodies/policies/force_policies.hpp"   // for ElasticForcePolicy, GravitationalForcePolicy
-#include "physics/hydro/schemes/ib/bodies/policies/interaction_policies.hpp"   // for AccretingFluidInteractionPolicy, MinimalFluidInteractionPolicy, StandardFluidInteractionPolicy
-#include "physics/hydro/schemes/ib/bodies/policies/material_policies.hpp"   // for DeformableMaterialPolicy, RigidMaterialPolicy
-#include "physics/hydro/schemes/ib/bodies/policies/motion_policies.hpp"   // for DynamicMotionPolicy
+#include "physics/hydro/schemes/ib/policies/force_policies.hpp"   // for ElasticForcePolicy, GravitationalForcePolicy
+#include "physics/hydro/schemes/ib/policies/interaction_policies.hpp"   // for AccretingFluidInteractionPolicy, MinimalFluidInteractionPolicy, StandardFluidInteractionPolicy
+#include "physics/hydro/schemes/ib/policies/material_policies.hpp"   // for DeformableMaterialPolicy, RigidMaterialPolicy
+#include "physics/hydro/schemes/ib/policies/motion_policies.hpp"   // for DynamicMotionPolicy
 
 namespace simbi::ib {
     template <typename T, size_t Dims>

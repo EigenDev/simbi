@@ -55,9 +55,9 @@
 #include "core/types/utility/config_dict.hpp"   // for ConfigDict
 #include "core/types/utility/enums.hpp"         // for BodyType
 #include "physics/hydro/schemes/ib/bodies/immersed_boundary.hpp"   // for ImmersedBody
-#include "physics/hydro/schemes/ib/bodies/policies/force_policies.hpp"
-#include "physics/hydro/schemes/ib/bodies/policies/motion_policies.hpp"
 #include "physics/hydro/schemes/ib/bodies/types/any_body.hpp"
+#include "physics/hydro/schemes/ib/policies/force_policies.hpp"
+#include "physics/hydro/schemes/ib/policies/motion_policies.hpp"
 
 namespace simbi {
     template <size_type Dims>
