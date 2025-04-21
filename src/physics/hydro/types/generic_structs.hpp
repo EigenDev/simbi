@@ -1001,14 +1001,15 @@ namespace simbi {
             const real x1,
             const real x2,
             const real x3,
-            const auto error_type,
+            const ErrorCode error_code,
             PrettyTable& table
         ) const
         {
+            printf("getting error\n");
             std::ostringstream oss;
             oss << "Primitives in non-physical state.\n";
-            if (error_type) {
-                oss << "reason: " << error_type << "\n";
+            if (error_code != ErrorCode::NONE) {
+                oss << "reason: " << error_code_to_string(error_code) << "\n";
             }
             if constexpr (Dims == 1) {
                 oss << "location: (" << x1 << "): \n";
@@ -1041,12 +1042,6 @@ namespace simbi {
                         << "]\n";
                 }
             }
-            // oss << "Density: " << rho() << "\n";
-            // oss << "Pressure: " << press() << "\n";
-            // oss << "Velocity: " << velocity() << "\n";
-            // if constexpr (R == Regime::RMHD) {
-            //     oss << "Magnetic Field: " << bfield() << "\n";
-            // }
             table.postError(oss.str());
         }
     };
