@@ -1,8 +1,8 @@
 import h5py
 import numpy as np
 from types import TracebackType
-from enum import IntEnum
-from typing import Any, Callable, Optional, Union, Sequence, Literal
+from enum import IntFlag
+from typing import Any, Callable, Optional, Union, Sequence
 from numpy.typing import NDArray
 from ..physics.calculations import (
     VectorComponent,
@@ -20,7 +20,7 @@ from ..physics.calculations import (
 Array = NDArray[np.floating[Any]]
 
 
-class BodyCapability(IntEnum):
+class BodyCapability(IntFlag):
     NONE = 0
     GRAVITATIONAL = 1 << 0
     ACCRETION = 1 << 1
@@ -222,7 +222,7 @@ class LazySimulationReader:
             position = body_group["position"][...]
             velocity = body_group["velocity"][...]
             force = body_group["force"][...]
-            body_type = BodyCapability(body_group.attrs["capabilities"])
+            body_type = BodyCapability(int(body_group.attrs["capabilities"]))
             # Check body type
             self._immersed_bodies_cache[f"body_{i}"] = {
                 "mass": mass,
