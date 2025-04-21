@@ -14,6 +14,11 @@ namespace simbi::ibsystem {
         const InitialConditions& init
     )
     {
+        if (!init.contains("body_system")) {
+            if (init.immersed_bodies.empty()) {
+                return nullptr;
+            }
+        }
         // create initial empty system
         auto system = util::make_unique<ComponentBodySystem<T, Dims>>(mesh);
 
