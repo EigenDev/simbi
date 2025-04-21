@@ -372,6 +372,8 @@ namespace simbi {
 
         T* host_data() const { return mem_.host_data(); }
 
+        bool empty() const { return this->size_ == 0; }
+
         class iterator
         {
           public:
