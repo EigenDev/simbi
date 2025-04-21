@@ -1,5 +1,7 @@
 #include "core/managers/boundary_manager.hpp"   // for BoundaryManager
-#include <cmath>                                // for max, min
+#include "core/types/utility/atomic_bool.hpp"
+#include "io/exceptions.hpp"
+#include <cmath>   // for max, min
 
 using namespace simbi;
 using namespace simbi::util;
@@ -29,11 +31,13 @@ SRHD<dim>::~SRHD() = default;
 template <int dim>
 void SRHD<dim>::cons2prim_impl()
 {
-    shared_atomic_bool local_failure;
+    atomic::simbi_atomic<bool> local_failure{false};
     this->prims_.transform(
-        [gamma = this->gamma,
-         loc   = &local_failure] DEV(auto& prim, const auto& cvar, auto& pguess)
-            -> Maybe<primitive_t> {
+        [gamma = this->gamma, loc = local_failure.get()] DEV(
+            auto& prim,
+            const auto& cvar,
+            auto& pguess
+        ) -> Maybe<primitive_t> {
             const auto& d    = cvar.dens();
             const auto& svec = cvar.momentum();
             const auto& tau  = cvar.nrg();
@@ -57,8 +61,7 @@ void SRHD<dim>::cons2prim_impl()
                 if (iter >= global::MAX_ITER || !std::isfinite(peq)) {
                     loc->store(true);
                     return simbi::None(
-                        "cons2prim iterations max exceeded or non-finite "
-                        "pressure"
+                        ErrorCode::MAX_ITER | ErrorCode::NON_FINITE_ROOT
                     );
                 }
                 iter++;
@@ -67,7 +70,7 @@ void SRHD<dim>::cons2prim_impl()
 
             if (peq < 0) {
                 loc->store(true);
-                return simbi::None("negative pressure");
+                return simbi::None(ErrorCode::NEGATIVE_PRESSURE);
             }
 
             const auto inv_et   = 1.0 / (tau + d + peq);

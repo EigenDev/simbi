@@ -1,5 +1,7 @@
 #include "build_options.hpp"
-#include "geometry/vector_calculus.hpp"             // for curl_component
+#include "core/types/utility/atomic_bool.hpp"   // for shared_atomic_bool
+#include "geometry/vector_calculus.hpp"         // for curl_component
+#include "io/exceptions.hpp"
 #include "physics/hydro/schemes/ct/emf_field.hpp"   // for EMField
 #include "physics/hydro/types/generic_structs.hpp"
 #include "util/tools/helpers.hpp"
@@ -38,12 +40,11 @@ RMHD<dim>::~RMHD() = default;
 template <int dim>
 void RMHD<dim>::cons2prim_impl()
 {
-    shared_atomic_bool local_failure;
-
+    atomic::simbi_atomic<bool> local_failure{false};
     this->prims_.transform(
         [gamma = this->gamma,
-         loc   = &local_failure] DEV(auto& prim, const auto& c)
-            -> Maybe<primitive_t> {
+         loc   = local_failure.get(
+         )] DEV(auto& prim, const auto& c) -> Maybe<primitive_t> {
             const real d      = c.dens();
             const auto mom    = c.momentum();
             const real tau    = c.nrg();
@@ -102,12 +103,12 @@ void RMHD<dim>::cons2prim_impl()
                 }
                 if (iter >= global::MAX_ITER || !std::isfinite(ff)) {
                     loc->store(true);
-                    return simbi::None([iter]() -> const char* {
+                    return simbi::None([iter]() -> const ErrorCode {
                         if (iter >= global::MAX_ITER) {
-                            return "cons1prim iterations max exceeded";
+                            return ErrorCode::MAX_ITER;
                         }
                         else {
-                            return "non-finite mu";
+                            return ErrorCode::NON_FINITE_ROOT;
                         }
                     }());
                 }
@@ -117,7 +118,7 @@ void RMHD<dim>::cons2prim_impl()
 
             if (!std::isfinite(mu)) {
                 loc->store(true);
-                return simbi::None("non-finite mu");
+                return simbi::None();
             }
 
             // Ok, we have the roots. Now we can compute the primitive
@@ -150,14 +151,17 @@ void RMHD<dim>::cons2prim_impl()
 
             if (!std::isfinite(pg) || pg < 0.0) {
                 loc->store(true);
-                return simbi::None("negative or non-finite pressure");
+                return simbi::None(
+                    ErrorCode::NEGATIVE_PRESSURE |
+                    ErrorCode::NON_FINITE_PRESSURE
+                );
             }
 
             // velocities Eq. (68)
             auto vel = mu * x * (rvec + hvec * rdb * mu);
             if (vel.norm() > 1.0) {
                 loc->store(true);
-                return simbi::None("velocity exceeds speed of light");
+                return simbi::None(ErrorCode::SUPERLUMINAL_VELOCITY);
             }
             if constexpr (global::using_four_velocity) {
                 vel *= w;

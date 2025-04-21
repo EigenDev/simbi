@@ -48,9 +48,25 @@
  */
 #ifndef EXCEPTIONS_HPP
 #define EXCEPTIONS_HPP
+#include "build_options.hpp"
+#include <cstdint>
 #include <exception>
 
 namespace simbi {
+    enum class ErrorCode : uint32_t {
+        NONE                  = 0,
+        NEGATIVE_PRESSURE     = 1 << 0,
+        NON_FINITE_PRESSURE   = 1 << 1,
+        NEGATIVE_DENSITY      = 1 << 2,
+        SUPERLUMINAL_VELOCITY = 1 << 3,
+        NEGATIVE_ENERGY       = 1 << 4,
+        NEGATIVE_ENTROPY      = 1 << 5,
+        NEGATIVE_MASS         = 1 << 6,
+        NON_FINITE_ROOT       = 1 << 7,
+        MAX_ITER              = 1 << 8,
+        UNDEFINED             = 1 << 9,
+    };
+
     namespace exception {
         class InterruptException : public std::exception
         {
@@ -69,6 +85,27 @@ namespace simbi {
 
     }   // namespace exception
 
+    inline DUAL constexpr ErrorCode operator|(ErrorCode lhs, ErrorCode rhs)
+    {
+        return static_cast<ErrorCode>(
+            static_cast<std::underlying_type_t<ErrorCode>>(lhs) |
+            static_cast<std::underlying_type_t<ErrorCode>>(rhs)
+        );
+    }
+
+    inline DUAL constexpr ErrorCode operator&(ErrorCode lhs, ErrorCode rhs)
+    {
+        return static_cast<ErrorCode>(
+            static_cast<std::underlying_type_t<ErrorCode>>(lhs) &
+            static_cast<std::underlying_type_t<ErrorCode>>(rhs)
+        );
+    }
+
+    inline DUAL constexpr bool has_error(ErrorCode code, ErrorCode error)
+    {
+        return (static_cast<uint32_t>(code) & static_cast<uint32_t>(error)) !=
+               0;
+    }
 }   // namespace simbi
 
 #endif

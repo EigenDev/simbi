@@ -1,5 +1,7 @@
 #include "core/managers/boundary_manager.hpp"
 #include "core/types/containers/array.hpp"
+#include "core/types/utility/atomic_bool.hpp"   // for shared_atomic_bool
+#include "io/exceptions.hpp"
 #include "util/tools/device_api.hpp"
 #include "util/tools/helpers.hpp"
 #include <cmath>   // for max, min
@@ -37,10 +39,10 @@ Newtonian<dim>::~Newtonian() = default;
 template <int dim>
 void Newtonian<dim>::cons2prim_impl()
 {
-    shared_atomic_bool local_failure;
+    atomic::simbi_atomic<bool> local_failure{false};
     this->prims_.transform(
         [gamma      = this->gamma,
-         loc        = &local_failure,
+         loc        = local_failure.get(),
          isothermal = isothermal_,
          cs2 = sound_speed_squared_] DEV(auto& prim, const auto& cons_var)
             -> Maybe<primitive_t> {
@@ -52,7 +54,10 @@ void Newtonian<dim>::cons2prim_impl()
             if (pre < 0 || !std::isfinite(pre)) {
                 // store the invalid state
                 loc->store(true);
-                return simbi::None("negative or non-finite pressure");
+                return simbi::None(
+                    ErrorCode::NEGATIVE_PRESSURE |
+                    ErrorCode::NON_FINITE_PRESSURE
+                );
             }
 
             return primitive_t{rho, vel, pre, chi};

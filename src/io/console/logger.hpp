@@ -256,17 +256,9 @@ namespace simbi {
                                 cell.centroid_coordinate(0),
                                 cell.centroid_coordinate(1),
                                 cell.centroid_coordinate(2),
-                                prim.error(),
+                                prim.error_code(),
                                 table
                             );
-                            // std::cout << "idx: " << idx << std::endl;
-                            // std::cout
-                            //     << sim_state.primitives().at(ii, jj, kk - 2)
-                            //     << std::endl;
-                            // std::cout
-                            //     << sim_state.primitives().at(ii, jj, kk - 1)
-                            //     << std::endl;
-                            // std::cin.get();
 
                             return typename sim_state_t::primitive_t{};
                         });
