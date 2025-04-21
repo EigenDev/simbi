@@ -50,21 +50,63 @@
 #define MAYBE_HPP
 
 #include "build_options.hpp"
-#include <bitset>
+#include "io/exceptions.hpp"
 #include <type_traits>
 
 namespace simbi {
+
     struct nothing_t {
-        constexpr explicit nothing_t(int) : error_message(nullptr) {}
-        constexpr explicit nothing_t(const char* message)
-            : error_message(message)
+        DUAL constexpr explicit nothing_t()
+            : error_message_(nullptr), error_code(ErrorCode::NONE)
+        {
+        }
+        DUAL constexpr explicit nothing_t(const char* message)
+            : error_message_(message), error_code(ErrorCode::NONE)
+        {
+        }
+        DUAL constexpr explicit nothing_t(ErrorCode code)
+            : error_message_(nullptr), error_code(code)
         {
         }
 
-        const char* error_message;
+        // copy constructor
+        DUAL constexpr nothing_t(const nothing_t& other)
+            : error_message_(other.error_message_), error_code(other.error_code)
+        {
+        }
+        // move constructor
+        DUAL constexpr nothing_t(nothing_t&& other) noexcept
+            : error_message_(other.error_message_), error_code(other.error_code)
+        {
+            other.error_message_ = nullptr;
+            other.error_code     = ErrorCode::NONE;
+        }
+        // copy assignment operator
+        DUAL constexpr nothing_t& operator=(const nothing_t& other)
+        {
+            if (this != &other) {
+                error_message_ = other.error_message_;
+                error_code     = other.error_code;
+            }
+            return *this;
+        }
+        // move assignment operator
+        DUAL constexpr nothing_t& operator=(nothing_t&& other) noexcept
+        {
+            if (this != &other) {
+                error_message_       = other.error_message_;
+                error_code           = other.error_code;
+                other.error_message_ = nullptr;
+                other.error_code     = ErrorCode::NONE;
+            }
+            return *this;
+        }
+
+        const char* error_message_;
+        ErrorCode error_code;
     };
 
-    inline constexpr nothing_t Nothing{0};
+    inline constexpr nothing_t Nothing{};
     using None = nothing_t;
 
     template <typename T>
@@ -73,31 +115,56 @@ namespace simbi {
       public:
         using value_type = T;
 
-        DUAL constexpr Maybe() : valid{false}, error_message(nullptr) {}
+        DUAL constexpr Maybe()
+            : valid{false},
+              this_value{},
+              error_message_(nullptr),
+              error_code_(ErrorCode::NONE)
+        {
+        }
 
         DUAL constexpr Maybe(nothing_t nothing)
-            : valid{false}, this_value{}, error_message(nothing.error_message)
+            : valid{false},
+              this_value{},
+              error_message_(nothing.error_message_),
+              error_code_(nothing.error_code)
         {
         }
 
         DUAL constexpr Maybe(const T& value)
-            : valid{true}, this_value{value}, error_message(nullptr)
+            : valid{true},
+              this_value{value},
+              error_message_(nullptr),
+              error_code_(ErrorCode::NONE)
         {
         }
 
         DUAL constexpr Maybe(T&& value)
-            : valid{true}, this_value{std::move(value)}, error_message(nullptr)
+            : valid{true},
+              this_value{std::move(value)},
+              error_message_(nullptr),
+              error_code_(ErrorCode::NONE)
         {
         }
 
-        // Constructor deduced from the value
-        template <typename U>
-        DUAL constexpr Maybe(U&& value)
-            : valid{true},
-              this_value{std::forward<U>(value)},
-              error_message(nullptr)
+        DUAL constexpr Maybe(const Maybe& other)
+            : valid{other.valid},
+              this_value{other.this_value},
+              error_message_(other.error_message_),
+              error_code_(other.error_code_)
         {
-            static_assert(std::is_convertible_v<U, T>);
+        }
+        // ctor deduced from the value type
+        DUAL constexpr Maybe(Maybe&& other) noexcept
+            : valid{other.valid},
+              this_value{std::move(other.this_value)},
+              error_message_(other.error_message_),
+              error_code_(other.error_code_)
+        {
+            // Clear the source
+            other.valid          = false;
+            other.error_message_ = nullptr;
+            other.error_code_    = ErrorCode::NONE;
         }
 
         // Copy assignment operator
@@ -107,13 +174,15 @@ namespace simbi {
                 valid = other.valid;
 
                 if (valid) {
-                    this_value    = other.this_value;
-                    error_message = nullptr;
+                    this_value     = other.this_value;
+                    error_message_ = nullptr;
+                    error_code_    = ErrorCode::NONE;
                 }
                 else {
                     // Default construct this_value when invalid
-                    this_value    = T{};
-                    error_message = other.error_message;
+                    this_value     = T{};
+                    error_message_ = other.error_message_;
+                    error_code_    = other.error_code_;
                 }
             }
             return *this;
@@ -126,18 +195,21 @@ namespace simbi {
                 valid = other.valid;
 
                 if (valid) {
-                    this_value    = std::move(other.this_value);
-                    error_message = nullptr;
+                    this_value     = std::move(other.this_value);
+                    error_message_ = nullptr;
+                    error_code_    = ErrorCode::NONE;
                 }
                 else {
                     // Default construct this_value when invalid
-                    this_value    = T{};
-                    error_message = other.error_message;
+                    this_value     = T{};
+                    error_message_ = other.error_message_;
+                    error_code_    = other.error_code_;
                 }
 
                 // Clear the source
-                other.valid         = false;
-                other.error_message = nullptr;
+                other.valid          = false;
+                other.error_message_ = nullptr;
+                other.error_code_    = ErrorCode::NONE;
             }
             return *this;
         }
@@ -145,18 +217,20 @@ namespace simbi {
         // Value assignment operator
         DUAL constexpr Maybe& operator=(const T& value)
         {
-            valid         = true;
-            this_value    = value;
-            error_message = nullptr;
+            valid          = true;
+            this_value     = value;
+            error_message_ = nullptr;
+            error_code_    = ErrorCode::NONE;
             return *this;
         }
 
         // Move value assignment operator
         DUAL constexpr Maybe& operator=(T&& value)
         {
-            valid         = true;
-            this_value    = std::move(value);
-            error_message = nullptr;
+            valid          = true;
+            this_value     = std::move(value);
+            error_message_ = nullptr;
+            error_code_    = ErrorCode::NONE;
             return *this;
         }
 
@@ -168,7 +242,11 @@ namespace simbi {
 
         DUAL constexpr T value() && { return std::move(this_value); }
 
-        DUAL constexpr const char* error() const { return error_message; }
+        DUAL constexpr const char* error_message() const
+        {
+            return error_message_;
+        }
+        DUAL constexpr ErrorCode error_code() const { return error_code_; }
 
         template <typename U>
         DUAL constexpr T unwrap_or(U&& default_value) const&
@@ -415,7 +493,7 @@ namespace simbi {
         }
 
         // implicit conversion to bool
-        DUAL constexpr explicit operator bool() const { return valid; }
+        // DUAL constexpr explicit operator bool() const { return valid; }
 
         // implicit conversion to T
         DUAL constexpr operator T() const { return this_value; }
@@ -426,7 +504,8 @@ namespace simbi {
       private:
         bool valid;
         T this_value;
-        const char* error_message;
+        const char* error_message_;
+        ErrorCode error_code_;
     };
 
     // Deduction guide
@@ -438,19 +517,6 @@ namespace simbi {
     {
         return Maybe<T>(value);
     }
-
-    // Hash support
-    // template <typename T>
-    // struct std::hash<simbi::Maybe<T>> {
-    //     std::size_t operator()(const simbi::Maybe<T>& m) const
-    //     {
-    //         if (!m.has_value()) {
-    //             return 0;
-    //         }
-    //         return std::hash<T>{}(*m);
-    //     }
-    // };
-
 }   // namespace simbi
 
 #endif
