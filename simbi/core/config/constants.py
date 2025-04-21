@@ -67,9 +67,9 @@ class BodyType(str, ExtendedEnum):
 
 
 class BodyCapability(int, ExtendedEnum):
-    NONE = (0,)
-    GRAVITATIONAL = (1 << 0,)
-    ACCRETION = (1 << 1,)
-    ELASTIC = (1 << 2,)
-    DEFORMABLE = (1 << 3,)
-    RIGID = (1 << 4,)
+    NONE = 0
+    GRAVITATIONAL = 1 << 0
+    ACCRETION = 1 << 1
+    ELASTIC = 1 << 2
+    DEFORMABLE = 1 << 3
+    RIGID = 1 << 4
