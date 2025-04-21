@@ -52,9 +52,15 @@
 #include "build_options.hpp"
 #include "physics/hydro/schemes/ib/serialization/body_serialization.hpp"
 #include <string>
+#include <unordered_map>
 
 using namespace simbi::ibsystem;
-
+std::unordered_map<simbi::Cellspacing, std::string> const cell2str = {
+  {simbi::Cellspacing::LOG, "log"},
+  {simbi::Cellspacing::LINEAR, "linear"}
+  // {"log-linear",Cellspacing},
+  // {"linear-log",Cellspacing},
+};
 namespace simbi {
     namespace io {
         // forward declaration
