@@ -52,9 +52,11 @@
 #include "build_options.hpp"
 #include "core/traits.hpp"
 #include "core/types/containers/vector.hpp"
+#include "core/types/monad/maybe.hpp"
 #include "core/types/utility/enums.hpp"
 #include "util/tools/algorithms.hpp"
 #include "util/tools/helpers.hpp"
+#include <cassert>
 #include <cmath>
 #include <iostream>
 #include <sstream>
@@ -86,6 +88,88 @@ namespace simbi {
             is_base_of_v<BaseStorage<typename T::value_type, T::dimensions>, T>;
     };
 
+    struct MignoneDelZannaVariables {
+        real lamL, lamR, aL, aR, dL, dR, vjL, vjR, vkL, vkR, vnorm{0.0};
+    };
+
+    template <Regime R>
+    DUAL constexpr bool has_mdz_vars()
+    {
+        if constexpr ((comp_ct_type == CTTYPE::MdZ) && sim_type::MHD<R>) {
+            return true;
+        }
+        else {
+            return false;
+        }
+    }
+
+    // Base empty storage that takes up no space when not needed
+    struct EmptyMdZStorage {
+    };
+
+    // Storage for actual MdZ variables when needed
+    struct MdZVariablesStorage {
+        MignoneDelZannaVariables vars;
+
+        DUAL constexpr MdZVariablesStorage() : vars{} {}
+        DUAL constexpr MdZVariablesStorage(
+            const MignoneDelZannaVariables& other
+        )
+            : vars(other)
+        {
+        }
+
+        DUAL constexpr const MignoneDelZannaVariables& get() const
+        {
+            return vars;
+        }
+        DUAL constexpr MignoneDelZannaVariables& get() { return vars; }
+        DUAL constexpr void set(const MignoneDelZannaVariables& other)
+        {
+            vars = other;
+        }
+    };
+
+    // Decorator for anyHydro that conditionally adds MdZ storage
+    template <bool UseMdZ, typename Base>
+    class MdZStorageDecorator : public Base
+    {
+      public:
+        using Base::Base;   // Inherit constructors
+
+        // Forward the returned value and keep the same API
+        DUAL constexpr auto mdz_vars() const
+        {
+            if constexpr (UseMdZ) {
+                // Return a Just wrapper with the actual variables
+                return Maybe(
+                    static_cast<const MdZVariablesStorage&>(*this).get()
+                );
+            }
+            else {
+                // Return Nothing when MdZ variables are not enabled
+                return Nothing;
+            }
+        }
+
+        DUAL constexpr auto mdz_vars()
+        {
+            if constexpr (UseMdZ) {
+                return Maybe(static_cast<MdZVariablesStorage&>(*this).get());
+            }
+            else {
+                return Nothing;
+            }
+        }
+
+        DUAL constexpr void set_mdz_vars(const MignoneDelZannaVariables& vars)
+        {
+            if constexpr (UseMdZ) {
+                static_cast<MdZVariablesStorage&>(*this).set(vars);
+            }
+        }
+    };
+
     namespace generic_hydro {
         template <size_type Dims, typename Derived, Regime R>
         struct anyHydro {
@@ -106,9 +190,6 @@ namespace simbi {
                 static constexpr size_type b2 = Dims + 3;
                 static constexpr size_type b3 = Dims + 4;
             };
-
-            // Wave speed components
-            real aL, aR, dL, dR, vjL, vjR, vkL, vkR, vnorm, lamL, lamR;
 
             ~anyHydro() = default;
 
@@ -167,7 +248,7 @@ namespace simbi {
                 const BType& bfield = BType{}
             )
                 requires VectorLike<VType> && VectorLike<BType>
-                : vals_{}   // Zero initialize first
+                : vals_{}
             {
                 vals_[Offsets::density] = density;
                 vals_[Offsets::energy]  = edensity;
@@ -355,16 +436,6 @@ namespace simbi {
             DUAL real& chi() { return vals_[Offsets::chi]; }
 
             DUAL const real& chi() const { return vals_[Offsets::chi]; }
-
-            DUAL constexpr real vLtrans(const luint perm) const
-            {
-                return perm == 1 ? vjL : vkL;
-            }
-
-            DUAL constexpr real vRtrans(const luint perm) const
-            {
-                return perm == 1 ? vjR : vkR;
-            }
             // output the hydro state
             DUAL void print() const
             {
@@ -420,16 +491,17 @@ namespace simbi {
 
     template <size_type Dims, Regime R>
     struct anyConserved
-        : public generic_hydro::anyHydro<Dims, anyConserved<Dims, R>, R> {
+        : public generic_hydro::anyHydro<Dims, anyConserved<Dims, R>, R>,
+          public std::conditional_t<
+              (comp_ct_type == CTTYPE::MdZ) && sim_type::MHD<R>,
+              MdZVariablesStorage,
+              EmptyMdZStorage> {
         using generic_hydro::anyHydro<Dims, anyConserved<Dims, R>, R>::anyHydro;
         using Base = generic_hydro::anyHydro<Dims, anyConserved<Dims, R>, R>;
         using Base::bfield;
         using Base::chi;
         using Base::vals_;
         using typename Base::Offsets;
-
-        // stuff for MdZ CT Algo
-        real lamR, lamL, aL, aR, dL, dR, vjL, vjR, vkL, vkR;
 
         // Vector-based accessors
         DUAL real& dens() { return vals_[Offsets::density]; }
@@ -624,6 +696,58 @@ namespace simbi {
             }
             const auto vel = momentum() / dens();
             return (gamma - 1.0) * (nrg() - 0.5 * dens() * vel.dot(vel));
+        }
+
+        // MdZ accessors
+        DUAL constexpr auto mdz_vars() const
+        {
+            if constexpr ((comp_ct_type == CTTYPE::MdZ) && sim_type::MHD<R>) {
+                return Maybe(
+                    static_cast<const MdZVariablesStorage*>(this)->get()
+                );
+            }
+            else {
+                return Nothing;
+            }
+        }
+
+        DUAL constexpr auto mdz_vars()
+        {
+            if constexpr ((comp_ct_type == CTTYPE::MdZ) && sim_type::MHD<R>) {
+                return Maybe(static_cast<MdZVariablesStorage*>(this)->get());
+            }
+            else {
+                return Nothing;
+            }
+        }
+
+        DUAL constexpr void set_mdz_vars(const MignoneDelZannaVariables& vars)
+        {
+            if constexpr ((comp_ct_type == CTTYPE::MdZ) && sim_type::MHD<R>) {
+                static_cast<MdZVariablesStorage*>(this)->set(vars);
+            }
+        }
+
+        DUAL constexpr real vLtrans(const luint perm) const
+        {
+            if constexpr (has_mdz_vars<R>()) {
+                const auto& mdz = mdz_vars().value();
+                return perm == 1 ? mdz.vjL : mdz.vkL;
+            }
+            else {
+                return 0.0;
+            }
+        }
+
+        DUAL constexpr real vRtrans(const luint perm) const
+        {
+            if constexpr (has_mdz_vars<R>()) {
+                const auto& mdz = mdz_vars().value();
+                return perm == 1 ? mdz.vjR : mdz.vkR;
+            }
+            else {
+                return 0.0;
+            }
         }
     };
 
@@ -1007,7 +1131,6 @@ namespace simbi {
             auto& table
         ) const
         {
-            printf("getting error\n");
             std::ostringstream oss;
             oss << "Primitives in non-physical state.\n";
             if (error_code != ErrorCode::NONE) {

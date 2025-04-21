@@ -359,6 +359,8 @@ RMHD<dim>::calc_max_wave_speeds(const auto& prims, const luint nhat) const
     vx))**4 - (1 - x**2)*((b2 + rho * h * cs**2) * (g*(x-vx))**2 - cs**2 *
     (bx - x * b0)**2)), domain='ZZ[rho, h, cs, g,
     ...: vx, b2, bx, b0]') # --------------- Eq. (56)
+    net_flux.set_mdz_vars(MignoneDelZannaVariables{
+    })
 
     In [12]: p.coeffs()
     Out[12]:
@@ -544,39 +546,55 @@ DUAL RMHD<dim>::conserved_t RMHD<dim>::calc_hlle_flux(
     if constexpr (comp_ct_type == CTTYPE::MdZ) {
         const auto nj = next_perm(nhat, 1);
         const auto nk = next_perm(nhat, 2);
-        net_flux.lamR = aRp;
-        net_flux.lamL = aLm;
         if (vface <= aLm) {
-            net_flux.aL  = 1.0;
-            net_flux.aR  = 0.0;
-            net_flux.dL  = 0.0;
-            net_flux.dR  = 0.0;
-            net_flux.vjL = prL.vcomponent(nj);
-            net_flux.vkL = prL.vcomponent(nk);
-            net_flux.vjR = 0.0;
-            net_flux.vkR = 0.0;
+            net_flux.set_mdz_vars(
+                MignoneDelZannaVariables{
+                  .lamL = aLm,
+                  .lamR = aRp,
+                  .aL   = 1.0,
+                  .aR   = 0.0,
+                  .dL   = 0.0,
+                  .dR   = 0.0,
+                  .vjL  = prL.vcomponent(nj),
+                  .vjR  = 0.0,
+                  .vkL  = prL.vcomponent(nk),
+                  .vkR  = 0.0,
+                }
+            );
         }
         else if (vface >= aRp) {
-            net_flux.aL  = 0.0;
-            net_flux.aR  = 1.0;
-            net_flux.dL  = 0.0;
-            net_flux.dR  = 0.0;
-            net_flux.vjL = 0.0;
-            net_flux.vkL = 0.0;
-            net_flux.vjR = prR.vcomponent(nj);
-            net_flux.vkR = prR.vcomponent(nk);
+            net_flux.set_mdz_vars(
+                MignoneDelZannaVariables{
+                  .lamL = aLm,
+                  .lamR = aRp,
+                  .aL   = 0.0,
+                  .aR   = 1.0,
+                  .dL   = 0.0,
+                  .dR   = 0.0,
+                  .vjL  = 0.0,
+                  .vjR  = prR.vcomponent(nj),
+                  .vkL  = 0.0,
+                  .vkR  = prR.vcomponent(nk),
+                }
+            );
         }
         else {
             // set the wave coefficients
             const auto afac = 1.0 / (aRp - aLm);
-            net_flux.aL     = +aRp * afac;
-            net_flux.aR     = -aLm * afac;
-            net_flux.dL     = -aRp * aLm * afac;
-            net_flux.dR     = net_flux.dL;
-            net_flux.vjL    = prL.vcomponent(nj);
-            net_flux.vkL    = prL.vcomponent(nk);
-            net_flux.vjR    = prR.vcomponent(nj);
-            net_flux.vkR    = prR.vcomponent(nk);
+            net_flux.set_mdz_vars(
+                MignoneDelZannaVariables{
+                  .lamL = aLm,
+                  .lamR = aRp,
+                  .aL   = +aRp * afac,
+                  .aR   = -aLm * afac,
+                  .dL   = -aRp * aLm * afac,
+                  .dR   = -aRp * aLm * afac,
+                  .vjL  = prL.vcomponent(nj),
+                  .vjR  = prR.vcomponent(nj),
+                  .vkL  = prL.vcomponent(nk),
+                  .vkR  = prR.vcomponent(nk),
+                }
+            );
         }
     }
     else {
@@ -748,27 +766,37 @@ DUAL RMHD<dim>::conserved_t RMHD<dim>::calc_hllc_flux(
     if constexpr (comp_ct_type == CTTYPE::MdZ) {
         const auto nj = next_perm(nhat, 1);
         const auto nk = next_perm(nhat, 2);
-        net_flux.lamR = aRp;
-        net_flux.lamL = aLm;
         if (vface <= aLm) {
-            net_flux.aL  = 1.0;
-            net_flux.aR  = 0.0;
-            net_flux.dL  = 0.0;
-            net_flux.dR  = 0.0;
-            net_flux.vjL = prL.vcomponent(nj);
-            net_flux.vkL = prL.vcomponent(nk);
-            net_flux.vjR = 0.0;
-            net_flux.vkR = 0.0;
+            net_flux.set_mdz_vars(
+                MignoneDelZannaVariables{
+                  .lamL = aLm,
+                  .lamR = aRp,
+                  .aL   = 1.0,
+                  .aR   = 0.0,
+                  .dL   = 0.0,
+                  .dR   = 0.0,
+                  .vjL  = prL.vcomponent(nj),
+                  .vjR  = 0.0,
+                  .vkL  = prL.vcomponent(nk),
+                  .vkR  = 0.0,
+                }
+            );
         }
         else if (vface >= aRp) {
-            net_flux.aL  = 0.0;
-            net_flux.aR  = 1.0;
-            net_flux.dL  = 0.0;
-            net_flux.dR  = 0.0;
-            net_flux.vjL = 0.0;
-            net_flux.vkL = 0.0;
-            net_flux.vjR = prR.vcomponent(nj);
-            net_flux.vkR = prR.vcomponent(nk);
+            net_flux.set_mdz_vars(
+                MignoneDelZannaVariables{
+                  .lamL = aLm,
+                  .lamR = aRp,
+                  .aL   = 0.0,
+                  .aR   = 1.0,
+                  .dL   = 0.0,
+                  .dR   = 0.0,
+                  .vjL  = 0.0,
+                  .vjR  = prR.vcomponent(nj),
+                  .vkL  = 0.0,
+                  .vkR  = prR.vcomponent(nk)
+                }
+            );
         }
         else {
             // if Bn is zero, then the HLLC solver admits a jummp in the
@@ -778,22 +806,38 @@ DUAL RMHD<dim>::conserved_t RMHD<dim>::calc_hllc_flux(
             if (null_normal_field) {
                 constexpr auto half = static_cast<real>(0.5);
                 const auto aaS      = std::abs(aS);
-                net_flux.aL         = half;
-                net_flux.aR         = half;
-                net_flux.dL = half * (aaS - std::abs(aLm)) * chiL + half * aaS;
-                net_flux.dR = half * (aaS - std::abs(aRp)) * chiR + half * aaS;
+                net_flux.set_mdz_vars(
+                    MignoneDelZannaVariables{
+                      .lamL = aLm,
+                      .lamR = aRp,
+                      .aL   = half,
+                      .aR   = half,
+                      .dL   = half * (aaS - std::abs(aLm)) * chiL + half * aaS,
+                      .dR   = half * (aaS - std::abs(aRp)) * chiR + half * aaS,
+                      .vjL  = prL.vcomponent(nj),
+                      .vjR  = prR.vcomponent(nj),
+                      .vkL  = prL.vcomponent(nk),
+                      .vkR  = prR.vcomponent(nk)
+                    }
+                );
             }
             else {
                 const auto afac = 1.0 / (aRp - aLm);
-                net_flux.aL     = +aRp * afac;
-                net_flux.aR     = -aLm * afac;
-                net_flux.dL     = -aRp * aLm * afac;
-                net_flux.dR     = net_flux.dL;
+                net_flux.set_mdz_vars(
+                    MignoneDelZannaVariables{
+                      .lamL = aLm,
+                      .lamR = aRp,
+                      .aL   = +aRp * afac,
+                      .aR   = -aLm * afac,
+                      .dL   = -aRp * aLm * afac,
+                      .dR   = -aRp * aLm * afac,
+                      .vjL  = prL.vcomponent(nj),
+                      .vjR  = prR.vcomponent(nj),
+                      .vkL  = prL.vcomponent(nk),
+                      .vkR  = prR.vcomponent(nk)
+                    }
+                );
             }
-            net_flux.vjL = prL.vcomponent(nj);
-            net_flux.vkL = prL.vcomponent(nk);
-            net_flux.vjR = prR.vcomponent(nj);
-            net_flux.vkR = prR.vcomponent(nk);
         }
     }
     else {
@@ -1215,48 +1259,62 @@ DUAL RMHD<dim>::conserved_t RMHD<dim>::calc_hlld_flux(
         const auto nj       = next_perm(nhat, 1);
         const auto nk       = next_perm(nhat, 2);
         constexpr auto half = static_cast<real>(0.5);
-        net_flux.lamR       = aRp;
-        net_flux.lamL       = aLm;
         if (vface <= aLm) {
-            net_flux.aL    = 1.0;
-            net_flux.aR    = 0.0;
-            net_flux.dL    = 0.0;
-            net_flux.dR    = 0.0;
-            net_flux.vjL   = prL.vcomponent(nj);
-            net_flux.vkL   = prL.vcomponent(nk);
-            net_flux.vjR   = 0.0;
-            net_flux.vkR   = 0.0;
-            net_flux.vnorm = prL.vcomponent(nhat);
+            net_flux.set_mdz_vars(
+                MignoneDelZannaVariables{
+                  .lamL  = aLm,
+                  .lamR  = aRp,
+                  .aL    = 1.0,
+                  .aR    = 0.0,
+                  .dL    = 0.0,
+                  .dR    = 0.0,
+                  .vjL   = prL.vcomponent(nj),
+                  .vjR   = 0.0,
+                  .vkL   = prL.vcomponent(nk),
+                  .vkR   = 0.0,
+                  .vnorm = prL.vcomponent(nhat)
+                }
+            );
         }
         else if (vface >= aRp) {
-            net_flux.aL    = 0.0;
-            net_flux.aR    = 1.0;
-            net_flux.dL    = 0.0;
-            net_flux.dR    = 0.0;
-            net_flux.vjL   = 0.0;
-            net_flux.vkL   = 0.0;
-            net_flux.vjR   = prR.vcomponent(nj);
-            net_flux.vkR   = prR.vcomponent(nk);
-            net_flux.vnorm = prR.vcomponent(nhat);
+            net_flux.set_mdz_vars(
+                MignoneDelZannaVariables{
+                  .lamL  = aLm,
+                  .lamR  = aRp,
+                  .aL    = 0.0,
+                  .aR    = 1.0,
+                  .dL    = 0.0,
+                  .dR    = 0.0,
+                  .vjL   = 0.0,
+                  .vjR   = prR.vcomponent(nj),
+                  .vkL   = 0.0,
+                  .vkR   = prR.vcomponent(nk),
+                  .vnorm = prR.vcomponent(nhat)
+                }
+            );
         }
         else {
             // if Bn is zero, then the HLLC solver admits a jummp in the
             // transverse magnetic field components across the middle wave.
             // If not, HLLC has the same flux and diffusion coefficients as
             // the HLL solver.
-            net_flux.aL = half * (1.0 + veeS);
-            net_flux.aR = half * (1.0 - veeS);
-            net_flux.dL = half * (veeL - veeS) * chiL +
-                          half * (std::abs(laL) - veeS * laL);
-            net_flux.dR = half * (veeR - veeS) * chiR +
-                          half * (std::abs(laR) - veeS * laR);
-
-            net_flux.vjL = prL.vcomponent(nj);
-            net_flux.vkL = prL.vcomponent(nk);
-            net_flux.vjR = prR.vcomponent(nj);
-            net_flux.vkR = prR.vcomponent(nk);
-            net_flux.vnorm =
-                0.5 * (prL.vcomponent(nhat) + prR.vcomponent(nhat));
+            net_flux.set_mdz_vars(
+                MignoneDelZannaVariables{
+                  .lamL = aLm,
+                  .lamR = aRp,
+                  .aL   = half * (1.0 + veeS),
+                  .aR   = half * (1.0 - veeS),
+                  .dL   = half * (veeL - veeS) * chiL +
+                        half * (std::abs(laL) - veeS * laL),
+                  .dR = half * (veeR - veeS) * chiR +
+                        half * (std::abs(laR) - veeS * laR),
+                  .vjL   = prL.vcomponent(nj),
+                  .vjR   = prR.vcomponent(nj),
+                  .vkL   = prL.vcomponent(nk),
+                  .vkR   = prR.vcomponent(nk),
+                  .vnorm = 0.5 * (prL.vcomponent(nhat) + prR.vcomponent(nhat))
+                }
+            );
         }
     }
     else {

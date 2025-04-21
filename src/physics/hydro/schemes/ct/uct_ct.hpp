@@ -98,11 +98,15 @@ namespace simbi {
             ) -> std::tuple<real, real, real, real>
             {
                 // d-coefficients from MdZ (2021), Eqns. (34 & 35)a
+                const auto& fn_mdz = fn.mdz_vars().value();
+                const auto& fs_mdz = fs.mdz_vars().value();
+                const auto& fe_mdz = fe.mdz_vars().value();
+                const auto& fw_mdz = fw.mdz_vars().value();
                 return std::make_tuple(
-                    static_cast<real>(0.5) * (fs.dL + fn.dL),
-                    static_cast<real>(0.5) * (fs.dR + fn.dR),
-                    static_cast<real>(0.5) * (fw.dL + fe.dL),
-                    static_cast<real>(0.5) * (fw.dR + fe.dR)
+                    static_cast<real>(0.5) * (fs_mdz.dL + fn_mdz.dL),
+                    static_cast<real>(0.5) * (fs_mdz.dR + fn_mdz.dR),
+                    static_cast<real>(0.5) * (fw_mdz.dL + fe_mdz.dL),
+                    static_cast<real>(0.5) * (fw_mdz.dR + fe_mdz.dR)
                 );
             };
 
@@ -115,11 +119,15 @@ namespace simbi {
             ) -> std::tuple<real, real, real, real>
             {
                 // a-coefficients from MdZ (2021), Eqns. (34 & 35)b
+                const auto& fn_mdz = fn.mdz_vars().value();
+                const auto& fs_mdz = fs.mdz_vars().value();
+                const auto& fe_mdz = fe.mdz_vars().value();
+                const auto& fw_mdz = fw.mdz_vars().value();
                 return std::make_tuple(
-                    static_cast<real>(0.5) * (fs.aL + fn.aL),
-                    static_cast<real>(0.5) * (fs.aR + fn.aR),
-                    static_cast<real>(0.5) * (fw.aL + fe.aL),
-                    static_cast<real>(0.5) * (fw.aR + fe.aR)
+                    static_cast<real>(0.5) * (fs_mdz.aL + fn_mdz.aL),
+                    static_cast<real>(0.5) * (fs_mdz.aR + fn_mdz.aR),
+                    static_cast<real>(0.5) * (fw_mdz.aL + fe_mdz.aL),
+                    static_cast<real>(0.5) * (fw_mdz.aR + fe_mdz.aR)
                 );
             };
 
@@ -134,18 +142,22 @@ namespace simbi {
             {
                 // transverse velocities from MdZ (2021), Eqns. (34 & 35)c
                 // average velocity coefficients, just after Eq. (27)
-                const auto lPv = my_max(fn.lamR, fs.lamR);
-                const auto lMv = my_min(fn.lamL, fs.lamL);
-                const auto lPh = my_max(fe.lamR, fw.lamR);
-                const auto lMh = my_min(fe.lamL, fw.lamL);
+                const auto& fn_mdz = fn.mdz_vars().value();
+                const auto& fs_mdz = fs.mdz_vars().value();
+                const auto& fe_mdz = fe.mdz_vars().value();
+                const auto& fw_mdz = fw.mdz_vars().value();
+                const auto lPv     = my_max(fn_mdz.lamR, fs_mdz.lamR);
+                const auto lMv     = my_min(fn_mdz.lamL, fs_mdz.lamL);
+                const auto lPh     = my_max(fe_mdz.lamR, fw_mdz.lamR);
+                const auto lMh     = my_min(fe_mdz.lamL, fw_mdz.lamL);
 
                 // check for stationary flow
                 if (lPh == lMh || lPv == lMv) {
                     return std::make_tuple(
-                        fw.vnorm,
-                        fe.vnorm,
-                        fs.vnorm,
-                        fn.vnorm
+                        fw_mdz.vnorm,
+                        fe_mdz.vnorm,
+                        fs_mdz.vnorm,
+                        fn_mdz.vnorm
                     );
                 }
 
