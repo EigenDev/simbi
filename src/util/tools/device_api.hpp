@@ -195,35 +195,6 @@ namespace simbi {
             void hostRegister(void* ptr, size_t size, unsigned int flags);
             void hostUnregister(void* ptr);
 
-            // JIT compilation
-            void createProgram(
-                devProgram_t* program,
-                const char* source,
-                const char* prog_name,
-                int num_headers,
-                const char* const* headers,
-                const char* const* include_names
-            );
-            int compileProgram(
-                devProgram_t program,
-                int num_options,
-                const char* const* options
-            );
-            void profilerStart();
-            void getProgramLogSize(devProgram_t program, size_t* size);
-            void getProgramLog(devProgram_t program, char* log);
-            void getProgramIRSize(devProgram_t program, size_t* size);
-            void getProgramIR(devProgram_t program, char* ir);
-            void destroyProgram(devProgram_t* program);
-            void moduleLoadData(devModule_t* module, const char* ir);
-            void moduleUnload(devModule_t module);
-            void loadModule(devModule_t* module, const char* ir);
-            void getFunction(
-                devFunction_t* function,
-                devModule_t module,
-                const char* name
-            );
-            void getIRSize(size_t* size, devProgram_t module);
             void alignedMalloc(void** ptr, size_t size);
             void launchKernel(
                 devFunction_t function,
