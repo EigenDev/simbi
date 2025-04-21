@@ -137,7 +137,7 @@ namespace simbi {
       private:
         // state
         std::vector<std::vector<real>> state_;
-        atomic_bool in_failure_state_;
+        std::atomic<bool> in_failure_state_;
 
         // physical / numerical parameters
         real gamma_;
