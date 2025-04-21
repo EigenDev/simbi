@@ -21,7 +21,7 @@ class SimulationRunner:
         os.environ["GPU_BLOCK_X"] = str(gpu_config.block_dims[0])
         os.environ["GPU_BLOCK_Y"] = str(gpu_config.block_dims[1])
         os.environ["GPU_BLOCK_Z"] = str(gpu_config.block_dims[2])
-        logger.info(f"Using GPU block dimensions: {gpu_config.block_dims})")
+        logger.info(f"Using GPU block dimensions: {gpu_config.block_dims}")
 
     def _setup_compute_environment(self, compute_mode: str) -> Any:
         """Configure compute environment and return execution module"""
