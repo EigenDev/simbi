@@ -39,7 +39,7 @@ gpu_settings = {
             '--compiler-options',
             '-fPIC',
         ],
-        'link_args': [f'-L@cuda_root@/lib64','-lcudart', '-lnvrtc', '-lcuda'],
+        'link_args': [f'-L@cuda_root@/lib64','-lcudart', '-lcuda'],
         'inter_link_args': ['-dlink', '-Xcompiler', '-fPIC'],
         'extra_link_args': ['-lcudadevrt'],
         'gpu_dependency': cuda
@@ -48,7 +48,7 @@ gpu_settings = {
         'compiler': 'hipcc',
         'arch': f'gfx@gpu_arch@',
         'args': ['-fPIC', f'--offload-arch=gfx@gpu_arch@'],
-        'link_args': [f'-L@rocm_path@/lib','-lamdhip64', '-lhiprtc'],
+        'link_args': [f'-L@rocm_path@/lib','-lamdhip64'],
         'inter_link_args': [],
         'extra_link_args': [],
         'gpu_dependency': hip
