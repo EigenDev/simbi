@@ -1,46 +1,45 @@
 #include <atomic>
 #include <cuda.h>
 #include <cuda/atomic>
-#include <cuda_runtime.h>
-#include <nvrtc.h>
 #include <cuda_profiler_api.h>
+#include <cuda_runtime.h>
 #define CUDA_CODE 1
 
-class atomic_bool_gpu
+template <typename ManagedType>
+class atomic_bool_gpu : public ManagedType
 {
   private:
-    cuda::atomic<int, cuda::thread_scope_device> value;
+    cuda::atomic<bool, cuda::thread_scope_device> value;
 
   public:
-    __host__ __device__ atomic_bool_gpu() : value(0) {}
+    __host__ __device__ atomic_bool_gpu() : value(false) {}
 
     __host__ __device__ atomic_bool_gpu(bool initial_value)
-        : value(initial_value ? 1 : 0)
+        : value(initial_value)
     {
     }
 
     __host__ __device__ void store(bool new_value)
     {
-        value.store(new_value ? 1 : 0, cuda::memory_order_relaxed);
+        value.store(new_value, cuda::memory_order_relaxed);
     }
 
     __host__ __device__ bool load() const
     {
-        return value.load(cuda::memory_order_relaxed) != 0;
+        return value.load(cuda::memory_order_relaxed);
     }
 
     __host__ __device__ bool exchange(bool new_value)
     {
-        return value.exchange(new_value ? 1 : 0, cuda::memory_order_relaxed) !=
-               0;
+        return value.exchange(new_value, cuda::memory_order_relaxed);
     }
 
     __host__ __device__ bool compare_exchange(bool expected, bool desired)
     {
-        int expected_int = expected ? 1 : 0;
+        bool expected_bool = expected;
         return value.compare_exchange_strong(
-            expected_int,
-            desired ? 1 : 0,
+            expected_bool,
+            desired,
             cuda::memory_order_relaxed
         );
     }
@@ -49,8 +48,8 @@ class atomic_bool_gpu
     __host__ __device__ explicit operator bool() const { return load(); }
 };
 
-using shared_atomic_bool = atomic_bool_gpu;
-using atomic_bool        = atomic_bool_gpu;
+template <typename T>
+using shared_atomic_bool = atomic_bool_gpu<T>;
 
 #define DEV        __device__
 #define KERNEL     __global__
@@ -198,27 +197,13 @@ constexpr auto devMemcpyPeerAsync      = cudaMemcpyPeerAsync;
 constexpr auto devMemcpyAsync          = cudaMemcpyAsync;
 constexpr auto devHostRegister         = cudaHostRegister;
 constexpr auto devHostUnregister       = cudaHostUnregister;
-constexpr auto devProfilerStart        = cudaProfilerStart;
-constexpr auto devProfilerStop         = cudaProfilerStop;
 
 using devProp_t       = cudaDeviceProp;
 using devError_t      = cudaError_t;
 using devEvent_t      = cudaEvent_t;
 using simbiStream_t   = cudaStream_t;
 using simbiMemcpyKind = cudaMemcpyKind;
-// tools for JIT compilation
-constexpr auto devCompileProgram    = nvrtcCompileProgram;
-constexpr auto devCreateProgram     = nvrtcCreateProgram;
-constexpr auto devGetIRSize         = nvrtcGetPTXSize;
-constexpr auto devGetIR             = nvrtcGetPTX;
-constexpr auto devGetProgramLogSize = nvrtcGetProgramLogSize;
-constexpr auto devGetProgramLog     = nvrtcGetProgramLog;
-constexpr auto devDestroyProgram    = nvrtcDestroyProgram;
-constexpr auto devLoadModule        = cuModuleLoadData;
-constexpr auto devUnloadModule      = cuModuleUnload;
-constexpr auto devGetFunction       = cuModuleGetFunction;
 
-using devProgram_t  = nvrtcProgram;
 using devContext_t  = CUcontext;
 using devModule_t   = CUmodule;
 using devDevice_t   = CUdevice;

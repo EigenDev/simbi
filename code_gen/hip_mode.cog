@@ -1,6 +1,5 @@
 #include <atomic>
 #include <hip/hip_runtime.h>
-#include <hip/hiprtc.h>
 #include <hip/std/atomic>
 #define HIP_CODE 1
 
@@ -211,20 +210,3 @@ using devProp_t     = hipDeviceProp_t;
 using devError_t    = hipError_t;
 using devEvent_t    = hipEvent_t;
 using simbiStream_t = hipStream_t;
-
-// tools for JIT compilation
-constexpr auto devCompileProgram    = hiprtcCompileProgram;
-constexpr auto devCreateProgram     = hiprtcCreateProgram;
-constexpr auto devGetIRSize         = hiprtcGetCodeSize;
-constexpr auto devGetIR             = hiprtcGetCode;
-constexpr auto devGetProgramLogSize = hiprtcGetProgramLogSize;
-constexpr auto devGetProgramLog     = hiprtcGetProgramLog;
-constexpr auto devLoadModule        = hipModuleLoadData;
-constexpr auto devDestroyProgram    = hiprtcDestroyProgram;
-constexpr auto devUnloadModule      = hipModuleUnload;
-constexpr auto devGetFunction       = hipModuleGetFunction;
-using devProgram_t                  = hiprtcProgram;
-using devContext_t                  = hipCtx_t;
-using devModule_t                   = hipModule_t;
-using devDevice_t                   = hipDevice_t;
-using devFunction_t                 = hipFunction_t;

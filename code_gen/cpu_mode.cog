@@ -3,8 +3,9 @@ using sig_bool = std::atomic<bool>;
 #define SINGLE(kernel_name, ...)                    kernel_name(__VA_ARGS__);
 #define CALL(kernel_name, gridsize, blocksize, ...) kernel_name(__VA_ARGS__);
 
+template <typename T>
 using shared_atomic_bool = std::atomic<bool>;
-using atomic_bool        = std::atomic<bool>;
+
 
 template <typename T>
 void store_atomic_bool(T& var, bool value)
@@ -77,10 +78,7 @@ namespace simbi {
     using devError_t      = int;
     using devProp_t       = int;
     using devEvent_t      = std::chrono::high_resolution_clock::time_point;
-    using devModule_t     = void*;
     using devFunction_t   = void*;
-    using devContext_t    = int;
-    using devProgram_t    = int;
 
     inline dim3 blockIdx(1, 1, 1);
     inline dim3 blockDim(1, 1, 1);
