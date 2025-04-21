@@ -393,7 +393,9 @@ namespace simbi {
                 bodies_count_attr.close();
 
                 // Write each body's data
-                for (size_t body_idx = 0; body_idx < body_count; ++body_idx) {
+                for (size_type body_idx = 0; body_idx < body_count;
+                     ++body_idx) {
+                    const auto& body = body_system.get_body(body_idx).value();
                     // Create a subgroup for this specific body
                     std::string body_group_name =
                         "body_" + std::to_string(body_idx);
@@ -404,8 +406,8 @@ namespace simbi {
                     auto properties =
                         body_system.get_serializable_properties(body_idx);
 
-                    // Write each property using the appropriate serialization
-                    // trait
+                    // Write each property using the appropriate
+                    // serialization trait
                     for (const auto& prop_variant : properties) {
                         std::visit(
                             [&body_group](const auto& prop) {
@@ -425,7 +427,7 @@ namespace simbi {
                     }
 
                     // Add capability flags as attributes
-                    auto caps         = body_system.capabilities()[body_idx];
+                    auto caps         = body.capabilities();
                     uint32_t caps_int = static_cast<uint32_t>(caps);
 
                     auto caps_attr = body_group.createAttribute(
