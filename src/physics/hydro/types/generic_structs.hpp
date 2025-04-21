@@ -57,7 +57,9 @@
 #include "util/tools/helpers.hpp"
 #include <cmath>
 #include <iostream>
-#include <limits>
+#include <sstream>
+
+using namespace simbi::helpers;
 
 namespace simbi {
     namespace sim_type {
@@ -1002,7 +1004,7 @@ namespace simbi {
             const real x2,
             const real x3,
             const ErrorCode error_code,
-            PrettyTable& table
+            auto& table
         ) const
         {
             printf("getting error\n");
