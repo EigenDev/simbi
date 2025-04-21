@@ -52,25 +52,13 @@
 #include "build_options.hpp"            // for real, STATIC, luint, lint
 #include "core/traits.hpp"              // for is_1D_primitive, is_2D_primitive
 #include "core/types/alias/alias.hpp"   // for uarray
-#include "core/types/monad/maybe.hpp"
 #include "core/types/utility/enums.hpp"   // for Geometry, BoundaryCondition, Solver
 #include "core/types/utility/functional.hpp"   // for Function
-#include "io/console/tabulate.hpp"             // for PrettyTable
-#include "util/parallel/exec_policy.hpp"       // for ExecutionPolicy
+#include "io/exceptions.hpp"                   // for ErrorCode
 #include <cmath>                               // for sqrt, exp, INFINITY
 #include <cstdlib>                             // for abs, size_t
-#include <exception>                           // for exception
-#include <map>                                 // for map
 #include <string>                              // for string, operator<=>
 #include <type_traits>                         // for enable_if
-#include <unordered_map>                       // for unordered_map
-
-std::unordered_map<simbi::Cellspacing, std::string> const cell2str = {
-  {simbi::Cellspacing::LOG, "log"},
-  {simbi::Cellspacing::LINEAR, "linear"}
-  // {"log-linear",Cellspacing},
-  // {"linear-log",Cellspacing},
-};
 
 // Some useful global constants
 constexpr real QUIRK_THRESHOLD = 1e-4;
