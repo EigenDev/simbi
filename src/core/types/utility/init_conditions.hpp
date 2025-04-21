@@ -54,7 +54,6 @@
 #include "core/types/containers/vector.hpp"
 #include "core/types/utility/enums.hpp"
 #include "enums.hpp"
-#include "physics/hydro/schemes/ib/bodies/immersed_boundary.hpp"
 #include <cinttypes>
 #include <memory>
 #include <unordered_map>
