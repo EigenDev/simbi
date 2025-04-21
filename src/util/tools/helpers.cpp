@@ -1,4 +1,5 @@
 #include "util/tools/helpers.hpp"
+#include "core/types/monad/maybe.hpp"
 #include "io/exceptions.hpp"
 #include <iomanip>
 #include <thread>
@@ -333,6 +334,57 @@ namespace simbi {
                 (gamma - 1.0) * rho * eps - p,
                 c2 * v2 - 1.0
             );
+        }
+
+        std::string error_code_to_string(ErrorCode code)
+        {
+            // handle bit-field error codes
+            if (code == ErrorCode::NONE) {
+                return "No error";
+            }
+
+            std::string result;
+            // Check each error code and append the corresponding message
+            // to the result string. For each error code after the first one,
+            // we add 'or' to the result string.
+            if (has_error(code, ErrorCode::NEGATIVE_PRESSURE)) {
+                result += "negative pressure or ";
+            }
+            if (has_error(code, ErrorCode::NON_FINITE_PRESSURE)) {
+                result += "non-finite pressure or ";
+            }
+            if (has_error(code, ErrorCode::NEGATIVE_DENSITY)) {
+                result += "negative density or ";
+            }
+            if (has_error(code, ErrorCode::SUPERLUMINAL_VELOCITY)) {
+                result += "superluminal velocity or ";
+            }
+            if (has_error(code, ErrorCode::NEGATIVE_ENERGY)) {
+                result += "negative energy or ";
+            }
+            if (has_error(code, ErrorCode::NEGATIVE_ENTROPY)) {
+                result += "negative entropy or ";
+            }
+            if (has_error(code, ErrorCode::NEGATIVE_MASS)) {
+                result += "negative mass or ";
+            }
+            if (has_error(code, ErrorCode::NON_FINITE_ROOT)) {
+                result += "non-finite root or ";
+            }
+            if (has_error(code, ErrorCode::MAX_ITER)) {
+                result += "maximum iterations reached or ";
+            }
+            if (has_error(code, ErrorCode::UNDEFINED)) {
+                result += "undefined error or ";
+            }
+            if (result.empty()) {
+                return "Unknown error";
+            }
+            result.pop_back();   // Remove the trailing space
+            result.pop_back();   // Remove the trailing r
+            result.pop_back();   // Remove the trailing o
+            result.pop_back();   // Remove the trailing space
+            return result;
         }
     }   // namespace helpers
 }   // namespace simbi

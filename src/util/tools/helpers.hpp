@@ -52,6 +52,7 @@
 #include "build_options.hpp"            // for real, STATIC, luint, lint
 #include "core/traits.hpp"              // for is_1D_primitive, is_2D_primitive
 #include "core/types/alias/alias.hpp"   // for uarray
+#include "core/types/monad/maybe.hpp"
 #include "core/types/utility/enums.hpp"   // for Geometry, BoundaryCondition, Solver
 #include "core/types/utility/functional.hpp"   // for Function
 #include "io/console/tabulate.hpp"             // for PrettyTable
@@ -734,6 +735,8 @@ namespace simbi {
          * @return std::string
          */
         std::string format_real(real value);
+
+        std::string error_code_to_string(const ErrorCode code);
 
         template <size_type Dims>
         DUAL static auto
