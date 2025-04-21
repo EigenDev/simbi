@@ -203,14 +203,6 @@ namespace simbi {
                 other.ctrl  = nullptr;
             }
 
-            // template <typename D>
-            // smart_ptr(ptr_t* pData, D&& deleter)
-            //     : pData(pData),
-            //       ctrl(new refcnt()),
-            //       custom_deleter(std::forward<D>(deleter))
-            // {
-            // }
-
             ~smart_ptr() { release(); }
 
             // add support for derived-to-base conversion
