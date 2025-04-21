@@ -126,6 +126,7 @@ namespace simbi {
         {
             return ibsystem::functions::apply_forces_to_fluid(
                 *body_system_,
+                *body_delta_accumulator_,
                 prim,
                 cell,
                 coords,
@@ -167,6 +168,8 @@ namespace simbi {
         ndarray<Maybe<primitive_t>, Dims> prims_;
         ndarray<conserved_t, Dims> cons_;
         util::smart_ptr<ibsystem::ComponentBodySystem<real, Dims>> body_system_;
+        util::smart_ptr<ibsystem::BodyDeltaAccumulator<real, Dims>>
+            body_delta_accumulator_;
         HydroContext context_;
 
         HydroBase() = default;
@@ -298,6 +301,12 @@ namespace simbi {
                 mesh_,
                 init
             );
+            if (body_system_) {
+                body_delta_accumulator_ = util::make_unique<
+                    ibsystem::BodyDeltaAccumulator<real, Dims>>(
+                    body_system_->size()
+                );
+            }
         }
 
         void simulate(
@@ -339,7 +348,7 @@ namespace simbi {
         {
             auto& derived = static_cast<Derived&>(*this);
 
-            // orbital dynamics (if any bodies are present)
+            // immersed body dynamics (if any bodies are present)
             if (body_system_) {
                 if constexpr (sim_type::Newtonian<R>) {
                     ibsystem::functions::update_body_system(
@@ -354,6 +363,13 @@ namespace simbi {
             derived.advance_impl();
             derived.cons2prim_impl();
             adapt_dt();
+
+            // generate new system based on the new body
+            // configuration / state
+            if (body_system_) {
+                *body_system_ =
+                    body_delta_accumulator_->apply_deltas(*body_system_);
+            }
         }
 
         // protected references to commonly used values
