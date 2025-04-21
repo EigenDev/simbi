@@ -3,11 +3,92 @@
 
 #include "build_options.hpp"
 #include "component_body_system.hpp"
-#include "physics/hydro/schemes/ib/bodies/policies/fluid_interaction_functions.hpp"
+#include "core/types/utility/atomic_acc.hpp"
+#include "physics/hydro/schemes/ib/policies/body_delta.hpp"
+#include "physics/hydro/schemes/ib/policies/interaction_functions.hpp"
+#include "physics/hydro/schemes/ib/processing/lazy.hpp"
 #include "physics/hydro/types/context.hpp"
 
-using namespace simbi::body_functions::gravitational;
-using namespace simbi::body_functions::accretion;
+using namespace simbi::ibsystem::body_functions::gravitational;
+using namespace simbi::ibsystem::body_functions::accretion;
+
+namespace simbi::ibsystem {
+    template <typename T, size_type Dims>
+    class BodyDeltaAccumulator : public Managed<global::managed_memory>
+    {
+      private:
+        using atomic_acc_t = AtomicAccumulator<T, Dims>;
+        atomic_acc_t force_x_deltas_;
+        atomic_acc_t force_y_deltas_;
+        atomic_acc_t force_z_deltas_;
+        atomic_acc_t mass_deltas_;
+        atomic_acc_t accreted_mass_deltas_;
+        atomic_acc_t accretion_rate_deltas_;
+
+      public:
+        BodyDeltaAccumulator(size_t body_count)
+            : force_x_deltas_(body_count),
+              force_y_deltas_(body_count * (Dims > 1)),
+              force_z_deltas_(body_count * (Dims > 2)),
+              mass_deltas_(body_count),
+              accreted_mass_deltas_(body_count),
+              accretion_rate_deltas_(body_count)
+        {
+        }
+
+        DUAL void accumulate(const BodyDelta<T, Dims>& delta)
+        {
+            const size_t idx = delta.body_idx;
+            force_x_deltas_.add(idx, delta.force_delta[0]);
+            if constexpr (Dims > 1) {
+                force_y_deltas_.add(idx, delta.force_delta[1]);
+            }
+            if constexpr (Dims > 2) {
+                force_z_deltas_.add(idx, delta.force_delta[2]);
+            }
+            mass_deltas_.add(idx, delta.mass_delta);
+            accreted_mass_deltas_.add(idx, delta.accreted_mass_delta);
+            accretion_rate_deltas_.add(idx, delta.accretion_rate_delta);
+        }
+
+        ComponentBodySystem<T, Dims>
+        apply_deltas(const ComponentBodySystem<T, Dims>& system)
+        {
+            ComponentBodySystem<T, Dims> new_system = system;
+
+            for (size_type ii = 0; ii < system.size(); ii++) {
+                auto maybe_body = system.get_body(ii);
+                if (!maybe_body.has_value()) {
+                    continue;
+                }
+
+                auto body = maybe_body.value();
+
+                // create new force vector
+                spatial_vector_t<T, Dims> new_force = body.force;
+                new_force[0] += force_x_deltas_[ii];
+                if constexpr (Dims > 1) {
+                    new_force[1] += force_y_deltas_[ii];
+                }
+                if constexpr (Dims > 2) {
+                    new_force[2] += force_z_deltas_[ii];
+                }
+
+                body = body.with_force(new_force);
+
+                // add accreted mass if relevant
+                if (accreted_mass_deltas_[ii] > 0) {
+                    body = body.add_accreted_mass(accreted_mass_deltas_[ii]);
+                }
+
+                // update the body in the system
+                new_system = new_system.update_body(ii, body);
+            }
+
+            return new_system;
+        }
+    };
+}   // namespace simbi::ibsystem
 
 namespace simbi::ibsystem::functions {
     template <typename T, size_type Dims>
@@ -76,7 +157,7 @@ namespace simbi::ibsystem::functions {
     {
         ComponentBodySystem<T, Dims> updated_system = system;
 
-        // Update the body system
+        // update the body system
         if constexpr (Dims >= 2) {
             if (system.is_binary()) {
                 // use binary system update logic that returns new bodies
@@ -97,71 +178,67 @@ namespace simbi::ibsystem::functions {
         return updated_system;
     }
 
-    // Apply forces with pure functional approach
     template <typename T, size_type Dims, typename Primitive>
     DEV Primitive::counterpart_t apply_forces_to_fluid(
         const ibsystem::ComponentBodySystem<T, Dims>& system,
+        BodyDeltaAccumulator<T, Dims>& accumulator,
         const Primitive& prim,
-        const auto& cell,
+        const auto& mesh_cell,
         std::tuple<size_type, size_type, size_type> coords,
         const HydroContext& context,
         const T dt
     )
     {
         using conserved_t = typename Primitive::counterpart_t;
-        conserved_t result;
+        conserved_t fluid_state{};
 
-        // apply gravitational forces from all bodies
-        for (size_type body_idx = 0; body_idx < system.size(); ++body_idx) {
-            const auto maybe_body = system.get_body(body_idx);
-            if (!maybe_body.has_value()) {
-                continue;
+        {
+            LazyCapabilityView<T, Dims> gravitational_bodies(
+                system,
+                BodyCapability::GRAVITATIONAL
+            );
+
+            for (const auto& [body_idx, body] : gravitational_bodies) {
+                // Apply gravitational forces
+                auto [fluid_change, body_delta] = apply_gravitational_force(
+                    body_idx,
+                    body,
+                    prim,
+                    mesh_cell,
+                    context,
+                    dt
+                );
+
+                fluid_state += fluid_change;
+
+                accumulator.accumulate(body_delta);
             }
-
-            const auto& body = maybe_body.value();
-            printf("body mass: %f\n", body.mass);
-            printf("body pos: %f\n", body.position[0]);
-
-            // if (body.has_capability(ibsystem::BodyCapability::GRAVITATIONAL))
-            // {
-            //     result += apply_gravitational_force(
-            //         body.position,
-            //         body.mass,
-            //         body.softening_length(),
-            //         body.two_way_coupling(),
-            //         prim,
-            //         cell,
-            //         context,
-            //         dt
-            //     );
-            // }
         }
 
-        // apply accretion effects from all bodies
-        // for (size_type body_idx = 0; body_idx < system.size(); ++body_idx) {
-        //     auto maybe_body = system.get_body(body_idx);
-        //     if (!maybe_body.has_value()) {
-        //         continue;
-        //     }
+        {
+            LazyCapabilityView<T, Dims> accretor_bodies(
+                system,
+                BodyCapability::ACCRETION
+            );
 
-        //     const auto& body = maybe_body.value();
+            for (const auto& [body_idx, body] : accretor_bodies) {
+                // Apply accretion effects
+                auto [fluid_change, body_delta] = apply_accretion_effect(
+                    body_idx,
+                    body,
+                    prim,
+                    mesh_cell,
+                    context,
+                    dt
+                );
 
-        //     if (body.has_capability(ibsystem::BodyCapability::ACCRETION)) {
-        //         result += apply_accretion_effect(
-        //             body.position,
-        //             body.velocity,
-        //             body.mass,
-        //             body.accretion_efficiency(),
-        //             body.accretion_radius(),
-        //             prim,
-        //             cell,
-        //             context,
-        //             dt
-        //         );
-        //     }
-        // }
+                fluid_state += fluid_change;
 
-        return result;
+                accumulator.accumulate(body_delta);
+            }
+
+            return fluid_state;
+        }
     }
 }   // namespace simbi::ibsystem::functions
 #endif

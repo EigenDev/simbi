@@ -12,8 +12,8 @@
 #include "physics/hydro/schemes/ib/serialization/body_serialization.hpp"
 #include "physics/hydro/types/generic_structs.hpp"
 #include "system_config.hpp"
-namespace simbi::ibsystem {
 
+namespace simbi::ibsystem {
     template <typename T, size_type Dims>
     class ComponentBodySystem : public Managed<global::managed_memory>
     {
@@ -185,7 +185,6 @@ namespace simbi::ibsystem {
             return bodies_[index];
         }
 
-        // pure function for updating a body
         ComponentBodySystem<T, Dims>
         update_body(size_t index, const Body<T, Dims>& updated_body) const
         {
@@ -240,6 +239,9 @@ namespace simbi::ibsystem {
             }
             return false;
         }
+
+        bool invokes_gravity() const { return !grav_body_indices_.empty(); }
+        bool invokes_accretion() const { return !accr_body_indices_.empty(); }
 
         // property extraction helper
         template <typename U>

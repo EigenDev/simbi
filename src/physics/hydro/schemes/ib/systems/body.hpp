@@ -164,6 +164,17 @@ namespace simbi::ibsystem {
             return new_body;
         }
 
+        DUAL Body<T, Dims> with_accretion_rate(T accr_rate) const
+        {
+            Body<T, Dims> new_body = *this;
+            if (new_body.accretion.has_value()) {
+                auto component           = new_body.accretion.value();
+                component.accretion_rate = accr_rate;
+                new_body.accretion       = component;
+            }
+            return new_body;
+        }
+
         // query functions
         DUAL bool has_capability(BodyCapability cap) const
         {
