@@ -175,6 +175,10 @@ class KeplerianRingTest(BaseConfig):
         return "data/kepler/"
 
     @simbi_property
+    def cfl_number(self) -> float:
+        return 0.05
+
+    @simbi_property
     def boundary_conditions(self) -> str:
         return "dynamic"
 
