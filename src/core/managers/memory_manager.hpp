@@ -92,7 +92,6 @@ namespace simbi {
                         device_data_ = unique_ptr<T, gpuDeleter<T>>(device_ptr);
 
                         // Copy data from other's device memory if available
-                        // TODO: Implement this
                         if (other.device_data_) {
                             gpu::api::copyDeviceToDevice(
                                 device_data_.get(),
@@ -279,7 +278,7 @@ namespace simbi {
       private:
         util::smart_ptr<T[]> host_data_;
         unique_ptr<T, gpuDeleter<T>> device_data_;
-        bool is_synced_{true};
+        bool is_synced_{false};
         size_type size_{0};
     };
 }   // namespace simbi
