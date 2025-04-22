@@ -59,6 +59,7 @@
 #include "core/types/utility/enums.hpp"
 #include "geometry/mesh/mesh.hpp"
 #include "util/parallel/exec_policy.hpp"
+#include "util/tools/algorithms.hpp"
 
 namespace simbi {
     struct conserved_tag;
