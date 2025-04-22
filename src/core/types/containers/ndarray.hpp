@@ -280,11 +280,11 @@ namespace simbi {
                 return;
             }
 
-            // Allocate new memory with larger capacity
+            // allocate new memory with larger capacity
             memory_manager<T> new_mem;
             new_mem.allocate(new_capacity);
 
-            // Copy existing data
+            // copy existing data
             if (this->size_ > 0) {
                 std::copy(
                     mem_.host_data(),
@@ -293,11 +293,11 @@ namespace simbi {
                 );
             }
 
-            // Replace old memory with new
+            // replace old memory with new
             mem_      = std::move(new_mem);
             capacity_ = new_capacity;
 
-            // If using GPU, sync the new data
+            // if we're on GPU, sync the new data
             if constexpr (global::on_gpu) {
                 mem_.sync_to_device();
             }
@@ -305,23 +305,23 @@ namespace simbi {
 
         auto push_back(T value) -> void
         {
-            // Check if we need to grow capacity
+            // check if we need to grow capacity
             if (this->size_ >= capacity_) {
-                // Grow by doubling capacity (common strategy)
+                // grow by doubling capacity
                 size_type new_capacity = (capacity_ == 0) ? 1 : capacity_ * 2;
                 resize_capacity(new_capacity);
             }
 
-            // Add the new value
+            // add the new value
             mem_[this->size_] = value;
 
-            // Increment size
+            // increment size
             this->size_ += 1;
 
-            // Update shape - increase first dimension
+            // update shape - increase first dimension
             this->shape_[0] += 1;
 
-            // Recompute strides (may not be necessary if only size changes)
+            // recompute strides (may not be necessary if only size changes)
             this->strides_ = this->compute_strides(this->shape_);
         }
 
