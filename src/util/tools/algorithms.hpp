@@ -86,6 +86,43 @@ namespace simbi::algorithms {
         }
         return first;
     }
+
+    // idem for swap_ranges
+    template <typename ForwardIt1, typename ForwardIt2>
+    DUAL void
+    swap_ranges(ForwardIt1 first1, ForwardIt1 last1, ForwardIt2 first2)
+    {
+        if constexpr (!global::on_gpu) {
+            std::swap_ranges(first1, last1, first2);
+        }
+        while (first1 != last1) {
+            std::swap(*first1++, *first2++);
+        }
+    }
+
+    // idem for swap
+    template <typename T>
+    DUAL void swap(T& a, T& b)
+    {
+        if constexpr (!global::on_gpu) {
+            std::swap(a, b);
+        }
+        T tmp = std::move(a);
+        a     = std::move(b);
+        b     = std::move(tmp);
+    }
+
+    // reverse
+    template <typename BidirectionalIt>
+    DUAL void reverse(BidirectionalIt first, BidirectionalIt last)
+    {
+        if constexpr (!global::on_gpu) {
+            std::reverse(first, last);
+        }
+        while (first < last) {
+            std::swap(*first++, *--last);
+        }
+    }
 }   // namespace simbi::algorithms
 
 #endif
