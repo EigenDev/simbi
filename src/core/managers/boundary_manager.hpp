@@ -139,7 +139,7 @@ namespace simbi {
                     auto rshape = interior_shape;
                     // reverse shape if row major
                     if constexpr (!global::col_major) {
-                        std::reverse(rshape.begin(), rshape.end());
+                        algorithms::reverse(rshape.begin(), rshape.end());
                     }
 
                     // Only process corner points
@@ -317,7 +317,7 @@ namespace simbi {
                     auto rshape      = interior_shape;
                     // reverse shape if row major
                     if constexpr (!global::col_major) {
-                        std::reverse(rshape.begin(), rshape.end());
+                        algorithms::reverse(rshape.begin(), rshape.end());
                     }
 
                     // Only process boundary points (automatically excludes
@@ -464,14 +464,7 @@ namespace simbi {
             auto tshape = shape;
             // get inverted copy of shape if we are in row major
             if constexpr (!global::col_major) {
-                if constexpr (!global::on_gpu) {
-                    std::reverse(tshape.begin(), tshape.end());
-                }
-                else {
-                    for (size_type i = 0; i < Dims; i++) {
-                        tshape[i] = shape[Dims - (i + 1)];
-                    }
-                }
+                algorithms::reverse(tshape.begin(), tshape.end());
             }
 
             // // Adjust coordinate based on boundary condition
