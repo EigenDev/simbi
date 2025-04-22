@@ -92,7 +92,6 @@ namespace simbi {
             for (size_type ii = 0; ii < Vec1::dimensions; ++ii) {
                 result += a[ii] * b[ii];
             }
-
             return result;
         }
 

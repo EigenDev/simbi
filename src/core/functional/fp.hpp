@@ -120,15 +120,16 @@ namespace simbi::fp {
 
         // use the type of the first container as the result container type
         // but with the result_t as its value type
-        using result_container_t = std::remove_cvref_t<C1>;
+        using some_container_t   = std::remove_cvref_t<C1>;
+        using result_container_t = std::remove_const_t<some_container_t>;
 
         result_container_t result{};
         const size_type min_size =
             std::min(container1.size(), container2.size());
 
-        for (size_type i = 0; i < min_size; ++i) {
-            result[i] =
-                std::invoke(std::forward<F>(f), container1[i], container2[i]);
+        for (size_type ii = 0; ii < min_size; ++ii) {
+            result[ii] =
+                std::invoke(std::forward<F>(f), container1[ii], container2[ii]);
         }
 
         return result;
