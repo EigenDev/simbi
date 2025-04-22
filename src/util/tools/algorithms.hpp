@@ -95,8 +95,10 @@ namespace simbi::algorithms {
         if constexpr (!global::on_gpu) {
             std::swap_ranges(first1, last1, first2);
         }
-        while (first1 != last1) {
-            std::swap(*first1++, *first2++);
+        else {
+            while (first1 != last1) {
+                std::swap(*first1++, *first2++);
+            }
         }
     }
 
@@ -107,9 +109,11 @@ namespace simbi::algorithms {
         if constexpr (!global::on_gpu) {
             std::swap(a, b);
         }
-        T tmp = std::move(a);
-        a     = std::move(b);
-        b     = std::move(tmp);
+        else {
+            T tmp = std::move(a);
+            a     = std::move(b);
+            b     = std::move(tmp);
+        }
     }
 
     // reverse
@@ -119,8 +123,23 @@ namespace simbi::algorithms {
         if constexpr (!global::on_gpu) {
             std::reverse(first, last);
         }
-        while (first < last) {
-            std::swap(*first++, *--last);
+        else {
+            while (first < last) {
+                std::swap(*first++, *--last);
+            }
+        }
+    }
+
+    // invoke that calls std::invoke on cpu
+    // and is customized on gpu
+    template <typename F, typename... Args>
+    DUAL constexpr auto invoke(F&& f, Args&&... args)
+    {
+        if constexpr (!global::on_gpu) {
+            return std::invoke(std::forward<F>(f), std::forward<Args>(args)...);
+        }
+        else {
+            static_assert(1 == 3, "GPU implementation not provided");
         }
     }
 }   // namespace simbi::algorithms
