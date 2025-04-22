@@ -1,69 +1,28 @@
-/**
- *  *=============================================================================
- *  *           SIMBI - Special Relativistic Magnetohydrodynamics Code
- *  *=============================================================================
- *  *
- *  * @file            vector.hpp
- *  * @brief           custom vector types for regime-specific operations
- *  * @details
- *  *
- *  * @version         0.8.0
- *  * @date            2025-02-26
- *  * @author          Marcus DuPont
- *  * @email           marcus.dupont@princeton.edu
- *  *
- *  *==============================================================================
- *  * @build           Requirements & Dependencies
- *  *==============================================================================
- *  * @requires        C++20
- *  * @depends         CUDA >= 11.0, HDF5 >= 1.12, OpenMP >= 4.5
- *  * @platform        Linux, MacOS
- *  * @parallel        GPU (CUDA, HIP), CPU (OpenMP)
- *  *
- *  *==============================================================================
- *  * @documentation   Reference & Notes
- *  *==============================================================================
- *  * @usage
- *  * @note
- *  * @warning
- *  * @todo
- *  * @bug
- *  * @performance
- *  *
- *  *==============================================================================
- *  * @testing        Quality Assurance
- *  *==============================================================================
- *  * @test
- *  * @benchmark
- *  * @validation
- *  *
- *  *==============================================================================
- *  * @history        Version History
- *  *==============================================================================
- *  * 2025-02-26      v0.8.0      Initial implementation
- *  *
- *  *==============================================================================
- *  * @copyright (C) 2025 Marcus DuPont. All rights reserved.
- *  *==============================================================================
- */
 #ifndef VECTOR_HPP
 #define VECTOR_HPP
 
-#include "build_options.hpp"              // for real, lint, luint
-#include "core/types/utility/enums.hpp"   // for Geometry
+#include "array.hpp"
+#include "build_options.hpp"
+#include "core/functional/fp.hpp"
+#include "core/types/monad/maybe.hpp"
+#include "core/types/utility/enums.hpp"
+#include "util/tools/algorithms.hpp"
+#include <array>
 #include <cmath>
+#include <functional>
 #include <type_traits>
 
 namespace simbi {
+    // vector types remain as enums for strong typing
     enum class VectorType {
-        SPATIAL,         // 3D spatial vectors
-        MAGNETIC,        // Magnetic field vectors
-        MAGNETIC_FOUR,   // 4D magnetic four-vectors
-        SPACETIME,       // 4D spacetime vectors
-        GENERAL,         // Generic vectors
+        SPATIAL,
+        MAGNETIC,
+        MAGNETIC_FOUR,
+        SPACETIME,
+        GENERAL,
     };
 
-    // Vector traits
+    // vector traits
     template <VectorType Type>
     struct vector_traits {
         static constexpr size_t dimensions = 3;   // default
@@ -104,13 +63,6 @@ namespace simbi {
     concept FourVector =
         T == VectorType::SPACETIME || T == VectorType::MAGNETIC_FOUR;
 
-    // type promotion helper
-    template <typename T, typename U>
-    using promote_t = std::common_type_t<T, U>;
-
-    template <VectorType T, VectorType U>
-    constexpr auto promote_vector_t = T == U ? T : VectorType::GENERAL;
-
     // forward declarations
     template <typename T, size_type Dims, VectorType Type>
     class Vector;
@@ -118,139 +70,447 @@ namespace simbi {
     template <typename T, size_type Dims, VectorType Type>
     class VectorView;
 
-    //=====================================================
-    // Base Storage Type for Vectors
-    //===================================================
-    template <typename T, size_type Dims>
-    class BaseStorage
-    {
-      protected:
-        T* data_;
-        bool owns_memory_;
+    namespace detail {
+        // type promotion helper
+        template <typename T, typename U>
+        using promote_t = std::common_type_t<T, U>;
 
-        DUAL constexpr BaseStorage(T* data, bool owns = false)
-            : data_{data}, owns_memory_{owns}
+        template <VectorType T, VectorType U>
+        constexpr auto promote_vector_t = T == U ? T : VectorType::GENERAL;
+    }   // namespace detail
+
+    namespace vecops {
+        // functitonal-style zip function that has nothing
+        // to do with vectors
+
+        // dot product
+        template <typename Vec1, typename Vec2>
+        DUAL constexpr auto dot(const Vec1& a, const Vec2& b)
         {
-        }
-
-      public:
-        using value_type                      = T;
-        static constexpr size_type dimensions = Dims;
-
-        DUAL constexpr size_type size() const { return Dims; }
-
-        DUAL constexpr T* data() { return data_; }
-
-        DUAL constexpr const T* data() const { return data_; }
-
-        DUAL constexpr bool owns_memory() const { return owns_memory_; }
-
-        DUAL constexpr T& operator[](size_type ii) { return data_[ii]; }
-
-        DUAL constexpr const T& operator[](size_type ii) const
-        {
-            return data_[ii];
-        }
-
-        // ostream operator
-        friend std::ostream& operator<<(std::ostream& os, const BaseStorage& v)
-        {
-            os << "(";
-            for (size_type ii = 0; ii < Dims; ++ii) {
-                os << v[ii] << (ii != Dims - 1 ? " " : "");
+            using T  = decltype(a[0] * b[0]);
+            T result = T{0};
+            for (size_type ii = 0; ii < Vec1::dimensions; ++ii) {
+                result += a[ii] * b[ii];
             }
-            os << ")";
-            return os;
+
+            return result;
         }
 
-        // implicitly convert to underlying data
-        DUAL constexpr operator T*() { return data_; }
-    };
+        // norm
+        template <typename T, size_type Dims, VectorType Type>
+        DUAL constexpr auto norm(const Vector<T, Dims, Type>& vec)
+        {
+            return std::sqrt(dot(vec, vec));
+        }
 
-    // Base vector type for generic vector operations
-    template <typename T, size_type Dims, VectorType Type>
-    class VectorOps : public BaseStorage<T, Dims>
+        // normalize
+        template <typename T, size_type Dims, VectorType Type>
+        DUAL constexpr auto normalize(const Vector<T, Dims, Type>& vec)
+        {
+            const auto n = norm(vec);
+            if (n > T{0}) {
+                return vec * (1.0 / n);
+            }
+            return vec;
+        }
+
+        // cross product
+        template <typename Vec1, typename Vec2>
+        DUAL constexpr auto cross(const Vec1& a, const Vec2& b)
+            requires(Vec1::dimensions == 3 && Vec2::dimensions == 3)
+        {
+            using T = decltype(a[0] * b[0]);
+            return Vector<T, 3, VectorType::GENERAL>(
+                a[1] * b[2] - a[2] * b[1],
+                a[2] * b[0] - a[0] * b[2],
+                a[0] * b[1] - b[0] * a[1]
+            );
+        }
+
+        // cross product magnitude for Dim = 2
+        template <typename Vec1, typename Vec2>
+        DUAL constexpr auto cross(const Vec1& a, const Vec2& b)
+            requires(Vec1::dimensions == 2 && Vec2::dimensions == 2)
+        {
+            return a[0] * b[1] - a[1] * b[0];
+        }
+
+        // specialized RMHD operations
+        template <
+            template <typename, size_type, VectorType> typename Vec,
+            typename T,
+            size_type Dims,
+            VectorType Type>
+        DUAL constexpr auto as_fourvec(
+            const Vec<T, Dims, Type>& bfield,
+            const auto& vel,
+            const auto lorentz
+        )
+            requires Magnetic<Type>
+        {
+            const auto vdB = dot(vel, bfield);
+            const auto b0  = lorentz * vdB;
+            const auto bs  = bfield * (1.0 / lorentz) + vel * lorentz * vdB;
+
+            return Vector<T, 4, VectorType::MAGNETIC_FOUR>{
+              b0,
+              bs[0],
+              bs[1],
+              bs[2]
+            };
+        }
+
+        // helpers to rotate vectors by some angle
+        template <typename Vec, typename T>
+        DEV static constexpr auto rotate_2D(const Vec& vec, const T& angle)
+        {
+            return Vector<T, 2, VectorType::SPATIAL>{
+              vec[0] * std::cos(angle) - vec[1] * std::sin(angle),
+              vec[0] * std::sin(angle) + vec[1] * std::cos(angle)
+            };
+        }
+
+        template <typename Vec, typename T>
+        DEV static constexpr auto rotate_3D(const Vec& vec, const T& angle)
+        {
+            return Vec{
+              vec[0] * std::cos(angle) - vec[1] * std::sin(angle),
+              vec[0] * std::sin(angle) + vec[1] * std::cos(angle),
+              vec[2]
+            };
+        }
+
+        // general rotation function that checks the dimension at compile-time
+        template <typename Vec, typename T>
+        DEV static constexpr auto rotate(const Vec& vec, const T& angle)
+        {
+            if constexpr (Vec::dimensions == 2) {
+                return rotate_2D(vec, angle);
+            }
+            else {
+                return rotate_3D(vec, angle);
+            }
+        }
+
+        template <typename Vec>
+        DEV auto constexpr spherical_to_cartesian(const Vec& vec)
+        {
+            if constexpr (Vec::dimensions == 1) {
+                return vec;
+            }
+            else if constexpr (Vec::dimensions == 2) {   // r-theta, not r-phi
+                return Vec{
+                  vec[0] * std::sin(vec[1]),
+                  vec[0] * std::cos(vec[1])
+                };
+            }
+            else {
+                return Vec{
+                  vec[0] * std::sin(vec[1]) * std::cos(vec[2]),
+                  vec[0] * std::sin(vec[1]) * std::sin(vec[2]),
+                  vec[0] * std::cos(vec[1])
+                };
+            }
+        }
+
+        template <typename Vec>
+        DEV auto constexpr cylindrical_to_cartesian(const Vec& vec)
+        {
+            if constexpr (Vec::dimensions == 1) {
+                return vec;
+            }
+            else if constexpr (Vec::dimensions == 2) {
+                return Vec{
+                  vec[0] * std::cos(vec[1]),
+                  vec[0] * std::sin(vec[1])
+                };
+            }
+            else {
+                return Vec{
+                  vec[0] * std::cos(vec[1]),
+                  vec[0] * std::sin(vec[1]),
+                  vec[2]
+                };
+            }
+        }
+
+        template <typename Vec>
+        DEV auto constexpr cartesian_to_spherical(const Vec& vec)
+        {
+            if constexpr (Vec::dimensions == 1) {
+                return vec;
+            }
+            else if constexpr (Vec::dimensions == 2) {
+                return Vec{vec.norm(), std::atan2(vec[1], vec[0])};
+            }
+            else {
+                return Vec{
+                  vec.norm(),
+                  std::acos(vec[2] / vec.norm()),
+                  std::atan2(vec[1], vec[0])
+                };
+            }
+        }
+
+        template <typename Vec>
+        DEV auto constexpr centralize_cartesian_to_spherical(const Vec& vec)
+        {
+            if constexpr (Vec::dimensions == 1) {
+                return vec;
+            }
+            else if constexpr (Vec::dimensions == 2) {
+                return Vec{
+                  vec.norm(),
+                  0.0,
+                };
+            }
+            else {
+                return Vec{vec.norm(), 0.0, 0.0};
+            }
+        }
+
+        template <typename Vec>
+        DEV auto constexpr centralize_cartesian_to_cylindrical(const Vec& vec)
+        {
+            if constexpr (Vec::dimensions == 1) {
+                return vec;
+            }
+            else if constexpr (Vec::dimensions == 2) {
+                return Vec{
+                  vec.norm(),
+                  0.0,
+                };
+            }
+            else {
+                return Vec{vec.norm(), 0.0, 0.0};
+            }
+        }
+
+        template <typename Vec>
+        DEV auto constexpr cartesian_to_cylindrical(const Vec& vec)
+        {
+            if constexpr (Vec::dimensions == 1) {
+                return vec;
+            }
+            else if constexpr (Vec::dimensions == 2) {
+                return Vec{vec.norm(), std::atan2(vec[1], vec[0])};
+            }
+            else {
+                return Vec{vec.norm(), std::atan2(vec[1], vec[0]), vec[2]};
+            }
+        }
+
+        // convert a cartesian vector to a curvlinear
+        // coordinate system
+        template <typename Vec>
+        DEV auto to_geometry(const Vec& vec, Geometry geometry)
+        {
+            if (geometry == Geometry::SPHERICAL) {
+                return cartesian_to_spherical(vec);
+            }
+            else if (geometry == Geometry::CYLINDRICAL) {
+                return cartesian_to_cylindrical(vec);
+            }
+            else {
+                return vec;
+            }
+        }
+
+        // project some vector onto the mesh
+        // using the mesh basis vectors
+        template <typename Vec>
+        DEV auto centralize(const Vec& vec, Geometry mesh_geometry)
+        {
+            switch (mesh_geometry) {
+                case Geometry::SPHERICAL:
+                    return centralize_cartesian_to_spherical(vec);
+                case Geometry::CYLINDRICAL:
+                    return centralize_cartesian_to_cylindrical(vec);
+                default: return vec;
+            }
+        }
+    }   // namespace vecops
+
+    // -------------------------------------------------------------
+    // Vector: pure value-based immutable vector with direct storage
+    // -------------------------------------------------------------
+    template <typename T, size_type Dims, VectorType Type = VectorType::GENERAL>
+    class Vector
     {
       private:
-        using base = BaseStorage<T, Dims>;
-
-      protected:
-        static constexpr auto zero = T{0};
+        // direct storage - no indirection
+        array_t<T, Dims> storage_{};
+        // Static zero value for out-of-bounds access in
+        // structured binding access
+        static inline T zero_value_{};
 
       public:
-        using base::base;
-        using typename base::value_type;
-        static constexpr VectorType vec_type = Type;
+        // type definitions for type traits and functional interfaces
+        using value_type      = T;
+        using reference       = T&;
+        using const_reference = const T&;
+        using iterator        = typename array_t<T, Dims>::iterator;
+        using const_iterator  = typename array_t<T, Dims>::const_iterator;
 
-        // Basic operations
-        DUAL constexpr auto norm() const
+        static constexpr size_type dimensions = Dims;
+        static constexpr VectorType vec_type  = Type;
+
+        // default constructor creates zero vector
+        constexpr Vector() = default;
+
+        // variadic constructor with perfect forwarding
+        template <typename... Args>
+        DUAL constexpr explicit Vector(Args&&... args)
+            requires(
+                sizeof...(Args) == Dims &&
+                (std::is_convertible_v<Args, T> && ...)
+            )
+            : storage_{static_cast<T>(std::forward<Args>(args))...}
         {
-            auto mag = zero;
-            for (size_type ii = 0; ii < Dims; ++ii) {
-                mag += (*this)[ii] * (*this)[ii];
+        }
+
+        // explicit construction from array_t
+        DUAL constexpr explicit Vector(const array_t<T, Dims>& arr)
+            : storage_(arr)
+        {
+        }
+
+        // construction from raw pointer
+        DUAL constexpr explicit Vector(const T* data)
+        {
+            algorithms::copy_n(data, Dims, storage_.begin());
+        }
+
+        // element access - direct, no indirection
+        DUAL constexpr reference operator[](size_type idx)
+        {
+            return storage_[idx];
+        }
+
+        DUAL constexpr const_reference operator[](size_type idx) const
+        {
+            return storage_[idx];
+        }
+
+        // safe access with bounds checking
+        DUAL constexpr Maybe<reference> at(size_type idx)
+        {
+            if (idx < Dims) {
+                return Maybe<reference>(storage_[idx]);
             }
-            return std::sqrt(mag);
+            return Nothing;
         }
 
-        DUAL constexpr auto norm_squared() const
+        DUAL constexpr Maybe<const_reference> at(size_type idx) const
         {
-            auto mag = zero;
-            for (size_type ii = 0; ii < Dims; ++ii) {
-                mag += (*this)[ii] * (*this)[ii];
+            if (idx < Dims) {
+                return Maybe<const_reference>(storage_[idx]);
             }
-            return mag;
+            return Nothing;
         }
 
-        DUAL constexpr auto normalize()
+        // data access for algorithms
+        DUAL constexpr T* data() { return storage_.data(); }
+        DUAL constexpr const T* data() const { return storage_.data(); }
+
+        // size and capacity
+        DUAL constexpr size_type size() const { return Dims; }
+
+        // iterators for standard algorithms
+        DUAL constexpr iterator begin() { return storage_.begin(); }
+        DUAL constexpr iterator end() { return storage_.end(); }
+        DUAL constexpr const_iterator begin() const { return storage_.begin(); }
+        DUAL constexpr const_iterator end() const { return storage_.end(); }
+        DUAL constexpr const_iterator cbegin() const
         {
-            auto mag = norm();
-            if (mag > zero) {
-                for (size_type ii = 0; ii < Dims; ++ii) {
-                    (*this)[ii] /= mag;
-                }
+            return storage_.cbegin();
+        }
+        DUAL constexpr const_iterator cend() const { return storage_.cend(); }
+        DUAL constexpr const_iterator rbegin() const
+        {
+            return storage_.rbegin();
+        }
+        DUAL constexpr const_iterator rend() const { return storage_.rend(); }
+
+        // functional operations
+
+        // map - apply function to each element, returning new vector
+        template <typename F>
+        DUAL constexpr auto map(F&& f) const
+        {
+            using result_t = std::invoke_result_t<F, T>;
+            Vector<result_t, Dims, Type> result;
+
+            for (size_type i = 0; i < Dims; ++i) {
+                result[i] = std::invoke(std::forward<F>(f), storage_[i]);
             }
-            return *this;
+
+            return result;
         }
 
-        DUAL constexpr auto normalized() const
-        {
-            auto mag = norm();
-            return *this / mag;
-        }
+        // vector operations built on functional primitives
+        // so that I can practice functional programming
 
-        DUAL constexpr auto unit() const
+        // dot product using fold
+        template <typename U, VectorType OtherType>
+        DUAL constexpr detail::promote_t<T, U>
+        dot(const Vector<U, Dims, OtherType>& other) const
         {
-            auto mag = norm();
-            if (mag > zero) {
-                for (size_type ii = 0; ii < Dims; ++ii) {
-                    (*this)[ii] /= mag;
-                }
+            using result_t = detail::promote_t<T, U>;
+            result_t sum{0};
+            for (size_type i = 0; i < Dims; ++i) {
+                sum += storage_[i] * other[i];
             }
-            return *this;
+
+            return sum;
         }
 
-        // vector-to-vector operations w/ type promotions
+        // allow dot product of vectors with different dims,
+        // but we only use the first Dims elements
         template <typename U, size_type OtherDims, VectorType OtherType>
-        DUAL constexpr promote_t<T, U>
-        dot(const VectorOps<U, OtherDims, OtherType>& other) const
+        DUAL constexpr detail::promote_t<T, U>
+        dot(const Vector<U, OtherDims, OtherType>& other) const
         {
-            using result_type = promote_t<T, U>;
-            result_type sum{0};
-            for (size_type ii = 0; ii < Dims; ++ii) {
-                sum += (*this)[ii] * other[ii];
+            using result_t = detail::promote_t<T, U>;
+            result_t sum{0};
+            for (size_type i = 0; i < Dims; ++i) {
+                sum += storage_[i] * other[i];
             }
             return sum;
         }
 
-        // binary operations w/ type promotions
+        // norm using dot product
+        DUAL constexpr auto norm_squared() const { return dot(*this); }
+
+        DUAL constexpr auto norm() const { return std::sqrt(norm_squared()); }
+
+        // normalize returning new vector
+        DUAL constexpr auto normalize() const
+        {
+            const auto n = norm();
+            if (n > T{0}) {
+                return map([n](const T& x) { return x / n; });
+            }
+            return *this;
+        }
+
+        // unary negation
+        DUAL constexpr auto operator-() const
+        {
+            return map([](const T& x) { return -x; });
+        }
+
+        // arithmetic operations
+
+        // element-wise addition
         template <typename U, size_type OtherDims, VectorType OtherType>
         DUAL constexpr Vector<
-            promote_t<T, U>,
+            detail::promote_t<T, U>,
             Dims,
-            promote_vector_t<Type, OtherType>>
-        operator+(const VectorOps<U, OtherDims, OtherType>& other) const
+            detail::promote_vector_t<Type, OtherType>>
+        operator+(const Vector<U, OtherDims, OtherType>& other) const
         {
-            using result_type = promote_t<T, U>;
+            using result_type = detail::promote_t<T, U>;
             constexpr auto result_vectype =
                 Type == OtherType ? Type : VectorType::GENERAL;
             Vector<result_type, Dims, result_vectype> result;
@@ -260,14 +520,15 @@ namespace simbi {
             return result;
         }
 
+        // element-wise subtraction
         template <typename U, size_type OtherDims, VectorType OtherType>
         DUAL constexpr Vector<
-            promote_t<T, U>,
+            detail::promote_t<T, U>,
             Dims,
-            promote_vector_t<Type, OtherType>>
-        operator-(const VectorOps<U, OtherDims, OtherType>& other) const
+            detail::promote_vector_t<Type, OtherType>>
+        operator-(const Vector<U, OtherDims, OtherType>& other) const
         {
-            using result_type = promote_t<T, U>;
+            using result_type = detail::promote_t<T, U>;
             constexpr auto result_vectype =
                 Type == OtherType ? Type : VectorType::GENERAL;
             Vector<result_type, Dims, result_vectype> result;
@@ -277,327 +538,68 @@ namespace simbi {
             return result;
         }
 
-        template <typename U, VectorType OtherType>
-        DUAL constexpr auto&
-        operator+=(const VectorOps<U, Dims, OtherType>& other)
-            requires(!std::is_const_v<T>)
+        // scalar multiplication
+        template <typename U>
+        DUAL constexpr auto operator*(U scalar) const
         {
+            using result_t = detail::promote_t<T, U>;
+            Vector<result_t, Dims, Type> result;
             for (size_type i = 0; i < Dims; ++i) {
-                (*this)[i] += static_cast<T>(other[i]);
+                result[i] = static_cast<result_t>(storage_[i]) * scalar;
             }
-            return *this;
+            return result;
         }
 
-        template <typename U, VectorType OtherType>
-        DUAL constexpr auto&
-        operator-=(const VectorOps<U, Dims, OtherType>& other)
-            requires(!std::is_const_v<T>)
+        // scalar division
+        template <typename U>
+        DUAL constexpr auto operator/(U scalar) const
         {
+            using result_t = detail::promote_t<T, U>;
+            Vector<result_t, Dims, Type> result;
             for (size_type i = 0; i < Dims; ++i) {
-                (*this)[i] -= static_cast<T>(other[i]);
-            }
-            return *this;
-        }
-
-        template <typename U>
-        DUAL constexpr Vector<promote_t<T, U>, Dims, Type>
-        operator*(const U scalar) const
-        {
-            using result_type = promote_t<T, U>;
-            Vector<result_type, Dims, Type> result;
-
-            // Manual component-wise multiplication
-            for (size_type ii = 0; ii < Dims; ++ii) {
-                result[ii] = static_cast<result_type>((*this)[ii]) * scalar;
-            }
-
-            return result;
-        }
-
-        template <typename U>
-        DUAL constexpr Vector<promote_t<T, U>, Dims, Type>
-        operator/(const U scalar) const
-        {
-            using result_type = promote_t<T, U>;
-            Vector<result_type, Dims, Type> result;
-            for (size_type ii = 0; ii < Dims; ++ii) {
-                result[ii] = (*this)[ii] / scalar;
+                result[i] = static_cast<result_t>(storage_[i]) / scalar;
             }
             return result;
         }
 
-        template <typename U>
-        DUAL constexpr auto operator*=(const U scalar)
-            requires(!std::is_const_v<T>)
+        // create a view to this vector
+        DUAL constexpr VectorView<T, Dims, Type> view()
         {
-            for (size_type ii = 0; ii < Dims; ++ii) {
-                (*this)[ii] *= scalar;
-            }
-            return *this;
+            return VectorView<T, Dims, Type>(storage_.data());
         }
 
-        template <typename U>
-        DUAL constexpr auto operator/=(const U scalar)
-            requires(!std::is_const_v<T>)
+        DUAL constexpr VectorView<const T, Dims, Type> view() const
         {
-            for (size_type ii = 0; ii < Dims; ++ii) {
-                (*this)[ii] /= scalar;
-            }
-            return *this;
+            return VectorView<const T, Dims, Type>(storage_.data());
         }
 
-        // unary operations
-        DUAL constexpr Vector<T, Dims, Type> operator-() const
+        // specialized operations for RMHD Magnetic four-vectors
+        // get a view of the spatial part of the magnetic four-vector
+        DUAL constexpr auto spatial_part() const
+            requires MagneticFour<Type>
         {
-            Vector<T, Dims, Type> result;
-            for (size_type ii = 0; ii < Dims; ++ii) {
-                result[ii] = -(*this)[ii];
-            }
-            return result;
+            return Vector<T, 3, VectorType::MAGNETIC>{storage_.data() + 1};
         }
 
-        // assignment operators
-        template <typename U, size_type OtherDims, VectorType OtherType>
-        DUAL constexpr auto&
-        operator=(const VectorOps<U, OtherDims, OtherType>& other)
-            requires(!std::is_const_v<T>)
+        DUAL constexpr auto inner_product(const auto& other) const
+            requires MagneticFour<Type>
         {
-            for (size_type ii = 0; ii < Dims; ++ii) {
-                (*this)[ii] = static_cast<T>(other[ii]);
-            }
-            return *this;
+            return -storage_[0] * other[0] + storage_[1] * other[1] +
+                   storage_[2] * other[2] + storage_[3] * other[3];
         }
 
-        // equality operators
-        template <typename U, size_type OtherDims, VectorType OtherType>
-        DUAL constexpr bool
-        operator==(const VectorOps<U, OtherDims, OtherType>& other) const
+        DUAL constexpr auto spatial_dot(const auto& other) const
+            requires MagneticFour<Type>
         {
-            for (size_type ii = 0; ii < Dims; ++ii) {
-                if ((*this)[ii] != other[ii]) {
-                    return false;
-                }
-            }
-            return true;
+            return storage_[1] * other[1] + storage_[2] * other[2] +
+                   storage_[3] * other[3];
         }
 
-        template <typename U, size_type OtherDims, VectorType OtherType>
-        DUAL constexpr bool
-        operator!=(const VectorOps<U, OtherDims, OtherType>& other) const
+        // conversion to other vector types
+        template <VectorType NewType>
+        DUAL constexpr auto as_type() const
         {
-            return !(*this == other);
-        }
-
-        // cross product
-        template <
-            template <typename, size_type, VectorType> class Vec_t,
-            typename U,
-            VectorType OtherType>
-        DUAL constexpr Vector<
-            promote_t<T, U>,
-            Dims,
-            promote_vector_t<Type, OtherType>>
-        cross(const Vec_t<U, Dims, OtherType>& other) const
-            requires(Dims == 3)
-        {
-            using result_type = promote_t<T, U>;
-            constexpr auto result_vectype =
-                Type == OtherType ? Type : VectorType::GENERAL;
-            return Vector<result_type, Dims, result_vectype>{
-              (*this)[1] * other[2] - (*this)[2] * other[1],
-              (*this)[2] * other[0] - (*this)[0] * other[2],
-              (*this)[0] * other[1] - (*this)[1] * other[0]
-            };
-        }
-
-        // component-specific cross product
-        template <
-            template <typename, size_type, VectorType> class Vec_t,
-            typename U,
-            VectorType OtherType>
-        DUAL constexpr promote_t<T, U>
-        cross(size_type ii, const Vec_t<U, Dims, OtherType>& other) const
-            requires(Dims == 3)
-        {
-            if (ii == 0) {
-                return (*this)[1] * other[2] - (*this)[2] * other[1];
-            }
-            else if (ii == 1) {
-                return (*this)[2] * other[0] - (*this)[0] * other[2];
-            }
-            else {
-                return (*this)[0] * other[1] - (*this)[1] * other[0];
-            }
-        }
-
-        // if less than 3D, the cross product is simply the magnitude
-        template <typename U, VectorType OtherType>
-        DUAL constexpr promote_t<T, U>
-        cross(const VectorOps<U, Dims, OtherType>& other) const
-            requires(Dims < 3)
-        {
-            if (Dims == 1) {
-                return 0.0;
-            }
-            else {
-                return (*this)[0] * other[1] - (*this)[1] * other[0];
-            }
-        }
-
-        // Implicit conversion to general vector type
-        DUAL constexpr operator Vector<T, Dims, VectorType::GENERAL>() const
-        {
-            Vector<T, Dims, VectorType::GENERAL> result;
-            for (size_type ii = 0; ii < Dims; ++ii) {
-                result[ii] = (*this)[ii];
-            }
-            return result;
-        }
-
-        // Type conversion operations
-        DUAL constexpr auto as_magnetic() const
-        {
-            return Vector<T, Dims, VectorType::MAGNETIC>{this->data_};
-        }
-
-        DUAL constexpr auto as_spatial() const
-        {
-            return Vector<T, Dims, VectorType::SPATIAL>{this->data_};
-        }
-
-        DUAL constexpr auto to_general() const
-        {
-            return Vector<T, Dims, VectorType::GENERAL>(*this);
-        }
-
-        DUAL constexpr auto as_spatial()
-            requires FourVector<Type>
-        {
-            return Vector<T, Dims, VectorType::SPATIAL>{this->data_};
-        }
-    };
-
-    // allow vector types to be operated on by scalars from the right
-    template <typename T, size_type Dims, VectorType Type, typename U>
-    DUAL constexpr auto operator*(U scalar, const VectorOps<T, Dims, Type>& vec)
-    {
-        return vec * scalar;
-    }
-
-    template <typename T, size_type Dims, VectorType Type, typename U>
-    DUAL constexpr auto operator/(U scalar, const VectorOps<T, Dims, Type>& vec)
-    {
-        return vec / scalar;
-    }
-
-    // Main vector class, memory owned
-    template <typename T, size_type Dims, VectorType Type>
-    class Vector : public VectorOps<T, Dims, Type>
-    {
-      private:
-        alignas(alignof(T)) T storage_[Dims];
-        static constexpr bool owned = true;
-        // Static zero value for out-of-bounds access in
-        // structured binding access
-        static inline T zero_value_{};
-
-      public:
-        DUAL constexpr Vector()
-            : VectorOps<T, Dims, Type>{storage_, owned}, storage_{}
-        {
-            if constexpr (std::is_same_v<T, const T>) {
-                return;
-            }
-            else {
-                for (size_type ii = 0; ii < Dims; ++ii) {
-                    this->data_[ii] = T{};
-                }
-            }
-        }
-
-        // DUAL constexpr Vector(std::initializer_list<T> values)
-        //     : VectorOps<T, Dims, Type>{storage_, owned},
-        //       storage_{values.begin(), values.end()}
-        // {
-        //     //  if const T is passed, skip this
-        //     if constexpr (std::is_same_v<T, const T>) {
-        //         this->data_ = storage_;
-        //     }
-        //     else {
-        //         size_type ii = 0;
-        //         for (const auto& value : values) {
-        //             this->data_[ii++] = value;
-        //         }
-        //     }
-        // }
-
-        // construct from std::vector
-        DUAL explicit Vector(const std::vector<T> values)
-            requires(!std::is_const_v<T>)
-            : VectorOps<T, Dims, Type>{storage_, owned}
-        {
-            if (values.empty()) {
-                if constexpr (global::on_gpu) {
-                    printf("Cannot construct vector from empty std::vector\n");
-                    this->data_ = storage_;
-                }
-                else {
-                    throw std::length_error(
-                        "Cannot construct vector from empty std::vector"
-                    );
-                }
-            }
-
-            // Copy min(values.size(), Dims) elements
-            const size_type n = std::min(values.size(), Dims);
-            std::copy_n(values.begin(), n, storage_);
-
-            // Zero-fill remaining elements if values.size() < Dims
-            if (n < Dims) {
-                std::fill(storage_ + n, storage_ + Dims, T{});
-            }
-
-            this->data_ = storage_;
-        }
-
-        // Variadic constructor for direct element initialization
-        template <typename... Args>
-        DUAL constexpr Vector(Args&&... args)
-            requires(sizeof...(Args) == Dims &&
-                     (std::is_constructible_v<T, Args> && ...))
-            : VectorOps<T, Dims, Type>{storage_, owned},
-              storage_{static_cast<T>(std::forward<Args>(args))...}
-        {
-            this->data_ = storage_;
-        }
-
-        // construct from raw memory
-        DUAL constexpr Vector(T* data)
-            : VectorOps<T, Dims, Type>{data, !owned}, storage_{}
-        {
-        }
-
-        template <VectorType OtherType>
-        DUAL constexpr Vector(const Vector<T, Dims, OtherType>& other)
-            : VectorOps<T, Dims, Type>{storage_, true}
-        {
-            std::copy_n(other.data(), Dims, storage_);
-        }
-
-        // copy and move constructors
-        DUAL constexpr Vector(const Vector& other)
-            : VectorOps<T, Dims, Type>{storage_, owned}
-        {
-            for (size_type ii = 0; ii < Dims; ++ii) {
-                this->data_[ii] = other[ii];
-            }
-        }
-
-        DUAL constexpr Vector(Vector&& other) noexcept
-            : VectorOps<T, Dims, Type>{storage_, owned}, storage_{}
-        {
-            std::move(other.data_, other.data_ + Dims, this->data_);
-            other.data_ = nullptr;   // Null out moved-from object
+            return Vector<T, Dims, NewType>(storage_);
         }
 
         // structured binding support
@@ -608,7 +610,7 @@ namespace simbi {
                 return zero_value_;
             }
             else {
-                return this->data_[I];
+                return storage_[I];
             }
         }
 
@@ -619,155 +621,265 @@ namespace simbi {
                 return zero_value_;
             }
             else {
-                return this->data_[I];
+                return storage_[I];
             }
-        }
-
-        template <size_t I>
-        DUAL constexpr T&& get() &&
-        {
-            if constexpr (I >= Dims) {
-                return std::move(zero_value_);
-            }
-            else {
-                return std::move(this->data_[I]);
-            }
-        }
-
-        template <size_t I>
-        friend DUAL constexpr decltype(auto) get(Vector& v)
-        {
-            return v.template get<I>();
-        }
-
-        template <size_t I>
-        friend DUAL constexpr decltype(auto) get(const Vector& v)
-        {
-            return v.template get<I>();
-        }
-
-        template <size_t I>
-        friend DUAL constexpr decltype(auto) get(Vector&& v)
-        {
-            return std::move(v).template get<I>();
-        }
-
-        // assignment operators
-        DUAL constexpr Vector& operator=(const Vector& other)
-        {
-            if (this != &other) {
-                for (size_type ii = 0; ii < Dims; ++ii) {
-                    this->data_[ii] = other[ii];
-                }
-            }
-            return *this;
-        }
-
-        // compound assignment
-        template <typename U, VectorType OtherType>
-        DUAL constexpr Vector&
-        operator+=(const Vector<U, Dims, OtherType>& other)
-        {
-            for (size_type ii = 0; ii < Dims; ++ii) {
-                this->data_[ii] += other[ii];
-            }
-            return *this;
-        }
-
-        DUAL constexpr auto
-        as_fourvec(const auto& vel, const auto lorentz) const
-            requires Magnetic<Type>
-        {
-            const auto vdB = vel.dot(*this);
-            const auto b0  = lorentz * vdB;
-            const auto bs  = (*this) * (1.0 / lorentz) + vel * lorentz * vdB;
-            return Vector<T, 4, VectorType::MAGNETIC_FOUR>{
-              b0,
-              bs[0],
-              bs[1],
-              bs[2]
-            };
-        }
-
-        // Specialized operations for RMHD Magnetic four-vectors
-        // get a view of the spatial part of the magnetic four-vector
-        DUAL constexpr auto spatial_part() const
-            requires MagneticFour<Type>
-        {
-            return Vector<T, 3, VectorType::MAGNETIC>{this->data_ + 1};
-        }
-
-        DUAL constexpr auto inner_product(const auto& other) const
-            requires MagneticFour<Type>
-        {
-            return -this->data_[0] * other[0] + this->data_[1] * other[1] +
-                   this->data_[2] * other[2] + this->data_[3] * other[3];
-        }
-
-        DUAL constexpr auto spatial_dot(const auto& other) const
-            requires MagneticFour<Type>
-        {
-            return this->data_[1] * other[0] + this->data_[2] * other[1] +
-                   this->data_[3] * other[2];
         }
     };
 
-    // Vector view class, memory not owned
-    template <typename T, size_type Dims, VectorType Type>
-    class VectorView : public VectorOps<T, Dims, Type>
+    // scalar multiplication from the left
+    template <typename U, typename T, size_type Dims, VectorType Type>
+    DUAL constexpr auto operator*(U scalar, const Vector<T, Dims, Type>& vec)
+    {
+        return vec * scalar;
+    }
+
+    // -------------------------------------------------------------
+    // VectorView: non-owning view of vector data
+    // -------------------------------------------------------------
+    template <typename T, size_type Dims, VectorType Type = VectorType::GENERAL>
+    class VectorView
     {
       private:
-        bool valid_ = false;
+        T* data_;   // pointer to external data
 
       public:
-        DUAL constexpr VectorView(T* data = nullptr)
-            : VectorOps<T, Dims, Type>{data}, valid_{data != nullptr}
+        // type definitions
+        using value_type      = std::remove_const_t<T>;
+        using reference       = T&;
+        using const_reference = const T&;
+        using iterator        = T*;
+        using const_iterator  = const T*;
+
+        static constexpr size_type dimensions = Dims;
+        static constexpr VectorType vec_type  = Type;
+
+        // constructor from pointer
+        DUAL constexpr explicit VectorView(T* data = nullptr) : data_(data) {}
+
+        // element access
+        DUAL constexpr reference operator[](size_type idx)
         {
+            return data_[idx];
+        }
+        DUAL constexpr const_reference operator[](size_type idx) const
+        {
+            return data_[idx];
         }
 
-        DUAL constexpr bool valid() const { return valid_; }
-
-        // cache the data into memory-owning vector
-        DUAL constexpr auto cache() const
+        // bounds-checked access returning Maybe
+        DUAL constexpr Maybe<reference> at(size_type idx)
         {
-            return Vector<T, Dims, Type>{this->data_};
-        }
-    };
-
-    // const vector view
-    template <typename T, size_type Dims, VectorType Type>
-    class ConstVectorView : public VectorOps<const T, Dims, Type>
-    {
-      public:
-        DUAL constexpr ConstVectorView(const T* data = nullptr)
-            : VectorOps<const T, Dims, Type>{data}
-        {
+            if (idx < Dims) {
+                return Maybe<reference>(data_[idx]);
+            }
+            return Nothing;
         }
 
-        // cache the data into memory-owning vector
-        DUAL constexpr auto cache() const
+        DUAL constexpr Maybe<const_reference> at(size_type idx) const
         {
-            return Vector<const T, Dims, Type>{this->data_};
+            if (idx < Dims) {
+                return Maybe<const_reference>(data_[idx]);
+            }
+            return Nothing;
         }
 
+        // raw data access
+        DUAL constexpr T* data() { return data_; }
+        DUAL constexpr const T* data() const { return data_; }
+        DUAL constexpr size_type size() const { return Dims; }
+
+        // convert to owning Vector
+        DUAL constexpr Vector<std::remove_const_t<T>, Dims, Type>
+        to_vector() const
+        {
+            Vector<std::remove_const_t<T>, Dims, Type> result;
+            for (size_type i = 0; i < Dims; ++i) {
+                result[i] = data_[i];
+            }
+            return result;
+        }
+
+        template <typename U, VectorType OtherType>
+        DUAL constexpr auto dot(const Vector<U, Dims, OtherType>& other) const
+        {
+            return to_vector().dot(other);
+        }
+
+        template <typename U, VectorType OtherType>
         DUAL constexpr auto
-        as_fourvec(const auto& vel, const auto lorentz) const
-            requires Magnetic<Type>
+        dot(const VectorView<U, Dims, OtherType>& other) const
         {
-            const auto vdB = vel.dot(*this);
-            const auto b0  = lorentz * vdB;
-            const auto bs  = (*this) * (1.0 / lorentz) + vel * lorentz * vdB;
-
-            return Vector<const T, 4, VectorType::MAGNETIC_FOUR>{
-              b0,
-              bs[0],
-              bs[1],
-              bs[2]
-            };
+            return to_vector().dot(other.to_vector());
         }
+
+        DUAL constexpr auto norm() const { return to_vector().norm(); }
+
+        DUAL constexpr auto normalize() const
+        {
+            return to_vector().normalize();
+        }
+
+        // fix pointer after device synchronization
+        DUAL constexpr void fix_device_pointer(T* new_data)
+        {
+            data_ = new_data;
+        }
+
+        // increment vector by another vector
+        template <typename Vec>
+        DUAL constexpr auto& operator+=(const Vec& other)
+            requires(!std::is_const_v<T>)
+        {
+            for (size_type i = 0; i < Dims; ++i) {
+                data_[i] += static_cast<T>(other[i]);
+            }
+            return *this;
+        }
+
+        // iterator logic for stl algorithms
+        DUAL constexpr iterator begin() { return data_; }
+        DUAL constexpr iterator end() { return data_ + Dims; }
+        DUAL constexpr const_iterator begin() const { return data_; }
+        DUAL constexpr const_iterator end() const { return data_ + Dims; }
+        DUAL constexpr const_iterator cbegin() const { return data_; }
+        DUAL constexpr const_iterator cend() const { return data_ + Dims; }
+        DUAL constexpr const_iterator rbegin() const { return data_ + Dims; }
+        DUAL constexpr const_iterator rend() const { return data_; }
     };
 
-    // Specialization helpers
+    //---------------------------------------------------------------
+    // ConstVectorView: const version of VectorView
+    // ---------------------------------------------------------------
+    template <typename T, size_type Dims, VectorType Type = VectorType::GENERAL>
+    class ConstVectorView
+    {
+      private:
+        const T* data_;   // pointer to external data
+
+      public:
+        // type definitions
+        using value_type      = T;
+        using reference       = const T&;
+        using const_reference = const T&;
+        using iterator        = const T*;
+        using const_iterator  = const T*;
+
+        static constexpr size_type dimensions = Dims;
+        static constexpr VectorType vec_type  = Type;
+
+        // constructor from pointer
+        DUAL constexpr explicit ConstVectorView(const T* data) : data_(data) {}
+
+        // brace-enclosed initializer list constructor
+        DUAL constexpr explicit ConstVectorView(std::initializer_list<T> data)
+            : data_(data.begin())
+        {
+        }
+
+        // element access
+        DUAL constexpr reference operator[](size_type idx) const
+        {
+            return data_[idx];
+        }
+
+        // bounds-checked access returning Maybe
+        DUAL constexpr Maybe<reference> at(size_type idx) const
+        {
+            if (idx < Dims) {
+                return Maybe<reference>(data_[idx]);
+            }
+            return Nothing;
+        }
+
+        // raw data access
+        DUAL constexpr const T* data() const { return data_; }
+        DUAL constexpr size_type size() const { return Dims; }
+
+        // convert to owning Vector
+        DUAL constexpr Vector<T, Dims, Type> to_vector() const
+        {
+            Vector<T, Dims, Type> result;
+            for (size_type i = 0; i < Dims; ++i) {
+                result[i] = data_[i];
+            }
+            return result;
+        }
+
+        // arithmetic operations
+        // scalar multiplication
+        template <typename U>
+        DUAL constexpr auto operator*(U scalar) const
+        {
+            using result_t = detail::promote_t<T, U>;
+            Vector<result_t, Dims, Type> result;
+            for (size_type i = 0; i < Dims; ++i) {
+                result[i] = static_cast<result_t>(data_[i]) * scalar;
+            }
+            return result;
+        }
+
+        // scalar division
+        template <typename U>
+        DUAL constexpr auto operator/(U scalar) const
+        {
+            using result_t = detail::promote_t<T, U>;
+            Vector<result_t, Dims, Type> result;
+            for (size_type i = 0; i < Dims; ++i) {
+                result[i] = static_cast<result_t>(data_[i]) / scalar;
+            }
+            return result;
+        }
+
+        // addition
+        template <typename U, VectorType OtherType>
+        DUAL constexpr auto operator+(const Vector<U, Dims, OtherType>& other
+        ) const
+        {
+            using result_t = detail::promote_t<T, U>;
+            constexpr auto result_type =
+                detail::promote_vector_t<Type, OtherType>;
+            Vector<result_t, Dims, result_type> result;
+            for (size_type i = 0; i < Dims; ++i) {
+                result[i] = static_cast<result_t>(data_[i]) +
+                            static_cast<result_t>(other[i]);
+            }
+            return result;
+        }
+
+        // subtraction
+        template <typename U, VectorType OtherType>
+        DUAL constexpr auto operator-(const Vector<U, Dims, OtherType>& other
+        ) const
+        {
+            using result_t = detail::promote_t<T, U>;
+            constexpr auto result_type =
+                detail::promote_vector_t<Type, OtherType>;
+
+            Vector<result_t, Dims, result_type> result;
+            for (size_type i = 0; i < Dims; ++i) {
+                result[i] = static_cast<result_t>(data_[i]) -
+                            static_cast<result_t>(other[i]);
+            }
+            return result;
+        }
+
+        // norm
+        DUAL constexpr auto norm() const { return to_vector().norm(); }
+
+        // iterator logic for stl algorithms
+        DUAL constexpr iterator begin() { return data_; }
+        DUAL constexpr iterator end() { return data_ + Dims; }
+        DUAL constexpr const_iterator begin() const { return data_; }
+        DUAL constexpr const_iterator end() const { return data_ + Dims; }
+        DUAL constexpr const_iterator cbegin() const { return data_; }
+        DUAL constexpr const_iterator cend() const { return data_ + Dims; }
+        DUAL constexpr const_iterator rbegin() const { return data_ + Dims; }
+        DUAL constexpr const_iterator rend() const { return data_; }
+    };
+
+    // -------------------------------------------------------------
+    // type aliases for common vector types
+    // -------------------------------------------------------------
     template <typename T, size_type Dims>
     using spatial_vector_t = Vector<T, Dims, VectorType::SPATIAL>;
     template <typename T, size_type Dims>
@@ -805,6 +917,20 @@ namespace simbi {
     using const_magnetic_four_vector_view_t =
         ConstVectorView<T, 4, VectorType::MAGNETIC_FOUR>;
 
+    // zero vector view as a global singleton
+    template <typename T, size_type Dims, VectorType Type>
+    class ZeroVectorView
+    {
+      private:
+        static inline array_t<T, Dims> zero_storage_{};
+
+      public:
+        DUAL constexpr VectorView<const T, Dims, Type> view() const
+        {
+            return VectorView<const T, Dims, Type>(zero_storage_.data());
+        }
+    };
+
     class ZeroMagneticVectorView : public const_magnetic_vector_view_t<real, 3>
     {
       private:
@@ -830,7 +956,14 @@ namespace simbi {
         }
     };
 
-    // set of unit vectors in the x1, x2, x3 directions
+    // utility for pipeline-style composition with operator|
+    template <typename T, size_type Dims, VectorType Type, typename F>
+    DUAL constexpr auto operator|(const Vector<T, Dims, Type>& v, F&& f)
+        -> decltype(std::invoke(std::forward<F>(f), v))
+    {
+        return std::invoke(std::forward<F>(f), v);
+    }
+
     namespace unit_vectors {
         template <size_type Dims>
         DUAL constexpr auto get(size_type i)
@@ -868,209 +1001,32 @@ namespace simbi {
         }
     }   // namespace unit_vectors
 
-    namespace vecops {
-        // helpers to rotate vectors by some angle
-        template <typename Vec, typename T>
-        DEV static constexpr auto rotate_2D(const Vec& vec, const T& angle)
-        {
-            return Vector<T, 2, VectorType::SPATIAL>{
-              vec[0] * std::cos(angle) - vec[1] * std::sin(angle),
-              vec[0] * std::sin(angle) + vec[1] * std::cos(angle)
-            };
-        }
-
-        template <typename Vec, typename T>
-        DEV static constexpr auto rotate_3D(const Vec& vec, const T& angle)
-        {
-            return Vector<T, 3, VectorType::SPATIAL>{
-              vec[0] * std::cos(angle) - vec[1] * std::sin(angle),
-              vec[0] * std::sin(angle) + vec[1] * std::cos(angle),
-              vec[2]
-            };
-        }
-
-        // general rotation function that checks the dimension at compile-time
-        template <typename Vec, typename T>
-        DEV static constexpr auto rotate(const Vec& vec, const T& angle)
-        {
-            if constexpr (Vec::dimensions == 2) {
-                return rotate_2D(vec, angle);
-            }
-            else {
-                return rotate_3D(vec, angle);
-            }
-        }
-
-        template <typename Vec>
-        DEV auto constexpr spherical_to_cartesian(const Vec& vec)
-        {
-            if constexpr (Vec::dimensions == 1) {
-                return vec;
-            }
-            else if constexpr (Vec::dimensions == 2) {   // r-theta, not r-phi
-                return Vector<real, 2, VectorType::SPATIAL>{
-                  vec[0] * std::sin(vec[1]),
-                  vec[0] * std::cos(vec[1])
-                };
-            }
-            else {
-                return Vector<real, 3, VectorType::SPATIAL>{
-                  vec[0] * std::sin(vec[1]) * std::cos(vec[2]),
-                  vec[0] * std::sin(vec[1]) * std::sin(vec[2]),
-                  vec[0] * std::cos(vec[1])
-                };
-            }
-        }
-
-        template <typename Vec>
-        DEV auto constexpr cylindrical_to_cartesian(const Vec& vec)
-        {
-            if constexpr (Vec::dimensions == 1) {
-                return vec;
-            }
-            else if constexpr (Vec::dimensions == 2) {
-                return Vector<real, 2, VectorType::SPATIAL>{
-                  vec[0] * std::cos(vec[1]),
-                  vec[0] * std::sin(vec[1])
-                };
-            }
-            else {
-                return Vector<real, 3, VectorType::SPATIAL>{
-                  vec[0] * std::cos(vec[1]),
-                  vec[0] * std::sin(vec[1]),
-                  vec[2]
-                };
-            }
-        }
-
-        template <typename Vec>
-        DEV auto constexpr cartesian_to_spherical(const Vec& vec)
-        {
-            if constexpr (Vec::dimensions == 1) {
-                return vec;
-            }
-            else if constexpr (Vec::dimensions == 2) {
-                return Vector<real, 2, VectorType::SPATIAL>{
-                  vec.norm(),
-                  std::atan2(vec[1], vec[0])
-                };
-            }
-            else {
-                return Vector<real, 3, VectorType::SPATIAL>{
-                  vec.norm(),
-                  std::acos(vec[2] / vec.norm()),
-                  std::atan2(vec[1], vec[0])
-                };
-            }
-        }
-
-        template <typename Vec>
-        DEV auto constexpr centralize_cartesian_to_spherical(const Vec& vec)
-        {
-            if constexpr (Vec::dimensions == 1) {
-                return vec;
-            }
-            else if constexpr (Vec::dimensions == 2) {
-                return Vector<real, 2, VectorType::SPATIAL>{
-                  vec.norm(),
-                  0.0,
-                };
-            }
-            else {
-                return Vector<real, 3, VectorType::SPATIAL>{
-                  vec.norm(),
-                  0.0,
-                  0.0
-                };
-            }
-        }
-
-        template <typename Vec>
-        DEV auto constexpr centralize_cartesian_to_cylindrical(const Vec& vec)
-        {
-            if constexpr (Vec::dimensions == 1) {
-                return vec;
-            }
-            else if constexpr (Vec::dimensions == 2) {
-                return Vector<real, 2, VectorType::SPATIAL>{
-                  vec.norm(),
-                  0.0,
-                };
-            }
-            else {
-                return Vector<real, 3, VectorType::SPATIAL>{
-                  vec.norm(),
-                  0.0,
-                  0.0
-                };
-            }
-        }
-
-        template <typename Vec>
-        DEV auto constexpr cartesian_to_cylindrical(const Vec& vec)
-        {
-            if constexpr (Vec::dimensions == 1) {
-                return vec;
-            }
-            else if constexpr (Vec::dimensions == 2) {
-                return Vector<real, 2, VectorType::SPATIAL>{
-                  vec.norm(),
-                  std::atan2(vec[1], vec[0])
-                };
-            }
-            else {
-                return Vector<real, 3, VectorType::SPATIAL>{
-                  vec.norm(),
-                  std::atan2(vec[1], vec[0]),
-                  vec[2]
-                };
-            }
-        }
-
-        // convert a cartesian vector to a curvlinear
-        // coordinate system
-        template <typename Vec>
-        DEV auto to_geometry(const Vec& vec, Geometry geometry)
-        {
-            if (geometry == Geometry::SPHERICAL) {
-                return cartesian_to_spherical(vec);
-            }
-            else if (geometry == Geometry::CYLINDRICAL) {
-                return cartesian_to_cylindrical(vec);
-            }
-            else {
-                return vec;
-            }
-        }
-
-        // project some vector onto the mesh
-        // using the mesh basis vectors
-        template <typename Vec>
-        DEV auto centralize(const Vec& vec, Geometry mesh_geometry)
-        {
-            switch (mesh_geometry) {
-                case Geometry::SPHERICAL:
-                    return centralize_cartesian_to_spherical(vec);
-                case Geometry::CYLINDRICAL:
-                    return centralize_cartesian_to_cylindrical(vec);
-                default: return vec;
-            }
-        }
-
-    }   // namespace vecops
-
 }   // namespace simbi
 
+// structured binding support
 namespace std {
     template <typename T, size_type Dims, simbi::VectorType Type>
     struct tuple_size<simbi::Vector<T, Dims, Type>>
-        : integral_constant<size_type, Dims> {
+        : integral_constant<size_t, Dims> {
     };
 
-    template <size_type I, typename T, size_type Dims, simbi::VectorType Type>
+    template <size_t I, typename T, size_type Dims, simbi::VectorType Type>
     struct tuple_element<I, simbi::Vector<T, Dims, Type>> {
         using type = T;
     };
-}   // namespace std
 
+    template <size_t I, typename T, size_type Dims, simbi::VectorType Type>
+    DUAL constexpr T& get(simbi::Vector<T, Dims, Type>& v)
+    {
+        static_assert(I < Dims, "index out of bounds");
+        return v[I];
+    }
+
+    template <size_t I, typename T, size_type Dims, simbi::VectorType Type>
+    DUAL constexpr const T& get(const simbi::Vector<T, Dims, Type>& v)
+    {
+        static_assert(I < Dims, "index out of bounds");
+        return v[I];
+    }
+}   // namespace std
 #endif
