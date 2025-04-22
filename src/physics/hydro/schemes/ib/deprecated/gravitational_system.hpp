@@ -437,11 +437,11 @@ namespace simbi::ibsystem {
                 const auto mass = body_ptr->mass();
 
                 // Kinetic energy
-                total_energy_ += 0.5 * mass * vel.dot(vel);
+                total_energy_ += 0.5 * mass * vecops::dot(vel, vel);
 
                 // Angular momentum
                 if constexpr (Dims == 3) {
-                    angular_momentum_ += mass * pos.cross(vel);
+                    angular_momentum_ += mass * vecops::cross(pos, vel);
                 }
                 else if constexpr (Dims == 2) {
                     angular_momentum_ +=

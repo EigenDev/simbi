@@ -64,13 +64,13 @@ namespace simbi::ibsystem::traits {
             T a2 = config_.semi_major - a1;
 
             if constexpr (Dims == 2) {
-                spatial_vector_t<T, Dims> r1 = {a1, 0.0};
-                spatial_vector_t<T, Dims> r2 = {-a2, 0.0};
+                spatial_vector_t<T, Dims> r1{a1, 0.0};
+                spatial_vector_t<T, Dims> r2{-a2, 0.0};
                 return {r1, r2};
             }
             else {
-                spatial_vector_t<T, Dims> r1 = {a1, 0.0, 0.0};
-                spatial_vector_t<T, Dims> r2 = {-a2, 0.0, 0.0};
+                spatial_vector_t<T, Dims> r1{a1, 0.0, 0.0};
+                spatial_vector_t<T, Dims> r2{-a2, 0.0, 0.0};
                 return {r1, r2};
             }
         }
@@ -86,13 +86,13 @@ namespace simbi::ibsystem::traits {
                 T a2               = separation - a1;
 
                 if constexpr (Dims == 2) {
-                    spatial_vector_t<T, Dims> v1 = {0.0, phi_dot * a2};
-                    spatial_vector_t<T, Dims> v2 = {0.0, -phi_dot * a1};
+                    spatial_vector_t<T, Dims> v1{0.0, phi_dot * a2};
+                    spatial_vector_t<T, Dims> v2{0.0, -phi_dot * a1};
                     return {v1, v2};
                 }
                 else {
-                    spatial_vector_t<T, Dims> v1 = {0.0, phi_dot * a2, 0.0};
-                    spatial_vector_t<T, Dims> v2 = {0.0, -phi_dot * a1, 0.0};
+                    spatial_vector_t<T, Dims> v1{0.0, phi_dot * a2, 0.0};
+                    spatial_vector_t<T, Dims> v2{0.0, -phi_dot * a1, 0.0};
                     return {v1, v2};
                 }
             }

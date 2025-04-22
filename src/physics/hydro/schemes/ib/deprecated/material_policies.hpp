@@ -60,7 +60,7 @@ namespace simbi::ib {
                     const auto normal = cell.normal.normalized();
 
                     // Get the component of velocity along normal direction
-                    const auto v_normal = body.velocity().dot(normal);
+                    const auto v_normal = vecopss::body.velocity().dot(normal);
 
                     // If we're moving toward the obstacle
                     if (v_normal < 0) {

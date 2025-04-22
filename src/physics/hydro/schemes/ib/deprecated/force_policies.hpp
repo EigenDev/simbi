@@ -88,8 +88,8 @@ namespace simbi::ib {
 
                         const auto r = other.position() - body.position();
                         const auto r2 =
-                            r.dot(r) + trait_.softening_length() *
-                                           trait_.softening_length();
+                            vecops::dot(r, r) + trait_.softening_length() *
+                                                    trait_.softening_length();
                         body.force_ += -other.mass() * body.mass() * r /
                                        (r2 * std::sqrt(r2));
                     }

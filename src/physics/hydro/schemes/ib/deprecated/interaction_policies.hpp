@@ -43,7 +43,7 @@ namespace simbi::ib {
 
             // Apply gravitational force to entire fluid domain
             const auto r  = mesh_cell.cartesian_centroid() - body.position();
-            const auto r2 = r.dot(r) + softening * softening;
+            const auto r2 = vecops::dot(r, r) + softening * softening;
 
             // Gravitational force on fluid element (G = 1)
             // This is the force in cartesian coordinates
@@ -61,7 +61,7 @@ namespace simbi::ib {
             const auto v_new =
                 (prim.spatial_momentum(context.gamma) + dp) / prim.rho();
             const auto v_avg = 0.5 * (v_old + v_new);
-            const auto dE    = dp.dot(v_avg);
+            const auto dE    = vecops::dot(v_avg, dp);
             const auto state = conserved_t{0.0, dp, dE};
 
             if (two_way_coupling) {
@@ -182,10 +182,10 @@ namespace simbi::ib {
                 // directional dependence - enhance upstream, reduce downstream
                 // from: Blondin & Raymer (2012) -
                 // https://doi.org/10.1088/0004-637X/752/1/30
-                if (mach_number > 0.1 && rel_position.norm() > 0.0) {
+                if (mach_number > 0.1 && vecops::norm(rel_position) > 0.0) {
                     // Cosine of angle between position and velocity vectors
-                    T cos_angle = rel_position.dot(rel_velocity) /
-                                  (rel_position.norm() * vel_mag);
+                    T cos_angle = vecops::dot(rel_position, rel_velocity) /
+                                  (vecops::norm(rel_position) * vel_mag);
 
                     // directional weighting (strongest upstream, weakest
                     // downstream) Factor ranges from ~0.5 (downstream) to ~1.5
@@ -396,10 +396,10 @@ namespace simbi::ib {
             // https://doi.org/10.1093/mnras/stt128
             T specific_angular_momentum = [&]() {
                 if constexpr (Dims < 3) {
-                    return r_vector.cross(rel_velocity);
+                    return vecops::cross(r_vector, rel_velocity);
                 }
                 else {
-                    return r_vector.cross(rel_velocity).norm();
+                    return vecops::cross(r_vector, rel_velocity).norm();
                 }
             }();
 
