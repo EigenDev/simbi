@@ -131,15 +131,141 @@ namespace simbi {
             return data_[i];
         }
 
-        // Iterator support - host only
-        DUAL T* begin() { return data_; }
-        DUAL const T* begin() const { return data_; }
-        DUAL T* end() { return data_ + N; }
-        DUAL const T* end() const { return data_ + N; }
+        // Iterator support
+        class iterator
+        {
+          public:
+            using iterator_category = std::random_access_iterator_tag;
+            using value_type        = T;
+            using difference_type   = std::ptrdiff_t;
+            using pointer           = T*;
+            using reference         = T&;
+
+            DUAL iterator(T* ptr) : ptr_(ptr) {}
+
+            DUAL reference operator*() { return *ptr_; }
+            DUAL pointer operator->() { return ptr_; }
+
+            DUAL iterator& operator++()
+            {
+                ++ptr_;
+                return *this;
+            }
+
+            DUAL iterator operator++(int)
+            {
+                iterator tmp = *this;
+                ++(*this);
+                return tmp;
+            }
+            DUAL iterator& operator--()
+            {
+                --ptr_;
+                return *this;
+            }
+            DUAL iterator operator--(int)
+            {
+                iterator tmp = *this;
+                --(*this);
+                return tmp;
+            }
+
+            DUAL bool operator==(const iterator& other) const
+            {
+                return ptr_ == other.ptr_;
+            }
+            DUAL bool operator!=(const iterator& other) const
+            {
+                return !(*this == other);
+            }
+            DUAL bool operator<(const iterator& other) const
+            {
+                return ptr_ < other.ptr_;
+            }
+            DUAL bool operator>(const iterator& other) const
+            {
+                return ptr_ > other.ptr_;
+            }
+
+          private:
+            T* ptr_;
+        };
+
+        class const_iterator
+        {
+          public:
+            using iterator_category = std::random_access_iterator_tag;
+            using value_type        = T;
+            using difference_type   = std::ptrdiff_t;
+            using pointer           = const T*;
+            using reference         = const T&;
+
+            const_iterator(const T* ptr) : ptr_(ptr) {}
+
+            DUAL reference operator*() { return *ptr_; }
+            DUAL pointer operator->() { return ptr_; }
+
+            DUAL const_iterator& operator++()
+            {
+                ++ptr_;
+                return *this;
+            }
+
+            DUAL const_iterator operator++(int)
+            {
+                const_iterator tmp = *this;
+                ++(*this);
+                return tmp;
+            }
+            DUAL const_iterator& operator--()
+            {
+                --ptr_;
+                return *this;
+            }
+            DUAL const_iterator operator--(int)
+            {
+                const_iterator tmp = *this;
+                --(*this);
+                return tmp;
+            }
+
+            DUAL bool operator==(const const_iterator& other) const
+            {
+                return ptr_ == other.ptr_;
+            }
+            DUAL bool operator!=(const const_iterator& other) const
+            {
+                return !(*this == other);
+            }
+            DUAL bool operator<(const const_iterator& other) const
+            {
+                return ptr_ < other.ptr_;
+            }
+            DUAL bool operator>(const const_iterator& other) const
+            {
+                return ptr_ > other.ptr_;
+            }
+
+          private:
+            const T* ptr_;
+        };
+        DUAL iterator begin() { return iterator(data_); }
+        DUAL iterator end() { return iterator(data_ + N); }
+        DUAL const_iterator begin() const { return const_iterator(data_); }
+        DUAL const_iterator end() const { return const_iterator(data_ + N); }
+        DUAL const_iterator cbegin() const { return begin(); }
+        DUAL const_iterator cend() const { return end(); }
+        DUAL const_iterator rbegin() const
+        {
+            return const_iterator(data_ + N - 1);
+        }
+        DUAL const_iterator rend() const { return const_iterator(data_ - 1); }
+        DUAL const_iterator crbegin() const { return rbegin(); }
+        DUAL const_iterator crend() const { return rend(); }
 
       private:
         T data_[N];
-    };
+    };   // class array_t
 
     // overload ostream to print simbi::array_t
     template <typename T, size_type N>
@@ -193,6 +319,7 @@ namespace simbi {
         static_assert(I < N, "Index out of bounds");
         return std::move(a[I]);
     }
+
 }   // namespace simbi
 
 #endif
