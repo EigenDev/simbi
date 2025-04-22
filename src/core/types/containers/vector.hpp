@@ -13,15 +13,6 @@
 #include <type_traits>
 
 namespace simbi {
-    // vector types remain as enums for strong typing
-    enum class VectorType {
-        SPATIAL,
-        MAGNETIC,
-        MAGNETIC_FOUR,
-        SPACETIME,
-        GENERAL,
-    };
-
     // vector traits
     template <VectorType Type>
     struct vector_traits {
@@ -80,19 +71,22 @@ namespace simbi {
     }   // namespace detail
 
     namespace vecops {
-        // functitonal-style zip function that has nothing
-        // to do with vectors
-
         // dot product
         template <typename Vec1, typename Vec2>
         DUAL constexpr auto dot(const Vec1& a, const Vec2& b)
         {
-            using T  = decltype(a[0] * b[0]);
-            T result = T{0};
-            for (size_type ii = 0; ii < Vec1::dimensions; ++ii) {
-                result += a[ii] * b[ii];
-            }
-            return result;
+            // traditional for loop version
+            // using T  = decltype(a[0] * b[0]);
+            // T result = 0;
+            // for (size_type ii = 0; ii < Vec1::dimensions; ++ii) {
+            //     result += a[ii] * b[ii];
+            // }
+            // return result;
+
+            const auto mult = fp::zip(a, b, [](const auto& x, const auto& y) {
+                return x * y;
+            });
+            return fp::sum(mult);
         }
 
         // norm
@@ -106,11 +100,21 @@ namespace simbi {
         template <typename T, size_type Dims, VectorType Type>
         DUAL constexpr auto normalize(const Vector<T, Dims, Type>& vec)
         {
-            const auto n = norm(vec);
-            if (n > T{0}) {
-                return vec * (1.0 / n);
-            }
-            return vec;
+            // tradiational for loop version
+            // const auto n = norm(vec);
+            // auto result  = vec;
+            // for (size_type ii = 0; ii < Dims; ++ii) {
+            //     result[ii] /= n;
+            // }
+            // return result;
+
+            using result_t = detail::promote_t<T, double>;
+            const auto n   = norm(vec);
+            return n > 0 ? fp::map(
+                               vec,
+                               [n](const auto& x) -> result_t { return x / n; }
+                           )
+                         : vec;
         }
 
         // cross product
@@ -337,19 +341,22 @@ namespace simbi {
     class Vector
     {
       private:
-        // direct storage - no indirection
+        // direct storage
         array_t<T, Dims> storage_{};
-        // Static zero value for out-of-bounds access in
+        // static zero value for out-of-bounds access in
         // structured binding access
         static inline T zero_value_{};
 
       public:
         // type definitions for type traits and functional interfaces
-        using value_type      = T;
-        using reference       = T&;
-        using const_reference = const T&;
-        using iterator        = typename array_t<T, Dims>::iterator;
-        using const_iterator  = typename array_t<T, Dims>::const_iterator;
+        using value_type       = T;
+        using reference        = T&;
+        using const_reference  = const T&;
+        using iterator         = typename array_t<T, Dims>::iterator;
+        using const_iterator   = typename array_t<T, Dims>::const_iterator;
+        using reverse_iterator = typename array_t<T, Dims>::reverse_iterator;
+        using const_reverse_iterator =
+            typename array_t<T, Dims>::const_reverse_iterator;
 
         static constexpr size_type dimensions = Dims;
         static constexpr VectorType vec_type  = Type;
@@ -380,7 +387,7 @@ namespace simbi {
             algorithms::copy_n(data, Dims, storage_.begin());
         }
 
-        // element access - direct, no indirection
+        // element access
         DUAL constexpr reference operator[](size_type idx)
         {
             return storage_[idx];
@@ -425,70 +432,41 @@ namespace simbi {
             return storage_.cbegin();
         }
         DUAL constexpr const_iterator cend() const { return storage_.cend(); }
-        DUAL constexpr const_iterator rbegin() const
+        DUAL constexpr reverse_iterator rbegin() { return storage_.rbegin(); }
+        DUAL constexpr reverse_iterator rend() { return storage_.rend(); }
+        DUAL constexpr const_reverse_iterator rbegin() const
         {
             return storage_.rbegin();
         }
-        DUAL constexpr const_iterator rend() const { return storage_.rend(); }
-
-        // functional operations
-
-        // map - apply function to each element, returning new vector
-        template <typename F>
-        DUAL constexpr auto map(F&& f) const
+        DUAL constexpr const_reverse_iterator rend() const
         {
-            using result_t = std::invoke_result_t<F, T>;
-            Vector<result_t, Dims, Type> result;
-
-            for (size_type i = 0; i < Dims; ++i) {
-                result[i] = std::invoke(std::forward<F>(f), storage_[i]);
-            }
-
-            return result;
-        }
-
-        // vector operations built on functional primitives
-        // so that I can practice functional programming
-
-        // dot product using fold
-        template <typename U, VectorType OtherType>
-        DUAL constexpr detail::promote_t<T, U>
-        dot(const Vector<U, Dims, OtherType>& other) const
-        {
-            using result_t = detail::promote_t<T, U>;
-            result_t sum{0};
-            for (size_type i = 0; i < Dims; ++i) {
-                sum += storage_[i] * other[i];
-            }
-
-            return sum;
-        }
-
-        // allow dot product of vectors with different dims,
-        // but we only use the first Dims elements
-        template <typename U, size_type OtherDims, VectorType OtherType>
-        DUAL constexpr detail::promote_t<T, U>
-        dot(const Vector<U, OtherDims, OtherType>& other) const
-        {
-            using result_t = detail::promote_t<T, U>;
-            result_t sum{0};
-            for (size_type i = 0; i < Dims; ++i) {
-                sum += storage_[i] * other[i];
-            }
-            return sum;
+            return storage_.rend();
         }
 
         // norm using dot product
-        DUAL constexpr auto norm_squared() const { return dot(*this); }
+        DUAL constexpr auto norm_squared() const
+        {
+            return vecops::dot(*this, *this);
+        }
 
         DUAL constexpr auto norm() const { return std::sqrt(norm_squared()); }
 
         // normalize returning new vector
         DUAL constexpr auto normalize() const
         {
-            const auto n = norm();
+            // traditional for loop version
+            // const auto n = norm();
+            // for (size_type ii = 0; ii < Dims; ++ii) {
+            //     storage_[ii] /= n;
+            // }
+            // return *this;
+
+            const auto n   = norm();
+            using result_t = detail::promote_t<T, decltype(n)>;
             if (n > T{0}) {
-                return map([n](const T& x) { return x / n; });
+                return fp::map(*this, [n](const auto& x) -> result_t {
+                    return x / n;
+                });
             }
             return *this;
         }
@@ -496,7 +474,14 @@ namespace simbi {
         // unary negation
         DUAL constexpr auto operator-() const
         {
-            return map([](const T& x) { return -x; });
+            // tradiational for loop version
+            // Vector<T, Dims, Type> result;
+            // for (size_type ii = 0; ii < Dims; ++ii) {
+            //     result[ii] = -storage_[ii];
+            // }
+            // return result;
+
+            return fp::map(*this, [](const T& x) { return -x; });
         }
 
         // arithmetic operations
@@ -509,14 +494,21 @@ namespace simbi {
             detail::promote_vector_t<Type, OtherType>>
         operator+(const Vector<U, OtherDims, OtherType>& other) const
         {
-            using result_type = detail::promote_t<T, U>;
-            constexpr auto result_vectype =
-                Type == OtherType ? Type : VectorType::GENERAL;
-            Vector<result_type, Dims, result_vectype> result;
-            for (size_type ii = 0; ii < Dims; ++ii) {
-                result[ii] = (*this)[ii] + other[ii];
-            }
-            return result;
+            // traditional for loop version
+            // using result_t = detail::promote_t<T, U>;
+            // Vector<result_t, Dims, detail::promote_vector_t<Type, OtherType>>
+            //     result;
+            // for (size_type ii = 0; ii < Dims; ++ii) {
+            //     result[ii] = storage_[ii] + static_cast<result_t>(other[ii]);
+            // }
+            // return result;
+
+            using result_t = detail::promote_t<T, U>;
+            return fp::zip(
+                *this,
+                other,
+                [](const auto& x, const auto& y) -> result_t { return x + y; }
+            );
         }
 
         // element-wise subtraction
@@ -527,38 +519,57 @@ namespace simbi {
             detail::promote_vector_t<Type, OtherType>>
         operator-(const Vector<U, OtherDims, OtherType>& other) const
         {
-            using result_type = detail::promote_t<T, U>;
-            constexpr auto result_vectype =
-                Type == OtherType ? Type : VectorType::GENERAL;
-            Vector<result_type, Dims, result_vectype> result;
-            for (size_type ii = 0; ii < Dims; ++ii) {
-                result[ii] = (*this)[ii] - other[ii];
-            }
-            return result;
+            // traditional for loop version
+            // using result_t = detail::promote_t<T, U>;
+            // Vector<result_t, Dims, detail::promote_vector_t<Type, OtherType>>
+            //     result;
+            // for (size_type ii = 0; ii < Dims; ++ii) {
+            //     result[ii] = storage_[ii] - static_cast<result_t>(other[ii]);
+            // }
+            // return result;
+
+            using result_t = detail::promote_t<T, U>;
+            return fp::zip(
+                *this,
+                other,
+                [](const auto& x, const auto& y) -> result_t { return x - y; }
+            );
         }
 
         // scalar multiplication
         template <typename U>
         DUAL constexpr auto operator*(U scalar) const
         {
+            // traditional for loop version
+            // using result_t = detail::promote_t<T, U>;
+            // Vector<result_t, Dims, Type> result;
+            // for (size_type ii = 0; ii < Dims; ++ii) {
+            //     result[ii] = static_cast<result_t>(scalar) * storage_[ii];
+            // }
+            // return result;
+
             using result_t = detail::promote_t<T, U>;
-            Vector<result_t, Dims, Type> result;
-            for (size_type i = 0; i < Dims; ++i) {
-                result[i] = static_cast<result_t>(storage_[i]) * scalar;
-            }
-            return result;
+            return fp::map(*this, [scalar](const auto& x) -> result_t {
+                return scalar * x;
+            });
         }
 
         // scalar division
         template <typename U>
         DUAL constexpr auto operator/(U scalar) const
         {
+            // traditional for loop version
+            // using result_t = detail::promote_t<T, U>;
+            // Vector<result_t, Dims, Type> result;
+            // for (size_type ii = 0; ii < Dims; ++ii) {
+            //     result[ii] = static_cast<result_t>(storage_[ii]) / scalar;
+            // }
+            // return result;
+
             using result_t = detail::promote_t<T, U>;
-            Vector<result_t, Dims, Type> result;
-            for (size_type i = 0; i < Dims; ++i) {
-                result[i] = static_cast<result_t>(storage_[i]) / scalar;
-            }
-            return result;
+            return fp::map(*this, [scalar](const auto& x) -> result_t {
+                return x / scalar;
+            });
         }
 
         // create a view to this vector
@@ -590,8 +601,8 @@ namespace simbi {
         DUAL constexpr auto spatial_dot(const auto& other) const
             requires MagneticFour<Type>
         {
-            return storage_[1] * other[1] + storage_[2] * other[2] +
-                   storage_[3] * other[3];
+            return storage_[1] * other[0] + storage_[2] * other[1] +
+                   storage_[3] * other[2];
         }
 
         // conversion to other vector types
@@ -599,6 +610,12 @@ namespace simbi {
         DUAL constexpr auto as_type() const
         {
             return Vector<T, Dims, NewType>(storage_);
+        }
+
+        // implicit conversion to general vector type
+        DUAL constexpr operator Vector<T, Dims, VectorType::GENERAL>() const
+        {
+            return Vector<T, Dims, VectorType::GENERAL>(storage_);
         }
 
         // structured binding support
@@ -623,6 +640,35 @@ namespace simbi {
                 return storage_[I];
             }
         }
+
+        template <size_t I>
+        DUAL constexpr T&& get() &&
+        {
+            if constexpr (I >= Dims) {
+                return std::move(zero_value_);
+            }
+            else {
+                return std::move(storage_[I]);
+            }
+        }
+
+        template <size_t I>
+        friend DUAL constexpr decltype(auto) get(Vector& v)
+        {
+            return v.template get<I>();
+        }
+
+        template <size_t I>
+        friend DUAL constexpr decltype(auto) get(const Vector& v)
+        {
+            return v.template get<I>();
+        }
+
+        template <size_t I>
+        friend DUAL constexpr decltype(auto) get(Vector&& v)
+        {
+            return std::move(v).template get<I>();
+        }
     };
 
     // scalar multiplication from the left
@@ -639,15 +685,17 @@ namespace simbi {
     class VectorView
     {
       private:
-        T* data_;   // pointer to external data
+        T* data_;   // pointer to external, non-owned data
 
       public:
         // type definitions
-        using value_type      = std::remove_const_t<T>;
-        using reference       = T&;
-        using const_reference = const T&;
-        using iterator        = T*;
-        using const_iterator  = const T*;
+        using value_type             = std::remove_const_t<T>;
+        using reference              = T&;
+        using const_reference        = const T&;
+        using iterator               = T*;
+        using const_iterator         = const T*;
+        using reverse_iterator       = T*;
+        using const_reverse_iterator = const T*;
 
         static constexpr size_type dimensions = Dims;
         static constexpr VectorType vec_type  = Type;
@@ -691,24 +739,7 @@ namespace simbi {
         DUAL constexpr Vector<std::remove_const_t<T>, Dims, Type>
         to_vector() const
         {
-            Vector<std::remove_const_t<T>, Dims, Type> result;
-            for (size_type i = 0; i < Dims; ++i) {
-                result[i] = data_[i];
-            }
-            return result;
-        }
-
-        template <typename U, VectorType OtherType>
-        DUAL constexpr auto dot(const Vector<U, Dims, OtherType>& other) const
-        {
-            return to_vector().dot(other);
-        }
-
-        template <typename U, VectorType OtherType>
-        DUAL constexpr auto
-        dot(const VectorView<U, Dims, OtherType>& other) const
-        {
-            return to_vector().dot(other.to_vector());
+            return Vector<std::remove_const_t<T>, Dims, Type>(data_);
         }
 
         DUAL constexpr auto norm() const { return to_vector().norm(); }
@@ -718,32 +749,52 @@ namespace simbi {
             return to_vector().normalize();
         }
 
-        // fix pointer after device synchronization
-        DUAL constexpr void fix_device_pointer(T* new_data)
-        {
-            data_ = new_data;
-        }
-
         // increment vector by another vector
         template <typename Vec>
         DUAL constexpr auto& operator+=(const Vec& other)
             requires(!std::is_const_v<T>)
         {
-            for (size_type i = 0; i < Dims; ++i) {
-                data_[i] += static_cast<T>(other[i]);
+            for (size_type ii = 0; ii < Dims; ++ii) {
+                data_[ii] += static_cast<T>(other[ii]);
             }
             return *this;
         }
 
         // iterator logic for stl algorithms
-        DUAL constexpr iterator begin() { return data_; }
-        DUAL constexpr iterator end() { return data_ + Dims; }
-        DUAL constexpr const_iterator begin() const { return data_; }
-        DUAL constexpr const_iterator end() const { return data_ + Dims; }
-        DUAL constexpr const_iterator cbegin() const { return data_; }
-        DUAL constexpr const_iterator cend() const { return data_ + Dims; }
-        DUAL constexpr const_iterator rbegin() const { return data_ + Dims; }
-        DUAL constexpr const_iterator rend() const { return data_; }
+        DUAL constexpr iterator begin() { return iterator(data_); }
+        DUAL constexpr iterator end() { return iterator(data_ + Dims); }
+        DUAL constexpr const_iterator begin() const
+        {
+            return const_iterator(data_);
+        }
+        DUAL constexpr const_iterator end() const
+        {
+            return const_iterator(data_ + Dims);
+        }
+        DUAL constexpr const_iterator cbegin() const
+        {
+            return const_iterator(data_);
+        }
+        DUAL constexpr const_iterator cend() const
+        {
+            return const_iterator(data_ + Dims);
+        }
+        DUAL constexpr const_reverse_iterator rbegin() const
+        {
+            return const_reverse_iterator(data_ + Dims);
+        }
+        DUAL constexpr const_reverse_iterator rend() const
+        {
+            return const_reverse_iterator(data_);
+        }
+        DUAL constexpr const_reverse_iterator crbegin() const
+        {
+            return const_reverse_iterator(data_ + Dims);
+        }
+        DUAL constexpr const_reverse_iterator crend() const
+        {
+            return const_reverse_iterator(data_);
+        }
     };
 
     //---------------------------------------------------------------
@@ -757,11 +808,13 @@ namespace simbi {
 
       public:
         // type definitions
-        using value_type      = T;
-        using reference       = const T&;
-        using const_reference = const T&;
-        using iterator        = const T*;
-        using const_iterator  = const T*;
+        using value_type             = T;
+        using reference              = const T&;
+        using const_reference        = const T&;
+        using iterator               = const T*;
+        using const_iterator         = const T*;
+        using reverse_iterator       = const T*;
+        using const_reverse_iterator = const T*;
 
         static constexpr size_type dimensions = Dims;
         static constexpr VectorType vec_type  = Type;
@@ -797,11 +850,7 @@ namespace simbi {
         // convert to owning Vector
         DUAL constexpr Vector<T, Dims, Type> to_vector() const
         {
-            Vector<T, Dims, Type> result;
-            for (size_type i = 0; i < Dims; ++i) {
-                result[i] = data_[i];
-            }
-            return result;
+            return Vector<T, Dims, Type>(data_);
         }
 
         // arithmetic operations
@@ -809,24 +858,36 @@ namespace simbi {
         template <typename U>
         DUAL constexpr auto operator*(U scalar) const
         {
+            // traditional for loop version
+            // using result_t = detail::promote_t<T, U>;
+            // Vector<result_t, Dims, Type> result;
+            // for (size_type ii = 0; ii < Dims; ++ii) {
+            //     result[ii] = static_cast<result_t>(scalar) * data_[ii];
+            // }
+            // return result;
+
             using result_t = detail::promote_t<T, U>;
-            Vector<result_t, Dims, Type> result;
-            for (size_type i = 0; i < Dims; ++i) {
-                result[i] = static_cast<result_t>(data_[i]) * scalar;
-            }
-            return result;
+            return fp::map(*this, [scalar](const auto& x) -> result_t {
+                return scalar * x;
+            });
         }
 
         // scalar division
         template <typename U>
         DUAL constexpr auto operator/(U scalar) const
         {
+            // traditional for loop version
+            // using result_t = detail::promote_t<T, U>;
+            // Vector<result_t, Dims, Type> result;
+            // for (size_type ii = 0; ii < Dims; ++ii) {
+            //     result[ii] = static_cast<result_t>(data_[ii]) / scalar;
+            // }
+            // return result;
+
             using result_t = detail::promote_t<T, U>;
-            Vector<result_t, Dims, Type> result;
-            for (size_type i = 0; i < Dims; ++i) {
-                result[i] = static_cast<result_t>(data_[i]) / scalar;
-            }
-            return result;
+            return fp::map(*this, [scalar](const auto& x) -> result_t {
+                return x / scalar;
+            });
         }
 
         // addition
@@ -834,15 +895,21 @@ namespace simbi {
         DUAL constexpr auto operator+(const Vector<U, Dims, OtherType>& other
         ) const
         {
+            // traditional for loop version
+            // using result_t = detail::promote_t<T, U>;
+            // Vector<result_t, Dims, detail::promote_vector_t<Type, OtherType>>
+            //     result;
+            // for (size_type ii = 0; ii < Dims; ++ii) {
+            //     result[ii] = data_[ii] + static_cast<result_t>(other[ii]);
+            // }
+            // return result;
+
             using result_t = detail::promote_t<T, U>;
-            constexpr auto result_type =
-                detail::promote_vector_t<Type, OtherType>;
-            Vector<result_t, Dims, result_type> result;
-            for (size_type i = 0; i < Dims; ++i) {
-                result[i] = static_cast<result_t>(data_[i]) +
-                            static_cast<result_t>(other[i]);
-            }
-            return result;
+            return fp::zip(
+                *this,
+                other,
+                [](const auto& x, const auto& y) -> result_t { return x + y; }
+            );
         }
 
         // subtraction
@@ -850,30 +917,61 @@ namespace simbi {
         DUAL constexpr auto operator-(const Vector<U, Dims, OtherType>& other
         ) const
         {
-            using result_t = detail::promote_t<T, U>;
-            constexpr auto result_type =
-                detail::promote_vector_t<Type, OtherType>;
+            // traditional for loop version
+            // using result_t = detail::promote_t<T, U>;
+            // Vector<result_t, Dims, detail::promote_vector_t<Type, OtherType>>
+            //     result;
+            // for (size_type ii = 0; ii < Dims; ++ii) {
+            //     result[ii] = data_[ii] - static_cast<result_t>(other[ii]);
+            // }
+            // return result;
 
-            Vector<result_t, Dims, result_type> result;
-            for (size_type i = 0; i < Dims; ++i) {
-                result[i] = static_cast<result_t>(data_[i]) -
-                            static_cast<result_t>(other[i]);
-            }
-            return result;
+            using result_t = detail::promote_t<T, U>;
+            return fp::zip(
+                *this,
+                other,
+                [](const auto& x, const auto& y) -> result_t { return x - y; }
+            );
         }
 
         // norm
         DUAL constexpr auto norm() const { return to_vector().norm(); }
 
         // iterator logic for stl algorithms
-        DUAL constexpr iterator begin() { return data_; }
-        DUAL constexpr iterator end() { return data_ + Dims; }
-        DUAL constexpr const_iterator begin() const { return data_; }
-        DUAL constexpr const_iterator end() const { return data_ + Dims; }
-        DUAL constexpr const_iterator cbegin() const { return data_; }
-        DUAL constexpr const_iterator cend() const { return data_ + Dims; }
-        DUAL constexpr const_iterator rbegin() const { return data_ + Dims; }
-        DUAL constexpr const_iterator rend() const { return data_; }
+        DUAL constexpr iterator begin() { return iterator(data_); }
+        DUAL constexpr iterator end() { return iterator(data_ + Dims); }
+        DUAL constexpr const_iterator begin() const
+        {
+            return const_iterator(data_);
+        }
+        DUAL constexpr const_iterator end() const
+        {
+            return const_iterator(data_ + Dims);
+        }
+        DUAL constexpr const_iterator cbegin() const
+        {
+            return const_iterator(data_);
+        }
+        DUAL constexpr const_iterator cend() const
+        {
+            return const_iterator(data_ + Dims);
+        }
+        DUAL constexpr const_reverse_iterator rbegin() const
+        {
+            return const_reverse_iterator(data_ + Dims);
+        }
+        DUAL constexpr const_reverse_iterator rend() const
+        {
+            return const_reverse_iterator(data_);
+        }
+        DUAL constexpr const_reverse_iterator crbegin() const
+        {
+            return const_reverse_iterator(data_ + Dims);
+        }
+        DUAL constexpr const_reverse_iterator crend() const
+        {
+            return const_reverse_iterator(data_);
+        }
     };
 
     // -------------------------------------------------------------

@@ -49,20 +49,13 @@
 #ifndef VECTOR_HPP
 #define VECTOR_HPP
 
-#include "build_options.hpp"              // for real, lint, luint
+#include "build_options.hpp"   // for real, lint, luint
+#include "core/functional/fp.hpp"
 #include "core/types/utility/enums.hpp"   // for Geometry
 #include <cmath>
 #include <type_traits>
 
 namespace simbi {
-    enum class VectorType {
-        SPATIAL,         // 3D spatial vectors
-        MAGNETIC,        // Magnetic field vectors
-        MAGNETIC_FOUR,   // 4D magnetic four-vectors
-        SPACETIME,       // 4D spacetime vectors
-        GENERAL,         // Generic vectors
-    };
-
     // Vector traits
     template <VectorType Type>
     struct vector_traits {
@@ -531,6 +524,14 @@ namespace simbi {
         //     }
         // }
 
+        // conversion operator
+        template <VectorType OtherType>
+        DUAL constexpr auto as_type() const
+            requires(!std::is_const_v<T>)
+        {
+            return Vector<T, Dims, OtherType>{this->data_};
+        }
+
         // construct from std::vector
         DUAL explicit Vector(const std::vector<T> values)
             requires(!std::is_const_v<T>)
@@ -707,8 +708,8 @@ namespace simbi {
         DUAL constexpr auto spatial_dot(const auto& other) const
             requires MagneticFour<Type>
         {
-            return this->data_[1] * other[1] + this->data_[2] * other[2] +
-                   this->data_[3] * other[3];
+            return this->data_[1] * other[0] + this->data_[2] * other[1] +
+                   this->data_[3] * other[2];
         }
     };
 
@@ -728,7 +729,7 @@ namespace simbi {
         DUAL constexpr bool valid() const { return valid_; }
 
         // cache the data into memory-owning vector
-        DUAL constexpr auto cache() const
+        DUAL constexpr auto to_vector() const
         {
             return Vector<T, Dims, Type>{this->data_};
         }
@@ -745,7 +746,7 @@ namespace simbi {
         }
 
         // cache the data into memory-owning vector
-        DUAL constexpr auto cache() const
+        DUAL constexpr auto to_vector() const
         {
             return Vector<const T, Dims, Type>{this->data_};
         }
@@ -869,6 +870,87 @@ namespace simbi {
     }   // namespace unit_vectors
 
     namespace vecops {
+        // dot product
+        template <typename Vec1, typename Vec2>
+        DUAL constexpr auto dot(const Vec1& a, const Vec2& b)
+        {
+            using T = decltype(a[0] * b[0]);
+            T sum   = 0;
+            for (size_type ii = 0; ii < Vec1::dimensions; ii++) {
+                // accumulate the dot product
+                sum += a[ii] * b[ii];
+            }
+            return sum;
+
+            // const auto mult = fp::zip(a, b, [](const auto& x, const auto& y)
+            // {
+            //     return x * y;
+            // });
+            // return fp::sum(mult);
+        }
+
+        // norm
+        template <typename T, size_type Dims, VectorType Type>
+        DUAL constexpr auto norm(const Vector<T, Dims, Type>& vec)
+        {
+            return std::sqrt(dot(vec, vec));
+        }
+
+        // normalize
+        template <typename T, size_type Dims, VectorType Type>
+        DUAL constexpr auto normalize(const Vector<T, Dims, Type>& vec)
+        {
+            const auto n = norm(vec);
+            return n > 0 ? fp::map(vec, [n](const auto& x) { return x / n; })
+                         : vec;
+        }
+
+        // cross product
+        template <typename Vec1, typename Vec2>
+        DUAL constexpr auto cross(const Vec1& a, const Vec2& b)
+            requires(Vec1::dimensions == 3 && Vec2::dimensions == 3)
+        {
+            using T = decltype(a[0] * b[0]);
+            return Vector<T, 3, VectorType::GENERAL>(
+                a[1] * b[2] - a[2] * b[1],
+                a[2] * b[0] - a[0] * b[2],
+                a[0] * b[1] - b[0] * a[1]
+            );
+        }
+
+        // cross product magnitude for Dim = 2
+        template <typename Vec1, typename Vec2>
+        DUAL constexpr auto cross(const Vec1& a, const Vec2& b)
+            requires(Vec1::dimensions == 2 && Vec2::dimensions == 2)
+        {
+            return a[0] * b[1] - a[1] * b[0];
+        }
+
+        // specialized RMHD operations
+        template <
+            template <typename, size_type, VectorType> typename Vec,
+            typename T,
+            size_type Dims,
+            VectorType Type>
+        DUAL constexpr auto as_fourvec(
+            const Vec<T, Dims, Type>& bfield,
+            const auto& vel,
+            const auto lorentz
+        )
+            requires Magnetic<Type>
+        {
+            const auto vdB = dot(vel, bfield);
+            const auto b0  = lorentz * vdB;
+            const auto bs  = bfield * (1.0 / lorentz) + vel * lorentz * vdB;
+
+            return Vector<T, 4, VectorType::MAGNETIC_FOUR>{
+              b0,
+              bs[0],
+              bs[1],
+              bs[2]
+            };
+        }
+
         // helpers to rotate vectors by some angle
         template <typename Vec, typename T>
         DEV static constexpr auto rotate_2D(const Vec& vec, const T& angle)

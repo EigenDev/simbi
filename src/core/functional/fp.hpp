@@ -20,10 +20,56 @@
 #define FUNCTIONAL_PROGRAMMING_HPP
 
 #include "build_options.hpp"
+#include "core/types/utility/enums.hpp"
 #include <concepts>
 #include <functional>
 #include <type_traits>
 #include <utility>
+
+namespace simbi {
+    // forward declarations
+    template <typename T, size_type Dims, VectorType Type>
+    class Vector;
+}   // namespace simbi
+namespace simbi::detail {
+    // Primary template (fallback)
+    template <typename Container, typename NewValueType>
+    struct rebind_container {
+        // assuming some standard container type
+        using type = Container;
+    };
+
+    // specialization for Vectors lass
+    template <
+        template <typename, size_type, VectorType> typename Vec,
+        typename T,
+        size_type Dims,
+        VectorType Type,
+        typename NewValueType>
+    struct rebind_container<Vec<T, Dims, Type>, NewValueType> {
+        using type = Vector<NewValueType, Dims, Type>;
+    };
+
+    // specialization for Vectors with const T. We make it non-const to allow
+    // modification of the elements
+    template <
+        template <typename, size_type, VectorType> typename Vec,
+        typename T,
+        size_type Dims,
+        VectorType Type,
+        typename NewValueType>
+    struct rebind_container<Vec<const T, Dims, Type>, NewValueType> {
+        using type = Vector<NewValueType, Dims, Type>;
+    };
+
+    // helper alias for rebind_container
+    template <typename Container, typename NewValueType>
+    using rebind_container_t = typename rebind_container<
+        std::remove_cvref_t<Container>,
+        NewValueType>::type;
+
+    // TODO: add more specializations later
+}   // namespace simbi::detail
 
 namespace simbi::fp {
 
@@ -65,23 +111,31 @@ namespace simbi::fp {
     //     }
     // }
 
-    // map: transform each element with a function, returning a new container of
-    // the same type
+    // map: transform each element with a function, returning a new
+    // container of the same type
     template <Container C, typename F>
     DUAL constexpr auto map(const C& container, F&& f)
     {
-        using result_t = std::invoke_result_t<F, typename C::value_type>;
-        C result{};
+        using T                = typename C::value_type;
+        using base_container_t = std::remove_cvref_t<C>;
+        using result_t         = std::invoke_result_t<F, T>;
 
-        for (size_type i = 0; i < container.size(); ++i) {
-            result[i] = std::invoke(std::forward<F>(f), container[i]);
+        // rebind the container type to the result type
+        // but allow for the elements to be modified
+        using result_container_t =
+            typename detail::rebind_container<base_container_t, result_t>::type;
+
+        result_container_t result{};
+
+        for (size_type ii = 0; ii < container.size(); ++ii) {
+            result[ii] = std::invoke(std::forward<F>(f), container[ii]);
         }
 
         return result;
     }
 
-    // reduce: combine elements using a binary function, with optional initial
-    // value
+    // reduce: combine elements using a binary function, with optional
+    // initial value
     template <Container C, typename F>
     DUAL constexpr auto
     reduce(const C& container, F&& f, typename C::value_type init = {})
@@ -89,22 +143,22 @@ namespace simbi::fp {
         using value_t  = typename C::value_type;
         value_t result = init;
 
-        for (size_type i = 0; i < container.size(); ++i) {
-            result = std::invoke(std::forward<F>(f), result, container[i]);
+        for (size_type ii = 0; ii < container.size(); ++ii) {
+            result = std::invoke(std::forward<F>(f), result, container[ii]);
         }
 
         return result;
     }
 
-    // fold: like reduce but with explicit initial value of possibly different
-    // type
+    // fold: like reduce but with explicit initial value of possibly
+    // different type
     template <Container C, typename F, typename U>
     DUAL constexpr auto fold(const C& container, F&& f, U init)
     {
         U result = init;
 
-        for (size_type i = 0; i < container.size(); ++i) {
-            result = std::invoke(std::forward<F>(f), result, container[i]);
+        for (size_type ii = 0; ii < container.size(); ++ii) {
+            result = std::invoke(std::forward<F>(f), result, container[ii]);
         }
 
         return result;
@@ -118,10 +172,12 @@ namespace simbi::fp {
         using T2       = typename C2::value_type;
         using result_t = std::invoke_result_t<F, T1, T2>;
 
-        // use the type of the first container as the result container type
-        // but with the result_t as its value type
-        using some_container_t   = std::remove_cvref_t<C1>;
-        using result_container_t = std::remove_const_t<some_container_t>;
+        // if the container is const, then we need to remove the const
+        // and rebind the container type to the result type
+        // but allow for the elements to be modified
+        using base_container_t = std::remove_cvref_t<C1>;
+        using result_container_t =
+            detail::rebind_container_t<base_container_t, result_t>;
 
         result_container_t result{};
         const size_type min_size =
@@ -149,8 +205,8 @@ namespace simbi::fp {
         };
     }
 
-    // curry: transform a function that takes multiple arguments into a sequence
-    // of functions that each take a single argument
+    // curry: transform a function that takes multiple arguments into a
+    // sequence of functions that each take a single argument
     template <typename F>
     DUAL constexpr auto curry(F&& f)
     {

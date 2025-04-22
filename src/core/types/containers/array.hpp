@@ -101,33 +101,39 @@ namespace simbi {
         // array_t access
         DUAL constexpr T& operator[](size_type i)
         {
-#ifdef GPU_CODE
-            if (i >= N) {
-                // GPU-safe error handling
-                printf("array_t index out of bounds\n");
-                return data_[0];
+            if constexpr (global::on_gpu) {
+                if (i >= N) {
+                    // GPU-safe error handling
+                    printf("array_t index out of bounds\n");
+                    return data_[0];
+                }
             }
-#else
-            if (i >= N) {
-                throw std::out_of_range("array_t index out of bounds");
+            else {
+                if (i >= N) {
+                    std::cerr << "array_t index out of bounds\n";
+                    std::cin.get();
+                    throw std::out_of_range("array_t index out of bounds");
+                }
             }
-#endif
+
             return data_[i];
         }
 
         DUAL constexpr const T& operator[](size_type i) const
         {
-#ifdef GPU_CODE
-            if (i >= N) {
-                // GPU-safe error handling
-                printf("array_t index out of bounds\n");
-                return data_[0];
+            if constexpr (global::on_gpu) {
+                if (i >= N) {
+                    // GPU-safe error handling
+                    printf("array_t index out of bounds\n");
+                    return data_[0];
+                }
             }
-#else
-            if (i >= N) {
-                throw std::out_of_range("array_t index out of bounds");
+            else {
+                if (i >= N) {
+                    throw std::out_of_range("array_t index out of bounds");
+                }
             }
-#endif
+
             return data_[i];
         }
 
@@ -141,48 +147,51 @@ namespace simbi {
             using pointer           = T*;
             using reference         = T&;
 
-            DUAL iterator(T* ptr) : ptr_(ptr) {}
+            constexpr iterator() = default;
+            DUAL constexpr iterator(T* ptr) : ptr_(ptr) {}
 
-            DUAL reference operator*() { return *ptr_; }
-            DUAL pointer operator->() { return ptr_; }
+            DUAL constexpr reference operator*() { return *ptr_; }
+            DUAL constexpr pointer operator->() { return ptr_; }
+            DUAL constexpr reference operator*() const { return *ptr_; }
+            DUAL constexpr pointer operator->() const { return ptr_; }
 
-            DUAL iterator& operator++()
+            DUAL constexpr iterator& operator++()
             {
                 ++ptr_;
                 return *this;
             }
 
-            DUAL iterator operator++(int)
+            DUAL constexpr iterator operator++(int)
             {
                 iterator tmp = *this;
                 ++(*this);
                 return tmp;
             }
-            DUAL iterator& operator--()
+            DUAL constexpr iterator& operator--()
             {
                 --ptr_;
                 return *this;
             }
-            DUAL iterator operator--(int)
+            DUAL constexpr iterator operator--(int)
             {
                 iterator tmp = *this;
                 --(*this);
                 return tmp;
             }
 
-            DUAL bool operator==(const iterator& other) const
+            DUAL constexpr bool operator==(const iterator& other) const
             {
                 return ptr_ == other.ptr_;
             }
-            DUAL bool operator!=(const iterator& other) const
+            DUAL constexpr bool operator!=(const iterator& other) const
             {
                 return !(*this == other);
             }
-            DUAL bool operator<(const iterator& other) const
+            DUAL constexpr bool operator<(const iterator& other) const
             {
                 return ptr_ < other.ptr_;
             }
-            DUAL bool operator>(const iterator& other) const
+            DUAL constexpr bool operator>(const iterator& other) const
             {
                 return ptr_ > other.ptr_;
             }
@@ -200,48 +209,49 @@ namespace simbi {
             using pointer           = const T*;
             using reference         = const T&;
 
-            const_iterator(const T* ptr) : ptr_(ptr) {}
+            constexpr const_iterator() = default;
+            DUAL constexpr const_iterator(const T* ptr) : ptr_(ptr) {}
 
-            DUAL reference operator*() { return *ptr_; }
-            DUAL pointer operator->() { return ptr_; }
+            DUAL constexpr reference operator*() { return *ptr_; }
+            DUAL constexpr pointer operator->() { return ptr_; }
 
-            DUAL const_iterator& operator++()
+            DUAL constexpr const_iterator& operator++()
             {
                 ++ptr_;
                 return *this;
             }
 
-            DUAL const_iterator operator++(int)
+            DUAL constexpr const_iterator operator++(int)
             {
                 const_iterator tmp = *this;
                 ++(*this);
                 return tmp;
             }
-            DUAL const_iterator& operator--()
+            DUAL constexpr const_iterator& operator--()
             {
                 --ptr_;
                 return *this;
             }
-            DUAL const_iterator operator--(int)
+            DUAL constexpr const_iterator operator--(int)
             {
                 const_iterator tmp = *this;
                 --(*this);
                 return tmp;
             }
 
-            DUAL bool operator==(const const_iterator& other) const
+            DUAL constexpr bool operator==(const const_iterator& other) const
             {
                 return ptr_ == other.ptr_;
             }
-            DUAL bool operator!=(const const_iterator& other) const
+            DUAL constexpr bool operator!=(const const_iterator& other) const
             {
                 return !(*this == other);
             }
-            DUAL bool operator<(const const_iterator& other) const
+            DUAL constexpr bool operator<(const const_iterator& other) const
             {
                 return ptr_ < other.ptr_;
             }
-            DUAL bool operator>(const const_iterator& other) const
+            DUAL constexpr bool operator>(const const_iterator& other) const
             {
                 return ptr_ > other.ptr_;
             }
@@ -249,19 +259,96 @@ namespace simbi {
           private:
             const T* ptr_;
         };
+
+        class reverse_iterator
+        {
+          public:
+            using iterator_category = std::random_access_iterator_tag;
+            using value_type        = T;
+            using difference_type   = std::ptrdiff_t;
+            using pointer           = T*;
+            using reference         = T&;
+
+            constexpr reverse_iterator() = default;
+            DUAL constexpr reverse_iterator(T* ptr) : ptr_(ptr) {}
+
+            DUAL constexpr reference operator*() { return *ptr_; }
+            DUAL constexpr pointer operator->() { return ptr_; }
+
+            DUAL constexpr reverse_iterator& operator++()
+            {
+                --ptr_;
+                return *this;
+            }
+
+            DUAL constexpr reverse_iterator operator++(int)
+            {
+                reverse_iterator tmp = *this;
+                --(*this);
+                return tmp;
+            }
+
+          private:
+            T* ptr_;
+        };
+
+        class const_reverse_iterator
+        {
+          public:
+            using iterator_category = std::random_access_iterator_tag;
+            using value_type        = T;
+            using difference_type   = std::ptrdiff_t;
+            using pointer           = const T*;
+            using reference         = const T&;
+
+            constexpr const_reverse_iterator() = default;
+            DUAL constexpr const_reverse_iterator(const T* ptr) : ptr_(ptr) {}
+
+            DUAL constexpr reference operator*() { return *ptr_; }
+            DUAL constexpr pointer operator->() { return ptr_; }
+
+            DUAL constexpr const_reverse_iterator& operator++()
+            {
+                --ptr_;
+                return *this;
+            }
+
+            DUAL constexpr const_reverse_iterator operator++(int)
+            {
+                const_reverse_iterator tmp = *this;
+                --(*this);
+                return tmp;
+            }
+
+          private:
+            const T* ptr_;
+        };
+
         DUAL iterator begin() { return iterator(data_); }
         DUAL iterator end() { return iterator(data_ + N); }
         DUAL const_iterator begin() const { return const_iterator(data_); }
         DUAL const_iterator end() const { return const_iterator(data_ + N); }
         DUAL const_iterator cbegin() const { return begin(); }
         DUAL const_iterator cend() const { return end(); }
-        DUAL const_iterator rbegin() const
+        // reverse iterators
+        DUAL reverse_iterator rbegin() { return reverse_iterator(data_ + N); }
+        DUAL reverse_iterator rend() { return reverse_iterator(data_); }
+        DUAL const_reverse_iterator rbegin() const
         {
-            return const_iterator(data_ + N - 1);
+            return const_reverse_iterator(data_ + N);
         }
-        DUAL const_iterator rend() const { return const_iterator(data_ - 1); }
-        DUAL const_iterator crbegin() const { return rbegin(); }
-        DUAL const_iterator crend() const { return rend(); }
+        DUAL const_reverse_iterator rend() const
+        {
+            return const_reverse_iterator(data_);
+        }
+        DUAL const_reverse_iterator crbegin() const
+        {
+            return const_reverse_iterator(data_ + N);
+        }
+        DUAL const_reverse_iterator crend() const
+        {
+            return const_reverse_iterator(data_);
+        }
 
       private:
         T data_[N];
