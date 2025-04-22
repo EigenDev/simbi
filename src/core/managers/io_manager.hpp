@@ -271,8 +271,8 @@ namespace simbi {
             const Conserved& conserved_data
         ) const
         {
-            auto local_results                     = conserved_data;
-            spatial_vector_t<real, 3> local_coords = {0.0, 0.0, 0.0};
+            auto local_results = conserved_data;
+            spatial_vector_t<real, 3> local_coords{0.0, 0.0, 0.0};
             for (size_type ii = 0; ii < Dims; ++ii) {
                 local_coords[ii] = coords[ii];
             }
