@@ -84,8 +84,8 @@ namespace simbi {
         { t.size() } -> std::convertible_to<size_type>;
 
         // must inherit from BaseStorage
-        requires std::
-            is_base_of_v<BaseStorage<typename T::value_type, T::dimensions>, T>;
+        // requires std::
+        // is_base_of_v<BaseStorage<typename T::value_type, T::dimensions>, T>;
     };
 
     struct MignoneDelZannaVariables {
@@ -602,19 +602,19 @@ namespace simbi {
         // physical calculations
         DUAL real momentum_magnitude() const
         {
-            return std::sqrt(momentum().dot(momentum()));
+            return std::sqrt(vecops::dot(momentum(), momentum()));
         }
 
         DUAL real magnetic_energy() const
             requires sim_type::MHD<R>
         {
-            return 0.5 * bfield().dot(bfield());
+            return 0.5 * vecops::dot(bfield(), bfield());
         }
 
         DUAL real magnetic_norm_squared() const
             requires sim_type::MHD<R>
         {
-            return bfield().dot(bfield());
+            return vecops::dot(bfield(), bfield());
         }
 
         DUAL real total_energy() const
@@ -664,7 +664,7 @@ namespace simbi {
             // and store it back into the magnetic field for later electric
             // field retrieval
             if constexpr (Dims == 3) {
-                const auto efield = -nhat.cross(bfield());
+                const auto efield = -vecops::cross(nhat, bfield());
                 // if (ehat == 1) {
                 //     std::cout << "Bfield: " << bfield() << std::endl;
                 //     std::cout << "Efield: " << efield << std::endl;
@@ -695,7 +695,8 @@ namespace simbi {
                 return dens() * cs2;
             }
             const auto vel = momentum() / dens();
-            return (gamma - 1.0) * (nrg() - 0.5 * dens() * vel.dot(vel));
+            return (gamma - 1.0) *
+                   (nrg() - 0.5 * dens() * vecops::dot(vel, vel));
         }
 
         // MdZ accessors
@@ -888,20 +889,18 @@ namespace simbi {
         spatial_momentum(const real gamma) const
         {
             if constexpr (R == Regime::SRHD) {
-                return (
-                    velocity() * enthalpy_density(gamma) *
-                    lorentz_factor_squared()
-                );
+                return (velocity() * enthalpy_density(gamma) *
+                        lorentz_factor_squared())
+                    .template as_type<VectorType::GENERAL>();
             }
             else if constexpr (R == Regime::RMHD) {
-                return (
-                    velocity() *
-                        (enthalpy(gamma) * rho() * lorentz_factor_squared() +
-                         bsquared()) -
-                    bfield() * (velocity().dot(bfield()))
-                );
+                return (velocity() * (enthalpy(gamma) * rho() *
+                                          lorentz_factor_squared() +
+                                      bsquared()) -
+                        bfield() * vecops::dot(velocity(), bfield()))
+                    .template as_type<VectorType::GENERAL>();
             }
-            return velocity() * rho();
+            return (velocity() * rho()).template as_type<VectorType::GENERAL>();
         }
 
         DEV auto calc_magnetic_four_vector() const
@@ -909,15 +908,21 @@ namespace simbi {
             if constexpr (R != Regime::RMHD) {
                 if constexpr (!global::on_gpu) {
                     static const ZeroMagneticFourVectorView zero_view;
-                    return zero_view.cache();
+                    return zero_view.to_vector();
                 }
                 else {
                     ZeroMagneticFourVectorView zero_view;
-                    return zero_view.cache();
+                    return zero_view.to_vector();
                     // return magnetic_four_vector_t<real>{};
                 }
             }
-            return bfield().as_fourvec(velocity(), lorentz_factor());
+            else {
+                return vecops::as_fourvec(
+                    bfield(),
+                    velocity(),
+                    lorentz_factor()
+                );
+            }
         }
 
         DUAL constexpr real lorentz_factor() const
@@ -958,15 +963,18 @@ namespace simbi {
 
         DUAL constexpr real vsquared() const
         {
-            return velocity().dot(velocity());
+            return vecops::dot(velocity(), velocity());
         }
 
-        DUAL constexpr real bsquared() const { return bfield().dot(bfield()); }
+        DUAL constexpr real bsquared() const
+        {
+            return vecops::dot(bfield(), bfield());
+        }
 
         DUAL constexpr real vdotb() const
         {
             if constexpr (sim_type::MHD<R>) {
-                return velocity().dot(bfield());
+                return vecops::dot(velocity(), bfield());
             }
             else {
                 return static_cast<real>(0.0);
@@ -1041,12 +1049,12 @@ namespace simbi {
         DUAL constexpr auto electric_field() const
             requires sim_type::MHD<R>
         {
-            return -velocity().cross(bfield());
+            return -vecops::cross(velocity(), bfield());
         }
 
         DUAL constexpr auto electric_field(luint ehat) const
         {
-            return -velocity().cross(ehat - 1, bfield());
+            return -vecops::cross(velocity(), bfield())[ehat - 1];
         }
 
         DUAL constexpr real ecomponent(const luint nhat) const
@@ -1076,9 +1084,9 @@ namespace simbi {
         DUAL anyConserved<Dims, R>
         to_flux(const real gamma, const unit_vector_t<Dims>& nhat) const
         {
-            const auto vnorm = velocity().dot(nhat);
+            const auto vnorm = vecops::dot(velocity(), nhat);
             const auto mom   = spatial_momentum(gamma);
-            const auto mnorm = mom.dot(nhat);
+            const auto mnorm = vecops::dot(mom, nhat);
             if constexpr (R == Regime::NEWTONIAN) {
                 return {
                   mnorm,
@@ -1098,8 +1106,9 @@ namespace simbi {
             }
             else {
                 if constexpr (Dims == 3) {
-                    const auto bnorm     = bfield().dot(nhat);
-                    const auto induction = nhat.cross(electric_field());
+                    const auto bnorm = vecops::dot(bfield(), nhat);
+                    const auto induction =
+                        vecops::cross(nhat, electric_field());
                     const auto bmu_spatial =
                         bfield() / lorentz_factor() +
                         velocity() * lorentz_factor() * vdotb();
@@ -1110,7 +1119,7 @@ namespace simbi {
                           bmu_spatial * bnorm / lorentz_factor(),
                       mnorm - vnorm * d,
                       chi() * d * vnorm,
-                      induction.as_magnetic()
+                      induction.template as_type<VectorType::MAGNETIC>(),
                     };
                 }
                 else {

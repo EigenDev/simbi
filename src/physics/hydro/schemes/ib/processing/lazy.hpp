@@ -20,7 +20,7 @@ namespace simbi::ibsystem {
         };
 
         // ctor takes system and requested capability
-        LazyCapabilityView(
+        DEV LazyCapabilityView(
             const ComponentBodySystem<T, Dims>& system,
             BodyCapability capability
         )
@@ -91,7 +91,15 @@ namespace simbi::ibsystem {
             DUAL reference operator*() const
             {
                 if (!current_value_) {
-                    throw std::runtime_error("Dereferencing invalid iterator");
+                    if constexpr (global::on_gpu) {
+                        printf("Dereferencing invalid iterator\n");
+                        return *current_value_;
+                    }
+                    else {
+                        throw std::runtime_error(
+                            "Dereferencing invalid iterator"
+                        );
+                    }
                 }
                 return *current_value_;
             }
@@ -100,7 +108,15 @@ namespace simbi::ibsystem {
             DUAL pointer operator->() const
             {
                 if (!current_value_) {
-                    throw std::runtime_error("Dereferencing invalid iterator");
+                    if constexpr (global::on_gpu) {
+                        printf("Dereferencing invalid iterator\n");
+                        return &(*current_value_);
+                    }
+                    else {
+                        throw std::runtime_error(
+                            "Dereferencing invalid iterator"
+                        );
+                    }
                 }
                 return &(*current_value_);
             }

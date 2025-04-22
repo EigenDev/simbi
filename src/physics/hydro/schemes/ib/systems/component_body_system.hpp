@@ -197,8 +197,6 @@ namespace simbi::ibsystem {
             new_system.bodies_[index] = updated_body;
 
             // update specialized arrays if capabilities changed
-            // (this might require more complex logic to maintain GPU-friendly
-            // arrays)
 
             return new_system;
         }

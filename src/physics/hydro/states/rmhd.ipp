@@ -60,17 +60,17 @@ void RMHD<dim>::cons2prim_impl()
             const real isqrtd = std::sqrt(invd);
             const real q      = tau * invd;
             const auto rvec   = mom * invd;
-            const auto rsq    = rvec.dot(rvec);
+            const auto rsq    = vecops::dot(rvec, rvec);
             const real rmag   = std::sqrt(rsq);
             const auto hvec   = bfield * isqrtd;
-            const auto beesq  = hvec.dot(hvec) + global::epsilon;
-            const auto rdb    = rvec.dot(hvec);
+            const auto beesq  = vecops::dot(hvec, hvec) + global::epsilon;
+            const auto rdb    = vecops::dot(rvec, hvec);
             const real rdbsq  = rdb * rdb;
             // r-parallel Eq. (25.a)
             const auto rparr = rdb / beesq * hvec;
             // r-perpendicular, Eq. (25.b)
             const auto rperp = rvec - rparr;
-            const auto rpsq  = rperp.dot(rperp);
+            const auto rpsq  = vecops::dot(rperp, rperp);
 
             // We use the false position method to solve for the roots
             real mu_lower = 0.0;
@@ -204,17 +204,17 @@ DEV auto RMHD<dim>::cons2prim_single(const auto& cons) const
     const real isqrtd = std::sqrt(invd);
     const real q      = tau * invd;
     const auto rvec   = mom * invd;
-    const auto rsq    = rvec.dot(rvec);
+    const auto rsq    = vecops::dot(rvec, rvec);
     const real rmag   = std::sqrt(rsq);
     const auto hvec   = bfield * isqrtd;
-    const auto beesq  = hvec.dot(hvec) + global::epsilon;
-    const auto rdb    = rvec.dot(hvec);
+    const auto beesq  = vecops::dot(hvec, hvec) + global::epsilon;
+    const auto rdb    = vecops::dot(rvec, hvec);
     const real rdbsq  = rdb * rdb;
     // r-parallel Eq. (25.a)
     const auto rparr = rdb / beesq * hvec;
     // r-perpendicular, Eq. (25.b)
     const auto rperp = rvec - rparr;
-    const auto rpsq  = rperp.dot(rperp);
+    const auto rpsq  = vecops::dot(rperp, rperp);
 
     // We use the false position method to solve for the roots
     real mu_lower = 0.0;

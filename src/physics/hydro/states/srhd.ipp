@@ -75,8 +75,9 @@ void SRHD<dim>::cons2prim_impl()
 
             const auto inv_et   = 1.0 / (tau + d + peq);
             const auto velocity = svec * inv_et;
-            const auto w        = 1.0 / std::sqrt(1.0 - velocity.dot(velocity));
-            pguess              = peq;
+            const auto w =
+                1.0 / std::sqrt(1.0 - vecops::dot(velocity, velocity));
+            pguess = peq;
             return primitive_t{
               d / w,
               velocity * (global::using_four_velocity ? w : 1.0),
@@ -266,9 +267,9 @@ DUAL auto SRHD<dim>::calc_star_state(
     const auto& fhlls   = hll_flux.momentum();
     const auto& fhlltau = hll_flux.nrg();
     const auto e        = uhlltau + uhlld;
-    const auto snorm    = uhlls.dot(unit_vectors::get<dim>(nhat));
+    const auto snorm    = vecops::dot(uhlls, unit_vectors::get<dim>(nhat));
     const auto fe       = fhlltau + fhlld;
-    const auto fsnorm   = fhlls.dot(unit_vectors::get<dim>(nhat));
+    const auto fsnorm   = vecops::dot(fhlls, unit_vectors::get<dim>(nhat));
 
     //------Calculate the contact wave velocity and pressure
     const auto a     = fe;

@@ -236,9 +236,8 @@ namespace simbi::ibsystem::functions {
 
                 accumulator.accumulate(body_delta);
             }
-
-            return fluid_state;
         }
+        return fluid_state;
     }
 }   // namespace simbi::ibsystem::functions
 #endif

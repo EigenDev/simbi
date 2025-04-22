@@ -33,13 +33,11 @@ namespace simbi::ibsystem::body_functions {
         )
         {
             using conserved_t = Primitive::counterpart_t;
-
-            auto new_body = body;
-
             // Calculate distance vector from body to cell
             const auto softening_length = body.softening_length();
-            const auto r  = mesh_cell.cartesian_centroid() - body.position;
-            const auto r2 = r.dot(r) + softening_length * softening_length;
+            const auto r = mesh_cell.cartesian_centroid() - body.position;
+            const auto r2 =
+                vecops::dot(r, r) + softening_length * softening_length;
             // Gravitational force on fluid element (G = 1)
             const auto f_cart = body.mass * r / (r2 * std::sqrt(r2));
 
@@ -53,8 +51,7 @@ namespace simbi::ibsystem::body_functions {
             const auto v_new = (prim.spatial_momentum(context.gamma) + dp) /
                                prim.labframe_density();
             const auto v_avg = 0.5 * (v_old + v_new);
-            const auto dE    = dp.dot(v_avg);
-            const auto state = conserved_t{0.0, dp, dE};
+            const auto dE    = vecops::dot(v_avg, dp);
 
             // Apply two-way coupling if enabled
             BodyDelta<T, Dims> delta{body_idx, {}, 0, 0, 0};
@@ -65,7 +62,7 @@ namespace simbi::ibsystem::body_functions {
                     prim.labframe_density() * mesh_cell.volume() * f_cart;
             }
 
-            return {state, delta};
+            return {conserved_t(0.0, dp, dE), delta};
         }
 
     }   // namespace gravitational
@@ -123,8 +120,8 @@ namespace simbi::ibsystem::body_functions {
                 // https://doi.org/10.1088/0004-637X/752/1/30
                 if (mach_number > 0.1 && rel_position.norm() > 0.0) {
                     // Cosine of angle between position and velocity vectors
-                    T cos_angle = rel_position.dot(rel_velocity) /
-                                  (rel_position.norm() * vel_mag);
+                    T cos_angle = vecops::dot(rel_position, rel_velocity) /
+                                  (vecops::norm(rel_position) * vel_mag);
 
                     // directional weighting (strongest upstream, weakest
                     // downstream) Factor ranges from ~0.5 (downstream) to ~1.5
@@ -332,10 +329,16 @@ namespace simbi::ibsystem::body_functions {
             // Calculate specific angular momentum
             T specific_angular_momentum = [&]() {
                 if constexpr (Dims < 3) {
-                    return r_vector.cross(rel_velocity);
+                    // 2D case: use z-component of angular momentum
+                    if constexpr (Dims == 1) {
+                        return 0.0;
+                    }
+                    else {
+                        return vecops::cross(r_vector, rel_velocity);
+                    }
                 }
                 else {
-                    return r_vector.cross(rel_velocity).norm();
+                    return vecops::cross(r_vector, rel_velocity).norm();
                 }
             }();
 
@@ -386,11 +389,11 @@ namespace simbi::ibsystem::body_functions {
                     max_accretion * prim.energy(context.gamma);
 
                 // Create conserved state with removed material
-                conserved_t result{
-                  -accreted_density,
-                  -accreted_momentum,
-                  -accreted_energy
-                };
+                conserved_t result(
+                    -accreted_density,
+                    -accreted_momentum,
+                    -accreted_energy
+                );
 
                 // Update body statistics
                 const auto dV              = mesh_cell.volume();
@@ -415,13 +418,13 @@ namespace simbi::ibsystem::body_functions {
             T a2 = semi_major - a1;
 
             if constexpr (Dims == 2) {
-                spatial_vector_t<T, Dims> r1 = {a1, 0.0};
-                spatial_vector_t<T, Dims> r2 = {-a2, 0.0};
+                spatial_vector_t<T, Dims> r1{a1, 0.0};
+                spatial_vector_t<T, Dims> r2{-a2, 0.0};
                 return {r1, r2};
             }
             else {
-                spatial_vector_t<T, Dims> r1 = {a1, 0.0, 0.0};
-                spatial_vector_t<T, Dims> r2 = {-a2, 0.0, 0.0};
+                spatial_vector_t<T, Dims> r1{a1, 0.0, 0.0};
+                spatial_vector_t<T, Dims> r2{-a2, 0.0, 0.0};
                 return {r1, r2};
             }
         }
@@ -444,13 +447,13 @@ namespace simbi::ibsystem::body_functions {
                 T a2               = separation - a1;
 
                 if constexpr (Dims == 2) {
-                    spatial_vector_t<T, Dims> v1 = {0.0, phi_dot * a2};
-                    spatial_vector_t<T, Dims> v2 = {0.0, -phi_dot * a1};
+                    spatial_vector_t<T, Dims> v1{0.0, phi_dot * a2};
+                    spatial_vector_t<T, Dims> v2{0.0, -phi_dot * a1};
                     return {v1, v2};
                 }
                 else {
-                    spatial_vector_t<T, Dims> v1 = {0.0, phi_dot * a2, 0.0};
-                    spatial_vector_t<T, Dims> v2 = {0.0, -phi_dot * a1, 0.0};
+                    spatial_vector_t<T, Dims> v1{0.0, phi_dot * a2, 0.0};
+                    spatial_vector_t<T, Dims> v2{0.0, -phi_dot * a1, 0.0};
                     return {v1, v2};
                 }
             }

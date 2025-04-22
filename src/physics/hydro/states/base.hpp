@@ -259,7 +259,7 @@ namespace simbi {
             const auto v_new = (prims.spatial_momentum(gamma_) + dp_dt) /
                                prims.labframe_density();
             const auto v_avg = 0.5 * (v_old + v_new);
-            const auto dE_dt = dp_dt.dot(v_avg);
+            const auto dE_dt = vecops::dot(dp_dt, v_avg);
 
             // gravity source term is rho * g_vec for momentum and
             // rho * v.dot(g_vec) for energy
