@@ -56,37 +56,29 @@
 namespace simbi {
 
     struct nothing_t {
-        DUAL constexpr explicit nothing_t()
-            : error_message_(nullptr), error_code(ErrorCode::NONE)
-        {
-        }
+        DUAL constexpr explicit nothing_t() : error_code(ErrorCode::NONE) {}
         DUAL constexpr explicit nothing_t(const char* message)
-            : error_message_(message), error_code(ErrorCode::NONE)
+            : error_code(ErrorCode::NONE)
         {
         }
-        DUAL constexpr explicit nothing_t(ErrorCode code)
-            : error_message_(nullptr), error_code(code)
-        {
-        }
+        DUAL constexpr explicit nothing_t(ErrorCode code) : error_code(code) {}
 
         // copy constructor
         DUAL constexpr nothing_t(const nothing_t& other)
-            : error_message_(other.error_message_), error_code(other.error_code)
+            : error_code(other.error_code)
         {
         }
         // move constructor
         DUAL constexpr nothing_t(nothing_t&& other) noexcept
-            : error_message_(other.error_message_), error_code(other.error_code)
+            : error_code(other.error_code)
         {
-            other.error_message_ = nullptr;
-            other.error_code     = ErrorCode::NONE;
+            other.error_code = ErrorCode::NONE;
         }
         // copy assignment operator
         DUAL constexpr nothing_t& operator=(const nothing_t& other)
         {
             if (this != &other) {
-                error_message_ = other.error_message_;
-                error_code     = other.error_code;
+                error_code = other.error_code;
             }
             return *this;
         }
@@ -94,15 +86,12 @@ namespace simbi {
         DUAL constexpr nothing_t& operator=(nothing_t&& other) noexcept
         {
             if (this != &other) {
-                error_message_       = other.error_message_;
-                error_code           = other.error_code;
-                other.error_message_ = nullptr;
-                other.error_code     = ErrorCode::NONE;
+                error_code       = other.error_code;
+                other.error_code = ErrorCode::NONE;
             }
             return *this;
         }
 
-        const char* error_message_;
         ErrorCode error_code;
     };
 
@@ -116,33 +105,23 @@ namespace simbi {
         using value_type = T;
 
         DUAL constexpr Maybe()
-            : valid{false},
-              this_value{},
-              error_message_(nullptr),
-              error_code_(ErrorCode::NONE)
+            : valid{false}, this_value{}, error_code_(ErrorCode::NONE)
         {
         }
 
         DUAL constexpr Maybe(nothing_t nothing)
-            : valid{false},
-              this_value{},
-              error_message_(nothing.error_message_),
-              error_code_(nothing.error_code)
+            : valid{false}, this_value{}, error_code_(nothing.error_code)
         {
         }
 
         DUAL constexpr Maybe(const T& value)
-            : valid{true},
-              this_value{value},
-              error_message_(nullptr),
-              error_code_(ErrorCode::NONE)
+            : valid{true}, this_value{value}, error_code_(ErrorCode::NONE)
         {
         }
 
         DUAL constexpr Maybe(T&& value)
             : valid{true},
               this_value{std::move(value)},
-              error_message_(nullptr),
               error_code_(ErrorCode::NONE)
         {
         }
@@ -150,7 +129,6 @@ namespace simbi {
         DUAL constexpr Maybe(const Maybe& other)
             : valid{other.valid},
               this_value{other.this_value},
-              error_message_(other.error_message_),
               error_code_(other.error_code_)
         {
         }
@@ -158,13 +136,11 @@ namespace simbi {
         DUAL constexpr Maybe(Maybe&& other) noexcept
             : valid{other.valid},
               this_value{std::move(other.this_value)},
-              error_message_(other.error_message_),
               error_code_(other.error_code_)
         {
             // Clear the source
-            other.valid          = false;
-            other.error_message_ = nullptr;
-            other.error_code_    = ErrorCode::NONE;
+            other.valid       = false;
+            other.error_code_ = ErrorCode::NONE;
         }
 
         // Copy assignment operator
@@ -174,15 +150,13 @@ namespace simbi {
                 valid = other.valid;
 
                 if (valid) {
-                    this_value     = other.this_value;
-                    error_message_ = nullptr;
-                    error_code_    = ErrorCode::NONE;
+                    this_value  = other.this_value;
+                    error_code_ = ErrorCode::NONE;
                 }
                 else {
                     // Default construct this_value when invalid
-                    this_value     = T{};
-                    error_message_ = other.error_message_;
-                    error_code_    = other.error_code_;
+                    this_value  = T{};
+                    error_code_ = other.error_code_;
                 }
             }
             return *this;
@@ -195,21 +169,18 @@ namespace simbi {
                 valid = other.valid;
 
                 if (valid) {
-                    this_value     = std::move(other.this_value);
-                    error_message_ = nullptr;
-                    error_code_    = ErrorCode::NONE;
+                    this_value  = std::move(other.this_value);
+                    error_code_ = ErrorCode::NONE;
                 }
                 else {
                     // Default construct this_value when invalid
-                    this_value     = T{};
-                    error_message_ = other.error_message_;
-                    error_code_    = other.error_code_;
+                    this_value  = T{};
+                    error_code_ = other.error_code_;
                 }
 
                 // Clear the source
-                other.valid          = false;
-                other.error_message_ = nullptr;
-                other.error_code_    = ErrorCode::NONE;
+                other.valid       = false;
+                other.error_code_ = ErrorCode::NONE;
             }
             return *this;
         }
@@ -217,20 +188,18 @@ namespace simbi {
         // Value assignment operator
         DUAL constexpr Maybe& operator=(const T& value)
         {
-            valid          = true;
-            this_value     = value;
-            error_message_ = nullptr;
-            error_code_    = ErrorCode::NONE;
+            valid       = true;
+            this_value  = value;
+            error_code_ = ErrorCode::NONE;
             return *this;
         }
 
         // Move value assignment operator
         DUAL constexpr Maybe& operator=(T&& value)
         {
-            valid          = true;
-            this_value     = std::move(value);
-            error_message_ = nullptr;
-            error_code_    = ErrorCode::NONE;
+            valid       = true;
+            this_value  = std::move(value);
+            error_code_ = ErrorCode::NONE;
             return *this;
         }
 
@@ -241,11 +210,6 @@ namespace simbi {
         DUAL constexpr T& value() & { return this_value; }
 
         DUAL constexpr T value() && { return std::move(this_value); }
-
-        DUAL constexpr const char* error_message() const
-        {
-            return error_message_;
-        }
         DUAL constexpr ErrorCode error_code() const { return error_code_; }
 
         template <typename U>
@@ -504,7 +468,6 @@ namespace simbi {
       private:
         bool valid;
         T this_value;
-        const char* error_message_;
         ErrorCode error_code_;
     };
 
