@@ -612,6 +612,11 @@ namespace simbi {
             return Vector<T, Dims, NewType>(storage_);
         }
 
+        DUAL constexpr auto as_general() const
+        {
+            return Vector<T, Dims, VectorType::GENERAL>(storage_);
+        }
+
         // implicit conversion to general vector type
         DUAL constexpr operator Vector<T, Dims, VectorType::GENERAL>() const
         {

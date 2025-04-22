@@ -891,16 +891,16 @@ namespace simbi {
             if constexpr (R == Regime::SRHD) {
                 return (velocity() * enthalpy_density(gamma) *
                         lorentz_factor_squared())
-                    .template as_type<VectorType::GENERAL>();
+                    .as_general();
             }
             else if constexpr (R == Regime::RMHD) {
                 return (velocity() * (enthalpy(gamma) * rho() *
                                           lorentz_factor_squared() +
                                       bsquared()) -
                         bfield() * vecops::dot(velocity(), bfield()))
-                    .template as_type<VectorType::GENERAL>();
+                    .as_general();
             }
-            return (velocity() * rho()).template as_type<VectorType::GENERAL>();
+            return (velocity() * rho()).as_general();
         }
 
         DEV auto calc_magnetic_four_vector() const
