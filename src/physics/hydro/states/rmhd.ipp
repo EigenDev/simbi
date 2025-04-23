@@ -1331,19 +1331,22 @@ void RMHD<dim>::sync_flux_boundaries()
         this->full_xvertex_policy(),
         fri,
         fri.contract({1, 1, 0}),
-        this->bcs()
+        this->bcs(),
+        this->mesh()
     );
     this->conserved_boundary_manager().template sync_boundaries<flux_tag>(
         this->full_yvertex_policy(),
         gri,
         gri.contract({1, 0, 1}),
-        this->bcs()
+        this->bcs(),
+        this->mesh()
     );
     this->conserved_boundary_manager().template sync_boundaries<flux_tag>(
         this->full_zvertex_policy(),
         hri,
         hri.contract({0, 1, 1}),
-        this->bcs()
+        this->bcs(),
+        this->mesh()
     );
 }
 
@@ -1354,19 +1357,22 @@ void RMHD<dim>::sync_magnetic_boundaries()
         this->full_xvertex_policy(),
         bstag1,
         bstag1.contract({1, 1, 0}),
-        this->bcs()
+        this->bcs(),
+        this->mesh()
     );
     bfield_man_.sync_boundaries(
         this->full_yvertex_policy(),
         bstag2,
         bstag2.contract({1, 0, 1}),
-        this->bcs()
+        this->bcs(),
+        this->mesh()
     );
     bfield_man_.sync_boundaries(
         this->full_zvertex_policy(),
         bstag3,
         bstag3.contract({0, 1, 1}),
-        this->bcs()
+        this->bcs(),
+        this->mesh()
     );
 
     // check if the magnetic field is divergence free

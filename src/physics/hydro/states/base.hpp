@@ -276,8 +276,8 @@ namespace simbi {
                 cons_,
                 cons_.contract(halo_radius()),
                 bcs(),
-                io_manager_.get(),
                 mesh_,
+                io_manager_.get(),
                 time(),
                 time_step(),
                 need_corners
