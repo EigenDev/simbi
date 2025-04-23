@@ -488,10 +488,7 @@ namespace simbi {
 
         // element-wise addition
         template <typename U, size_type OtherDims, VectorType OtherType>
-        DUAL constexpr Vector<
-            detail::promote_t<T, U>,
-            Dims,
-            detail::promote_vector_t<Type, OtherType>>
+        DUAL constexpr auto
         operator+(const Vector<U, OtherDims, OtherType>& other) const
         {
             // traditional for loop version
@@ -513,10 +510,7 @@ namespace simbi {
 
         // element-wise subtraction
         template <typename U, size_type OtherDims, VectorType OtherType>
-        DUAL constexpr Vector<
-            detail::promote_t<T, U>,
-            Dims,
-            detail::promote_vector_t<Type, OtherType>>
+        DUAL constexpr auto
         operator-(const Vector<U, OtherDims, OtherType>& other) const
         {
             // traditional for loop version
@@ -618,10 +612,10 @@ namespace simbi {
         }
 
         // implicit conversion to general vector type
-        DUAL constexpr operator Vector<T, Dims, VectorType::GENERAL>() const
-        {
-            return Vector<T, Dims, VectorType::GENERAL>(storage_);
-        }
+        // DUAL constexpr operator Vector<T, Dims, VectorType::GENERAL>() const
+        // {
+        //     return Vector<T, Dims, VectorType::GENERAL>(storage_);
+        // }
 
         // structured binding support
         template <size_t I>
