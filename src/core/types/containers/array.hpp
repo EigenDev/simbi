@@ -101,38 +101,35 @@ namespace simbi {
         // array_t access
         DUAL constexpr T& operator[](size_type i)
         {
-            if constexpr (global::on_gpu) {
-                if (i >= N) {
-                    // GPU-safe error handling
-                    printf("array_t index out of bounds\n");
-                    return data_[0];
-                }
+#if GPU_CODE
+            if (i >= N) {
+                // GPU-safe error handling
+                printf("array_t index out of bounds\n");
+                return data_[0];
             }
-            else {
-                if (i >= N) {
-                    std::cerr << "array_t index out of bounds\n";
-                    std::cin.get();
-                    throw std::out_of_range("array_t index out of bounds");
-                }
+#else
+            if (i >= N) {
+                throw std::out_of_range("array_t index out of bounds");
             }
+#endif
 
             return data_[i];
         }
 
         DUAL constexpr const T& operator[](size_type i) const
         {
-            if constexpr (global::on_gpu) {
-                if (i >= N) {
-                    // GPU-safe error handling
-                    printf("array_t index out of bounds\n");
-                    return data_[0];
-                }
+#if GPU_CODE
+            if (i >= N) {
+                // GPU-safe error handling
+                printf("array_t index out of bounds\n");
+                return data_[0];
             }
-            else {
-                if (i >= N) {
-                    throw std::out_of_range("array_t index out of bounds");
-                }
+
+#else
+            if (i >= N) {
+                throw std::out_of_range("array_t index out of bounds");
             }
+#endif
 
             return data_[i];
         }
