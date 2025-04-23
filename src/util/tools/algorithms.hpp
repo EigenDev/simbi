@@ -132,16 +132,24 @@ namespace simbi::algorithms {
 
     // invoke that calls std::invoke on cpu
     // and is customized on gpu
-    template <typename F, typename... Args>
-    DUAL constexpr auto invoke(F&& f, Args&&... args)
-    {
-        if constexpr (!global::on_gpu) {
-            return std::invoke(std::forward<F>(f), std::forward<Args>(args)...);
-        }
-        else {
-            static_assert(1 == 3, "GPU implementation not provided");
-        }
-    }
+    // template <typename F, typename... Args>
+    // DUAL constexpr auto invoke(F&& f, Args&&... args)
+    // {
+    //     if constexpr (!global::on_gpu) {
+    //         return std::invoke(std::forward<F>(f),
+    //         std::forward<Args>(args)...);
+    //     }
+    //     else {
+    //         // gpu-compatible invoke
+    //         if constexpr (std::is_member_function_pointer_v<
+    //                           std::remove_cvref_t<F>>) {
+    //             return (std::forward<F>(f)->*(std::forward<Args>(args)...));
+    //         }
+    //         else {
+    //             return std::forward<F>(f)(std::forward<Args>(args)...);
+    //         }
+    //     }
+    // }
 }   // namespace simbi::algorithms
 
 #endif
