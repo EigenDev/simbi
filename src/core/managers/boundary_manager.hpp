@@ -74,8 +74,8 @@ namespace simbi {
             ndarray<T, Dims>& full_array,
             const array_view<T, Dims>& interior_view,
             const ndarray<BoundaryCondition>& conditions,
+            const Mesh<Dims>& mesh,
             const Maybe<const IOManager<Dims>*> io_manager = Nothing,
-            const Mesh<Dims>& mesh                         = {},
             const real time                                = 0.0,
             const real time_step                           = 0.0,
             const bool need_corners                        = false
@@ -140,7 +140,7 @@ namespace simbi {
                     auto rshape = interior_shape;
                     // reverse shape if row major
                     if constexpr (!global::col_major) {
-                        algorithms::reverse(rshape.begin(), rshape.end());
+                        std::reverse(rshape.begin(), rshape.end());
                     }
 
                     // Only process corner points
@@ -318,7 +318,7 @@ namespace simbi {
                     auto rshape      = interior_shape;
                     // reverse shape if row major
                     if constexpr (!global::col_major) {
-                        algorithms::reverse(rshape.begin(), rshape.end());
+                        std::reverse(rshape.begin(), rshape.end());
                     }
 
                     // Only process boundary points (automatically excludes
@@ -383,7 +383,7 @@ namespace simbi {
                             }
                             case BoundaryCondition::REFLECTING:
                                 (void) handle_dynamic_bc;
-                                data[idx] = apply_reflecting(
+                                data[idx] = apply_reflecting<TagType>(
                                     data[interior_idx],
                                     boundary_dim + 1,
                                     mesh->get_cell_from_global(interior_idx),
@@ -465,10 +465,10 @@ namespace simbi {
             auto tshape = shape;
             // get inverted copy of shape if we are in row major
             if constexpr (!global::col_major) {
-                algorithms::reverse(tshape.begin(), tshape.end());
+                std::reverse(tshape.begin(), tshape.end());
             }
 
-            // // Adjust coordinate based on boundary condition
+            // Adjust coordinate based on boundary condition
             switch (bc) {
                 case BoundaryCondition::REFLECTING:
                     int_coords[dim] =
@@ -497,7 +497,7 @@ namespace simbi {
             return idx;
         }
 
-        template <typename U>
+        template <typename TagType, typename U>
         DEV static U apply_reflecting(
             const U& val,
             int momentum_idx,
@@ -508,10 +508,15 @@ namespace simbi {
             auto result = val;
             if constexpr (is_conserved_v<T>) {
                 // m_\theta only changes sign at equator
-                if (geom == Geometry::SPHERICAL && !cell.at_pole()) {
-                    result.mcomponent(momentum_idx) *= -1.0;
-                    if constexpr (is_mhd<U>::value) {
-                        result.bcomponent(momentum_idx) *= -1.0;
+                if constexpr (std::is_same_v<TagType, conserved_tag>) {
+                    if (geom == Geometry::SPHERICAL && !cell.at_pole()) {
+                        result.mcomponent(momentum_idx) *= -1.0;
+                        if constexpr (is_mhd<U>::value) {
+                            result.bcomponent(momentum_idx) *= -1.0;
+                        }
+                    }
+                    else {
+                        result.mcomponent(momentum_idx) *= -1.0;
                     }
                 }
                 else {
