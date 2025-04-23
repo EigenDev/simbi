@@ -1057,7 +1057,7 @@ namespace simbi {
 
         DUAL constexpr auto electric_field(luint ehat) const
         {
-            return -vecops::cross(velocity(), bfield())[ehat - 1];
+            return -vecops::cross_component(velocity(), bfield(), ehat);
         }
 
         DUAL constexpr real ecomponent(const luint nhat) const

@@ -138,6 +138,24 @@ namespace simbi {
             return a[0] * b[1] - a[1] * b[0];
         }
 
+        // cross product component
+        template <typename Vec1, typename Vec2>
+        DUAL constexpr auto
+        cross_component(const Vec1& a, const Vec2& b, size_type ehat)
+        {
+            using T = decltype(a[0] * b[0]);
+            if (ehat == 1) {
+                return a[1] * b[2] - a[2] * b[1];
+            }
+            if (ehat == 2) {
+                return a[2] * b[0] - a[0] * b[2];
+            }
+            if (ehat == 3) {
+                return a[0] * b[1] - a[1] * b[0];
+            }
+            return static_cast<T>(0.0);
+        }
+
         // specialized RMHD operations
         template <
             template <typename, size_type, VectorType> typename Vec,

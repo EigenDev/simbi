@@ -75,13 +75,10 @@ void RMHD<dim>::cons2prim_impl()
             // We use the false position method to solve for the roots
             real mu_lower = 0.0;
             real mu_upper = find_mu_plus(beesq, rdbsq, rmag);
-            real f_lower  = kkc_fmu49(mu_lower, beesq, rdbsq, rmag);
-            real f_upper  = kkc_fmu49(mu_upper, beesq, rdbsq, rmag);
-
             // Evaluate the master function (Eq. 44) at the roots
-            f_lower =
+            real f_lower =
                 kkc_fmu44(mu_lower, rmag, rpsq, beesq, rdbsq, q, d, gamma);
-            f_upper =
+            real f_upper =
                 kkc_fmu44(mu_upper, rmag, rpsq, beesq, rdbsq, q, d, gamma);
             size_type iter = 0.0;
             real mu, ff;
@@ -187,7 +184,8 @@ void RMHD<dim>::cons2prim_impl()
  * @return none
  */
 template <int dim>
-DEV auto RMHD<dim>::cons2prim_single(const auto& cons) const
+DEV simbi::Maybe<typename RMHD<dim>::primitive_t>
+RMHD<dim>::cons2prim_single(const auto& cons) const
 {
     const real d      = cons.dens();
     const auto mom    = cons.momentum();
@@ -217,55 +215,12 @@ DEV auto RMHD<dim>::cons2prim_single(const auto& cons) const
     const auto rpsq  = vecops::dot(rperp, rperp);
 
     // We use the false position method to solve for the roots
-    real mu_lower = 0.0;
-    real mu_upper = 1.0;
-    real f_lower  = kkc_fmu49(mu_lower, beesq, rdbsq, rmag);
-    real f_upper  = kkc_fmu49(mu_upper, beesq, rdbsq, rmag);
-
-    bool good_guesses = false;
-    // if good guesses, use them
-    if (std::abs(f_lower) + std::abs(f_upper) < 2.0 * global::epsilon) {
-        good_guesses = true;
-    }
-
-    int iter = 0.0;
-    // compute mu in case the initial bracket is not good
-    real mu = static_cast<real>(0.5) * (mu_lower + mu_upper);
-    real ff;
-    if (!good_guesses) {
-        do {
-            mu =
-                (mu_lower * f_upper - mu_upper * f_lower) / (f_upper - f_lower);
-            ff = kkc_fmu49(mu, beesq, rdbsq, rmag);
-            if (ff * f_upper < 0.0) {
-                mu_lower = mu_upper;
-                f_lower  = f_upper;
-                mu_upper = mu;
-                f_upper  = ff;
-            }
-            else {
-                // use Illinois algorithm to avoid stagnation
-                f_lower  = 0.5 * f_lower;
-                mu_upper = mu;
-                f_upper  = ff;
-            }
-
-            if (iter >= global::MAX_ITER || !std::isfinite(ff)) {
-                return primitive_t{};
-            }
-            iter++;
-        } while (std::abs(mu_lower - mu_upper) > global::epsilon &&
-                 std::abs(ff) > global::epsilon);
-    }
-
-    // We found good brackets. Now we can solve for the roots
-    mu_lower = 0.0;
-    mu_upper = mu;
-
-    // Evaluate the master function (Eq. 44) at the roots
-    f_lower = kkc_fmu44(mu_lower, rmag, rpsq, beesq, rdbsq, q, d, gamma);
-    f_upper = kkc_fmu44(mu_upper, rmag, rpsq, beesq, rdbsq, q, d, gamma);
-    iter    = 0.0;
+    real mu_lower  = 0.0;
+    real mu_upper  = find_mu_plus(beesq, rdbsq, rmag);
+    real f_lower   = kkc_fmu44(mu_lower, rmag, rpsq, beesq, rdbsq, q, d, gamma);
+    real f_upper   = kkc_fmu44(mu_upper, rmag, rpsq, beesq, rdbsq, q, d, gamma);
+    size_type iter = 0.0;
+    real mu, ff;
     do {
         mu = (mu_lower * f_upper - mu_upper * f_lower) / (f_upper - f_lower);
         ff = kkc_fmu44(mu, rmag, rpsq, beesq, rdbsq, q, d, gamma);
@@ -282,14 +237,21 @@ DEV auto RMHD<dim>::cons2prim_single(const auto& cons) const
             f_upper  = ff;
         }
         if (iter >= global::MAX_ITER || !std::isfinite(ff)) {
-            return primitive_t{};
+            return simbi::None([iter]() -> const ErrorCode {
+                if (iter >= global::MAX_ITER) {
+                    return ErrorCode::MAX_ITER;
+                }
+                else {
+                    return ErrorCode::NON_FINITE_ROOT;
+                }
+            }());
         }
         iter++;
     } while (std::abs(mu_lower - mu_upper) > global::epsilon &&
              std::abs(ff) > global::epsilon);
 
     if (!std::isfinite(mu)) {
-        return primitive_t{};
+        return simbi::None();
     }
 
     // Ok, we have the roots. Now we can compute the primitive
@@ -302,26 +264,34 @@ DEV auto RMHD<dim>::cons2prim_single(const auto& cons) const
     // Equation (39)
     const real qbar = q - 0.5 * (beesq + mu * mu * x * x * beesq * rpsq);
 
-    // Equation (32) inverted and squared
+    // Equation (32)
     const real vsq  = mu * mu * rbar_sq;
-    const real gbsq = vsq / std::abs(1.0 - vsq);
+    const real gbsq = vsq / (1.0 - vsq);
     const real w    = std::sqrt(1.0 + gbsq);
 
     // Equation (41)
     const real rhohat = d / w;
 
     // Equation (42)
-    const real epshat = w * (qbar - mu * rbar_sq) + gbsq / (1.0 + w);
+    const real eps = w * (qbar - mu * rbar_sq) + gbsq / (1.0 + w);
+    // zero-temperature limit for gamma-law EoS
+    constexpr auto pfloor = 1.0e-3;
+    const real epshat     = my_max(eps, pfloor / (rhohat * (gamma - 1.0)));
 
     // Equation (43)
     const real pg = (gamma - 1.0) * rhohat * epshat;
 
     if (!std::isfinite(pg) || pg < 0.0) {
-        return primitive_t{};
+        return simbi::None(
+            ErrorCode::NEGATIVE_PRESSURE | ErrorCode::NON_FINITE_PRESSURE
+        );
     }
 
     // velocities Eq. (68)
     auto vel = mu * x * (rvec + hvec * rdb * mu);
+    if (vel.norm() > 1.0) {
+        return simbi::None(ErrorCode::SUPERLUMINAL_VELOCITY);
+    }
     if constexpr (global::using_four_velocity) {
         vel *= w;
     }
@@ -620,14 +590,18 @@ DUAL RMHD<dim>::conserved_t RMHD<dim>::calc_hllc_flux(
     const auto fL          = prL.to_flux(gamma, unit_vectors::get<dim>(nhat));
     const auto fR          = prR.to_flux(gamma, unit_vectors::get<dim>(nhat));
 
-    const auto lambda = calc_eigenvals(prL, prR, nhat);
-    const real aL     = lambda.afL();
-    const real aR     = lambda.afR();
-    const real aLm    = aL < 0.0 ? aL : 0.0;
-    const real aRp    = aR > 0.0 ? aR : 0.0;
-    auto net_flux     = [&]() {
+    const auto lambda     = calc_eigenvals(prL, prR, nhat);
+    const real aL         = lambda.afL();
+    const real aR         = lambda.afR();
+    const real aLm        = aL < 0.0 ? aL : 0.0;
+    const real aRp        = aR > 0.0 ? aR : 0.0;
+    const auto stationary = aLm == aRp;
+    auto net_flux         = [&]() {
         //---- Check Wave Speeds before wasting computations
-        if (vface <= aLm) {
+        if (stationary) {
+            return (fL + fR) * 0.5 - (uR + uL) * 0.5 * vface;
+        }
+        else if (vface <= aLm) {
             return fL - uL * vface;
         }
         else if (vface >= aRp) {
@@ -651,7 +625,8 @@ DUAL RMHD<dim>::conserved_t RMHD<dim>::calc_hllc_flux(
         const auto np2 = next_perm(nhat, 2);
         // the normal component of the magnetic field is assumed to
         // be continuous across the interface, so bnL = bnR = bn
-        const auto bn = bface;
+        const auto bn = hll_state.bcomponent(nhat);
+        // const auto bn = bface;
         // const real bn  = hll_state.bcomponent(nhat);
         const real bp1 = hll_state.bcomponent(np1);
         const real bp2 = hll_state.bcomponent(np2);
@@ -1043,15 +1018,19 @@ DUAL RMHD<dim>::conserved_t RMHD<dim>::calc_hlld_flux(
     const auto fL = prL.to_flux(gamma, unit_vectors::get<dim>(nhat));
     const auto fR = prR.to_flux(gamma, unit_vectors::get<dim>(nhat));
 
-    const auto lambda = calc_eigenvals(prL, prR, nhat);
-    const real aL     = lambda.afL();
-    const real aR     = lambda.afR();
-    const real aLm    = aL < 0.0 ? aL : 0.0;
-    const real aRp    = aR > 0.0 ? aR : 0.0;
+    const auto lambda     = calc_eigenvals(prL, prR, nhat);
+    const real aL         = lambda.afL();
+    const real aR         = lambda.afR();
+    const real aLm        = aL < 0.0 ? aL : 0.0;
+    const real aRp        = aR > 0.0 ? aR : 0.0;
+    const auto stationary = aLm == aRp;
 
     auto net_flux = [&]() {
         //---- Check Wave Speeds before wasting computations
-        if (vface <= aLm) {
+        if (stationary) {
+            return (fL + fR) * 0.5 - (uR + uL) * 0.5 * vface;
+        }
+        else if (vface <= aLm) {
             return fL - uL * vface;
         }
         else if (vface >= aRp) {
@@ -1078,7 +1057,8 @@ DUAL RMHD<dim>::conserved_t RMHD<dim>::calc_hlld_flux(
         const auto np2 = next_perm(nhat, 2);
         // the normal component of the magnetic field is assumed to
         // be continuous across the interface, so bnL = bnR = bn
-        const auto bn = bface;
+        const auto bn = hll_state.bcomponent(nhat);
+        // const auto bn = bface;
         // const real bn = hll_state.bcomponent(nhat);
 
         // Eq. (12)
@@ -1089,7 +1069,11 @@ DUAL RMHD<dim>::conserved_t RMHD<dim>::calc_hlld_flux(
         // Iteratively solve for the pressure
         //------------------------------------
         //------------ initial pressure guess
-        auto p0 = cons2prim_single(hll_state).total_pressure();
+        const auto maybe_prim = cons2prim_single(hll_state);
+        if (!maybe_prim.has_value()) {
+            return hll_flux - hll_state * vface;
+        }
+        auto p0 = maybe_prim.value().total_pressure();
 
         // params to smoothen secant method if HLLD fails
         constexpr real feps          = global::epsilon;

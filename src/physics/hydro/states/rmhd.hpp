@@ -124,7 +124,7 @@ namespace simbi {
 
         /* Methods */
 
-        DEV auto cons2prim_single(const auto& cons) const;
+        DEV Maybe<primitive_t> cons2prim_single(const auto& cons) const;
         void sync_flux_boundaries();
         void sync_magnetic_boundaries();
         void riemann_fluxes();
