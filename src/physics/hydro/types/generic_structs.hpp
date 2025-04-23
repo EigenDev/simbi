@@ -885,22 +885,25 @@ namespace simbi {
         {
             return gamma * press() / (rho() * enthalpy(gamma));
         }
-        DUAL general_vector_t<real, Dims>
-        spatial_momentum(const real gamma) const
+        DUAL auto spatial_momentum(const real gamma) const
         {
             if constexpr (R == Regime::SRHD) {
-                return (velocity() * enthalpy_density(gamma) *
-                        lorentz_factor_squared())
-                    .as_general();
+                return (
+                    velocity() * enthalpy_density(gamma) *
+                    lorentz_factor_squared()
+                );
             }
             else if constexpr (R == Regime::RMHD) {
-                return (velocity() * (enthalpy(gamma) * rho() *
-                                          lorentz_factor_squared() +
-                                      bsquared()) -
-                        bfield() * vecops::dot(velocity(), bfield()))
-                    .as_general();
+                return (
+                    velocity() *
+                        (enthalpy(gamma) * rho() * lorentz_factor_squared() +
+                         bsquared()) -
+                    bfield() * vecops::dot(velocity(), bfield())
+                );
             }
-            return (velocity() * rho()).as_general();
+            else {
+                return velocity() * rho();
+            }
         }
 
         DEV auto calc_magnetic_four_vector() const
