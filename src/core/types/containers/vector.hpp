@@ -611,12 +611,6 @@ namespace simbi {
             return Vector<T, Dims, VectorType::GENERAL>(storage_);
         }
 
-        // implicit conversion to general vector type
-        // DUAL constexpr operator Vector<T, Dims, VectorType::GENERAL>() const
-        // {
-        //     return Vector<T, Dims, VectorType::GENERAL>(storage_);
-        // }
-
         // structured binding support
         template <size_t I>
         DUAL constexpr T& get() &
@@ -917,20 +911,21 @@ namespace simbi {
         ) const
         {
             // traditional for loop version
-            // using result_t = detail::promote_t<T, U>;
-            // Vector<result_t, Dims, detail::promote_vector_t<Type, OtherType>>
-            //     result;
-            // for (size_type ii = 0; ii < Dims; ++ii) {
-            //     result[ii] = data_[ii] - static_cast<result_t>(other[ii]);
-            // }
-            // return result;
-
             using result_t = detail::promote_t<T, U>;
-            return fp::zip(
-                *this,
-                other,
-                [](const auto& x, const auto& y) -> result_t { return x - y; }
-            );
+            Vector<result_t, Dims, detail::promote_vector_t<Type, OtherType>>
+                result;
+            for (size_type ii = 0; ii < Dims; ++ii) {
+                result[ii] = data_[ii] - static_cast<result_t>(other[ii]);
+            }
+            return result;
+
+            // using result_t = detail::promote_t<T, U>;
+            // return fp::zip(
+            //     *this,
+            //     other,
+            //     [](const auto& x, const auto& y) -> result_t { return x - y;
+            //     }
+            // );
         }
 
         // norm
