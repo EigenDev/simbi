@@ -50,6 +50,7 @@
 #ifndef ENUMS_HPP
 #define ENUMS_HPP
 
+#include <cstdint>
 namespace simbi {
     enum class Cellspacing {
         LINEAR,
@@ -236,16 +237,16 @@ namespace simbi {
         GRAVITATIONAL_SINK,   // Gravitational sink
     };
 
-    enum class VectorType {
-        SPATIAL,
-        MAGNETIC,
-        MAGNETIC_FOUR,
-        SPACETIME,
-        GENERAL,
+    enum class VectorType : uint32_t {
+        GENERAL       = 0,
+        SPATIAL       = 1 << 0 | GENERAL,
+        MAGNETIC      = 1 << 1 | GENERAL,
+        MAGNETIC_FOUR = 1 << 2 | GENERAL,
+        SPACETIME     = 1 << 3 | GENERAL,
     };
 
     constexpr auto comp_wave_speed    = WaveSpeedEstimate::MIGNONE_AND_BODO_05;
-    constexpr auto comp_ct_type       = CTTYPE::CONTACT;
+    constexpr auto comp_ct_type       = CTTYPE::ZERO;
     constexpr auto comp_slope_limiter = LIMITER::MINMOD;
     constexpr auto comp_hllc_type     = HLLCTYPE::CLASSICAL;
 }   // namespace simbi
