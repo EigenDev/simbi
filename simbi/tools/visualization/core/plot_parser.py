@@ -2,7 +2,7 @@ import argparse
 from itertools import cycle
 from typing import Any, Optional, Dict
 from ..config.config import PlotGroup, StyleGroup, AnimationGroup, MultidimGroup
-from .constants import VALID_PLOT_TYPES, FIELD_CHOICES, LEGEND_LOCATIONS
+from .constants import FIELD_ALIASES, VALID_PLOT_TYPES, FIELD_CHOICES, LEGEND_LOCATIONS
 from ....cli.base_parser import BaseParser
 
 
@@ -130,7 +130,7 @@ class PlottingArgumentBuilder:
                     "default": ["rho"],
                     "nargs": "+",
                     "help": "the name of the field variable",
-                    "choices": FIELD_CHOICES,
+                    "choices": FIELD_CHOICES + list(FIELD_ALIASES.keys()),
                 },
             ),
             (

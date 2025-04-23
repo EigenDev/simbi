@@ -2,6 +2,9 @@ VALID_PLOT_TYPES = ["line", "multidim", "temporal", "histogram"]
 
 FIELD_ALIASES = {
     "Sigma": "rho",
+    "b1": "b1_mean",
+    "b2": "b2_mean",
+    "b3": "b3_mean",
 }
 
 DERIVED = [
@@ -35,9 +38,9 @@ FIELD_CHOICES = [
     "p",
     "gamma_beta",
     "chi",
-    "b1",
-    "b2",
-    "b3",
+    "b1_mean",
+    "b2_mean",
+    "b3_mean",
     "Sigma",
 ] + DERIVED
 
