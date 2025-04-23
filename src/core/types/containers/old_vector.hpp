@@ -458,9 +458,9 @@ namespace simbi {
             return Vector<T, Dims, VectorType::SPATIAL>{this->data_};
         }
 
-        DUAL constexpr auto to_general() const
+        DUAL constexpr auto as_general() const
         {
-            return Vector<T, Dims, VectorType::GENERAL>(*this);
+            return Vector<T, Dims, VectorType::GENERAL>(this->data_);
         }
 
         DUAL constexpr auto as_spatial()
