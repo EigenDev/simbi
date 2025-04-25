@@ -208,7 +208,7 @@ namespace simbi {
             const real r,
             const real rperp_sq,
             const real beesq,
-            const real rsbsq,
+            const real rdbsq,
             const real qterm,
             const real dterm,
             const real gamma
@@ -219,7 +219,7 @@ namespace simbi {
             const real x = 1.0 / (1.0 + mu * beesq);
 
             // Equation (38)
-            const real rbar_sq = r * r * x * x + mu * x * (1.0 + x) * rsbsq;
+            const real rbar_sq = r * r * x * x + mu * x * (1.0 + x) * rdbsq;
 
             // Equation (39)
             const real qbar =
