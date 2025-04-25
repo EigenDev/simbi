@@ -209,8 +209,8 @@ namespace simbi {
                     // Handle reflecting conditions for momentum/magnetic
                     // components
                     if constexpr (is_conserved_v<T>) {
-                        for (int i = 0; i < num_boundaries; ++i) {
-                            auto [dim, is_lower] = boundary_dims[i];
+                        for (size_type ii = 0; ii < num_boundaries; ++ii) {
+                            auto [dim, is_lower] = boundary_dims[ii];
                             const auto bc_idx    = 2 * dim + (is_lower ? 0 : 1);
                             if (conditions_ptr[bc_idx] ==
                                 BoundaryCondition::REFLECTING) {
@@ -271,7 +271,8 @@ namespace simbi {
 
             // copy necessary data to avoid pointer issues
             auto handle_dynamic_bc = [mesh, io_manager, time, time_step]() {
-                if constexpr (is_conserved_v<T>) {
+                if constexpr (is_conserved_v<T> &&
+                              std::is_same_v<TagType, conserved_tag>) {
                     return [mesh, io_manager, time, time_step] DEV(
                                const auto& coords,
                                const BoundaryFace face,
@@ -537,53 +538,6 @@ namespace simbi {
         {
             return val;
         }
-
-        // Add plane sequence helper
-        template <int num_dims>
-        struct PlaneSequence {
-            using type = typename std::conditional_t<
-                num_dims == 1,
-                detail::index_sequence<int>,
-                typename std::conditional_t<
-                    num_dims == 2,
-                    detail::index_sequence<int, static_cast<int>(Plane::IJ)>,
-                    detail::index_sequence<
-                        int,
-                        static_cast<int>(Plane::IJ),
-                        static_cast<int>(Plane::IK),
-                        static_cast<int>(Plane::JK)>>>;
-        };
-
-        template <Plane P>
-        struct PlaneInfo {
-            static constexpr auto bc_pairs =
-                []() -> simbi::array_t<std::pair<int, int>, 4> {
-                if constexpr (P == Plane::IJ) {
-                    return {
-                      std::make_pair(0, 2),   // (min_i, min_j)
-                      std::make_pair(0, 3),   // (min_i, max_j)
-                      std::make_pair(1, 2),   // (max_i, min_j)
-                      std::make_pair(1, 3)    // (max_i, max_j)
-                    };
-                }
-                else if constexpr (P == Plane::IK) {
-                    return {
-                      std::make_pair(0, 4),   // (min_i, min_k)
-                      std::make_pair(0, 5),   // (min_i, max_k)
-                      std::make_pair(1, 4),   // (max_i, min_k)
-                      std::make_pair(1, 5)    // (max_i, max_k)
-                    };
-                }
-                else {   // Plane::JK
-                    return {
-                      std::make_pair(2, 4),   // (min_j, min_k)
-                      std::make_pair(2, 5),   // (min_j, max_k)
-                      std::make_pair(3, 4),   // (max_j, min_k)
-                      std::make_pair(3, 5)    // (max_j, max_k)
-                    };
-                }
-            }();
-        };
     };
 }   // namespace simbi
 
