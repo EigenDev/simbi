@@ -372,8 +372,6 @@ namespace simbi {
                         const ZeroMagneticVectorView zero_view;
                         return zero_view;
                     }
-
-                    // return magnetic_vector_t<real, 3>{0.0, 0.0, 0.0};
                 }
             }
 
@@ -649,7 +647,7 @@ namespace simbi {
             return *this;
         }
 
-        // in MHD runs, the magnetic componeents are actually the EMF fluxes
+        // in MHD runs, the magnetic components are actually the EMF fluxes
         // so we add a method to get the electric field which is simply - nhat x
         // F
         DUAL auto calc_electric_field(
@@ -996,11 +994,15 @@ namespace simbi {
 
         DUAL constexpr real bpressure() const
         {
-            if constexpr (sim_type::MHD<R>) {
+            if constexpr (R == Regime::RMHD) {
+                const auto bmu = calc_magnetic_four_vector();
+                return 0.5 * bmu.inner_product(bmu);
+            }
+            else if constexpr (sim_type::MHD<R>) {
                 return 0.5 * bsquared();
             }
             else {
-                return 0.0;
+                return static_cast<real>(0.0);
             }
         }
 
@@ -1063,9 +1065,8 @@ namespace simbi {
         DUAL constexpr real ecomponent(const luint nhat) const
             requires sim_type::MHD<R>
         {
-            // Convert views to vectors before operations
             if constexpr (Dims == 3) {
-                return (electric_field(nhat));
+                return electric_field(nhat);
             }
             else {
                 return 0.0;
@@ -1122,7 +1123,7 @@ namespace simbi {
                           bmu_spatial * bnorm / lorentz_factor(),
                       mnorm - vnorm * d,
                       chi() * d * vnorm,
-                      induction.template as_type<VectorType::MAGNETIC>(),
+                      induction.as_magnetic(),
                     };
                 }
                 else {
