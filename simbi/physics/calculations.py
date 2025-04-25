@@ -253,24 +253,33 @@ def labframe_momentum(
         return np.asarray(mom_vec[int(mode.value)])
 
 
-def magnetic_pressure(bfields: Sequence[Array]) -> Array:
+def magnetic_pressure(
+    bfields: Sequence[Array], velocity: Sequence[Array], regime: str
+) -> Array:
     """Calculate magnetic pressure"""
     bsq: Array = np.sum([b**2 for b in bfields], axis=0)
+    if regime == "srmhd":
+        lorentz_factor = 1.0 / np.sqrt(1.0 - dot_product(velocity, velocity))
+        vdb = dot_product(velocity, bfields)
+        bsq = bsq / lorentz_factor**2 + vdb**2
     return 0.5 * bsq
 
 
-def total_pressure(pre: Array, bfields: Sequence[Array], regime: str) -> Array:
+def total_pressure(
+    pre: Array, bfields: Sequence[Array], velocity: Sequence[Array], regime: str
+) -> Array:
     """calculate total pressure"""
     if "mhd" not in regime:
         return pre
     else:
-        return pre + magnetic_pressure(bfields)
+        return pre + magnetic_pressure(bfields, velocity, regime)
 
 
 def enthalpy_density(
     rho: Array,
     pre: Array,
     bfields: Sequence[Array],
+    velocity: Sequence[Array],
     adiabatic_index: float,
     regime: str = "classical",
 ) -> Array:
@@ -280,7 +289,9 @@ def enthalpy_density(
         return rho * enthalpy(rho, pre, adiabatic_index)
     elif regime == "srmhd":
         return rho * enthalpy(rho, pre, adiabatic_index) + 2.0 * magnetic_pressure(
-            bfields
+            bfields,
+            velocity,
+            regime,
         )
     else:
         raise NotImplementedError(f"Regime '{regime}' not implemented")

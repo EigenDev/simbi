@@ -544,11 +544,12 @@ class LazySimulationReader:
         )
         pipeline["enthalpy_density"] = self.get_derived_field(
             "enthalpy_density",
-            ["rho", "p", *vector(ndim, "b")],
+            ["rho", "p", *vector(ndim, "b"), *vector(ndim, "v")],
             lambda fields: enthalpy_density(
                 fields["rho"],
                 fields["p"],
                 self._get_centered_fields(vec_from_dict(fields, ndim, "b")),
+                vec_from_dict(fields, ndim, "v"),
                 metadata["adiabatic_index"],
                 metadata["regime"],
             ),
@@ -563,18 +564,21 @@ class LazySimulationReader:
         )
         pipeline["ptot"] = self.get_derived_field(
             "ptot",
-            ["p", *vector(ndim, "b")],
+            ["p", *vector(ndim, "b"), *vector(ndim, "v")],
             lambda fields: total_pressure(
                 fields["p"],
                 self._get_centered_fields(vec_from_dict(fields, ndim, "b")),
+                vec_from_dict(fields, ndim, "v"),
                 metadata["regime"],
             ),
         )
         pipeline["pmag"] = self.get_derived_field(
             "pmag",
-            [*vector(ndim, "b")],
+            [*vector(ndim, "b"), *vector(ndim, "v")],
             lambda fields: magnetic_pressure(
-                self._get_centered_fields(vec_from_dict(fields, ndim, "b"))
+                self._get_centered_fields(vec_from_dict(fields, ndim, "b")),
+                vec_from_dict(fields, ndim, "v"),
+                metadata["regime"],
             ),
         )
         return pipeline
