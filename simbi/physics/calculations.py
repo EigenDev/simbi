@@ -259,11 +259,9 @@ def magnetic_pressure(bfields: Sequence[Array]) -> Array:
     return 0.5 * bsq
 
 
-def total_pressure(
-    pre: Array, bfields: Sequence[Array], regime: str = "classical"
-) -> Array:
+def total_pressure(pre: Array, bfields: Sequence[Array], regime: str) -> Array:
     """calculate total pressure"""
-    if regime == "classical":
+    if "mhd" not in regime:
         return pre
     else:
         return pre + magnetic_pressure(bfields)
