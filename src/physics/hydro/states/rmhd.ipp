@@ -1577,14 +1577,14 @@ void RMHD<dim>::advance_conserved()
             const auto sign = (q == 1) ? 1 : -1;
             res -= fr.at(q, 0, 0) * cell.inverse_volume(0) * cell.area(0 + q) *
                    sign;
-            // if constexpr (dim > 1) {
-            //     res -= gr.at(0, q, 0) * cell.inverse_volume(1) *
-            //            cell.area(2 + q) * sign;
-            //     if constexpr (dim > 2) {
-            //         res -= hr.at(0, 0, q) * cell.inverse_volume(2) *
-            //                cell.area(4 + q) * sign;
-            //     }
-            // }
+            if constexpr (dim > 1) {
+                res -= gr.at(0, q, 0) * cell.inverse_volume(1) *
+                       cell.area(2 + q) * sign;
+                if constexpr (dim > 2) {
+                    res -= hr.at(0, 0, q) * cell.inverse_volume(2) *
+                           cell.area(4 + q) * sign;
+                }
+            }
         }
 
         res += source_terms;
