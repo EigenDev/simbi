@@ -179,6 +179,9 @@ class PlotFormatter:
                     config["style"].semilogx or setup["x1_spacing"] == "log",
                     config["style"].semilogy or setup["x2_spacing"] == "log",
                 )
+                if config["style"].labels is not None:
+                    ax.legend()
+
             elif config["plot"].plot_type == "histogram":
                 ax.set_xlabel(r"$\Gamma\beta$")
                 if config["plot"].hist_type == "kinetic":

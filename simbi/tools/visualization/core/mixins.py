@@ -10,6 +10,7 @@ from simbi.functional.reader import BodyCapability, has_capability
 
 from ....functional.helpers import calc_any_mean
 from ... import utility as util
+from ...utility import get_field_str
 from ..core.constants import FIELD_ALIASES
 
 
@@ -27,6 +28,13 @@ class DataHandlerMixin:
             self._apply_units(var, field)
 
         return var
+
+    def get_label(self, field_name: str, user_defined_label: str | None = None) -> str:
+        if user_defined_label:
+            return user_defined_label
+        if field_name in FIELD_ALIASES:
+            field_name = FIELD_ALIASES[field_name]
+        return str(get_field_str(field_name))
 
     def _apply_units(self, var: np.ndarray, field: str) -> None:
         """Apply physical units to variable"""
