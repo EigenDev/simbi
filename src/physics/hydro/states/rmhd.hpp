@@ -239,18 +239,16 @@ namespace simbi {
             //       .v3m = 1.0
             //     };
             // }
-            const real cs = prim->sound_speed(gamma);
-            const real v1 = prim->vcomponent(1);
-            const real v2 = prim->vcomponent(2);
-            const real v3 = prim->vcomponent(3);
-
+            const auto [v1m, v1p] = calc_max_wave_speeds(prim.value(), 1);
+            const auto [v2m, v2p] = calc_max_wave_speeds(prim.value(), 2);
+            const auto [v3m, v3p] = calc_max_wave_speeds(prim.value(), 3);
             return WaveSpeeds{
-              std::abs(v1 + cs / (1 + v1 * cs)),
-              std::abs(v1 - cs / (1 - v1 * cs)),
-              std::abs(v2 + cs / (1 + v2 * cs)),
-              std::abs(v2 - cs / (1 - v2 * cs)),
-              std::abs(v3 + cs / (1 + v3 * cs)),
-              std::abs(v3 - cs / (1 - v3 * cs)),
+              std::abs(v1p),
+              std::abs(v1m),
+              std::abs(v2p),
+              std::abs(v2m),
+              std::abs(v3p),
+              std::abs(v3m)
             };
         }
 
