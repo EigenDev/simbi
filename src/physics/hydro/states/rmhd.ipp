@@ -1360,41 +1360,39 @@ void RMHD<dim>::sync_magnetic_boundaries()
     );
 
     // check if the magnetic field is divergence free
-    // for (size_type kk = 0; kk < this->mesh().grid().active_gridsize(2); kk++)
-    // {
-    //     for (size_type jj = 0; jj < this->mesh().grid().active_gridsize(1);
-    //          jj++) {
-    //         for (size_type ii = 0; ii <
-    //         this->mesh().grid().active_gridsize(0);
-    //              ii++) {
-    //             const auto cell =
-    //                 this->mesh().get_cell_from_indices(ii, jj, kk);
-    //             const auto b1L = bstag1.at(ii + 0, jj + 1, kk + 1);
-    //             const auto b1R = bstag1.at(ii + 1, jj + 1, kk + 1);
-    //             const auto b2L = bstag2.at(ii + 1, jj + 0, kk + 1);
-    //             const auto b2R = bstag2.at(ii + 1, jj + 1, kk + 1);
-    //             const auto b3L = bstag3.at(ii + 1, jj + 1, kk + 0);
-    //             const auto b3R = bstag3.at(ii + 1, jj + 1, kk + 1);
-    //             const auto divB =
-    //                 divergence(cell, b1L, b1R, b2L, b2R, b3L, b3R);
+    for (size_type kk = 0; kk < this->mesh().grid().active_gridsize(2); kk++) {
+        for (size_type jj = 0; jj < this->mesh().grid().active_gridsize(1);
+             jj++) {
+            for (size_type ii = 0; ii < this->mesh().grid().active_gridsize(0);
+                 ii++) {
+                const auto cell =
+                    this->mesh().get_cell_from_indices(ii, jj, kk);
+                const auto b1L = bstag1.at(ii + 0, jj + 1, kk + 1);
+                const auto b1R = bstag1.at(ii + 1, jj + 1, kk + 1);
+                const auto b2L = bstag2.at(ii + 1, jj + 0, kk + 1);
+                const auto b2R = bstag2.at(ii + 1, jj + 1, kk + 1);
+                const auto b3L = bstag3.at(ii + 1, jj + 1, kk + 0);
+                const auto b3R = bstag3.at(ii + 1, jj + 1, kk + 1);
+                const auto divB =
+                    divergence(cell, b1L, b1R, b2L, b2R, b3L, b3R);
 
-    //             if (!goes_to_zero(divB)) {
-    //                 printf(
-    //                     "b3L: %f, b3R: %f, b3L(ghost): %f, b3R(ghost) %f\n",
-    //                     b3L,
-    //                     b3R,
-    //                     bstag3.at(ii, jj, kk + 0),
-    //                     bstag3.at(ii, jj, kk + 1)
-    //                 );
-    //                 std::cout << "[" << this->current_iter() << "] "
-    //                           << "Divergence of B is not zero at (" << ii
-    //                           << ", " << jj << ", " << kk << ") " << divB
-    //                           << std::endl;
-    //                 std::cin.get();
-    //             }
-    //         }
-    //     }
-    // }
+                if (!goes_to_zero(divB)) {
+                    printf(
+                        "b3L: %f, b3R: %f, b3L(ghost): %f, b3R(ghost) %f\n",
+                        b3L,
+                        b3R,
+                        bstag3.at(ii, jj, kk + 0),
+                        bstag3.at(ii, jj, kk + 1)
+                    );
+                    std::cout << "[" << this->current_iter() << "] "
+                              << "Divergence of B is not zero at (" << ii
+                              << ", " << jj << ", " << kk << ") " << divB
+                              << std::endl;
+                    std::cin.get();
+                }
+            }
+        }
+    }
 }
 
 template <int dim>
