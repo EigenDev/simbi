@@ -285,7 +285,7 @@ class LazySimulationReader:
             ndim = metadata["dimensions"]
 
             # Create mesh data based on metadata
-            mesh = {}
+            mesh: dict[str, Any] = {}
 
             def grid_length_str(i: int) -> str:
                 if i == 0:
@@ -565,7 +565,9 @@ class LazySimulationReader:
             "ptot",
             ["p", *vector(ndim, "b")],
             lambda fields: total_pressure(
-                fields["p"], self._get_centered_fields(vec_from_dict(fields, ndim, "b"))
+                fields["p"],
+                self._get_centered_fields(vec_from_dict(fields, ndim, "b")),
+                metadata["regime"],
             ),
         )
         pipeline["pmag"] = self.get_derived_field(
