@@ -629,6 +629,11 @@ namespace simbi {
             return Vector<T, Dims, VectorType::GENERAL>(storage_);
         }
 
+        DUAL constexpr auto as_magnetic() const
+        {
+            return Vector<T, Dims, VectorType::MAGNETIC>(storage_);
+        }
+
         // structured binding support
         template <size_t I>
         DUAL constexpr T& get() &
@@ -1110,6 +1115,21 @@ namespace simbi {
         }
     }   // namespace unit_vectors
 
+    // overload ostream operator for printing vectors
+    template <typename T, size_type Dims, VectorType Type>
+    DUAL std::ostream&
+    operator<<(std::ostream& os, const Vector<T, Dims, Type>& v)
+    {
+        os << "[";
+        for (size_type i = 0; i < Dims; ++i) {
+            os << v[i];
+            if (i < Dims - 1) {
+                os << ", ";
+            }
+        }
+        os << "]";
+        return os;
+    }
 }   // namespace simbi
 
 // structured binding support
