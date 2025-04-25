@@ -1,6 +1,8 @@
 #include "build_options.hpp"
+#include "core/types/containers/vector.hpp"
 #include "core/types/utility/atomic_bool.hpp"   // for shared_atomic_bool
-#include "geometry/vector_calculus.hpp"         // for curl_component
+#include "core/types/utility/enums.hpp"
+#include "geometry/vector_calculus.hpp"   // for curl_component
 #include "io/exceptions.hpp"
 #include "physics/hydro/schemes/ct/emf_field.hpp"   // for EMField
 #include "physics/hydro/types/generic_structs.hpp"
@@ -80,17 +82,15 @@ void RMHD<dim>::cons2prim_impl()
                 kkc_fmu44(mu_lower, rmag, rpsq, beesq, rdbsq, q, d, gamma);
             real f_upper =
                 kkc_fmu44(mu_upper, rmag, rpsq, beesq, rdbsq, q, d, gamma);
-            size_type iter = 0.0;
+            size_type iter = 0;
             real mu, ff;
             do {
                 mu = (mu_lower * f_upper - mu_upper * f_lower) /
                      (f_upper - f_lower);
                 ff = kkc_fmu44(mu, rmag, rpsq, beesq, rdbsq, q, d, gamma);
                 if (ff * f_upper < 0.0) {
-                    mu_lower = mu_upper;
-                    f_lower  = f_upper;
-                    mu_upper = mu;
-                    f_upper  = ff;
+                    mu_lower = mu;
+                    f_lower  = ff;
                 }
                 else {
                     // use Illinois algorithm to avoid stagnation
@@ -156,10 +156,10 @@ void RMHD<dim>::cons2prim_impl()
 
             // velocities Eq. (68)
             auto vel = mu * x * (rvec + hvec * rdb * mu);
-            if (vel.norm() > 1.0) {
-                loc->store(true);
-                return simbi::None(ErrorCode::SUPERLUMINAL_VELOCITY);
-            }
+            // if (vel.norm() > 1.0) {
+            //     loc->store(true);
+            //     return simbi::None(ErrorCode::SUPERLUMINAL_VELOCITY);
+            // }
             if constexpr (global::using_four_velocity) {
                 vel *= w;
             }
@@ -451,9 +451,9 @@ DUAL RMHD<dim>::eigenvals_t RMHD<dim>::calc_eigenvals(
 ) const
 {
     // left side
-    auto [lmL, lpL] = calc_max_wave_speeds(primsL, nhat);
+    const auto [lmL, lpL] = calc_max_wave_speeds(primsL, nhat);
     // right_side
-    auto [lmR, lpR] = calc_max_wave_speeds(primsR, nhat);
+    const auto [lmR, lpR] = calc_max_wave_speeds(primsR, nhat);
 
     const auto aR = my_max(lpL, lpR);
     const auto aL = my_min(lmL, lmR);
@@ -1577,14 +1577,14 @@ void RMHD<dim>::advance_conserved()
             const auto sign = (q == 1) ? 1 : -1;
             res -= fr.at(q, 0, 0) * cell.inverse_volume(0) * cell.area(0 + q) *
                    sign;
-            if constexpr (dim > 1) {
-                res -= gr.at(0, q, 0) * cell.inverse_volume(1) *
-                       cell.area(2 + q) * sign;
-                if constexpr (dim > 2) {
-                    res -= hr.at(0, 0, q) * cell.inverse_volume(2) *
-                           cell.area(4 + q) * sign;
-                }
-            }
+            // if constexpr (dim > 1) {
+            //     res -= gr.at(0, q, 0) * cell.inverse_volume(1) *
+            //            cell.area(2 + q) * sign;
+            //     if constexpr (dim > 2) {
+            //         res -= hr.at(0, 0, q) * cell.inverse_volume(2) *
+            //                cell.area(4 + q) * sign;
+            //     }
+            // }
         }
 
         res += source_terms;
@@ -1651,7 +1651,9 @@ void RMHD<dim>::advance_impl()
     riemann_fluxes();
     sync_flux_boundaries();
     advance_magnetic_fields();
-    sync_magnetic_boundaries();
+    if constexpr (comp_ct_type == CTTYPE::MdZ) {
+        sync_magnetic_boundaries();
+    }
     advance_conserved();
     this->apply_boundary_conditions();
 }
