@@ -46,10 +46,11 @@ class SedovTaylor(BaseConfig):
         self.theta_min = 0
         self.theta_max = math.pi if self.config.full_sphere else 0.5 * math.pi
         self.npolar = compute_num_polar_zones(
-            rmin=self.config.rinit,
-            rmax=self.config.rend,
+            rmin=float(self.config.rinit),
+            rmax=float(self.config.rend),
             nr=self.nr,
             theta_bounds=(self.theta_min, self.theta_max),
+            zpd=int(self.config.zpd),
         )
 
     @simbi_property
