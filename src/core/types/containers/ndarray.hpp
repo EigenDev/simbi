@@ -362,6 +362,17 @@ namespace simbi {
             }
         }
 
+        // emplace method
+        template <typename... Args>
+        auto emplace_back_with_sync(Args&&... args) -> void
+        {
+            emplace_back(std::forward<Args>(args)...);
+            // If using GPU, synchronize just the changed element
+            if constexpr (global::on_gpu) {
+                mem_.sync_to_device();
+            }
+        }
+
         void reserve(size_type capacity)
         {
             if (capacity > capacity_) {
@@ -373,6 +384,17 @@ namespace simbi {
         T* host_data() const { return mem_.host_data(); }
 
         DUAL bool empty() const { return this->size_ == 0; }
+
+        DUAL void clear()
+        {
+            this->size_     = 0;
+            this->shape_[0] = 0;
+            // fill the remaining dimensions with 0
+            for (size_type ii = 1; ii < Dims; ++ii) {
+                this->shape_[ii] = 0;
+            }
+            this->strides_ = this->compute_strides(this->shape_);
+        }
 
         class iterator
         {
