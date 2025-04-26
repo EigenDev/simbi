@@ -367,6 +367,10 @@ namespace simbi {
             // generate new system based on the new body
             // configuration / state
             if (body_system_) {
+                // update system on the host
+                // but make sure gpu finishes
+                // the work before we do this
+                gpu::api::deviceSynch();
                 *body_system_ =
                     accumulator_->apply_to(std::move(*body_system_));
             }
