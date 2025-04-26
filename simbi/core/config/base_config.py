@@ -12,7 +12,7 @@ from ..simulation.state_init import SimulationBundle, initialize_simulation
 from numpy.typing import NDArray
 from pathlib import Path
 from ...functional import Maybe
-from .bodies import GravitationalSystemConfig, ImmersedBodyConfig
+from .bodies import BodySystemConfig, GravitationalSystemConfig, ImmersedBodyConfig
 from typing import (
     Callable,
     Optional,
@@ -264,8 +264,8 @@ class BaseConfig(metaclass=abc.ABCMeta):
         return None
 
     @simbi_property(group="sim_state")
-    def gravitational_system(self) -> Optional[GravitationalSystemConfig]:
-        """Define a gravitational system configuration."""
+    def body_system(self) -> Optional[BodySystemConfig]:
+        """Define an immersed body system configuration."""
         return None
 
     @simbi_property(group="sim_state")

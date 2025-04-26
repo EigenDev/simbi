@@ -287,9 +287,7 @@ class SimulationSettings(BaseSettings):
             bodies=setup["immersed_bodies"],
             sound_speed=setup["ambient_sound_speed"],
             isothermal=setup["isothermal"],
-            body_system=get_first_existing_key(
-                setup, ["gravitational_system", "elastic_system", "rigid_system"], None
-            ),
+            body_system=setup["body_system"],
         )
 
     def to_execution_dict(self) -> dict[str, Any]:
