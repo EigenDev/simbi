@@ -124,15 +124,17 @@ namespace simbi {
             std::tuple<size_type, size_type, size_type>&& coords
         )
         {
-            return ibsystem::functions::apply_forces_to_fluid(
-                *body_system_,
-                *body_delta_accumulator_,
-                prim,
-                cell,
-                coords,
-                context_,
-                time_step()
-            );
+            auto [fluid_change, delta_buffer] =
+                ibsystem::functions::apply_forces_to_fluid(
+                    *body_system_,
+                    prim,
+                    cell,
+                    coords,
+                    context_,
+                    time_step()
+                );
+            accumulator_->add_buffer(delta_buffer);
+            return std::move(fluid_change);
         }
 
       private:
@@ -168,8 +170,7 @@ namespace simbi {
         ndarray<Maybe<primitive_t>, Dims> prims_;
         ndarray<conserved_t, Dims> cons_;
         util::smart_ptr<ibsystem::ComponentBodySystem<real, Dims>> body_system_;
-        util::smart_ptr<ibsystem::BodyDeltaAccumulator<real, Dims>>
-            body_delta_accumulator_;
+        util::smart_ptr<ibsystem::BodyDeltaCombiner<real, Dims>> accumulator_;
         HydroContext context_;
 
         HydroBase() = default;
@@ -302,10 +303,9 @@ namespace simbi {
                 init
             );
             if (body_system_) {
-                body_delta_accumulator_ = util::make_unique<
-                    ibsystem::BodyDeltaAccumulator<real, Dims>>(
-                    body_system_->size()
-                );
+                accumulator_ =
+                    util::make_unique<ibsystem::BodyDeltaCombiner<real, Dims>>(
+                    );
             }
         }
 
@@ -351,8 +351,8 @@ namespace simbi {
             // immersed body dynamics (if any bodies are present)
             if (body_system_) {
                 if constexpr (sim_type::Newtonian<R>) {
-                    ibsystem::functions::update_body_system(
-                        *body_system_,
+                    *body_system_ = ibsystem::functions::update_body_system(
+                        std::move(*body_system_),
                         time(),
                         time_step()
                     );
@@ -368,7 +368,7 @@ namespace simbi {
             // configuration / state
             if (body_system_) {
                 *body_system_ =
-                    body_delta_accumulator_->apply_deltas(*body_system_);
+                    accumulator_->apply_to(std::move(*body_system_));
             }
         }
 

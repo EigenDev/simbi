@@ -201,6 +201,46 @@ namespace simbi::ibsystem {
             return new_system;
         }
 
+        ComponentBodySystem<T, Dims>
+        update_body(size_t index, Body<T, Dims>&& updated_body) const
+        {
+            if (index >= bodies_.size()) {
+                return *this;
+            }
+
+            ComponentBodySystem<T, Dims> new_system(*this);
+            new_system.bodies_[index] = std::move(updated_body);
+            return new_system;
+        }
+
+        static ComponentBodySystem<T, Dims> update_body_in(
+            ComponentBodySystem<T, Dims>&& system,
+            size_type index,
+            Body<T, Dims>&& updated_body
+        )
+        {
+            if (index >= system.bodies_.size()) {
+                return std::move(system);
+            }
+
+            system.bodies_[index] = std::move(updated_body);
+            return std::move(system);
+        }
+
+        // allows for chaining multiple updates
+        template <typename UpdateFunc>
+        ComponentBodySystem<T, Dims> update_with(UpdateFunc&& func) const
+        {
+            return std::forward<UpdateFunc>(func)(*this);
+        }
+
+        template <typename UpdateFunc>
+        static ComponentBodySystem<T, Dims>
+        update_with_in(ComponentBodySystem<T, Dims>&& system, UpdateFunc&& func)
+        {
+            return std::forward<UpdateFunc>(func)(std::move(system));
+        }
+
         // calculate derived properties
         DUAL T total_mass() const
         {
@@ -234,6 +274,16 @@ namespace simbi::ibsystem {
             if (system_config_) {
                 return dynamic_cast<BinarySystemConfig<T>*>(system_config_.get()
                        ) != nullptr;
+            }
+            return false;
+        }
+
+        bool inertial() const
+        {
+            if (system_config_) {
+                return dynamic_cast<BinarySystemConfig<T>*>(system_config_.get()
+                )
+                    ->prescribed_motion;
             }
             return false;
         }
@@ -344,6 +394,13 @@ namespace simbi::ibsystem {
                     PropertyDescriptor<T>{
                       "total_accreted_mass",
                       [body](size_t) { return body.total_accreted_mass(); }
+                    }
+                );
+
+                properties.push_back(
+                    PropertyDescriptor<T>{
+                      "accretion_rate",
+                      [body](size_t) { return body.accretion_rate(); }
                     }
                 );
             }

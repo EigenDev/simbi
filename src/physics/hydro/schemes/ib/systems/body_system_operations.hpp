@@ -1,93 +1,124 @@
 #ifndef BODY_SYSTEM_OPERATIONS_HPP
 #define BODY_SYSTEM_OPERATIONS_HPP
 
-#include "build_options.hpp"
-#include "component_body_system.hpp"
-#include "core/types/utility/atomic_acc.hpp"
-#include "physics/hydro/schemes/ib/policies/body_delta.hpp"
-#include "physics/hydro/schemes/ib/policies/interaction_functions.hpp"
-#include "physics/hydro/schemes/ib/processing/lazy.hpp"
-#include "physics/hydro/types/context.hpp"
+#include "build_options.hpp"           // for real, size_type, Dims
+#include "component_body_system.hpp"   // for ComponentBodySystem
+#include "physics/hydro/schemes/ib/policies/body_delta.hpp"   // for BodyDelta
+#include "physics/hydro/schemes/ib/policies/interaction_functions.hpp"   // for apply_gravitational_force, apply_accretion_effect
+#include "physics/hydro/schemes/ib/processing/lazy.hpp"   // for LazyCapabilityView
+#include "physics/hydro/types/context.hpp"                // for HydroContext
 
 using namespace simbi::ibsystem::body_functions::gravitational;
 using namespace simbi::ibsystem::body_functions::accretion;
 
 namespace simbi::ibsystem {
+    // small enough to be returned by value from GPU functions
     template <typename T, size_type Dims>
-    class BodyDeltaAccumulator : public Managed<global::managed_memory>
+    struct BodyDeltaBuffer {
+        // max 10 bodies x 2 interaction types
+        static constexpr size_t MAX_DELTAS = 20;
+
+        // actual deltas
+        array_t<BodyDelta<T, Dims>, MAX_DELTAS> deltas;
+        // number of valid deltas
+        size_t count = 0;
+
+        // add a delta to the buffer
+        DUAL void collect(const BodyDelta<T, Dims>& delta)
+        {
+            if (count < MAX_DELTAS) {
+                deltas[count++] = delta;
+            }
+        }
+    };
+
+    template <typename T, size_type Dims>
+    class BodyDeltaCombiner
     {
       private:
-        using atomic_acc_t = AtomicAccumulator<T, Dims>;
-        atomic_acc_t force_x_deltas_;
-        atomic_acc_t force_y_deltas_;
-        atomic_acc_t force_z_deltas_;
-        atomic_acc_t mass_deltas_;
-        atomic_acc_t accreted_mass_deltas_;
-        atomic_acc_t accretion_rate_deltas_;
+        static constexpr size_t MAX_BODIES = 10;
+        // one entry per body - indexed directly by body_idx
+        array_t<BodyDelta<T, Dims>, MAX_BODIES> combined_deltas;
+        array_t<bool, MAX_BODIES> has_delta;
 
       public:
-        BodyDeltaAccumulator(size_t body_count)
-            : force_x_deltas_(body_count),
-              force_y_deltas_(body_count * (Dims > 1)),
-              force_z_deltas_(body_count * (Dims > 2)),
-              mass_deltas_(body_count),
-              accreted_mass_deltas_(body_count),
-              accretion_rate_deltas_(body_count)
+        BodyDeltaCombiner()
         {
+            // initialize has_delta to all false
+            for (size_t ii = 0; ii < MAX_BODIES; ii++) {
+                has_delta[ii] = false;
+            }
         }
 
-        DUAL void accumulate(const BodyDelta<T, Dims>& delta)
+        // add all deltas from a buffer
+        void add_buffer(const BodyDeltaBuffer<T, Dims>& buffer)
         {
-            const size_t idx = delta.body_idx;
-            force_x_deltas_.add(idx, delta.force_delta[0]);
-            if constexpr (Dims > 1) {
-                force_y_deltas_.add(idx, delta.force_delta[1]);
+            for (size_t ii = 0; ii < buffer.count; ii++) {
+                const auto& delta = buffer.deltas[ii];
+                size_t body_idx   = delta.body_idx;
+
+                if (body_idx >= MAX_BODIES) {
+                    continue;   // safety check
+                }
+
+                if (has_delta[body_idx]) {
+                    // combine with existing delta
+                    combined_deltas[body_idx] =
+                        combined_deltas[body_idx].combine(delta);
+                }
+                else {
+                    // first delta for this body
+                    combined_deltas[body_idx] = delta;
+                    has_delta[body_idx]       = true;
+                }
             }
-            if constexpr (Dims > 2) {
-                force_z_deltas_.add(idx, delta.force_delta[2]);
-            }
-            mass_deltas_.add(idx, delta.mass_delta);
-            accreted_mass_deltas_.add(idx, delta.accreted_mass_delta);
-            accretion_rate_deltas_.add(idx, delta.accretion_rate_delta);
         }
 
+        // apply all deltas to system
         ComponentBodySystem<T, Dims>
-        apply_deltas(const ComponentBodySystem<T, Dims>& system)
+        apply_to(ComponentBodySystem<T, Dims>&& system)
         {
-            ComponentBodySystem<T, Dims> new_system = system;
+            for (size_t body_idx = 0; body_idx < MAX_BODIES; body_idx++) {
+                if (!has_delta[body_idx]) {
+                    continue;
+                }
 
-            for (size_type ii = 0; ii < system.size(); ii++) {
-                auto maybe_body = system.get_body(ii);
+                auto maybe_body = system.get_body(body_idx);
                 if (!maybe_body.has_value()) {
                     continue;
                 }
 
-                auto body = maybe_body.value();
+                auto body         = maybe_body.value();
+                const auto& delta = combined_deltas[body_idx];
 
-                // create new force vector
-                spatial_vector_t<T, Dims> new_force = body.force;
-                new_force[0] += force_x_deltas_[ii];
-                if constexpr (Dims > 1) {
-                    new_force[1] += force_y_deltas_[ii];
-                }
-                if constexpr (Dims > 2) {
-                    new_force[2] += force_z_deltas_[ii];
-                }
+                // apply force delta
+                auto new_force = body.force + delta.force_delta;
+                body = std::move(body).with_force(std::move(new_force));
 
-                body = body.with_force(new_force);
-
-                // add accreted mass if relevant
-                if (accreted_mass_deltas_[ii] > 0) {
-                    body = body.add_accreted_mass(accreted_mass_deltas_[ii]);
+                // apply accreted mass
+                if (delta.accreted_mass_delta > 0) {
+                    body = std::move(body)
+                               .add_accreted_mass(delta.accreted_mass_delta)
+                               .with_accretion_rate(delta.accretion_rate_delta);
                 }
 
-                // update the body in the system
-                new_system = new_system.update_body(ii, body);
+                // update system with move semantics
+                system = ComponentBodySystem<T, Dims>::update_body_in(
+                    std::move(system),
+                    body_idx,
+                    std::move(body)
+                );
             }
 
-            return new_system;
+            // reset for next use
+            for (size_t ii = 0; ii < MAX_BODIES; ii++) {
+                has_delta[ii] = false;
+            }
+
+            return std::move(system);
         }
     };
+
 }   // namespace simbi::ibsystem
 
 namespace simbi::ibsystem::functions {
@@ -150,16 +181,15 @@ namespace simbi::ibsystem::functions {
 
     template <typename T, size_type Dims>
     ComponentBodySystem<T, Dims> update_body_system(
-        const ComponentBodySystem<T, Dims>& system,
+        ComponentBodySystem<T, Dims>&& system,
         const T time,
         const T dt
     )
     {
-        ComponentBodySystem<T, Dims> updated_system = system;
-
+        using system_t = ComponentBodySystem<T, Dims>;
         // update the body system
         if constexpr (Dims >= 2) {
-            if (system.is_binary()) {
+            if (system.is_binary() && system.inertial()) {
                 // use binary system update logic that returns new bodies
                 auto updated_bodies =
                     body_functions::binary::calculate_binary_motion(
@@ -168,20 +198,23 @@ namespace simbi::ibsystem::functions {
                     );
 
                 // apply updates to the system
-                for (size_t i = 0; i < updated_bodies.size(); i++) {
-                    updated_system =
-                        updated_system.update_body(i, updated_bodies[i]);
+                for (size_t ii = 0; ii < updated_bodies.size(); ii++) {
+                    system = system_t::update_body_in(
+                        std::move(system),
+                        ii,
+                        std::move(updated_bodies[ii])
+                    );
                 }
             }
         }
 
-        return updated_system;
+        return std::move(system);
     }
 
     template <typename T, size_type Dims, typename Primitive>
-    DEV Primitive::counterpart_t apply_forces_to_fluid(
+    DEV std::pair<typename Primitive::counterpart_t, BodyDeltaBuffer<T, Dims>>
+    apply_forces_to_fluid(
         const ibsystem::ComponentBodySystem<T, Dims>& system,
-        BodyDeltaAccumulator<T, Dims>& accumulator,
         const Primitive& prim,
         const auto& mesh_cell,
         std::tuple<size_type, size_type, size_type> coords,
@@ -191,6 +224,7 @@ namespace simbi::ibsystem::functions {
     {
         using conserved_t = typename Primitive::counterpart_t;
         conserved_t fluid_state{};
+        BodyDeltaBuffer<T, Dims> accumulator{};
 
         {
             LazyCapabilityView<T, Dims> gravitational_bodies(
@@ -211,7 +245,7 @@ namespace simbi::ibsystem::functions {
 
                 fluid_state += fluid_change;
 
-                accumulator.accumulate(body_delta);
+                accumulator.collect(std::move(body_delta));
             }
         }
 
@@ -234,10 +268,10 @@ namespace simbi::ibsystem::functions {
 
                 fluid_state += fluid_change;
 
-                accumulator.accumulate(body_delta);
+                accumulator.collect(std::move(body_delta));
             }
         }
-        return fluid_state;
+        return {std::move(fluid_state), std::move(accumulator)};
     }
 }   // namespace simbi::ibsystem::functions
 #endif
