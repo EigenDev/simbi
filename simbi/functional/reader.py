@@ -237,7 +237,7 @@ class LazySimulationReader:
             if has_capability(body_type, BodyCapability.ACCRETION):
                 self._immersed_bodies_cache[f"body_{i}"].update(
                     {
-                        # "accretion_rate": body_group["accretion_rate"][...],
+                        "accretion_rate": body_group["accretion_rate"][...],
                         "accretion_radius": body_group["accretion_radius"][...],
                         "total_accreted_mass": body_group["total_accreted_mass"][...],
                     }
