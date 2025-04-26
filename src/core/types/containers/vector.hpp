@@ -584,6 +584,57 @@ namespace simbi {
             });
         }
 
+        // compound assignment (+=, -=, *=, /=)
+        template <typename U, size_type OtherDims, VectorType OtherType>
+        DUAL constexpr auto
+        operator+=(const Vector<U, OtherDims, OtherType>& other)
+        {
+            // traditional for loop version
+            // for (size_type ii = 0; ii < Dims; ++ii) {
+            //     storage_[ii] += static_cast<T>(other[ii]);
+            // }
+            // return *this;
+
+            return *this = *this + other;
+        }
+
+        template <typename U, size_type OtherDims, VectorType OtherType>
+        DUAL constexpr auto
+        operator-=(const Vector<U, OtherDims, OtherType>& other)
+        {
+            // traditional for loop version
+            // for (size_type ii = 0; ii < Dims; ++ii) {
+            //     storage_[ii] -= static_cast<T>(other[ii]);
+            // }
+            // return *this;
+
+            return *this = *this - other;
+        }
+
+        template <typename U>
+        DUAL constexpr auto operator*=(U scalar)
+        {
+            // traditional for loop version
+            // for (size_type ii = 0; ii < Dims; ++ii) {
+            //     storage_[ii] *= static_cast<T>(scalar);
+            // }
+            // return *this;
+
+            return *this = *this * scalar;
+        }
+
+        template <typename U>
+        DUAL constexpr auto operator/=(U scalar)
+        {
+            // traditional for loop version
+            // for (size_type ii = 0; ii < Dims; ++ii) {
+            //     storage_[ii] /= static_cast<T>(scalar);
+            // }
+            // return *this;
+
+            return *this = *this / scalar;
+        }
+
         // create a view to this vector
         DUAL constexpr VectorView<T, Dims, Type> view()
         {
