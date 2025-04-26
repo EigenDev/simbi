@@ -35,21 +35,24 @@ namespace simbi::ibsystem::body_functions {
             using conserved_t = Primitive::counterpart_t;
             // Calculate distance vector from body to cell
             const auto softening_length = body.softening_length();
-            const auto r = mesh_cell.cartesian_centroid() - body.position;
-            const auto r2 =
-                vecops::dot(r, r) + softening_length * softening_length;
+            const auto softening_sq     = softening_length * softening_length;
+            const auto r      = mesh_cell.cartesian_centroid() - body.position;
+            const auto r2     = vecops::dot(r, r) + softening_sq;
+            const auto r3_inv = 1.0 / (r2 * std::sqrt(r2));
             // Gravitational force on fluid element (G = 1)
-            const auto f_cart = body.mass * r / (r2 * std::sqrt(r2));
+            const auto f_cart = body.mass * r * r3_inv;
 
             // Centralize force based on geometry
             const auto ff_hat = -centralize(f_cart, mesh_cell.geometry());
 
+            const auto density = prim.labframe_density();
             // Calculate momentum and energy change
-            const auto dp = prim.labframe_density() * ff_hat * dt;
+            const auto dp = density * ff_hat * dt;
 
-            const auto v_old = prim.velocity();
-            const auto v_new = (prim.spatial_momentum(context.gamma) + dp) /
-                               prim.labframe_density();
+            const auto& v_old = prim.velocity();
+            const auto invd   = 1.0 / density;
+            const auto v_new =
+                (prim.spatial_momentum(context.gamma) + dp) * invd;
             const auto v_avg = 0.5 * (v_old + v_new);
             const auto dE    = vecops::dot(v_avg, dp);
 
