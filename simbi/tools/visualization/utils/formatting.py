@@ -48,21 +48,22 @@ class PlotTextStyle:
         else:
             nind_curves = config["plot"].nplots // len(config["plot"].files)
 
+        nlines = len(config["plot"].fields)
+        if config["style"].nlinestyles is not None:
+            nind_curves = config["style"].nlinestyles
+            nlines = config["style"].nlinestyles
         colors = np.array([colormap(k) for k in np.linspace(0.1, 0.9, nind_curves)])
-        linestyles = [
-            x[0]
-            for x in zip(
-                cycle(["-", "--", ":", "-."]), range(len(config["plot"].fields))
-            )
-        ]
-        default_cycler = cycler(color=colors) * (cycler(linestyle=linestyles))
+        linestyles = [x[0] for x in zip(cycle(["-", "--", ":", "-."]), range(nlines))]
+        if len(colors) == len(linestyles):
+            default_cycler = cycler(color=colors) + (cycler(linestyle=linestyles))
+        else:
+            default_cycler = cycler(color=colors) * (cycler(linestyle=linestyles))
 
         # Update matplotlib params
         plt.rcParams.update(
             {
                 "font.size": self.fontsize,
                 "text.color": self.color,
-                "font.family": self.fontname,
                 "text.usetex": self.use_tex,
                 "font.family": self.font_family,
                 "legend.fontsize": self.fontsize,
@@ -159,11 +160,13 @@ class PlotFormatter:
                 weight_string: str = get_field_str(
                     [config["plot"].weight], normalized=False
                 ).replace(r"$", "")
+                if weight_string == "None":
+                    weight_string = ""
+                else:
+                    weight_string = "_" + weight_string
                 ax.set_xlabel(r"$t$")
                 if len(config["plot"].fields) == 1:
-                    ax.set_ylabel(
-                        rf"$\langle$ {field_string}$~\rangle_{weight_string}$"
-                    )
+                    ax.set_ylabel(rf"$\langle$ {field_string}$~\rangle{weight_string}$")
                 else:
                     ax.legend()
                 ax.set_title(f"{config['plot'].setup}")

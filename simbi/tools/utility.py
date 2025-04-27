@@ -79,7 +79,10 @@ FIELD_MAP: dict[str, str] = {
     "b1": r"$B_1$",
     "b2": r"$B_2$",
     "b3": r"$B_3$",
-    "mdot": r"$M_dot$",
+    "accretion_rate": r"$\dot{M}$",
+    "accreted_mass": r"$M_{\rm acc}$",
+    "mdot": r"$\dot{M}$",
+    "maccr": r"$M_{\rm acc}$",
 }
 
 UNITS: dict[str, str] = {

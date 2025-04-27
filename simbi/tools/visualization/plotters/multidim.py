@@ -11,6 +11,7 @@ from ..utils.io import DataManager
 from ..core.mixins import DataHandlerMixin, AnimationMixin, CoordinatesMixin
 from ..core.base import BasePlotter
 from ....functional.helpers import find_nearest
+from ....functional.reader import BodyCapability, has_capability
 from ..core.constants import LINEAR_FIELDS
 from ...utility import get_field_str
 
@@ -233,13 +234,12 @@ class MultidimPlotter(BasePlotter, DataHandlerMixin, AnimationMixin, Coordinates
         linestyle: str,
     ) -> None:
         """Plot a circle on the given axes"""
-        ...
-        # circle = mpatches.Circle(
-        #     center, radius, color=color, linestyle=linestyle, alpha=0.5
-        # )
-        # axes.add_patch(circle)
-        # axes.set_aspect("equal", adjustable="box")
-        # axes.autoscale_view()
+        circle = mpatches.Circle(
+            center, radius, color=color, linestyle=linestyle, alpha=0.5
+        )
+        axes.add_patch(circle)
+        axes.set_aspect("equal", adjustable="box")
+        axes.autoscale_view()
 
     def _plot_immersed_bodies(
         self,
@@ -249,7 +249,7 @@ class MultidimPlotter(BasePlotter, DataHandlerMixin, AnimationMixin, Coordinates
     ) -> None:
         """Plot immersed bodies on top of the current plot"""
         for body in immersed_bodies.values():
-            if body["type"] == "accretor":
+            if has_capability(body["type"], BodyCapability.ACCRETION):
                 radius = body["accretion_radius"]
             else:
                 radius = body["radius"]

@@ -5,6 +5,8 @@ FIELD_ALIASES = {
     "b1": "b1_mean",
     "b2": "b2_mean",
     "b3": "b3_mean",
+    "mdot": "accretion_rate",
+    "maccr": "accreted_mass",
 }
 
 DERIVED = [
@@ -27,7 +29,8 @@ DERIVED = [
     "pmag",
     "sigma",
     "enthalpy_density",
-    "mdot",
+    "accretion_rate",
+    "accreted_mass",
 ]
 FIELD_CHOICES = [
     "rho",

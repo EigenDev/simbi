@@ -176,6 +176,14 @@ class PlottingArgumentBuilder:
                     "type": str,
                 },
             ),
+            (
+                ["--nlines"],
+                {
+                    "help": "number of linestyles to plot",
+                    "default": None,
+                    "type": int,
+                },
+            ),
         ]
 
     def _build_style_arguments(self) -> None:
@@ -629,6 +637,7 @@ class PlottingArgumentBuilder:
                 color_range=args["cbar_range"],
                 xmax=args["xmax"],
                 orbital_params=args["orbital_params"],
+                nlinestyles=args["nlines"],
             ),
             "animation": AnimationGroup(
                 frame_rate=args["frame_rate"],

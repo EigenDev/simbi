@@ -211,7 +211,6 @@ class LazySimulationReader:
 
         # get the number of bodies
         body_count: int = int(ib_group.attrs["count"])
-
         # Read data for each body
         for i in range(body_count):
             body_group = ib_group[f"body_{i}"]
@@ -257,6 +256,23 @@ class LazySimulationReader:
             k: bool(v) if isinstance(v, np.uint8) else v
             for k, v in self._metadata_cache.items()
         }
+
+        if "immersed_bodies" in file_obj:
+            ib_group = dict(file_obj["immersed_bodies"])
+            ib_attrs = dict(file_obj["immersed_bodies"].attrs)
+            ref_frame: str = ib_attrs["reference_frame"].decode("utf-8")
+            self._metadata_cache["reference_frame"] = ref_frame
+            if "system_config" in ib_group:
+                system_config = dict(ib_group["system_config"].attrs)
+                self._metadata_cache["system_config"] = {
+                    k: v.decode("utf-8") if isinstance(v, bytes) else v
+                    for k, v in system_config.items()
+                }
+                # turn numpy uint8 into bool
+                self._metadata_cache["system_config"] = {
+                    k: bool(v) if isinstance(v, np.uint8) else v
+                    for k, v in self._metadata_cache["system_config"].items()
+                }
 
         # derived metadata
         self._metadata_cache.update(

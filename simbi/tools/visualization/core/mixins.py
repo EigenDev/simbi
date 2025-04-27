@@ -139,16 +139,16 @@ class AnimationMixin:
                         radius = body["accretion_radius"]
                     else:
                         radius = body["radius"]
-                    # circle = mpatches.Circle(
-                    #     body["position"],
-                    #     radius,
-                    #     color="black",
-                    #     linestyle="--",
-                    #     alpha=0.5,
-                    # )
-                    # self.axes.add_patch(circle)
-                    # self.axes.set_aspect("equal", adjustable="box")
-                    # self.axes.autoscale_view()
+                    circle = mpatches.Circle(
+                        body["position"],
+                        radius,
+                        color="black",
+                        linestyle="--",
+                        alpha=0.5,
+                    )
+                    self.axes.add_patch(circle)
+                    self.axes.set_aspect("equal", adjustable="box")
+                    self.axes.autoscale_view()
 
 
 class CoordinatesMixin:

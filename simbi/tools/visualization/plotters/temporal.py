@@ -4,12 +4,49 @@ from argparse import ArgumentParser
 from dataclasses import dataclass
 from typing import Optional, Any
 from numpy.typing import NDArray
+from itertools import cycle
+from cycler import cycler
+from simbi.tools.visualization.core.mixins import (
+    AnimationMixin,
+    CoordinatesMixin,
+    DataHandlerMixin,
+)
 from ..utils.io import DataManager
 from ..utils.formatting import PlotFormatter
 from ..core.base import BasePlotter
 from ....functional.helpers import calc_cell_volume
 from ... import utility as util
-from ..core.constants import DERIVED
+from ..core.constants import DERIVED, FIELD_ALIASES
+
+
+@dataclass
+class AccretionTimeSeriesData:
+    """Container for accretion time series data"""
+
+    times: list[float]
+    # body ID -> list of accreted masses over time
+    # for both accretion rate and mass, the list is ordered by time
+    # and the body ID is the key
+    accreted_mass: dict[str, list[float]]
+    accretion_rate: dict[str, list[float]]
+
+    @property
+    def array(self):
+        return np.array(self.times)
+
+    def get_body_data(self, body_id: str, data_type: str):
+        """Get data for a specific body"""
+        if data_type == "accreted_mass":
+            return np.array(self.accreted_mass.get(body_id, []))
+        elif data_type == "accretion_rate":
+            return np.array(self.accretion_rate.get(body_id, []))
+        else:
+            raise ValueError(f"Unknown data type: {data_type}")
+
+    @property
+    def body_ids(self):
+        """Get list of all body IDs"""
+        return list(self.accreted_mass.keys())
 
 
 @dataclass
@@ -26,7 +63,7 @@ class TimeSeriesData:
         return np.array(self.times), np.array(self.values)
 
 
-class TemporalPlotter(BasePlotter):
+class TemporalPlotter(BasePlotter, DataHandlerMixin, AnimationMixin, CoordinatesMixin):
     """Plots mean quantities vs time"""
 
     def __init__(self, parser: ArgumentParser) -> None:
@@ -62,20 +99,16 @@ class TemporalPlotter(BasePlotter):
     def _compute_time_series(self) -> TimeSeriesData:
         """Compute time series for given dataset"""
         times, values = [], []
+        plot_weight = self.config["plot"].weight
 
         for data in self.data_manager.iter_files():
             # Get variable and weights
-            var = (
-                util.prims2var(data.fields, self.config["plot"].fields[0])
-                if self.config["plot"].fields[0] in DERIVED
-                else data.fields[self.config["plot"].fields[0]]
-            )
+            var = self.get_variable(data.fields, self.config["plot"].fields[0])
 
-            weights = (
-                util.prims2var(data.fields, self.config["plot"].weight)
-                if self.config["plot"].weight != self.config["plot"].fields[0]
-                else None
-            )
+            if plot_weight is not None:
+                weights = self.get_variable(data.fields, self.config["plot"].weight)
+            else:
+                weights = None
 
             # Calculate weighted mean
             if weights is not None:
@@ -90,6 +123,31 @@ class TemporalPlotter(BasePlotter):
         return TimeSeriesData(
             times, values, self.config["plot"].weight, self.config["plot"].fields[0]
         )
+
+    def _compute_accretion_time_series(self) -> AccretionTimeSeriesData:
+        """Compute time series for accretion data"""
+        times = []
+        # body ID -> list of accreted masses
+        accreted_mass = {}
+        accretion_rate = {}
+
+        for data in self.data_manager.iter_files():
+            times.append(data.setup["time"])
+
+            # process immersed bodies data
+            if data.immersed_bodies:
+                for body_id, body_data in data.immersed_bodies.items():
+                    # check if body is an accretor
+                    if "total_accreted_mass" in body_data:
+                        # init lists if this is the first time we're seeing this body
+                        if body_id not in accreted_mass:
+                            accreted_mass[body_id] = []
+                            accretion_rate[body_id] = []
+
+                        accreted_mass[body_id].append(body_data["total_accreted_mass"])
+                        accretion_rate[body_id].append(body_data["accretion_rate"])
+
+        return AccretionTimeSeriesData(times, accreted_mass, accretion_rate)
 
     def _fit_power_law(
         self, times: np.ndarray, data: np.ndarray, t_break: Optional[float] = None
@@ -112,42 +170,62 @@ class TemporalPlotter(BasePlotter):
             ],
         }
 
-    def plot(self):
-        """Main plotting method"""
-        # Compute time series
-        series = self._compute_time_series()
-        times, data = series.array
+    def _plot_accretion_data(self, field_type: str):
+        """Plot accretion data for immersed bodies"""
+        # compute accretion time series
+        accretion_series = self._compute_accretion_time_series()
+        times = accretion_series.array
 
-        # Plot main data
-        label = self.config["style"].labels or None
-        self.frames.append(self.axes.plot(times, data, label=label, alpha=1.0)[0])
+        # get labels from config or generate defaults
+        labels = self.config["style"].labels or []
+        # plot data for each body
+        for i, body_id in enumerate(accretion_series.body_ids):
+            body_data = accretion_series.get_body_data(body_id, field_type)
+
+            # use provided label or generate default
+            label = labels[i] if i < len(labels) else f"Body {body_id.split('_')[-1]}"
+
+            # plot this body's data
+            self.frames.append(
+                self.axes.plot(times, body_data, label=label, alpha=1.0)[0]
+            )
+
+        # set title based on what we're plotting
+        title = (
+            "Total Accreted Mass vs Time"
+            if field_type == "accreted_mass"
+            else "Accretion Rate vs Time"
+        )
+        self.axes.set_title(title)
+
+        # add legend if multiple bodies
+        if len(accretion_series.body_ids) > 1:
+            self.axes.legend()
+
+        # apply formatter settings
         self.formatter.set_axes_properties(
             self.fig, self.axes, {"dimensions": 1}, self.config
         )
         self.formatter.setup_axis_style(self.axes)
-        # Add power law fits if requested
-        # if (
-        #     self.pictorial
-        #     and series.field in ["gamma_beta", "u1", "u"]
-        #     and key == len(self.flist.keys()) - 1
-        # ):
 
-        #     fit = self._fit_power_law(times, data, self.break_time)
+    def plot(self):
+        """Main plotting method"""
+        # check if we're plotting regular field data or accretion data
+        field = self.config["plot"].fields[0]
+        if field in FIELD_ALIASES:
+            field = FIELD_ALIASES[field]
 
-        #     if self.break_time:
-        #         for fit_data, label in fit["fits"]:
-        #             self.ax.plot(
-        #                 fit["time"],
-        #                 fit_data,
-        #                 label=label,
-        #                 color="grey",
-        #                 linestyle="--",
-        #             )
-        #     else:
-        #         self.ax.plot(
-        #             fit["time"],
-        #             fit["fit"],
-        #             label=fit["label"],
-        #             color="grey",
-        #             linestyle=":",
-        #         )
+        # check if we're plotting accretion data
+        if field in ["accreted_mass", "accretion_rate"]:
+            self._plot_accretion_data(field)
+        else:
+            series = self._compute_time_series()
+            times, data = series.array
+
+            # plot main data
+            label = self.config["style"].labels or None
+            self.frames.append(self.axes.plot(times, data, label=label, alpha=1.0)[0])
+            self.formatter.set_axes_properties(
+                self.fig, self.axes, {"dimensions": 1}, self.config
+            )
+            self.formatter.setup_axis_style(self.axes)

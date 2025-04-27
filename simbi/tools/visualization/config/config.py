@@ -71,6 +71,7 @@ class StyleGroup:
     ylabel: str = "y"
     dpi: int = 300
     orbital_params: Optional[dict[str, float]] = None
+    nlinestyles: Optional[int] = None
 
 
 @dataclass
