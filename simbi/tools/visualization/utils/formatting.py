@@ -177,11 +177,6 @@ class PlotFormatter:
                 else:
                     ax.legend()
                 ax.set_title(f"{config['plot'].setup} t = {setup['time']:.2f}")
-                PlotFormatter.set_scale(
-                    ax,
-                    config["style"].semilogx or setup["x1_spacing"] == "log",
-                    config["style"].semilogy or setup["x2_spacing"] == "log",
-                )
                 if config["style"].labels is not None:
                     ax.legend()
 
@@ -215,6 +210,12 @@ class PlotFormatter:
                 if any(config["style"].ylims):
                     ax.set_ylim(config["style"].ylims)
                 ax.set_aspect("equal", adjustable="box")
+
+            PlotFormatter.set_scale(
+                ax,
+                config["style"].semilogx or setup["x1_spacing"] == "log",
+                config["style"].semilogy or setup["x2_spacing"] == "log",
+            )
 
     @staticmethod
     def format_cartesian_colorbar(

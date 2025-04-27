@@ -57,3 +57,12 @@ class DataManager:
                 yield DataManager.read_file(file)
         else:
             yield DataManager.read_file(next(self.file_list_iter))
+
+    def get_metadata(self) -> dict[str, Any]:
+        """Get metadata from the first file"""
+        if not self.file_list:
+            raise ValueError("No files to read metadata from")
+
+        first_file = self.file_list[0]
+        data = DataManager.read_file(first_file)
+        return data.setup

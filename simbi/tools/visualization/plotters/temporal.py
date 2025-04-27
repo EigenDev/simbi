@@ -202,10 +202,9 @@ class TemporalPlotter(BasePlotter, DataHandlerMixin, AnimationMixin, Coordinates
         if len(accretion_series.body_ids) > 1:
             self.axes.legend()
 
+        metadata = self.data_manager.get_metadata()
         # apply formatter settings
-        self.formatter.set_axes_properties(
-            self.fig, self.axes, {"dimensions": 1}, self.config
-        )
+        self.formatter.set_axes_properties(self.fig, self.axes, metadata, self.config)
         self.formatter.setup_axis_style(self.axes)
 
     def plot(self):
@@ -225,7 +224,8 @@ class TemporalPlotter(BasePlotter, DataHandlerMixin, AnimationMixin, Coordinates
             # plot main data
             label = self.config["style"].labels or None
             self.frames.append(self.axes.plot(times, data, label=label, alpha=1.0)[0])
+            metadata = self.data_manager.get_metadata()
             self.formatter.set_axes_properties(
-                self.fig, self.axes, {"dimensions": 1}, self.config
+                self.fig, self.axes, metadata, self.config
             )
             self.formatter.setup_axis_style(self.axes)
