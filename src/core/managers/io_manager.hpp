@@ -185,42 +185,30 @@ namespace simbi {
         auto checkpoint_index() const { return checkpoint_idx_; }
 
         // call 'em
-        template <typename... Args>
-            requires(sizeof...(Args) == Dims + 2)
-        DEV void call_hydro_source(Args&&... args) const
+        template <typename Conserved>
+        DEV Conserved call_hydro_source(
+            const spatial_vector_t<real, Dims> coords,
+            const real time,
+            const Conserved& cons
+        ) const
         {
-            // extract the coordinates and results array from args
-            real coords[3] = {0.0, 0.0, 0.0};
-            real t         = 0.0;
-            real* results  = nullptr;
-
-            if constexpr (Dims == 1) {
-                //  1D: args are (x1, t, results*)
-                std::tie(coords[0], t, results) =
-                    std::forward_as_tuple(std::forward<Args>(args)...);
+            auto local_cons = cons;
+            spatial_vector_t<real, 3> local_coords{0.0, 0.0, 0.0};
+            for (size_type ii = 0; ii < Dims; ++ii) {
+                local_coords[ii] = coords[ii];
             }
-            else if constexpr (Dims == 2) {
-                //  2D: args are (x1, x2, t, results*)
-                std::tie(coords[0], coords[1], t, results) =
-                    std::forward_as_tuple(std::forward<Args>(args)...);
-            }
-            else if constexpr (Dims == 3) {
-                //  3D: args are (x1, x2, x3, t, results*)
-                std::tie(coords[0], coords[1], coords[2], t, results) =
-                    std::forward_as_tuple(std::forward<Args>(args)...);
-            }
-
             expression::evaluate_expr_vector(
-                hydro_source_expr_nodes_.data(),
-                hydro_source_output_indices_.data(),
-                hydro_source_output_indices_.size(),
-                coords[0],
-                coords[1],
-                coords[2],
-                t,
-                hydro_source_parameters_.data(),
-                results
+                hydro_source_expr_nodes_.data(),       // node data
+                hydro_source_output_indices_.data(),   // node idx data
+                hydro_source_output_indices_.size(),   // output element size
+                local_coords[0],                       // x1
+                local_coords[1],                       // x2
+                local_coords[2],                       // x3
+                time,                                  // time
+                cons.data(),        // passed-in conservatives
+                local_cons.data()   // local conservatives
             );
+            return local_cons;
         }
 
         template <typename... Args>

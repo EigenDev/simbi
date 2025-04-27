@@ -444,7 +444,7 @@ void SRHD<dim>::advance_impl()
             fri,
             gri,
             hri,
-            this->hydro_sources(cell),
+            this->hydro_sources(prim.value(), cell),
             this->gravity_sources(prim.value(), cell),
             cell.geometrical_sources(prim.value(), gamma),
             cell

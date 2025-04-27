@@ -201,27 +201,16 @@ namespace simbi {
             init_body_system(init_conditions);
         }
 
-        DEV conserved_t hydro_sources(const auto& cell) const
+        DEV conserved_t hydro_sources(const auto& prims, const auto& cell) const
         {
             if (null_sources()) {
                 return conserved_t{};
             }
 
-            conserved_t res;
             const auto* iof = io_manager_.get();
-            if constexpr (Dims == 1) {
-                const auto x1c = cell.centroid()[0];
-                iof->call_hydro_source(x1c, time(), res.data());
-            }
-            else if constexpr (Dims == 2) {
-                const auto [x1c, x2c] = cell.centroid();
-                iof->call_hydro_source(x1c, x2c, time(), res.data());
-            }
-            else {
-                const auto [x1c, x2c, x3c] = cell.centroid();
-                iof->call_hydro_source(x1c, x2c, x3c, time(), res.data());
-            }
-            return res;
+            auto coords     = cell.centroid();
+            return iof
+                ->call_hydro_source(coords, time(), prims.to_conserved(gamma_));
         }
 
         DEV conserved_t
@@ -350,13 +339,11 @@ namespace simbi {
 
             // immersed body dynamics (if any bodies are present)
             if (body_system_) {
-                if constexpr (sim_type::Newtonian<R>) {
-                    *body_system_ = ibsystem::functions::update_body_system(
-                        std::move(*body_system_),
-                        time(),
-                        time_step()
-                    );
-                }
+                *body_system_ = ibsystem::functions::update_body_system(
+                    std::move(*body_system_),
+                    time(),
+                    time_step()
+                );
             }
 
             // gas dynamics

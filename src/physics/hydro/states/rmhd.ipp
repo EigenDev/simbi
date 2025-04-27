@@ -1613,7 +1613,7 @@ void RMHD<dim>::advance_conserved()
             fr,
             gr,
             hr,
-            this->hydro_sources(cell),
+            this->hydro_sources(prim.value(), cell),
             this->gravity_sources(prim.value(), cell),
             cell.geometrical_sources(prim.value(), gamma),
             cell
