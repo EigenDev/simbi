@@ -51,6 +51,7 @@
 
 #include "build_options.hpp"
 #include "physics/hydro/schemes/ib/serialization/body_serialization.hpp"
+#include "physics/hydro/schemes/ib/serialization/system_serialization.hpp"
 #include <string>
 #include <unordered_map>
 
@@ -398,6 +399,18 @@ namespace simbi {
                 bodies_count_attr.write(int_type, &body_count);
                 bodies_count_attr.close();
 
+                auto ref_attr = ib_group.createAttribute(
+                    "reference_frame",
+                    H5::StrType(H5::PredType::C_S1, 256),
+                    scalar_dataspace
+                );
+                const auto ref_frame = body_system.reference_frame();
+                ref_attr.write(
+                    H5::StrType(H5::PredType::C_S1, 256),
+                    ref_frame.c_str()
+                );
+                ref_attr.close();
+
                 // Write each body's data
                 for (size_type body_idx = 0; body_idx < body_count;
                      ++body_idx) {
@@ -444,8 +457,15 @@ namespace simbi {
                     caps_attr.write(int_type, &caps_int);
                     caps_attr.close();
 
-                    // Close this body's group
+                    // close this body's group
                     body_group.close();
+                }
+
+                if (body_system.has_system_config()) {
+                    serialize_system_config(
+                        body_system.system_config().get(),
+                        ib_group
+                    );
                 }
 
                 // Close the immersed_bodies group

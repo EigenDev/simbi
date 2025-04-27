@@ -19,8 +19,30 @@ namespace simbi::ibsystem {
                 return nullptr;
             }
         }
+
+        std::string reference_frame = "inertial";
+        if (init.contains("body_system")) {
+            const auto& sys_props = init.get_dict("body_system");
+            if (sys_props.contains("system_type")) {
+                const auto& system_type =
+                    sys_props.at("system_type").get<std::string>();
+                if (system_type != "binary") {
+                    throw std::runtime_error(
+                        "Only binary systems are supported at this time"
+                    );
+                }
+            }
+            if (sys_props.contains("reference_frame")) {
+                reference_frame =
+                    sys_props.at("reference_frame").get<std::string>();
+            }
+        }
+
         // create initial empty system
-        auto system = util::make_unique<ComponentBodySystem<T, Dims>>(mesh);
+        auto system = util::make_unique<ComponentBodySystem<T, Dims>>(
+            mesh,
+            std::move(reference_frame)
+        );
 
         // check if body system configuration exists
         if (init.contains("body_system")) {

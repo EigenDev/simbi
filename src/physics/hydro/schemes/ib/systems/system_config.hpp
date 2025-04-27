@@ -3,10 +3,27 @@
 
 #include "build_options.hpp"
 #include "core/types/utility/managed.hpp"
+#include <utility>
+
+namespace H5 {
+    class Group;
+}
 
 namespace simbi::ibsystem {
     struct SystemConfig : public Managed<global::managed_memory> {
         virtual ~SystemConfig() = default;
+
+        // Serialization method that each derived class must implement
+        virtual void write_to_h5(H5::Group& group) const
+        {
+            // Base class implementation - just writes the type
+            H5::DataSpace scalar_space(H5S_SCALAR);
+            H5::StrType str_type(H5::PredType::C_S1, H5T_VARIABLE);
+            auto type_attr =
+                group.createAttribute("config_type", str_type, scalar_space);
+            const char* type_str = "base";
+            type_attr.write(str_type, &type_str);
+        }
     };
 
     template <typename T>
@@ -38,7 +55,68 @@ namespace simbi::ibsystem {
               body_indices(body1_idx, body2_idx)
         {
         }
+
+        // Implementation of serialization method for binary systems
+        void write_to_h5(H5::Group& group) const override;
     };
+
+    // Implementation of the serialization method for binary systems
+    template <typename T>
+    void BinarySystemConfig<T>::write_to_h5(H5::Group& group) const
+    {
+        // Write config type
+        H5::DataSpace scalar_space(H5S_SCALAR);
+        H5::StrType str_type(H5::PredType::C_S1, H5T_VARIABLE);
+        auto type_attr =
+            group.createAttribute("config_type", str_type, scalar_space);
+        const char* type_str = "binary";
+        type_attr.write(str_type, &type_str);
+
+        // Write all binary system properties as attributes
+        auto write_scalar = [&group](const std::string& name, auto value) {
+            H5::DataSpace scalar_space(H5S_SCALAR);
+            using ValueType = decltype(value);
+
+            if constexpr (std::is_same_v<ValueType, bool>) {
+                auto attr = group.createAttribute(
+                    name,
+                    H5::PredType::NATIVE_HBOOL,
+                    scalar_space
+                );
+                attr.write(H5::PredType::NATIVE_HBOOL, &value);
+            }
+            else if constexpr (std::is_floating_point_v<ValueType>) {
+                auto attr = group.createAttribute(
+                    name,
+                    H5::PredType::NATIVE_DOUBLE,
+                    scalar_space
+                );
+                attr.write(H5::PredType::NATIVE_DOUBLE, &value);
+            }
+        };
+
+        // Write scalar properties
+        write_scalar("semi_major", this->semi_major);
+        write_scalar("mass_ratio", this->mass_ratio);
+        write_scalar("eccentricity", this->eccentricity);
+        write_scalar("orbital_period", this->orbital_period);
+        write_scalar("circular_orbit", this->circular_orbit);
+        write_scalar("prescribed_motion", this->prescribed_motion);
+
+        // Write body indices as a dataset
+        hsize_t dims[1] = {2};
+        H5::DataSpace pair_space(1, dims);
+        auto dataset = group.createDataSet(
+            "body_indices",
+            H5::PredType::NATIVE_UINT64,
+            pair_space
+        );
+        size_t indices[2] = {
+          this->body_indices.first,
+          this->body_indices.second
+        };
+        dataset.write(indices, H5::PredType::NATIVE_UINT64);
+    }
 }   // namespace simbi::ibsystem
 
 #endif   // SYSTEM_CONFIG_HPP

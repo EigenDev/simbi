@@ -22,14 +22,21 @@ namespace simbi::ibsystem {
         using conserved_t = anyConserved<Dims, Regime::NEWTONIAN>;
 
         // ctor
-        ComponentBodySystem(const MeshType& mesh) : mesh_(mesh) {}
+        ComponentBodySystem(
+            const MeshType& mesh,
+            std::string reference_frame = "intertial"
+        )
+            : mesh_(mesh), reference_frame_(reference_frame)
+        {
+        }
 
         // copy constructor
         ComponentBodySystem(const ComponentBodySystem& other)
             : mesh_(other.mesh_),
               bodies_(other.bodies_),
               grav_body_indices_(other.grav_body_indices_),
-              accr_body_indices_(other.accr_body_indices_)
+              accr_body_indices_(other.accr_body_indices_),
+              reference_frame_(other.reference_frame_)
         {
             // deep copy the system config if it exists
             if (other.system_config_) {
@@ -52,7 +59,8 @@ namespace simbi::ibsystem {
               bodies_(std::move(other.bodies_)),
               grav_body_indices_(std::move(other.grav_body_indices_)),
               accr_body_indices_(std::move(other.accr_body_indices_)),
-              system_config_(std::move(other.system_config_))
+              system_config_(std::move(other.system_config_)),
+              reference_frame_(std::move(other.reference_frame_))
         {
         }
 
@@ -86,6 +94,7 @@ namespace simbi::ibsystem {
                 else {
                     system_config_.reset();
                 }
+                reference_frame_ = other.reference_frame_;
             }
             return *this;
         }
@@ -105,6 +114,7 @@ namespace simbi::ibsystem {
                 grav_body_indices_ = std::move(other.grav_body_indices_);
                 accr_body_indices_ = std::move(other.accr_body_indices_);
                 system_config_     = std::move(other.system_config_);
+                reference_frame_   = std::move(other.reference_frame_);
             }
             return *this;
         }
@@ -268,6 +278,7 @@ namespace simbi::ibsystem {
         }
 
         bool has_system_config() const { return system_config_ != nullptr; }
+        auto system_config() const { return system_config_; }
 
         bool is_binary() const
         {
@@ -290,6 +301,8 @@ namespace simbi::ibsystem {
 
         bool invokes_gravity() const { return !grav_body_indices_.empty(); }
         bool invokes_accretion() const { return !accr_body_indices_.empty(); }
+
+        std::string reference_frame() const { return reference_frame_; }
 
         // property extraction helper
         template <typename U>
@@ -420,6 +433,9 @@ namespace simbi::ibsystem {
 
         // system config - optional
         util::smart_ptr<SystemConfig> system_config_;
+
+        // reference frame for the system
+        std::string reference_frame_;
     };
 };   // namespace simbi::ibsystem
 #endif
