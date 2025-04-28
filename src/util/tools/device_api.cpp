@@ -1,5 +1,4 @@
 #include "util/tools/device_api.hpp"
-#include <memory>   // for allocator
 
 namespace simbi {
     namespace gpu {
