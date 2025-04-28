@@ -27,3 +27,7 @@ version.py
 *.txt
 *.so
 *.log
+
+# Automatically added by dev.py
+build*/
+__pycache__/
