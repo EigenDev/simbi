@@ -146,7 +146,19 @@ namespace simbi::expression {
         }
     };
 
-    // node2cstring function to convert ExprNode to c string
+    struct LinearExprInstr {
+        ExprOp op;             // operation type
+        int result_register;   // register to store result
+        union {
+            struct {
+                int operand1;   // first operand
+                int operand2;   // second operand
+                int operand3;   // third operand
+            } register_operands;
+            real constant_eval;   // constant value
+            int parameter_idx;    // parameter index
+        };
+    };
 
 }   // namespace simbi::expression
 
