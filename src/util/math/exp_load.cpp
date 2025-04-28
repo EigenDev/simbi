@@ -62,6 +62,7 @@ namespace simbi::expression {
     ndarray<ExprNode> load_expressions(const ConfigDict& expr_data)
     {
         ndarray<ExprNode> nodes;
+        std::vector<ExprNode> nodes_vec;
 
         // get the expressions array
         if (!expr_data.contains("expressions") ||
@@ -115,7 +116,6 @@ namespace simbi::expression {
                     }
                 }
             }
-
             nodes.push_back_with_sync(node);
         }
 

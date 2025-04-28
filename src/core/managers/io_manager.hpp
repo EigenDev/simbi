@@ -56,6 +56,8 @@
 #include "core/types/utility/managed.hpp"
 #include "util/math/evaluator.hpp"
 #include "util/math/exp_load.hpp"
+#include "util/math/expression.hpp"
+#include "util/math/linearizer.hpp"
 #include <string>
 
 namespace simbi {
@@ -146,10 +148,20 @@ namespace simbi {
         ndarray<int> hydro_source_output_indices_;
         ndarray<real> hydro_source_parameters_;
 
+        // linearized expr logic
+        int hydro_source_reg_count_;
+        ndarray<int> hydro_source_linear_outputs_;
+        ndarray<expression::LinearExprInstr> hydro_source_linear_instrs_;
+
         // gravity source expressions
         ndarray<expression::ExprNode> gravity_source_expr_nodes_;
         ndarray<int> gravity_source_output_indices_;
         ndarray<real> gravity_source_parameters_;
+
+        // linearized expr logic
+        int gravity_source_reg_count_;
+        ndarray<int> gravity_source_linear_outputs_;
+        ndarray<expression::LinearExprInstr> gravity_source_linear_instrs_;
 
       public:
         // move constructor and assignment
@@ -197,57 +209,74 @@ namespace simbi {
             for (size_type ii = 0; ii < Dims; ++ii) {
                 local_coords[ii] = coords[ii];
             }
-            expression::evaluate_expr_vector(
-                hydro_source_expr_nodes_.data(),       // node data
-                hydro_source_output_indices_.data(),   // node idx data
-                hydro_source_output_indices_.size(),   // output element size
-                local_coords[0],                       // x1
-                local_coords[1],                       // x2
-                local_coords[2],                       // x3
-                time,                                  // time
-                cons.data(),        // passed-in conservatives
-                local_cons.data()   // local conservatives
+
+            expression::evaluate_linear_expr(
+                hydro_source_linear_instrs_.data(),
+                hydro_source_linear_instrs_.size(),
+                hydro_source_linear_outputs_.data(),
+                hydro_source_output_indices_.size(),
+                hydro_source_reg_count_,
+                local_coords[0],
+                local_coords[1],
+                local_coords[2],
+                time,
+                0.0,   // dt not used for hydro_source
+                cons.data(),
+                local_cons.data()
             );
+            // expression::evaluate_expr_vector(
+            //     hydro_source_expr_nodes_.data(),       // node data
+            //     hydro_source_output_indices_.data(),   // node idx data
+            //     hydro_source_output_indices_.size(),   // output element size
+            //     local_coords[0],                       // x1
+            //     local_coords[1],                       // x2
+            //     local_coords[2],                       // x3
+            //     time,                                  // time
+            //     cons.data(),        // passed-in conservatives
+            //     local_cons.data()   // local conservatives
+            // );
             return local_cons;
         }
 
-        template <typename... Args>
-            requires(sizeof...(Args) == Dims + 2)
-        DEV void call_gravity_source(Args&&... args) const
+        DEV spatial_vector_t<real, Dims> call_gravity_source(
+            const spatial_vector_t<real, Dims>& coords,
+            const real time
+        ) const
         {
-
-            // extract the coordinates and results array from args
-            real coords[3] = {0.0, 0.0, 0.0};
-            real t         = 0.0;
-            real* results  = nullptr;
-
-            if constexpr (Dims == 1) {
-                //  1D: args are (x1, t, results*)
-                std::tie(coords[0], t, results) =
-                    std::forward_as_tuple(std::forward<Args>(args)...);
-            }
-            else if constexpr (Dims == 2) {
-                //  2D: args are (x1, x2, t, results*)
-                std::tie(coords[0], coords[1], t, results) =
-                    std::forward_as_tuple(std::forward<Args>(args)...);
-            }
-            else if constexpr (Dims == 3) {
-                //  3D: args are (x1, x2, x3, t, results*)
-                std::tie(coords[0], coords[1], coords[2], t, results) =
-                    std::forward_as_tuple(std::forward<Args>(args)...);
+            spatial_vector_t<real, Dims> local_vec;
+            spatial_vector_t<real, 3> local_coords{0.0, 0.0, 0.0};
+            for (size_type ii = 0; ii < Dims; ++ii) {
+                local_coords[ii] = coords[ii];
             }
 
-            expression::evaluate_expr_vector(
-                gravity_source_expr_nodes_.data(),
-                gravity_source_output_indices_.data(),
+            expression::evaluate_linear_expr(
+                gravity_source_linear_instrs_.data(),
+                gravity_source_linear_instrs_.size(),
+                gravity_source_linear_outputs_.data(),
                 gravity_source_output_indices_.size(),
-                coords[0],
-                coords[1],
-                coords[2],
-                t,
-                gravity_source_parameters_.data(),
-                results
+                gravity_source_reg_count_,
+                local_coords[0],
+                local_coords[1],
+                local_coords[2],
+                time,
+                0.0,   // dt not used for hydro_source
+                nullptr,
+                local_vec.data()
             );
+
+            return std::move(local_vec);
+
+            // expression::evaluate_expr_vector(
+            //     gravity_source_expr_nodes_.data(),
+            //     gravity_source_output_indices_.data(),
+            //     gravity_source_output_indices_.size(),
+            //     coords[0],
+            //     coords[1],
+            //     coords[2],
+            //     t,
+            //     gravity_source_parameters_.data(),
+            //     results
+            // );
         }
 
         template <typename Conserved>
@@ -454,9 +483,30 @@ namespace simbi {
                 auto [node, indices, params] = expression::load_expression_data(
                     init.gravity_source_expressions
                 );
+
                 gravity_source_expr_nodes_     = std::move(node);
                 gravity_source_output_indices_ = std::move(indices);
                 gravity_source_parameters_     = std::move(params);
+
+                // now we linearize it
+                auto [linear_instrs, mapped_outputs] =
+                    expression::linearize_expression_tree(
+                        gravity_source_expr_nodes_,
+                        gravity_source_output_indices_
+                    );
+                gravity_source_linear_instrs_  = std::move(linear_instrs);
+                gravity_source_linear_outputs_ = std::move(mapped_outputs);
+                gravity_source_reg_count_      = expression::get_max_register(
+                                                gravity_source_linear_instrs_
+                                            ) +
+                                            1;
+                // sync everything to device
+                gravity_source_expr_nodes_.sync_to_device();
+                gravity_source_output_indices_.sync_to_device();
+                gravity_source_parameters_.sync_to_device();
+                gravity_source_linear_instrs_.sync_to_device();
+                gravity_source_linear_outputs_.sync_to_device();
+
                 solver_manager_.set_null_gravity(false);
             }
             else {
@@ -471,9 +521,31 @@ namespace simbi {
                 auto [node, indices, params] = expression::load_expression_data(
                     init.hydro_source_expressions
                 );
+
                 hydro_source_expr_nodes_     = std::move(node);
                 hydro_source_output_indices_ = std::move(indices);
                 hydro_source_parameters_     = std::move(params);
+
+                // idem
+                auto [linear_instrs, mapped_outputs] =
+                    expression::linearize_expression_tree(
+                        hydro_source_expr_nodes_,
+                        hydro_source_output_indices_
+                    );
+
+                hydro_source_linear_instrs_  = std::move(linear_instrs);
+                hydro_source_linear_outputs_ = std::move(mapped_outputs);
+                hydro_source_reg_count_ =
+                    expression::get_max_register(hydro_source_linear_instrs_) +
+                    1;
+
+                // sync everything to device
+                hydro_source_expr_nodes_.sync_to_device();
+                hydro_source_output_indices_.sync_to_device();
+                hydro_source_parameters_.sync_to_device();
+                hydro_source_linear_instrs_.sync_to_device();
+                hydro_source_linear_outputs_.sync_to_device();
+
                 solver_manager_.set_null_sources(false);
             }
             else {

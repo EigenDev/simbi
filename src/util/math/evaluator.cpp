@@ -26,6 +26,366 @@ namespace simbi::expression {
         UNKNOWN_OPERATION
     };
 
+    int get_max_register(const ndarray<LinearExprInstr>& instructions)
+    {
+        int max_reg = 4;   // Start with input registers
+
+        for (size_t i = 0; i < instructions.size(); i++) {
+            const auto& instr = instructions[i];
+            max_reg           = std::max(max_reg, instr.result_register);
+
+            // Also check operands for completeness
+            if (instr.op != ExprOp::CONSTANT && instr.op != ExprOp::PARAMETER) {
+                max_reg = std::max(max_reg, instr.register_operands.operand1);
+                max_reg = std::max(max_reg, instr.register_operands.operand2);
+                max_reg = std::max(max_reg, instr.register_operands.operand3);
+            }
+        }
+
+        return max_reg;
+    }
+
+    DEV void evaluate_linear_expr(
+        const LinearExprInstr* instructions,
+        size_type instruction_count,
+        const int* mapped_output_indices,
+        size_type output_count,
+        int reg_count,
+        real x1,
+        real x2,
+        real x3,
+        real t,
+        real dt,
+        const real* parameters,
+        real* outputs
+    )
+    {
+        // Create register bank
+        // Use a fixed size array for performance - adjust MAX_REGISTERS as
+        // needed
+        constexpr int MAX_REGISTERS   = 256;
+        real registers[MAX_REGISTERS] = {0.0};
+
+        // Initialize input registers
+        registers[0] = x1;
+        registers[1] = x2;
+        registers[2] = x3;
+        registers[3] = t;
+        registers[4] = dt;   // if needed
+
+        // Execute each instruction in reverse order
+        for (size_type ii = 0; ii < instruction_count; ii++) {
+            const auto& instr    = instructions[ii];
+            const int result_reg = instr.result_register;
+
+            // make sure reg index is valid
+            if (result_reg < 0 || result_reg >= MAX_REGISTERS) {
+                continue;   // this should never happen
+            }
+
+            switch (instr.op) {
+                case ExprOp::CONSTANT:
+                    registers[result_reg] = instr.constant_eval;
+                    break;
+
+                case ExprOp::VARIABLE_X1:
+                case ExprOp::VARIABLE_X2:
+                case ExprOp::VARIABLE_X3:
+                case ExprOp::VARIABLE_T:
+                case ExprOp::VARIABLE_DT:
+                    // Already handled in initialization
+                    break;
+
+                case ExprOp::PARAMETER:
+                    registers[result_reg] = parameters[instr.parameter_idx];
+                    break;
+
+                case ExprOp::ADD:
+                    registers[result_reg] =
+                        registers[instr.register_operands.operand1] +
+                        registers[instr.register_operands.operand2];
+                    break;
+
+                case ExprOp::SUBTRACT:
+                    registers[result_reg] =
+                        registers[instr.register_operands.operand1] -
+                        registers[instr.register_operands.operand2];
+                    break;
+
+                case ExprOp::MULTIPLY:
+                    registers[result_reg] =
+                        registers[instr.register_operands.operand1] *
+                        registers[instr.register_operands.operand2];
+                    break;
+                case ExprOp::DIVIDE: {
+                    real denominator =
+                        registers[instr.register_operands.operand2];
+                    if (denominator == 0.0) {
+                        printf(
+                            "[ExprError] Division by zero in instruction %zu\n",
+                            ii
+                        );
+                        registers[result_reg] = 0.0;   // Handle gracefully
+                        break;
+                    }
+                    registers[result_reg] =
+                        registers[instr.register_operands.operand1] /
+                        denominator;
+                    break;
+                }
+
+                case ExprOp::POWER: {
+                    real base     = registers[instr.register_operands.operand1];
+                    real exponent = registers[instr.register_operands.operand2];
+                    // Handle potential domain errors
+                    if (base == 0.0 && exponent < 0.0) {
+                        printf(
+                            "[ExprError] Zero raised to negative power in "
+                            "instruction %zu\n",
+                            ii
+                        );
+                    }
+                    if (base < 0.0 && std::floor(exponent) != exponent) {
+                        printf(
+                            "[ExprError] Negative base with non-integer "
+                            "exponent in instruction %zu\n",
+                            ii
+                        );
+                    }
+                    registers[result_reg] = std::pow(base, exponent);
+                    break;
+                }
+
+                case ExprOp::NEG:
+                    registers[result_reg] =
+                        -registers[instr.register_operands.operand1];
+                    break;
+                case ExprOp::LT:
+                    registers[result_reg] =
+                        registers[instr.register_operands.operand1] <
+                                registers[instr.register_operands.operand2]
+                            ? 1.0
+                            : 0.0;
+                    break;
+                case ExprOp::GT:
+                    registers[result_reg] =
+                        registers[instr.register_operands.operand1] >
+                                registers[instr.register_operands.operand2]
+                            ? 1.0
+                            : 0.0;
+                    break;
+                case ExprOp::EQ:
+                    registers[result_reg] =
+                        registers[instr.register_operands.operand1] ==
+                                registers[instr.register_operands.operand2]
+                            ? 1.0
+                            : 0.0;
+                    break;
+                case ExprOp::LE:
+                    registers[result_reg] =
+                        registers[instr.register_operands.operand1] <=
+                                registers[instr.register_operands.operand2]
+                            ? 1.0
+                            : 0.0;
+                    break;
+                case ExprOp::GE:
+                    registers[result_reg] =
+                        registers[instr.register_operands.operand1] >=
+                                registers[instr.register_operands.operand2]
+                            ? 1.0
+                            : 0.0;
+                    break;
+                case ExprOp::AND:
+                    registers[result_reg] =
+                        static_cast<int>(
+                            registers[instr.register_operands.operand1]
+                        ) &&
+                                static_cast<int>(
+                                    registers[instr.register_operands.operand2]
+                                )
+                            ? 1.0
+                            : 0.0;
+                    break;
+                case ExprOp::OR:
+                    registers[result_reg] =
+                        static_cast<int>(
+                            registers[instr.register_operands.operand1]
+                        ) ||
+                                static_cast<int>(
+                                    registers[instr.register_operands.operand2]
+                                )
+                            ? 1.0
+                            : 0.0;
+                    break;
+
+                case ExprOp::NOT:
+                    registers[result_reg] =
+                        !static_cast<int>(
+                            registers[instr.register_operands.operand1]
+                        )
+                            ? 1.0
+                            : 0.0;
+                    break;
+                case ExprOp::LOG:
+                    registers[result_reg] =
+                        std::log(registers[instr.register_operands.operand1]);
+                    break;
+                case ExprOp::LOG10:
+                    registers[result_reg] =
+                        std::log10(registers[instr.register_operands.operand1]);
+                    break;
+                case ExprOp::ABS:
+                    registers[result_reg] =
+                        std::abs(registers[instr.register_operands.operand1]);
+                    break;
+                case ExprOp::SIN:
+                    registers[result_reg] =
+                        std::sin(registers[instr.register_operands.operand1]);
+                    break;
+                case ExprOp::COS:
+                    registers[result_reg] =
+                        std::cos(registers[instr.register_operands.operand1]);
+                    break;
+                case ExprOp::TAN:
+                    registers[result_reg] =
+                        std::tan(registers[instr.register_operands.operand1]);
+                    break;
+                case ExprOp::ASIN:
+                    registers[result_reg] =
+                        std::asin(registers[instr.register_operands.operand1]);
+                    break;
+                case ExprOp::ACOS:
+                    registers[result_reg] =
+                        std::acos(registers[instr.register_operands.operand1]);
+                    break;
+                case ExprOp::ATAN:
+                    registers[result_reg] =
+                        std::atan(registers[instr.register_operands.operand1]);
+                    break;
+                case ExprOp::EXP:
+                    registers[result_reg] =
+                        std::exp(registers[instr.register_operands.operand1]);
+                    break;
+                case ExprOp::SQRT:
+                    registers[result_reg] =
+                        std::sqrt(registers[instr.register_operands.operand1]);
+                    break;
+                case ExprOp::MIN:
+                    registers[result_reg] = std::min(
+                        registers[instr.register_operands.operand1],
+                        registers[instr.register_operands.operand2]
+                    );
+                    break;
+                case ExprOp::MAX:
+                    registers[result_reg] = std::max(
+                        registers[instr.register_operands.operand1],
+                        registers[instr.register_operands.operand2]
+                    );
+                    break;
+                case ExprOp::SINH:
+                    registers[result_reg] =
+                        std::sinh(registers[instr.register_operands.operand1]);
+                    break;
+                case ExprOp::COSH:
+                    registers[result_reg] =
+                        std::cosh(registers[instr.register_operands.operand1]);
+                    break;
+                case ExprOp::TANH:
+                    registers[result_reg] =
+                        std::tanh(registers[instr.register_operands.operand1]);
+                    break;
+                case ExprOp::ASINH:
+                    registers[result_reg] =
+                        std::asinh(registers[instr.register_operands.operand1]);
+                    break;
+                case ExprOp::ACOSH:
+                    registers[result_reg] =
+                        std::acosh(registers[instr.register_operands.operand1]);
+                    break;
+                case ExprOp::ATANH:
+                    registers[result_reg] =
+                        std::atanh(registers[instr.register_operands.operand1]);
+                    break;
+                case ExprOp::SGN:
+                    registers[result_reg] =
+                        registers[instr.register_operands.operand1] > 0.0
+                            ? 1.0
+                            : (registers[instr.register_operands.operand1] < 0.0
+                                   ? -1.0
+                                   : 0.0);
+                    break;
+                case ExprOp::BITWISE_AND:
+                    registers[result_reg] =
+                        static_cast<int>(
+                            registers[instr.register_operands.operand1]
+                        ) &
+                        static_cast<int>(
+                            registers[instr.register_operands.operand2]
+                        );
+                    break;
+                case ExprOp::BITWISE_OR:
+                    registers[result_reg] =
+                        static_cast<int>(
+                            registers[instr.register_operands.operand1]
+                        ) |
+                        static_cast<int>(
+                            registers[instr.register_operands.operand2]
+                        );
+                    break;
+                case ExprOp::BITWISE_XOR:
+                    registers[result_reg] =
+                        static_cast<int>(
+                            registers[instr.register_operands.operand1]
+                        ) ^
+                        static_cast<int>(
+                            registers[instr.register_operands.operand2]
+                        );
+                    break;
+                case ExprOp::BITWISE_NOT:
+                    registers[result_reg] = ~static_cast<int>(
+                        registers[instr.register_operands.operand1]
+                    );
+                    break;
+                case ExprOp::BITWISE_LEFT_SHIFT:
+                    registers[result_reg] =
+                        static_cast<int>(
+                            registers[instr.register_operands.operand1]
+                        )
+                        << static_cast<int>(
+                               registers[instr.register_operands.operand2]
+                           );
+                    break;
+                case ExprOp::BITWISE_RIGHT_SHIFT:
+                    registers[result_reg] =
+                        static_cast<int>(
+                            registers[instr.register_operands.operand1]
+                        ) >>
+                        static_cast<int>(
+                            registers[instr.register_operands.operand2]
+                        );
+                    break;
+
+                case ExprOp::IF_THEN_ELSE:
+                    registers[result_reg] =
+                        registers[instr.register_operands.operand1] != 0.0
+                            ? registers[instr.register_operands.operand2]
+                            : registers[instr.register_operands.operand3];
+                    break;
+            }
+        }
+
+        // Copy results to output array
+        for (size_type i = 0; i < output_count; i++) {
+            int reg_idx = mapped_output_indices[i];
+            if (reg_idx >= 0 && reg_idx < MAX_REGISTERS) {
+                outputs[i] = registers[reg_idx];
+            }
+            else {
+                outputs[i] = 0.0;   // Fallback for invalid register
+            }
+        }
+    }
+
     DEV real evaluate_expr(
         const ExprNode* nodes,
         int node_idx,
