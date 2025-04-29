@@ -149,8 +149,9 @@ namespace simbi {
                     }
 
                     // Find which dimensions are at boundaries
-                    simbi::array_t<std::pair<int, bool>, Dims> boundary_dims;
-                    int num_boundaries = 0;
+                    simbi::array_t<std::pair<size_type, bool>, Dims>
+                        boundary_dims;
+                    size_type num_boundaries = 0;
 
                     for (size_type dim = 0; dim < Dims; ++dim) {
                         if (coords[dim] < radii[dim]) {
@@ -171,8 +172,8 @@ namespace simbi {
                     size_type interior_idx = 0;
                     auto int_coords        = coords;
 
-                    for (int i = 0; i < num_boundaries; ++i) {
-                        auto [dim, is_lower] = boundary_dims[i];
+                    for (size_type ii = 0; ii < num_boundaries; ++ii) {
+                        auto [dim, is_lower] = boundary_dims[ii];
                         const auto bc_idx    = 2 * dim + (is_lower ? 0 : 1);
                         const auto bc        = conditions_ptr[bc_idx];
 

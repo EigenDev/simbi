@@ -904,18 +904,11 @@ namespace simbi {
             }
         }
 
-        DEV auto calc_magnetic_four_vector() const
+        DEV constexpr auto calc_magnetic_four_vector() const
         {
             if constexpr (R != Regime::RMHD) {
-                if constexpr (!global::on_gpu) {
-                    static const ZeroMagneticFourVectorView zero_view;
-                    return zero_view.to_vector();
-                }
-                else {
-                    ZeroMagneticFourVectorView zero_view;
-                    return zero_view.to_vector();
-                    // return magnetic_four_vector_t<real>{};
-                }
+                ZeroMagneticFourVectorView zero_view;
+                return zero_view.to_vector();
             }
             else {
                 return vecops::as_fourvec(

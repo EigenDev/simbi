@@ -8,6 +8,7 @@ sources = files(
     'util/tools/device_api.cpp',
     'util/math/exp_load.cpp',
     'util/math/evaluator.cpp',
+    'util/math/linearize.cpp',
 )
 
 headers = files(

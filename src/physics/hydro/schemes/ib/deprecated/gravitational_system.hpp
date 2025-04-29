@@ -409,7 +409,7 @@ namespace simbi::ibsystem {
             const auto& bodies      = this->bodies();
             const size_t num_bodies = bodies.size();
 
-            for (size_t i = 0; i < num_bodies; ++i) {
+            for (size_type i = 0; i < num_bodies; ++i) {
                 for (size_t j = i + 1; j < num_bodies; ++j) {
                     const auto& body1 = bodies[i];
                     const auto& body2 = bodies[j];

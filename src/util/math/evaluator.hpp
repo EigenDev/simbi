@@ -2,6 +2,7 @@
 #define EVALUATOR_HPP
 
 #include "build_options.hpp"
+#include "core/types/containers/ndarray.hpp"
 #include "util/math/expression.hpp"
 
 namespace simbi::expression {
@@ -56,6 +57,24 @@ namespace simbi::expression {
         real* results,
         real dt = 0.0
     );
+
+    DEV void evaluate_linear_expr(
+        const LinearExprInstr* instructions,
+        size_type instruction_count,
+        const int* mapped_output_indices,
+        size_type output_count,
+        int reg_count,
+        real x1,
+        real x2,
+        real x3,
+        real t,
+        real dt,
+        const real* parameters,
+        real* outputs
+    );
+
+    int get_max_register(const ndarray<LinearExprInstr>& instructions);
+
 }   // namespace simbi::expression
 
 #endif

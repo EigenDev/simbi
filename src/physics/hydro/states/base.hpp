@@ -207,8 +207,8 @@ namespace simbi {
                 return conserved_t{};
             }
 
-            const auto* iof = io_manager_.get();
-            auto coords     = cell.centroid();
+            const auto* iof   = io_manager_.get();
+            const auto coords = cell.centroid();
             return iof
                 ->call_hydro_source(coords, time(), prims.to_conserved(gamma_));
         }
@@ -220,29 +220,9 @@ namespace simbi {
                 return conserved_t{};
             }
 
-            const auto c = cell.centroid();
-            spatial_vector_t<real, Dims> gravity_vec;
-            const auto* iof = io_manager_.get();
-            if constexpr (Dims == 1) {
-                iof->call_gravity_source(c[0], time(), gravity_vec.data());
-            }
-            else if constexpr (Dims == 2) {
-                iof->call_gravity_source(
-                    c[0],
-                    c[1],
-                    time(),
-                    gravity_vec.data()
-                );
-            }
-            else {
-                iof->call_gravity_source(
-                    c[0],
-                    c[1],
-                    c[2],
-                    time(),
-                    gravity_vec.data()
-                );
-            }
+            const auto coords      = cell.centroid();
+            const auto* iof        = io_manager_.get();
+            const auto gravity_vec = iof->call_gravity_source(coords, time());
 
             const auto dp_dt = prims.labframe_density() * gravity_vec;
             const auto v_old = prims.velocity();

@@ -33,7 +33,7 @@ namespace simbi::ibsystem {
     };
 
     template <typename T, size_type Dims>
-    class BodyDeltaCombiner
+    class BodyDeltaCombiner : public Managed<global::managed_memory>
     {
       private:
         static constexpr size_t MAX_BODIES = 10;
@@ -51,7 +51,7 @@ namespace simbi::ibsystem {
         }
 
         // add all deltas from a buffer
-        void add_buffer(const BodyDeltaBuffer<T, Dims>& buffer)
+        DEV void add_buffer(const BodyDeltaBuffer<T, Dims>& buffer)
         {
             for (size_t ii = 0; ii < buffer.count; ii++) {
                 const auto& delta = buffer.deltas[ii];
