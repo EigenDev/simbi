@@ -3,6 +3,7 @@ from typing import Any
 
 import matplotlib.patches as mpatches
 import numpy as np
+import matplotlib.colors as mcolors
 from matplotlib.animation import FuncAnimation
 from numpy.typing import NDArray
 
@@ -121,14 +122,18 @@ class AnimationMixin:
             sliced_var = self.get_slice_data(var, mesh, setup)
             self.frames[idx].set_data(x, sliced_var)
         else:
-            # vmin, vmax = np.nanmin(var), np.nanmax(var)
-            for drawing in self.frames:
-                # Update norm if using LogNorm
-                # if isinstance(drawing.norm, mcolors.LogNorm):
-                #     drawing.norm = mcolors.LogNorm(vmin=vmin, vmax=vmax)
-                # else:
-                #     drawing.norm = mcolors.Normalize(vmin=vmin, vmax=vmax)
-                drawing.set_array(var.ravel())
+            drawing = self.frames[idx]
+            # if a user has not defined colorbar limits,
+            # let the colorbar auto adjust
+            if all(x is None for x in next(self.config["style"].color_range)):
+                vmin, vmax = np.min(var), np.max(var)
+                if isinstance(drawing.norm, mcolors.LogNorm):
+                    drawing.norm = mcolors.LogNorm(vmin=vmin, vmax=vmax)
+                else:
+                    drawing.norm = mcolors.PowerNorm(
+                        vmin=vmin, vmax=vmax, gamma=self.config["style"].power
+                    )
+            drawing.set_array(var.ravel())
             if immersed_bodies:
                 # Clear previous patches
                 for patch in self.axes.patches:

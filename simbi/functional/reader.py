@@ -82,6 +82,21 @@ class LazySimulationReader:
                         return np.sqrt(
                             sum(pipeline[f"v{i}"]() ** 2 for i in range(1, 4))
                         )
+                elif key == "u":
+                    # four-velocity
+                    if dimensions == 1:
+                        return pipeline["u1"]()
+                    else:
+                        # get the four-velocity magnitude
+                        v = np.sqrt(sum(pipeline[f"v{i}"]() ** 2 for i in range(1, 4)))
+                        W = pipeline["W"]()
+                        if any(x < 0 for x in v.flat):
+                            raise ValueError("Velocity is negative")
+                        if any(x < 0 for x in W.flat):
+                            raise ValueError("Lorentz factor is negative")
+
+                        return v * W
+
                 raise KeyError(f"Field '{key}' not found")
 
             def __contains__(self, key: object) -> bool:

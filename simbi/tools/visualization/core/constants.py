@@ -62,7 +62,7 @@ LINEAR_FIELDS = [
     "v1",
     "v2",
     "v3",
-    "sigma",
+    # "sigma",
 ]
 
 LEGEND_LOCATIONS = [
