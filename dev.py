@@ -599,7 +599,9 @@ def configure(
     args: argparse.Namespace, reconfigure: str, hdf5_include: str, gpu_include: str
 ) -> List[str]:
     """Create meson configure command."""
-    if args.dev_arch is None or args.dev_arch == 0:
+    if args.gpu_compilation == "enabled" and (
+        args.dev_arch is None or args.dev_arch == 0
+    ):
         logger.warning("No GPU architecture specified")
         if not confirm("Continue anyway?"):
             if not confirm("Would you like to set the gpu architecure now?"):
