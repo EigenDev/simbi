@@ -84,10 +84,14 @@ struct InitialConditions {
     simbi::ConfigDict hydro_source_expressions;
     simbi::ConfigDict gravity_source_expressions;
 
-    std::tuple<lint, lint, lint> active_zones() const
+    std::tuple<size_type, size_type, size_type> active_zones() const
     {
         const auto nghosts = 2 * (1 + (spatial_order == "plm"));
-        return std::make_tuple(nx - nghosts, ny - nghosts, nz - nghosts);
+        return std::make_tuple(
+            nx - nghosts,
+            std::max<lint>(ny - nghosts, 1),
+            std::max<lint>(nz - nghosts, 1)
+        );
     }
 
     // Basic dictionary access methods
