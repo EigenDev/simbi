@@ -3,123 +3,13 @@
 
 #include "build_options.hpp"           // for real, size_type, Dims
 #include "component_body_system.hpp"   // for ComponentBodySystem
-#include "physics/hydro/schemes/ib/policies/body_delta.hpp"   // for BodyDelta
+#include "physics/hydro/schemes/ib/delta/collector.hpp"
 #include "physics/hydro/schemes/ib/policies/interaction_functions.hpp"   // for apply_gravitational_force, apply_accretion_effect
 #include "physics/hydro/schemes/ib/processing/lazy.hpp"   // for LazyCapabilityView
 #include "physics/hydro/types/context.hpp"                // for HydroContext
 
 using namespace simbi::ibsystem::body_functions::gravitational;
 using namespace simbi::ibsystem::body_functions::accretion;
-
-namespace simbi::ibsystem {
-    // small enough to be returned by value from GPU functions
-    template <typename T, size_type Dims>
-    struct BodyDeltaBuffer {
-        // max 10 bodies x 2 interaction types
-        static constexpr size_t MAX_DELTAS = 20;
-
-        // actual deltas
-        array_t<BodyDelta<T, Dims>, MAX_DELTAS> deltas;
-        // number of valid deltas
-        size_t count = 0;
-
-        // add a delta to the buffer
-        DUAL void collect(const BodyDelta<T, Dims>& delta)
-        {
-            if (count < MAX_DELTAS) {
-                deltas[count++] = delta;
-            }
-        }
-    };
-
-    template <typename T, size_type Dims>
-    class BodyDeltaCombiner : public Managed<global::managed_memory>
-    {
-      private:
-        static constexpr size_t MAX_BODIES = 10;
-        // one entry per body - indexed directly by body_idx
-        array_t<BodyDelta<T, Dims>, MAX_BODIES> combined_deltas;
-        array_t<bool, MAX_BODIES> has_delta;
-
-      public:
-        BodyDeltaCombiner()
-        {
-            // initialize has_delta to all false
-            for (size_t ii = 0; ii < MAX_BODIES; ii++) {
-                has_delta[ii] = false;
-            }
-        }
-
-        // add all deltas from a buffer
-        DEV void add_buffer(const BodyDeltaBuffer<T, Dims>& buffer)
-        {
-            for (size_t ii = 0; ii < buffer.count; ii++) {
-                const auto& delta = buffer.deltas[ii];
-                size_t body_idx   = delta.body_idx;
-
-                if (body_idx >= MAX_BODIES) {
-                    continue;   // safety check
-                }
-
-                if (has_delta[body_idx]) {
-                    // combine with existing delta
-                    combined_deltas[body_idx] =
-                        combined_deltas[body_idx].combine(delta);
-                }
-                else {
-                    // first delta for this body
-                    combined_deltas[body_idx] = delta;
-                    has_delta[body_idx]       = true;
-                }
-            }
-        }
-
-        // apply all deltas to system
-        ComponentBodySystem<T, Dims>
-        apply_to(ComponentBodySystem<T, Dims>&& system)
-        {
-            for (size_t body_idx = 0; body_idx < MAX_BODIES; body_idx++) {
-                if (!has_delta[body_idx]) {
-                    continue;
-                }
-
-                auto maybe_body = system.get_body(body_idx);
-                if (!maybe_body.has_value()) {
-                    continue;
-                }
-
-                auto body         = maybe_body.value();
-                const auto& delta = combined_deltas[body_idx];
-
-                // apply force delta
-                auto new_force = body.force + delta.force_delta;
-                body = std::move(body).with_force(std::move(new_force));
-
-                // apply accreted mass
-                if (delta.accreted_mass_delta > 0) {
-                    body = std::move(body)
-                               .add_accreted_mass(delta.accreted_mass_delta)
-                               .with_accretion_rate(delta.accretion_rate_delta);
-                }
-
-                // update system with move semantics
-                system = ComponentBodySystem<T, Dims>::update_body_in(
-                    std::move(system),
-                    body_idx,
-                    std::move(body)
-                );
-            }
-
-            // reset for next use
-            for (size_t ii = 0; ii < MAX_BODIES; ii++) {
-                has_delta[ii] = false;
-            }
-
-            return std::move(system);
-        }
-    };
-
-}   // namespace simbi::ibsystem
 
 namespace simbi::ibsystem::functions {
     template <typename T, size_type Dims>
@@ -212,19 +102,18 @@ namespace simbi::ibsystem::functions {
     }
 
     template <typename T, size_type Dims, typename Primitive>
-    DEV std::pair<typename Primitive::counterpart_t, BodyDeltaBuffer<T, Dims>>
-    apply_forces_to_fluid(
+    DEV Primitive::counterpart_t apply_forces_to_fluid(
         const ibsystem::ComponentBodySystem<T, Dims>& system,
         const Primitive& prim,
         const auto& mesh_cell,
         std::tuple<size_type, size_type, size_type> coords,
         const HydroContext& context,
-        const T dt
+        const T dt,
+        GridBodyDeltaCollector<T, Dims>& collector
     )
     {
         using conserved_t = typename Primitive::counterpart_t;
         conserved_t fluid_state{};
-        BodyDeltaBuffer<T, Dims> accumulator{};
 
         {
             LazyCapabilityView<T, Dims> gravitational_bodies(
@@ -245,7 +134,14 @@ namespace simbi::ibsystem::functions {
 
                 fluid_state += fluid_change;
 
-                accumulator.collect(std::move(body_delta));
+                collector.record_delta(
+                    coords,
+                    body_idx,
+                    body_delta.force_delta,
+                    0.0,
+                    0.0,
+                    0.0
+                );
             }
         }
 
@@ -268,10 +164,17 @@ namespace simbi::ibsystem::functions {
 
                 fluid_state += fluid_change;
 
-                accumulator.collect(std::move(body_delta));
+                collector.record_delta(
+                    coords,
+                    body_idx,
+                    body_delta.force_delta,
+                    body_delta.mass_delta,
+                    body_delta.accreted_mass_delta,
+                    body_delta.accretion_rate_delta
+                );
             }
         }
-        return {std::move(fluid_state), std::move(accumulator)};
+        return std::move(fluid_state);
     }
 }   // namespace simbi::ibsystem::functions
 #endif

@@ -153,6 +153,13 @@ namespace simbi::ibsystem {
             return new_body;
         }
 
+        DUAL Body<T, Dims> add_mass(T added_mass) const
+        {
+            Body<T, Dims> new_body = *this;
+            new_body.mass          = mass + added_mass;
+            return new_body;
+        }
+
         DUAL Body<T, Dims> add_accreted_mass(T added_mass) const
         {
             Body<T, Dims> new_body = *this;

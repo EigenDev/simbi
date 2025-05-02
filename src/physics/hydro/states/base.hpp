@@ -55,6 +55,7 @@
 #include "core/managers/io_manager.hpp"            // for IOManager
 #include "core/managers/solver_manager.hpp"        // for SolverManager
 #include "core/managers/time_manager.hpp"          // for TimeManager
+#include "core/types/containers/collapsable.hpp"
 #include "core/types/containers/vector.hpp"
 #include "core/types/utility/init_conditions.hpp"   // for InitialConditions
 #include "core/types/utility/managed.hpp"           // for Managed
@@ -124,17 +125,15 @@ namespace simbi {
             std::tuple<size_type, size_type, size_type>&& coords
         )
         {
-            auto [fluid_change, delta_buffer] =
-                ibsystem::functions::apply_forces_to_fluid(
-                    *body_system_,
-                    prim,
-                    cell,
-                    coords,
-                    context_,
-                    time_step()
-                );
-            accumulator_->add_buffer(delta_buffer);
-            return std::move(fluid_change);
+            return ibsystem::functions::apply_forces_to_fluid(
+                *body_system_,
+                prim,
+                cell,
+                coords,
+                context_,
+                time_step(),
+                *collector_
+            );
         }
 
       private:
@@ -170,7 +169,8 @@ namespace simbi {
         ndarray<Maybe<primitive_t>, Dims> prims_;
         ndarray<conserved_t, Dims> cons_;
         util::smart_ptr<ibsystem::ComponentBodySystem<real, Dims>> body_system_;
-        util::smart_ptr<ibsystem::BodyDeltaCombiner<real, Dims>> accumulator_;
+        util::smart_ptr<ibsystem::GridBodyDeltaCollector<real, Dims>>
+            collector_;
         HydroContext context_;
 
         HydroBase() = default;
@@ -272,9 +272,12 @@ namespace simbi {
                 init
             );
             if (body_system_) {
-                accumulator_ =
-                    util::make_unique<ibsystem::BodyDeltaCombiner<real, Dims>>(
-                    );
+                const auto [nax, nay, naz] = init.active_zones();
+                collector_                 = util::make_unique<
+                                    ibsystem::GridBodyDeltaCollector<real, Dims>>(
+                    collapsable<Dims>{naz, nay, nax},
+                    2
+                );
             }
         }
 
@@ -334,12 +337,7 @@ namespace simbi {
             // generate new system based on the new body
             // configuration / state
             if (body_system_) {
-                // update system on the host
-                // but make sure gpu finishes
-                // the work before we do this
-                gpu::api::deviceSynch();
-                *body_system_ =
-                    accumulator_->apply_to(std::move(*body_system_));
+                *body_system_ = collector_->apply_to(std::move(*body_system_));
             }
         }
 

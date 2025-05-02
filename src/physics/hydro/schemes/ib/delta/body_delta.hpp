@@ -14,15 +14,16 @@ namespace simbi::ibsystem {
         T accretion_rate_delta;
 
         // combine two deltas affecting the same body
-        DUAL BodyDelta<T, Dims> combine(const BodyDelta<T, Dims>& other) const
+        DUAL static BodyDelta combine(const BodyDelta& a, const BodyDelta& b)
         {
-            assert(body_idx == other.body_idx);
-            BodyDelta<T, Dims> result = *this;
-            result.force_delta += other.force_delta;
-            result.mass_delta += other.mass_delta;
-            result.accreted_mass_delta += other.accreted_mass_delta;
-            result.accretion_rate_delta += other.accretion_rate_delta;
-            return result;
+            assert(a.body_idx == b.body_idx);
+            return {
+              a.body_idx,
+              a.force_delta + b.force_delta,
+              a.mass_delta + b.mass_delta,
+              a.accreted_mass_delta + b.accreted_mass_delta,
+              a.accretion_rate_delta + b.accretion_rate_delta
+            };
         }
     };
 }   // namespace simbi::ibsystem

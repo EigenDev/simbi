@@ -5,12 +5,12 @@
 #ifndef INTERACTION_FUNCTIONS_HPP
 #define INTERACTION_FUNCTIONS_HPP
 
-#include "body_delta.hpp"
 #include "build_options.hpp"   // for real, size_type, DEV
 #include "core/types/containers/array.hpp"
-#include "core/types/containers/vector.hpp"            // for spatial_vector_t
-#include "geometry/mesh/cell.hpp"                      // for Cell
-#include "physics/hydro/schemes/ib/systems/body.hpp"   // for Body
+#include "core/types/containers/vector.hpp"   // for spatial_vector_t
+#include "geometry/mesh/cell.hpp"             // for Cell
+#include "physics/hydro/schemes/ib/delta/body_delta.hpp"   // for BodyDelta
+#include "physics/hydro/schemes/ib/systems/body.hpp"       // for Body
 #include "physics/hydro/schemes/ib/systems/component_body_system.hpp"   // for ComponentBodySystem
 #include "physics/hydro/types/context.hpp"   // for HydroContext
 #include <cmath>                             // for std::sqrt
