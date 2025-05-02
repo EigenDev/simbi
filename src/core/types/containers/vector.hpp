@@ -416,6 +416,15 @@ namespace simbi {
             return storage_[idx];
         }
 
+        DUAL constexpr bool is_zero() const
+        {
+            bool result = true;
+            for (size_type ii = 0; ii < Dims; ++ii) {
+                result &= (storage_[ii] == 0.0);
+            }
+            return result;
+        }
+
         // safe access with bounds checking
         DUAL constexpr Maybe<reference> at(size_type idx)
         {
