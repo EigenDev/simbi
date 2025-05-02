@@ -47,20 +47,6 @@ namespace simbi::ibsystem {
             cell_policy_ = ExecutionPolicy<>(cpolicy_shape, {1, 1, 1});
             body_policy_ = ExecutionPolicy<>({max_bodies, 1, 1}, {1, 1, 1});
 
-            // Initialize all deltas with invalid body_idx
-            cell_deltas.transform(
-                [](auto&) {
-                    return BodyDelta<T, Dims>{
-                      std::numeric_limits<size_t>::max(),   // invalid body_idx
-                      spatial_vector_t<T, Dims>{},          // zero force
-                      0,
-                      0,
-                      0   // zero mass changes
-                    };
-                },
-                cell_policy_
-            );
-
             // prep body deltas array (one per possible body)
             body_deltas.resize(max_bodies_);
 
@@ -95,7 +81,7 @@ namespace simbi::ibsystem {
                 std::get<2>(cell_idx)
             );
 
-            // set the delta values
+            // // set the delta values
             delta.body_idx             = body_idx;
             delta.force_delta          = force;
             delta.mass_delta           = mass;
@@ -103,7 +89,7 @@ namespace simbi::ibsystem {
             delta.accretion_rate_delta = accretion_rate;
 
             // mark that this body was modified
-            body_modified[body_idx] = 1;
+            // body_modified[body_idx] = 1;
         }
 
         // parallel reduction of deltas on device
@@ -111,7 +97,7 @@ namespace simbi::ibsystem {
         {
             // reset the body deltas array
             body_deltas.transform(
-                [](auto&) {
+                [] DEV(auto&) {
                     return BodyDelta<T, Dims>{
                       std::numeric_limits<size_t>::max(),   // invalid body_idx
                       spatial_vector_t<T, Dims>{},          // zero force
@@ -126,6 +112,9 @@ namespace simbi::ibsystem {
             // for each delta in the grid, atomically accumulate to body_deltas
             cell_deltas.transform_with_indices(
                 [this] DEV(const auto& delta, size_type idx) {
+                    if (delta.accretion_rate_delta != 0.0) {
+                        printf("accr rate: %f\n", delta.accretion_rate_delta);
+                    }
                     // skip invalid deltas
                     if (delta.body_idx == std::numeric_limits<size_t>::max()) {
                         return delta;
@@ -161,9 +150,8 @@ namespace simbi::ibsystem {
                         );
                     }
                     else {
-                        // atomic ops via openmp
-                        body_deltas[delta.body_idx].force_delta +=
-                            delta.force_delta;
+                    // atomic ops via openmp
+#pragma omp atomic
                         body_deltas[delta.body_idx].mass_delta +=
                             delta.mass_delta;
                         body_deltas[delta.body_idx].accreted_mass_delta +=
@@ -188,9 +176,9 @@ namespace simbi::ibsystem {
             // apply the deltas from the already-reduced array
             for (size_t body_idx = 0; body_idx < max_bodies_; body_idx++) {
                 // skip bodies that weren't modified
-                if (body_modified[body_idx] == 0) {
-                    continue;
-                }
+                // if (body_modified[body_idx] == 0) {
+                //     continue;
+                // }
 
                 auto maybe_body = system.get_body(body_idx);
                 if (!maybe_body.has_value()) {
@@ -212,6 +200,7 @@ namespace simbi::ibsystem {
                 }
 
                 if (delta.accreted_mass_delta > 0) {
+                    printf("accretion active\n");
                     body = std::move(body)
                                .add_accreted_mass(delta.accreted_mass_delta)
                                .with_accretion_rate(delta.accretion_rate_delta);
@@ -225,8 +214,8 @@ namespace simbi::ibsystem {
             }
 
             // reset the body_modified array for next use
-            body_modified.fill(0);
-            body_modified.sync_to_device();
+            // body_modified.fill(0);
+            // body_modified.sync_to_device();
 
             return std::move(system);
         }
