@@ -26,6 +26,7 @@ __all__ = [
     "acos",
     "atan",
     "exp",
+    "abs",
     "max_expr",
     "min_expr",
     "if_then_else",
@@ -320,6 +321,15 @@ def atanh(expr: Expr) -> Expr:
 def exp(expr: Expr) -> Expr:
     """Exponential function."""
     return Expr(expr._graph, expr._graph.add_node("exp", expr._node_id))
+
+
+def abs(expr: Expr | float) -> Expr:
+    """Absolute value function."""
+    if isinstance(expr, Expr):
+        return Expr(expr._graph, expr._graph.add_node("abs", expr._node_id))
+    else:
+        val = constant(expr)
+        return Expr(val._graph, val._graph.add_node("abs", val._node_id))
 
 
 def max_expr(expr1: Expr, expr2: Expr) -> Expr:

@@ -12,6 +12,7 @@ from .dag_expression import (
     exp,
     sin,
     cos,
+    abs,
     tan,
     asin,
     acos,
@@ -50,4 +51,5 @@ __all__ = [
     "asinh",
     "acosh",
     "atanh",
+    "abs",
 ]
