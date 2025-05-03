@@ -153,7 +153,7 @@ class AnimationMixin:
                         radius,
                         color="black",
                         linestyle="--",
-                        alpha=0.5,
+                        alpha=0.9,
                     )
                     self.axes.add_patch(circle)
                     self.axes.set_aspect("equal", adjustable="box")
