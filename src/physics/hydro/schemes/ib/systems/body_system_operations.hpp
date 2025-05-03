@@ -89,6 +89,11 @@ namespace simbi::ibsystem::functions {
 
                 // apply updates to the system
                 for (size_t ii = 0; ii < updated_bodies.size(); ii++) {
+                    // std::cout << "Updating body " << ii << " with position "
+                    //           << updated_bodies[ii].position << "with mass "
+                    //           << updated_bodies[ii].mass << " with velocity:
+                    //           "
+                    //           << updated_bodies[ii].velocity << std::endl;
                     system = system_t::update_body_in(
                         std::move(system),
                         ii,

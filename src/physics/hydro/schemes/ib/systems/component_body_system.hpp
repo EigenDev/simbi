@@ -289,15 +289,7 @@ namespace simbi::ibsystem {
             return false;
         }
 
-        bool inertial() const
-        {
-            if (system_config_) {
-                return dynamic_cast<BinarySystemConfig<T>*>(system_config_.get()
-                )
-                    ->prescribed_motion;
-            }
-            return false;
-        }
+        bool inertial() const { return reference_frame_ == "inertial"; }
 
         bool invokes_gravity() const { return !grav_body_indices_.empty(); }
         bool invokes_accretion() const { return !accr_body_indices_.empty(); }

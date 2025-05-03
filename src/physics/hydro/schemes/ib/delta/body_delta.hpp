@@ -22,7 +22,7 @@ namespace simbi::ibsystem {
               a.force_delta + b.force_delta,
               a.mass_delta + b.mass_delta,
               a.accreted_mass_delta + b.accreted_mass_delta,
-              a.accretion_rate_delta + b.accretion_rate_delta
+              b.accretion_rate_delta
             };
         }
     };

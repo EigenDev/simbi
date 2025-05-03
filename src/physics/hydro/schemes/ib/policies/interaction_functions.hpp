@@ -487,7 +487,8 @@ namespace simbi::ibsystem::body_functions {
             auto config = system.template get_system_config<
                 ibsystem::BinarySystemConfig<T>>();
             if (!config || !config->prescribed_motion) {
-                return {Body<T, Dims>(), Body<T, Dims>()};
+                const auto& bodies = system.bodies();
+                return {bodies[0], bodies[1]};
             }
 
             // Extract parameters
