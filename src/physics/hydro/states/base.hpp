@@ -320,24 +320,20 @@ namespace simbi {
         {
             auto& derived = static_cast<Derived&>(*this);
 
-            // immersed body dynamics (if any bodies are present)
-            if (body_system_) {
-                *body_system_ = ibsystem::functions::update_body_system(
-                    std::move(*body_system_),
-                    time(),
-                    time_step()
-                );
-            }
-
-            // gas dynamics
+            // gas dynamics (might include immersed body effects)
             derived.advance_impl();
             derived.cons2prim_impl();
             adapt_dt();
 
             // generate new system based on the new body
-            // configuration / state
+            // configuration / state and move the bodies
             if (body_system_) {
                 *body_system_ = collector_->apply_to(std::move(*body_system_));
+                *body_system_ = ibsystem::functions::update_body_system(
+                    std::move(*body_system_),
+                    time(),
+                    time_step()
+                );
             }
         }
 

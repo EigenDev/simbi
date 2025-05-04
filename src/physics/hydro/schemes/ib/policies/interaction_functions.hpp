@@ -317,8 +317,10 @@ namespace simbi::ibsystem::body_functions {
             const auto distance = r_vector.norm();
 
             // Calculate standard Bondi radius based on ambient sound speed
-            const auto cs_ambient = context.ambient_sound_speed;
-            const auto r_bondi    = 2.0 * body.mass / (cs_ambient * cs_ambient);
+            const auto cs_ambient    = context.ambient_sound_speed;
+            const auto cs_ambient_sq = cs_ambient * cs_ambient;
+            const auto canon_bondi   = 2.0 * body.mass / cs_ambient_sq;
+            const auto r_bondi = std::min(canon_bondi, body.accretion_radius());
 
             // Skip if too far away
             if (distance > 2.5 * r_bondi) {
