@@ -235,7 +235,7 @@ class MultidimPlotter(BasePlotter, DataHandlerMixin, AnimationMixin, Coordinates
     ) -> None:
         """Plot a circle on the given axes"""
         circle = mpatches.Circle(
-            center, radius, color=color, linestyle=linestyle, alpha=0.9
+            center, radius, color=color, linestyle=linestyle, alpha=0.5
         )
         axes.add_patch(circle)
         axes.set_aspect("equal", adjustable="box")

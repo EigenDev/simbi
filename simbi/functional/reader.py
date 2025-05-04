@@ -80,7 +80,10 @@ class LazySimulationReader:
                     else:
                         # get the velocity magnitude
                         return np.sqrt(
-                            sum(pipeline[f"v{i}"]() ** 2 for i in range(1, 4))
+                            sum(
+                                pipeline[f"v{i}"]() ** 2
+                                for i in range(1, dimensions + 1)
+                            )
                         )
                 elif key == "u":
                     # four-velocity
@@ -88,7 +91,12 @@ class LazySimulationReader:
                         return pipeline["u1"]()
                     else:
                         # get the four-velocity magnitude
-                        v = np.sqrt(sum(pipeline[f"v{i}"]() ** 2 for i in range(1, 4)))
+                        v = np.sqrt(
+                            sum(
+                                pipeline[f"v{i}"]() ** 2
+                                for i in range(1, dimensions + 1)
+                            )
+                        )
                         W = pipeline["W"]()
                         if any(x < 0 for x in v.flat):
                             raise ValueError("Velocity is negative")

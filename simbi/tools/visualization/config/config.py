@@ -29,6 +29,7 @@ class PlotGroup:
     powerfit: Optional[float] = None
     hist_type: str = "kinetic"
     weight: str = "rho"
+    extension: Optional[str] = None
 
 
 @dataclass

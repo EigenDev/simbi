@@ -164,7 +164,11 @@ class PlotFormatter:
                     weight_string = ""
                 else:
                     weight_string = "_" + weight_string
-                ax.set_xlabel(r"$t$")
+
+                tunits = ""
+                if config["style"].orbital_params is not None:
+                    tunits = "[orbit(s)]"
+                ax.set_xlabel(rf"$t$ {tunits}")
                 if len(config["plot"].fields) == 1:
                     ax.set_ylabel(rf"$\langle$ {field_string}$~\rangle{weight_string}$")
                 else:

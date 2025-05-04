@@ -35,11 +35,11 @@ class LinePlotter(BasePlotter, DataHandlerMixin, AnimationMixin, CoordinatesMixi
         else:
             labels = [None] * len(self.config["plot"].fields)
         for ax in self.axes:
-            for file_idx, data in enumerate(self.data_manager.iter_files()):
-                for field in self.config["plot"].fields:
+            for data in self.data_manager.iter_files():
+                for field_idx, field in enumerate(self.config["plot"].fields):
                     # Use DataHandlerMixin
                     var = self.get_variable(data.fields, field)
-                    label = self.get_label(field, labels[file_idx])
+                    label = self.get_label(field, labels[field_idx])
 
                     # Use CoordinatesMixin
                     x, indices = self.transform_coordinates(data.mesh, data.setup)
