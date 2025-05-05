@@ -26,6 +26,14 @@ if hip.found()
 endif
 
 gpu_arch = get_option('gpu_arch')
+if cuda.found()
+    # expand the arch string into a list, e.g. 'sm_80' -> ['-gencode', 'arch=compute_80,code=sm_80']
+    gpu_arch = gpu_arch.split(' ')
+elif hip.found()
+    if run_command('hipconfig', '--platform', check: true).stdout().strip() == 'nvidia'
+        gpu_arch = gpu_arch.split(' ')
+endif
+
 gpu_settings = {
     'nvidia': {
         'compiler': 'nvcc',
