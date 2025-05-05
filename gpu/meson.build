@@ -30,9 +30,9 @@ gpu_arch = get_option('gpu_arch').strip()
 gpu_settings = {
     'nvidia': {
         'compiler': 'nvcc',
-        'arch': f'@gpu_arch@',
+        'arch': gpu_arch,
         'args': [
-            f'@gpu_arch@',
+            gpu_arch,
             '-x',
             'cu',
             '-dc',
@@ -50,8 +50,8 @@ gpu_settings = {
     },
     'amd': {
         'compiler': 'hipcc',
-        'arch': f'@gpu_arch@',
-        'args': ['-fPIC', f'@gpu_arch@'],
+        'arch': gpu_arch,
+        'args': ['-fPIC', gpu_arch],
         'link_args': [f'-L@rocm_path@/lib','-lamdhip64'],
         'inter_link_args': [],
         'extra_link_args': [],
