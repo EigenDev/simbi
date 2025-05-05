@@ -66,7 +66,7 @@ namespace simbi::ibsystem {
             spatial_policy_.optimize_batch_size();
 
             // Initialize cell_deltas with default values
-            parallel_for(spatial_policy_, [this, cell_shape] DEV(luint idx) {
+            for (size_type idx = 0; idx < size; ++idx) {
                 // Convert flat index to 3D spatial coordinates
                 const size_type x = idx % cell_shape[0];
                 const size_type y = (idx / cell_shape[0]) % cell_shape[1];
@@ -83,7 +83,7 @@ namespace simbi::ibsystem {
                       0                              // zero accretion rate
                     };
                 }
-            });
+            }
 
             // ensure device has initial state
             cell_deltas.sync_to_device();
