@@ -122,6 +122,9 @@ class AnimationMixin:
             sliced_var = self.get_slice_data(var, mesh, setup)
             self.frames[idx].set_data(x, sliced_var)
         else:
+            # safeguar
+            if any(x < 1e-10 for x in var.flat):
+                var = np.where(var < 1e-10, 1e-10, var)
             if len(self.config["plot"].fields) == 1:
                 for drawing in self.frames:
                     drawing.set_array(var.ravel())
@@ -132,6 +135,9 @@ class AnimationMixin:
                 if all(x is None for x in next(self.config["style"].color_range)):
                     vmin, vmax = np.min(var), np.max(var)
                     if isinstance(drawing.norm, mcolors.LogNorm):
+                        if any(x < 1e-10 for x in var.flat):
+                            var = np.where(var < 1e-10, 1e-10, var)
+                            vmin = max(vmin, 1e-10)
                         drawing.norm = mcolors.LogNorm(vmin=vmin, vmax=vmax)
                     else:
                         drawing.norm = mcolors.PowerNorm(

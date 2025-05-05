@@ -187,6 +187,11 @@ class MultidimPlotter(BasePlotter, DataHandlerMixin, AnimationMixin, Coordinates
                 vmin -= eps
                 vmax += eps
 
+        if self.config["style"].log and field not in LINEAR_FIELDS:
+            if any(x < 1e-10 for x in var.flat):
+                var = np.where(var < 1e-10, 1e-10, var)
+                vmin = max(vmin, 1e-10)
+
         norm = (
             mcolors.LogNorm(vmin=vmin, vmax=vmax)
             if self.config["style"].log and field not in LINEAR_FIELDS
