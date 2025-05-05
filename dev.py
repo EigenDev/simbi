@@ -5,9 +5,7 @@ import json
 import os
 import logging
 from pathlib import Path
-from typing import Optional, Callable, Dict, List, Tuple, Any, Union
-from functools import reduce, partial
-import itertools
+from typing import Optional, Dict, List, Tuple, Any
 
 # Constants
 CACHE_FILE = "simbi_build_cache.txt"
@@ -23,7 +21,7 @@ DEFAULT_CONFIG = {
     "column_major": False,
     "precision": "double",
     "install_mode": "default",
-    "dev_arch": 0,
+    "dev_arch": "",
     "build_dir": "build",
     "four_velocity": False,
     "shared_memory": True,
@@ -96,6 +94,82 @@ def try_sequentially(funcs, fallback=None):
         return fallback
 
     return try_sequence
+
+
+# =================================================================
+# GPU Architecture Management
+# =================================================================
+
+
+def suggest_gpu_architectures(platform: str) -> str:
+    """Suggest default GPU architectures based on platform."""
+    if platform.lower() == "cuda":
+        # Common NVIDIA architectures covering the last few generations
+        # Pascal (60), Volta (70), Turing (75), Ampere (80,86), Ada Lovelace (89)
+        return "60,70,75,80,86,89"
+    elif platform.lower() == "hip":
+        # Common AMD architectures: Vega (gfx900, gfx906), CDNA (gfx908), RDNA 2 (gfx1030)
+        return "gfx900,gfx906,gfx908,gfx1030"
+    return ""
+
+
+def parse_gpu_architectures(arch_str: str, platform: str) -> List[str]:
+    """Convert comma-separated architecture string into appropriate format."""
+    if not arch_str:
+        return []
+
+    archs = [a.strip() for a in arch_str.split(",")]
+
+    # for NVIDIA: ensure all architectures are numeric and have consistent format
+    # TODO: add support for different GPU manufacturers
+    if platform.lower() == "cuda":
+        return [a if a.isdigit() else a.replace("sm_", "") for a in archs]
+
+    # for AMD: ensure all architectures start with "gfx" prefix
+    elif platform.lower() == "hip":
+        return ["gfx" + a if not a.startswith("gfx") else a for a in archs]
+
+    return archs
+
+
+def generate_gpu_arch_flags(arch_str: str, platform: str) -> str:
+    """Generate GPU architecture flags for the specified platform.
+
+    Args:
+        arch_str: Comma-separated list of architecture values
+        platform: GPU platform ('cuda' or 'hip')
+
+    Returns:
+        String containing the appropriate GPU architecture flags
+    """
+    if not arch_str:
+        return ""
+
+    # Split by comma and strip whitespace
+    archs = [a.strip() for a in arch_str.split(",")]
+
+    if platform.lower() == "cuda":
+        # for CUDA: generate -gencode flags for each architecture
+        flags = []
+        for arch in archs:
+            # strio any "sm_" prefix if present
+            arch = arch.replace("sm_", "")
+            # gen the CUDA architecture flag
+            flags.append(f"-gencode=arch=compute_{arch},code=sm_{arch}")
+        return " ".join(flags)
+
+    elif platform.lower() == "hip":
+        # for HIP: generate --offload-arch flags for each architecture
+        flags = []
+        for arch in archs:
+            # add "gfx" prefix if not already present
+            if not arch.startswith("gfx"):
+                arch = f"gfx{arch}"
+            # gen HIP architecture flag
+            flags.append(f"--offload-arch={arch}")
+        return " ".join(flags)
+
+    return ""
 
 
 # =================================================================
@@ -600,18 +674,28 @@ def configure(
 ) -> List[str]:
     """Create meson configure command."""
     if args.gpu_compilation == "enabled" and (
-        args.dev_arch is None or args.dev_arch == 0
+        args.dev_arch is None or args.dev_arch == "" or args.dev_arch == 0
     ):
-        logger.warning("No GPU architecture specified")
-        if not confirm("Continue anyway?"):
-            if not confirm("Would you like to set the gpu architecure now?"):
-                sys.exit(1)
-            else:
-                args.dev_arch = int(
-                    input(
-                        "Please enter the gpu compute capability (omitting decimals): "
-                    )
-                )
+        suggested_archs = suggest_gpu_architectures(args.gpu_platform)
+        logger.info(f"No GPU architecture specified, suggesting: {suggested_archs}")
+
+        if confirm(f"Use suggested architectures ({suggested_archs})?"):
+            args.dev_arch = suggested_archs
+        elif confirm("Would you like to specify GPU architecture(s) now?"):
+            arch_example = (
+                "e.g. 70,75,80"
+                if args.gpu_platform.lower() == "cuda"
+                else "e.g. gfx906,gfx908"
+            )
+            args.dev_arch = input(
+                f"Enter comma-separated GPU architecture(s) ({arch_example}): "
+            )
+        elif not confirm("Continue without specifying GPU architecture?"):
+            sys.exit(1)
+
+    arch_flags = ""
+    if args.gpu_compilation == "enabled" and args.dev_arch:
+        arch_flags = generate_gpu_arch_flags(args.dev_arch, args.gpu_platform)
 
     command = [
         "meson",
@@ -621,7 +705,7 @@ def configure(
         f"-Dcolumn_major={args.column_major}",
         f"-Dprecision={args.precision}",
         f"-Dprofile={args.install_mode}",
-        f"-Dgpu_arch={args.dev_arch}",
+        f"-Dgpu_arch={arch_flags}",
         f"-Dfour_velocity={args.four_velocity}",
         f"-Dcpp_std={args.cpp_version}",
         f"-Dbuildtype={args.build_type}",
@@ -650,9 +734,9 @@ def parse_the_arguments() -> Tuple[argparse.ArgumentParser, argparse.Namespace]:
     build_parser.set_defaults(func=build_simbi)
     build_parser.add_argument(
         "--dev-arch",
-        type=int,
-        default=0,
-        help="SM architecture specification for gpu compilation",
+        type=str,
+        default="",
+        help="GPU architecture for compilation as comma-separated list (e.g. '70,75,80' for NVIDIA or 'gfx900,gfx906' for AMD)",
     )
     build_parser.add_argument(
         "--verbose",

@@ -26,9 +26,9 @@ gpu_arch = get_option('gpu_arch')
 gpu_settings = {
     'nvidia': {
         'compiler': 'nvcc',
-        'arch': f'-arch=sm_@gpu_arch@',
+        'arch': f'@gpu_arch@',
         'args': [
-            f'-arch=sm_@gpu_arch@',
+            f'@gpu_arch@',
             '-x',
             'cu',
             '-dc',
@@ -46,8 +46,8 @@ gpu_settings = {
     },
     'amd': {
         'compiler': 'hipcc',
-        'arch': f'gfx@gpu_arch@',
-        'args': ['-fPIC', f'--offload-arch=gfx@gpu_arch@'],
+        'arch': f'@gpu_arch@',
+        'args': ['-fPIC', f'@gpu_arch@'],
         'link_args': [f'-L@rocm_path@/lib','-lamdhip64'],
         'inter_link_args': [],
         'extra_link_args': [],
