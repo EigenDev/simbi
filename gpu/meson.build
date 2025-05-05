@@ -32,6 +32,7 @@ if cuda.found()
 elif hip.found()
     if run_command('hipconfig', '--platform', check: true).stdout().strip() == 'nvidia'
         gpu_arch = gpu_arch.split(' ')
+    endif
 endif
 
 gpu_settings = {
