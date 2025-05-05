@@ -23,6 +23,7 @@ endif
 rocm_path = ''
 if hip.found()
     rocm_path = run_command('hipconfig', '--path', check: false).stdout().strip()
+endif
 
 gpu_arch = get_option('gpu_arch')
 gpu_settings = {
