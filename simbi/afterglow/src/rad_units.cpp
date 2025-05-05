@@ -6,6 +6,7 @@
     @version 0.1 05/20/22
 */
 #include "rad_units.hpp"
+#include <algorithm>
 #include <functional>
 #include <random>
 
