@@ -31,8 +31,7 @@ gpu_settings = {
     'nvidia': {
         'compiler': 'nvcc',
         'arch': gpu_arch,
-        'args': [
-            gpu_arch,
+        'args': gpu_arch.split(' ') + [
             '-x',
             'cu',
             '-dc',
@@ -51,7 +50,7 @@ gpu_settings = {
     'amd': {
         'compiler': 'hipcc',
         'arch': gpu_arch,
-        'args': ['-fPIC', gpu_arch],
+        'args': ['-fPIC'] + gpu_arch.split(' '),
         'link_args': [f'-L@rocm_path@/lib','-lamdhip64'],
         'inter_link_args': [],
         'extra_link_args': [],
