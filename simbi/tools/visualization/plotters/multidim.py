@@ -234,12 +234,12 @@ class MultidimPlotter(BasePlotter, DataHandlerMixin, AnimationMixin, Coordinates
         linestyle: str,
     ) -> None:
         """Plot a circle on the given axes"""
-        circle = mpatches.Circle(
-            center, radius, color=color, linestyle=linestyle, alpha=0.5
-        )
-        axes.add_patch(circle)
-        axes.set_aspect("equal", adjustable="box")
-        axes.autoscale_view()
+        # circle = mpatches.Circle(
+        #     center, radius, color=color, linestyle=linestyle, alpha=0.5
+        # )
+        # axes.add_patch(circle)
+        # axes.set_aspect("equal", adjustable="box")
+        # axes.autoscale_view()
 
     def _plot_immersed_bodies(
         self,
