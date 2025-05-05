@@ -184,6 +184,15 @@ class PlottingArgumentBuilder:
                     "type": int,
                 },
             ),
+            (
+                ["--extend"],
+                {
+                    "default": None,
+                    "nargs": "+",
+                    "help": "path(s) to Python script(s) with custom plotting functions",
+                    "type": str,
+                },
+            ),
         ]
 
     def _build_style_arguments(self) -> None:
@@ -572,7 +581,7 @@ class PlottingArgumentBuilder:
                 },
             ),
             (
-                ["--extent"],
+                ["--extension"],
                 {
                     "default": 1.0,
                     "type": float,
@@ -600,6 +609,7 @@ class PlottingArgumentBuilder:
                 powerfit=args["powerfit"],
                 weight=args["weight"],
                 save_as=args["save_as"],
+                extension=args["extension"],
             ),
             "style": StyleGroup(
                 color_maps=args["cmap"],

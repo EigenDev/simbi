@@ -6,27 +6,27 @@ option(
 
 option(
     'precision',
-    type: 'combo', 
+    type: 'combo',
     choices: ['single', 'double'],
     value: 'double',
 )
 
 option(
     'column_major',
-    type: 'boolean', 
+    type: 'boolean',
     value: false
 )
 option(
     'profile',
-    type: 'combo', 
+    type: 'combo',
     choices: ['default', 'develop'],
     value: 'default'
 )
 
 option(
     'gpu_arch',
-    type: 'integer',
-    value: 70,
+    type: 'string',
+    value: '-gencode=arch=70,compute=sm_70 -gencode=arch=75,compute=sm_75 -gencode=arch=80,compute=sm_80 -gencode=arch=86,compute=sm_86',
 )
 
 option(

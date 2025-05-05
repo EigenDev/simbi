@@ -20,15 +20,18 @@ if cuda_path != ''
 endif
 
 # Get ROCm paths
-rocm_path = run_command('hipconfig', '--path', check: false).stdout().strip()
+rocm_path = ''
+if hip.found()
+    rocm_path = run_command('hipconfig', '--path', check: false).stdout().strip()
+endif
 
-gpu_arch = get_option('gpu_arch')
+gpu_arch = get_option('gpu_arch').strip()
+
 gpu_settings = {
     'nvidia': {
         'compiler': 'nvcc',
-        'arch': f'-arch=sm_@gpu_arch@',
-        'args': [
-            f'-arch=sm_@gpu_arch@',
+        'arch': gpu_arch,
+        'args': gpu_arch.split(' ') + [
             '-x',
             'cu',
             '-dc',
@@ -46,8 +49,8 @@ gpu_settings = {
     },
     'amd': {
         'compiler': 'hipcc',
-        'arch': f'gfx@gpu_arch@',
-        'args': ['-fPIC', f'--offload-arch=gfx@gpu_arch@'],
+        'arch': gpu_arch,
+        'args': ['-fPIC'] + gpu_arch.split(' '),
         'link_args': [f'-L@rocm_path@/lib','-lamdhip64'],
         'inter_link_args': [],
         'extra_link_args': [],

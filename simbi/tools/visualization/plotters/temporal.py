@@ -176,6 +176,19 @@ class TemporalPlotter(BasePlotter, DataHandlerMixin, AnimationMixin, Coordinates
         accretion_series = self._compute_accretion_time_series()
         times = accretion_series.array
 
+        if self.config["style"].orbital_params:
+            # get orbital period
+            separation = self.config["style"].orbital_params.get("separation")
+            total_mass = self.config["style"].orbital_params.get("mass")
+            if separation is None or total_mass is None:
+                raise ValueError("Separation or total mass not provided in config.")
+
+            orbital_period = (
+                2.0 * np.pi * np.sqrt(float(separation) ** 3 / float(total_mass))
+            )
+            # convert times to orbital periods
+            times = np.array(times) / orbital_period
+
         # get labels from config or generate defaults
         labels = self.config["style"].labels or []
         # plot data for each body

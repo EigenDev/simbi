@@ -67,7 +67,12 @@ py3.extension_module(
 
 #Check and configure GPU compilation
 if get_option('gpu_compilation').enabled()
-    hdf5_inc = hdf5_dep.get_variable('includedir', cmake: 'HDF5_INCLUDE_DIRS')
+    hdf5_inc = hdf5_dep.get_variable('includedir', cmake: 'HDF5_INCLUDE_DIRS', default_value: '')
+    if hdf5_inc == ''
+        # fallback to pkg-config --cflags-only-I hdf5
+        hdf5_inc = run_command('pkg-config', '--cflags-only-I', 'hdf5', check: true).stdout().strip()
+        hdf5_inc = hdf5_inc.replace('-I', '')
+    endif
     include_dirs = [
         meson.current_source_dir() + '/src',
         '.',
