@@ -20,7 +20,9 @@ if cuda_path != ''
 endif
 
 # Get ROCm paths
-rocm_path = run_command('hipconfig', '--path', check: false).stdout().strip()
+rocm_path = ''
+if hip.found()
+    rocm_path = run_command('hipconfig', '--path', check: false).stdout().strip()
 
 gpu_arch = get_option('gpu_arch')
 gpu_settings = {
