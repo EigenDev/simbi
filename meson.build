@@ -72,6 +72,7 @@ if get_option('gpu_compilation').enabled()
         # fallback to pkg-config --cflags-only-I hdf5
         hdf5_inc = run_command('pkg-config', '--cflags-only-I', 'hdf5', check: true).stdout().strip()
         hdf5_inc = hdf5_inc.replace('-I', '')
+    endif
     include_dirs = [
         meson.current_source_dir() + '/src',
         '.',
