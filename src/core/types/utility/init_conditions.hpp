@@ -114,7 +114,7 @@ struct InitialConditions {
             return default_value;
         }
         try {
-            return at(key).get<T>();
+            return at(key).template get<T>();
         }
         catch (...) {
             return default_value;
@@ -126,7 +126,7 @@ struct InitialConditions {
         if (!contains(key) || !at(key).is_dict()) {
             return {};   // Return empty dict
         }
-        return at(key).get<simbi::ConfigDict>();
+        return at(key).template get<simbi::ConfigDict>();
     }
 
     simbi::ConfigValue get_nested(const std::string& nested_key) const
@@ -235,8 +235,8 @@ struct InitialConditions {
                 }
                 else if (init.at("boundary_conditions").is_string()) {
                     // Single boundary condition for all boundaries
-                    std::string bc =
-                        init.at("boundary_conditions").get<std::string>();
+                    std::string bc = init.at("boundary_conditions")
+                                         .template get<std::string>();
                     // Create vector with appropriate size based on
                     // dimensionality
                     int ndims = 1;
@@ -244,8 +244,8 @@ struct InitialConditions {
                         ndims = init.get<int>("dimensionality", 1);
                     }
                     else if (init.contains("resolution")) {
-                        auto res =
-                            init.at("resolution").get<std::vector<real>>();
+                        auto res = init.at("resolution")
+                                       .template get<std::vector<real>>();
                         ndims = res.size();
                     }
                     init.boundary_conditions.resize(2 * ndims, bc);
@@ -258,8 +258,9 @@ struct InitialConditions {
                     ndims = init.get<int>("dimensionality", 1);
                 }
                 else if (init.contains("resolution")) {
-                    auto res = init.at("resolution").get<std::vector<real>>();
-                    ndims    = res.size();
+                    auto res =
+                        init.at("resolution").template get<std::vector<real>>();
+                    ndims = res.size();
                 }
                 init.boundary_conditions.resize(2 * ndims, "outflow");
             }
@@ -270,7 +271,8 @@ struct InitialConditions {
             if (init.contains("bounds") &&
                 init.at("bounds").is_nested_array_of_floats()) {
                 auto bounds =
-                    init.at("bounds").get<std::vector<std::vector<real>>>();
+                    init.at("bounds")
+                        .template get<std::vector<std::vector<real>>>();
                 if (bounds.size() >= 1 && bounds[0].size() >= 2) {
                     init.x1bounds = std::make_pair(bounds[0][0], bounds[0][1]);
                 }
@@ -285,18 +287,18 @@ struct InitialConditions {
                 // get individual x1bounds, x2bounds, x3bounds
                 if (init.contains("x1bounds") &&
                     init.at("x1bounds").is_pair()) {
-                    init.x1bounds =
-                        init.at("x1bounds").get<std::pair<real, real>>();
+                    init.x1bounds = init.at("x1bounds")
+                                        .template get<std::pair<real, real>>();
                 }
                 if (init.contains("x2bounds") &&
                     init.at("x2bounds").is_pair()) {
-                    init.x2bounds =
-                        init.at("x2bounds").get<std::pair<real, real>>();
+                    init.x2bounds = init.at("x2bounds")
+                                        .template get<std::pair<real, real>>();
                 }
                 if (init.contains("x3bounds") &&
                     init.at("x3bounds").is_pair()) {
-                    init.x3bounds =
-                        init.at("x3bounds").get<std::pair<real, real>>();
+                    init.x3bounds = init.at("x3bounds")
+                                        .template get<std::pair<real, real>>();
                 }
             }
         }
@@ -306,7 +308,8 @@ struct InitialConditions {
             // Resolution
             if (init.contains("resolution") &&
                 init.at("resolution").is_array()) {
-                auto res = init.at("resolution").get<std::vector<int>>();
+                auto res =
+                    init.at("resolution").template get<std::vector<int>>();
                 if (res.size() >= 1) {
                     init.nx = res[0];
                 }
@@ -356,7 +359,8 @@ struct InitialConditions {
             if (init.contains("bfield") &&
                 init.at("bfield").is_nested_array_of_floats()) {
                 init.bfield =
-                    init.at("bfield").get<std::vector<std::vector<real>>>();
+                    init.at("bfield")
+                        .template get<std::vector<std::vector<real>>>();
             }
         }
 
@@ -419,7 +423,8 @@ struct InitialConditions {
             // Check if bodies are provided in list format
             if (init.contains("bodies") && init.at("bodies").is_list()) {
                 const auto& bodies_list =
-                    init.at("bodies").get<std::list<simbi::ConfigDict>>();
+                    init.at("bodies")
+                        .template get<std::list<simbi::ConfigDict>>();
 
                 for (const auto& body_dict : bodies_list) {
                     // extract body type from the dict!
@@ -428,7 +433,7 @@ struct InitialConditions {
                         continue;   // Skip invalid body entries
                     }
                     const std::string type_str =
-                        body_dict.at("body_type").get<std::string>();
+                        body_dict.at("body_type").template get<std::string>();
                     simbi::BodyType body_type = string_to_body_type(type_str);
                     // create property map
                     simbi::ConfigDict props;
@@ -445,7 +450,8 @@ struct InitialConditions {
                     if (body_dict.contains("specifics") &&
                         body_dict.at("specifics").is_dict()) {
                         const auto& specifics =
-                            body_dict.at("specifics").get<simbi::ConfigDict>();
+                            body_dict.at("specifics")
+                                .template get<simbi::ConfigDict>();
                         for (const auto& [key, value] : specifics) {
                             add_property(key, value, props);
                         }
@@ -470,7 +476,8 @@ struct InitialConditions {
             else if (init.contains("immersed_bodies") &&
                      init.at("immersed_bodies").is_dict()) {
                 const auto& bodies_dict =
-                    init.at("immersed_bodies").get<simbi::ConfigDict>();
+                    init.at("immersed_bodies")
+                        .template get<simbi::ConfigDict>();
 
                 for (const auto& [body_name, body_config] : bodies_dict) {
                     if (!body_config.is_dict()) {
@@ -573,7 +580,7 @@ struct InitialConditions {
         )
         {
             if (dict.contains(name) && dict.at(name).is_array()) {
-                props[name] = dict.at(name).get<std::vector<double>>();
+                props[name] = dict.at(name).template get<std::vector<double>>();
             }
         }
 
@@ -584,7 +591,8 @@ struct InitialConditions {
         )
         {
             if (dict.contains(name) && dict.at(name).is_real_number()) {
-                props[name] = static_cast<real>(dict.at(name).get<double>());
+                props[name] =
+                    static_cast<real>(dict.at(name).template get<double>());
             }
         }
     };

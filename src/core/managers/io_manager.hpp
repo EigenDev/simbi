@@ -264,7 +264,7 @@ namespace simbi {
                 local_vec.data()
             );
 
-            return std::move(local_vec);
+            return local_vec;
 
             // expression::evaluate_expr_vector(
             //     gravity_source_expr_nodes_.data(),

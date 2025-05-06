@@ -25,7 +25,7 @@ namespace simbi::ibsystem {
             const auto& sys_props = init.get_dict("body_system");
             if (sys_props.contains("system_type")) {
                 const auto& system_type =
-                    sys_props.at("system_type").get<std::string>();
+                    sys_props.at("system_type").template get<std::string>();
                 if (system_type != "binary") {
                     throw std::runtime_error(
                         "Only binary systems are supported at this time"
@@ -34,7 +34,7 @@ namespace simbi::ibsystem {
             }
             if (sys_props.contains("reference_frame")) {
                 reference_frame =
-                    sys_props.at("reference_frame").get<std::string>();
+                    sys_props.at("reference_frame").template get<std::string>();
             }
         }
 
@@ -51,39 +51,42 @@ namespace simbi::ibsystem {
             // process system configuration
             if (sys_props.contains("system_type")) {
                 const auto& system_type =
-                    sys_props.at("system_type").get<std::string>();
+                    sys_props.at("system_type").template get<std::string>();
 
                 // handle binary system configuration
                 if (system_type == "binary" &&
                     sys_props.contains("binary_config")) {
                     if constexpr (Dims >= 2) {
                         const auto& binary_props =
-                            sys_props.at("binary_config").get<ConfigDict>();
+                            sys_props.at("binary_config")
+                                .template get<ConfigDict>();
 
                         // Extract binary parameters
-                        real total_mass =
-                            binary_props.contains("total_mass")
-                                ? binary_props.at("total_mass").get<real>()
-                                : 1.0;
+                        real total_mass = binary_props.contains("total_mass")
+                                              ? binary_props.at("total_mass")
+                                                    .template get<real>()
+                                              : 1.0;
 
-                        real semi_major =
-                            binary_props.contains("semi_major")
-                                ? binary_props.at("semi_major").get<real>()
-                                : 1.0;
+                        real semi_major = binary_props.contains("semi_major")
+                                              ? binary_props.at("semi_major")
+                                                    .template get<real>()
+                                              : 1.0;
 
                         real eccentricity =
                             binary_props.contains("eccentricity")
-                                ? binary_props.at("eccentricity").get<real>()
+                                ? binary_props.at("eccentricity")
+                                      .template get<real>()
                                 : 0.0;
 
-                        real mass_ratio =
-                            binary_props.contains("mass_ratio")
-                                ? binary_props.at("mass_ratio").get<real>()
-                                : 1.0;
+                        real mass_ratio = binary_props.contains("mass_ratio")
+                                              ? binary_props.at("mass_ratio")
+                                                    .template get<real>()
+                                              : 1.0;
 
                         bool prescribed_motion =
                             sys_props.contains("prescribed_motion")
-                                ? sys_props.at("prescribed_motion").get<bool>()
+                                ? sys_props.at("prescribed_motion")
+                                      .template get<bool>()
                                 : true;
 
                         // get binary components
@@ -151,7 +154,7 @@ namespace simbi::ibsystem {
 
                         // process the first component
                         auto& comp1 = binary_components.front();
-                        T radius1   = comp1.at("radius").get<T>();
+                        T radius1   = comp1.at("radius").template get<T>();
 
                         // create body with functional approach
                         Body<T, Dims> body1(
@@ -164,15 +167,16 @@ namespace simbi::ibsystem {
 
                         // add capabilities using functional approach
                         body1 = body1.with_gravitational(
-                            comp1.at("softening_length").get<T>(),
-                            comp1.at("two_way_coupling").get<bool>()
+                            comp1.at("softening_length").template get<T>(),
+                            comp1.at("two_way_coupling").template get<bool>()
                         );
 
                         // add accretion if specified
-                        if (comp1.at("is_an_accretor").get<bool>()) {
+                        if (comp1.at("is_an_accretor").template get<bool>()) {
                             body1 = body1.with_accretion(
-                                comp1.at("accretion_efficiency").get<T>(),
-                                comp1.at("accretion_radius").get<T>()
+                                comp1.at("accretion_efficiency")
+                                    .template get<T>(),
+                                comp1.at("accretion_radius").template get<T>()
                             );
                         }
 
@@ -182,7 +186,7 @@ namespace simbi::ibsystem {
 
                         // process the second component
                         auto& comp2 = binary_components.back();
-                        T radius2   = comp2.at("radius").get<T>();
+                        T radius2   = comp2.at("radius").template get<T>();
 
                         // create body with functional approach
                         Body<T, Dims> body2(
@@ -195,15 +199,16 @@ namespace simbi::ibsystem {
 
                         // add capabilities using functional approach
                         body2 = body2.with_gravitational(
-                            comp2.at("softening_length").get<T>(),
-                            comp2.at("two_way_coupling").get<bool>()
+                            comp2.at("softening_length").template get<T>(),
+                            comp2.at("two_way_coupling").template get<bool>()
                         );
 
                         // add accretion if specified
-                        if (comp2.at("is_an_accretor").get<bool>()) {
+                        if (comp2.at("is_an_accretor").template get<bool>()) {
                             body2 = body2.with_accretion(
-                                comp2.at("accretion_efficiency").get<T>(),
-                                comp2.at("accretion_radius").get<T>()
+                                comp2.at("accretion_efficiency")
+                                    .template get<T>(),
+                                comp2.at("accretion_radius").template get<T>()
                             );
                         }
 
@@ -241,11 +246,11 @@ namespace simbi::ibsystem {
             for (const auto& [body_type, props] : init.immersed_bodies) {
                 // common properties
                 const auto& position =
-                    props.at("position").get<std::vector<real>>();
+                    props.at("position").template get<std::vector<real>>();
                 const auto& velocity =
-                    props.at("velocity").get<std::vector<real>>();
-                const real mass   = props.at("mass").get<real>();
-                const real radius = props.at("radius").get<real>();
+                    props.at("velocity").template get<std::vector<real>>();
+                const real mass   = props.at("mass").template get<real>();
+                const real radius = props.at("radius").template get<real>();
 
                 // position and velocity
                 spatial_vector_t<T, Dims> pos_vec, vel_vec;
@@ -263,13 +268,14 @@ namespace simbi::ibsystem {
                 // add gravitational capability if properties exist
                 if (props.contains("softening_length") ||
                     props.contains("two_way_coupling")) {
-                    T softening = props.contains("softening_length")
-                                      ? props.at("softening_length").get<T>()
-                                      : T(0.01);
+                    T softening =
+                        props.contains("softening_length")
+                            ? props.at("softening_length").template get<T>()
+                            : T(0.01);
 
                     bool two_way =
                         props.contains("two_way_coupling")
-                            ? props.at("two_way_coupling").get<bool>()
+                            ? props.at("two_way_coupling").template get<bool>()
                             : false;
 
                     body = body.with_gravitational(softening, two_way);
@@ -282,19 +288,19 @@ namespace simbi::ibsystem {
 
                     bool is_accretor =
                         props.contains("is_an_accretor")
-                            ? props.at("is_an_accretor").get<bool>()
+                            ? props.at("is_an_accretor").template get<bool>()
                             : false;
 
                     if (is_accretor ||
                         body_type == BodyType::GRAVITATIONAL_SINK) {
-                        T efficiency =
-                            props.contains("accretion_efficiency")
-                                ? props.at("accretion_efficiency").get<T>()
-                                : T(0.01);
+                        T efficiency = props.contains("accretion_efficiency")
+                                           ? props.at("accretion_efficiency")
+                                                 .template get<T>()
+                                           : T(0.01);
 
                         T accr_radius =
                             props.contains("accretion_radius")
-                                ? props.at("accretion_radius").get<T>()
+                                ? props.at("accretion_radius").template get<T>()
                                 : radius;
 
                         body = body.with_accretion(efficiency, accr_radius);

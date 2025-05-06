@@ -586,7 +586,7 @@ namespace simbi {
                 // multiple times
                 if (is_lower) {
                     // for lower boundary, divide by the ratio ghost_layer times
-                    for (int i = 0; i < ghost_layer; i++) {
+                    for (size_type ii = 0; ii < ghost_layer; ii++) {
                         face_pos /= log_ratio;
                     }
                     // pos is at the center of the ghost cell
@@ -595,7 +595,7 @@ namespace simbi {
                 else {
                     // for upper boundary, multiply by the ratio ghost_layer
                     // times
-                    for (int i = 0; i < ghost_layer; i++) {
+                    for (size_type ii = 0; ii < ghost_layer; ii++) {
                         face_pos *= log_ratio;
                     }
                     // pos is at the center of the ghost cell

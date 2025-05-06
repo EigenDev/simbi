@@ -71,7 +71,7 @@ namespace simbi::expression {
         }
 
         const auto& expressions_list =
-            expr_data.at("expressions").get<std::list<ConfigDict>>();
+            expr_data.at("expressions").template get<std::list<ConfigDict>>();
         // We need to determine the actual type in the list
         // Since ConfigDict doesn't store lists of dictionaries directly,
         // we need to access each dict in the list individually
@@ -85,33 +85,38 @@ namespace simbi::expression {
 
             // Get the operation type
             if (expr_node.contains("op") && expr_node.at("op").is_string()) {
-                std::string op_str = expr_node.at("op").get<std::string>();
-                node.op            = string_to_expr_op(op_str);
+                std::string op_str =
+                    expr_node.at("op").template get<std::string>();
+                node.op = string_to_expr_op(op_str);
 
                 // Handle different node types
                 if (op_str == "CONSTANT") {
-                    node.value = expr_node.at("value").get<real>();
+                    node.value = expr_node.at("value").template get<real>();
                 }
                 else if (op_str.find("VARIABLE_") == 0) {
                     // Variables don't need additional data
                 }
                 else if (op_str == "PARAMETER") {
-                    node.param_idx = expr_node.at("param_idx").get<int>();
+                    node.param_idx =
+                        expr_node.at("param_idx").template get<int>();
                 }
                 else if (op_str == "IF_THEN_ELSE") {
                     node.ternary.condition =
-                        expr_node.at("condition").get<int>();
-                    node.ternary.then_expr = expr_node.at("then").get<int>();
-                    node.ternary.else_expr = expr_node.at("else").get<int>();
+                        expr_node.at("condition").template get<int>();
+                    node.ternary.then_expr =
+                        expr_node.at("then").template get<int>();
+                    node.ternary.else_expr =
+                        expr_node.at("else").template get<int>();
                 }
                 else {
                     // Binary/unary operations
                     if (expr_node.contains("left")) {
-                        node.children.left = expr_node.at("left").get<int>();
+                        node.children.left =
+                            expr_node.at("left").template get<int>();
 
                         if (expr_node.contains("right")) {
                             node.children.right =
-                                expr_node.at("right").get<int>();
+                                expr_node.at("right").template get<int>();
                         }
                     }
                 }
@@ -129,7 +134,9 @@ namespace simbi::expression {
             return ndarray<int>{};
         }
 
-        ndarray res(expr_data.at("output_indices").get<std::vector<int>>());
+        ndarray res(
+            expr_data.at("output_indices").template get<std::vector<int>>()
+        );
         res.sync_to_device();
         return res;
     }
@@ -141,7 +148,8 @@ namespace simbi::expression {
             return ndarray<real>{};
         }
 
-        ndarray res(expr_data.at("parameters").get<std::vector<real>>());
+        ndarray res(expr_data.at("parameters").template get<std::vector<real>>()
+        );
         res.sync_to_device();
         return res;
     }
@@ -152,7 +160,8 @@ namespace simbi::expression {
             return ndarray<real>{};
         }
 
-        auto res = ndarray<real>(expr_data.at("param_count").get<int>());
+        auto res =
+            ndarray<real>(expr_data.at("param_count").template get<int>());
         res.sync_to_device();
         return res;
     }
