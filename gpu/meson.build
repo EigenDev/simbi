@@ -91,7 +91,9 @@ if hip.found() or cuda.found()
         'gpu_link',
         input: gpu_objs,
         output: 'gpu_link.o',
-        command: [gpu_compiler, settings['link_args'], settings['inter_link_args'], '@INPUT@', '-o', '@OUTPUT@'] + settings['extra_link_args'] + settings['arch'],
+        command: [gpu_compiler, settings['link_args'], settings['inter_link_args'], '@INPUT@', '-o', '@OUTPUT@']
+        + settings['extra_link_args']
+        + settings['arch'].split(' '),
         build_by_default: true
     )]
 

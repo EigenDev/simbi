@@ -26,7 +26,7 @@ option(
 option(
     'gpu_arch',
     type: 'string',
-    value: '-gencode=arch=70,compute=sm_70 -gencode=arch=75,compute=sm_75 -gencode=arch=80,compute=sm_80 -gencode=arch=86,compute=sm_86',
+    value: '-gencode=arch=70,compute=sm_70 -gencode=arch=75,compute=sm_70 -gencode=arch=80,compute=sm_80 -gencode=arch=86,compute=sm_86',
 )
 
 option(
