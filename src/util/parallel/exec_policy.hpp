@@ -259,7 +259,7 @@ namespace simbi {
 
         void set_device(int device)
         {
-            this->devices = {device};
+            this->devices.push_back(device);
             gpu::api::setDevice(device);
         }
 
