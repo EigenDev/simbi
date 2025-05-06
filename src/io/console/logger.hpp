@@ -59,7 +59,6 @@
 #include "util/tools/helpers.hpp"   // for get_real_idx, catch_signals, Inter...
 #include <chrono>                   // for time_point, high_resolution_clock
 #include <cmath>                    // for INFINITY, pow
-#include <format>                   // for format
 #include <iostream>                 // for operator<<, char_traits, basic_ost...
 #include <memory>                   // for allocator
 #include <type_traits>              // for conditional_t
@@ -313,9 +312,24 @@ namespace simbi {
                     table.updateRow(
                         1,
                         {std::to_string(n),
-                         std::format("{:.2e}", sim_state.time()),
-                         std::format("{:.2e}", sim_state.dt()),
-                         std::format("{:.2e}", speed),
+                         [&]() {
+                             std::stringstream ss;
+                             ss << std::scientific << std::setprecision(2)
+                                << sim_state.time();
+                             return ss.str();
+                         }(),
+                         [&]() {
+                             std::stringstream ss;
+                             ss << std::scientific << std::setprecision(2)
+                                << sim_state.dt();
+                             return ss.str();
+                         }(),
+                         [&]() {
+                             std::stringstream ss;
+                             ss << std::scientific << std::setprecision(2)
+                                << speed;
+                             return ss.str();
+                         }(),
                          format_time(elapsed_seconds),
                          format_time(estimated_time_left)}
                     );
