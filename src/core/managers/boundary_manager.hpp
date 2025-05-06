@@ -60,6 +60,7 @@
 #include "geometry/mesh/mesh.hpp"
 #include "util/parallel/exec_policy.hpp"
 #include "util/tools/algorithms.hpp"
+#include <cstddef>
 
 namespace simbi {
     struct conserved_tag;
@@ -271,19 +272,17 @@ namespace simbi {
             }
 
             // copy necessary data to avoid pointer issues
-            auto handle_dynamic_bc = [mesh, io_manager, time, time_step]() {
+            auto handle_dynamic_bc = [io_manager, time, time_step]() {
                 if constexpr (is_conserved_v<T> &&
                               std::is_same_v<TagType, conserved_tag>) {
-                    return [mesh, io_manager, time, time_step] DEV(
-                               const auto& coords,
+                    return [io_manager, time, time_step] DEV(
+                               const auto& ghost_coords,
                                const BoundaryFace face,
                                const T& result
                            ) {
-                        const auto physical_coords =
-                            mesh->retrieve_cell(coords).centroid();
                         return io_manager->call_boundary_source(
                             face,
-                            physical_coords,
+                            ghost_coords,
                             time,
                             time_step,
                             result
@@ -291,8 +290,7 @@ namespace simbi {
                     };
                 }
                 else {
-                    // suppress compoler warning about unused captures
-                    (void) mesh;
+                    // suppress compiler warning about unused captures
                     (void) io_manager;
                     (void) time;
                     (void) time_step;
@@ -365,8 +363,45 @@ namespace simbi {
                                               std::is_same_v<
                                                   TagType,
                                                   conserved_tag>) {
+                                    const auto int_coords =
+                                        unravel_idx(interior_idx, full_shape);
+                                    // get interior cell reference
+                                    const auto interior_cell =
+                                        mesh->retrieve_cell(int_coords);
+
+                                    // calc the ghost layer depth based on
+                                    // coordinates Determine how many layers
+                                    // deep this ghost cell is
+                                    size_type ghost_layer = 1;
+
+                                    if (is_lower) {
+                                        // for lower boundary, calculate
+                                        // distance from the boundary in cell
+                                        // units
+                                        ghost_layer = radii[boundary_dim] -
+                                                      coordinates[boundary_dim];
+                                    }
+                                    else {
+                                        // for upper boundary, calculate
+                                        // distance from the boundary in cell
+                                        // units
+                                        ghost_layer =
+                                            coordinates[boundary_dim] -
+                                            (rshape[boundary_dim] +
+                                             radii[boundary_dim] - 1);
+                                    }
+
+                                    // calc the physical position of this
+                                    // ghost cell
+                                    auto ghost_coords =
+                                        interior_cell.calculate_ghost_position(
+                                            boundary_dim,
+                                            is_lower,
+                                            ghost_layer
+                                        );
+
                                     T dynamic_conserved = handle_dynamic_bc(
-                                        coordinates,
+                                        ghost_coords,
                                         static_cast<BoundaryFace>(bc_idx),
                                         data[interior_idx]
                                     );

@@ -51,6 +51,7 @@
 #define CELL_HPP
 
 #include "build_options.hpp"
+#include "core/types/utility/enums.hpp"
 #include "geometry_manager.hpp"     // for GeometryManager
 #include "geometry_traits.hpp"      // for GeomtryTraits
 #include "grid_manager.hpp"         // for GridManager
@@ -552,6 +553,112 @@ namespace simbi {
                 return 1.0 / widths_[ii];
             }
             return 1.0 / dV_;
+        }
+
+        DUAL spatial_vector_t<real, Dims> calculate_ghost_position(
+            size_type boundary_dim,
+            bool is_lower,
+            size_type ghost_layer
+        ) const
+        {
+            auto ghost_pos = this->centroid();
+
+            // get the face position of the interior cell
+            real face_pos = is_lower ? this->normal(Side(2 * boundary_dim + 0))
+                                     : this->normal(Side(2 * boundary_dim + 1));
+
+            // calc position based on spacing
+            if (geo_info_.spacing_type(boundary_dim) == Cellspacing::LINEAR) {
+                real dx = this->dx(boundary_dim);
+                // for multiple ghost layers:
+                // ghost_layer=1: one cell away from boundary
+                // ghost_layer=2: two cells away from boundary, etc.
+                ghost_pos[boundary_dim] =
+                    is_lower ? face_pos - (ghost_layer - 0.5) * dx
+                             : face_pos + (ghost_layer - 0.5) * dx;
+            }
+            else {
+                // log spacing
+                real log_ratio = this->normal(Side(2 * boundary_dim + 1)) /
+                                 this->normal(Side(2 * boundary_dim + 0));
+
+                // for multiple ghost layers with log spacing, apply ratio
+                // multiple times
+                if (is_lower) {
+                    // for lower boundary, divide by the ratio ghost_layer times
+                    for (int i = 0; i < ghost_layer; i++) {
+                        face_pos /= log_ratio;
+                    }
+                    // pos is at the center of the ghost cell
+                    ghost_pos[boundary_dim] = face_pos * std::sqrt(log_ratio);
+                }
+                else {
+                    // for upper boundary, multiply by the ratio ghost_layer
+                    // times
+                    for (int i = 0; i < ghost_layer; i++) {
+                        face_pos *= log_ratio;
+                    }
+                    // pos is at the center of the ghost cell
+                    ghost_pos[boundary_dim] = face_pos / std::sqrt(log_ratio);
+                }
+            }
+
+            // proper handling for different geometries
+            if (geo_info_.geometry() != Geometry::CARTESIAN) {
+                if (boundary_dim ==
+                    1) {   // theta (phi) coordinate in spherical (cylindrical)
+                    if (geo_info_.geometry() == Geometry::SPHERICAL) {
+                        // handle spherical coordinates
+                        if (is_lower && ghost_pos[boundary_dim] < 0) {
+                            // Reflection across θ=0 pole
+                            ghost_pos[boundary_dim] = -ghost_pos[boundary_dim];
+
+                            // In spherical coordinates, crossing the pole also
+                            // means phi changes by phi (if we have 3D)
+                            if constexpr (Dims > 2) {
+                                ghost_pos[2] += M_PI;
+                                if (ghost_pos[2] > 2 * M_PI) {
+                                    ghost_pos[2] -= 2 * M_PI;
+                                }
+                            }
+                        }
+                        else if (!is_lower && ghost_pos[boundary_dim] > M_PI) {
+                            // reflection across \theta=\pi pole
+                            ghost_pos[boundary_dim] =
+                                2 * M_PI - ghost_pos[boundary_dim];
+
+                            // Also adjust phi by \pi
+                            if constexpr (Dims > 2) {
+                                ghost_pos[2] += M_PI;
+                                if (ghost_pos[2] > 2 * M_PI) {
+                                    ghost_pos[2] -= 2 * M_PI;
+                                }
+                            }
+                        }
+                    }
+                    else if (geo_info_.geometry() == Geometry::CYLINDRICAL) {
+                        // For cylindrical, phi is periodic
+                        if (ghost_pos[boundary_dim] < 0) {
+                            ghost_pos[boundary_dim] += 2 * M_PI;
+                        }
+                        else if (ghost_pos[boundary_dim] > 2 * M_PI) {
+                            ghost_pos[boundary_dim] -= 2 * M_PI;
+                        }
+                    }
+                }
+                else if (Dims > 2 &&
+                         boundary_dim == 2) {   // phi coordinate in 3D
+                    // Enforce periodicity for φ
+                    while (ghost_pos[boundary_dim] < 0) {
+                        ghost_pos[boundary_dim] += 2 * M_PI;
+                    }
+                    while (ghost_pos[boundary_dim] >= 2 * M_PI) {
+                        ghost_pos[boundary_dim] -= 2 * M_PI;
+                    }
+                }
+            }
+
+            return ghost_pos;
         }
     };
 }   // namespace simbi
