@@ -56,50 +56,50 @@ class MartiMuller(BaseConfig):
 
     # -------------------- Uncomment if one wants the mesh to move
 
-    @simbi_property
-    def boundary_conditions(self) -> Sequence[str]:
-        return ["outflow", "dynamic"]
+    # @simbi_property
+    # def boundary_conditions(self) -> Sequence[str]:
+    #     return ["outflow", "dynamic"]
 
-    @simbi_property
-    def scale_factor(cls) -> Callable[[float], float]:
-        return lambda t: 1
+    # @simbi_property
+    # def scale_factor(cls) -> Callable[[float], float]:
+    #     return lambda t: 1
 
-    @simbi_property
-    def scale_factor_derivative(cls) -> Callable[[float], float]:
-        return lambda t: 0.5
+    # @simbi_property
+    # def scale_factor_derivative(cls) -> Callable[[float], float]:
+    #     return lambda t: 0.5
 
-    @simbi_property
-    def bx1_outer_expressions(self) -> ExpressionDict:
-        graph = expr.ExprGraph()
+    # @simbi_property
+    # def bx1_outer_expressions(self) -> ExpressionDict:
+    #     graph = expr.ExprGraph()
 
-        x = expr.variable("x1", graph)
-        t = expr.variable("t", graph)
+    #     x = expr.variable("x1", graph)
+    #     t = expr.variable("t", graph)
 
-        # const values
-        gamma = expr.constant(float(self.config.adiabatic_index), graph)
-        rho_ambient = expr.constant(0.1, graph)
-        v_ambient = expr.constant(0.0, graph)
-        pressure = expr.constant(1e-10, graph)
+    #     # const values
+    #     gamma = expr.constant(float(self.config.adiabatic_index), graph)
+    #     rho_ambient = expr.constant(0.1, graph)
+    #     v_ambient = expr.constant(0.0, graph)
+    #     pressure = expr.constant(1e-10, graph)
 
-        # build expressions
-        v_squared = v_ambient * v_ambient
-        one = expr.constant(1.0, graph)
-        lorentz = one / (one - v_squared) ** 0.5
+    #     # build expressions
+    #     v_squared = v_ambient * v_ambient
+    #     one = expr.constant(1.0, graph)
+    #     lorentz = one / (one - v_squared) ** 0.5
 
-        gamma_minus_1 = gamma - one
-        enthalpy = one + gamma * pressure / rho_ambient / gamma_minus_1
+    #     gamma_minus_1 = gamma - one
+    #     enthalpy = one + gamma * pressure / rho_ambient / gamma_minus_1
 
-        # final expressions for each component
-        density = rho_ambient * lorentz
-        momentum = rho_ambient * lorentz * lorentz * enthalpy * v_ambient
-        energy = (
-            rho_ambient * lorentz * lorentz * enthalpy
-            - pressure
-            - rho_ambient * lorentz
-        )
-        scalar = expr.constant(0.0, graph)
+    #     # final expressions for each component
+    #     density = rho_ambient * lorentz
+    #     momentum = rho_ambient * lorentz * lorentz * enthalpy * v_ambient
+    #     energy = (
+    #         rho_ambient * lorentz * lorentz * enthalpy
+    #         - pressure
+    #         - rho_ambient * lorentz
+    #     )
+    #     scalar = expr.constant(0.0, graph)
 
-        # compile the expressions
-        compiled_expr = graph.compile([density, momentum, energy, scalar])
+    #     # compile the expressions
+    #     compiled_expr = graph.compile([density, momentum, energy, scalar])
 
-        return compiled_expr.serialize()
+    #     return compiled_expr.serialize()
