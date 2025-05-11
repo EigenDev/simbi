@@ -78,11 +78,12 @@ def _configure_single_state(
 
     problem_class: Any = problem_class_t()
 
-    if args.peek:
+    if args.info:
         print(
             f"{bcolors.YELLOW}Printing dynamic arguments in {setup_class}{bcolors.ENDC}"
         )
-        return None, {}, ""
+        del problem_class
+        sys.exit(0)
 
     _setup_logging(problem_class, args)
 
