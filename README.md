@@ -2,8 +2,6 @@
 
 <div align="center">
 
-![SIMBI Logo](https://via.placeholder.com/150)
-
 [![MIT License](https://img.shields.io/badge/License-MIT-blue.svg)](https://opensource.org/licenses/MIT)
 [![C++20](https://img.shields.io/badge/C%2B%2B-20-orange.svg)](https://en.cppreference.com/w/cpp/20)
 [![Python 3.10+](https://img.shields.io/badge/Python-3.10%2B-blue.svg)](https://www.python.org/downloads/)
@@ -42,6 +40,13 @@
 ### 1D Moving Mesh Techniques
 
 <https://user-images.githubusercontent.com/29236993/205418982-943af187-8ae3-4401-92d5-e09a4ea821e2.mp4>
+
+### 2D Magnetic Turbulence 
+
+<https://github.com/user-attachments/assets/9e5b8c42-ce3e-4c23-a380-7903eec52b92>
+
+
+
 
 ## 🔧 Requirements
 
