@@ -16,7 +16,7 @@
 
 - **Full 3D physics** - Special Relativistic Magnetohydrodynamics, Special Relativistic Hydrodynamics, and Newtonian Hydrodynamics
 - **GPU acceleration** - Supports both NVIDIA (CUDA) and AMD (HIP/ROCm) GPUs
-- **Adaptive meshes** - Dynamic mesh expansion/contraction capabilities
+- **Expanding meshes** - Dynamic mesh expansion/contraction capabilities
 - **Immersed boundary method** - Based on Peskin (2002)
 - **Customizable boundary conditions** - Periodic, reflecting, outflow, and dynamic options
 - **Source term support** - Both at boundaries and within the Euler equations
