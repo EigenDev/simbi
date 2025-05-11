@@ -31,14 +31,15 @@ class MignoneBodo(BaseConfig):
         )
 
     def __init__(self) -> None:
+        super().__init__()
         self.problem_state = {
             1: (
                 ShockTubeState(1.0, 0.0, 1.0),
                 ShockTubeState(0.1, 0.0, 0.125),
             ),
             2: (
-                ShockTubeState(1.0, -2.0, 0.4),
-                ShockTubeState(1.0, 2.0, 0.4),
+                ShockTubeState(1.0, -0.2, 0.4),
+                ShockTubeState(1.0, +0.2, 0.4),
             ),
         }
 
