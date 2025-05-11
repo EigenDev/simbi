@@ -149,7 +149,7 @@ def _add_global_args(parser: ArgumentParser) -> None:
         default=None,
     )
     parser.add_argument(
-        "--peek", help="print setup-script usage", default=False, action="store_true"
+        "--info", help="print setup-script usage", default=False, action="store_true"
     )
     parser.add_argument(
         "--type-check",
