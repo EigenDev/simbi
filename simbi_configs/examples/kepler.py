@@ -187,7 +187,7 @@ class KeplerianRingTest(BaseConfig):
         x1: expr.Expr,
         x2: expr.Expr,
         t: expr.Expr,
-        dt: expr.Expr,  # Add timestep as parameter
+        dt: expr.Expr,
         inner: list[expr.Expr],
         r_buffer: expr.Expr,
         r_outer: expr.Expr,
