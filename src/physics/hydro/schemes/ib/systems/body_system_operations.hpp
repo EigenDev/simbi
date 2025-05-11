@@ -1,3 +1,51 @@
+/**
+ *=============================================================================
+ *           SIMBI - Special Relativistic Magnetohydrodynamics Code
+ *=============================================================================
+ *
+ * @file            body_system_operations.hpp
+ * @brief           Body system operations for the IB scheme
+ * @details
+ *
+ * @version         0.8.0
+ * @date            2025-05-11
+ * @author          Marcus DuPont
+ * @email           marcus.dupont@princeton.edu
+ *
+ *==============================================================================
+ * @build           Requirements & Dependencies
+ *==============================================================================
+ * @requires        C++20
+ * @depends         CUDA >= 11.0, HDF5 >= 1.12, OpenMP >= 4.5
+ * @platform        Linux, MacOS
+ * @parallel        GPU (CUDA, HIP), CPU (OpenMP)
+ *
+ *==============================================================================
+ * @documentation   Reference & Notes
+ *==============================================================================
+ * @usage
+ * @note
+ * @warning
+ * @todo
+ * @bug
+ * @performance
+ *
+ *==============================================================================
+ * @testing        Quality Assurance
+ *==============================================================================
+ * @test
+ * @benchmark
+ * @validation
+ *
+ *==============================================================================
+ * @history        Version History
+ *==============================================================================
+ * 2025-05-11      v0.8.0      Initial implementation
+ *
+ *==============================================================================
+ * @copyright (C) 2025 Marcus DuPont. All rights reserved.
+ *==============================================================================
+ */
 #ifndef BODY_SYSTEM_OPERATIONS_HPP
 #define BODY_SYSTEM_OPERATIONS_HPP
 
