@@ -175,7 +175,7 @@ class BaseConfig(metaclass=abc.ABCMeta):
         return "linear"
 
     @simbi_property(group="sim_state")
-    def passive_scalars(
+    def passive_scalar(
         self,
     ) -> Optional[Union[Sequence[float], NDArray[np.floating[Any]]]]:
         return None
@@ -539,7 +539,7 @@ class BaseConfig(metaclass=abc.ABCMeta):
         try:
             attr = super().__getattribute__(name)
             if isinstance(attr, property) and name in PropertyBase.registry:
-                # This is a simbi_property, validate its computation
+                # this is a simbi_property, validate its computation
                 try:
                     return attr.__get__(self)
                 except Exception as e:
@@ -564,7 +564,7 @@ class BaseConfig(metaclass=abc.ABCMeta):
         # collect instance properties
         for name, (_, group) in PropertyBase.registry.items():
             if hasattr(self, name):
-                # ignore miscalaneaus groups
+                # ignore miscalleaneus groups
                 if group.value not in settings.keys():
                     continue
 
