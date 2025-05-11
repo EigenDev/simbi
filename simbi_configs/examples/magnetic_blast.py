@@ -36,8 +36,8 @@ class MagneticBomb(BaseConfig):
             ybounds = self.bounds[1]
             dx = (xbounds[1] - xbounds[0]) / ni
             dy = (ybounds[1] - ybounds[0]) / nj
-            rho_amb = self.config.rho0
-            pre_amb = self.config.p0
+            rho_amb = float(self.config.rho0)
+            pre_amb = float(self.config.p0)
             pslope = (P_EXP - pre_amb) / (R_STOP - R_EXP)
             rhoslope = (RHO_EXP - rho_amb) / (R_STOP - R_EXP)
             for k in range(nk):
@@ -54,7 +54,7 @@ class MagneticBomb(BaseConfig):
                                 0.0,
                                 0.0,
                                 0.0,
-                                P_EXP - rhoslope * (r - R_EXP),
+                                P_EXP - pslope * (r - R_EXP),
                             )
                         else:
                             yield (rho_amb, 0.0, 0.0, 0.0, pre_amb)
@@ -65,7 +65,7 @@ class MagneticBomb(BaseConfig):
                 for j in range(nj + (bn == "by")):
                     for i in range(ni + (bn == "bx")):
                         if bn == "bx":
-                            yield self.config.b0
+                            yield float(self.config.b0)
                         else:
                             yield 0.0
 
