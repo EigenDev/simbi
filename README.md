@@ -25,31 +25,23 @@
 - **Passive scalar tracking** - For following specific scalar concentrations
 - **Gravity source terms** - For simulating gravitational effects
 
-## 📊 Showcase
+## 🎨 Simulation Gallery
 
 ### 2D Relativistic Jet Simulation
 
-<div align="center">
 <https://user-images.githubusercontent.com/29236993/145315802-c8d7e8c5-7beb-488c-b496-b9edf404be2e.mp4>
-</div>
 
 ### 2D Relativistic Shock Tube
 
-<div align="center">
 <https://user-images.githubusercontent.com/29236993/212521070-0e2a7ced-cd5f-4006-9039-be67f174fb07.mp4>
-</div>
 
 ### 2D Rayleigh-Taylor in Newtonian Fluid
 
-<div align="center">
 <https://github.com/EigenDev/simbi/assets/29236993/818d930d-d993-4e5d-8ed4-47a9bae11a7f>
-</div>
 
 ### 1D Moving Mesh Techniques
 
-<div align="center">
 <https://user-images.githubusercontent.com/29236993/205418982-943af187-8ae3-4401-92d5-e09a4ea821e2.mp4>
-</div>
 
 ## 🔧 Requirements
 
