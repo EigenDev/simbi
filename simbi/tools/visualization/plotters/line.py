@@ -1,3 +1,4 @@
+from itertools import cycle
 import matplotlib.pyplot as plt
 import numpy as np
 from ..core.base import BasePlotter
@@ -34,12 +35,13 @@ class LinePlotter(BasePlotter, DataHandlerMixin, AnimationMixin, CoordinatesMixi
             labels = self.config["style"].labels
         else:
             labels = [None] * len(self.config["plot"].fields)
+        label_cycle = cycle(labels)
         for ax in self.axes:
             for data in self.data_manager.iter_files():
                 for field_idx, field in enumerate(self.config["plot"].fields):
                     # Use DataHandlerMixin
                     var = self.get_variable(data.fields, field)
-                    label = self.get_label(field, labels[field_idx])
+                    label = self.get_label(field, next(label_cycle))
 
                     # Use CoordinatesMixin
                     x, indices = self.transform_coordinates(data.mesh, data.setup)
@@ -47,7 +49,7 @@ class LinePlotter(BasePlotter, DataHandlerMixin, AnimationMixin, CoordinatesMixi
                         sliced_var = self.get_slice_data(var, data.mesh, data.setup)
                         self._plot_slice(ax, x, sliced_var, field, label)
                     else:
-                        self._plot_line(ax, x, var, field)
+                        self._plot_line(ax, x, var, field, label)
 
             self.formatter.set_axes_properties(self.fig, ax, data.setup, self.config)
             self.formatter.setup_axis_style(
