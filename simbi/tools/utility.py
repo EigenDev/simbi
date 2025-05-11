@@ -67,7 +67,7 @@ FIELD_MAP: dict[str, str] = {
     "temperature": "T",
     "mach": "M",
     "v1": r"$v_1 / v_0$",
-    "v": r"$v_1 / v_0$",
+    "v": r"$v / v_0$",
     "v2": r"$v_2 / v_0$",
     "v3": r"$v_3 / v_0$",
     "tau-s": r"$\tau_s$",
