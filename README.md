@@ -41,10 +41,10 @@
 
 <https://user-images.githubusercontent.com/29236993/205418982-943af187-8ae3-4401-92d5-e09a4ea821e2.mp4>
 
-### 2D Magnetic Turbulence 
-
+### 2D Magnetic Turbulence
+<div align="center">
 <https://github.com/user-attachments/assets/9e5b8c42-ce3e-4c23-a380-7903eec52b92>
-
+</div>
 
 
 
