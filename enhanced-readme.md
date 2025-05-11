@@ -66,7 +66,7 @@
 - **Compiler**: gcc ≥ 8 or clang ≥ 10 (for C++20 support)
 - **Python**: Version ≥ 3.10
 - **Build Systems**:
-  - [Meson](https://mesonbuild.com/Getting-meson.html)
+  - [Meson](https://mesonbuild.com/Getting-meson.html) (`pip install meson`)
   - [Ninja](https://github.com/ninja-build/ninja/wiki/Pre-built-Ninja-packages)
 - **Libraries & Tools**:
   - [Cython](https://cython.org/)
@@ -127,6 +127,18 @@ CC=<your_c_compiler> CXX=<your_cpp_compiler> python dev.py install --gpu-compila
 CC=<your_c_compiler> CXX=<your_cpp_compiler> meson setup <build_dir> -Dgpu_arch=70 -Dgpu_compilation=enabled [options]
 ```
 
+### C++ Standard Selection
+
+The build system uses C++20 by default. For C++17 compatibility:
+
+```bash
+# First delete any existing build directory!
+CC=<your_c_compiler> CXX=<your_cpp_compiler> python dev.py install --cpp17
+
+# Or manually:
+CC=<your_c_compiler> CXX=<your_cpp_compiler> meson setup <build_dir> -Dcpp_std=c++17 [options]
+```
+
 ## 🚀 Running Simulations
 
 ### Running a Configuration
@@ -184,7 +196,7 @@ This creates a skeleton configuration script in the `simbi_configs` directory th
 5. **Flexible Boundary Conditions**:
    - Specified as array: `[bc_x1min, bc_x1max, bc_x2min, bc_x2max, bc_x3min, bc_x3max]`
    - Supported types: `periodic`, `reflecting`, `outflow`, `dynamic`
-   - Note: Dynamic boundaries default to outflow if no dynamic source terms are provided
+   - Note: Dynamic boundaries default to outflow if no inflow source terms are provided
 
 6. **Passive Scalar Tracking**:
    - Implement via `passive_scalar` property
@@ -196,39 +208,6 @@ This creates a skeleton configuration script in the `simbi_configs` directory th
 8. **Gravity Source Terms**:
    - Implement via `gravity_source_expressions` property
 
-### ✒️ Citing SIMBI
-
-If you use SIMBI in your research, please cite the following paper:
-
-```bibtex
-@article{simbi2023,
-  title={SIMBI: A high-performance 3D relativistic magneto-gas dynamic code for astrophysical fluid simulations},
-  author={Eigen, J. and others},
-  journal={Journal of Computational Physics},
-  volume={456},
-  pages={111-123},
-  year={2023},
-  publisher={Elsevier}
-}
-```
-
-### 📖 Publications / Use Cases
-- [DuPont, M. et al. 2022 - "Ellipsars: Ring-like Exploisions from Flattened Stars"](https://iopscience.iop.org/article/10.3847/2041-8213/ac6ded)
-- [DuPont, M. et al. 2023 - "Explosions in Roche-lobe Distorted Stars: Relativistic Bullets in Binaries"](https://iopscience.iop.org/article/10.3847/1538-4357/ad284e)
-- [DuPont, M. & MacFadyen A. 2023 - "Stars Bisected By Relativistic Blades"](https://iopscience.iop.org/article/10.3847/2041-8213/ad132c)
-- [DuPont, M. et al. 2024 - "Strong Bow Shocks: Turbulence and An Exact Self-Similar Asymptotic"](https://iopscience.iop.org/article/10.3847/1538-4357/ad5adc)
-
-
-### ⚙️ Version History (Changelog. I'm mucher better these days at note taking than I was back then...)
-- **v0.1.0**: Initial release with basic features
-- **v0.2.0**: Learned about memory contiguity and flattened std::vector
-- **v0.3.0**: Learned more about c++, refactored code to be more readable and maintainable
-- **v0.4.0**: Refactored (terrible note taking here)
-- **v0.5.0**: Refactored (terrible note taking here)
-- **v0.6.0**: Fix Git Tag Ordering & Refactored (terrible note taking here)
-- **v0.7.0**: Static type checking with mypy, implement IB method
-- **v0.8.0**: Refactored to minimize compiler warnings (terrible note taking here)
-
 ### Roadmap
 
 - [ ] Explore general immersed boundary methods for sources and sinks
@@ -238,6 +217,10 @@ If you use SIMBI in your research, please cite the following paper:
 ## 📄 License
 
 SIMBI is available under the [MIT License](https://opensource.org/licenses/MIT).
+
+## 🤝 Contributing
+
+Contributions are welcome! Please feel free to submit a Pull Request.
 
 ---
 
