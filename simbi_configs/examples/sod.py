@@ -20,7 +20,7 @@ class SodProblem(BaseConfig):
     ) -> InitialStateType:
         """return initial primitive generator"""
 
-        def _initial_state() -> Generator[Sequence[float], None, None]:
+        def gas_state() -> Generator[Sequence[float], None, None]:
             nx = self.resolution
             dx = (self.bounds[1] - self.bounds[0]) / nx
             for i in range(nx):
@@ -29,7 +29,7 @@ class SodProblem(BaseConfig):
                 else:
                     yield 0.125, 0.0, 0.1
 
-        return _initial_state
+        return gas_state
 
     @simbi_property
     def bounds(self) -> Sequence[float]:

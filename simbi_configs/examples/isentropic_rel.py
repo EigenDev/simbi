@@ -91,7 +91,7 @@ class IsentropicRelWave(BaseConfig):
     def initial_primitive_state(self) -> InitialStateType:
         """Return initial primitive generator"""
 
-        def _initial_state() -> Generator[Sequence[float], None, None]:
+        def gas_state() -> Generator[Sequence[float], None, None]:
             dx = (self.bounds[1] - self.bounds[0]) / self.resolution
             x = np.fromiter((i * dx for i in range(self.resolution)), dtype=np.float64)
             rho = self.state.density(x)
@@ -99,7 +99,7 @@ class IsentropicRelWave(BaseConfig):
             v = self.state.velocity(rho, p)
             yield from zip(rho, v, p)
 
-        return _initial_state
+        return gas_state
 
     @simbi_property
     def bounds(self) -> Sequence[float]:
