@@ -10,6 +10,7 @@ namespace simbi {
         // all individually.
         real gamma;
         bool is_isothermal;
+        bool locally_isothermal;
         real ambient_sound_speed;
     };
 }   // namespace simbi

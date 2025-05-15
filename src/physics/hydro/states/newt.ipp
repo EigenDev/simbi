@@ -22,10 +22,12 @@ Newtonian<dim>::Newtonian(
 )
     : HydroBase<Newtonian<dim>, dim, Regime::NEWTONIAN>(state, init_conditions),
       isothermal_(init_conditions.isothermal),
+      locally_isothermal_(init_conditions.locally_isothermal),
       sound_speed_squared_(init_conditions.sound_speed_squared)
 {
     this->context_.gamma               = gamma;
     this->context_.is_isothermal       = goes_to_zero(gamma - 1.0);
+    this->context_.locally_isothermal  = locally_isothermal_;
     this->context_.ambient_sound_speed = std::sqrt(sound_speed_squared_);
 }
 
@@ -41,15 +43,24 @@ void Newtonian<dim>::cons2prim_impl()
 {
     atomic::simbi_atomic<bool> local_failure{false};
     this->prims_.transform(
-        [gamma      = this->gamma,
-         loc        = local_failure.get(),
-         isothermal = isothermal_,
-         cs2 = sound_speed_squared_] DEV(auto& prim, const auto& cons_var)
+        [gamma     = this->gamma,
+         loc       = local_failure.get(),
+         iso       = isothermal_,
+         local_iso = locally_isothermal_,
+         cs2       = sound_speed_squared_] DEV(auto& prim, const auto& cons_var)
             -> Maybe<primitive_t> {
             const auto& rho = cons_var.dens();
             const auto vel  = cons_var.momentum() / rho;
             const auto& chi = cons_var.chi() / rho;
-            const auto pre  = cons_var.pressure(gamma, isothermal, cs2);
+            const auto pre  = [&]() {
+                if (local_iso) {
+                    // if isothermal, the energy term is a proxy for the sound
+                    // speed squared. This is for optimization purposes
+                    const auto cs2_local = cons_var.nrg();
+                    return rho * cs2_local;
+                }
+                return cons_var.pressure(gamma, iso, cs2);
+            }();
 
             if (pre < 0 || !std::isfinite(pre)) {
                 // store the invalid state
@@ -532,8 +543,9 @@ void Newtonian<dim>::advance_impl()
             );
         }
 
-        // Return updated conserved values
-        return con.value() + delta_con;
+        // Return updated conserved values (if isothermal, energy is not
+        // updated)
+        return con.value().increment_gas_terms(delta_con, isothermal_);
     };
 
     // Transform using stencil operations

@@ -625,13 +625,16 @@ namespace simbi {
             }
         }
 
-        DUAL anyConserved<Dims, R>
-        increment_gas_terms(const anyConserved<Dims, R>& other)
-            requires sim_type::MHD<R>
+        DUAL anyConserved<Dims, R> increment_gas_terms(
+            const anyConserved<Dims, R>& other,
+            bool isothermal = false
+        )
         {
             dens() += other.dens();
             momentum() += other.momentum();
-            nrg() += other.nrg();
+            if (!isothermal) {
+                nrg() += other.nrg();
+            }
             chi() += other.chi();
             return *this;
         }

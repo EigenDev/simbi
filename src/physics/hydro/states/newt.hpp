@@ -71,7 +71,7 @@ namespace simbi {
         using base_t = HydroBase<Newtonian<dim>, dim, Regime::NEWTONIAN>;
 
         // isothermal EOS
-        bool isothermal_;
+        bool isothermal_, locally_isothermal_;
         real sound_speed_squared_;
 
       protected:
