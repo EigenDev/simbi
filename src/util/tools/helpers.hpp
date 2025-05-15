@@ -574,25 +574,6 @@ namespace simbi {
             return std::abs(pr - pl) / my_min(pl, pr) > QUIRK_THRESHOLD;
         }
 
-        /**
-         * @brief Get the real idx of an array object
-         *
-         * @param idx the global index
-         * @param offset the halo radius
-         * @param active_zones the number of real, active zones in the grid
-         * @return the nearest active index corresponding to the global index
-         * given
-         */
-        STATIC
-        constexpr luint
-        get_real_idx(const lint idx, const lint offset, const lint active_zones)
-        {
-            if (idx > active_zones - 1 + offset) {
-                return active_zones - 1;
-            }
-            return (idx - offset > 0) * (idx - offset);
-        }
-
         STATIC constexpr std::tuple<luint, luint, luint>
         get_indices(const luint idx, const auto nx, const auto ny)
         {
@@ -600,22 +581,6 @@ namespace simbi {
             const auto jj = get_row(idx, nx, ny, kk);
             const auto ii = get_column(idx, nx, ny, kk);
             return {ii, jj, kk};
-        }
-
-        STATIC constexpr std::tuple<luint, luint, luint> get_real_indices(
-            const auto ii,
-            const auto jj,
-            const auto kk,
-            const auto nx,
-            const auto ny,
-            const auto offset
-        )
-        {
-            return {
-              get_real_idx(ii, offset, nx),
-              get_real_idx(jj, offset, ny),
-              get_real_idx(kk, offset, 1)
-            };
         }
 
         /**
