@@ -163,6 +163,16 @@ namespace simbi {
         ndarray<int> gravity_source_linear_outputs_;
         ndarray<expression::LinearExprInstr> gravity_source_linear_instrs_;
 
+        // local sound speed function
+        ndarray<expression::ExprNode> sound_speed_expr_nodes_;
+        ndarray<int> sound_speed_output_indices_;
+        ndarray<real> sound_speed_parameters_;
+
+        // linearized expr logic
+        int sound_speed_reg_count_;
+        ndarray<int> sound_speed_linear_outputs_;
+        ndarray<expression::LinearExprInstr> sound_speed_linear_instrs_;
+
       public:
         // move constructor and assignment
         IOManager(IOManager&& other) noexcept            = default;
@@ -181,6 +191,7 @@ namespace simbi {
             setup_boundary_expressions(init);
             setup_hydro_source_expressions(init);
             setup_gravity_source_expressions(init);
+            setup_sound_speed_expressions(init);
         }
 
         // shared_ptr cleans up libraries
@@ -326,13 +337,6 @@ namespace simbi {
                             local_results.data(),
                             dt
                         );
-                        // printf(
-                        //     "local results: %f, %f, %f, %f\n",
-                        //     local_results[0],
-                        //     local_results[1],
-                        //     local_results[2],
-                        //     local_results[3]
-                        // );
                     }
                     return local_results;
 
@@ -401,6 +405,32 @@ namespace simbi {
                     }
                     return local_results;
             }
+        }
+
+        DEV real
+        call_local_sound_speed(const spatial_vector_t<real, Dims>& coords) const
+        {
+            spatial_vector_t<real, 3> local_coords{0.0, 0.0, 0.0};
+            for (size_type ii = 0; ii < Dims; ++ii) {
+                local_coords[ii] = coords[ii];
+            }
+            real local_sound_speed[1] = {0.0};
+            expression::evaluate_linear_expr(
+                sound_speed_linear_instrs_.data(),
+                sound_speed_linear_instrs_.size(),
+                sound_speed_linear_outputs_.data(),
+                sound_speed_output_indices_.size(),
+                sound_speed_reg_count_,
+                local_coords[0],
+                local_coords[1],
+                local_coords[2],
+                0.0,   // time not used for sound speed
+                0.0,   // dt not used for sound speed
+                nullptr,
+                local_sound_speed
+            );
+
+            return local_sound_speed[0];
         }
 
       private:
@@ -550,6 +580,39 @@ namespace simbi {
             }
             else {
                 solver_manager_.set_null_sources(true);
+            }
+        }
+
+        void setup_sound_speed_expressions(const InitialConditions& init)
+        {
+            if (init.local_sound_speed_expressions.size() > 0) {
+                // load the expressions :)))
+                auto [node, indices, params] = expression::load_expression_data(
+                    init.local_sound_speed_expressions
+                );
+
+                sound_speed_expr_nodes_     = std::move(node);
+                sound_speed_output_indices_ = std::move(indices);
+                sound_speed_parameters_     = std::move(params);
+
+                // idem
+                auto [linear_instrs, mapped_outputs] =
+                    expression::linearize_expression_tree(
+                        sound_speed_expr_nodes_,
+                        sound_speed_output_indices_
+                    );
+                sound_speed_linear_instrs_  = std::move(linear_instrs);
+                sound_speed_linear_outputs_ = std::move(mapped_outputs);
+                sound_speed_reg_count_ =
+                    expression::get_max_register(sound_speed_linear_instrs_) +
+                    1;
+
+                // sync everything to device
+                sound_speed_expr_nodes_.sync_to_device();
+                sound_speed_output_indices_.sync_to_device();
+                sound_speed_parameters_.sync_to_device();
+                sound_speed_linear_instrs_.sync_to_device();
+                sound_speed_linear_outputs_.sync_to_device();
             }
         }
     };   // namespace simbi
