@@ -80,6 +80,31 @@ class ParseKVAction(argparse.Action):
         for each in values:
             try:
                 key, value = each.split("=")
+                if "," in value:
+                    value = value.split(",")
+                getattr(namespace, self.dest)[key] = value
+            except ValueError as ex:
+                message = "\nTraceback: {}".format(ex)
+                message += "\nError on '{}' || It should be 'key=value'".format(each)
+                raise argparse.ArgumentError(self, str(message))
+
+
+class ParseKVActionToList(argparse.Action):
+    def __call__(
+        self,
+        parser: argparse.ArgumentParser,
+        namespace: argparse.Namespace,
+        values: Any,
+        option_string: str | None = None,
+    ) -> None:
+        setattr(namespace, self.dest, dict())
+        for each in values:
+            try:
+                key, value = each.split("=")
+                if "," in value:
+                    value = value.split(",")
+                if isinstance(value, str):
+                    value = [value]
                 getattr(namespace, self.dest)[key] = value
             except ValueError as ex:
                 message = "\nTraceback: {}".format(ex)
@@ -399,7 +424,7 @@ class PlottingArgumentBuilder:
             (
                 ["--fig-dims"],
                 {
-                    "default": [4, 4],
+                    "default": [6, 6],
                     "type": float,
                     "nargs": 2,
                     "help": "figure dimensions",
@@ -522,9 +547,9 @@ class PlottingArgumentBuilder:
                 ["--coords"],
                 {
                     "help": "coordinates of fixed vars for (n-m)d projection",
-                    "action": ParseKVAction,
+                    "action": ParseKVActionToList,
                     "nargs": "+",
-                    "default": {"xj": "0.0", "xk": "0.0"},
+                    "default": {"xj": ["0.0"], "xk": ["0.0"]},
                 },
             ),
             (
@@ -659,6 +684,7 @@ class PlottingArgumentBuilder:
                 box_depth=args["box_depth"],
                 bipolar=args["bipolar"],
                 slice_along=args["slice_along"],
+                coords=args["coords"],
             ),
         }
 

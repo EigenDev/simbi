@@ -42,8 +42,8 @@ class PlotTextStyle:
                 len(config["plot"].fields),
                 len(config["plot"].files),
                 # len(config['plot'].cutoffs),
-                len(config["multidim"].coords["xj"].split(","))
-                * len(config["multidim"].coords["xk"].split(",")),
+                len(config["multidim"].coords.get("xj", "0"))
+                * len(config["multidim"].coords.get("xk", "0")),
             )
         else:
             nind_curves = config["plot"].nplots // len(config["plot"].files)
@@ -178,7 +178,8 @@ class PlotFormatter:
                 ax.set_xlabel(f"${config['style'].xlabel}$")
                 if len(config["plot"].fields) == 1:
                     ax.set_ylabel(f"{field_string}")
-                else:
+
+                if len(config["plot"].fields) > 1 or config["multidim"].slice_along:
                     ax.legend()
                 ax.set_title(f"{config['plot'].setup} t = {setup['time']:.2f}")
                 if config["style"].labels is not None:

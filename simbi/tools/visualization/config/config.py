@@ -84,7 +84,9 @@ class MultidimGroup:
     bipolar: bool = False
     patches: int = 1
     slice_along: Optional[str] = None
-    coords: Dict[str, str] = field(default_factory=lambda: {"xj": "0.0", "xk": "0.0"})
+    coords: Dict[str, list[str]] = field(
+        default_factory=lambda: {"xj": ["0.0"], "xk": ["0.0"]}
+    )
 
 
 @dataclass

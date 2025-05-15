@@ -46,8 +46,10 @@ class LinePlotter(BasePlotter, DataHandlerMixin, AnimationMixin, CoordinatesMixi
                     # Use CoordinatesMixin
                     x, indices = self.transform_coordinates(data.mesh, data.setup)
                     if self.config["multidim"].slice_along:
-                        sliced_var = self.get_slice_data(var, data.mesh, data.setup)
-                        self._plot_slice(ax, x, sliced_var, field, label)
+                        sliced_vars, sliced_labels = self.get_slice_data(
+                            var, data.mesh, data.setup, label
+                        )
+                        self._plot_slice(ax, x, sliced_vars, field, sliced_labels)
                     else:
                         self._plot_line(ax, x, var, field, label)
 
@@ -69,7 +71,8 @@ class LinePlotter(BasePlotter, DataHandlerMixin, AnimationMixin, CoordinatesMixi
         line = ax.plot(x, yvar, label=label)[0]
         self.frames.append(line)
 
-    def _plot_slice(self, ax, x, var, field: str, label: str | None = None):
+    def _plot_slice(self, ax, x, sliced_vars, field: str, sliced_labels: Sequence[str]):
         """Plot 1D slice using transformed coordinates"""
-        line = ax.plot(x, var.flat, label=label)[0]
-        self.frames.append(line)
+        for var, label in zip(sliced_vars, sliced_labels):
+            line = ax.plot(x, var.flat, label=label)[0]
+            self.frames.append(line)

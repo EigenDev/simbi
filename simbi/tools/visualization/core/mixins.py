@@ -144,26 +144,26 @@ class AnimationMixin:
                             vmin=vmin, vmax=vmax, gamma=self.config["style"].power
                         )
                 drawing.set_array(var.ravel())
-            # if immersed_bodies:
-            #     # Clear previous patches
-            #     for patch in self.axes.patches:
-            #         patch.remove()
+            if immersed_bodies:
+                # Clear previous patches
+                for patch in self.axes.patches:
+                    patch.remove()
 
-            #     for body in immersed_bodies.values():
-            #         if has_capability(body["type"], BodyCapability.ACCRETION):
-            #             radius = body["accretion_radius"]
-            #         else:
-            #             radius = body["radius"]
-            #         circle = mpatches.Circle(
-            #             body["position"],
-            #             radius,
-            #             color="black",
-            #             linestyle="--",
-            #             alpha=0.5,
-            #         )
-            #         self.axes.add_patch(circle)
-            #         self.axes.set_aspect("equal", adjustable="box")
-            #         self.axes.autoscale_view()
+                for body in immersed_bodies.values():
+                    if has_capability(body["type"], BodyCapability.ACCRETION):
+                        radius = body["accretion_radius"]
+                    else:
+                        radius = body["radius"]
+                    circle = mpatches.Circle(
+                        body["position"],
+                        radius,
+                        color="black",
+                        linestyle="--",
+                        alpha=0.5,
+                    )
+                    self.axes.add_patch(circle)
+                    self.axes.set_aspect("equal", adjustable="box")
+                    self.axes.autoscale_view()
 
 
 class CoordinatesMixin:
@@ -174,10 +174,11 @@ class CoordinatesMixin:
         var: NDArray[np.floating[Any]],
         mesh: dict[str, NDArray[np.floating[Any]]],
         setup: dict[str, Any],
+        label: str | None = None,
     ) -> NDArray[np.floating[Any]]:
         """ "Get data for a 1D slice of a higher-dimensional field"""
-        slices = self._get_slice_indices(mesh, setup)
-        return var[slices]
+        slice_arr, sliced_labels = self._get_slice_indices(mesh, setup, label)
+        return [var[slices] for slices in slice_arr], sliced_labels
 
     def check_cartesian(self) -> bool:
         """Check if the mesh is Cartesian"""
@@ -212,21 +213,37 @@ class CoordinatesMixin:
             return "x1v", "x2v"
 
     def _get_slice_indices(
-        self, mesh: dict[str, NDArray[np.floating[Any]]], setup: dict[str, Any]
+        self,
+        mesh: dict[str, NDArray[np.floating[Any]]],
+        setup: dict[str, Any],
+        label: str | None = None,
     ) -> Any:
         """Get indices for slice through higher dimensions"""
-        for xkcoord in map(float, self.config["multidim"].coords["xk"].split(",")):
-            for xjcoord in map(float, self.config["multidim"].coords["xj"].split(",")):
+        slice_arr = []
+        sliced_labels = []
+        for xkcoord in map(float, self.config["multidim"].coords.get("xk", "0")):
+            for xjcoord in map(float, self.config["multidim"].coords.get("xj", "0")):
+                if label:
+                    sliced_label = label + f" $x_j={xjcoord:.0f}$"
+                    if "xk" in self.config["multidim"].coords:
+                        sliced_label += f" $x_k={xkcoord:.0f}$"
+                    sliced_labels.append(sliced_label)
+
                 if setup["coord_system"] == "spherical":
                     xjcoord = np.deg2rad(xjcoord)
                     xkcoord = np.deg2rad(xkcoord)
+
                 xj, xk = self._get_permuted_indices(mesh, setup)
                 jidx = util.find_nearest(mesh.get(xj, np.linspace(0, 1)), xjcoord)[0]
                 kidx = util.find_nearest(mesh.get(xk, np.linspace(0, 1)), xkcoord)[0]
+                if jidx != 0:
+                    jidx -= 1
+                if kidx != 0:
+                    kidx -= 1
                 if mesh["effective_dimensions"] == 1:
-                    return (None, None, None)
+                    slice_arr.append((None, None, None))
                 elif mesh["effective_dimensions"] == 2:
-                    return jidx
+                    slice_arr.append(jidx)
                 else:
                     if self.config["multidim"].slice_along == "x1":
                         slice = np.s_[kidx, jidx, :]
@@ -234,7 +251,8 @@ class CoordinatesMixin:
                         slice = np.s_[jidx, :, kidx]
                     else:
                         slice = np.s_[:, kidx, jidx]
-                    return slice
+                    slice_arr.append(slice)
+        return slice_arr, sliced_labels
 
     def _transform_polar(self, mesh: dict, setup: dict[str, Any]) -> tuple:
         """Handle polar coordinate transforms"""
