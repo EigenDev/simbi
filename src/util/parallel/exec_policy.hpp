@@ -53,9 +53,7 @@
 #include "core/types/containers/array.hpp"   // for array
 #include "util/tools/device_api.hpp"         // for api::setDevice
 #include <exception>                         // for exception
-#include <iostream>   // for operator<<, char_traits, basic_ostream
-#include <ranges>     // for ranges::views::transform
-#include <vector>     // for vector
+#include <vector>                            // for vector
 
 struct ExecutionException : public std::exception {
     const char* what() const throw() { return "Invalid constructor args"; }
@@ -259,7 +257,7 @@ namespace simbi {
 
         void set_device(int device)
         {
-            this->devices.push_back(device);
+            this->devices = {device};
             gpu::api::setDevice(device);
         }
 
