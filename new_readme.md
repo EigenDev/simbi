@@ -173,7 +173,7 @@
 CC=<your_c_compiler> CXX=<your_cpp_compiler> python dev.py install [options]
 ```
 
-
+<div align="center">
 ### ⚙️ Manual Install
 Setup with Meson**:
 
@@ -193,7 +193,7 @@ or
 meson install -C <build_dir>
 ```
 
-</details>
+</div>
 
 <details>
 <summary><b>⚠️ GPU Compilation Notes</b></summary>
@@ -215,7 +215,7 @@ CC=<your_c_compiler> CXX=<your_cpp_compiler> meson setup <build_dir> -Dgpu_arch=
 
 ## 🚀 Running Simulations
 
-<div align="center">
+<div align="left">
 <table>
 <tr>
 <th width="33%">Running a Configuration</th>
@@ -269,7 +269,7 @@ This creates a skeleton configuration in the `simbi_configs` directory that you 
 </table>
 </div>
 
-<div align="center">
+<div align="left">
 <i>Note: <code>--mode</code> is a global CLI option, while <code>--nzones</code> and <code>--ad-index</code> are problem-specific options defined in the configuration script.</i>
 </div>
 
@@ -330,11 +330,11 @@ This creates a skeleton configuration in the `simbi_configs` directory that you 
 
 ## ✒️ Citing SIMBI
 
-<div align="center">
+<div align="left">
 If you use SIMBI in your research, please cite:
 </div>
 
-<div align="center">
+<div align="left">
 <table>
 <tr>
 <td>
@@ -431,16 +431,16 @@ If you use SIMBI in your research, please cite:
 
 ## 🔮 Roadmap
 
-<div align="center">
+<div align="left">
 <table>
 <tr>
-<td align="center">
+<td align="left">
 <h3>Short Term</h3>
 </td>
-<td align="center">
+<td align="left">
 <h3>Medium Term</h3>
 </td>
-<td align="center">
+<td align="left">
 <h3>Long Term</h3>
 </td>
 </tr>
