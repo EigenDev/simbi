@@ -52,10 +52,8 @@
 #define GEOMETRY_TRAITS_HPP
 
 #include "build_options.hpp"
-#include "core/types/containers/array.hpp"          // for array
-#include "core/types/containers/vector.hpp"         // for spatial_vector_t
-#include "core/types/utility/enums.hpp"             // for Geometry
-#include "core/types/utility/init_conditions.hpp"   // for InitialConditions
+#include "core/types/containers/vector.hpp"   // for spatial_vector_t
+#include "core/types/utility/enums.hpp"       // for Geometry
 
 namespace simbi {
     enum class GridDirection {
@@ -410,32 +408,29 @@ namespace simbi {
         static constexpr auto get_differential(const auto& cell)
         {
             if constexpr (Dir == GridDirection::X1) {
-                return cell.normal(1) - cell.normal(0);
+                return cell.width(0);
             }
             else if constexpr (Dir == GridDirection::X2) {
-                if constexpr (Dims < 2) {
-                    return 1.0;
-                }
-                return cell.normal(3) - cell.normal(2);
+                return cell.width(1);
             }
             else {
-                if constexpr (Dims < 3) {
-                    return 1.0;
-                }
-                return cell.normal(5) - cell.normal(4);
+                return cell.width(2);
             }
         }
 
         static constexpr void calculate_areas(auto& faces, const auto& cell)
         {
-            faces[0].area = 1.0;
-            faces[1].area = 1.0;
+            // cartesian areas at x faces are y * z
+            faces[0].area = cell.width(1) * cell.width(2);
+            faces[1].area = cell.width(1) * cell.width(2);
             if constexpr (Dims > 1) {
-                faces[2].area = 1.0;
-                faces[3].area = 1.0;
+                // cartesian areas at y faces are x * z
+                faces[2].area = cell.width(0) * cell.width(2);
+                faces[3].area = cell.width(0) * cell.width(2);
                 if constexpr (Dims > 2) {
-                    faces[4].area = 1.0;
-                    faces[5].area = 1.0;
+                    // cartesian areas at z faces are x * y
+                    faces[4].area = cell.width(0) * cell.width(1);
+                    faces[5].area = cell.width(0) * cell.width(1);
                 }
             }
         }

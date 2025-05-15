@@ -111,55 +111,6 @@ namespace simbi {
             }
         }
 
-        DUAL Maybe<size_type> get_neighbor_cell_index(
-            size_type center_idx,
-            int offset_i,
-            int offset_j
-        ) const
-        {
-            // get current cell coordinates
-            auto cell     = get_cell_from_global(center_idx);
-            auto centroid = cell.centroid();
-
-            // calculate neighbor centroid position
-            spatial_vector_t<real, Dims> neighbor_pos = centroid;
-            neighbor_pos[0] += offset_i * cell.width(0);
-            if constexpr (Dims > 1) {
-                neighbor_pos[1] += offset_j * cell.width(1);
-            }
-
-            // Find cell closest to this position
-            // TODO: make more sophisticated if needed later
-            real min_distance            = std::numeric_limits<real>::max();
-            Maybe<size_type> closest_idx = Nothing;
-
-            // Check cells in a small radius around the original cell
-            for (int di = -1; di <= 1; di++) {
-                for (int dj = -1; dj <= 1; dj++) {
-                    // Skip the current cell
-                    if (di == 0 && dj == 0) {
-                        continue;
-                    }
-
-                    // Calculate potential neighbor index
-                    auto idx = center_idx + di + dj * grid().active_gridsize(0);
-                    if (idx >= 0 && idx < size()) {
-                        auto candidate_cell = get_cell_from_global(idx);
-                        auto candidate_pos  = candidate_cell.centroid();
-
-                        // Calculate distance
-                        real distance = (candidate_pos - neighbor_pos).norm();
-                        if (distance < min_distance) {
-                            min_distance = distance;
-                            closest_idx  = idx;
-                        }
-                    }
-                }
-            }
-
-            return closest_idx;
-        }
-
         // member accessors
         DUAL const auto& grid() const { return grid_; }
         DUAL const auto& geometry_state() const { return geometry_; }

@@ -100,9 +100,9 @@ namespace simbi {
         DUAL void calculate_geometry_metrics_impl()
         {
             const auto traits = GeometryTraits<G, Dims>{};
+            traits.calculate_widths(widths_, *this);
             traits.calculate_areas(faces_, *this);
             traits.calculate_volume(*this);
-            traits.calculate_widths(widths_, *this);
         }
 
         DUAL void calculate_geometry_metrics()
@@ -520,7 +520,7 @@ namespace simbi {
         DUAL constexpr auto width(const size_type ii) const
         {
             if (ii >= Dims) {
-                return 0.0;
+                return 1.0;
             }
             return widths_[ii];
         }
@@ -534,9 +534,9 @@ namespace simbi {
 
         DUAL constexpr auto inverse_volume(const size_type ii) const
         {
-            if (geo_info_.geometry() == Geometry::CARTESIAN) {
-                return 1.0 / widths_[ii];
-            }
+            // if (geo_info_.geometry() == Geometry::CARTESIAN) {
+            //     return 1.0 / widths_[ii];
+            // }
             return 1.0 / dV_;
         }
 
