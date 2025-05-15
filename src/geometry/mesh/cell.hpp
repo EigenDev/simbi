@@ -375,37 +375,22 @@ namespace simbi {
                                                            : 3;
 
             if constexpr (dir == 1) {
-                const auto ireal = get_real_idx(
-                    ii,
-                    grid_info_.halo_radius(),
-                    grid_info_.active_gridsize(0)
-                );
                 if (geo_info_.spacing_type(0) == Cellspacing::LINEAR) {
-                    return get_face_linear<dir>(ireal, side == 0);
+                    return get_face_linear<dir>(ii, side == 0);
                 }
-                return get_face_log<dir>(ireal, side == 0);
+                return get_face_log<dir>(ii, side == 0);
             }
             else if constexpr (dir == 2) {
-                const auto jreal = get_real_idx(
-                    jj,
-                    grid_info_.halo_radius(),
-                    grid_info_.active_gridsize(1)
-                );
                 if (geo_info_.spacing_type(1) == Cellspacing::LINEAR) {
-                    return get_face_linear<dir>(jreal, side == 0);
+                    return get_face_linear<dir>(jj, side == 0);
                 }
-                return get_face_log<dir>(jreal, side == 0);
+                return get_face_log<dir>(jj, side == 0);
             }
             else {
-                const auto kreal = get_real_idx(
-                    kk,
-                    grid_info_.halo_radius(),
-                    grid_info_.active_gridsize(2)
-                );
                 if (geo_info_.spacing_type(2) == Cellspacing::LINEAR) {
-                    return get_face_linear<dir>(kreal, side == 0);
+                    return get_face_linear<dir>(kk, side == 0);
                 }
-                return get_face_log<dir>(kreal, side == 0);
+                return get_face_log<dir>(kk, side == 0);
             }
         }
 
