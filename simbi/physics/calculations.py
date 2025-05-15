@@ -138,6 +138,9 @@ def labframe_energy(
     bfields: nested_array,
     regime: str,
 ) -> Array:
+    if adiabatic_index == 1.0:
+        # this wll be a proxy for the sound speed squared
+        return pressure / rho
     res: Array
     bsq = dot_product(bfields, bfields) if np.any(bfields) else 0.0
     vdb = dot_product(velocity, bfields) if np.any(bfields) else 0.0
