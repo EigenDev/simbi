@@ -56,12 +56,12 @@
 #include "io/exceptions.hpp"           // for SimulationFailureException
 #include "io/hdf5/checkpoint.hpp"      // for write_to_file
 #include "util/tools/device_api.hpp"   // for gpuEventCreate, gpuEventDestroy
-#include "util/tools/helpers.hpp"   // for get_real_idx, catch_signals, Inter...
-#include <chrono>                   // for time_point, high_resolution_clock
-#include <cmath>                    // for INFINITY, pow
-#include <iostream>                 // for operator<<, char_traits, basic_ost...
-#include <memory>                   // for allocator
-#include <type_traits>              // for conditional_t
+#include "util/tools/helpers.hpp"      // for catch_signals, Inter...
+#include <chrono>                      // for time_point, high_resolution_clock
+#include <cmath>                       // for INFINITY, pow
+#include <iostream>      // for operator<<, char_traits, basic_ost...
+#include <memory>        // for allocator
+#include <type_traits>   // for conditional_t
 
 using namespace std::chrono;
 
