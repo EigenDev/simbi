@@ -56,7 +56,6 @@
 #include "physics/hydro/schemes/ib/systems/component_body_system.hpp"   // for ComponentBodySystem
 #include "util/parallel/exec_policy.hpp"
 #include "util/parallel/parallel_for.hpp"
-#include <atomic>   // for atomic_ref
 
 namespace simbi::ibsystem {
     template <typename T, size_type Dims>
@@ -170,104 +169,57 @@ namespace simbi::ibsystem {
         // parallel reduction of deltas on device
         void reduce_deltas()
         {
-            // Reset the body deltas array with invalid body indices and zero
-            // values
+            // reset the body deltas
             for (size_type body_idx = 0; body_idx < max_bodies_; body_idx++) {
                 body_deltas[body_idx] = BodyDelta<T, Dims>{
-                  std::numeric_limits<size_t>::max(),   // invalid body_idx
-                  spatial_vector_t<T, Dims>{},          // zero force
-                  0,                                    // zero mass
-                  0,                                    // zero accreted mass
-                  0                                     // zero accretion rate
+                  body_idx,                      // valid body_idx from start
+                  spatial_vector_t<T, Dims>{},   // zero force
+                  0,
+                  0,
+                  0   // zero other values
                 };
             }
+            body_deltas.sync_to_device();
 
-            // Reduce cell deltas to body deltas using the flattened approach
-            // This will process each spatial cell in parallel and handle all
-            // bodies for that cell
-            parallel_for(spatial_policy_, [this] DEV(luint idx) {
-                // Convert flat index to 3D spatial coordinates
-                const size_type x = idx % cell_shape_[0];
-                const size_type y = (idx / cell_shape_[0]) % cell_shape_[1];
-                const size_type z = idx / (cell_shape_[0] * cell_shape_[1]);
+            // create a policy for parallelizing over bodies
+            ExecutionPolicy<> body_policy({max_bodies_, 1, 1}, {128, 1, 1});
 
-                // Process all bodies for this spatial location
-                for (size_type body_idx = 0; body_idx < max_bodies_;
-                     body_idx++) {
-                    const auto& delta = cell_deltas.at(x, y, z, body_idx);
+            // Parallelize over bodies - each thread handles one body
+            parallel_for(body_policy, [this] DEV(luint body_idx) {
+                if (body_idx >= max_bodies_) {
+                    return;
+                }
 
-                    // Skip invalid body indices
-                    if (delta.body_idx >= max_bodies_) {
-                        continue;
-                    }
+                // local accumulation variables
+                spatial_vector_t<T, Dims> force_sum{};
+                T mass_sum = 0, accreted_mass_sum = 0, accretion_rate_sum = 0;
 
-                    // Initialize body delta if this is first contribution
-                    if (body_deltas[body_idx].body_idx ==
-                        std::numeric_limits<size_t>::max()) {
-                        body_deltas[body_idx].body_idx = delta.body_idx;
-                    }
+                // process all cells for this body
+                for (size_type z = 0; z < cell_shape_[2]; z++) {
+                    for (size_type y = 0; y < cell_shape_[1]; y++) {
+                        for (size_type x = 0; x < cell_shape_[0]; x++) {
+                            const auto& delta =
+                                cell_deltas.at(x, y, z, body_idx);
 
-                    // Accumulate values using atomics
-                    if constexpr (global::on_gpu) {
-                        // Accumulate force components
-                        for (size_type dim = 0; dim < Dims; ++dim) {
-                            gpu::api::atomicAdd(
-                                &body_deltas[body_idx].force_delta[dim],
-                                delta.force_delta[dim]
-                            );
+                            // skip invalid body indices
+                            if (delta.body_idx >= max_bodies_) {
+                                continue;
+                            }
+
+                            // acc without atomics (thread-local)
+                            force_sum += delta.force_delta;
+                            mass_sum += delta.mass_delta;
+                            accreted_mass_sum += delta.accreted_mass_delta;
+                            accretion_rate_sum += delta.accretion_rate_delta;
                         }
-
-                        // Accumulate scalar values
-                        gpu::api::atomicAdd(
-                            &body_deltas[body_idx].mass_delta,
-                            delta.mass_delta
-                        );
-                        gpu::api::atomicAdd(
-                            &body_deltas[body_idx].accreted_mass_delta,
-                            delta.accreted_mass_delta
-                        );
-                        gpu::api::atomicAdd(
-                            &body_deltas[body_idx].accretion_rate_delta,
-                            delta.accretion_rate_delta
-                        );
-                    }
-                    else {
-                        // CPU version using std::atomic_ref
-                        for (size_type dim = 0; dim < Dims; ++dim) {
-                            std::atomic_ref<T> atomic_force(
-                                body_deltas[body_idx].force_delta[dim]
-                            );
-                            atomic_force.fetch_add(
-                                delta.force_delta[dim],
-                                std::memory_order_relaxed
-                            );
-                        }
-
-                        std::atomic_ref<T> atomic_mass(
-                            body_deltas[body_idx].mass_delta
-                        );
-                        atomic_mass.fetch_add(
-                            delta.mass_delta,
-                            std::memory_order_relaxed
-                        );
-
-                        std::atomic_ref<T> atomic_accreted_mass(
-                            body_deltas[body_idx].accreted_mass_delta
-                        );
-                        atomic_accreted_mass.fetch_add(
-                            delta.accreted_mass_delta,
-                            std::memory_order_relaxed
-                        );
-
-                        std::atomic_ref<T> atomic_accretion_rate(
-                            body_deltas[body_idx].accretion_rate_delta
-                        );
-                        atomic_accretion_rate.fetch_add(
-                            delta.accretion_rate_delta,
-                            std::memory_order_relaxed
-                        );
                     }
                 }
+
+                // Write final sums to global memory once
+                body_deltas[body_idx].force_delta          = force_sum;
+                body_deltas[body_idx].mass_delta           = mass_sum;
+                body_deltas[body_idx].accreted_mass_delta  = accreted_mass_sum;
+                body_deltas[body_idx].accretion_rate_delta = accretion_rate_sum;
             });
         }
 
@@ -288,7 +240,7 @@ namespace simbi::ibsystem {
                 auto body         = maybe_body.value();
                 const auto& delta = body_deltas[body_idx];
 
-                // Apply deltas immutably
+                // apply deltas immutably
                 if (!delta.force_delta.is_zero()) {
                     body = std::move(body).with_force(
                         body.force + delta.force_delta
