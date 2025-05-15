@@ -173,6 +173,7 @@ namespace simbi {
             collector_;
         HydroContext context_;
 
+        // ctors and dtors
         HydroBase() = default;
 
         ~HydroBase() = default;
@@ -236,6 +237,14 @@ namespace simbi {
             // here, we return the force and power to later
             // be multiplied by the timestep
             return {0.0, dp_dt, dE_dt};
+        }
+
+        DEV real local_sound_speed_squared(const auto& cell) const
+        {
+            const auto coords   = cell.centroid();
+            const auto* iof     = io_manager_.get();
+            const auto local_cs = iof->call_local_sound_speed(coords);
+            return local_cs * local_cs;
         }
 
         void apply_boundary_conditions()
