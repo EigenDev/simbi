@@ -83,7 +83,8 @@ def _configure_single_state(
             f"{bcolors.YELLOW}Printing dynamic arguments in {setup_class}{bcolors.ENDC}"
         )
         del problem_class
-        sys.exit(0)
+        return None, {}, ""
+        # sys.exit(0)
 
     _setup_logging(problem_class, args)
 
@@ -170,5 +171,8 @@ def configure_state(
         states.append(state)
         kwargs[idx] = kwarg_dict
         state_docs.append(doc)
+
+    if args.info:
+        sys.exit(0)
 
     return states, kwargs, state_docs
