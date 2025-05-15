@@ -116,6 +116,7 @@ class SimulationRunner:
                 "bx3_outer_expressions",
                 "gravity_source_expressions",
                 "hydro_source_expressions",
+                "local_sound_speed_expressions",
             ]:
                 if not param:
                     continue

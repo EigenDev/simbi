@@ -43,6 +43,15 @@ __all__ = [
     "bitwise_not",
     "bitwise_left_shift",
     "bitwise_right_shift",
+    "logical_and",
+    "logical_or",
+    "logical_not",
+    "logical_xor",
+    "logical_nand",
+    "logical_nor",
+    "logical_xnor",
+    "where",
+    "sgn",
 ]
 
 X1_ALIASES = ["x", "r", "x1"]
@@ -397,6 +406,64 @@ def if_then_else(condition: Expr, true_case: Expr, false_case: Expr) -> Expr:
             "if_then_else", condition._node_id, true_case._node_id, false_case._node_id
         ),
     )
+
+
+def logical_and(expr1: Expr, expr2: Expr) -> Expr:
+    """Logical AND operation."""
+    return Expr(
+        expr1._graph,
+        expr1._graph.add_node("logical_and", expr1._node_id, expr2._node_id),
+    )
+
+
+def logical_or(expr1: Expr, expr2: Expr) -> Expr:
+    """Logical OR operation."""
+    return Expr(
+        expr1._graph,
+        expr1._graph.add_node("logical_or", expr1._node_id, expr2._node_id),
+    )
+
+
+def logical_not(expr: Expr) -> Expr:
+    """Logical NOT operation."""
+    return Expr(expr._graph, expr._graph.add_node("logical_not", expr._node_id))
+
+
+def logical_xor(expr1: Expr, expr2: Expr) -> Expr:
+    """Logical XOR operation."""
+    return Expr(
+        expr1._graph,
+        expr1._graph.add_node("logical_xor", expr1._node_id, expr2._node_id),
+    )
+
+
+def logical_nand(expr1: Expr, expr2: Expr) -> Expr:
+    """Logical NAND operation."""
+    return Expr(
+        expr1._graph,
+        expr1._graph.add_node("logical_nand", expr1._node_id, expr2._node_id),
+    )
+
+
+def logical_nor(expr1: Expr, expr2: Expr) -> Expr:
+    """Logical NOR operation."""
+    return Expr(
+        expr1._graph,
+        expr1._graph.add_node("logical_nor", expr1._node_id, expr2._node_id),
+    )
+
+
+def logical_xnor(expr1: Expr, expr2: Expr) -> Expr:
+    """Logical XNOR operation."""
+    return Expr(
+        expr1._graph,
+        expr1._graph.add_node("logical_xnor", expr1._node_id, expr2._node_id),
+    )
+
+
+def where(condition: Expr, true_case: Expr, false_case: Expr) -> Expr:
+    """Where function for conditional expressions."""
+    return if_then_else(condition, true_case, false_case)
 
 
 # higher-order functions
@@ -782,6 +849,75 @@ class CompiledExpr:
                 expressions.append(
                     {
                         "op": "IF_THEN_ELSE",
+                        "condition": node_map[input_ids[0]],
+                        "true_case": node_map[input_ids[1]],
+                        "false_case": node_map[input_ids[2]],
+                    }
+                )
+            elif op == "sgn":
+                expressions.append(
+                    {"op": "SGN", "left": node_map[input_ids[0]], "right": -1}
+                )
+            elif op == "abs":
+                expressions.append(
+                    {"op": "ABS", "left": node_map[input_ids[0]], "right": -1}
+                )
+            elif op == "logical_and":
+                expressions.append(
+                    {
+                        "op": "LOGICAL_AND",
+                        "left": node_map[input_ids[0]],
+                        "right": node_map[input_ids[1]],
+                    }
+                )
+            elif op == "logical_or":
+                expressions.append(
+                    {
+                        "op": "LOGICAL_OR",
+                        "left": node_map[input_ids[0]],
+                        "right": node_map[input_ids[1]],
+                    }
+                )
+            elif op == "logical_not":
+                expressions.append(
+                    {"op": "LOGICAL_NOT", "left": node_map[input_ids[0]], "right": -1}
+                )
+            elif op == "logical_xor":
+                expressions.append(
+                    {
+                        "op": "LOGICAL_XOR",
+                        "left": node_map[input_ids[0]],
+                        "right": node_map[input_ids[1]],
+                    }
+                )
+            elif op == "logical_nand":
+                expressions.append(
+                    {
+                        "op": "LOGICAL_NAND",
+                        "left": node_map[input_ids[0]],
+                        "right": node_map[input_ids[1]],
+                    }
+                )
+            elif op == "logical_nor":
+                expressions.append(
+                    {
+                        "op": "LOGICAL_NOR",
+                        "left": node_map[input_ids[0]],
+                        "right": node_map[input_ids[1]],
+                    }
+                )
+            elif op == "logical_xnor":
+                expressions.append(
+                    {
+                        "op": "LOGICAL_XNOR",
+                        "left": node_map[input_ids[0]],
+                        "right": node_map[input_ids[1]],
+                    }
+                )
+            elif op == "where":
+                expressions.append(
+                    {
+                        "op": "WHERE",
                         "condition": node_map[input_ids[0]],
                         "true_case": node_map[input_ids[1]],
                         "false_case": node_map[input_ids[2]],

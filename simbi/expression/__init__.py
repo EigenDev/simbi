@@ -24,6 +24,15 @@ from .dag_expression import (
     asinh,
     acosh,
     atanh,
+    sgn,
+    logical_and,
+    logical_or,
+    logical_not,
+    logical_xor,
+    logical_nand,
+    logical_nor,
+    logical_xnor,
+    where,
 )
 
 __all__ = [
@@ -52,4 +61,13 @@ __all__ = [
     "acosh",
     "atanh",
     "abs",
+    "sgn",
+    "logical_and",
+    "logical_or",
+    "logical_not",
+    "logical_xor",
+    "logical_nand",
+    "logical_nor",
+    "logical_xnor",
+    "where",
 ]
