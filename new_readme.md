@@ -174,7 +174,10 @@ CC=<your_c_compiler> CXX=<your_cpp_compiler> python dev.py install [options]
 ```
 
 <div align="center">
+
 ### ⚙️ Manual Install
+
+</div>
 Setup with Meson**:
 
 ```bash
@@ -192,8 +195,6 @@ or
 ```bash
 meson install -C <build_dir>
 ```
-
-</div>
 
 <details>
 <summary><b>⚠️ GPU Compilation Notes</b></summary>
