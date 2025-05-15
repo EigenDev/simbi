@@ -137,11 +137,6 @@ namespace simbi::ibsystem::functions {
 
                 // apply updates to the system
                 for (size_t ii = 0; ii < updated_bodies.size(); ii++) {
-                    // std::cout << "Updating body " << ii << " with position "
-                    //           << updated_bodies[ii].position << "with mass "
-                    //           << updated_bodies[ii].mass << " with velocity:
-                    //           "
-                    //           << updated_bodies[ii].velocity << std::endl;
                     system = system_t::update_body_in(
                         std::move(system),
                         ii,
@@ -175,7 +170,7 @@ namespace simbi::ibsystem::functions {
             );
 
             for (const auto& [body_idx, body] : gravitational_bodies) {
-                // Apply gravitational forces
+                // apply gravitational forces
                 auto [fluid_change, body_delta] = apply_gravitational_force(
                     body_idx,
                     body,
@@ -227,7 +222,7 @@ namespace simbi::ibsystem::functions {
                 );
             }
         }
-        return std::move(fluid_state);
+        return fluid_state;
     }
 }   // namespace simbi::ibsystem::functions
 #endif

@@ -195,8 +195,9 @@ namespace simbi::ib::forces {
                     // reduce accretion when circularization radius approaches
                     // distance (material would form a disk rather than accrete
                     // directly)
+                    constexpr auto strength = 0.01;
                     j_factor =
-                        1.0 / (1.0 + (r_circ / (0.1 * effective_r_bondi)));
+                        1.0 / (1.0 + (r_circ / (strength * effective_r_bondi)));
                 }
             }
 

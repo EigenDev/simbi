@@ -355,18 +355,25 @@ namespace simbi::ibsystem::body_functions {
             using conserved_t = Primitive::counterpart_t;
             auto delta        = BodyDelta<T, Dims>{body_idx, {}, 0, 0, 0};
 
-            // Get position vector from sink to cell center
+            // get position vector from sink to cell center
             const auto r_vector =
                 mesh_cell.cartesian_centroid() - body.position;
             const auto distance = r_vector.norm();
 
-            // Calculate standard Bondi radius based on ambient sound speed
+            // calc standard Bondi radius based on ambient sound speed
             const auto cs_ambient    = context.ambient_sound_speed;
             const auto cs_ambient_sq = cs_ambient * cs_ambient;
             const auto canon_bondi   = 2.0 * body.mass / cs_ambient_sq;
-            const auto r_bondi = std::min(canon_bondi, body.accretion_radius());
+            const auto r_bondi       = [=]() {
+                if (cs_ambient > 0.0) {
+                    // sometimes, we are working with locally isothermal
+                    // flows, so global ambient sound speed is meaningless
+                    return std::min(canon_bondi, body.accretion_radius());
+                }
+                return body.accretion_radius();
+            }();
 
-            // Skip if too far away
+            // skip if too far away
             if (distance > 2.5 * r_bondi) {
                 return {conserved_t{}, delta};
             }
@@ -391,7 +398,7 @@ namespace simbi::ibsystem::body_functions {
                 }
             }();
 
-            // Calculate accretion factor based on profile
+            // calc accretion factor based on profile
             T accretion_factor = calculate_radial_accretion_profile(
                 distance,
                 r_bondi,
@@ -404,14 +411,14 @@ namespace simbi::ibsystem::body_functions {
                 context.is_isothermal
             );
 
-            // Apply accretion if factor is positive
+            // apply accretion if factor is positive
             if (accretion_factor > 0) {
-                // Calculate stability-limited accretion rate
+                // calc stability-limited accretion rate
                 const T cell_size           = mesh_cell.max_cell_width();
                 const T sound_crossing_time = cell_size / local_cs;
                 const T r_ratio             = distance / r_bondi;
 
-                // Apply appropriate accretion limit
+                // apply appropriate accretion limit
                 T max_fraction;
                 if (r_ratio < 0.5) {
                     max_fraction = 1.0;
@@ -424,8 +431,7 @@ namespace simbi::ibsystem::body_functions {
                         blend * 1.0 +
                         (1.0 - blend) * std::min(0.5, stability_limit);
                 }
-
-                // Apply minimum of theoretical and numerical stability limits
+                // apply minimum of theoretical and numerical stability limits
                 const T max_accretion =
                     std::min(accretion_factor, max_fraction);
 
@@ -437,14 +443,14 @@ namespace simbi::ibsystem::body_functions {
                 const T accreted_energy =
                     max_accretion * prim.energy(context.gamma);
 
-                // Create conserved state with removed material
+                // create conserved state with removed material
                 conserved_t result(
                     -accreted_density,
                     -accreted_momentum,
                     -accreted_energy
                 );
 
-                // Update body statistics
+                // update body statistics
                 const auto dV              = mesh_cell.volume();
                 delta.accreted_mass_delta  = dV * accreted_density;
                 delta.accretion_rate_delta = dV * accreted_density / dt;
