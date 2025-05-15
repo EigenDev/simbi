@@ -56,6 +56,7 @@ namespace simbi::expression {
         ACOSH,
         ATANH,
         SGN,
+        ATAN2,
         // bitwise operations
         BITWISE_AND,           // bitwise AND
         BITWISE_OR,            // bitwise OR
@@ -63,6 +64,14 @@ namespace simbi::expression {
         BITWISE_NOT,           // bitwise NOT
         BITWISE_LEFT_SHIFT,    // left shift
         BITWISE_RIGHT_SHIFT,   // right shift
+        // logical operations
+        LOGICAL_AND,    // logical AND
+        LOGICAL_OR,     // logical OR
+        LOGICAL_NOT,    // logical NOT
+        LOGICAL_XOR,    // logical XOR
+        LOGICAL_NAND,   // logical NAND
+        LOGICAL_NOR,    // logical NOR
+        LOGICAL_XNOR,   // logical XNOR
 
         // special operations
         IF_THEN_ELSE   // ternary conditional operation

@@ -262,6 +262,12 @@ namespace simbi::expression {
                     registers[result_reg] =
                         std::atan(registers[instr.register_operands.operand1]);
                     break;
+                case ExprOp::ATAN2:
+                    registers[result_reg] = std::atan2(
+                        registers[instr.register_operands.operand1],
+                        registers[instr.register_operands.operand2]
+                    );
+                    break;
                 case ExprOp::EXP:
                     registers[result_reg] =
                         std::exp(registers[instr.register_operands.operand1]);
@@ -363,6 +369,65 @@ namespace simbi::expression {
                         static_cast<int>(
                             registers[instr.register_operands.operand2]
                         );
+                    break;
+                case ExprOp::LOGICAL_AND:
+                    registers[result_reg] =
+                        static_cast<int>(
+                            registers[instr.register_operands.operand1]
+                        ) &&
+                        static_cast<int>(
+                            registers[instr.register_operands.operand2]
+                        );
+                    break;
+                case ExprOp::LOGICAL_OR:
+                    registers[result_reg] =
+                        static_cast<int>(
+                            registers[instr.register_operands.operand1]
+                        ) ||
+                        static_cast<int>(
+                            registers[instr.register_operands.operand2]
+                        );
+                    break;
+                case ExprOp::LOGICAL_NOT:
+                    registers[result_reg] = !static_cast<int>(
+                        registers[instr.register_operands.operand1]
+                    );
+                    break;
+                case ExprOp::LOGICAL_XOR:
+                    registers[result_reg] =
+                        static_cast<int>(
+                            registers[instr.register_operands.operand1]
+                        ) ^
+                        static_cast<int>(
+                            registers[instr.register_operands.operand2]
+                        );
+                    break;
+                case ExprOp::LOGICAL_NAND:
+                    registers[result_reg] =
+                        !(static_cast<int>(
+                              registers[instr.register_operands.operand1]
+                          ) &&
+                          static_cast<int>(
+                              registers[instr.register_operands.operand2]
+                          ));
+                    break;
+                case ExprOp::LOGICAL_NOR:
+                    registers[result_reg] =
+                        !(static_cast<int>(
+                              registers[instr.register_operands.operand1]
+                          ) ||
+                          static_cast<int>(
+                              registers[instr.register_operands.operand2]
+                          ));
+                    break;
+                case ExprOp::LOGICAL_XNOR:
+                    registers[result_reg] =
+                        !(static_cast<int>(
+                              registers[instr.register_operands.operand1]
+                          ) ^
+                          static_cast<int>(
+                              registers[instr.register_operands.operand2]
+                          ));
                     break;
 
                 case ExprOp::IF_THEN_ELSE:
@@ -1068,6 +1133,30 @@ namespace simbi::expression {
                 return std::atan(value);
             }
 
+            case ExprOp::ATAN2: {
+                real y = evaluate_expr(
+                    nodes,
+                    node.children.left,
+                    x1,
+                    x2,
+                    x3,
+                    t,
+                    dt,
+                    parameters
+                );
+                real x = evaluate_expr(
+                    nodes,
+                    node.children.right,
+                    x1,
+                    x2,
+                    x3,
+                    t,
+                    dt,
+                    parameters
+                );
+                return std::atan2(y, x);
+            }
+
             case ExprOp::SGN: {
                 real value = evaluate_expr(
                     nodes,
@@ -1253,6 +1342,173 @@ namespace simbi::expression {
                     parameters
                 );
                 return static_cast<int>(left) >> static_cast<int>(right);
+            }
+
+            // logical operations
+            case ExprOp::LOGICAL_AND: {
+                real left = evaluate_expr(
+                    nodes,
+                    node.children.left,
+                    x1,
+                    x2,
+                    x3,
+                    t,
+                    dt,
+                    parameters
+                );
+                // short-circuit evaluation
+                if (left == 0.0) {
+                    return 0.0;
+                }
+                real right = evaluate_expr(
+                    nodes,
+                    node.children.right,
+                    x1,
+                    x2,
+                    x3,
+                    t,
+                    dt,
+                    parameters
+                );
+                return (left != 0.0 && right != 0.0) ? 1.0 : 0.0;
+            }
+
+            case ExprOp::LOGICAL_OR: {
+                real left = evaluate_expr(
+                    nodes,
+                    node.children.left,
+                    x1,
+                    x2,
+                    x3,
+                    t,
+                    dt,
+                    parameters
+                );
+                // short-circuit evaluation
+                if (left != 0.0) {
+                    return 1.0;
+                }
+                real right = evaluate_expr(
+                    nodes,
+                    node.children.right,
+                    x1,
+                    x2,
+                    x3,
+                    t,
+                    dt,
+                    parameters
+                );
+                return (left != 0.0 || right != 0.0) ? 1.0 : 0.0;
+            }
+
+            case ExprOp::LOGICAL_NOT: {
+                real value = evaluate_expr(
+                    nodes,
+                    node.children.left,
+                    x1,
+                    x2,
+                    x3,
+                    t,
+                    dt,
+                    parameters
+                );
+                return value == 0.0 ? 1.0 : 0.0;
+            }
+
+            case ExprOp::LOGICAL_XOR: {
+                real left = evaluate_expr(
+                    nodes,
+                    node.children.left,
+                    x1,
+                    x2,
+                    x3,
+                    t,
+                    dt,
+                    parameters
+                );
+                real right = evaluate_expr(
+                    nodes,
+                    node.children.right,
+                    x1,
+                    x2,
+                    x3,
+                    t,
+                    dt,
+                    parameters
+                );
+                return (left != 0.0) ^ (right != 0.0) ? 1.0 : 0.0;
+            }
+
+            case ExprOp::LOGICAL_NAND: {
+                real left = evaluate_expr(
+                    nodes,
+                    node.children.left,
+                    x1,
+                    x2,
+                    x3,
+                    t,
+                    dt,
+                    parameters
+                );
+                real right = evaluate_expr(
+                    nodes,
+                    node.children.right,
+                    x1,
+                    x2,
+                    x3,
+                    t,
+                    dt,
+                    parameters
+                );
+                return !(left != 0.0 && right != 0.0) ? 1.0 : 0.0;
+            }
+
+            case ExprOp::LOGICAL_NOR: {
+                real left = evaluate_expr(
+                    nodes,
+                    node.children.left,
+                    x1,
+                    x2,
+                    x3,
+                    t,
+                    dt,
+                    parameters
+                );
+                real right = evaluate_expr(
+                    nodes,
+                    node.children.right,
+                    x1,
+                    x2,
+                    x3,
+                    t,
+                    dt,
+                    parameters
+                );
+                return !(left != 0.0 || right != 0.0) ? 1.0 : 0.0;
+            }
+
+            case ExprOp::LOGICAL_XNOR: {
+                real left = evaluate_expr(
+                    nodes,
+                    node.children.left,
+                    x1,
+                    x2,
+                    x3,
+                    t,
+                    dt,
+                    parameters
+                );
+                real right = evaluate_expr(
+                    nodes,
+                    node.children.right,
+                    x1,
+                    x2,
+                    x3,
+                    t,
+                    dt,
+                    parameters
+                );
+                return !(left != 0.0) == !(right != 0.0) ? 1.0 : 0.0;
             }
 
             default: {
@@ -1443,6 +1699,7 @@ namespace simbi::expression {
                                 case ExprOp::POWER:
                                 case ExprOp::MIN:
                                 case ExprOp::MAX:
+                                case ExprOp::ATAN2:
                                 case ExprOp::LT:
                                 case ExprOp::LE:
                                 case ExprOp::GT:
@@ -1455,6 +1712,12 @@ namespace simbi::expression {
                                 case ExprOp::BITWISE_XOR:
                                 case ExprOp::BITWISE_LEFT_SHIFT:
                                 case ExprOp::BITWISE_RIGHT_SHIFT:
+                                case ExprOp::LOGICAL_AND:
+                                case ExprOp::LOGICAL_OR:
+                                case ExprOp::LOGICAL_XOR:
+                                case ExprOp::LOGICAL_NAND:
+                                case ExprOp::LOGICAL_NOR:
+                                case ExprOp::LOGICAL_XNOR:
                                     entry.children_needed = 2;
                                     break;
 
@@ -1724,6 +1987,12 @@ namespace simbi::expression {
                                 break;
                             case ExprOp::ATAN:
                                 result = std::atan(entry.child_values[0]);
+                                break;
+                            case ExprOp::ATAN2:
+                                result = std::atan2(
+                                    entry.child_values[0],
+                                    entry.child_values[1]
+                                );
                                 break;
                             case ExprOp::ASINH:
                                 result = std::asinh(entry.child_values[0]);

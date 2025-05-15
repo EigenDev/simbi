@@ -1,6 +1,7 @@
 #include "exp_load.hpp"
 #include "core/types/containers/ndarray.hpp"
 #include "core/types/utility/config_dict.hpp"
+#include "util/math/expression.hpp"
 #include <iostream>
 #include <unordered_map>
 
@@ -45,6 +46,7 @@ namespace simbi::expression {
           {"SQRT", ExprOp::SQRT},
           {"MIN", ExprOp::MIN},
           {"MAX", ExprOp::MAX},
+          {"ATAN2", ExprOp::ATAN2},
           {"IF_THEN_ELSE", ExprOp::IF_THEN_ELSE}
         };
 
