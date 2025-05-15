@@ -335,7 +335,7 @@ This creates a skeleton configuration in the `simbi_configs` directory that you 
 If you use SIMBI in your research, please cite:
 </div>
 
-<div align="center">
+<div align="left">
 <table>
 <tr>
 <td>
