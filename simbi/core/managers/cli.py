@@ -25,7 +25,6 @@ class CLIManager:
         """Register a dynamic argument"""
         if arg.name in [a.name for a in self.dynamic_args]:
             return
-
         self.dynamic_args.append(arg)
         # the problem args group should only be called once
         if not self.arg_group_set:
@@ -40,13 +39,18 @@ class CLIManager:
                 f"--{arg.name}", help=arg.help, action=arg.action, default=arg.value
             )
         else:
-            problem_args.add_argument(
-                f"--{arg.name}",
-                help=arg.help,
-                type=arg.var_type,
-                choices=arg.choices,
-                default=arg.value,
-            )
+            try:
+                problem_args.add_argument(
+                    f"--{arg.name}",
+                    help=arg.help,
+                    type=arg.var_type,
+                    choices=arg.choices,
+                    default=arg.value,
+                )
+            except argparse.ArgumentError:
+                # this will happen if the argument
+                # is already registered
+                pass
 
     def parse_args(self) -> dict[str, Any]:
         """Parse arguments and return values"""
