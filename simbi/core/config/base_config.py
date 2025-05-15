@@ -1,6 +1,5 @@
 import argparse
 import abc
-import halo
 import math
 import numpy as np
 from ..types.typing import InitialStateType, ExpressionDict
@@ -12,7 +11,7 @@ from ..simulation.state_init import SimulationBundle, initialize_simulation
 from numpy.typing import NDArray
 from pathlib import Path
 from ...functional import Maybe
-from .bodies import BodySystemConfig, GravitationalSystemConfig, ImmersedBodyConfig
+from .bodies import BodySystemConfig, ImmersedBodyConfig
 from typing import (
     Callable,
     Optional,
@@ -78,6 +77,7 @@ class BaseConfig(metaclass=abc.ABCMeta):
     base_properties: dict[str, Any] = {}
     validator: ConfigValidator = ConfigValidator()
     body_validator: BodyConfigValidator = BodyConfigValidator()
+    registered_arg_names: ClassVar[set[str]] = set()
 
     def __init_subclass__(cls: Type["BaseConfig"], *args: Any, **kwargs: Any) -> None:
         super().__init_subclass__(*args, **kwargs)
@@ -91,6 +91,12 @@ class BaseConfig(metaclass=abc.ABCMeta):
                     f"Available properties: {list(BaseConfig.base_properties.keys())}"
                 )
 
+        if not hasattr(cls, "registered_arg_names"):
+            parent_registered: set[str] = getattr(
+                cls.__base__, "registered_arg_names", set()
+            )
+            cls.registered_arg_names = set(parent_registered)
+
         # get config class if it exists
         config_cls = getattr(cls, "config", None)
         if config_cls is None:
@@ -98,15 +104,22 @@ class BaseConfig(metaclass=abc.ABCMeta):
             cls.config = DynamicArgNamespace()
             return
 
-        # collect and register dynamic args from config class
-        dynamic_args = {
-            name: member
-            for name, member in vars(config_cls).items()
-            if isinstance(member, DynamicArg)
-        }
+        for name, member in vars(config_cls).items():
+            if (
+                isinstance(member, DynamicArg)
+                and member.name not in cls.registered_arg_names
+            ):
+                cls.dynamic_args.append(member)
+                cls.registered_arg_names.add(member.name)
+        # # collect and register dynamic args from config class
+        # dynamic_args = {
+        #     name: member
+        #     for name, member in vars(config_cls).items()
+        #     if isinstance(member, DynamicArg)
+        # }
 
-        for _, arg in dynamic_args.items():
-            cls.dynamic_args.append(arg)
+        # for _, arg in dynamic_args.items():
+        #     cls.dynamic_args.append(arg)
 
     def __init__(self) -> None:
         # Create config namespace that preserves DynamicArg instances but returns raw values
@@ -175,7 +188,7 @@ class BaseConfig(metaclass=abc.ABCMeta):
         return "linear"
 
     @simbi_property(group="sim_state")
-    def passive_scalar(
+    def passive_scalars(
         self,
     ) -> Optional[Union[Sequence[float], NDArray[np.floating[Any]]]]:
         return None
@@ -388,13 +401,29 @@ class BaseConfig(metaclass=abc.ABCMeta):
     @simbi_property(group="sim_state")
     def ambient_sound_speed(self) -> float:
         """if the simulation is determined to be isothermal, the user should define the ambient sound speed or we error out"""
-        if self.isothermal:
+        if self.isothermal and not self.locally_isothermal:
             raise NotImplementedError(
-                "For isothermal simulations (gamma=1), the ambient sound speed *must* be defined. "
-                "Override the sound_speed to get rid of this error"
+                "For isothermal simulations (gamma=1), the ambient sound speed *must* be defined"
+                " unless locally_isothermal is set to True. "
+                "Override the ambeint_sound_speed or locally_isothermal simbi properties to get rid of this error"
             )
 
         return 0.0
+
+    @simbi_property(group="sim_state")
+    def locally_isothermal(self) -> bool:
+        """checks whether the simulation is locally isothermal"""
+        return False
+
+    @simbi_property(group="io")
+    def local_sound_speed_expressions(self) -> ExpressionDict:
+        """Expressions for the sound speed"""
+        # if self.locally_isothermal:
+        #     raise NotImplementedError(
+        #         "For locally isothermal simulations, the local sound speed must be defined. "
+        #         "Override the sound_speed_expressions to get rid of this error"
+        #     )
+        return {}
 
     @simbi_property(group="misc")
     def buffer_parameters(self) -> dict[str, float]:
@@ -539,7 +568,7 @@ class BaseConfig(metaclass=abc.ABCMeta):
         try:
             attr = super().__getattribute__(name)
             if isinstance(attr, property) and name in PropertyBase.registry:
-                # this is a simbi_property, validate its computation
+                # This is a simbi_property, validate its computation
                 try:
                     return attr.__get__(self)
                 except Exception as e:
@@ -564,7 +593,7 @@ class BaseConfig(metaclass=abc.ABCMeta):
         # collect instance properties
         for name, (_, group) in PropertyBase.registry.items():
             if hasattr(self, name):
-                # ignore miscalleaneus groups
+                # ignore miscalaneaus groups
                 if group.value not in settings.keys():
                     continue
 
