@@ -205,6 +205,7 @@ namespace simbi {
                 {xblockdim, yblockdim, zblockdim},
                 config
             );
+
             interior_policy_ = full_policy_.contract(grid.halo_radius());
             xvertex_policy_  = fullxvertex_policy_.contract({0, 1, 1});
             yvertex_policy_  = fullyvertex_policy_.contract({1, 0, 1});
