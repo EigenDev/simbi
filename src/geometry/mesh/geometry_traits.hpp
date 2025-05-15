@@ -409,7 +409,21 @@ namespace simbi {
         template <GridDirection Dir>
         static constexpr auto get_differential(const auto& cell)
         {
-            return (cell.normal(1) - cell.normal(0));
+            if constexpr (Dir == GridDirection::X1) {
+                return cell.normal(1) - cell.normal(0);
+            }
+            else if constexpr (Dir == GridDirection::X2) {
+                if constexpr (Dims < 2) {
+                    return 1.0;
+                }
+                return cell.normal(3) - cell.normal(2);
+            }
+            else {
+                if constexpr (Dims < 3) {
+                    return 1.0;
+                }
+                return cell.normal(5) - cell.normal(4);
+            }
         }
 
         static constexpr void calculate_areas(auto& faces, const auto& cell)
