@@ -206,6 +206,7 @@ class IOSettings(BaseSettings):
     bx2_inner_expressions: Optional[ExpressionDict] = None
     bx3_outer_expressions: Optional[ExpressionDict] = None
     bx3_inner_expressions: Optional[ExpressionDict] = None
+    local_sound_speed_expressions: Optional[ExpressionDict] = None
 
     @staticmethod
     def try_get_path(path: str) -> Optional[Path]:
@@ -227,6 +228,7 @@ class IOSettings(BaseSettings):
             bx2_inner_expressions=setup.get("bx2_inner_expressions"),
             bx3_outer_expressions=setup.get("bx3_outer_expressions"),
             bx3_inner_expressions=setup.get("bx3_inner_expressions"),
+            local_sound_speed_expressions=setup.get("local_sound_speed_expressions"),
         )
 
     def to_execution_dict(self) -> dict[str, Any]:
@@ -247,6 +249,7 @@ class IOSettings(BaseSettings):
             "bx2_inner_expressions": self.bx2_inner_expressions,
             "bx3_outer_expressions": self.bx3_outer_expressions,
             "bx3_inner_expressions": self.bx3_inner_expressions,
+            "local_sound_speed_expressions": self.local_sound_speed_expressions,
         }
 
 
@@ -267,6 +270,7 @@ class SimulationSettings(BaseSettings):
     bodies: list[ImmersedBodyConfig] = field(default_factory=list)
     sound_speed: float = 0.0
     isothermal: bool = False
+    locally_isothermal: bool = False
     body_system: Optional[BodySystemConfig] = None
 
     @classmethod
@@ -288,6 +292,7 @@ class SimulationSettings(BaseSettings):
             sound_speed=setup["ambient_sound_speed"],
             isothermal=setup["isothermal"],
             body_system=setup["body_system"],
+            locally_isothermal=setup["locally_isothermal"],
         )
 
     def to_execution_dict(self) -> dict[str, Any]:
@@ -308,5 +313,6 @@ class SimulationSettings(BaseSettings):
             "bodies": [asdict(x) for x in self.bodies],
             "sound_speed": self.sound_speed,
             "isothermal": self.isothermal,
+            "locally_isothermal": self.locally_isothermal,
             "body_system": asdict(self.body_system) if self.body_system else None,
         }
