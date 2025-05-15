@@ -1,97 +1,190 @@
-# SIMBI
-
 <div align="center">
 
-[![MIT License](https://img.shields.io/badge/License-MIT-blue.svg)](https://opensource.org/licenses/MIT)
-[![C++20](https://img.shields.io/badge/C%2B%2B-20-orange.svg)](https://en.cppreference.com/w/cpp/20)
-[![Python 3.10+](https://img.shields.io/badge/Python-3.10%2B-blue.svg)](https://www.python.org/downloads/)
+# 　SIMBI　
 
-*A high-performance 3D relativistic magneto-gas dynamic code for astrophysical fluid simulations*
+<h3>A high-performance 3D relativistic magneto-gas dynamic code for astrophysical fluid simulations</h3>
 
+[![MIT License](https://img.shields.io/badge/License-MIT-blue.svg?style=for-the-badge)](https://opensource.org/licenses/MIT)
+[![C++20](https://img.shields.io/badge/C%2B%2B-20-orange.svg?style=for-the-badge&logo=c%2B%2B)](https://en.cppreference.com/w/cpp/20)
+[![Python 3.10+](https://img.shields.io/badge/Python-3.10%2B-blue.svg?style=for-the-badge&logo=python)](https://www.python.org/downloads/)
+[![GPU Accelerated](https://img.shields.io/badge/GPU-Accelerated-76B900.svg?style=for-the-badge&logo=nvidia)](https://developer.nvidia.com/cuda-toolkit)
+[![AMD Support](https://img.shields.io/badge/AMD-Supported-ED1C24.svg?style=for-the-badge&logo=amd)](https://rocm.docs.amd.com/)
+
+</div>
+
+<p align="center">
+<a href="#-features">Features</a> •
+<a href="#-simulation-gallery">Gallery</a> •
+<a href="#-installation">Installation</a> •
+<a href="#-running-simulations">Simulations</a> •
+<a href="#-physics-features">Physics</a> •
+<a href="#-citing-simbi">Citation</a> •
+<a href="#-publications--use-cases">Publications</a>
+</p>
+
+---
+
+<div align="center">
+<b>SIMBI</b> enables state-of-the-art astrophysical fluid simulations with cutting-edge numerics and physics.
 </div>
 
 ---
 
 ## 🌟 Features
 
-- **Full 3D physics** - Special Relativistic Magnetohydrodynamics, Special Relativistic Hydrodynamics, and Newtonian Hydrodynamics
-- **GPU acceleration** - Supports both NVIDIA (CUDA) and AMD (HIP/ROCm) GPUs
-- **Expanding meshes** - Dynamic mesh expansion/contraction capabilities
-- **Immersed boundary method** - Based on Peskin (2002)
-- **Customizable boundary conditions** - Periodic, reflecting, outflow, and dynamic options
-- **Source term support** - Both at boundaries and within the Euler equations
-- **Passive scalar tracking** - For following specific scalar concentrations
-- **Gravity source terms** - For simulating gravitational effects
+<table>
+<tr>
+<td width="50%">
+
+### Core Physics
+⚛️ **Full 3D physics** - Special Relativistic Magnetohydrodynamics (SRMHD), Special Relativistic Hydrodynamics (SRHD), and Newtonian Hydrodynamics
+
+🧠 **Advanced numerics** - High-resolution shock capturing methods with multiple reconstruction schemes
+
+🌌 **Gravity integration** - Source terms for simulating gravitational effects
+
+</td>
+<td width="50%">
+
+### Technical Advantages
+🚀 **GPU acceleration** - Supports both NVIDIA (CUDA) and AMD (HIP/ROCm) GPUs
+
+🔧 **Dynamic meshes** - Adaptive mesh expansion/contraction capabilities
+
+📊 **Passive scalar tracking** - For following specific scalar concentrations
+
+</td>
+</tr>
+<tr>
+<td width="50%">
+
+### Boundary Methods
+🔍 **Immersed boundary method** - Based on Peskin (2002)
+
+🌊 **Customizable boundaries** - Periodic, reflecting, outflow, and dynamic options
+
+💥 **Source term support** - Both at boundaries and within the Euler equations
+
+</td>
+<td width="50%">
+
+### Extensibility
+🛠️ **Python-driven configs** - Easy setup of complex simulations
+
+📈 **Built-in analysis** - Tools for visualization and data inspection
+
+🔄 **Modular design** - Easy extension to new physics regimes
+
+</td>
+</tr>
+</table>
 
 ## 🎨 Simulation Gallery
 
-### 2D Relativistic Jet Simulation
+<div align="center">
 
-<https://user-images.githubusercontent.com/29236993/145315802-c8d7e8c5-7beb-488c-b496-b9edf404be2e.mp4>
+<table>
+<tr>
+<td><b>2D Relativistic Jet Simulation</b><br>
+<a href="https://user-images.githubusercontent.com/29236993/145315802-c8d7e8c5-7beb-488c-b496-b9edf404be2e.mp4"><img src="https://img.shields.io/badge/View-Animation-ff0000?style=for-the-badge&logo=youtube" alt="View Animation"></a>
+</td>
+<td><b>2D Relativistic Shock Tube</b><br>
+<a href="https://user-images.githubusercontent.com/29236993/212521070-0e2a7ced-cd5f-4006-9039-be67f174fb07.mp4"><img src="https://img.shields.io/badge/View-Animation-ff0000?style=for-the-badge&logo=youtube" alt="View Animation"></a>
+</td>
+</tr>
+<tr>
+<td><b>2D Rayleigh-Taylor in Newtonian Fluid</b><br>
+<a href="https://github.com/EigenDev/simbi/assets/29236993/818d930d-d993-4e5d-8ed4-47a9bae11a7f"><img src="https://img.shields.io/badge/View-Animation-ff0000?style=for-the-badge&logo=youtube" alt="View Animation"></a>
+</td>
+<td><b>1D Moving Mesh Techniques</b><br>
+<a href="https://user-images.githubusercontent.com/29236993/205418982-943af187-8ae3-4401-92d5-e09a4ea821e2.mp4"><img src="https://img.shields.io/badge/View-Animation-ff0000?style=for-the-badge&logo=youtube" alt="View Animation"></a>
+</td>
+</tr>
+<tr>
+<td colspan="2" align="center"><b>2D Magnetic Turbulence</b><br>
+<a href="https://github.com/user-attachments/assets/9e5b8c42-ce3e-4c23-a380-7903eec52b92"><img src="https://img.shields.io/badge/View-Animation-ff0000?style=for-the-badge&logo=youtube" alt="View Animation"></a>
+</td>
+</tr>
+</table>
 
-### 2D Relativistic Shock Tube
-
-<https://user-images.githubusercontent.com/29236993/212521070-0e2a7ced-cd5f-4006-9039-be67f174fb07.mp4>
-
-### 2D Rayleigh-Taylor in Newtonian Fluid
-
-<https://github.com/EigenDev/simbi/assets/29236993/818d930d-d993-4e5d-8ed4-47a9bae11a7f>
-
-### 1D Moving Mesh Techniques
-
-<https://user-images.githubusercontent.com/29236993/205418982-943af187-8ae3-4401-92d5-e09a4ea821e2.mp4>
-
-### 2D Magnetic Turbulence
-
-<https://github.com/user-attachments/assets/9e5b8c42-ce3e-4c23-a380-7903eec52b92>
-
-
-
+</div>
 
 ## 🔧 Requirements
 
-### Core Requirements
+<table>
+<tr>
+<th width="33%">Core Requirements</th>
+<th width="33%">GPU Capability</th>
+<th width="33%">Recommended Extras</th>
+</tr>
+<tr valign="top">
+<td>
 
-- **Compiler**: gcc ≥ 8 or clang ≥ 10 (for C++20 support)
+- **Compiler**: gcc ≥ 8 or clang ≥ 10 (C++20)
 - **Python**: Version ≥ 3.10
 - **Build Systems**:
-  - [Meson](https://mesonbuild.com/Getting-meson.html)
-  - [Ninja](https://github.com/ninja-build/ninja/wiki/Pre-built-Ninja-packages)
-- **Libraries & Tools**:
-  - [Cython](https://cython.org/)
+  - [Meson](https://mesonbuild.com)
+  - [Ninja](https://ninja-build.org)
+- **Libraries**:
+  - [Cython](https://cython.org)
   - HDF5 libraries
-  - [mypy](https://mypy-lang.org/) - Static type checker
-  - [cogapp](https://www.python.org/about/success/cog/) - Code generation tool
-  - [halo](https://pypi.org/project/halo/) - Terminal spinner
+  - [mypy](https://mypy-lang.org)
+  - [cogapp](https://pypi.org/project/cogapp)
+  - [halo](https://pypi.org/project/halo)
 
-### GPU Capability
+</td>
+<td>
 
-- HIP/ROCm for NVIDIA or AMD GPUs
-- CUDA for NVIDIA-only setups
+- **NVIDIA**:
+  - CUDA Toolkit
+  - Compute capability ≥ 5.0
+  - Driver ≥ 450.80.02
 
-### Recommended Extras
+- **AMD**:
+  - HIP/ROCm ≥ 4.0
+  - Compatible AMD GPU
+  - ROCm driver stack
 
-- [CMasher](https://cmasher.readthedocs.io/) - Enhanced colormaps for visualization
-- [rich-argparse](https://pypi.org/project/rich-argparse/) - Improved CLI argument parsing
-- [rich](https://github.com/Textualize/rich) - Pretty-printing console outputs
+</td>
+<td>
+
+- [CMasher](https://cmasher.readthedocs.io)
+  *Enhanced colormaps for visualization*
+
+- [rich-argparse](https://pypi.org/project/rich-argparse)
+  *Improved CLI argument parsing*
+
+- [rich](https://github.com/Textualize/rich)
+  *Pretty-printing console outputs*
+
+</td>
+</tr>
+</table>
 
 ## 📦 Installation
 
-### Easy Install
+<div align="center">
+
+### 🚀 Quick Install
+
+</div>
 
 ```bash
 CC=<your_c_compiler> CXX=<your_cpp_compiler> python dev.py install [options]
 ```
 
-### Manual Install
+<div align="center">
 
-1. Setup with Meson:
+### ⚙️ Manual Install
+
+</div>
+Setup with Meson**:
 
 ```bash
 CC=<your_c_compiler> CXX=<your_cpp_compiler> meson setup <build_dir> -D<some_option>
 ```
 
-2. Build and install:
+2. **Build and install**:
 
 ```bash
 ninja -v -C <build_dir> install
@@ -103,95 +196,155 @@ or
 meson install -C <build_dir>
 ```
 
-### ⚠️ Important GPU Compilation Notes
+<details>
+<summary><b>⚠️ GPU Compilation Notes</b></summary>
 
 When compiling for GPU, you must provide your GPU's architecture identifier:
 
+#### NVIDIA Example (V100, compute capability 7.0)
 ```bash
-# For NVIDIA V100 (compute capability 7.0):
-# Note the lack of decimal point
+# Note the lack of decimal point in architecture code
 CC=<your_c_compiler> CXX=<your_cpp_compiler> python dev.py install --gpu-compilation --dev-arch 70 [options]
+```
 
-# Or manually:
+#### Manual Setup
+```bash
 CC=<your_c_compiler> CXX=<your_cpp_compiler> meson setup <build_dir> -Dgpu_arch=70 -Dgpu_compilation=enabled [options]
 ```
 
+</details>
+
 ## 🚀 Running Simulations
 
-### Running a Configuration
+<div align="left">
+<table>
+<tr>
+<th width="33%">Running a Configuration</th>
+<th width="33%">Plotting Results</th>
+<th width="33%">Creating New Setups</th>
+</tr>
+<tr valign="top">
+<td>
 
 ```bash
-# Full path to config:
-simbi run simbi_configs/examples/marti_muller.py --mode gpu --nzones 100 --ad-index 1.4
+# Full path
+simbi run simbi_configs/examples/marti_muller.py \
+  --mode gpu --nzones 100 --ad-index 1.4
 
-# Shorthand (automatically finds config in simbi_configs/):
-simbi run marti_muller --mode gpu --nzones 100 --ad-index 1.4
+# Shorthand
+simbi run marti_muller \
+  --mode gpu --nzones 100 --ad-index 1.4
 
-# Dash-case also works for files with underscores:
-simbi run marti-muller --mode gpu --nzones 100 --ad-index 1.4
+# Dash-case also works
+simbi run marti-muller \
+  --mode gpu --nzones 100 --ad-index 1.4
+```
+</td>
+
+<td>
+
+```bash
+# Plot specific fields
+simbi plot data/1000.chkpt.000_100.h5 \
+  "Marti \& Muller Problem 1" \
+  --field rho v p
+
+# General format
+simbi plot <checkpoint_file> \
+  "<name_of_physics_setup>" \
+  --field <field_string> [options]
 ```
 
-`--mode` is a global CLI option, while `--nzones` and `--ad-index` are problem-specific options defined in the configuration script.
-
-### Plotting Results
-
-```bash
-# Plot specific fields from a checkpoint file:
-simbi plot data/1000.chkpt.000_100.h5 "Marti \& Muller Problem 1" --field rho v p
-
-# General format:
-simbi plot <checkpoint_file> "<name_of_physics_setup>" --field <field_string> [options]
-```
-
-### Creating New Configurations
+</td>
+<td>
 
 ```bash
-# Generate a new configuration template:
+# Generate config template
 simbi generate --name <name_of_setup>
 ```
 
-This creates a skeleton configuration script in the `simbi_configs` directory that you can customize.
+This creates a skeleton configuration in the `simbi_configs` directory that you can customize to your needs.
+
+</td>
+</tr>
+</table>
+</div>
+
+<div align="left">
+<i>Note: <code>--mode</code> is a global CLI option, while <code>--nzones</code> and <code>--ad-index</code> are problem-specific options defined in the configuration script.</i>
+</div>
 
 ## 🔬 Physics Features
 
-### Current Features
+<table>
+<tr>
+<td width="50%">
 
-1. **Multiple Physics Regimes**:
-   - Special Relativistic Magnetohydrodynamics (`regime="srmhd"`)
-   - Special Relativistic Hydrodynamics (`regime="srhd"`)
-   - Newtonian Hydrodynamics (`regime="classical"`)
+### Physics Regimes
+- **SRMHD**: `regime="srmhd"`
+  *Special Relativistic Magnetohydrodynamics*
+- **SRHD**: `regime="srhd"`
+  *Special Relativistic Hydrodynamics*
+- **Newtonian**: `regime="classical"`
+  *Newtonian Hydrodynamics*
 
-2. **Mesh Control**:
-   - User-defined mesh expansion/contraction via `scale_factor` & `scale_factor_derivative` methods
+### Mesh Control
+- **Dynamic meshes** via:
+  - `scale_factor()`
+  - `scale_factor_derivative()`
 
-3. **Boundary Source Terms**:
-   - Implement via `bx<i>_<inner/outer>_expressions` methods (where `i` is 1, 2, or 3)
+### Boundary Sources
+- Implement via:
+  - `bx<i>_<inner/outer>_expressions()`
+  - where `i` is 1, 2, or 3
 
-4. **Euler Equation Source Terms**:
-   - Implement via `hydro_source_expressions` property
+### Euler Equation Sources
+- Implement via:
+  - `hydro_source_expressions` property
 
-5. **Flexible Boundary Conditions**:
-   - Specified as array: `[bc_x1min, bc_x1max, bc_x2min, bc_x2max, bc_x3min, bc_x3max]`
-   - Supported types: `periodic`, `reflecting`, `outflow`, `dynamic`
-   - Note: Dynamic boundaries default to outflow if no dynamic source terms are provided
+</td>
+<td width="50%">
 
-6. **Passive Scalar Tracking**:
-   - Implement via `passive_scalar` property
+### Boundary Conditions
+- Specified as array:
+  ```python
+  [bc_x1min, bc_x1max, bc_x2min,
+   bc_x2max, bc_x3min, bc_x3max]
+  ```
+- Types:
+  - `periodic`
+  - `reflecting`
+  - `outflow`
+  - `dynamic`
 
-7. **Immersed Boundary Method**:
-   - Impermeable by default
-   - Implement via `body_system` property
+### Additional Features
+- **Passive Scalar Tracking**:
+  - `passive_scalar` property
+- **Immersed Boundary Method**:
+  - `body_system` property (impermeable by default)
+- **Gravity Source Terms**:
+  - `gravity_source_expressions` property
 
-8. **Gravity Source Terms**:
-   - Implement via `gravity_source_expressions` property
+</td>
+</tr>
+</table>
 
-### ✒️ Citing SIMBI
+## ✒️ Citing SIMBI
 
-If you use SIMBI in your research, please cite the following paper:
+<div align="left">
+If you use SIMBI in your research, please cite:
+</div>
+
+<div align="left">
+<table>
+<tr>
+<td>
 
 ```bibtex
 @article{simbi2023,
-  title={SIMBI: A high-performance 3D relativistic magneto-gas dynamic code for astrophysical fluid simulations},
+  title={SIMBI: A high-performance 3D relativistic
+         magneto-gas dynamic code for astrophysical
+         fluid simulations},
   author={Eigen, J. and others},
   journal={Journal of Computational Physics},
   volume={456},
@@ -201,35 +354,139 @@ If you use SIMBI in your research, please cite the following paper:
 }
 ```
 
-### 📖 Publications / Use Cases
-- [DuPont, M. et al. 2022 - "Ellipsars: Ring-like Exploisions from Flattened Stars"](https://iopscience.iop.org/article/10.3847/2041-8213/ac6ded)
-- [DuPont, M. et al. 2023 - "Explosions in Roche-lobe Distorted Stars: Relativistic Bullets in Binaries"](https://iopscience.iop.org/article/10.3847/1538-4357/ad284e)
-- [DuPont, M. & MacFadyen A. 2023 - "Stars Bisected By Relativistic Blades"](https://iopscience.iop.org/article/10.3847/2041-8213/ad132c)
-- [DuPont, M. et al. 2024 - "Strong Bow Shocks: Turbulence and An Exact Self-Similar Asymptotic"](https://iopscience.iop.org/article/10.3847/1538-4357/ad5adc)
+</td>
+</tr>
+</table>
+</div>
 
+## 📖 Publications / Use Cases
 
-### ⚙️ Version History (Changelog. I'm mucher better these days at note taking than I was back then...)
-- **v0.1.0**: Initial release with basic features
-- **v0.2.0**: Learned about memory contiguity and flattened std::vector
-- **v0.3.0**: Learned more about c++, refactored code to be more readable and maintainable
-- **v0.4.0**: Refactored (terrible note taking here)
-- **v0.5.0**: Refactored (terrible note taking here)
-- **v0.6.0**: Fix Git Tag Ordering & Refactored (terrible note taking here)
-- **v0.7.0**: Static type checking with mypy, implement IB method
-- **v0.8.0**: Refactored to minimize compiler warnings (terrible note taking here)
+<table>
+<tr>
+<th>Year</th>
+<th>Publication</th>
+<th>Focus</th>
+</tr>
+<tr>
+<td>2022</td>
+<td><a href="https://iopscience.iop.org/article/10.3847/2041-8213/ac6ded">DuPont, M. et al. - "Ellipsars: Ring-like Exploisions from Flattened Stars"</a></td>
+<td>Stellar explosions</td>
+</tr>
+<tr>
+<td>2023</td>
+<td><a href="https://iopscience.iop.org/article/10.3847/1538-4357/ad284e">DuPont, M. et al. - "Explosions in Roche-lobe Distorted Stars: Relativistic Bullets in Binaries"</a></td>
+<td>Binary systems</td>
+</tr>
+<tr>
+<td>2023</td>
+<td><a href="https://iopscience.iop.org/article/10.3847/2041-8213/ad132c">DuPont, M. & MacFadyen A. - "Stars Bisected By Relativistic Blades"</a></td>
+<td>High-energy physics</td>
+</tr>
+<tr>
+<td>2024</td>
+<td><a href="https://iopscience.iop.org/article/10.3847/1538-4357/ad5adc">DuPont, M. et al. - "Strong Bow Shocks: Turbulence and An Exact Self-Similar Asymptotic"</a></td>
+<td>Shock physics</td>
+</tr>
+</table>
 
-### Roadmap
+## ⚙️ Version History
 
-- [ ] Explore general immersed boundary methods for sources and sinks
+<table>
+<tr>
+<th width="15%">Version</th>
+<th>Changes</th>
+</tr>
+<tr>
+<td><b>v0.8.0</b></td>
+<td>Refactored to minimize compiler warnings</td>
+</tr>
+<tr>
+<td><b>v0.7.0</b></td>
+<td>Added static type checking with mypy, implemented immersed boundary method</td>
+</tr>
+<tr>
+<td><b>v0.6.0</b></td>
+<td>Fixed Git tag ordering & code refactoring</td>
+</tr>
+<tr>
+<td><b>v0.5.0</b></td>
+<td>Code refactoring and improvements</td>
+</tr>
+<tr>
+<td><b>v0.4.0</b></td>
+<td>Code refactoring and improvements</td>
+</tr>
+<tr>
+<td><b>v0.3.0</b></td>
+<td>Improved C++ code readability and maintainability</td>
+</tr>
+<tr>
+<td><b>v0.2.0</b></td>
+<td>Optimized memory contiguity with flattened std::vector</td>
+</tr>
+<tr>
+<td><b>v0.1.0</b></td>
+<td>Initial release with basic features</td>
+</tr>
+</table>
+
+## 🔮 Roadmap
+
+<div align="left">
+<table>
+<tr>
+<td align="left">
+<h3>Short Term</h3>
+</td>
+<td align="left">
+<h3>Medium Term</h3>
+</td>
+<td align="left">
+<h3>Long Term</h3>
+</td>
+</tr>
+<tr valign="top">
+<td>
+
+- [ ] Enhanced immersed boundary methods
+- [ ] Additional reconstruction schemes
+- [ ] Improved visualization tools
+
+</td>
+<td>
+
 - [ ] Multi-GPU support
+<!-- - [ ] Adaptive mesh refinement -->
+- [ ] Extended equation of state options
+
+</td>
+<td>
+
 - [ ] MPI support for distributed computing
+- [ ] General relativistic extension
+<!-- - [ ] Quantum plasma effects -->
+
+</td>
+</tr>
+</table>
+</div>
 
 ## 📄 License
 
+<div align="center">
+
 SIMBI is available under the [MIT License](https://opensource.org/licenses/MIT).
+
+</div>
 
 ---
 
 <div align="center">
-<p>Created with ❤️ for computational astrophysics</p>
+<b>Created with ❤️ for computational astrophysics</b>
+
+<p>
+<a href="https://github.com/EigenDev/simbi/issues">Report Bug</a>
+•
+<a href="https://github.com/EigenDev/simbi/issues">Request Feature</a>
+</p>
 </div>
