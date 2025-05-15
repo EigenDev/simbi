@@ -63,7 +63,8 @@ struct InitialConditions {
     real time, checkpoint_interval, dlogt;
     real plm_theta, gamma, cfl, tend, sound_speed_squared;
     luint nx, ny, nz, checkpoint_index;
-    bool quirk_smoothing, homologous, mesh_motion, isothermal;
+    bool quirk_smoothing, homologous, mesh_motion;
+    bool isothermal, locally_isothermal;
     std::vector<std::vector<real>> bfield;
     std::string data_directory, coord_system, solver;
     std::string x1_spacing, x2_spacing, x3_spacing, regime;
@@ -83,6 +84,7 @@ struct InitialConditions {
     simbi::ConfigDict bx3_outer_expressions, bx3_inner_expressions;
     simbi::ConfigDict hydro_source_expressions;
     simbi::ConfigDict gravity_source_expressions;
+    simbi::ConfigDict local_sound_speed_expressions;
 
     std::tuple<size_type, size_type, size_type> active_zones() const
     {
@@ -349,6 +351,8 @@ struct InitialConditions {
             // Equation of state
             init.gamma      = init.get<real>("adiabatic_index", 5.0 / 3.0);
             init.isothermal = init.get<bool>("isothermal", false);
+            init.locally_isothermal =
+                init.get<bool>("locally_isothermal", false);
 
             real sound_speed = init.get<real>("sound_speed", 1.0);
             if (sound_speed != 0.0) {
@@ -412,6 +416,12 @@ struct InitialConditions {
             if (init.contains("gravity_source_expressions")) {
                 init.gravity_source_expressions =
                     init.get_dict("gravity_source_expressions");
+            }
+
+            // Load expressions for locally defined sound speed
+            if (init.contains("local_sound_speed_expressions")) {
+                init.local_sound_speed_expressions =
+                    init.get_dict("local_sound_speed_expressions");
             }
         }
 
