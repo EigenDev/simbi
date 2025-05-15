@@ -41,6 +41,7 @@ class BasePlotter(ABC):
         if not self.fig:
             raise RuntimeError("No figure to save")
 
+        self.fig.tight_layout()
         if hasattr(self, "animation"):
             self.animation.save(
                 f"{path}.mp4",
