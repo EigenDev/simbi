@@ -106,10 +106,6 @@ namespace simbi {
         ) const;
         RiemannFuncPointer<RMHD<dim>> riemann_solve;
 
-        std::vector<function_t> bsources;   // boundary sources
-        std::vector<function_t> hsources;   // hydro sources
-        std::vector<function_t> gsources;   // gravity sources
-
         /* Shared Data Members */
         ndarray<conserved_t, dim> fri, gri, hri;
         ndarray<real, dim> bstag1, bstag2, bstag3;
