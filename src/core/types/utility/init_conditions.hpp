@@ -60,7 +60,7 @@
 #include <utility>
 
 struct InitialConditions {
-    real time, checkpoint_interval, dlogt;
+    real time, checkpoint_interval, dlogt, viscosity;
     real plm_theta, gamma, cfl, tend, sound_speed_squared;
     luint nx, ny, nz, checkpoint_index;
     bool quirk_smoothing, homologous, mesh_motion;
@@ -221,6 +221,7 @@ struct InitialConditions {
             init.quirk_smoothing = init.get<bool>("quirk_smoothing", false);
             init.regime          = init.get<std::string>("regime", "classical");
             init.cfl             = init.get<real>("cfl", 0.3);
+            init.viscosity       = init.get<real>("viscosity", 0.0);
 
             // I/O settings
             init.data_directory =

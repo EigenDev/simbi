@@ -159,7 +159,7 @@ namespace simbi {
         bool use_pcm_;
         bool using_rk1_;
         bool quirk_smoothing_;
-        real plm_theta_, step_;
+        real plm_theta_, step_, viscosity_;
 
         // Physics flags
         bool null_gravity_{true};
@@ -177,7 +177,8 @@ namespace simbi {
               using_rk1_(temporal_order_ == "rk1"),
               quirk_smoothing_(init.quirk_smoothing),
               plm_theta_(init.plm_theta),
-              step_((temporal_order_ == "rk1") ? 1.0 : 0.5)
+              step_((temporal_order_ == "rk1") ? 1.0 : 0.5),
+              viscosity_(init.viscosity)
         {
             set_boundary_conditions(init.boundary_conditions);
         }
@@ -216,6 +217,7 @@ namespace simbi {
         DUAL auto step() const { return step_; }
         DUAL auto set_null_sources(bool state) { null_sources_ = state; }
         DUAL auto set_null_gravity(bool state) { null_gravity_ = state; }
+        DUAL auto viscosity() const { return viscosity_; }
     };
 }   // namespace simbi
 

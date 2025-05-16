@@ -252,6 +252,11 @@ class BaseConfig(metaclass=abc.ABCMeta):
     def temporal_order(self) -> str:
         return "rk2"
 
+    @simbi_property(group="sim_state")
+    def viscosity(self) -> float | DynamicArg:
+        """the kinematic viscosity"""
+        return 0.0
+
     @simbi_property(group="io")
     def checkpoint_interval(self) -> float:
         return 0.1
