@@ -1,7 +1,15 @@
 import numpy as np
 from numpy.typing import NDArray
 from dataclasses import dataclass
-from typing import Optional, Any, Sequence
+from typing import Any, Sequence
+
+from simbi.core.config.bodies import (
+    GravitationalSystemConfig,
+    BinaryComponentConfig,
+    BinaryConfig,
+    ImmersedBodyConfig,
+)
+from simbi.functional.reader import BodyCapability, has_capability
 from ..config.settings import MeshSettings, IOSettings, GridSettings, SimulationSettings
 from ..config.initialization import InitializationConfig
 from ...functional.maybe import Maybe
@@ -50,7 +58,7 @@ def try_checkpoint_initialization(
     # given inside the problem
 
     def overwrite_if_needed(
-        settings: dict[str, Any], metadata: dict[str, Any]
+        settings: dict[str, Any], metadata: dict[str, Any], **kwargs: Any
     ) -> dict[str, Any]:
         meta_set = {key for key in metadata.keys()}
         overwrite = settings.copy()
@@ -87,6 +95,70 @@ def try_checkpoint_initialization(
         elif "default_start_time" in non_intersecting:
             overwrite["default_start_time"] = metadata["time"]
             overwrite["isothermal"] = bool(metadata["adiabatic_index"] == 1.0)
+
+        if "immersed_bodies" in kwargs:
+            if metadata["system_config"] is None:
+                overwrite["immersed_bodies"] = []
+                for key, body in kwargs["immersed_bodies"].items():
+                    overwrite["immersed_bodies"].append(
+                        ImmersedBodyConfig(
+                            body_type=body["type"],
+                            mass=body["mass"],
+                            velocity=body["velocity"],
+                            position=body["position"],
+                            radius=body["radius"],
+                            specifics=body.get("specifics", None),
+                        )
+                    )
+            else:
+                # check if there are two bodies that are gravitational,
+                # if so, this is likely a binary system
+                if len(kwargs["immersed_bodies"]) == 2:
+                    body1 = kwargs["immersed_bodies"]["body_0"]
+                    body2 = kwargs["immersed_bodies"]["body_1"]
+                    system_config = metadata["system_config"]
+
+                    overwrite["body_system"] = GravitationalSystemConfig(
+                        prescribed_motion=system_config["prescribed_motion"],
+                        reference_frame=system_config["reference_frame"],
+                        system_type="binary",
+                        binary_config=BinaryConfig(
+                            semi_major=system_config["semi_major"],
+                            eccentricity=system_config["eccentricity"],
+                            mass_ratio=system_config["mass_ratio"],
+                            total_mass=body1["mass"] + body2["mass"],
+                            components=[
+                                BinaryComponentConfig(
+                                    mass=body1["mass"],
+                                    radius=body1["radius"],
+                                    is_an_accretor=has_capability(
+                                        body1["type"], BodyCapability.ACCRETION
+                                    ),
+                                    softening_length=body1["softening_length"],
+                                    two_way_coupling=False,
+                                    accretion_efficiency=body1["accretion_efficiency"],
+                                    accretion_radius=body1["accretion_radius"],
+                                    position=body1["position"],
+                                    velocity=body1["velocity"],
+                                    force=body1["force"],
+                                ),
+                                BinaryComponentConfig(
+                                    mass=body2["mass"],
+                                    radius=body2["radius"],
+                                    is_an_accretor=has_capability(
+                                        body2["type"], BodyCapability.ACCRETION
+                                    ),
+                                    softening_length=body2["softening_length"],
+                                    two_way_coupling=False,
+                                    accretion_efficiency=body2["accretion_efficiency"],
+                                    accretion_radius=body2["accretion_radius"],
+                                    position=body2["position"],
+                                    velocity=body2["velocity"],
+                                    force=body2["force"],
+                                ),
+                            ],
+                        ),
+                    )
         return overwrite
 
     settings = setup[1]
@@ -107,7 +179,11 @@ def try_checkpoint_initialization(
                     overwrite_if_needed(settings["io"], chkpt.metadata)
                 ),
                 sim_config=SimulationSettings.from_dict(
-                    overwrite_if_needed(settings["sim_state"], chkpt.metadata)
+                    overwrite_if_needed(
+                        settings["sim_state"],
+                        chkpt.metadata,
+                        immersed_bodies=chkpt.immersed_bodies,
+                    )
                 ),
                 state=chkpt.state.to_numpy(),
                 staggered_bfields=chkpt.staggered_bfields,

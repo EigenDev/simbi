@@ -1,5 +1,5 @@
 from typing import Optional, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 
 @dataclass(frozen=True)
@@ -21,6 +21,9 @@ class BinaryComponentConfig:
     two_way_coupling: bool
     accretion_efficiency: float
     accretion_radius: float
+    position: Sequence[float] = field(default_factory=lambda: [0.0, 0.0, 0.0])
+    velocity: Sequence[float] = field(default_factory=lambda: [0.0, 0.0, 0.0])
+    force: Sequence[float] = field(default_factory=lambda: [0.0, 0.0, 0.0])
 
 
 @dataclass(frozen=True)

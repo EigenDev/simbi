@@ -51,8 +51,10 @@
 
 #include "build_options.hpp"
 #include "core/types/utility/smart_ptr.hpp"
+#include "physics/hydro/schemes/ib/policies/interaction_functions.hpp"
 #include "physics/hydro/schemes/ib/systems/component_body_system.hpp"
 #include "util/tools/helpers.hpp"
+#include <algorithm>
 
 namespace simbi::ibsystem {
     template <typename T, size_type Dims>
@@ -109,7 +111,7 @@ namespace simbi::ibsystem {
                             sys_props.at("binary_config")
                                 .template get<ConfigDict>();
 
-                        // Extract binary parameters
+                        // get the system configuration
                         real total_mass = binary_props.contains("total_mass")
                                               ? binary_props.at("total_mass")
                                                     .template get<real>()
@@ -148,67 +150,81 @@ namespace simbi::ibsystem {
                             );
                         }
 
-                        // calculate individual masses based on total mass and
-                        // mass ratio
-                        T m1 = total_mass / (1.0 + mass_ratio);
-                        T m2 = total_mass - m1;
-
-                        // calculate positions based on semi-major axis
-                        T r1 = semi_major * mass_ratio / (1.0 + mass_ratio);
-                        T r2 = semi_major - r1;
-
-                        // initial positions
-                        spatial_vector_t<T, Dims> pos1, pos2;
-                        pos1[0] = -r1;
-                        pos2[0] = r2;
-
-                        // for dimensions > 1, set y to 0
-                        if constexpr (Dims > 1) {
-                            pos1[1] = 0;
-                            pos2[1] = 0;
-                        }
-
-                        // for dimensions > 2, set z to 0
-                        if constexpr (Dims > 2) {
-                            pos1[2] = 0;
-                            pos2[2] = 0;
-                        }
-
-                        // calculate orbital velocity - for circular orbit
-                        T orbital_velocity = std::sqrt(total_mass / semi_major);
-
-                        // initial velocities (perpendicular to position)
-                        spatial_vector_t<T, Dims> vel1, vel2;
-
-                        if constexpr (Dims > 1) {
-                            vel1[0] = 0;
-                            vel1[1] = orbital_velocity * mass_ratio /
-                                      (1.0 + mass_ratio);
-
-                            vel2[0] = 0;
-                            vel2[1] =
-                                -orbital_velocity * 1.0 / (1.0 + mass_ratio);
-
-                            if constexpr (Dims > 2) {
-                                vel1[2] = 0;
-                                vel2[2] = 0;
-                            }
-                        }
-                        else {
-                            // cant't have orbital motion in 1D
-                            vel1[0] = 0;
-                            vel2[0] = 0;
-                        }
-
                         // process the first component
-                        auto& comp1 = binary_components.front();
-                        T radius1   = comp1.at("radius").template get<T>();
+                        const auto& comp1 = binary_components.front();
+                        const auto& comp2 = binary_components.back();
+                        const auto& pos1 =
+                            comp1.at("position")
+                                .template get<std::vector<real>>();
+                        const auto& pos2 =
+                            comp2.at("position")
+                                .template get<std::vector<real>>();
+                        const T radius1 = comp1.at("radius").template get<T>();
+                        const T radius2 = comp2.at("radius").template get<T>();
+                        const auto& vel1 =
+                            comp1.at("velocity")
+                                .template get<std::vector<real>>();
+                        const auto& vel2 =
+                            comp2.at("velocity")
+                                .template get<std::vector<real>>();
+                        const T m1 = comp1.at("mass").template get<T>();
+                        const T m2 = comp2.at("mass").template get<T>();
+
+                        // position and velocity
+                        spatial_vector_t<T, Dims> pos_vec1, pos_vec2;
+                        for (size_type i = 0; i < Dims && i < pos1.size();
+                             i++) {
+                            pos_vec1[i] = pos1[i];
+                        }
+                        for (size_type i = 0; i < Dims && i < pos2.size();
+                             i++) {
+                            pos_vec2[i] = pos2[i];
+                        }
+                        spatial_vector_t<T, Dims> vel_vec1, vel_vec2;
+                        for (size_type i = 0; i < Dims && i < vel1.size();
+                             i++) {
+                            vel_vec1[i] = vel1[i];
+                        }
+                        for (size_type i = 0; i < Dims && i < vel2.size();
+                             i++) {
+                            vel_vec2[i] = vel2[i];
+                        }
+
+                        // if the initial positions are null, use the semi-major
+                        // axis to set the initial positions
+                        if (std::all_of(
+                                pos_vec1.begin(),
+                                pos_vec1.end(),
+                                [](real val) { return val == 0.0; }
+                            )) {
+                            std::tie(pos_vec1, pos_vec2) =
+                                body_functions::binary::initial_positions<Dims>(
+                                    semi_major,
+                                    mass_ratio
+                                );
+                        }
+                        // if the initial velocities are null, use the
+                        // semi-major axis to set the initial velocities
+                        if (std::all_of(
+                                vel_vec1.begin(),
+                                vel_vec1.end(),
+                                [](real val) { return val == 0.0; }
+                            )) {
+                            std::tie(vel_vec1, vel_vec2) =
+                                body_functions::binary::initial_velocities<
+                                    Dims>(
+                                    semi_major,
+                                    total_mass,
+                                    mass_ratio,
+                                    goes_to_zero(eccentricity)
+                                );
+                        }
 
                         // create body with functional approach
                         Body<T, Dims> body1(
                             BodyType::GRAVITATIONAL,
-                            pos1,
-                            vel1,
+                            pos_vec1,
+                            vel_vec1,
                             m1,
                             radius1
                         );
@@ -233,14 +249,11 @@ namespace simbi::ibsystem {
                         size_t body1_idx = system->size() - 1;
 
                         // process the second component
-                        auto& comp2 = binary_components.back();
-                        T radius2   = comp2.at("radius").template get<T>();
-
                         // create body with functional approach
                         Body<T, Dims> body2(
                             BodyType::GRAVITATIONAL,
-                            pos2,
-                            vel2,
+                            pos_vec2,
+                            vel_vec2,
                             m2,
                             radius2
                         );

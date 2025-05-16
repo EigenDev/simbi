@@ -36,6 +36,7 @@ class CheckpointData:
     mesh: dict[str, NDArray[np.floating[Any]]]
     metadata: dict[str, Any]
     staggered_bfields: Sequence[NDArray[np.floating[Any]]]
+    immersed_bodies: dict[str, Any]
 
 
 def load_checkpoint(filepath: Path | str) -> Maybe[CheckpointData]:
@@ -77,6 +78,7 @@ def load_checkpoint(filepath: Path | str) -> Maybe[CheckpointData]:
                     ),
                     mesh=mesh,
                     metadata=metadata,
+                    immersed_bodies=immersed_bodies,
                 )
             )
         )

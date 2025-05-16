@@ -272,6 +272,7 @@ class SimulationSettings(BaseSettings):
     isothermal: bool = False
     locally_isothermal: bool = False
     body_system: Optional[BodySystemConfig] = None
+    viscosity: Optional[float] = None
 
     @classmethod
     def from_dict(cls, setup: dict[str, Any]) -> "SimulationSettings":
@@ -293,6 +294,7 @@ class SimulationSettings(BaseSettings):
             isothermal=setup["isothermal"],
             body_system=setup["body_system"],
             locally_isothermal=setup["locally_isothermal"],
+            viscosity=setup["viscosity"],
         )
 
     def to_execution_dict(self) -> dict[str, Any]:
@@ -315,4 +317,5 @@ class SimulationSettings(BaseSettings):
             "isothermal": self.isothermal,
             "locally_isothermal": self.locally_isothermal,
             "body_system": asdict(self.body_system) if self.body_system else None,
+            "viscosity": self.viscosity,
         }

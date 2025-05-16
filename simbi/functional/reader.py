@@ -256,12 +256,19 @@ class LazySimulationReader:
             }
 
             # For accretors, read additional properties
+            if has_capability(body_type, BodyCapability.GRAVITATIONAL):
+                self._immersed_bodies_cache[f"body_{i}"].update(
+                    {
+                        "softening_length": body_group["softening_length"][...],
+                    }
+                )
             if has_capability(body_type, BodyCapability.ACCRETION):
                 self._immersed_bodies_cache[f"body_{i}"].update(
                     {
                         "accretion_rate": body_group["accretion_rate"][...],
                         "accretion_radius": body_group["accretion_radius"][...],
                         "total_accreted_mass": body_group["total_accreted_mass"][...],
+                        "accretion_efficiency": body_group["accretion_efficiency"][...],
                     }
                 )
 
@@ -287,6 +294,7 @@ class LazySimulationReader:
             self._metadata_cache["reference_frame"] = ref_frame
             if "system_config" in ib_group:
                 system_config = dict(ib_group["system_config"].attrs)
+                system_config["reference_frame"] = ref_frame
                 self._metadata_cache["system_config"] = {
                     k: v.decode("utf-8") if isinstance(v, bytes) else v
                     for k, v in system_config.items()
