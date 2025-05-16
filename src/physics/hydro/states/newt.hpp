@@ -93,7 +93,9 @@ namespace simbi {
             const primitive_t&,
             const primitive_t&,
             const luint,
-            const real
+            const real,
+            const conserved_t&,
+            const conserved_t&
         ) const;
         RiemannFuncPointer<Newtonian<dim>> riemann_solve;
 
@@ -120,14 +122,18 @@ namespace simbi {
             const auto& prL,
             const auto& prR,
             const luint nhat,
-            const real vface = 0.0
+            const real vface  = 0.0,
+            const auto& viscL = {},
+            const auto& viscR = {}
         ) const;
 
         DUAL conserved_t calc_hlle_flux(
             const auto& prL,
             const auto& prR,
             const luint nhat,
-            const real vface = 0.0
+            const real vface  = 0.0,
+            const auto& viscL = {},
+            const auto& viscR = {}
         ) const;
 
         DUAL void set_riemann_solver()
@@ -148,30 +154,6 @@ namespace simbi {
         }
 
         void init_simulation();
-
-        void check_sources()
-        {
-            // check if ~all~ boundary sources have been set.
-            // if the user forgot one, the code will run with
-            // and outflow outer boundary condition
-            this->all_outer_bounds = std::all_of(
-                this->bsources.begin(),
-                this->bsources.end(),
-                [](const auto& q) { return q != nullptr; }
-            );
-
-            this->null_gravity = std::all_of(
-                this->gsources.begin(),
-                this->gsources.end(),
-                [](const auto& q) { return q == nullptr; }
-            );
-
-            this->null_sources = std::all_of(
-                this->hsources.begin(),
-                this->hsources.end(),
-                [](const auto& q) { return q == nullptr; }
-            );
-        }
 
       public:
         void cons2prim_impl();

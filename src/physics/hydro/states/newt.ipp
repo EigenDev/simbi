@@ -2,6 +2,7 @@
 #include "core/types/containers/array.hpp"
 #include "core/types/utility/atomic_bool.hpp"   // for shared_atomic_bool
 #include "io/exceptions.hpp"
+#include "physics/hydro/schemes/viscosity/viscous.hpp"
 #include "util/tools/device_api.hpp"
 #include "util/tools/helpers.hpp"
 #include <cmath>   // for max, min
@@ -221,7 +222,9 @@ DUAL Newtonian<dim>::conserved_t Newtonian<dim>::calc_hlle_flux(
     const auto& prL,
     const auto& prR,
     const luint nhat,
-    const real vface
+    const real vface,
+    const auto& viscL,
+    const auto& viscR
 ) const
 {
     const auto lambda = calc_eigenvals(prL, prR, nhat);
@@ -229,8 +232,12 @@ DUAL Newtonian<dim>::conserved_t Newtonian<dim>::calc_hlle_flux(
     const real aR     = lambda.aR();
     const auto uL     = prL.to_conserved(gamma);
     const auto uR     = prR.to_conserved(gamma);
-    const auto fL     = prL.to_flux(gamma, unit_vectors::get<dim>(nhat));
-    const auto fR     = prR.to_flux(gamma, unit_vectors::get<dim>(nhat));
+    auto fL           = prL.to_flux(gamma, unit_vectors::get<dim>(nhat));
+    auto fR           = prR.to_flux(gamma, unit_vectors::get<dim>(nhat));
+    if (!goes_to_zero(this->viscosity())) {
+        fL -= viscL;   // add the viscous stress to Reynolds
+        fR -= viscR;   // add the viscous stress to Reynolds
+    }
 
     auto net_flux = [&] {
         // Compute the HLL Flux component-wise
@@ -263,7 +270,9 @@ DUAL Newtonian<dim>::conserved_t Newtonian<dim>::calc_hllc_flux(
     const auto& prL,
     const auto& prR,
     const luint nhat,
-    const real vface
+    const real vface,
+    const auto& viscL,
+    const auto& viscR
 ) const
 {
     const auto lambda = calc_eigenvals(prL, prR, nhat);
@@ -271,8 +280,12 @@ DUAL Newtonian<dim>::conserved_t Newtonian<dim>::calc_hllc_flux(
     const real aR     = lambda.aR();
     const auto uL     = prL.to_conserved(gamma);
     const auto uR     = prR.to_conserved(gamma);
-    const auto fL     = prL.to_flux(gamma, unit_vectors::get<dim>(nhat));
-    const auto fR     = prR.to_flux(gamma, unit_vectors::get<dim>(nhat));
+    auto fL           = prL.to_flux(gamma, unit_vectors::get<dim>(nhat));
+    auto fR           = prR.to_flux(gamma, unit_vectors::get<dim>(nhat));
+    if (!goes_to_zero(this->viscosity())) {
+        fL -= viscL;   // add the viscous stress to Reynolds
+        fR -= viscR;   // add the viscous stress to Reynolds
+    }
 
     // Quick checks before moving on with rest of computation
     if (vface <= aL) {
@@ -450,6 +463,7 @@ void Newtonian<dim>::advance_impl()
 
     auto calc_flux = [this, dcons] DEV(auto& con, const auto& prim) {
         conserved_t fri[2], gri[2], hri[2];
+        primitive_t pLx, pRx, pLy, pRy, pLz, pRz;
 
         const auto [ii, jj, kk] = con.position();
         const auto cell = this->mesh().get_cell_from_indices(ii, jj, kk);
@@ -457,8 +471,10 @@ void Newtonian<dim>::advance_impl()
         // Calculate fluxes using prim
         for (int q = 0; q < 2; q++) {
             // X-direction flux
-            const auto& pL = prim.at(q - 1, 0, 0);
-            const auto& pR = prim.at(q - 0, 0, 0);
+            // const auto& pL = prim.at(q - 1, 0, 0);
+            // const auto& pR = prim.at(q - 0, 0, 0);
+            pLx = prim.at(q - 1, 0, 0);
+            pRx = prim.at(q - 0, 0, 0);
 
             auto vface = cell.velocity(q);
 
@@ -466,60 +482,80 @@ void Newtonian<dim>::advance_impl()
                 const auto& pLL = prim.at(q - 2, 0, 0);
                 const auto& pRR = prim.at(q + 1, 0, 0);
                 // compute the reconstructed states
-                const auto pLr =
-                    pL + plm_gradient(pL, pLL, pR, this->plm_theta()) * 0.5;
-                const auto pRr =
-                    pR - plm_gradient(pR, pL, pRR, this->plm_theta()) * 0.5;
-                fri[q] = (this->*riemann_solve)(pLr, pRr, 1, vface);
-            }
-            else {
-                fri[q] = (this->*riemann_solve)(pL, pR, 1, vface);
+                pLx += plm_gradient(pLx, pLL, pRx, this->plm_theta()) * 0.5;
+                pRx -= plm_gradient(pRx, pLx, pRR, this->plm_theta()) * 0.5;
             }
 
             if constexpr (dim > 1) {
-                vface = cell.velocity(q + 2);
                 // Y-direction flux
-                const auto& pL_y = prim.at(0, q - 1, 0);
-                const auto& pR_y = prim.at(0, q - 0, 0);
+                pLy = prim.at(0, q - 1, 0);
+                pRy = prim.at(0, q - 0, 0);
                 if (!this->using_pcm()) {
-                    const auto& pLL_y = prim.at(0, q - 2, 0);
-                    const auto& pRR_y = prim.at(0, q + 1, 0);
-                    const auto pLr_y =
-                        pL_y +
-                        plm_gradient(pL_y, pLL_y, pR_y, this->plm_theta()) *
-                            0.5;
-                    const auto pRr_y =
-                        pR_y -
-                        plm_gradient(pR_y, pL_y, pRR_y, this->plm_theta()) *
-                            0.5;
-                    gri[q] = (this->*riemann_solve)(pLr_y, pRr_y, 2, vface);
-                }
-                else {
-                    gri[q] = (this->*riemann_solve)(pL_y, pR_y, 2, vface);
-                }
+                    const auto& pLLy = prim.at(0, q - 2, 0);
+                    const auto& pRRy = prim.at(0, q + 1, 0);
 
-                if constexpr (dim > 2) {
-                    vface = cell.velocity(q + 4);
-                    // Z-direction flux
-                    const auto& pL_z = prim.at(0, 0, q - 1);
-                    const auto& pR_z = prim.at(0, 0, q - 0);
-                    if (!this->using_pcm()) {
-                        const auto& pLL_z = prim.at(0, 0, q - 2);
-                        const auto& pRR_z = prim.at(0, 0, q + 1);
-                        const auto pLr_z =
-                            pL_z +
-                            plm_gradient(pL_z, pLL_z, pR_z, this->plm_theta()) *
-                                0.5;
-                        const auto pRr_z =
-                            pR_z -
-                            plm_gradient(pR_z, pL_z, pRR_z, this->plm_theta()) *
-                                0.5;
-                        hri[q] = (this->*riemann_solve)(pLr_z, pRr_z, 3, vface);
-                    }
-                    else {
-                        hri[q] = (this->*riemann_solve)(pL_z, pR_z, 3, vface);
-                    }
+                    pLy +=
+                        plm_gradient(pLy, pLLy, pRy, this->plm_theta()) * 0.5;
+                    pRy -=
+                        plm_gradient(pRy, pLy, pRRy, this->plm_theta()) * 0.5;
                 }
+            }
+
+            if constexpr (dim > 2) {
+                // Z-direction flux
+                // const auto& pL_z = prim.at(0, 0, q - 1);
+                // const auto& pR_z = prim.at(0, 0, q - 0);
+                pLz = prim.at(0, 0, q - 1);
+                pRz = prim.at(0, 0, q - 0);
+                if (!this->using_pcm()) {
+                    const auto& pLLz = prim.at(0, 0, q - 2);
+                    const auto& pRRz = prim.at(0, 0, q + 1);
+
+                    pLz +=
+                        plm_gradient(pLz, pLLz, pRz, this->plm_theta()) * 0.5;
+                    pRz -=
+                        plm_gradient(pRz, pLz, pRRz, this->plm_theta()) * 0.5;
+                }
+            }
+
+            const auto [viscxL, viscxR] = visc::viscous_flux<
+                1>(pLx, pRx, pLy, pRy, pLz, pRz, cell, q, this->viscosity());
+
+            fri[q] = (this->*riemann_solve)(pLx, pRx, 1, vface, viscxL, viscxR);
+
+            if constexpr (dim > 1) {
+                vface = cell.velocity(q + 2);
+
+                const auto [viscyL, viscyR] = visc::viscous_flux<2>(
+                    pLx,
+                    pRx,
+                    pLy,
+                    pRy,
+                    pLz,
+                    pRz,
+                    cell,
+                    q,
+                    this->viscosity()
+                );
+                gri[q] =
+                    (this->*riemann_solve)(pLy, pRy, 2, vface, viscyL, viscyR);
+            }
+            if constexpr (dim > 2) {
+                vface = cell.velocity(q + 4);
+
+                const auto [visczL, visczR] = visc::viscous_flux<3>(
+                    pLx,
+                    pRx,
+                    pLy,
+                    pRy,
+                    pLz,
+                    pRz,
+                    cell,
+                    q,
+                    this->viscosity()
+                );
+                hri[q] =
+                    (this->*riemann_solve)(pLz, pRz, 3, vface, visczL, visczR);
             }
         }
 

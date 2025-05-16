@@ -66,6 +66,7 @@
 #include "physics/hydro/schemes/ib/systems/component_generator.hpp"
 #include "physics/hydro/types/context.hpp"           // for HydroContext
 #include "physics/hydro/types/generic_structs.hpp"   // for anyConserved, anyPrimitive
+#include "util/tools/helpers.hpp"
 #include <limits>
 
 namespace simbi {
@@ -116,6 +117,13 @@ namespace simbi {
                     cfl_
                 );
             }
+
+            // if viscosity is present, we must also be aware of the viscous
+            // time
+            // real viscous_dt = std::numeric_limits<real>::infinity();
+            // if (!goes_to_zero(viscosity())) {
+            //     viscous_dt = visc::get_minimum_viscous_time(*this);
+            // }
             time_manager_.set_dt(std::min(gas_dt, system_dt));
         }
 
@@ -393,6 +401,7 @@ namespace simbi {
         const auto& bcs() const { return solver_config_.boundary_conditions(); }
         auto spatial_order() const { return solver_config_.spatial_order(); }
         auto temporal_order() const { return solver_config_.temporal_order(); }
+        DUAL auto viscosity() const { return solver_config_.viscosity(); }
 
         // accessors from time manager class
         DUAL auto time() const { return time_manager_.time(); }
