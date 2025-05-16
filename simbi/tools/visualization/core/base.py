@@ -66,6 +66,7 @@ class BasePlotter(ABC):
         """Display plot"""
         if not self.fig:
             raise RuntimeError("No figure to display")
+        self.fig.tight_layout()
         plt.show()
 
     def __enter__(self):
