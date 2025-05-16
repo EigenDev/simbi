@@ -1190,6 +1190,22 @@ namespace simbi {
         os << "]";
         return os;
     }
+
+    template <typename T, size_type Dims, VectorType Type>
+    DUAL std::ostream&
+    operator<<(std::ostream& os, const ConstVectorView<T, Dims, Type>& v)
+    {
+        os << "[";
+        for (size_type i = 0; i < Dims; ++i) {
+            os << v[i];
+            if (i < Dims - 1) {
+                os << ", ";
+            }
+        }
+        os << "]";
+        return os;
+    }
+
 }   // namespace simbi
 
 // structured binding support
