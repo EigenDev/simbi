@@ -532,7 +532,7 @@ namespace simbi::ibsystem::body_functions {
         template <typename T, size_type Dims>
         array_t<Body<T, Dims>, 2> calculate_binary_motion(
             const ibsystem::ComponentBodySystem<T, Dims>& system,
-            T time
+            T dt
         )
         {
             // get binary config
@@ -556,19 +556,16 @@ namespace simbi::ibsystem::body_functions {
             const T m1         = body1.mass;
             const T m2         = body2.mass;
             const T total_mass = m1 + m2;
-            const T mass_ratio = m2 / m1;
+            // const T mass_ratio = m2 / m1;
 
-            // Calculate positions and velocities
-            auto [pos1, pos2] = initial_positions<Dims>(semi_major, mass_ratio);
-            auto [vel1, vel2] = initial_velocities<Dims>(
-                semi_major,
-                total_mass,
-                mass_ratio,
-                config->circular_orbit
-            );
+            // Load or calculate positions and velocities
+            const auto& pos1 = body1.position;
+            const auto& pos2 = body2.position;
+            const auto& vel1 = body1.velocity;
+            const auto& vel2 = body2.velocity;
 
             T phi_dot = std::sqrt(total_mass / std::pow(semi_major, T(3)));
-            T phi     = phi_dot * time;
+            T phi     = phi_dot * dt;
 
             // Update positions and velocities
             return {

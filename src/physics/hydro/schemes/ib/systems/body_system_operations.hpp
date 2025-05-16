@@ -130,10 +130,7 @@ namespace simbi::ibsystem::functions {
             if (system.is_binary() && system.inertial()) {
                 // use binary system update logic that returns new bodies
                 auto updated_bodies =
-                    body_functions::binary::calculate_binary_motion(
-                        system,
-                        time
-                    );
+                    body_functions::binary::calculate_binary_motion(system, dt);
 
                 // apply updates to the system
                 for (size_t ii = 0; ii < updated_bodies.size(); ii++) {
