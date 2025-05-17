@@ -215,6 +215,15 @@ namespace simbi {
 #endif
             };
 
+            void prefetchToDevice(const void* obj, size_t bytes, int device)
+            {
+#if GPU_CODE
+                auto status =
+                    error::status_t(devPrefetchAsync(obj, bytes, device));
+                error::check_err(status, "Failed to prefetch to device");
+#endif
+            };
+
             void streamQuery(simbiStream_t stream, int* status)
             {
 #if GPU_CODE

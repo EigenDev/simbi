@@ -157,6 +157,8 @@ namespace simbi {
                 devEvent_t event,
                 unsigned int flags = 0
             );
+            void
+            prefetchToDevice(const void* obj, size_t bytes, int device = 0);
             void streamQuery(simbiStream_t stream, int* status);
             void peerCopyAsync(
                 void* dst,
@@ -269,54 +271,7 @@ namespace simbi {
                gridDim.z;
     }
 
-    STATIC
-    unsigned int get_ii_in2D()
-    {
-        if constexpr (global::col_major) {
-            return blockDim.y * blockIdx.y + threadIdx.y;
-        }
-        return blockDim.x * blockIdx.x + threadIdx.x;
-    }
-
-    STATIC
-    unsigned int get_jj_in2D()
-    {
-        if constexpr (global::col_major) {
-            return blockDim.x * blockIdx.x + threadIdx.x;
-        }
-        return blockDim.y * blockIdx.y + threadIdx.y;
-    }
-
-    template <global::Platform P = global::BuildPlatform>
-    STATIC unsigned int get_tx()
-    {
-        if constexpr (P == global::Platform::GPU) {
-            if constexpr (global::col_major) {
-                return threadIdx.y;
-            }
-            return threadIdx.x;
-        }
-        else {
-            return 0;
-        }
-    }
-
-    template <global::Platform P = global::BuildPlatform>
-    STATIC unsigned int get_ty()
-    {
-        if constexpr (P == global::Platform::GPU) {
-            if constexpr (global::col_major) {
-                return threadIdx.x;
-            }
-            return threadIdx.y;
-        }
-        else {
-            return 0;
-        }
-    }
-
-    template <global::Platform P = global::BuildPlatform>
-    STATIC unsigned int get_threadId()
+    STATIC unsigned int get_thread_id()
     {
 #if GPU_CODE
         return blockDim.x * blockDim.y * threadIdx.z +
@@ -324,6 +279,27 @@ namespace simbi {
 #else
         return std::hash<std::thread::id>{}(std::this_thread::get_id());
 #endif
+    }
+
+    STATIC unsigned int get_block_id()
+    {
+        if constexpr (global::on_gpu) {
+            return blockIdx.x + blockIdx.y * gridDim.x +
+                   blockIdx.z * gridDim.x * gridDim.y;
+        }
+        else {
+            return 0;
+        }
+    }
+
+    STATIC unsigned int get_threads_per_block()
+    {
+        if constexpr (global::on_gpu) {
+            return blockDim.x * blockDim.y * blockDim.z;
+        }
+        else {
+            return 1;
+        }
     }
 }   // namespace simbi
 
