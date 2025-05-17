@@ -237,7 +237,9 @@ namespace simbi::ibsystem {
                             body1 = body1.with_accretion(
                                 comp1.at("accretion_efficiency")
                                     .template get<T>(),
-                                comp1.at("accretion_radius").template get<T>()
+                                comp1.at("accretion_radius").template get<T>(),
+                                comp1.at("total_accreted_mass")
+                                    .template get<T>()
                             );
                         }
 
@@ -266,7 +268,9 @@ namespace simbi::ibsystem {
                             body2 = body2.with_accretion(
                                 comp2.at("accretion_efficiency")
                                     .template get<T>(),
-                                comp2.at("accretion_radius").template get<T>()
+                                comp2.at("accretion_radius").template get<T>(),
+                                comp2.at("total_accreted_mass")
+                                    .template get<T>()
                             );
                         }
 
