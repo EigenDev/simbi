@@ -231,19 +231,19 @@ class LazySimulationReader:
         self._immersed_bodies_cache = {}
         # load immersed bodies data
         ib_group = file_obj["immersed_bodies"]
-
+        ib_attrs = dict(ib_group.attrs)
         # get the number of bodies
-        body_count: int = int(ib_group.attrs["count"])
+        body_count: int = int(ib_attrs["count"])
         # Read data for each body
         for i in range(body_count):
             body_group = ib_group[f"body_{i}"]
 
             # Read properties
-            mass = body_group["mass"][...]
-            radius = body_group["radius"][...]
-            position = body_group["position"][...]
-            velocity = body_group["velocity"][...]
-            force = body_group["force"][...]
+            mass = body_group["mass"][()].item()
+            radius = body_group["radius"][()].item()
+            position = body_group["position"][:].tolist()
+            velocity = body_group["velocity"][:].tolist()
+            force = body_group["force"][:].tolist()
             body_type = BodyCapability(int(body_group.attrs["capabilities"]))
             # Check body type
             self._immersed_bodies_cache[f"body_{i}"] = {
@@ -259,16 +259,20 @@ class LazySimulationReader:
             if has_capability(body_type, BodyCapability.GRAVITATIONAL):
                 self._immersed_bodies_cache[f"body_{i}"].update(
                     {
-                        "softening_length": body_group["softening_length"][...],
+                        "softening_length": body_group["softening_length"][()].item(),
                     }
                 )
             if has_capability(body_type, BodyCapability.ACCRETION):
                 self._immersed_bodies_cache[f"body_{i}"].update(
                     {
-                        "accretion_rate": body_group["accretion_rate"][...],
-                        "accretion_radius": body_group["accretion_radius"][...],
-                        "total_accreted_mass": body_group["total_accreted_mass"][...],
-                        "accretion_efficiency": body_group["accretion_efficiency"][...],
+                        "accretion_rate": body_group["accretion_rate"][()].item(),
+                        "accretion_radius": body_group["accretion_radius"][()].item(),
+                        "total_accreted_mass": body_group["total_accreted_mass"][
+                            ()
+                        ].item(),
+                        "accretion_efficiency": body_group["accretion_efficiency"][
+                            ()
+                        ].item(),
                     }
                 )
 
@@ -302,6 +306,11 @@ class LazySimulationReader:
                 # turn numpy uint8 into bool
                 self._metadata_cache["system_config"] = {
                     k: bool(v) if isinstance(v, np.uint8) else v
+                    for k, v in self._metadata_cache["system_config"].items()
+                }
+                # turn numpy float64 into float
+                self._metadata_cache["system_config"] = {
+                    k: float(v) if isinstance(v, np.float64) else v
                     for k, v in self._metadata_cache["system_config"].items()
                 }
 
