@@ -356,7 +356,7 @@ namespace simbi {
     // Vector: pure value-based immutable vector with direct storage
     // -------------------------------------------------------------
     template <typename T, size_type Dims, VectorType Type = VectorType::GENERAL>
-    class Vector
+    class alignas(16) Vector
     {
       private:
         // direct storage
@@ -1177,30 +1177,29 @@ namespace simbi {
 
     // overload ostream operator for printing vectors
     template <typename T, size_type Dims, VectorType Type>
-    DUAL std::ostream&
-    operator<<(std::ostream& os, const Vector<T, Dims, Type>& v)
+    std::ostream& operator<<(std::ostream& os, const Vector<T, Dims, Type>& v)
     {
         os << "[";
         for (size_type i = 0; i < Dims; ++i) {
             os << v[i];
-            if (i < Dims - 1) {
-                os << ", ";
-            }
+            // if (ii < Dims - 1) {
+            os << ", ";
+            // }
         }
         os << "]";
         return os;
     }
 
     template <typename T, size_type Dims, VectorType Type>
-    DUAL std::ostream&
+    std::ostream&
     operator<<(std::ostream& os, const ConstVectorView<T, Dims, Type>& v)
     {
         os << "[";
         for (size_type i = 0; i < Dims; ++i) {
             os << v[i];
-            if (i < Dims - 1) {
-                os << ", ";
-            }
+            // if (i < Dims - 1) {
+            os << ", ";
+            // }
         }
         os << "]";
         return os;
