@@ -47,12 +47,9 @@ class SimulationRunner:
 
     def _execute_simulation(self, executor: Any, sim_state: dict[str, Any]) -> None:
         """Execute simulation using loaded module"""
-        # Reshape state for contiguous memory access
         state_contig = self.bundle.state.reshape(self.bundle.state.shape[0], -1)
-        # Give user a chance to check their params
         print_progress()
 
-        # Execute simulation
         executor().run(
             state=state_contig,
             sim_info=sim_state,
