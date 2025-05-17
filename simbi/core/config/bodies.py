@@ -24,6 +24,7 @@ class BinaryComponentConfig:
     position: Sequence[float] = field(default_factory=lambda: [0.0, 0.0, 0.0])
     velocity: Sequence[float] = field(default_factory=lambda: [0.0, 0.0, 0.0])
     force: Sequence[float] = field(default_factory=lambda: [0.0, 0.0, 0.0])
+    total_accreted_mass: float = 0.0
 
 
 @dataclass(frozen=True)
