@@ -168,6 +168,8 @@ namespace simbi {
             auto xblockdim = std::min(grid.active_gridsize(0), gpu_block_dimx_);
             auto yblockdim = std::min(grid.active_gridsize(1), gpu_block_dimy_);
             auto zblockdim = std::min(grid.active_gridsize(2), gpu_block_dimz_);
+            config.shared_mem_bytes =
+                calculate_optimal_shared_mem(xblockdim, yblockdim, zblockdim);
 
             if constexpr (global::on_gpu) {
                 if (xblockdim * yblockdim * zblockdim < global::WARP_SIZE) {
@@ -210,6 +212,21 @@ namespace simbi {
             xvertex_policy_  = fullxvertex_policy_.contract({0, 1, 1});
             yvertex_policy_  = fullyvertex_policy_.contract({1, 0, 1});
             zvertex_policy_  = fullzvertex_policy_.contract({1, 1, 0});
+        }
+
+        size_type calculate_optimal_shared_mem(
+            size_type xblockdim,
+            size_type yblockdim,
+            size_type zblockdim
+        ) const
+        {
+            // Calculate the optimal shared memory size based on block
+            // dimensions
+            return std::max(
+                       xblockdim * yblockdim * zblockdim,
+                       global::WARP_SIZE
+                   ) *
+                   sizeof(real);
         }
     };
 

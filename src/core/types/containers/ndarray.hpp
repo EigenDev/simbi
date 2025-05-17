@@ -642,9 +642,6 @@ namespace simbi {
         U reduce(U init, F reduce_op, const ExecutionPolicy<>& policy) const
         {
             if constexpr (global::on_gpu) {
-                // Allocate shared memory in the kernel for partial reductions
-                constexpr size_t shared_mem_size = 1024;
-
                 ndarray<U> result(1, init);
                 result.sync_to_device();
                 auto result_ptr = result.data();
@@ -653,19 +650,20 @@ namespace simbi {
 
                 // First pass: each thread block computes a partial reduction
                 parallel_for(policy, [=] DEV(size_type idx) {
-                    SHARED U shared_data[shared_mem_size];
+                    extern __shared__ U shared_data[];
 
                     // Each thread initializes with its own value
                     U thread_val =
                         idx < size ? reduce_op(init, arr[idx], idx) : init;
 
                     // Block-level reduction
-                    size_type tid    = threadIdx.x;
+                    size_type tid    = get_thread_id();
                     shared_data[tid] = thread_val;
                     gpu::api::synchronize();
 
                     // Reduce within block
-                    for (size_type s = blockDim.x / 2; s > 0; s >>= 1) {
+                    for (size_type s = get_threads_per_block() / 2; s > 0;
+                         s >>= 1) {
                         if (tid < s && idx + s < size) {
                             shared_data[tid] =
                                 my_min(shared_data[tid], shared_data[tid + s]);
@@ -673,14 +671,6 @@ namespace simbi {
                         gpu::api::synchronize();
                     }
 
-                    // printf(
-                    //     "idx: %ld, shared_data[0]: %f, arr[idx]: "
-                    //     "%f, thread_val: %f\n",
-                    //     idx,
-                    //     shared_data[0],
-                    //     arr[idx]->rho(),
-                    //     thread_val
-                    // );
                     // Write block result to global memory
                     if (tid == 0) {
                         gpu::api::atomicMin(&result_ptr[0], shared_data[0]);
@@ -711,9 +701,10 @@ namespace simbi {
                     bool success;
                     do {
                         U expected = result.load(std::memory_order_relaxed);
+                        U new_val  = my_min(expected, local_result);
                         success    = result.compare_exchange_weak(
                             expected,
-                            reduce_op(expected, mem_[start], start),
+                            new_val,
                             std::memory_order_release,
                             std::memory_order_relaxed
                         );
