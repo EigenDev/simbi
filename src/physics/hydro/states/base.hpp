@@ -310,7 +310,6 @@ namespace simbi {
         )
         {
             auto& derived = static_cast<Derived&>(*this);
-
             cons_.resize(this->total_zones()).reshape({nz(), ny(), nx()});
             prims_.resize(this->total_zones()).reshape({nz(), ny(), nx()});
             // Move the state array
