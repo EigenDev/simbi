@@ -252,7 +252,19 @@ namespace simbi::visc {
         return {left_viscous_flux, right_viscous_flux};
     }
 
-    DUAL real get_minimum_viscous_time(auto& sim_state) {}
+    template<typename PolicyType, typename MeshType>
+    real get_minimum_viscous_time(const PolicyType& policy, const MeshType& mesh, real visc) {
+        // get the minimum viscous time from the simulation state
+        const real min_viscous_time = std::numeric_limits<real>::infinity();
+        return fp::reduce(policy, min_viscous_time, [mesh, visc] DEV(real acc, luint idx) -> real{
+          auto cell = mesh.get_cell_from_global(idx);
+          auto dx1 = cell.width(0);
+          auto dx2 = cell.width(1);
+          auto dx3 = cell.width(2);
+          auto tvisc = my_min3(dx1 * dx1, dx2 * dx2, dx3 * dx3) / visc;
+          return my_min(acc, tvisc);
+        });
+    }
 
 }   // namespace simbi::visc
 
