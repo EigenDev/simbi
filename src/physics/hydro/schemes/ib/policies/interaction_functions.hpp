@@ -301,8 +301,7 @@ namespace simbi::ibsystem::body_functions {
                     std::pow(distance / effective_r_bondi, mass_flux_power);
 
                 // Enhance accretion near sonic point by blending with a higher
-                // value You can keep your 0.2 minimum factor or make it
-                // configurable
+                // value
                 const T min_blend_factor = 0.2;
                 accretion_factor =
                     base_value *

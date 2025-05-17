@@ -258,7 +258,7 @@ namespace simbi::ib::forces {
 
             if (distance <= core_radius) {
                 // Zone 1: core region - maximum accretion
-                // Apply directional, Hoyle and angular momentum factors
+                // apply directional, Hoyle and angular momentum factors
                 accretion_factor = accretion_efficiency * hoyle_factor *
                                    direction_factor * j_factor;
             }
@@ -297,8 +297,7 @@ namespace simbi::ib::forces {
                     std::pow(distance / effective_r_bondi, mass_flux_power);
 
                 // Enhance accretion near sonic point by blending with a higher
-                // value You can keep your 0.2 minimum factor or make it
-                // configurable
+                // value
                 const T min_blend_factor = 0.2;
                 accretion_factor =
                     base_value *
