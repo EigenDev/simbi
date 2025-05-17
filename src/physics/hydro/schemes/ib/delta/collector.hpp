@@ -56,6 +56,9 @@
 #include "physics/hydro/schemes/ib/systems/component_body_system.hpp"   // for ComponentBodySystem
 #include "util/parallel/exec_policy.hpp"
 #include "util/parallel/parallel_for.hpp"
+#include "util/tools/helpers.hpp"   // for unravel_idx
+
+using namespace simbi::helpers;
 
 namespace simbi::ibsystem {
     template <typename T, size_type Dims>
@@ -138,7 +141,7 @@ namespace simbi::ibsystem {
         }
 
         // thread-safe recording - each cell writes to its own slot
-        DUAL void record_delta(
+        DEV void record_delta(
             std::tuple<size_type, size_type, size_type> cell_idx,
             size_t body_idx,
             const spatial_vector_t<T, Dims>& force,
@@ -179,7 +182,6 @@ namespace simbi::ibsystem {
                   0   // zero other values
                 };
             }
-            body_deltas.sync_to_device();
 
             // create a policy for parallelizing over bodies
             ExecutionPolicy<> body_policy({max_bodies_, 1, 1}, {128, 1, 1});
@@ -223,14 +225,196 @@ namespace simbi::ibsystem {
             });
         }
 
-        // apply all reduced deltas to body system
+        // since gpus hate not having work,
+        // we do a reduction for each thread block
+        // in each cell and then finally reduce on the host
+        void reduce_deltas_gpu()
+        {
+            for (size_type body_idx = 0; body_idx < max_bodies_; body_idx++) {
+                body_deltas[body_idx] = BodyDelta<T, Dims>{
+                  body_idx,                      // valid body_idx from start
+                  spatial_vector_t<T, Dims>{},   // zero force
+                  0,
+                  0,
+                  0   // zero other values
+                };
+            }
+            body_deltas.sync_to_device();
+
+            // allocate intermediate reduction buffer (one entry per block per
+            // body) Calculate grid dimensions for a suitable block size
+            constexpr size_type BLOCK_SIZE = 256;
+            const size_type total_cells =
+                cell_shape_[0] * cell_shape_[1] * cell_shape_[2];
+            const size_type num_blocks =
+                (total_cells + BLOCK_SIZE - 1) / BLOCK_SIZE;
+
+            // allocate intermediate results buffer
+            ndarray<BodyDelta<T, Dims>, 2> block_results;
+            block_results.resize(num_blocks * max_bodies_);
+            block_results.reshape({num_blocks, max_bodies_});
+
+            // init with zeros
+            for (size_type block_idx = 0; block_idx < num_blocks; block_idx++) {
+                for (size_type body_idx = 0; body_idx < max_bodies_;
+                     body_idx++) {
+                    block_results.at(block_idx, body_idx) = BodyDelta<T, Dims>{
+                      body_idx,
+                      spatial_vector_t<T, Dims>{},
+                      0,
+                      0,
+                      0
+                    };
+                }
+            }
+            block_results.sync_to_device();
+
+            // first phase: ech thread block processes a chunk of cells
+            // and produces one partial result per body
+            ExecutionPolicy<> block_policy(
+                {total_cells, 1, 1},
+                {BLOCK_SIZE, 1, 1}
+            );
+            block_policy.shared_mem_bytes =
+                max_bodies_ * sizeof(BodyDelta<T, Dims>);
+            auto* block_results_ptr = block_results.data();
+
+            parallel_for(
+                block_policy,
+                [this, block_results_ptr, total_cells] DEV(luint idx) {
+                    // block index
+                    const size_type block_idx  = get_block_id();
+                    const size_type thread_idx = get_thread_id();
+
+                    // set up shared memory for block-level reduction
+                    extern __shared__ char shared_mem[];
+                    BodyDelta<T, Dims>* shared_deltas =
+                        reinterpret_cast<BodyDelta<T, Dims>*>(shared_mem);
+
+                    // init shared memory
+                    if (thread_idx < max_bodies_) {
+                        shared_deltas[thread_idx] = BodyDelta<T, Dims>{
+                          thread_idx,
+                          spatial_vector_t<T, Dims>{},
+                          0,
+                          0,
+                          0
+                        };
+                    }
+                    gpu::api::synchronize();
+
+                    // each thread processes multiple cells based on its global
+                    // index
+                    const size_type cells_per_block = BLOCK_SIZE;
+                    const size_type start_cell = block_idx * cells_per_block;
+                    const size_type end_cell =
+                        std::min(start_cell + cells_per_block, total_cells);
+
+                    // process cells assigned to this thread
+                    for (size_type cell_idx = start_cell + thread_idx;
+                         cell_idx < end_cell;
+                         cell_idx += get_threads_per_block()) {
+
+                        // covert linear index to 3D coordinates
+                        size_type x = 0, y = 0, z = 0;
+                        const auto pos =
+                            unravel_idx<Dims>(cell_idx, cell_shape_);
+                        x = pos[0];
+                        if constexpr (Dims > 1) {
+                            y = pos[1];
+                        }
+                        if constexpr (Dims > 2) {
+                            z = pos[2];
+                        }
+
+                        // process all bodies for this cell
+                        for (size_type body_idx = 0; body_idx < max_bodies_;
+                             body_idx++) {
+                            const auto& delta =
+                                cell_deltas.at(x, y, z, body_idx);
+
+                            // skip invalid body indices
+                            if (delta.body_idx >= max_bodies_) {
+                                continue;
+                            }
+
+                            // use atomic operations for thread-safe
+                            // accumulation in shared memory
+                            for (size_type dim = 0; dim < Dims; ++dim) {
+                                gpu::api::atomicAdd(
+                                    &shared_deltas[body_idx].force_delta[dim],
+                                    delta.force_delta[dim]
+                                );
+                            }
+                            gpu::api::atomicAdd(
+                                &shared_deltas[body_idx].mass_delta,
+                                delta.mass_delta
+                            );
+                            gpu::api::atomicAdd(
+                                &shared_deltas[body_idx].accreted_mass_delta,
+                                delta.accreted_mass_delta
+                            );
+                            gpu::api::atomicAdd(
+                                &shared_deltas[body_idx].accretion_rate_delta,
+                                delta.accretion_rate_delta
+                            );
+                        }
+                    }
+
+                    // ensure all threads have finished processing
+                    gpu::api::synchronize();
+
+                    // first thread in block writes results to global memory
+                    if (thread_idx < max_bodies_) {
+                        const auto res_idx =
+                            block_idx * max_bodies_ + thread_idx;
+                        block_results_ptr[res_idx] = shared_deltas[thread_idx];
+                    }
+                }
+            );
+
+            // second phase: Reduce block results on the host
+            // transfer block results to host (relatively small data)
+            block_results.sync_to_host();
+
+            // final reduction on host
+            for (size_type body_idx = 0; body_idx < max_bodies_; body_idx++) {
+                spatial_vector_t<T, Dims> force_sum{};
+                T mass_sum = 0, accreted_mass_sum = 0, accretion_rate_sum = 0;
+
+                // acc from all blocks
+                for (size_type block_idx = 0; block_idx < num_blocks;
+                     block_idx++) {
+                    const auto& block_delta =
+                        block_results.at(body_idx, block_idx);
+                    force_sum += block_delta.force_delta;
+                    mass_sum += block_delta.mass_delta;
+                    accreted_mass_sum += block_delta.accreted_mass_delta;
+                    accretion_rate_sum += block_delta.accretion_rate_delta;
+                }
+
+                // store final results
+                body_deltas[body_idx].force_delta          = force_sum;
+                body_deltas[body_idx].mass_delta           = mass_sum;
+                body_deltas[body_idx].accreted_mass_delta  = accreted_mass_sum;
+                body_deltas[body_idx].accretion_rate_delta = accretion_rate_sum;
+            }
+
+            // sync the final results back to device if needed
+            body_deltas.sync_to_device();
+        }
+
         ComponentBodySystem<T, Dims>
         apply_to(ComponentBodySystem<T, Dims>&& system)
         {
-            // perform parallel reduction on device
-            reduce_deltas();
+            // Use appropriate reduction strategy based on platform
+            if constexpr (global::on_gpu) {
+                reduce_deltas_gpu();
+            }
+            else {
+                reduce_deltas();
+            }
 
-            // apply the deltas from the already-reduced array
             for (size_t body_idx = 0; body_idx < max_bodies_; body_idx++) {
                 auto maybe_body = system.get_body(body_idx);
                 if (!maybe_body.has_value()) {
