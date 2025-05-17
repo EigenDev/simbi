@@ -67,17 +67,11 @@ namespace simbi::ibsystem {
       private:
         // one delta per cell in the grid
         ndarray<BodyDelta<T, Dims>, 4> cell_deltas;
-
         // reduced deltas per body (final output)
         ndarray<BodyDelta<T, Dims>, 1> body_deltas;
 
-        // tracks which bodies were modified
-        ndarray<unsigned int, 1> body_modified;
-
         size_type max_bodies_;
         array_t<size_type, 3> cell_shape_;
-
-        ExecutionPolicy<> spatial_policy_{};
 
       public:
         GridBodyDeltaCollector(
@@ -100,28 +94,17 @@ namespace simbi::ibsystem {
                 {max_bodies, cell_shape[2], cell_shape[1], cell_shape[0]}
             );
 
-            // Create execution policy for spatial dimensions only
-            spatial_policy_ = ExecutionPolicy<>(cell_shape, {8, 8, 8});
-
             // prep body deltas array (one per possible body)
             body_deltas.resize(max_bodies_);
 
-            // init body modified flags (0 = not modified)
-            body_modified.resize(max_bodies_);
-            body_modified.fill(0);
-
-            // Initialize cell deltas for all bodies in parallel
-            // We'll use a flattened 3D approach to handle the 4D array
-            spatial_policy_.optimize_batch_size();
-
-            // Initialize cell_deltas with default values
+            // init cell_deltas with default values
             for (size_type idx = 0; idx < size; ++idx) {
-                // Convert flat index to 3D spatial coordinates
+                // convert flat index to 3D spatial coordinates
                 const size_type x = idx % cell_shape[0];
                 const size_type y = (idx / cell_shape[0]) % cell_shape[1];
                 const size_type z = idx / (cell_shape[0] * cell_shape[1]);
 
-                // Initialize for all bodies at this spatial location
+                // init for all bodies at this spatial location
                 for (size_type body_idx = 0; body_idx < max_bodies_;
                      body_idx++) {
                     cell_deltas.at(x, y, z, body_idx) = BodyDelta<T, Dims>{
@@ -137,7 +120,6 @@ namespace simbi::ibsystem {
             // ensure device has initial state
             cell_deltas.sync_to_device();
             body_deltas.sync_to_device();
-            body_modified.sync_to_device();
         }
 
         // thread-safe recording - each cell writes to its own slot
