@@ -136,7 +136,7 @@ namespace global {
 }   // namespace global
 
 namespace global {
-    constexpr int WARP_SIZE = 64;
+    constexpr size_type WARP_SIZE = 64;
 }   // namespace global
 
 template <typename T>
@@ -205,6 +205,8 @@ constexpr auto devMemcpyAsync          = hipMemcpyAsync;
 constexpr auto devHostRegister         = hipHostRegister;
 constexpr auto devHostUnregister       = hipHostUnregister;
 constexpr auto devLaunchKernel         = hipLaunchKernel;
+constexpr auto devPretchAsync          = hipMemPretchAsync;
+constexpr auto devMemAdvice            = hipMemAdvise;
 
 using devProp_t     = hipDeviceProp_t;
 using devError_t    = hipError_t;
