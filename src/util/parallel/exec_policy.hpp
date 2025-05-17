@@ -142,19 +142,14 @@ namespace simbi {
             return block_size.y;
         }
 
-        constexpr auto get_full_extent() const
-        {
-            if constexpr (global::on_gpu) {
-                return nzones;
-                // return block_size.z * grid_size.z * block_size.x *
-                // block_size.y * grid_size.x * grid_size.y;
-            }
-            else {
-                return nzones;
-            }
-        }
+        constexpr auto get_full_extent() const { return nzones; }
 
         constexpr auto get_real_extent() const { return nzones; }
+
+        constexpr auto set_shared_mem_bytes(size_type bytes)
+        {
+            shared_mem_bytes = bytes;
+        }
 
         // build grid to handle multiple devices
         void build_grid(
