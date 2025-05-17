@@ -146,19 +146,16 @@ namespace simbi {
         }
 
         // memory prefetching methods (TODO: revisit this)
-        // void prefetch_to_device(int device = 0) const
-        // {
-        //     if constexpr (gpu_managed) {
-        //         gpu::api::prefetchToDevice(this, sizeof(*this), device);
-        //     }
-        // }
-
-        // void prefetch_to_host() const
-        // {
-        //     if constexpr (gpu_managed) {
-        //         gpu::api::prefetchToHost(this, sizeof(*this));
-        //     }
-        // }
+        void prefetch_to_device(int device = 0) const
+        {
+            if constexpr (gpu_managed) {
+                simbiStream_t stream;
+                gpu::api::streamCreate(&stream);
+                gpu::api::prefetchToDevice(this, sizeof(*this), device);
+                gpu::api::streamSynchronize(stream);
+                gpu::api::streamDestroy(stream);
+            }
+        }
     };
 }   // namespace simbi
 #endif
