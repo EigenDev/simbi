@@ -665,8 +665,8 @@ namespace simbi {
                     // Block-level reduction
                     const size_type tid = get_thread_id();
                     // const size_type bid   = get_block_id();
-                    // const auto block_size = get_threads_per_block();
-                    shared_data[tid] = thread_val;
+                    const auto block_size = get_threads_per_block();
+                    shared_data[tid]      = thread_val;
                     gpu::api::synchronize();
 
                     // const size_type block_start_idx = bid * block_size;
