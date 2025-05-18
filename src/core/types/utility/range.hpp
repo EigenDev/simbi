@@ -117,7 +117,7 @@ struct range_t {
 template <typename T, typename U = int>
 STATIC range_t<T> range(T begin, T end, U step = 1)
 {
-    begin += simbi::globalThreadIdx();
+    begin += simbi::global_thread_idx();
     return range_t<T>{begin, end, static_cast<T>(step)};
 }
 #endif

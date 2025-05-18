@@ -248,7 +248,7 @@ namespace simbi {
     }   // namespace gpu
 
     STATIC
-    unsigned int globalThreadIdx()
+    unsigned int global_thread_idx()
     {
         if constexpr (global::on_gpu) {
             return (
