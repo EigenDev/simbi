@@ -116,7 +116,7 @@ namespace simbi::ibsystem::body_functions {
 
     namespace accretion {
 
-        // Cubic spline smoothing kernel
+        // cubic spline smoothing kernel
         template <typename T>
         DEV T smoothing_kernel(const T r_norm)
         {
@@ -125,6 +125,16 @@ namespace simbi::ibsystem::body_functions {
             }
             const T q = 1.0 - r_norm;
             return q * q * (1.0 + 2.0 * r_norm);
+        }
+
+        // helper function for smooth transitions
+        template <typename T>
+        DEV T smoothstep(T x)
+        {
+            // CLamp x to [0,1]
+            x = std::min(std::max(x, T(0.0)), T(1.0));
+            // smoothstep polynomial: 3x^2 - 2x^3
+            return x * x * (3.0 - 2.0 * x);
         }
 
         // Calculate radial accretion profile
@@ -357,7 +367,10 @@ namespace simbi::ibsystem::body_functions {
             // get position vector from sink to cell center
             const auto r_vector =
                 mesh_cell.cartesian_centroid() - body.position;
-            const auto distance = r_vector.norm();
+            const auto distance = std::sqrt(
+                vecops::dot(r_vector, r_vector) +
+                body.softening_length() * body.softening_length()
+            );
 
             // calc standard Bondi radius based on ambient sound speed
             const auto cs_ambient    = context.ambient_sound_speed;
@@ -413,7 +426,7 @@ namespace simbi::ibsystem::body_functions {
             // apply accretion if factor is positive
             if (accretion_factor > 0) {
                 // calc stability-limited accretion rate
-                const T cell_size           = mesh_cell.max_cell_width();
+                const T cell_size           = mesh_cell.min_cell_width();
                 const T sound_crossing_time = cell_size / local_cs;
                 const T r_ratio             = distance / r_bondi;
 
@@ -457,6 +470,578 @@ namespace simbi::ibsystem::body_functions {
             }
 
             return {conserved_t{}, delta};
+        }
+
+        template <typename T, size_type Dims, typename Primitive>
+        DEV std::pair<typename Primitive::counterpart_t, BodyDelta<T, Dims>>
+        apply_ibm_interior_treatment(
+            size_type body_idx,
+            const Body<T, Dims>& body,
+            const Primitive& prim,
+            const Cell<Dims>& mesh_cell,
+            const HydroContext& context,
+            T dt
+        )
+        {
+            using conserved_t = typename Primitive::counterpart_t;
+            auto delta        = BodyDelta<T, Dims>{body_idx, {}, 0, 0, 0};
+
+            // cell and fluid props
+            const auto cell_center     = mesh_cell.cartesian_centroid();
+            const auto cell_volume     = mesh_cell.volume();
+            const auto cell_width      = mesh_cell.min_cell_width();
+            const auto density         = prim.labframe_density();
+            const auto fluid_velocity  = prim.velocity();
+            const auto specific_energy = prim.specific_energy(context.gamma);
+            const auto pressure        = prim.press();
+            const auto local_cs        = prim.sound_speed(context.gamma);
+
+            // calculate distance to black hole
+            const auto r_vector = cell_center - body.position;
+            const auto distance = std::sqrt(
+                vecops::dot(r_vector, r_vector) +
+                body.softening_length() * body.softening_length()
+            );
+            const auto accretion_radius = body.accretion_radius();
+            const auto accr_eff         = body.accretion_efficiency();
+            const auto r_scaled         = distance / accretion_radius;
+
+            // =========== PHYSICAL PARAMETERS ===========
+
+            // calculate local dynamical time
+            const T local_dynamical_time =
+                std::sqrt(std::pow(distance, 3) / body.mass);
+            const T sound_crossing_time = cell_width / local_cs;
+            // we define the safety sink rate to not exceed the local sound
+            // speed and 0.5 is an aditional safety margin
+            constexpr T safety_factor = 0.5;
+            const T max_allowed_sink_rate =
+                safety_factor * density / sound_crossing_time;
+
+            // calculate free-fall velocity
+            const T v_freefall = std::sqrt(2.0 * body.mass / distance);
+
+            // calculate specific angular momentum and circularization radius
+            T specific_angular_momentum;
+            if constexpr (Dims < 3) {
+                if constexpr (Dims == 1) {
+                    specific_angular_momentum = 0.0;
+                }
+                else {
+                    specific_angular_momentum = std::abs(
+                        vecops::cross(r_vector, fluid_velocity - body.velocity)
+                    );
+                }
+            }
+            else {
+                specific_angular_momentum =
+                    vecops::cross(r_vector, fluid_velocity - body.velocity)
+                        .norm();
+            }
+            const T r_circ = specific_angular_momentum *
+                             specific_angular_momentum / body.mass;
+
+            // =========== REGIME IDENTIFICATION ===========
+
+            // ID physical regime for this cell
+            enum class AccretionRegime {
+                DEEP_INTERIOR,       // we are cery close to black hole
+                TRANSITION_REGION,   // intermediate region
+                DISK_LIKE   // material with significant angular momentum
+            };
+
+            AccretionRegime regime;
+
+            // check for disk-like structure first
+            constexpr T r_circ_threshold   = 0.2;
+            constexpr T r_scale_threshold  = 0.3;
+            const T angular_momentum_ratio = r_circ / distance;
+            const bool high_angular_momentum =
+                angular_momentum_ratio > r_circ_threshold;
+
+            if (high_angular_momentum) {
+                regime = AccretionRegime::DISK_LIKE;
+            }
+            else if (r_scaled < r_scale_threshold) {
+                regime = AccretionRegime::DEEP_INTERIOR;
+            }
+            else {
+                regime = AccretionRegime::TRANSITION_REGION;
+            }
+
+            // =========== SINK TIMESCALE CALCULATION ===========
+
+            // base timescale dependent on regime
+            T sink_timescale;
+
+            switch (regime) {
+                case AccretionRegime::DEEP_INTERIOR: {
+                    // rapid removal in deep interior
+                    constexpr T deep_interior_factor = 0.1;
+                    sink_timescale =
+                        deep_interior_factor * local_dynamical_time;
+                } break;
+
+                case AccretionRegime::TRANSITION_REGION:
+                    // gradual transition to boundary
+                    {
+                        constexpr T blend_factor = 0.9;
+
+                        // smooth transition from deep interior to boundary
+                        const T transition_factor =
+                            (r_scaled - r_scale_threshold) /
+                            (1 - r_scale_threshold);
+                        const T blend = smoothstep(transition_factor);
+                        sink_timescale =
+                            ((1 - blend_factor) + blend_factor * blend) *
+                            local_dynamical_time;
+                    }
+                    break;
+
+                case AccretionRegime::DISK_LIKE:
+                    // use viscous-like timescale for disk material
+                    {
+                        // estimate alpha-disk viscous timescale
+                        // TODO: make context dependent?
+                        // Shakura-Sunyaev viscosity parameter
+                        const T alpha = 0.01;
+                        const T h_r =
+                            local_cs / std::sqrt(body.mass / distance);
+                        const T viscous_timescale =
+                            local_dynamical_time / (alpha * h_r * h_r);
+
+                        // scale with circularization radius - farther out means
+                        // slower accretion
+                        const T circ_factor = std::min(5.0, r_circ / distance);
+
+                        sink_timescale = viscous_timescale * circ_factor;
+                    }
+                    break;
+            }
+
+            // =========== VELOCITY PROFILE ===========
+
+            // calculate desired velocity field inside boundary
+            spatial_vector_t<T, Dims> desired_velocity;
+
+            switch (regime) {
+                case AccretionRegime::DEEP_INTERIOR:
+                    // pure radial infall for deep interior
+                    desired_velocity = -v_freefall * (r_vector / distance);
+                    break;
+
+                case AccretionRegime::TRANSITION_REGION:
+                    // transitional velocity field
+                    {
+                        // base velocity - radial component
+                        const auto radial_dir = r_vector / distance;
+                        const auto radial_vel = -v_freefall * radial_dir;
+
+                        // keep some of the original velocity's non-radial
+                        // component
+                        const auto current_radial =
+                            vecops::dot(fluid_velocity, radial_dir) *
+                            radial_dir;
+                        const auto current_nonradial =
+                            fluid_velocity - current_radial;
+
+                        // blend between pure infall and current tangential
+                        // component
+                        const T blend_factor = (r_scaled - r_scale_threshold) /
+                                               (1 - r_scale_threshold);
+                        const T tangential_retention = smoothstep(blend_factor);
+
+                        desired_velocity = radial_vel + tangential_retention *
+                                                            current_nonradial;
+                    }
+                    break;
+
+                case AccretionRegime::DISK_LIKE:
+                    // maintain rotational support but induce slow inspiral
+                    {
+                        // extract radial and tangential components
+                        const auto radial_dir = r_vector / distance;
+                        const auto current_radial =
+                            vecops::dot(fluid_velocity, radial_dir) *
+                            radial_dir;
+                        const auto current_nonradial =
+                            fluid_velocity - current_radial;
+
+                        // modified radial velocity - slower infall
+                        constexpr T radial_infall_factor = 0.1;
+                        const auto modified_radial =
+                            -radial_infall_factor * v_freefall * radial_dir;
+
+                        // keep non-radial component for disk structure
+                        desired_velocity =
+                            modified_radial +
+                            (1 - radial_infall_factor) * current_nonradial;
+                    }
+                    break;
+            }
+
+            // =========== PRESSURE TREATMENT ===========
+
+            // calculate pressure profile consistent with velocity field
+            T pressure_forcing = 0.0;
+
+            // only apply pressure forcing in certain regimes
+            if (regime != AccretionRegime::DISK_LIKE) {
+                // calculate pressure gradient needed to support desired
+                // velocity field
+                const T gravity = body.mass / (distance * distance);
+
+                T velocity_gradient;
+                if (regime == AccretionRegime::DEEP_INTERIOR) {
+                    // for v ~ r^(-1/2): dv/dr = -0.5v/r
+                    velocity_gradient = -0.5 * v_freefall / distance;
+                }
+                else {
+                    // approximate gradient for transition region
+                    velocity_gradient = -0.3 * v_freefall / distance;
+                }
+
+                // pressure gradient to balance forces: dp/dr = \rho v(dv/dr) -
+                // \rho g
+                const T desired_pressure_gradient =
+                    density * (v_freefall * velocity_gradient - gravity);
+
+                // current pressure gradient (approximate)
+                // simple approximation
+                const T current_pressure_gradient = -pressure / distance;
+
+                // pressure forcing to correct gradient
+                pressure_forcing =
+                    (desired_pressure_gradient - current_pressure_gradient) *
+                    distance / 3.0;
+            }
+
+            // =========== SINK TERM CALCULATION ===========
+
+            // calculate sink rate from timescale
+            const T sink_rate = density / sink_timescale;
+
+            // apply mathematically consistent sink for mass based on velocity
+            // divergence
+            T divergence_sink = 0.0;
+
+            if (regime == AccretionRegime::DEEP_INTERIOR) {
+                // for v ~ r^(-1/2), div(v) = -1.5v/r
+                divergence_sink = density * 1.5 * v_freefall / distance;
+            }
+            else if (regime == AccretionRegime::TRANSITION_REGION) {
+                // approximate divergence for transition region
+                divergence_sink = density * 0.8 * v_freefall / distance;
+            }
+
+            // final sink rate is the maximum of timescale-based and
+            // divergence-based sinks
+            const T final_sink_rate = std::max(sink_rate, divergence_sink);
+            const T mass_removed =
+                std::min(final_sink_rate, max_allowed_sink_rate) * dt *
+                accr_eff;
+
+            // =========== ENERGY TREATMENT ===========
+
+            // calculate energy removal consistent with physical processes
+            T energy_removed;
+
+            // different energy treatment based on regime
+            if (regime == AccretionRegime::DISK_LIKE) {
+                // for disk-like flow, account for energy release from viscous
+                // dissipation
+                // we use Virial theorem here [TODO: can we do better?]
+                const T orbital_energy       = -0.5 * body.mass / distance;
+                const T accretion_efficiency = body.accretion_efficiency();
+
+                // energy removed minus energy released by accretion
+                energy_removed =
+                    mass_removed *
+                    (specific_energy - orbital_energy * accretion_efficiency);
+            }
+            else {
+                // for direct infall, standard energy removal
+                energy_removed = mass_removed * specific_energy;
+
+                // account for gravitational energy release
+                // TODO: implement
+                // if (context.include_energy_release) {
+                //     const T gravitational_potential = -body.mass / distance;
+                //     const T kinetic_energy =
+                //         0.5 * vecops::dot(fluid_velocity, fluid_velocity);
+                //     const T binding_energy =
+                //         kinetic_energy + gravitational_potential;
+
+                //     // Typical accretion efficiency
+                //     const T accretion_efficiency = 0.1;
+
+                //     // Reduce energy removal due to energy release
+                //     energy_removed =
+                //         mass_removed * (specific_energy -
+                //                         binding_energy *
+                //                         accretion_efficiency);
+                // }
+            }
+
+            // =========== MOMENTUM AND VELOCITY FORCING ===========
+
+            // calculate momentum removal
+            const auto momentum_removed = mass_removed * fluid_velocity;
+
+            // velocity forcing to maintain desired profile
+            const auto velocity_difference = desired_velocity - fluid_velocity;
+            const auto velocity_forcing    = density * velocity_difference / dt;
+
+            // =========== FINAL UPDATE ===========
+
+            // combine all contributions
+            conserved_t result(
+                -mass_removed,                               // mass update
+                -momentum_removed + velocity_forcing * dt,   // momentum update
+                -energy_removed +
+                    vecops::dot(velocity_forcing, fluid_velocity) * dt +
+                    pressure_forcing * dt   // energy update
+            );
+
+            // update accretion statistics
+            delta.accreted_mass_delta  = mass_removed * cell_volume;
+            delta.accretion_rate_delta = mass_removed * cell_volume / dt;
+
+            return {result, delta};
+        }
+
+        template <typename T, size_type Dims, typename Primitive>
+        DEV std::pair<typename Primitive::counterpart_t, BodyDelta<T, Dims>>
+        apply_ibm_accretion(
+            size_type body_idx,
+            const Body<T, Dims>& body,
+            const Primitive& prim,
+            const Cell<Dims>& mesh_cell,
+            const HydroContext& context,
+            T dt
+        )
+        {
+
+            using conserved_t = typename Primitive::counterpart_t;
+            auto delta        = BodyDelta<T, Dims>{body_idx, {}, 0, 0, 0};
+
+            // cell properties
+            const auto center     = mesh_cell.cartesian_centroid();
+            const auto volume     = mesh_cell.volume();
+            const auto cell_width = mesh_cell.min_cell_width();
+
+            // distance to sink particle surface
+            const auto r_vector = center - body.position;
+            const auto softening_sq =
+                body.softening_length() * body.softening_length();
+            const auto distance =
+                std::sqrt(vecops::dot(r_vector, r_vector) + softening_sq);
+            const auto accretion_radius = body.accretion_radius();
+
+            // skip if too far away
+            if (distance > 1.5 * accretion_radius) {
+                return {conserved_t{}, delta};
+            }
+
+            // only apply to interior cells
+            if (distance < accretion_radius - 0.5 * cell_width) {
+                return apply_ibm_interior_treatment(
+                    body_idx,
+                    body,
+                    prim,
+                    mesh_cell,
+                    context,
+                    dt
+                );
+            }
+            // determin cell type relative to boundary
+            bool is_boundary_cell =
+                std::abs(distance - accretion_radius) < cell_width;
+            // const bool is_interior_cell =
+            //     distance < accretion_radius - 0.5 * cell_width;
+
+            if (!is_boundary_cell) {
+                // TODO: handle interior cells with direct sink treament
+                // although his is not part of IBM proper
+                return {conserved_t{}, delta};
+            }
+
+            // get local fluid properties
+            const auto density      = prim.labframe_density();
+            const auto vfluid       = prim.velocity();
+            const auto rel_velocity = prim.velocity() - body.velocity;
+
+            // desired boundary velocity calulcation (inflow for accretion)
+            const auto boundary_normal = -r_vector / distance;
+
+            // calculate specific angular momentum
+            T specific_angular_momentum = [&]() {
+                if constexpr (Dims < 3) {
+                    // 2D case: use z-component of angular momentum
+                    if constexpr (Dims == 1) {
+                        return 0.0;
+                    }
+                    else {
+                        return vecops::cross(r_vector, rel_velocity);
+                    }
+                }
+                else {
+                    return vecops::cross(r_vector, rel_velocity).norm();
+                }
+            }();
+
+            //  circularization radius
+            const T r_circ = specific_angular_momentum *
+                             specific_angular_momentum / body.mass;
+
+            //  timescales
+            const T dynamical_time =
+                std::sqrt(std::pow(distance, 3) / body.mass);
+            const T alpha = 0.01;   // Effective viscosity parameter
+
+            // I will define some "core radius"
+            // constexpr T core_radius = 0.1;   // Core radius for accretion
+
+            //  accretion timescale with angular momentum dependence
+            const auto final_accretion_time = [=]() {
+                if (r_circ < 0.1 * distance) {
+                    // direct accretion case
+                    return dynamical_time;
+                }
+                else {
+                    // disk formation case
+                    const T viscous_time = dynamical_time / alpha;
+                    // smooth transition based on circularization radius
+                    const T ratio = r_circ / (0.1 * distance);
+                    const T blend = ratio / (1.0 + ratio);
+                    return dynamical_time * (1.0 - blend) +
+                           viscous_time * blend;
+                }
+            }();
+
+            // set the boundary velocity based on free-fall speed
+            const T v_ff          = std::sqrt(2.0 * body.mass / distance);
+            const auto u_boundary = v_ff * boundary_normal;
+
+            // now we invoke Huang & Sung (2007)
+
+            // init mass sink term
+            T q = 0.0;
+
+            // check each face to see if it's crossed by the boundary
+            for (size_type f = 0; f < 2 * Dims; ++f) {
+                const auto normal     = mesh_cell.normal_vec(f);
+                const auto face_coord = mesh_cell.normal(f);
+                const auto face_vec   = normal * face_coord;
+
+                // calculate distance from face center to sink
+                const auto face_r_vector = face_vec - body.position;
+                const auto face_distance = std::sqrt(
+                    vecops::dot(face_r_vector, face_r_vector) + softening_sq
+                );
+
+                // check if this face is crossed by the boundary
+                // a face is crossed if the accretion radius lies between this
+                // face and the opposite face
+                bool is_crossed_face = false;
+
+                // for each direction (x, y, z), check the opposite face
+                size_type opposite_face = f % 2 == 0 ? f + 1 : f - 1;
+                const auto opp_norm     = mesh_cell.normal_vec(opposite_face);
+                const auto opp_coord    = mesh_cell.normal(opposite_face);
+                const auto opp_vec      = opp_norm * opp_coord;
+
+                const auto opp_face_r_vector = opp_vec - body.position;
+                const auto opp_face_distance = std::sqrt(
+                    vecops::dot(opp_face_r_vector, opp_face_r_vector) +
+                    softening_sq
+                );
+
+                // the boundary crosses between these faces if one is inside and
+                // one is outside
+                is_crossed_face = (face_distance < accretion_radius &&
+                                   opp_face_distance > accretion_radius) ||
+                                  (face_distance > accretion_radius &&
+                                   opp_face_distance < accretion_radius);
+
+                if (is_crossed_face) {
+                    // calc \beta (Eq. 18) for this face
+                    // beta = 1/2 - d/\delta x where d is distance from face to
+                    // boundary
+                    T beta_i =
+                        0.5 - (accretion_radius - face_distance) / cell_width;
+
+                    // get fluid velocity at face center (interpolate from cell
+                    // center)
+                    // simplified - TODO: ideally interpolate
+                    // from neighboring cells
+                    auto u_face = vfluid;
+
+                    // calc face-centered velocity for virtual cell
+                    auto u_c = [&]() -> spatial_vector_t<T, Dims> {
+                        if (beta_i > 0) {
+                            // face is outside boundary
+                            return beta_i / (1.0 + 2.0 * beta_i) * u_face;
+                        }
+                        else {
+                            // face is inside boundary
+                            return ((3.0 / 2.0) + (beta_i / 2.0)) * u_boundary -
+                                   ((1.0 / 2.0) + (beta_i / 2.0)) * u_face;
+                        }
+                    }();
+
+                    // calc mass flux term for this face (Eq. 24)
+                    // \omega * u \cdot n - \beta * u' \cdot n
+                    // Where \omega is 1 for forcing points and 0 otherwise
+                    T face_flux = 0.0;
+
+                    // If face is inside boundary, apply forcing (\omega = 1)
+                    if (face_distance < accretion_radius) {
+                        face_flux += vecops::dot(u_face, normal);
+                    }
+
+                    // apply virtual cell correction
+                    face_flux -= beta_i * vecops::dot(u_c, normal);
+
+                    // weight by face area and add to sink term
+                    q += face_flux * mesh_cell.area(f);
+                }
+            }
+
+            // normalize by cell volume
+            q /= volume;
+
+            // we are studying accretion, so we only want to consider
+            // negative fluxes
+            q = std::max(q, 0.0);
+
+            // scale by accretion timescale for angular momentum dependence
+            // note to self: this modifies the IBM sink term to account for
+            // angular momentum
+            if (q < 0) {   // only for inflow (negative flux)
+                q *= dynamical_time / final_accretion_time;
+            }
+
+            // apply sink term to create conserved update
+            // note that q * dt is the fractional change in density
+            // negative b/c q is positive for outflow
+            const T density_removed = density * q * dt;
+
+            // create conserved state update
+            // the negative sign because we are ADDING
+            // the source term to the conserved state
+            conserved_t result(
+                -density_removed,
+                -density_removed * vfluid,
+                -density_removed * prim.energy(context.gamma) / density
+            );
+
+            if (density_removed > 0.0) {
+                // update body statistics
+                delta.accreted_mass_delta  = density_removed * volume;
+                delta.accretion_rate_delta = density_removed * volume / dt;
+            }
+            return {result, delta};
         }
 
     }   // namespace accretion
@@ -542,7 +1127,6 @@ namespace simbi::ibsystem::body_functions {
                 return {bodies[0], bodies[1]};
             }
 
-            // Extract parameters
             const auto [body1_idx, body2_idx] = config->body_indices;
             // const T orbital_period            = config->orbital_period;
             const T semi_major = config->semi_major;
@@ -557,7 +1141,6 @@ namespace simbi::ibsystem::body_functions {
             const T total_mass = m1 + m2;
             // const T mass_ratio = m2 / m1;
 
-            // Load or calculate positions and velocities
             const auto& pos1 = body1.position;
             const auto& pos2 = body2.position;
             const auto& vel1 = body1.velocity;
@@ -575,7 +1158,6 @@ namespace simbi::ibsystem::body_functions {
             };
         }
 
-        // Calculate orbital timestep
         template <typename T, size_type Dims>
         T calculate_binary_timestep(
             const ibsystem::ComponentBodySystem<T, Dims>& system,
@@ -589,7 +1171,7 @@ namespace simbi::ibsystem::body_functions {
             }
 
             // for binary systems, a sensible timestep is a fraction of the
-            // orbital period
+            // orbital period. TODO: implement eccentric orbits
             return config->orbital_period * cfl / 100.0;
         }
 
