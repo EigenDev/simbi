@@ -96,10 +96,14 @@ namespace simbi {
 
         DUAL value_type& operator[](size_type ii)
         {
+            // bounds check
+            assert(ii < this->size_ && "Index out of boumds");
             return access(data_[ii] + this->compute_offset(this->offsets_));
         }
         DUAL value_type& operator[](size_type ii) const
         {
+            // bounds check
+            assert(ii < this->size_ && "Index out of bounds");
             return access(data_[ii] + this->compute_offset(this->offsets_));
         }
         template <typename... Indices>

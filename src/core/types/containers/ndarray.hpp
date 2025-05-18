@@ -207,9 +207,16 @@ namespace simbi {
         }
 
         // access operators
-        DUAL value_type& operator[](size_type ii) { return access(mem_[ii]); }
+        DUAL value_type& operator[](size_type ii)
+        {
+            // bounds check
+            assert(ii < this->size() && "Index out of bounds");
+            return access(mem_[ii]);
+        }
         DUAL value_type& operator[](size_type ii) const
         {
+            // bounds check
+            assert(ii < this->size() && "Index out of bounds");
             return access(mem_[ii]);
         }
 
@@ -644,26 +651,32 @@ namespace simbi {
             if constexpr (global::on_gpu) {
                 ndarray<U> result(1, init);
                 result.sync_to_device();
-                auto result_ptr = result.data();
-                auto arr        = mem_.data();
-                size_type size  = this->size_;
+                auto result_ptr      = result.data();
+                auto arr             = mem_.data();
+                const size_type size = this->size_;
 
                 // First pass: each thread block computes a partial reduction
                 parallel_for(policy, [=] DEV(size_type idx) {
                     extern __shared__ U shared_data[];
 
                     // Each thread initializes with its own value
-                    U thread_val =
-                        idx < size ? reduce_op(init, arr[idx], idx) : init;
+                    U thread_val = reduce_op(init, arr[idx], idx);
 
                     // Block-level reduction
-                    size_type tid    = get_thread_id();
+                    const size_type tid = get_thread_id();
+                    // const size_type bid   = get_block_id();
+                    // const auto block_size = get_threads_per_block();
                     shared_data[tid] = thread_val;
                     gpu::api::synchronize();
 
+                    // const size_type block_start_idx = bid * block_size;
+                    // const size_type block_end_idx =
+                    //     std::min(size, (bid + 1) * block_size);
+                    // const auto active_threads = block_end_idx -
+                    // block_start_idx;
+
                     // Reduce within block
-                    for (size_type s = get_threads_per_block() / 2; s > 0;
-                         s >>= 1) {
+                    for (size_type s = block_size / 2; s > 0; s >>= 1) {
                         if (tid < s && idx + s < size) {
                             shared_data[tid] =
                                 my_min(shared_data[tid], shared_data[tid + s]);
