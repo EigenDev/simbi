@@ -45,6 +45,10 @@ def visualize(config: dict[str, Any]) -> None:
     # Execute visualization
     with plotter:
         if config["plot"].kind == "movie":
+            if config["plot"].plot_type == "temporal":
+                raise ValueError(
+                    "Movie visualization is not supported for temporal plots."
+                )
             plotter.animate()
         else:
             plotter.plot()
