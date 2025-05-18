@@ -70,9 +70,14 @@ class GridSettings(BaseSettings):
     effective_dim: int
 
     @classmethod
-    def from_dict(cls, setup: dict[str, Any], spatial_order: str) -> "GridSettings":
-        # pad the resolution with ones up to 3D
-        dim: int = sum(s > 1 for s in setup["resolution"])
+    def from_dict(
+        cls, setup: dict[str, Any], spatial_order: str, is_mhd: bool
+    ) -> "GridSettings":
+        dim: int
+        if is_mhd:
+            dim = 3
+        else:
+            dim = sum(s > 1 for s in setup["resolution"])
         resolution: tuple[int, ...] = setup["resolution"]
         if len(resolution) < 3:
             resolution += (1,) * (3 - len(resolution))
