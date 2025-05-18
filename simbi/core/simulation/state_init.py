@@ -176,6 +176,7 @@ def try_checkpoint_initialization(
                 grid_config=GridSettings.from_dict(
                     overwrite_if_needed(settings["grid"], chkpt.metadata),
                     spatial_order=chkpt.metadata["spatial_order"],
+                    is_mhd=chkpt.metadata["is_mhd"],
                 ),
                 io_config=IOSettings.from_dict(
                     overwrite_if_needed(settings["io"], chkpt.metadata)
@@ -221,6 +222,7 @@ def try_fresh_initialization(
                 grid_config=GridSettings.from_dict(
                     settings["grid"],
                     spatial_order=settings["sim_state"]["spatial_order"],
+                    is_mhd=settings["sim_state"]["is_mhd"],
                 ),
                 io_config=IOSettings.from_dict(settings["io"]),
                 sim_config=SimulationSettings.from_dict(settings["sim_state"]),
