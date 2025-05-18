@@ -138,9 +138,12 @@ namespace simbi {
 
             // Create the data space for the dataset.
             hsize_t dims[1]   = {state.total_zones()};
-            hsize_t dimxv[1]  = {state.full_xvertex_policy().get_real_extent()};
-            hsize_t dimyv[1]  = {state.full_yvertex_policy().get_real_extent()};
-            hsize_t dimzv[1]  = {state.full_zvertex_policy().get_real_extent()};
+            hsize_t dimxv[1]  = {state.full_xvertex_policy().get_active_extent(
+            )};
+            hsize_t dimyv[1]  = {state.full_yvertex_policy().get_active_extent(
+            )};
+            hsize_t dimzv[1]  = {state.full_zvertex_policy().get_active_extent(
+            )};
             hsize_t dim_bc[1] = {
               state.solver_config().boundary_conditions().size()
             };
