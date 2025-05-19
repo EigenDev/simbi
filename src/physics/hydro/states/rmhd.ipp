@@ -1508,9 +1508,9 @@ void RMHD<dim>::update_magnetic_component(const ExecutionPolicy<>& policy)
             fri,
             gri,
             hri,
-            bstag1,
-            bstag2,
-            bstag3,
+            bstag1_old,
+            bstag2_old,
+            bstag3_old,
             prim
         );
 
@@ -1656,6 +1656,14 @@ void RMHD<dim>::advance_impl()
     }
     advance_conserved();
     this->apply_boundary_conditions();
+
+    if constexpr (comp_ct_type == CTTYPE::MdZ) {
+        // copy_from does a deep copy, but on device if need be,
+        // so we need not do any syncs
+        bstag1_old.copy_from(bstag1, this->full_xvertex_policy());
+        bstag2_old.copy_from(bstag2, this->full_yvertex_policy());
+        bstag3_old.copy_from(bstag3, this->full_zvertex_policy());
+    }
 }
 
 //===================================================================================================================
@@ -1698,5 +1706,14 @@ void RMHD<dim>::init_simulation()
     bstag3.reshape(
         {this->active_nz() + 1, this->active_ny() + 2, this->active_nx() + 2}
     );
+
+    // will need the current bfields if using the
+    // CT scheme of Mignone & Del Zanna (2021)
+    if constexpr (comp_ct_type == CTTYPE::MdZ) {
+        bstag1_old = bstag1;
+        bstag2_old = bstag2;
+        bstag3_old = bstag3;
+    }
+
     sync_all_to_device();
 };

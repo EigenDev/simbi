@@ -109,6 +109,7 @@ namespace simbi {
         /* Shared Data Members */
         ndarray<conserved_t, dim> fri, gri, hri;
         ndarray<real, dim> bstag1, bstag2, bstag3;
+        ndarray<real, dim> bstag1_old, bstag2_old, bstag3_old;
 
         RMHD();
         RMHD(
