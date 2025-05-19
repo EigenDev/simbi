@@ -39,7 +39,7 @@ dependencies = [
 
 [project.optional-dependencies]
 visual = ["cmasher"]
-gui = ["rich-argparse"]
+cli = ["rich-argparse"]
 
 [project.scripts]
 simbi = "simbi.cli.__main__:main"

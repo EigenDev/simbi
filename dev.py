@@ -572,7 +572,8 @@ def write_to_cache(args: argparse.Namespace) -> None:
     details.pop("func", None)
     details.pop("verbose", None)
     details.pop("configure", None)
-    details.pop("extras", None)
+    details.pop("cli", None)
+    details.pop("visual", None)
 
     # Add cache version
     details["_cache_version"] = CURRENT_CACHE_VERSION
@@ -596,7 +597,8 @@ def merge_cached_config(
             "verbose",
             "configure",
             "func",
-            "extras",
+            "cli_extras",
+            "visual_extras",
             "cpp_version",
             "build_type",
         ]:
@@ -766,10 +768,16 @@ def parse_the_arguments() -> Tuple[argparse.ArgumentParser, argparse.Namespace]:
         help="build directory name for meson build",
     )
     build_parser.add_argument(
-        "--extras",
+        "--cli-extras",
         action="store_true",
         default=False,
-        help="flag to install the optional dependencies",
+        help="flag to install the optional cli dependencies",
+    )
+    build_parser.add_argument(
+        "--visual-extras",
+        action="store_true",
+        default=False,
+        help="flag to install the optional visual dependencies",
     )
     build_parser.add_argument(
         "--four-velocity",
@@ -969,7 +977,10 @@ def install_simbi(args: argparse.Namespace) -> None:
     """Install the simbi package."""
     egg_dir, build_dir = build_simbi(args)
 
-    extras = "" if not args.extras else "[extras]"
+    extras = "" if not args.visual_extras else "[visual]"
+    if args.cli_extras:
+        extras += "[cli]" if not extras else ",[cli]"
+
     install_mode = (
         "." + extras if args.install_mode == "default" else "-e" + "." + extras
     )
