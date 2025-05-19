@@ -11,7 +11,8 @@ authors = [
 description = "Python module to solve hydrodynamic equations using a hip/cuda/c++ backend"
 requires-python = ">=3.10"
 keywords = ["physics", "relativity"]
-license = {file = 'LICENSE'}
+license = "MIT"
+license-files = ["LICENSE"]
 classifiers = [
     "Programming Language :: Python :: 3",
     "Programming Language :: C++",
@@ -33,20 +34,15 @@ dependencies = [
     "matplotlib",
     "astropy",
     "halo",
+    "rich",
 ]
 
 [project.optional-dependencies]
-extras = [
-  "rich-argparse",
-  "cmasher",
-  "rich",
-]
+visual = ["cmasher"]
+gui = ["rich-argparse"]
 
 [project.scripts]
 simbi = "simbi.cli.__main__:main"
-
-[options]
-zip_safe = false
 
 [tool.setuptools]
 packages = ["simbi"]
