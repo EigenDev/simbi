@@ -60,7 +60,9 @@
 #include "core/types/utility/init_conditions.hpp"   // for InitialConditions
 #include "core/types/utility/managed.hpp"           // for Managed
 #include "geometry/mesh/mesh.hpp"                   // for Mesh
-#include "io/console/logger.hpp"                    // for logger
+#include "geometry/mesh/refinement/fmr/refinement_functions.hpp"   // for prolongate_value, prolongate
+#include "geometry/mesh/refinement/fmr/refinement_manager.hpp"   // for refinement_manager
+#include "io/console/logger.hpp"                                 // for logger
 #include "physics/hydro/schemes/ib/systems/body_system_operations.hpp"
 #include "physics/hydro/schemes/ib/systems/component_body_system.hpp"
 #include "physics/hydro/schemes/ib/systems/component_generator.hpp"
@@ -180,6 +182,15 @@ namespace simbi {
         util::smart_ptr<ibsystem::GridBodyDeltaCollector<real, Dims>>
             collector_;
         HydroContext context_;
+
+        // fmr-related members
+        struct level_data_t {
+            ndarray<Maybe<primitive_t>, Dims> prims;
+            ndarray<conserved_t, Dims> cons;
+        };
+        std::vector<level_data_t> level_data_;
+        refinement::refinement_manager<Dims> refine_mgr_;
+        bool using_refinement_{false};
 
         // ctors and dtors
         HydroBase() = default;
@@ -307,7 +318,7 @@ namespace simbi {
 
             cons_.resize(this->total_zones()).reshape({nz(), ny(), nx()});
             prims_.resize(this->total_zones()).reshape({nz(), ny(), nx()});
-            // Move the state array
+
             for (size_type ii = 0; ii < this->total_zones(); ii++) {
                 for (int q = 0; q < conserved_t::nmem; q++) {
                     cons_[ii][q] = state_[q][ii];
@@ -315,17 +326,21 @@ namespace simbi {
             }
             deallocate_state();
 
-            // Initialize simulation
+            if (using_refinement_) {
+                init_refinement_levels();
+            }
+
+            // init simulation
             derived.init_simulation();
             derived.cons2prim_impl();
             adapt_dt();
 
-            // Main simulation loop
+            // main simulation loop
             detail::logger::with_logger(derived, tend(), [&] {
-                // Single timestep advance
+                // single timestep advance
                 advance_system();
 
-                // Update time
+                // update time
                 time_manager_.advance(step());
 
                 // move the mesh if needed
@@ -336,9 +351,10 @@ namespace simbi {
         void advance_system()
         {
             auto& derived = static_cast<Derived&>(*this);
-
             // gas dynamics (might include immersed body effects)
             derived.advance_impl();
+            // ensure consistency b/w levels via restriction
+            synchronize_levels();
             derived.cons2prim_impl();
             adapt_dt();
 
@@ -351,6 +367,188 @@ namespace simbi {
                     time(),
                     time_step()
                 );
+            }
+        }
+
+        //--- Level-Specific Functions ---//
+
+        // calculate the shape of the level arrays
+        auto calculate_level_shape(size_type level) const
+        {
+            if (level == 0) {
+                // base level shape - the entire domain
+                return array_t<size_type, Dims>{nz(), ny(), nx()};
+            }
+
+            array_t<size_type, Dims> shape;
+            const size_type rf = refine_mgr_.refinement_factor;
+
+            for (size_type i = 0; i < Dims; ++i) {
+                shape[i] = 0;
+            }
+
+            // expand shape to cover all refinement regions at this level
+            for (const auto& region : refine_mgr_.regions[level - 1]) {
+                for (size_type ii = 0; ii < Dims; ++ii) {
+                    // calc refined size of this region
+                    size_type region_size =
+                        (region.max_bounds[ii] - region.min_bounds[ii]) * rf;
+                    // add ghost zones on both sides
+                    region_size += 2 * halo_radius();
+                    // update shape to maximum required
+                    shape[ii] = std::max(shape[ii], region_size);
+                }
+            }
+
+            return shape;
+        }
+
+        // create a policy for the given level
+        auto create_level_policy(size_type level) const
+        {
+            if (level == 0) {
+                return full_policy();
+            }
+
+            // for refine levels, create policies based on the level's
+            // array sizes
+            return ExecutionPolicy<>{
+              // cons and prim have the same shape
+              level_data_[level].cons.shape(),
+              {128, 1, 1}   // default block size, TODO: make this configurable
+            };
+        }
+
+        // update the boundaries of the level data
+        void update_level_boundaries(size_type level)
+        {
+            if (!using_refinement_ || level >= refine_mgr_.max_level) {
+                return;
+            }
+
+            // coarse level -> fine level (prolongation to fill ghost zones)
+            // this prepares the fine level for computation
+            for (const auto& region : refine_mgr_.regions[level]) {
+                // create expanded region that includes ghost zones
+                refinement::refinement_region<Dims> ghost_region = region;
+
+                // expand region to include ghost zones
+                for (size_type i = 0; i < Dims; ++i) {
+                    ghost_region.min_bounds[i] =
+                        (region.min_bounds[i] > halo_radius())
+                            ? region.min_bounds[i] - halo_radius()
+                            : 0;
+
+                    ghost_region.max_bounds[i] = std::min(
+                        region.max_bounds[i] + halo_radius(),
+                        level_data_[level].cons.shape()[i]
+                    );
+                }
+
+                // fill ghost zones via prolongation
+                refinement::prolongate(
+                    level_data_[level].cons,
+                    level_data_[level + 1].cons,
+                    ghost_region,
+                    refine_mgr_.refinement_factor
+                );
+            }
+        }
+
+        // synchronize levels
+        auto synchronize_levels()
+        {
+            // restrict the data from the finest level to the coarse level
+            for (size_type level = refine_mgr_.max_level; level > 0; --level) {
+                auto& fine_data   = level_data_[level].cons;
+                auto& coarse_data = level_data_[level - 1].cons;
+
+                // restrict the fine data to the coarse data
+                refinement::restrict(
+                    fine_data,
+                    coarse_data,
+                    refine_mgr_.regions[level - 1],
+                    refine_mgr_.refinement_factor,
+                    exec_policy_manager_.create_policy(coarse_data.shape())
+                );
+            }
+        }
+
+        //=== FMR ===//
+        // my attempt at learning to implement fmr :P
+        void init_refinement_levels()
+        {
+            // set up the level_data_ vector (level 0 is the base level)
+            const size_type max_level = refine_mgr_.max_level;
+            level_data_.resize(max_level + 1);
+
+            // init level 0 with the base grid data
+            level_data_[0].cons  = cons_;
+            level_data_[0].prims = prims_;
+
+            // for each subsequent level, init refined regions
+            for (size_type level = 1; level <= max_level; ++level) {
+                // determine shape for this level's arrays
+                auto level_shape = calculate_level_shape(level);
+
+                // resize arrays for this level
+                level_data_[level].cons.resize(level_shape);
+                level_data_[level].prims.resize(level_shape);
+
+                // for each region at this level, init via prolongation
+                const size_type prev_level = level - 1;
+                for (const auto& region : refine_mgr_.regions[prev_level]) {
+                    // prolongate conserved variables from coarse to fine level
+                    refinement::prolongate(
+                        level_data_[prev_level].cons,
+                        level_data_[level].cons,
+                        region,
+                        refine_mgr_.refinement_factor
+                    );
+                }
+            }
+        }
+
+        // get conserved variables at a specific level
+        const ndarray<conserved_t, Dims>& level_conserved(size_type level) const
+        {
+            if (level == 0 || !using_refinement_) {
+                return cons_;   // backwards compat
+            }
+            else {
+                return level_data_[level].cons;
+            }
+        }
+
+        // get primitive variables at a specific level
+        const ndarray<Maybe<primitive_t>, Dims>&
+        level_primitives(size_type level) const
+        {
+            if (level == 0 || !using_refinement_) {
+                return prims_;   // backwards compat
+            }
+            else {
+                return level_data_[level].prims;
+            }
+        }
+
+        conserved_t conserved_at_position(
+            const array_t<size_type, Dims>& coarse_coords
+        ) const
+        {
+            if (!using_refinement_) {
+                return cons_.access(coarse_coords);
+            }
+
+            // find the finest level that contains this position
+            size_type level = refine_mgr_.level_at(coarse_coords);
+
+            if (level == 0) {
+                return level_data_[0].cons.access(coarse_coords);
+            }
+            else {
+                auto fine_coords = refine_mgr_.coarse_to_fine(coarse_coords);
+                return level_data_[level].cons.access(fine_coords);
             }
         }
 
