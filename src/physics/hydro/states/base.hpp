@@ -50,6 +50,7 @@
 #define BASE_HPP
 
 #include "build_options.hpp"   // for real, luint, global::managed_memory, use...
+#include "core/functional/fp.hpp"
 #include "core/managers/boundary_manager.hpp"      // for boundary_manager
 #include "core/managers/exec_policy_manager.hpp"   // for ExecutionPolicy
 #include "core/managers/io_manager.hpp"            // for IOManager
@@ -462,21 +463,20 @@ namespace simbi {
         }
 
         // synchronize levels
-        auto synchronize_levels()
+        void synchronize_levels()
         {
-            // restrict the data from the finest level to the coarse level
+            // work from finest to coarsest level
             for (size_type level = refine_mgr_.max_level; level > 0; --level) {
-                auto& fine_data   = level_data_[level].cons;
-                auto& coarse_data = level_data_[level - 1].cons;
-
-                // restrict the fine data to the coarse data
-                refinement::restrict(
-                    fine_data,
-                    coarse_data,
-                    refine_mgr_.regions[level - 1],
-                    refine_mgr_.refinement_factor,
-                    exec_policy_manager_.create_policy(coarse_data.shape())
-                );
+                // for each refinement region
+                for (const auto& region : refine_mgr_.regions[level - 1]) {
+                    // Restrict data from fine to coarse
+                    refinement::restrict(
+                        level_data_[level].cons,
+                        level_data_[level - 1].cons,
+                        region,
+                        refine_mgr_.refinement_factor
+                    );
+                }
             }
         }
 
@@ -496,10 +496,11 @@ namespace simbi {
             for (size_type level = 1; level <= max_level; ++level) {
                 // determine shape for this level's arrays
                 auto level_shape = calculate_level_shape(level);
+                auto level_size  = fp::product(level_shape);
 
                 // resize arrays for this level
-                level_data_[level].cons.resize(level_shape);
-                level_data_[level].prims.resize(level_shape);
+                level_data_[level].cons.resize(level_size);
+                level_data_[level].prims.resize(level_size);
 
                 // for each region at this level, init via prolongation
                 const size_type prev_level = level - 1;
