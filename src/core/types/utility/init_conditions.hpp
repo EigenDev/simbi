@@ -51,10 +51,8 @@
 
 #include "build_options.hpp"   // for real
 #include "config_dict.hpp"     // for ConfigDict
-#include "core/types/containers/vector.hpp"
 #include "core/types/utility/enums.hpp"
 #include "enums.hpp"
-#include <cinttypes>
 #include <memory>
 #include <unordered_map>
 #include <utility>
