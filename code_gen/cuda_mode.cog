@@ -87,7 +87,7 @@ namespace global {
 }   // namespace global
 
 namespace global {
-    constexpr int WARP_SIZE = 32;
+    constexpr size_type WARP_SIZE = 32;
 }   // namespace global
 
 template <typename T>
@@ -170,6 +170,11 @@ template <typename T>
 __device__ __forceinline__ T devAtomicMin(T* addr, T value)
 {
     return atomicMin(addr, value);
+}
+
+inline auto devPrefetchAsync(const void* dec_ptr, size_t size, int dst_device, cudaStream_t stream = 0)
+{
+    return cudaMemPrefetchAsync(dec_ptr, size, dst_device, stream);
 }
 
 constexpr auto devMemcpy               = cudaMemcpy;

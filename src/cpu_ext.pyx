@@ -76,14 +76,13 @@ cdef class SimState:
         a: callable[[float], float],
         adot: callable[[float], float]
     ):
-        # Convert the Python dictionary to a ConfigDict
+        # comvert the Python dictionary to a ConfigDict
         cdef ConfigDict config_dict = convert_python_to_config_dict(sim_info)
-        # Create InitialConditions using the builder pattern
         cdef InitialConditions sim_cond = InitialConditions.create(config_dict)
 
         cdef PyObjWrapper a_cpp = PyObjWrapper(a)
         cdef PyObjWrapper adot_cpp = PyObjWrapper(adot)
-
+        print("Running simulation with state:")
         self.driver_state.run(
             state,
             sim_info["dimensionality"],

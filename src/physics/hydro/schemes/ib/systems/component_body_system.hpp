@@ -461,6 +461,13 @@ namespace simbi::ibsystem {
             return properties;
         }
 
+        void sync_to_device()
+        {
+            bodies_.sync_to_device();
+            grav_body_indices_.sync_to_device();
+            accr_body_indices_.sync_to_device();
+        }
+
       private:
         const MeshType& mesh_;
 

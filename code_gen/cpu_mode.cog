@@ -15,7 +15,7 @@ void store_atomic_bool(T& var, bool value)
 
 namespace global {
     constexpr auto BuildPlatform = Platform::CPU;
-    constexpr int WARP_SIZE      = 32;
+    constexpr size_type WARP_SIZE      = 32;
     // shorthand flag for using gpu shared memory
     constexpr bool on_sm = false;
 }   // namespace global
@@ -28,7 +28,7 @@ namespace global {
 #define KERNEL
 #define DUAL
 #define SHARED     const
-#define __shared__ static
+#define __shared__
 #define EXTERN     static
 #define STATIC_VAR static
 

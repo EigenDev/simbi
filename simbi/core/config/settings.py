@@ -67,12 +67,12 @@ class GridSettings(BaseSettings):
     nyv: int  # Number of vertices in the y-direction
     nzv: int  # Number of vertices in the z-direction
     nghosts: int  # Number of ghost cells
-    dimensionality: int
+    effective_dim: int
 
     @classmethod
     def from_dict(cls, setup: dict[str, Any], spatial_order: str) -> "GridSettings":
         # pad the resolution with ones up to 3D
-        dim: int = len(setup["resolution"])
+        dim: int = sum(s > 1 for s in setup["resolution"])
         resolution: tuple[int, ...] = setup["resolution"]
         if len(resolution) < 3:
             resolution += (1,) * (3 - len(resolution))
@@ -86,7 +86,7 @@ class GridSettings(BaseSettings):
             nyv=ny_active + 1,
             nzv=nz_active + 1,
             nghosts=nghosts,
-            dimensionality=dim,
+            effective_dim=dim,
         )
 
     @classmethod
@@ -97,16 +97,16 @@ class GridSettings(BaseSettings):
 
         nghosts = 2 * (1 + (cli_args["spatial_order"] == "plm"))
         nx_active, ny_active, nz_active = instance.resolution
-        dimensionality = instance.dimensionality
+        dim = instance.effective_dim
         return cls(
             nx=nx_active + nghosts,
-            ny=ny_active + nghosts * (dimensionality > 1),
-            nz=nz_active + nghosts * (dimensionality > 2),
+            ny=ny_active + nghosts * (dim > 1),
+            nz=nz_active + nghosts * (dim > 2),
             nxv=nx_active + 1,
             nyv=ny_active + 1,
             nzv=nz_active + 1,
             nghosts=nghosts,
-            dimensionality=dimensionality,
+            effective_dim=dim,
         )
 
     def to_execution_dict(self) -> dict[str, Any]:
@@ -119,7 +119,7 @@ class GridSettings(BaseSettings):
             "nyv": self.nyv,
             "nzv": self.nzv,
             "nghosts": self.nghosts,
-            "dimensionality": self.dimensionality,
+            "effective_dim": self.effective_dim,
         }
 
     @property

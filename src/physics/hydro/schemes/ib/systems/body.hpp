@@ -166,13 +166,17 @@ namespace simbi::ibsystem {
             return new_body;
         }
 
-        DUAL Body<T, Dims> with_accretion(T efficiency, T accr_radius = 0) const
+        DUAL Body<T, Dims> with_accretion(
+            T efficiency,
+            T accr_radius         = 0,
+            T total_accreted_mass = 0
+        ) const
         {
             Body<T, Dims> new_body = *this;
             new_body.accretion     = AccretionComponent<T>{
               efficiency,
               accr_radius <= 0 ? radius : accr_radius,
-              T(0)   // Initial accreted mass
+              total_accreted_mass
             };
             return new_body;
         }

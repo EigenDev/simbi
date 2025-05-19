@@ -1,6 +1,7 @@
 from dataclasses import dataclass
 from ..config import GPUConfig
 from ...io.logging import logger
+from ...io.summary import print_simulation_parameters
 from ...functional.utilities import pipe
 from ...functional.helpers import tuple_of_tuples, print_progress, to_tuple_of_pairs
 from .builder import SimStateBuilder
@@ -47,12 +48,9 @@ class SimulationRunner:
 
     def _execute_simulation(self, executor: Any, sim_state: dict[str, Any]) -> None:
         """Execute simulation using loaded module"""
-        # Reshape state for contiguous memory access
         state_contig = self.bundle.state.reshape(self.bundle.state.shape[0], -1)
-        # Give user a chance to check their params
         print_progress()
 
-        # Execute simulation
         executor().run(
             state=state_contig,
             sim_info=sim_state,
@@ -60,75 +58,9 @@ class SimulationRunner:
             adot=self.bundle.mesh_config.scale_factor_derivative or (lambda t: 0.0),
         )
 
-    def _print_simulation_parameter_summary(
-        self, sim_state: dict[str, Any]
-    ) -> dict[str, Any]:
-        logger.info("=" * 80)
-        logger.info("Simulation Parameters")
-        logger.info("=" * 80)
-
-        def format_tuple_of_tuples(param: Any) -> str:
-            if tuple_of_tuples(param):
-                formatted = tuple(
-                    tuple(
-                        f"{x:.3f}" if isinstance(x, float) else str(x)
-                        for x in inner_tuple
-                    )
-                    for inner_tuple in param
-                )
-                return str(formatted).replace("'", "").replace(" ", "")
-            else:
-                return str(param)
-
-        def format_param(param: Any) -> str:
-            """
-            Format the parameter for logging.
-
-            Parameters:
-                param (Any): The parameter to format.
-
-            Returns:
-                str: The formatted parameter as a string.
-            """
-            if isinstance(param, (float, np.float64)):
-                return f"{param:.3f}"
-            elif callable(param):
-                return f"user-defined {param.__name__} function"
-            elif isinstance(param, (list, np.ndarray)):
-                if len(param) > 6:
-                    return f"user-defined {param.__class__.__name__} terms"
-                return to_tuple_of_pairs(list(format_param(p) for p in param))  # type: ignore
-            elif isinstance(param, tuple):
-                return format_tuple_of_tuples(param)
-
-            x = param.decode("utf-8") if isinstance(param, bytes) else str(param)
-            if x == "":
-                return "None"
-            return x
-
-        for key, param in sim_state.items():
-            if key in [
-                "bx1_inner_expressions",
-                "bx1_outer_expressions",
-                "bx2_inner_expressions",
-                "bx2_outer_expressions",
-                "bx3_inner_expressions",
-                "bx3_outer_expressions",
-                "gravity_source_expressions",
-                "hydro_source_expressions",
-                "local_sound_speed_expressions",
-            ]:
-                if not param:
-                    continue
-                val_str = "user-defined source expressions"
-                logger.info(f"{key.ljust(30, '.')} {val_str}")
-            elif key not in ["bfield", "staggered_bfields", "bodies", "body_system"]:
-                val_str = format_param(param)
-                logger.info(f"{key.ljust(30, '.')} {val_str}")
-
-        logger.info("=" * 80)
-
-        return sim_state
+    def _print_simulation_summary_(self, sim_state: dict[str, Any]) -> dict[str, Any]:
+        """pretty print simulation parameters"""
+        return print_simulation_parameters(sim_state)
 
     def run(self, **cli_args: Any) -> None:
         """Run simulation with functional composition"""
@@ -136,6 +68,6 @@ class SimulationRunner:
             None,
             lambda _: self._setup_compute_environment(cli_args["compute_mode"]),
             lambda executor: (executor, self._prepare_simulation_state(cli_args)),
-            lambda args: (args[0], self._print_simulation_parameter_summary(args[1])),
+            lambda args: (args[0], self._print_simulation_summary_(args[1])),
             lambda args: self._execute_simulation(args[0], args[1]),
         )

@@ -66,8 +66,10 @@
 #include "physics/hydro/schemes/ib/systems/body_system_operations.hpp"
 #include "physics/hydro/schemes/ib/systems/component_body_system.hpp"
 #include "physics/hydro/schemes/ib/systems/component_generator.hpp"
+#include "physics/hydro/schemes/viscosity/viscous.hpp"   // for visc::get_minimum_viscous_time
 #include "physics/hydro/types/context.hpp"           // for HydroContext
 #include "physics/hydro/types/generic_structs.hpp"   // for anyConserved, anyPrimitive
+#include "util/tools/device_api.hpp"
 #include "util/tools/helpers.hpp"
 #include <limits>
 
@@ -120,13 +122,17 @@ namespace simbi {
                 );
             }
 
-            // if viscosity is present, we must also be aware of the viscous
-            // time
-            // real viscous_dt = std::numeric_limits<real>::infinity();
-            // if (!goes_to_zero(viscosity())) {
-            //     viscous_dt = visc::get_minimum_viscous_time(*this);
-            // }
-            time_manager_.set_dt(std::min(gas_dt, system_dt));
+            // if viscosity is present, limit the dt to the minimum viscous time
+            real viscous_dt = std::numeric_limits<real>::infinity();
+            if (!goes_to_zero(viscosity())) {
+                viscous_dt = cfl_ * visc::get_minimum_viscous_time(
+                                        full_policy(),
+                                        mesh(),
+                                        viscosity()
+                                    );
+            }
+
+            time_manager_.set_dt(std::min({gas_dt, system_dt, viscous_dt}));
         }
 
         DEV conserved_t ib_sources(
@@ -315,7 +321,6 @@ namespace simbi {
         )
         {
             auto& derived = static_cast<Derived&>(*this);
-
             cons_.resize(this->total_zones()).reshape({nz(), ny(), nx()});
             prims_.resize(this->total_zones()).reshape({nz(), ny(), nx()});
 
@@ -367,6 +372,7 @@ namespace simbi {
                     time(),
                     time_step()
                 );
+                body_system_->sync_to_device();
             }
         }
 

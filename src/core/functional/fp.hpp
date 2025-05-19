@@ -20,7 +20,10 @@
 #define FUNCTIONAL_PROGRAMMING_HPP
 
 #include "build_options.hpp"
+#include "core/types/containers/ndarray.hpp"
 #include "core/types/utility/enums.hpp"
+#include "util/parallel/exec_policy.hpp"
+#include "util/tools/device_api.hpp"
 #include <concepts>
 #include <functional>
 #include <type_traits>
@@ -286,6 +289,86 @@ namespace simbi::fp {
     {
         return std::invoke(std::forward<F>(f), std::forward<T>(value));
     }
+
+    // parallel reduce: reduce a range of indices using an execution policy
+    template <typename T, typename F>
+    T reduce(const ExecutionPolicy<>& policy, T init, F&& reduce_op)
+    {
+        if constexpr (global::on_gpu) {
+            ndarray<T> result(1, init);
+            result.sync_to_device();
+            auto result_ptr      = result.data();
+            const size_type size = policy.get_full_extent();
+
+            // define a kernel function that processes each element and
+            // atomically updates the result
+            parallel_for(policy, [=] DEV(size_type idx) {
+                extern SHARED T shared_data[];
+                T thread_val = idx < size ? reduce_op(init, idx) : init;
+
+                // block-level reduction
+                size_type tid    = get_thread_id();
+                shared_data[tid] = thread_val;
+                gpu::api::synchronize();
+
+                // reduce within block
+                for (size_type s = get_threads_per_block() / 2; s > 0;
+                     s >>= 1) {
+                    if (tid < s && idx + s < size) {
+                        shared_data[tid] =
+                            my_min(shared_data[tid], shared_data[tid + s]);
+                    }
+                    gpu::api::synchronize();
+                }
+
+                // write block result to global memory
+                if (tid == 0) {
+                    gpu::api::atomicMin(&result_ptr[0], shared_data[0]);
+                }
+            });
+
+            // sync to ensure all threads have completed
+            policy.synchronize();
+
+            // copy result back to host
+            result.sync_to_host();
+            return result[0];
+        }
+        else {
+            // cpu implementation using atomic for thread safety
+            std::atomic<T> result(init);
+            const size_type batch_size = policy.batch_size;
+            const size_type num_batches =
+                policy.get_num_batches(policy.get_full_extent());
+
+            parallel_for(policy, num_batches, [&](size_type bid) {
+                const size_type start = bid * batch_size;
+                const size_type end =
+                    std::min(start + batch_size, policy.get_full_extent());
+
+                // process each element in this batch
+                T local_min = init;
+                for (size_type idx = start; idx < end; idx++) {
+                    local_min = std::min(local_min, reduce_op(init, idx));
+                }
+
+                // atomically update the global minimum
+                T current_min = result.load(std::memory_order_relaxed);
+                while (local_min < current_min && !result.compare_exchange_weak(
+                                                      current_min,
+                                                      local_min,
+                                                      std::memory_order_release,
+                                                      std::memory_order_relaxed
+                                                  )) {
+                    // keep trying if the comparison failed but our value is
+                    // still smaller
+                }
+            });
+
+            return result.load(std::memory_order_acquire);
+        }
+    }
+
 }   // namespace simbi::fp
 
 #endif

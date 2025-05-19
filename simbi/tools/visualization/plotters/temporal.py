@@ -200,7 +200,7 @@ class TemporalPlotter(BasePlotter, DataHandlerMixin, AnimationMixin, Coordinates
 
             # plot this body's data
             self.frames.append(
-                self.axes.plot(times, body_data, label=label, alpha=1.0)[0]
+                self.axes.plot(times, body_data, label=label, alpha=1.0, marker="o")[0]
             )
 
         # set title based on what we're plotting

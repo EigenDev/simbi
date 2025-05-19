@@ -50,6 +50,7 @@
 #define COMPONENT_GENERATOR_HPP
 
 #include "build_options.hpp"
+#include "core/functional/fp.hpp"
 #include "core/types/utility/smart_ptr.hpp"
 #include "physics/hydro/schemes/ib/policies/interaction_functions.hpp"
 #include "physics/hydro/schemes/ib/systems/component_body_system.hpp"
@@ -192,11 +193,9 @@ namespace simbi::ibsystem {
 
                         // if the initial positions are null, use the semi-major
                         // axis to set the initial positions
-                        if (std::all_of(
-                                pos_vec1.begin(),
-                                pos_vec1.end(),
-                                [](real val) { return val == 0.0; }
-                            )) {
+                        if (fp::all_of(pos_vec1, [](real val) {
+                                return val == 0.0;
+                            })) {
                             std::tie(pos_vec1, pos_vec2) =
                                 body_functions::binary::initial_positions<Dims>(
                                     semi_major,
@@ -205,11 +204,9 @@ namespace simbi::ibsystem {
                         }
                         // if the initial velocities are null, use the
                         // semi-major axis to set the initial velocities
-                        if (std::all_of(
-                                vel_vec1.begin(),
-                                vel_vec1.end(),
-                                [](real val) { return val == 0.0; }
-                            )) {
+                        if (fp::all_of(vel_vec1, [](real val) {
+                                return val == 0.0;
+                            })) {
                             std::tie(vel_vec1, vel_vec2) =
                                 body_functions::binary::initial_velocities<
                                     Dims>(
@@ -240,7 +237,9 @@ namespace simbi::ibsystem {
                             body1 = body1.with_accretion(
                                 comp1.at("accretion_efficiency")
                                     .template get<T>(),
-                                comp1.at("accretion_radius").template get<T>()
+                                comp1.at("accretion_radius").template get<T>(),
+                                comp1.at("total_accreted_mass")
+                                    .template get<T>()
                             );
                         }
 
@@ -269,7 +268,9 @@ namespace simbi::ibsystem {
                             body2 = body2.with_accretion(
                                 comp2.at("accretion_efficiency")
                                     .template get<T>(),
-                                comp2.at("accretion_radius").template get<T>()
+                                comp2.at("accretion_radius").template get<T>(),
+                                comp2.at("total_accreted_mass")
+                                    .template get<T>()
                             );
                         }
 
