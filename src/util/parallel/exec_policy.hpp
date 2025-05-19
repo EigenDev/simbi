@@ -101,10 +101,10 @@ namespace simbi {
         ~ExecutionPolicy() = default;
         ExecutionPolicy()  = default;
 
-        // Vector constructor with config
+        template <size_type Dims>
         ExecutionPolicy(
-            const simbi::array_t<T, 3>& grid_sizes,
-            const simbi::array_t<U, 3>& block_sizes,
+            const simbi::array_t<T, Dims>& grid_sizes,
+            const simbi::array_t<U, Dims>& block_sizes,
             const ExecutionPolicyConfig& config = {}
         )
             : shared_mem_bytes(config.shared_mem_bytes),
@@ -117,6 +117,43 @@ namespace simbi {
             if (grid_sizes.size() != block_sizes.size()) {
                 throw ExecutionException();
             }
+            init_devices();
+            build_grid(grid_sizes, block_sizes);
+        }
+
+        ExecutionPolicy(
+            std::initializer_list<T> grid_sizes_list,
+            std::initializer_list<U> block_sizes_list,
+            const ExecutionPolicyConfig& config = {}
+        )
+            : shared_mem_bytes(config.shared_mem_bytes),
+              streams(config.streams),
+              devices(config.devices),
+              batch_size(config.batch_size),
+              min_elements_per_thread(config.min_elements_per_thread),
+              config(config)
+        {
+            if (grid_sizes_list.size() != block_sizes_list.size() ||
+                grid_sizes_list.size() > 3) {
+                throw ExecutionException();
+            }
+
+            simbi::array_t<T, 3> grid_sizes;
+            simbi::array_t<U, 3> block_sizes;
+
+            // Copy the provided dimensions
+            size_type dim = grid_sizes_list.size();
+            for (size_type i = 0; i < dim; ++i) {
+                grid_sizes[i]  = *(grid_sizes_list.begin() + i);
+                block_sizes[i] = *(block_sizes_list.begin() + i);
+            }
+
+            // Set remaining dimensions to 1
+            for (size_type i = dim; i < 3; ++i) {
+                grid_sizes[i]  = 1;
+                block_sizes[i] = 1;
+            }
+
             init_devices();
             build_grid(grid_sizes, block_sizes);
         }
@@ -152,14 +189,17 @@ namespace simbi {
         }
 
         // build grid to handle multiple devices
+        template <size_type Dims>
         void build_grid(
-            const simbi::array_t<T, 3> grid_list,
-            const simbi::array_t<U, 3> block_list
+            const simbi::array_t<T, Dims> grid_list,
+            const simbi::array_t<U, Dims> block_list
         )
         {
             // store original grid dimensions
-            this->grid_list  = grid_list;
-            this->block_list = block_list;
+            for (size_t ii = 0; ii < grid_list.size(); ii++) {
+                this->grid_list[ii]  = grid_list[ii];
+                this->block_list[ii] = block_list[ii];
+            }
 
             // Calculate total zoness
             if (grid_list.size() == 1) {
@@ -327,8 +367,8 @@ namespace simbi {
         }
 
       private:
-        simbi::array_t<T, 3> grid_list;
-        simbi::array_t<U, 3> block_list;
+        simbi::array_t<T, 3> grid_list  = {1, 1, 1};
+        simbi::array_t<U, 3> block_list = {1, 1, 1};
 
         void init_devices()
         {
