@@ -59,6 +59,7 @@ namespace simbi {
     class array_t
     {
       public:
+        using value_type = T;
         static constexpr size_type len() { return N; }
 
         // Default constructor
