@@ -72,7 +72,7 @@ namespace simbi::ibsystem {
         // ctor
         ComponentBodySystem(
             const MeshType& mesh,
-            std::string reference_frame = "intertial"
+            std::string reference_frame = "inertial"
         )
             : mesh_(mesh), reference_frame_(reference_frame)
         {
@@ -197,20 +197,20 @@ namespace simbi::ibsystem {
             const spatial_vector_t<T, Dims>& velocity,
             const T mass,
             const T radius,
+            const bool two_way_coupling,
             const ConfigDict& config
         ) const
         {
             // create basic body
-            Body<T, Dims> body(type, position, velocity, mass, radius);
+            Body<T, Dims>
+                body(type, position, velocity, mass, radius, two_way_coupling);
 
             // add capabilities based on config
-            if (config.contains("softening_length") ||
-                config.contains("two_way_coupling")) {
+            if (config.contains("softening_length")) {
                 T softening =
                     extract_property<T>(config, "softening_length", T(0.01));
-                bool two_way =
-                    extract_property<bool>(config, "two_way_coupling", false);
-                body = body.with_gravitational(softening, two_way);
+
+                body = body.with_gravitational(softening);
             }
 
             if (config.contains("accretion_efficiency") ||
@@ -423,7 +423,7 @@ namespace simbi::ibsystem {
                 properties.push_back(
                     PropertyDescriptor<bool>{
                       "two_way_coupling",
-                      [body](size_t) { return body.two_way_coupling(); }
+                      [body](size_t) { return body.two_way_coupling; }
                     }
                 );
             }
