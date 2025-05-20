@@ -5,7 +5,6 @@ This module provides tools for formatting, grouping, and displaying
 simulation parameters in a visually appealing way (imo).
 """
 
-from os import ST_APPEND
 from typing import Any, Optional
 import numpy as np
 from .logging import logger
@@ -513,15 +512,18 @@ class SimulationParameterSummary:
         return sim_state
 
 
-def print_simulation_parameters(sim_state: dict[str, Any]) -> dict[str, Any]:
-    """
-    Print a beautifully formatted summary of simulation parameters.
+def print_simulation_parameters(params: dict[str, Any]) -> dict[str, Any]:
+    """Print a summary of the simulation parameters"""
+    try:
+        from rich.console import Console
 
-    Parameters:
-        sim_state (dict[str, Any]): Simulation state dictionary.
+        # Import locally to avoid dependency issues
+        from .rich_summary import print_rich_simulation_parameters
 
-    Returns:
-        dict[str, Any]: The unchanged simulation state.
-    """
-    summary = SimulationParameterSummary()
-    return summary.generate_parameter_summary(sim_state)
+        print_rich_simulation_parameters(params)
+    except ImportError:
+        # Fall back to the original version if Rich is not available
+        summary = SimulationParameterSummary()
+        summary_string = summary.generate_parameter_summary(params)
+        print(summary_string)
+    return params
