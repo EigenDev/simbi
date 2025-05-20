@@ -29,6 +29,8 @@ __all__ = [
     "abs",
     "max_expr",
     "min_expr",
+    "floor",
+    "ceil",
     "if_then_else",
     "sinh",
     "cosh",
@@ -195,6 +197,12 @@ class Expr:
         other_expr = self._ensure_expr(other)
         return Expr(
             self._graph, self._graph.add_node("ge", self._node_id, other_expr._node_id)
+        )
+
+    def __mod__(self, other: Union[Expr, float, int]) -> Expr:
+        other_expr = self._ensure_expr(other)
+        return Expr(
+            self._graph, self._graph.add_node("mod", self._node_id, other_expr._node_id)
         )
 
     def _ensure_expr(self, value: Union[Expr, float, int]) -> Expr:
@@ -466,10 +474,19 @@ def where(condition: Expr, true_case: Expr, false_case: Expr) -> Expr:
     return if_then_else(condition, true_case, false_case)
 
 
-# higher-order functions
 def map_expr(f: Callable[[Expr], Expr], exprs: list[Expr]) -> list[Expr]:
     """Map a function over expressions."""
     return [f(expr) for expr in exprs]
+
+
+def floor(expr: Expr) -> Expr:
+    """Floor function."""
+    return Expr(expr._graph, expr._graph.add_node("floor", expr._node_id))
+
+
+def ceil(expr: Expr) -> Expr:
+    """Ceiling function."""
+    return Expr(expr._graph, expr._graph.add_node("ceil", expr._node_id))
 
 
 # evaluator
@@ -605,6 +622,10 @@ class CompiledExpr:
                 values[node_id] = math.atanh(values[input_ids[0]])
             elif op == "atan2":
                 values[node_id] = math.atan2(values[input_ids[0]], values[input_ids[1]])
+            elif op == "floor":
+                values[node_id] = math.floor(values[input_ids[0]])
+            elif op == "ceil":
+                values[node_id] = math.ceil(values[input_ids[0]])
             # binary ops
             elif op == "max":
                 values[node_id] = max(values[input_ids[0]], values[input_ids[1]])
@@ -623,6 +644,8 @@ class CompiledExpr:
                 values[node_id] = int(values[input_ids[0]]) << int(values[input_ids[1]])
             elif op == "bitwise_right_shift":
                 values[node_id] = int(values[input_ids[0]]) >> int(values[input_ids[1]])
+            elif op == "mod":
+                values[node_id] = values[input_ids[0]] % values[input_ids[1]]
             elif op == "if_then_else":
                 condition = values[input_ids[0]]
                 if condition:
@@ -776,6 +799,14 @@ class CompiledExpr:
             elif op == "exp":
                 expressions.append(
                     {"op": "EXP", "left": node_map[input_ids[0]], "right": -1}
+                )
+            elif op == "floor":
+                expressions.append(
+                    {"op": "FLOOR", "left": node_map[input_ids[0]], "right": -1}
+                )
+            elif op == "ceil":
+                expressions.append(
+                    {"op": "CEIL", "left": node_map[input_ids[0]], "right": -1}
                 )
             elif op == "power":
                 expressions.append(
