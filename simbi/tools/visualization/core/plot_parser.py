@@ -578,9 +578,18 @@ class PlottingArgumentBuilder:
             ),
             (
                 ["--xlabel"],
-                {"nargs": 1, "default": "x", "help": "X label name"},
+                {"default": "x", "help": "X label name"},
             ),
-            (["--ylabel"], {"nargs": 1, "default": "y", "help": "Y label name"}),
+            (["--ylabel"], {"default": "y", "help": "Y label name"}),
+            (
+                ["--draw-bodies"],
+                {
+                    "default": False,
+                    "help": "flag to draw immersed bodies (if any)",
+                    "type": bool,
+                    "action": argparse.BooleanOptionalAction,
+                },
+            ),
         ]
         for style in VALID_PLOT_TYPES:
             self.style_group.append(
@@ -673,6 +682,10 @@ class PlottingArgumentBuilder:
                 xmax=args["xmax"],
                 orbital_params=args["orbital_params"],
                 nlinestyles=args["nlines"],
+                ylabel=args["ylabel"],
+                xlabel=args["xlabel"],
+                legend=args["legend"],
+                draw_immersed_bodies=args["draw_bodies"],
             ),
             "animation": AnimationGroup(
                 frame_rate=args["frame_rate"],

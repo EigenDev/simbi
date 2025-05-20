@@ -2,7 +2,7 @@ from typing import Any, Generator, Optional
 from dataclasses import dataclass
 import numpy as np
 from pathlib import Path
-from ...utility import read_file as util_read_file
+from ....functional import read_file as util_read_file
 
 
 @dataclass

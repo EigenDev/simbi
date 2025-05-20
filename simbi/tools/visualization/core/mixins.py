@@ -7,12 +7,13 @@ import matplotlib.colors as mcolors
 from matplotlib.animation import FuncAnimation
 from numpy.typing import NDArray
 
-from simbi.functional.reader import BodyCapability, has_capability
 
 from ....functional.helpers import calc_any_mean
+from ....functional.reader import read_file
 from ... import utility as util
 from ...utility import get_field_str
 from ..core.constants import FIELD_ALIASES
+from ....core.types.constants import BodyCapability, has_capability
 
 
 class DataHandlerMixin:
@@ -50,7 +51,7 @@ class AnimationMixin:
 
     def update_frame(self, frame: int) -> tuple:
         """Update plot for animation frame"""
-        fields, metadata, mesh, immersed_bodies = util.read_file(
+        fields, metadata, mesh, immersed_bodies = read_file(
             self.data_manager.file_list[frame]
         )
 
@@ -144,26 +145,26 @@ class AnimationMixin:
                             vmin=vmin, vmax=vmax, gamma=self.config["style"].power
                         )
                 drawing.set_array(var.ravel())
-            # if immersed_bodies:
-            #     # Clear previous patches
-            #     for patch in self.axes.patches:
-            #         patch.remove()
+            if immersed_bodies and self.config["style"].draw_immersed_bodies:
+                # Clear previous patches
+                for patch in self.axes.patches:
+                    patch.remove()
 
-            #     for body in immersed_bodies.values():
-            #         if has_capability(body["type"], BodyCapability.ACCRETION):
-            #             radius = body["accretion_radius"]
-            #         else:
-            #             radius = body["radius"]
-            #         circle = mpatches.Circle(
-            #             body["position"],
-            #             radius,
-            #             color="black",
-            #             linestyle="--",
-            #             alpha=0.5,
-            #         )
-            #         self.axes.add_patch(circle)
-            #         self.axes.set_aspect("equal", adjustable="box")
-            #         self.axes.autoscale_view()
+                for body in immersed_bodies.values():
+                    if has_capability(body["type"], BodyCapability.ACCRETION):
+                        radius = body["accretion_radius"]
+                    else:
+                        radius = body["radius"]
+                    circle = mpatches.Circle(
+                        body["position"],
+                        radius,
+                        color="red",
+                        linestyle="--",
+                        alpha=1.0,
+                    )
+                    self.axes.add_patch(circle)
+                    self.axes.set_aspect("equal", adjustable="box")
+                    self.axes.autoscale_view()
 
 
 class CoordinatesMixin:

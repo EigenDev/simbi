@@ -11,7 +11,7 @@ from ..utils.io import DataManager
 from ..core.mixins import DataHandlerMixin, AnimationMixin, CoordinatesMixin
 from ..core.base import BasePlotter
 from ....functional.helpers import find_nearest
-from ....functional.reader import BodyCapability, has_capability
+from ....core.types.constants import BodyCapability, has_capability
 from ..core.constants import LINEAR_FIELDS
 from ...utility import get_field_str
 
@@ -87,6 +87,18 @@ class MultidimPlotter(BasePlotter, DataHandlerMixin, AnimationMixin, Coordinates
 
                 plot = self._create_plot(xx, yy, var, field, color_range)
                 self.frames.append(plot)
+                # if axissymmetric cylindrical coordinates,
+                # mirror the plot across the axis
+                if data.setup["coord_system"] == "axis_cylindrical":
+                    self.frames.append(
+                        self._create_plot(
+                            -xx,
+                            yy,
+                            var,
+                            field,
+                            color_range,
+                        )
+                    )
 
                 if self.config["style"].show_colorbar:
                     if is_distinct_field:
@@ -111,7 +123,7 @@ class MultidimPlotter(BasePlotter, DataHandlerMixin, AnimationMixin, Coordinates
 
             # plot any immersed bodies that might exist,
             # on top of the current plot
-            if data.immersed_bodies:
+            if data.immersed_bodies and self.config["style"].draw_immersed_bodies:
                 self._plot_immersed_bodies(
                     self.axes,
                     data.immersed_bodies,
@@ -239,14 +251,12 @@ class MultidimPlotter(BasePlotter, DataHandlerMixin, AnimationMixin, Coordinates
         linestyle: str,
     ) -> None:
         """Plot a circle on the given axes"""
-        ...
-        # # print(f"center: {center}, radius: {radius}")
-        # circle = mpatches.Circle(
-        #     center, radius, color=color, linestyle=linestyle, alpha=0.5
-        # )
-        # axes.add_patch(circle)
-        # axes.set_aspect("equal", adjustable="box")
-        # axes.autoscale_view()
+        circle = mpatches.Circle(
+            center, radius, color=color, linestyle=linestyle, alpha=1
+        )
+        axes.add_patch(circle)
+        axes.set_aspect("equal", adjustable="box")
+        axes.autoscale_view()
 
     def _plot_immersed_bodies(
         self,
@@ -264,6 +274,6 @@ class MultidimPlotter(BasePlotter, DataHandlerMixin, AnimationMixin, Coordinates
                 axes,
                 body["position"],
                 radius,
-                "black",
+                "red",
                 "--",
             )

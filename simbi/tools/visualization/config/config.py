@@ -73,6 +73,7 @@ class StyleGroup:
     dpi: int = 300
     orbital_params: Optional[dict[str, float]] = None
     nlinestyles: Optional[int] = None
+    draw_immersed_bodies: bool = False
 
 
 @dataclass
