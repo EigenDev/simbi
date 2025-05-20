@@ -11,6 +11,7 @@ namespace simbi {
         real gamma;
         real alpha_ss;   // Shakura-Sunyaev viscosity parameter
         bool is_isothermal;
+        real viscosity;
         bool locally_isothermal;
         real ambient_sound_speed;
     };
