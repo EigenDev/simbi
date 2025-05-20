@@ -226,6 +226,7 @@ namespace simbi {
               gamma(gamma_)
         {
             init_body_system(init_conditions);
+            context_.viscosity = viscosity();
         }
 
         DEV conserved_t hydro_sources(const auto& prims, const auto& cell) const
