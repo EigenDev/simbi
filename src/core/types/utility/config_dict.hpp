@@ -3,6 +3,7 @@
 
 #include "build_options.hpp"   // for real, luint, global::managed_memory, use
 #include "core/types/containers/vector.hpp"   // for spatial_vector_t
+#include <exception>
 #include <list>
 #include <stdexcept>
 #include <string>
@@ -240,5 +241,62 @@ namespace simbi {
     {
         return value.to_spatial_vector<T, Dims>();
     }
+
+    // helper functions for property extraction
+    namespace config {
+        template <typename T>
+        Maybe<T> try_read(const ConfigDict& dict, const std::string& key)
+        {
+            if (!dict.contains(key)) {
+                return Nothing;
+            }
+
+            try {
+                return Maybe<T>(dict.at(key).template get<T>());
+            }
+            catch (const std::exception&) {
+                return Nothing;
+            }
+        }
+
+        template <typename T, size_type Dims>
+        Maybe<spatial_vector_t<T, Dims>>
+        try_read_vec(const ConfigDict& dict, const std::string& key)
+        {
+            if (!dict.contains(key)) {
+                return Nothing;
+            }
+
+            try {
+                return Maybe<spatial_vector_t<T, Dims>>(
+                    dict.at(key).template to_spatial_vector<T, Dims>()
+                );
+            }
+            catch (const std::exception&) {
+                return Nothing;
+            }
+        }
+
+        // predicate for checking if a property exists and is of type T
+        template <typename T>
+        auto has_property_of_type(const std::string& key)
+        {
+            return [key](const ConfigDict& props) {
+                return try_read<T>(props, key).has_value();
+            };
+        }
+
+        // predicate for checking if a property exists and equals a specific
+        // value
+        template <typename T>
+        auto property_equals(const std::string& key, T expected_value)
+        {
+            return [key, expected_value](const ConfigDict& props) {
+                auto maybe_value = try_read<T>(props, key);
+                return maybe_value.has_value() &&
+                       *maybe_value == expected_value;
+            };
+        }
+    }   // namespace config
 }   // namespace simbi
 #endif
