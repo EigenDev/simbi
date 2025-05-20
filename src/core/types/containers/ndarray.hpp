@@ -158,6 +158,19 @@ namespace simbi {
             fill(fill_value);
         }
 
+        void copy_from(const ndarray& source, const ExecutionPolicy<>& policy)
+        {
+            assert(
+                this->size_ == source.size() &&
+                "Source and destination arrays must have the same size"
+            );
+            auto copy_op = [this,
+                            source_ptr = source.data()] DEV(size_type idx) {
+                mem_[idx] = source_ptr[idx];
+            };
+            parallel_for(policy, copy_op);
+        }
+
         auto data() -> T* { return mem_.data(); }
         DUAL auto data() const -> const T* { return mem_.data(); }
         auto fill(T value) -> void
@@ -701,10 +714,9 @@ namespace simbi {
                     bool success;
                     do {
                         U expected = result.load(std::memory_order_relaxed);
-                        U new_val  = my_min(expected, local_result);
                         success    = result.compare_exchange_weak(
                             expected,
-                            new_val,
+                            reduce_op(expected, mem_[start], start),
                             std::memory_order_release,
                             std::memory_order_relaxed
                         );
