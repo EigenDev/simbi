@@ -29,11 +29,12 @@ class RichSimulationSummary:
             "header": Style(color="bright_cyan", bold=True),
             "subheader": Style(color="cyan", bold=True),
             "param_name": Style(color="bright_white"),
-            "param_value": Style(color="bright_white"),
+            "param_value": Style(color="bright_yellow"),
             "grid_params": Style(color="bright_cyan"),
             "physics_params": Style(color="bright_cyan"),
             "boundary_params": Style(color="bright_cyan"),
             "numerical_params": Style(color="bright_cyan"),
+            "custom_params": Style(color="bright_cyan"),
             "output_params": Style(color="bright_cyan"),
             "statistics": Style(color="bright_white", italic=True),
             "memory": Style(color="yellow"),
@@ -88,6 +89,11 @@ class RichSimulationSummary:
         # get appropriate box style for this category or default to ROUNDED
         box_style = self.boxes.get(category, box.ROUNDED)
 
+        active_params = any(not not p for p in params.values())
+        if not active_params:
+            # if no parameters are active, return an empty table
+            return Table(box=box_style, title=category, width=TABLE_WIDTH)
+
         # determine style based on category
         if "Grid" in category:
             category_style = self.styles["grid_params"]
@@ -99,6 +105,8 @@ class RichSimulationSummary:
             category_style = self.styles["numerical_params"]
         elif "Output" in category:
             category_style = self.styles["output_params"]
+        elif "Custom" in category:
+            category_style = self.styles["custom_params"]
         else:
             category_style = self.styles["param_name"]
 
@@ -119,10 +127,17 @@ class RichSimulationSummary:
 
         # add rows for each parameter
         for name, value in params.items():
-            # format value properly based on type
-            formatted_value = self._format_parameter_value(value)
+            if value is None:
+                continue
 
-            # add description if available (could be extended with actual parameter descriptions)
+            if "expression" in name:
+                the_value = "user-defined"
+            else:
+                the_value = value
+            # format value properly based on type
+            formatted_value = self._format_parameter_value(the_value)
+
+            # add description if available
             description = self._get_parameter_description(name)
 
             table.add_row(name, formatted_value, description)
@@ -133,11 +148,17 @@ class RichSimulationSummary:
         """Format parameter values nicely based on their type"""
         if isinstance(value, (list, tuple)):
             if all(isinstance(x, (int, float)) for x in value):
-                # Format numeric arrays with precision
+                # format numeric arrays with precision
                 if all(isinstance(x, int) for x in value):
                     return str(value)
                 else:
-                    return str([f"{x:.6g}" for x in value])
+                    return str(tuple(round(x, 2) for x in value))
+            elif all(isinstance(x, str) for x in value):
+                # format string arrays with quotes
+                # this is likely the boundary conditions
+                return str(
+                    tuple(tuple((x, y)) for x, y in zip(value[0::2], value[1::2]))
+                )
             else:
                 return str(value)
         elif isinstance(value, float):
@@ -150,9 +171,9 @@ class RichSimulationSummary:
     def _get_parameter_description(self, param_name: str) -> str:
         """Get description for a parameter (placeholder - would be better with actual descriptions)"""
         descriptions = {
-            "nx": "Number of cells in x-direction",
-            "ny": "Number of cells in y-direction",
-            "nz": "Number of cells in z-direction",
+            "nx": "Number of cells in x1-direction",
+            "ny": "Number of cells in x2-direction",
+            "nz": "Number of cells in x3-direction",
             "gamma": "Adiabatic index",
             "cfl": "Courant-Friedrichs-Lewy condition",
             "dt": "Timestep size",

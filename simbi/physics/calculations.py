@@ -1,6 +1,5 @@
 import numpy as np
 from numpy.typing import NDArray
-from ..functional.maybe import Maybe
 from typing import Any, Sequence
 from enum import Enum, IntEnum
 from ..physics import StateVector
@@ -60,21 +59,6 @@ def calculate_state_vector(
         )
     except Exception as e:
         raise ValueError(f"Error calculating state vector: {e}")
-
-
-def validate_state_vector(state: StateVector) -> Maybe[StateVector]:
-    """Validate state vector components"""
-    if np.any(np.isnan(state.density)):
-        return Maybe(None, ValueError("Density contains NaN values"))
-    if any(np.any(np.isnan(m)) for m in state.momentum):
-        return Maybe(None, ValueError("Momentum contains NaN values"))
-    if np.any(np.isnan(state.energy)):
-        return Maybe(None, ValueError("Energy contains NaN values"))
-    if state.mean_magnetic_field and any(
-        np.any(np.isnan(b)) for b in state.mean_magnetic_field
-    ):
-        return Maybe(None, ValueError("Magnetic field contains NaN values"))
-    return Maybe.of(state)
 
 
 def elemental_multiply(a: nested_array, b: nested_array) -> Any:

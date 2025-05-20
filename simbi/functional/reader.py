@@ -1,9 +1,9 @@
 import h5py
 import numpy as np
 from types import TracebackType
-from enum import IntFlag
 from typing import Any, Callable, Optional, Union, Sequence
 from numpy.typing import NDArray
+from ..core import BodyCapability, has_capability
 from ..physics.calculations import (
     VectorComponent,
     enthalpy_density,
@@ -18,19 +18,6 @@ from ..physics.calculations import (
 )
 
 Array = NDArray[np.floating[Any]]
-
-
-class BodyCapability(IntFlag):
-    NONE = 0
-    GRAVITATIONAL = 1 << 0
-    ACCRETION = 1 << 1
-    ELASTIC = 1 << 2
-    DEFORMABLE = 1 << 3
-    RIGID = 1 << 4
-
-
-def has_capability(body_type: BodyCapability, capability: BodyCapability) -> bool:
-    return bool(body_type & capability)
 
 
 def vector(ndim: int, name: str) -> Sequence[str]:
@@ -273,6 +260,29 @@ class LazySimulationReader:
                         "accretion_efficiency": body_group["accretion_efficiency"][
                             ()
                         ].item(),
+                    }
+                )
+            if has_capability(body_type, BodyCapability.RIGID):
+                self._immersed_bodies_cache[f"body_{i}"].update(
+                    {
+                        "inertia": body_group["inertia"][()].item(),
+                        "apply_no_slip": bool(body_group["apply_no_slip"][()].item()),
+                    }
+                )
+
+            if has_capability(body_type, BodyCapability.DEFORMABLE):
+                self._immersed_bodies_cache[f"body_{i}"].update(
+                    {
+                        "yield_stress": body_group["yield_stress"][()].item(),
+                        "plastic_strain": body_group["plastic_strain"][()].item(),
+                    }
+                )
+
+            if has_capability(body_type, BodyCapability.ELASTIC):
+                self._immersed_bodies_cache[f"body_{i}"].update(
+                    {
+                        "elastic_modulus": body_group["elastic_modulus"][()].item(),
+                        "poisson_ration": body_group["poisson_ratio"][()].item(),
                     }
                 )
 
@@ -637,6 +647,19 @@ class LazySimulationReader:
                 metadata["regime"],
             ),
         )
+        pipeline["mach"] = self.get_derived_field(
+            "mach",
+            ["rho", *vector(ndim, "v"), *vector(ndim, "b"), "p"],
+            lambda fields: (
+                np.sqrt(
+                    sum(
+                        fields[f"v{i}"] ** 2
+                        for i in range(1, metadata["dimensions"] + 1)
+                    )
+                )
+                / np.sqrt((metadata["adiabatic_index"] * fields["p"] / fields["rho"]))
+            ),
+        )
         return pipeline
 
     def get_derived_field(
@@ -676,3 +699,8 @@ class LazySimulationReader:
             return compute_func(dep_data)
 
         return derived_field_loader
+
+
+def read_file(filename: str, unpad: bool = True) -> LazySimulationReader:
+    """lazily read simulation data"""
+    return LazySimulationReader(filename, unpad)

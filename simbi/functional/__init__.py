@@ -1,7 +1,7 @@
 from .helpers import is_dataclass_instance, to_iterable, to_tuple_of_tuples
 from .maybe import Maybe
 from .utilities import compose, pipe
-from .reader import LazySimulationReader
+from .reader import LazySimulationReader, read_file
 
 __all__ = [
     "Maybe",
@@ -11,4 +11,5 @@ __all__ = [
     "to_iterable",
     "to_tuple_of_tuples",
     "LazySimulationReader",
+    "read_file",
 ]

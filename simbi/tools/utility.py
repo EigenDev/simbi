@@ -5,7 +5,7 @@ import matplotlib
 import astropy.units as units
 import numpy as np
 import matplotlib.pyplot as plt
-from typing import Union, Any, Callable, Optional, Sequence, no_type_check
+from typing import Union, Any, Optional
 from numpy.typing import NDArray
 from ..functional import LazySimulationReader
 from ..functional.helpers import find_nearest
@@ -65,7 +65,7 @@ FIELD_MAP: dict[str, str] = {
     "chi_dens": r"$\rho \cdot \chi$",
     "T_eV": "T [eV]",
     "temperature": "T",
-    "mach": "M",
+    "mach": r"$\mathcal{M}$",
     "v1": r"$v_1 / v_0$",
     "v": r"$v / v_0$",
     "v2": r"$v_2 / v_0$",
@@ -230,147 +230,6 @@ def get_dimensionality(files: Union[list[str], dict[int, list[str]]]) -> int:
                 )
 
     return ndim
-
-
-def read_file(filename: str, unpad: bool = True) -> LazySimulationReader:
-    """lazily read simulation data"""
-    return LazySimulationReader(filename, unpad)
-
-
-# @no_type_check
-# def read_file(filename: str) -> tuple[dict[str, Any], dict[str, Any], dict[str, Any]]:
-#     with h5py.File(filename, "r") as hf:
-#         ds = dict(hf.get("sim_info").attrs)
-#         ndim: int = ds["dimensions"]
-#         ds.update(
-#             {k: v.decode("utf-8") for k, v in ds.items() if isinstance(v, np.bytes_)}
-#         )
-
-#         def read_and_flatten(name: str) -> NDArray[np.floating[Any]]:
-#             return flatten_fully(hf.get(name)[:].reshape(ds["nz"], ds["ny"], ds["nx"]))
-
-#         rho = read_and_flatten("rho")
-#         p = read_and_flatten("p")
-#         chi = read_and_flatten("chi")
-#         v = [read_and_flatten(f"v{dim}") for dim in range(1, ndim + 1)]
-
-#         padwidth = (ds["spatial_order"] != "pcm") + 1
-#         npad = tuple((padwidth, padwidth) for _ in range(ndim))
-
-#         def unpad_all(
-#             arrays: Sequence[NDArray[np.floating[Any]]],
-#         ) -> Sequence[NDArray[np.floating[Any]]]:
-#             return [unpad(arr, npad) for arr in arrays]
-
-#         rho, p, chi = unpad_all([rho, p, chi])
-#         v = np.array(unpad_all(v))
-
-#         fields = {f"v{i + 1}": v[i] for i in range(len(v))}
-#         fields.update(
-#             {
-#                 "rho": rho,
-#                 "p": p,
-#                 "chi": chi,
-#                 "adiabatic_index": ds["adiabatic_index"],
-#             }
-#         )
-
-#         vsqr = np.sum(v**2, axis=0)
-#         xactive_zones = ds["nx"] - 2 * padwidth
-#         yactive_zones = ds["ny"] - 2 * padwidth
-#         zactive_zones = ds["nz"] - 2 * padwidth
-#         grid = {
-#             "x{}_active_zones".format(i): x
-#             for x, i in zip(
-#                 [xactive_zones, yactive_zones, zactive_zones], range(1, ndim + 1)
-#             )
-#         }
-
-#         if ds["regime"] in ["srhd", "srmhd"]:
-#             W = (1 + vsqr) ** 0.5 if ds["using_gamma_beta"] else (1 - vsqr) ** (-0.5)
-#             if ds["using_gamma_beta"]:
-#                 fields.update({f"v{i + 1}": v[i] / W for i in range(len(v))})
-#                 vsqr /= W**2
-
-#             if ds["regime"] == "srmhd":
-
-#                 def read_bfield(
-#                     name: str, shape: tuple[int, ...]
-#                 ) -> NDArray[np.floating[Any]]:
-#                     return hf.get(name)[:].reshape(shape)
-
-#                 b1 = read_bfield(
-#                     "b1",
-#                     (
-#                         zactive_zones + 2,
-#                         yactive_zones + 2,
-#                         xactive_zones + 1,
-#                     ),
-#                 )
-#                 b2 = read_bfield(
-#                     "b2",
-#                     (
-#                         zactive_zones + 2,
-#                         yactive_zones + 1,
-#                         xactive_zones + 2,
-#                     ),
-#                 )
-#                 b3 = read_bfield(
-#                     "b3",
-#                     (
-#                         zactive_zones + 1,
-#                         yactive_zones + 2,
-#                         xactive_zones + 2,
-#                     ),
-#                 )
-
-#                 fields.update({"b1stag": b1, "b2stag": b2, "b3stag": b3})
-
-#                 # unpad from ghost zones from the fields in the orthogonal directions
-#                 b1 = unpad(b1, ((1, 1), (1, 1), (0, 0)))
-#                 b2 = unpad(b2, ((1, 1), (0, 0), (1, 1)))
-#                 b3 = unpad(b3, ((0, 0), (1, 1), (1, 1)))
-
-#                 fields.update(
-#                     {
-#                         "b1": 0.5 * (b1[..., 1:] + b1[..., :-1]),
-#                         "b2": 0.5 * (b2[:, 1:, :] + b2[:, :-1, :]),
-#                         "b3": 0.5 * (b3[1:, :, :] + b3[:-1, :, :]),
-#                     }
-#                 )
-
-#                 for dim in range(2, ndim + 1):
-#                     if f"v{dim}" not in fields:
-#                         fields[f"v{dim}"] = unpad(read_and_flatten(f"v{dim}"), npad)
-#         else:
-#             W = 1
-
-#         fields["gamma_beta"] = np.sqrt(vsqr) * W
-#         fields["W"] = W
-
-#         funcs = [
-#             (np.linspace if ds[f"{x}_spacing"] == "linear" else np.geomspace)
-#             for x in ["x1", "x2", "x3"]
-#         ]
-#         mesh = {
-#             f"x{i}v": funcs[i - 1](
-#                 ds[f"x{i}min"], ds[f"x{i}max"], grid[f"x{i}_active_zones"] + 1
-#             )
-#             for i in range(1, ndim + 1)
-#         }
-
-#         ds.update(
-#             {
-#                 "is_cartesian": ds["geometry"] in logically_cartesian,
-#                 "coord_system": ds.pop("geometry"),
-#                 "time": ds.pop("current_time"),
-#             }
-#         )
-
-#         if ds["x1max"] > mesh["x1v"][-1]:
-#             mesh["x1v"] = funcs[0](ds["x1min"], ds["x1max"], ds["xactive_zones"] + 1)
-
-#     return fields, ds, mesh
 
 
 def get_colors(

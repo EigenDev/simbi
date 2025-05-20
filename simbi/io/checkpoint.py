@@ -4,10 +4,10 @@ from typing import Sequence, Any, TypedDict
 from numpy.typing import NDArray
 from pathlib import Path
 
-from simbi.functional.reader import LazySimulationReader
+from ..functional import LazySimulationReader
 from ..functional.maybe import Maybe
+from ..functional.reader import read_file
 from ..physics import calculate_state_vector, StateVector
-from ..tools.utility import read_file
 
 
 class MHDFields(TypedDict):
