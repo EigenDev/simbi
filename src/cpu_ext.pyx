@@ -30,8 +30,6 @@ cdef ConfigDict convert_python_to_config_dict(py_dict):
         elif isinstance(value, str):
             result[cpp_key] = ConfigValue(<string>value.encode("utf-8"))
         elif isinstance(value, type):
-            print(f"Skipping type: {value} for key: {key}")
-            zzz = input("Press Enter to continue...")
             # For string-based enums like Regime, CoordSystem, etc.
             if isinstance(value.value, str):
                 result[cpp_key] = ConfigValue(<string>value.value.encode("utf-8"))
