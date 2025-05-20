@@ -1,6 +1,12 @@
 import math
 import simbi.expression as expr
-from simbi import BaseConfig, DynamicArg, simbi_property, ImmersedBodyConfig
+from simbi import (
+    BaseConfig,
+    DynamicArg,
+    simbi_property,
+    ImmersedBodyConfig,
+    BodyCapability,
+)
 from typing import Any, Sequence, Generator
 from simbi.typing import InitialStateType, ExpressionDict
 
@@ -115,7 +121,7 @@ class KeplerianRingTest(BaseConfig):
     def immersed_bodies(self) -> list[ImmersedBodyConfig]:
         return [
             ImmersedBodyConfig(
-                body_type="gravitational",
+                body_type=BodyCapability.GRAVITATIONAL,
                 mass=1.0,
                 velocity=[0.0, 0.0],
                 position=[0.0, 0.0],
