@@ -372,39 +372,44 @@ namespace simbi {
                                     // calc the ghost layer depth based on
                                     // coordinates Determine how many layers
                                     // deep this ghost cell is
-                                    size_type ghost_layer = 1;
+                                    // size_type ghost_layer = 1;
 
-                                    if (is_lower) {
-                                        // for lower boundary, calculate
-                                        // distance from the boundary in cell
-                                        // units
-                                        ghost_layer = radii[boundary_dim] -
-                                                      coordinates[boundary_dim];
-                                    }
-                                    else {
-                                        // for upper boundary, calculate
-                                        // distance from the boundary in cell
-                                        // units
-                                        ghost_layer =
-                                            coordinates[boundary_dim] -
-                                            (rshape[boundary_dim] +
-                                             radii[boundary_dim] - 1);
-                                    }
+                                    // if (is_lower) {
+                                    //     // for lower boundary, calculate
+                                    //     // distance from the boundary in cell
+                                    //     // units
+                                    //     ghost_layer = radii[boundary_dim] -
+                                    //                   coordinates[boundary_dim];
+                                    // }
+                                    // else {
+                                    //     // for upper boundary, calculate
+                                    //     // distance from the boundary in cell
+                                    //     // units
+                                    //     ghost_layer =
+                                    //         coordinates[boundary_dim] -
+                                    //         (rshape[boundary_dim] +
+                                    //          radii[boundary_dim] - 1);
+                                    // }
 
                                     // calc the physical position of this
                                     // ghost cell
-                                    auto ghost_coords =
-                                        interior_cell.calculate_ghost_position(
-                                            boundary_dim,
-                                            is_lower,
-                                            ghost_layer
-                                        );
+                                    // auto ghost_coords =
+                                    //     interior_cell.calculate_ghost_position(
+                                    //         boundary_dim,
+                                    //         is_lower,
+                                    //         ghost_layer
+                                    //     );
+                                    auto interior_coords =
+                                        interior_cell.centroid();
 
                                     T dynamic_conserved = handle_dynamic_bc(
-                                        ghost_coords,
+                                        interior_coords,
                                         static_cast<BoundaryFace>(bc_idx),
                                         data[interior_idx]
                                     );
+                                    // std::cout << interior_coords << " -> "
+                                    //           << dynamic_conserved <<
+                                    //           std::endl;
                                     data[idx] = dynamic_conserved;
                                 }
                                 else {
