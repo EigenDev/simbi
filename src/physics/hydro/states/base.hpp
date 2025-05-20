@@ -324,7 +324,6 @@ namespace simbi {
             auto& derived = static_cast<Derived&>(*this);
             cons_.resize(this->total_zones()).reshape({nz(), ny(), nx()});
             prims_.resize(this->total_zones()).reshape({nz(), ny(), nx()});
-
             for (size_type ii = 0; ii < this->total_zones(); ii++) {
                 for (int q = 0; q < conserved_t::nmem; q++) {
                     cons_[ii][q] = state_[q][ii];
@@ -360,7 +359,7 @@ namespace simbi {
             // gas dynamics (might include immersed body effects)
             derived.advance_impl();
             // ensure consistency b/w levels via restriction
-            synchronize_levels();
+            // synchronize_levels();
             derived.cons2prim_impl();
             adapt_dt();
 
