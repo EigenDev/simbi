@@ -86,7 +86,6 @@ namespace simbi::ibsystem {
     template <typename T>
     struct GravitationalComponent {
         T softening_length;
-        bool two_way_coupling;
     };
 
     template <typename T>
@@ -111,7 +110,8 @@ namespace simbi::ibsystem {
 
     template <typename T>
     struct RigidComponent {
-        T interia;
+        T inertia;
+        bool apply_no_slip;
     };
 }   // namespace simbi::ibsystem
 #endif
