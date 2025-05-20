@@ -252,6 +252,13 @@ namespace simbi::fp {
         return false;
     }
 
+    // general any_of predicate combinator
+    template <typename T, typename... Predicates>
+    DUAL constexpr bool any_of(const T& value, Predicates&&... preds)
+    {
+        return (... || (std::invoke(std::forward<Predicates>(preds), value)));
+    }
+
     // all: check if all elements satisfy a predicate
     template <Container C, typename F>
     DUAL constexpr bool all_of(const C& container, F&& pred)
@@ -262,6 +269,13 @@ namespace simbi::fp {
             }
         }
         return true;
+    }
+
+    // all: general predicate combinator
+    template <typename T, typename... Predicates>
+    DUAL constexpr bool all_of(const T& value, Predicates&&... preds)
+    {
+        return (... && (std::invoke(std::forward<Predicates>(preds), value)));
     }
 
     // filter: create a new container with elements that satisfy a predicate
