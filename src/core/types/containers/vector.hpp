@@ -131,7 +131,9 @@ namespace simbi {
             requires(Vec1::dimensions == 3 && Vec2::dimensions == 3)
         {
             using T = decltype(a[0] * b[0]);
-            return Vector<T, 3, VectorType::GENERAL>(
+            constexpr VectorType ResultType =
+                detail::promote_vector_t<Vec1::vec_type, Vec2::vec_type>;
+            return Vector<T, 3, ResultType>(
                 a[1] * b[2] - a[2] * b[1],
                 a[2] * b[0] - a[0] * b[2],
                 a[0] * b[1] - b[0] * a[1]
