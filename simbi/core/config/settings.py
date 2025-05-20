@@ -276,6 +276,7 @@ class SimulationSettings(BaseSettings):
     sound_speed: float = 0.0
     isothermal: bool = False
     locally_isothermal: bool = False
+    shakura_sunyaev_alpha: float = 0.0
     body_system: Optional[BodySystemConfig] = None
     viscosity: Optional[float] = None
 
@@ -299,6 +300,7 @@ class SimulationSettings(BaseSettings):
             isothermal=setup["isothermal"],
             body_system=setup["body_system"],
             locally_isothermal=setup["locally_isothermal"],
+            shakura_sunyaev_alpha=setup["shakura_sunyaev_alpha"],
             viscosity=setup["viscosity"],
         )
 
@@ -321,6 +323,7 @@ class SimulationSettings(BaseSettings):
             "sound_speed": self.sound_speed,
             "isothermal": self.isothermal,
             "locally_isothermal": self.locally_isothermal,
+            "shakura_sunyaev_alpha": self.shakura_sunyaev_alpha,
             "body_system": asdict(self.body_system) if self.body_system else None,
             "viscosity": self.viscosity,
         }

@@ -9,6 +9,7 @@ namespace simbi {
         // to the various functions that need them without having to pass them
         // all individually.
         real gamma;
+        real alpha_ss;   // Shakura-Sunyaev viscosity parameter
         bool is_isothermal;
         bool locally_isothermal;
         real ambient_sound_speed;

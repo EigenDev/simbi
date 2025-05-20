@@ -24,11 +24,13 @@ Newtonian<dim>::Newtonian(
     : HydroBase<Newtonian<dim>, dim, Regime::NEWTONIAN>(state, init_conditions),
       isothermal_(init_conditions.isothermal),
       locally_isothermal_(init_conditions.locally_isothermal),
+      shakura_sunyaev_alpha_(init_conditions.shakura_sunyaev_alpha),
       sound_speed_squared_(init_conditions.sound_speed_squared)
 {
     this->context_.gamma               = gamma;
     this->context_.is_isothermal       = goes_to_zero(gamma - 1.0);
     this->context_.locally_isothermal  = locally_isothermal_;
+    this->context_.alpha_ss            = shakura_sunyaev_alpha_;
     this->context_.ambient_sound_speed = std::sqrt(sound_speed_squared_);
 }
 

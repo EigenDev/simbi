@@ -65,6 +65,7 @@ struct InitialConditions {
     luint nx, ny, nz, checkpoint_index;
     bool quirk_smoothing, homologous, mesh_motion;
     bool isothermal, locally_isothermal;
+    real shakura_sunyaev_alpha;
     std::vector<std::vector<real>> bfield;
     std::string data_directory, coord_system, solver;
     std::string x1_spacing, x2_spacing, x3_spacing, regime;
@@ -354,6 +355,8 @@ struct InitialConditions {
             init.isothermal = init.get<bool>("isothermal", false);
             init.locally_isothermal =
                 init.get<bool>("locally_isothermal", false);
+            init.shakura_sunyaev_alpha =
+                init.get<real>("shakura_sunyaev_alpha", 0.0);
 
             real sound_speed = init.get<real>("sound_speed", 1.0);
             if (sound_speed != 0.0) {

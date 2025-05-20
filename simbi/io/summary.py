@@ -301,6 +301,7 @@ class SimulationParameterSummary:
                     "gamma",
                     "isothermal",
                     "locally_isothermal",
+                    "shakura_sunyaev_alpha",
                     "ambient_sound_speed",
                     "is_mhd",
                     "is_relativistic",
