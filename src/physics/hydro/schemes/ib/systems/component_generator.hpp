@@ -52,11 +52,14 @@
 #include "build_options.hpp"
 #include "core/functional/fp.hpp"
 #include "core/types/utility/config_dict.hpp"
+#include "core/types/utility/enums.hpp"
 #include "core/types/utility/smart_ptr.hpp"
 #include "physics/hydro/schemes/ib/policies/binary.hpp"
+#include "physics/hydro/schemes/ib/systems/capability.hpp"
 #include "physics/hydro/schemes/ib/systems/component_body_system.hpp"
 #include "physics/hydro/schemes/ib/systems/system_config.hpp"
 #include "util/tools/helpers.hpp"
+#include <cstdint>
 
 using namespace simbi::ibsystem::body_functions::binary;
 using namespace simbi::config;
@@ -80,7 +83,10 @@ namespace simbi::ibsystem {
             props,
             property_equals<bool>("is_an_accretor", true),
             [&body](const auto&) {
-                return body.type == BodyType::GRAVITATIONAL_SINK;
+                return has_capability(
+                    body.capabilities(),
+                    BodyCapability::GRAVITATIONAL
+                );
             },
             [](const auto& p) {
                 return has_property_of_type<T>("accretion_radius")(p) &&
@@ -146,11 +152,8 @@ namespace simbi::ibsystem {
     }
 
     template <typename T, size_type Dims>
-    Body<T, Dims> maybe_add_accretion(
-        Body<T, Dims> body,
-        BodyType body_type,
-        const ConfigDict& props
-    )
+    Body<T, Dims>
+    maybe_add_accretion(Body<T, Dims> body, const ConfigDict& props)
     {
 
         if (!should_be_accretor(props, body)) {
@@ -168,16 +171,8 @@ namespace simbi::ibsystem {
     }
 
     template <typename T, size_type Dims>
-    Body<T, Dims> maybe_add_rigid(
-        Body<T, Dims> body,
-        BodyType body_type,
-        const ConfigDict& props
-    )
+    Body<T, Dims> maybe_add_rigid(Body<T, Dims> body, const ConfigDict& props)
     {
-        if (body_type != BodyType::RIGID) {
-            return body;
-        }
-
         const auto inertia = config::try_read<real>(props, "inertia");
         if (!inertia.has_value()) {
             throw std::runtime_error("Rotation vector not found in properties");
@@ -194,10 +189,10 @@ namespace simbi::ibsystem {
     }
 
     template <typename T, size_type Dims>
-    Body<T, Dims>
-    create_individual_body(BodyType body_type, const ConfigDict& props)
+    Body<T, Dims> create_individual_body(const ConfigDict& props)
     {
         // basic body properties
+        const auto caps = config::try_read<BodyCapability>(props, "body_type");
         const auto pos_vec = config::try_read_vec<T, Dims>(props, "position");
         const auto vel_vec = config::try_read_vec<T, Dims>(props, "velocity");
         const auto mass    = config::try_read<real>(props, "mass");
@@ -216,19 +211,24 @@ namespace simbi::ibsystem {
         }
 
         // create body
-        Body<T, Dims> body(body_type, pos_vec, vel_vec, mass, radius, two_way);
+        Body<T, Dims> body(pos_vec, vel_vec, mass, radius, two_way);
 
         // add gravitational body capability if properties exist
-        const auto soft = config::try_read<real>(props, "softening_length");
-        if (soft.has_value()) {
-            body = body.with_gravitational(soft.value());
+        if (has_capability(caps.value(), BodyCapability::GRAVITATIONAL)) {
+            const auto soft = config::try_read<real>(props, "softening_length");
+            if (soft.has_value()) {
+                body = body.with_gravitational(soft.value());
+            }
+        }
+        if (has_capability(caps.value(), BodyCapability::ACCRETION)) {
+            // add accretion capability if needed
+            body = maybe_add_accretion(body, props);
         }
 
-        // add accretion capability if needed
-        body = maybe_add_accretion(body, body_type, props);
-
-        // add rigid body capability if needed
-        body = maybe_add_rigid(body, body_type, props);
+        if (has_capability(caps.value(), BodyCapability::RIGID)) {
+            // add rigid body capability if needed
+            body = maybe_add_rigid(body, props);
+        }
 
         return body;
     }
@@ -239,10 +239,8 @@ namespace simbi::ibsystem {
         const InitialConditions& init
     )
     {
-        for (const auto& [body_type, props] : init.immersed_bodies) {
-            system = system.add_body(
-                create_individual_body<T, Dims>(body_type, props)
-            );
+        for (const auto& props : init.immersed_bodies) {
+            system = system.add_body(create_individual_body<T, Dims>(props));
         }
     }
 
@@ -336,14 +334,7 @@ namespace simbi::ibsystem {
         }
 
         // Create body
-        Body<T, Dims> body(
-            BodyType::GRAVITATIONAL,
-            positions,
-            velocities,
-            mass,
-            radius,
-            two_way
-        );
+        Body<T, Dims> body(positions, velocities, mass, radius, two_way);
 
         // add gravitational capability
         body = body.with_gravitational(

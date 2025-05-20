@@ -229,7 +229,7 @@ namespace simbi::ibsystem::functions {
 
             for (const auto& [body_idx, body] : rigid_bodies) {
                 // apply rigid body forces
-                auto [fluid_change, body_delta] = apply_rigid_body_force(
+                auto [fluid_change, body_delta] = apply_rigid_body_ibm(
                     body_idx,
                     body,
                     prim,
@@ -240,8 +240,8 @@ namespace simbi::ibsystem::functions {
 
                 fluid_state += fluid_change;
 
-                collector
-                    .record_delta(coords, body_idx, body_delta.force_delta);
+                // collector
+                //     .record_delta(coords, body_idx, body_delta.force_delta);
             }
         }
         return fluid_state;

@@ -57,9 +57,32 @@ namespace simbi::ibsystem {
     struct BodyDelta {
         size_t body_idx;
         spatial_vector_t<T, Dims> force_delta;
+        spatial_vector_t<T, Dims> torque_delta;
         T mass_delta;
         T accreted_mass_delta;
         T accretion_rate_delta;
+
+        // default ctor
+        BodyDelta()
+            : body_idx(0),
+              force_delta{},
+              torque_delta{},
+              mass_delta(0),
+              accreted_mass_delta(0),
+              accretion_rate_delta(0)
+        {
+        }
+
+        // ctor from just body index
+        DUAL BodyDelta(size_t body_idx)
+            : body_idx(body_idx),
+              force_delta{},
+              torque_delta{},
+              mass_delta(0),
+              accreted_mass_delta(0),
+              accretion_rate_delta(0)
+        {
+        }
 
         // combine two deltas affecting the same body
         DUAL static BodyDelta combine(const BodyDelta& a, const BodyDelta& b)

@@ -58,7 +58,6 @@ namespace simbi::ibsystem {
     template <typename T, size_type Dims>
     struct Body {
         // core properties (always present)
-        BodyType type;
         spatial_vector_t<T, Dims> position;
         spatial_vector_t<T, Dims> velocity;
         spatial_vector_t<T, Dims> force;
@@ -75,68 +74,74 @@ namespace simbi::ibsystem {
 
         // ctors
         DUAL Body()
-            : type(BodyType::GRAVITATIONAL),
-              position(spatial_vector_t<T, Dims>()),
+            : position(spatial_vector_t<T, Dims>()),
               velocity(spatial_vector_t<T, Dims>()),
               force(spatial_vector_t<T, Dims>()),
               mass(T(0)),
               radius(T(0)),
               two_way_coupling(false),
               gravitational(Nothing),
-              accretion(Nothing)
+              accretion(Nothing),
+              elastic(Nothing),
+              rigid(Nothing),
+              deformable(Nothing)
         {
         }
         DUAL Body(
-            BodyType type,
             const spatial_vector_t<T, Dims>& position,
             const spatial_vector_t<T, Dims>& velocity,
             T mass,
             T radius,
             bool two_way_coupling = false
         )
-            : type(type),
-              position(position),
+            : position(position),
               velocity(velocity),
               force(spatial_vector_t<T, Dims>()),
               mass(mass),
               radius(radius),
               two_way_coupling(two_way_coupling),
               gravitational(Nothing),
-              accretion(Nothing)
+              accretion(Nothing),
+              elastic(Nothing),
+              rigid(Nothing),
+              deformable(Nothing)
         {
         }
 
         // copy ctor
         DUAL constexpr Body(const Body& other)
-            : type(other.type),
-              position(other.position),
+            : position(other.position),
               velocity(other.velocity),
               force(other.force),
               mass(other.mass),
               radius(other.radius),
               two_way_coupling(other.two_way_coupling),
               gravitational(other.gravitational),
-              accretion(other.accretion)
+              accretion(other.accretion),
+              elastic(other.elastic),
+              rigid(other.rigid),
+              deformable(other.deformable)
         {
         }
         // move ctor
         DUAL constexpr Body(Body&& other) noexcept
-            : type(other.type),
-              position(std::move(other.position)),
+            : position(std::move(other.position)),
               velocity(std::move(other.velocity)),
               force(std::move(other.force)),
               mass(other.mass),
               radius(other.radius),
               two_way_coupling(other.two_way_coupling),
               gravitational(std::move(other.gravitational)),
-              accretion(std::move(other.accretion))
+              accretion(std::move(other.accretion)),
+              elastic(std::move(other.elastic)),
+              rigid(std::move(other.rigid)),
+              deformable(std::move(other.deformable))
         {
         }
         // copy assignment
         DUAL constexpr Body& operator=(const Body& other)
         {
             if (this != &other) {
-                type             = other.type;
                 position         = other.position;
                 velocity         = other.velocity;
                 force            = other.force;
@@ -145,6 +150,9 @@ namespace simbi::ibsystem {
                 two_way_coupling = other.two_way_coupling;
                 gravitational    = other.gravitational;
                 accretion        = other.accretion;
+                elastic          = other.elastic;
+                rigid            = other.rigid;
+                deformable       = other.deformable;
             }
             return *this;
         }
@@ -152,7 +160,6 @@ namespace simbi::ibsystem {
         DUAL constexpr Body& operator=(Body&& other) noexcept
         {
             if (this != &other) {
-                type             = other.type;
                 position         = std::move(other.position);
                 velocity         = std::move(other.velocity);
                 force            = std::move(other.force);
@@ -161,6 +168,9 @@ namespace simbi::ibsystem {
                 two_way_coupling = other.two_way_coupling;
                 gravitational    = std::move(other.gravitational);
                 accretion        = std::move(other.accretion);
+                elastic          = std::move(other.elastic);
+                rigid            = std::move(other.rigid);
+                deformable       = std::move(other.deformable);
             }
             return *this;
         }
@@ -172,7 +182,7 @@ namespace simbi::ibsystem {
             return new_body;
         }
 
-        DUAL Body<T, Dims> with_rigid(T inertia, bool apply_no_slip)
+        DUAL Body<T, Dims> with_rigid(T inertia, bool apply_no_slip) const
         {
             Body<T, Dims> new_body = *this;
             new_body.rigid         = RigidComponent<T>{inertia, apply_no_slip};
@@ -254,7 +264,10 @@ namespace simbi::ibsystem {
                 case BodyCapability::GRAVITATIONAL:
                     return gravitational.has_value();
                 case BodyCapability::ACCRETION: return accretion.has_value();
-                // Add more capabilities as needed
+                case BodyCapability::RIGID: return rigid.has_value();
+                case BodyCapability::ELASTIC: return elastic.has_value();
+                case BodyCapability::DEFORMABLE: return deformable.has_value();
+                // add more capabilities as needed
                 default: return false;
             }
         }
@@ -273,6 +286,24 @@ namespace simbi::ibsystem {
                 caps = static_cast<BodyCapability>(
                     static_cast<int>(caps) |
                     static_cast<int>(BodyCapability::ACCRETION)
+                );
+            }
+            if (rigid.has_value()) {
+                caps = static_cast<BodyCapability>(
+                    static_cast<int>(caps) |
+                    static_cast<int>(BodyCapability::RIGID)
+                );
+            }
+            if (elastic.has_value()) {
+                caps = static_cast<BodyCapability>(
+                    static_cast<int>(caps) |
+                    static_cast<int>(BodyCapability::ELASTIC)
+                );
+            }
+            if (deformable.has_value()) {
+                caps = static_cast<BodyCapability>(
+                    static_cast<int>(caps) |
+                    static_cast<int>(BodyCapability::DEFORMABLE)
                 );
             }
             return caps;
@@ -347,6 +378,12 @@ namespace simbi::ibsystem {
         {
             return rigid.map([](const auto& r) { return r.inertia; }
             ).unwrap_or(T(0));
+        }
+
+        DUAL bool apply_no_slip() const
+        {
+            return rigid.map([](const auto& r) { return r.apply_no_slip; }
+            ).unwrap_or(false);
         }
     };
 }   // namespace simbi::ibsystem

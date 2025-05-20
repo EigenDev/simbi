@@ -97,7 +97,7 @@ namespace simbi::ibsystem::body_functions {
             const auto dE    = vecops::dot(v_avg, dp);
 
             // Apply two-way coupling if enabled
-            BodyDelta<T, Dims> delta{body_idx, {}, 0, 0, 0};
+            BodyDelta<T, Dims> delta{body_idx};
             if (body.two_way_coupling) {
                 // all vector quantities for the body
                 // are in Cartesian coordinates

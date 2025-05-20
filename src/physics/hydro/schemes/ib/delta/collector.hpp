@@ -52,6 +52,7 @@
 #include "body_delta.hpp"
 #include "build_options.hpp"
 #include "core/types/containers/array.hpp"
+#include "core/types/containers/vector.hpp"
 #include "core/types/utility/managed.hpp"   // for Managed
 #include "physics/hydro/schemes/ib/systems/component_body_system.hpp"   // for ComponentBodySystem
 #include "util/parallel/exec_policy.hpp"
@@ -107,13 +108,8 @@ namespace simbi::ibsystem {
                 // init for all bodies at this spatial location
                 for (size_type body_idx = 0; body_idx < max_bodies_;
                      body_idx++) {
-                    cell_deltas.at(x, y, z, body_idx) = BodyDelta<T, Dims>{
-                      body_idx,
-                      spatial_vector_t<T, Dims>{},   // zero force
-                      0,                             // zero mass
-                      0,                             // zero accreted mass
-                      0                              // zero accretion rate
-                    };
+                    cell_deltas.at(x, y, z, body_idx) =
+                        BodyDelta<T, Dims>{body_idx};
                 }
             }
 
@@ -157,11 +153,7 @@ namespace simbi::ibsystem {
             // reset the body deltas
             for (size_type body_idx = 0; body_idx < max_bodies_; body_idx++) {
                 body_deltas[body_idx] = BodyDelta<T, Dims>{
-                  body_idx,                      // valid body_idx from start
-                  spatial_vector_t<T, Dims>{},   // zero force
-                  0,
-                  0,
-                  0   // zero other values
+                  body_idx,   // valid body_idx from start
                 };
             }
 
@@ -214,11 +206,7 @@ namespace simbi::ibsystem {
         {
             for (size_type body_idx = 0; body_idx < max_bodies_; body_idx++) {
                 body_deltas[body_idx] = BodyDelta<T, Dims>{
-                  body_idx,                      // valid body_idx from start
-                  spatial_vector_t<T, Dims>{},   // zero force
-                  0,
-                  0,
-                  0   // zero other values
+                  body_idx,   // valid body_idx from start
                 };
             }
             body_deltas.sync_to_device();
@@ -241,11 +229,7 @@ namespace simbi::ibsystem {
                 for (size_type body_idx = 0; body_idx < max_bodies_;
                      body_idx++) {
                     block_results.at(block_idx, body_idx) = BodyDelta<T, Dims>{
-                      body_idx,
-                      spatial_vector_t<T, Dims>{},
-                      0,
-                      0,
-                      0
+                      body_idx,   // valid body_idx from start
                     };
                 }
             }

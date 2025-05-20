@@ -190,45 +190,6 @@ namespace simbi::ibsystem {
             return new_system;
         }
 
-        // factory method using user config
-        ComponentBodySystem<T, Dims> add_body_from_config(
-            BodyType type,
-            const spatial_vector_t<T, Dims>& position,
-            const spatial_vector_t<T, Dims>& velocity,
-            const T mass,
-            const T radius,
-            const bool two_way_coupling,
-            const ConfigDict& config
-        ) const
-        {
-            // create basic body
-            Body<T, Dims>
-                body(type, position, velocity, mass, radius, two_way_coupling);
-
-            // add capabilities based on config
-            if (config.contains("softening_length")) {
-                T softening =
-                    extract_property<T>(config, "softening_length", T(0.01));
-
-                body = body.with_gravitational(softening);
-            }
-
-            if (config.contains("accretion_efficiency") ||
-                config.contains("accretion_radius")) {
-                T accr_efficiency = extract_property<T>(
-                    config,
-                    "accretion_efficiency",
-                    T(0.01)
-                );
-                T accr_radius =
-                    extract_property<T>(config, "accretion_radius", T(0.0));
-                body = body.with_accretion(accr_efficiency, accr_radius);
-            }
-
-            // add the body to system
-            return add_body(body);
-        }
-
         // immutable access functions
         DUAL const ndarray<Body<T, Dims>>& bodies() const { return bodies_; }
         DUAL size_t size() const { return bodies_.size(); }
@@ -344,21 +305,6 @@ namespace simbi::ibsystem {
 
         std::string reference_frame() const { return reference_frame_; }
 
-        // property extraction helper
-        template <typename U>
-        U extract_property(
-            const ConfigDict& config,
-            const std::string& key,
-            const U& default_value
-        ) const
-        {
-            auto it = config.find(key);
-            if (it != config.end()) {
-                return it->second.get<U>();
-            }
-            return default_value;
-        }
-
         // generate serializable properties for a body
         ndarray<std::variant<
             PropertyDescriptor<T>,
@@ -454,6 +400,51 @@ namespace simbi::ibsystem {
                     PropertyDescriptor<T>{
                       "accretion_rate",
                       [body](size_t) { return body.accretion_rate(); }
+                    }
+                );
+            }
+
+            if (body.rigid.has_value()) {
+                properties
+                    .push_back(PropertyDescriptor<T>{"inertia", [body](size_t) {
+                                                         return body.inertia();
+                                                     }});
+                properties.push_back(
+                    PropertyDescriptor<bool>{
+                      "apply_no_slip",
+                      [body](size_t) { return body.apply_no_slip(); }
+                    }
+                );
+            }
+
+            if (body.elastic.has_value()) {
+                properties.push_back(
+                    PropertyDescriptor<T>{
+                      "elastic_modulus",
+                      [body](size_t) { return body.elastic_modulus(); }
+                    }
+                );
+
+                properties.push_back(
+                    PropertyDescriptor<T>{
+                      "poisson_ratio",
+                      [body](size_t) { return body.poisson_ratio(); }
+                    }
+                );
+            }
+
+            if (body.deformable.has_value()) {
+                properties.push_back(
+                    PropertyDescriptor<T>{
+                      "yield_stress",
+                      [body](size_t) { return body.yield_stress(); }
+                    }
+                );
+
+                properties.push_back(
+                    PropertyDescriptor<T>{
+                      "plastic_strain",
+                      [body](size_t) { return body.plastic_strain(); }
                     }
                 );
             }

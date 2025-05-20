@@ -121,7 +121,7 @@ namespace simbi::ibsystem::body_functions {
                 if (mach_number > 0.1 && rel_position.norm() > 0.0) {
                     // Cosine of angle between position and velocity vectors
                     T cos_angle = vecops::dot(rel_position, rel_velocity) /
-                                  (vecops::norm(rel_position) * vel_mag);
+                                  (rel_position.norm() * vel_mag);
 
                     // directional weighting (strongest upstream, weakest
                     // downstream) Factor ranges from ~0.5 (downstream) to ~1.5
@@ -305,7 +305,7 @@ namespace simbi::ibsystem::body_functions {
         )
         {
             using conserved_t = Primitive::counterpart_t;
-            auto delta        = BodyDelta<T, Dims>{body_idx, {}, 0, 0, 0};
+            auto delta        = BodyDelta<T, Dims>{body_idx};
 
             // get position vector from sink to cell center
             const auto r_vector =

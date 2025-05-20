@@ -50,19 +50,10 @@
 #define CAPABILITY_HPP
 
 #include "build_options.hpp"
+#include "core/types/utility/enums.hpp"
 #include <cstdint>
 
 namespace simbi::ibsystem {
-    enum class BodyCapability : uint32_t {
-        NONE          = 0,
-        GRAVITATIONAL = 1 << 0,
-        ACCRETION     = 1 << 1,
-        ELASTIC       = 1 << 2,
-        DEFORMABLE    = 1 << 3,
-        RIGID         = 1 << 4,
-        // TODO: add more capabilities as needed
-    };
-
     DUAL inline BodyCapability operator|(BodyCapability lhs, BodyCapability rhs)
     {
         return static_cast<BodyCapability>(
