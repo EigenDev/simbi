@@ -24,6 +24,7 @@ from .dag_expression import (
     asinh,
     acosh,
     atanh,
+    if_then_else,
     sgn,
     logical_and,
     logical_or,
@@ -33,6 +34,8 @@ from .dag_expression import (
     logical_nor,
     logical_xnor,
     where,
+    floor,
+    ceil,
 )
 
 __all__ = [
@@ -46,6 +49,7 @@ __all__ = [
     "log10",
     "max_expr",
     "min_expr",
+    "if_then_else",
     "exp",
     "sin",
     "cos",
@@ -70,4 +74,6 @@ __all__ = [
     "logical_nor",
     "logical_xnor",
     "where",
+    "floor",
+    "ceil",
 ]
