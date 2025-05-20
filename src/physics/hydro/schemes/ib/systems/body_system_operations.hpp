@@ -58,6 +58,7 @@
 
 using namespace simbi::ibsystem::body_functions::gravitational;
 using namespace simbi::ibsystem::body_functions::accretion;
+using namespace simbi::ibsystem::body_functions::rigid;
 
 namespace simbi::ibsystem::functions {
     template <typename T, size_type Dims>
@@ -217,6 +218,30 @@ namespace simbi::ibsystem::functions {
                     body_delta.accreted_mass_delta,
                     body_delta.accretion_rate_delta
                 );
+            }
+        }
+
+        {
+            LazyCapabilityView<T, Dims> rigid_bodies(
+                system,
+                BodyCapability::RIGID
+            );
+
+            for (const auto& [body_idx, body] : rigid_bodies) {
+                // apply rigid body forces
+                auto [fluid_change, body_delta] = apply_rigid_body_force(
+                    body_idx,
+                    body,
+                    prim,
+                    mesh_cell,
+                    context,
+                    dt
+                );
+
+                fluid_state += fluid_change;
+
+                collector
+                    .record_delta(coords, body_idx, body_delta.force_delta);
             }
         }
         return fluid_state;
