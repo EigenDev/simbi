@@ -3,10 +3,13 @@
 
 #include "build_options.hpp"   // for real, luint, global::managed_memory, use
 #include "core/types/containers/vector.hpp"   // for spatial_vector_t
+#include "enums.hpp"
+#include <cstdint>
 #include <exception>
 #include <list>
 #include <stdexcept>
 #include <string>
+#include <type_traits>
 #include <unordered_map>
 #include <variant>
 #include <vector>
@@ -35,7 +38,8 @@ namespace simbi {
             std::vector<int>,                 // For integer arrays
             std::pair<real, real>,            // For pairs of real values
             ConfigDict,                       // For nested dictionaries
-            std::list<ConfigDict>             // For list of dictionaries
+            std::list<ConfigDict>,            // For list of dictionaries
+            BodyCapability                    // For BodyCapabilities
             >;
 
         ValueType value;
@@ -57,6 +61,7 @@ namespace simbi {
         ConfigValue(ConfigDict v) : value(std::move(v)) {}
         ConfigValue(std::list<ConfigDict> v) : value(std::move(v)) {}
         ConfigValue(std::pair<real, real> v) : value(std::move(v)) {}
+        ConfigValue(BodyCapability v) : value(v) {}
 
         // Helper for spatial vectors
         template <typename T, size_type Dims>
@@ -114,6 +119,11 @@ namespace simbi {
         bool is_array_of_ints() const
         {
             return std::holds_alternative<std::vector<int>>(value);
+        }
+
+        bool is_body_cap() const
+        {
+            return std::holds_alternative<BodyCapability>(value);
         }
 
         // Value access with type checking
@@ -203,6 +213,9 @@ namespace simbi {
                 }
                 throw std::runtime_error("Not an unsigned integer value");
             }
+            else if constexpr (std::is_same_v<T, BodyCapability>) {
+                return std::get<BodyCapability>(value);
+            }
             else {
                 static_assert(always_false<T>::value, "Unsupported type");
             }
@@ -222,8 +235,8 @@ namespace simbi {
             }
 
             spatial_vector_t<T, Dims> result;
-            for (size_type i = 0; i < Dims; ++i) {
-                result[i] = static_cast<T>(array[i]);
+            for (size_type ii = 0; ii < Dims; ++ii) {
+                result[ii] = static_cast<T>(array[ii]);
             }
             return result;
         }

@@ -225,16 +225,15 @@ namespace simbi {
         RESET,
     };
 
-    enum class BodyType {
-        RIGID,                // Rigid body
-        ELASTIC,              // Elastic body
-        VISCOUS,              // Viscous body
-        POROUS,               // Porous body
-        SINK,                 // Fluid sink (accretes mass/momentum)
-        SOURCE,               // Fluid source (injections mass/momentum)
-        PASSIVE,              // Passive body
-        GRAVITATIONAL,        // Gravitational body
-        GRAVITATIONAL_SINK,   // Gravitational sink
+    enum class BodyCapability : uint32_t {
+        NONE          = 0,
+        GRAVITATIONAL = 1 << 0,
+        ACCRETION     = 1 << 1,
+        ELASTIC       = 1 << 2,
+        DEFORMABLE    = 1 << 3,
+        RIGID         = 1 << 4,
+
+        // TODO: add more capabilities as needed
     };
 
     enum class VectorType : uint32_t {
@@ -246,7 +245,7 @@ namespace simbi {
     };
 
     constexpr auto comp_wave_speed    = WaveSpeedEstimate::MIGNONE_AND_BODO_05;
-    constexpr auto comp_ct_type       = CTTYPE::ZERO;
+    constexpr auto comp_ct_type       = CTTYPE::MdZ;
     constexpr auto comp_slope_limiter = LIMITER::MINMOD;
     constexpr auto comp_hllc_type     = HLLCTYPE::CLASSICAL;
 }   // namespace simbi

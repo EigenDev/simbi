@@ -53,6 +53,7 @@
 #include "config_dict.hpp"     // for ConfigDict
 #include "core/types/utility/enums.hpp"
 #include "enums.hpp"
+#include <cstdint>
 #include <memory>
 #include <unordered_map>
 #include <utility>
@@ -75,7 +76,7 @@ struct InitialConditions {
     std::pair<real, real> x3bounds;
     bool enable_peer_access{true}, managed_memory{false};
     simbi::ConfigDict config;
-    std::vector<std::pair<simbi::BodyType, simbi::ConfigDict>> immersed_bodies;
+    std::vector<simbi::ConfigDict> immersed_bodies;
 
     // user-defined expressions to be evaluated
     simbi::ConfigDict bx1_outer_expressions, bx1_inner_expressions;
@@ -441,12 +442,10 @@ struct InitialConditions {
                 for (const auto& body_dict : bodies_list) {
                     // extract body type from the dict!
                     if (!body_dict.contains("body_type") ||
-                        !body_dict.at("body_type").is_string()) {
+                        !body_dict.at("body_type").is_body_cap()) {
                         continue;   // Skip invalid body entries
                     }
-                    const std::string type_str =
-                        body_dict.at("body_type").template get<std::string>();
-                    simbi::BodyType body_type = string_to_body_type(type_str);
+
                     // create property map
                     simbi::ConfigDict props;
 
@@ -455,6 +454,8 @@ struct InitialConditions {
                     add_vector_property(body_dict, "velocity", props);
                     add_scalar_property(body_dict, "mass", props);
                     add_scalar_property(body_dict, "radius", props);
+                    add_boolean_property(body_dict, "two_way_coupling", props);
+                    add_body_property(body_dict, "body_type", props);
 
                     // add specifics/extra properties
                     // this is a dictionary of properties that are specific to
@@ -469,7 +470,7 @@ struct InitialConditions {
                         }
                     }
 
-                    // Add other properties (not in specifics)
+                    // add other properties (not in specifics)
                     for (const auto& [key, value] : body_dict) {
                         if (key != "body_type" && key != "position" &&
                             key != "velocity" && key != "mass" &&
@@ -478,93 +479,9 @@ struct InitialConditions {
                         }
                     }
 
-                    // Add to immersed_bodies
-                    init.immersed_bodies.push_back(
-                        std::make_pair(body_type, props)
-                    );
+                    // add to immersed_bodies
+                    init.immersed_bodies.push_back(props);
                 }
-            }
-            // Check for old-style immersed_bodies dictionary
-            else if (init.contains("immersed_bodies") &&
-                     init.at("immersed_bodies").is_dict()) {
-                const auto& bodies_dict =
-                    init.at("immersed_bodies")
-                        .template get<simbi::ConfigDict>();
-
-                for (const auto& [body_name, body_config] : bodies_dict) {
-                    if (!body_config.is_dict()) {
-                        continue;
-                    }
-
-                    const auto& body_dict =
-                        body_config.get<simbi::ConfigDict>();
-
-                    // Extract body type
-                    auto it_type = body_dict.find("body_type");
-                    if (it_type == body_dict.end() ||
-                        !it_type->second.is_string()) {
-                        continue;   // Skip if no valid type
-                    }
-
-                    const std::string type_str =
-                        it_type->second.get<std::string>();
-                    simbi::BodyType body_type = string_to_body_type(type_str);
-
-                    // Create property map
-                    simbi::ConfigDict props;
-
-                    // Add each property to the map
-                    for (const auto& [prop_name, prop_value] : body_dict) {
-                        if (prop_name == "body_type") {
-                            continue;   // Already handled
-                        }
-
-                        add_property(prop_name, prop_value, props);
-                    }
-
-                    // Add to immersed_bodies
-                    init.immersed_bodies.push_back(
-                        std::make_pair(body_type, props)
-                    );
-                }
-            }
-        }
-
-        // helpers
-        static simbi::BodyType string_to_body_type(const std::string& type_str)
-        {
-            std::string type_upper = type_str;
-            std::transform(
-                type_upper.begin(),
-                type_upper.end(),
-                type_upper.begin(),
-                ::toupper
-            );
-
-            if (type_upper == "GRAVITATIONAL") {
-                return simbi::BodyType::GRAVITATIONAL;
-            }
-            else if (type_upper == "ELASTIC") {
-                return simbi::BodyType::ELASTIC;
-            }
-            else if (type_upper == "RIGID") {
-                return simbi::BodyType::RIGID;
-            }
-            else if (type_upper == "VISCOUS") {
-                return simbi::BodyType::VISCOUS;
-            }
-            else if (type_upper == "SINK") {
-                return simbi::BodyType::SINK;
-            }
-            else if (type_upper == "SOURCE") {
-                return simbi::BodyType::SOURCE;
-            }
-            else if (type_upper == "GRAVITATIONAL_SINK") {
-                return simbi::BodyType::GRAVITATIONAL_SINK;
-            }
-            else {
-                // Default to gravitational
-                return simbi::BodyType::GRAVITATIONAL;
             }
         }
 
@@ -605,6 +522,28 @@ struct InitialConditions {
             if (dict.contains(name) && dict.at(name).is_real_number()) {
                 props[name] =
                     static_cast<real>(dict.at(name).template get<double>());
+            }
+        }
+        static void add_boolean_property(
+            const simbi::ConfigDict& dict,
+            const std::string& name,
+            simbi::ConfigDict& props
+        )
+        {
+            if (dict.contains(name) && dict.at(name).is_bool()) {
+                props[name] = dict.at(name).template get<bool>();
+            }
+        }
+
+        static void add_body_property(
+            const simbi::ConfigDict& dict,
+            const std::string& name,
+            simbi::ConfigDict& props
+        )
+        {
+            if (dict.contains(name) && dict.at(name).is_body_cap()) {
+                props[name] =
+                    dict.at(name).template get<simbi::BodyCapability>();
             }
         }
     };

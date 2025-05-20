@@ -1,66 +1,122 @@
 cimport numpy as np
 import numpy as np
 from hydro_classes cimport *
+from enum import Enum
 
 cdef ConfigDict convert_python_to_config_dict(py_dict):
-    """Convert a Python dictionary to ConfigDict."""
+    """Convert a Python dictionary to ConfigDict with intelligent type handling."""
     cdef ConfigDict result
-    cdef vector[double] vec_of_floating
-    cdef vector[string] vec_of_strings
-    cdef vector[int] vec_of_integers
-    cdef vector[vector[double]] vec_of_vec_floating
-    cdef cpplist[ConfigDict] vec_dict
-    cdef pair[double, double] tuple_type
 
     for key, value in py_dict.items():
         if value is None:
             continue
 
         cpp_key: string = key.encode("utf-8")
-        if isinstance(value, (bool, np.uint8)):
+
+        # Handle common vector keys specially
+        if key in ["position", "velocity", "force"] and isinstance(value, (list, tuple, np.ndarray)):
+            result[cpp_key] = convert_to_vector_of_doubles(value)
+
+        # Basic scalar types
+        elif isinstance(value, bool):
             result[cpp_key] = ConfigValue(<cbool>value)
-        elif isinstance(value, (int, np.int32)):
-            result[cpp_key] = ConfigValue(<int>value)
-        elif isinstance(value, (float, np.float64, np.float32)):
+        elif isinstance(value, int) or isinstance(value, np.integer):
+            if key == "body_type":
+                result[cpp_key] = ConfigValue(<BodyCapability>value)
+            else:
+                result[cpp_key] = ConfigValue(<int>value)
+        elif isinstance(value, float) or isinstance(value, np.floating):
             result[cpp_key] = ConfigValue(<double>value)
         elif isinstance(value, str):
             result[cpp_key] = ConfigValue(<string>value.encode("utf-8"))
-        elif "bounds" in key:
-            tuple_type = pair[double, double](value[0], value[1])
-            result[cpp_key] = ConfigValue(tuple_type)
-        elif isinstance(value, (list, tuple, np.ndarray)) and all(isinstance(x, (list, tuple, np.ndarray, np.flatiter)) for x in value):
-            # Convert nested lists
-            for x in value:
-                vec_of_vec_floating.push_back([<double>y for y in x])
-            result[cpp_key] = ConfigValue(vec_of_vec_floating)
-        elif isinstance(value, (list, tuple, np.ndarray)) and all(isinstance(x, float) for x in value):
-            # Convert numeric lists
-            for x in value:
-                vec_of_floating.push_back(<double>x)
-            result[cpp_key] = ConfigValue(vec_of_floating)
-        elif isinstance(value, (list, tuple, np.ndarray)) and all(isinstance(x, int) for x in value):
-            # Convert integer lists
-            for x in value:
-                vec_of_integers.push_back(<int>x)
-            result[cpp_key] = ConfigValue(vec_of_integers)
-        elif isinstance(value, (list, tuple, np.ndarray)) and all(isinstance(x, str) for x in value):
-            # Convert string lists
-            for x in value:
-                vec_of_strings.push_back(<string>x.encode("utf-8"))
-            result[cpp_key] = ConfigValue(vec_of_strings)
+        elif isinstance(value, type):
+            print(f"Skipping type: {value} for key: {key}")
+            zzz = input("Press Enter to continue...")
+            # For string-based enums like Regime, CoordSystem, etc.
+            if isinstance(value.value, str):
+                result[cpp_key] = ConfigValue(<string>value.value.encode("utf-8"))
+            # For integer-based enums like BodyCapability
+            elif isinstance(value.value, int):
+                result[cpp_key] = ConfigValue(<int>value.value)
+            else:
+                raise ValueError(f"Unsupported enum type: {type(value)} for key: {key}")
+        # Special case for bounds
+        elif "bounds" in key and isinstance(value, (list, tuple)) and len(value) == 2:
+            result[cpp_key] = ConfigValue(pair[double, double](
+                <double>value[0], <double>value[1]))
+
+        # Collections
+        elif isinstance(value, (list, tuple, np.ndarray)):
+            result[cpp_key] = convert_collection(value)
         elif isinstance(value, dict):
-            # Recursively convert nested dictionaries
             result[cpp_key] = ConfigValue(convert_python_to_config_dict(value))
-        elif isinstance(value, list) and all(isinstance(x, dict) for x in value):
-            for x in value:
-                vec_dict.push_back(convert_python_to_config_dict(x))
-            result[cpp_key] = ConfigValue(vec_dict)
         elif callable(value):
+            # Skip callable objects
             pass
         else:
-            raise ValueError(f"Unsupported type: {type(value)} for variable: {key}")
+            raise ValueError(f"Unsupported type: {type(value)} for key: {key}")
 
     return result
+
+cdef ConfigValue convert_to_vector_of_doubles(value):
+    """Convert a Python sequence to a vector of doubles."""
+    cdef vector[double] vec
+    for x in value:
+        vec.push_back(<double>x)
+    return ConfigValue(vec)
+
+cdef ConfigValue convert_collection(collection):
+    """Convert a Python collection to the appropriate ConfigValue."""
+    # Empty collection
+    if len(collection) == 0:
+        return ConfigValue(vector[double]())
+
+    # Check first item to determine collection type
+    first_item = collection[0]
+    cdef vector[vector[double]] nested_vec
+    cdef cpplist[ConfigDict] dict_list
+    cdef vector[int] int_vec
+    cdef vector[string] str_vec
+    cdef vector[double] double_vec
+
+    # Nested lists/arrays
+    if isinstance(first_item, (list, tuple, np.ndarray)):
+        for item in collection:
+            nested_vec.push_back([<double>x for x in item])
+        return ConfigValue(nested_vec)
+
+    # List of dictionaries (bodies)
+    elif isinstance(first_item, dict):
+        for item in collection:
+            dict_list.push_back(convert_python_to_config_dict(item))
+        return ConfigValue(dict_list)
+
+    # List of same type
+    else:
+        # Integer list
+        if isinstance(first_item, int) or isinstance(first_item, np.integer):
+            for item in collection:
+                int_vec.push_back(<int>item)
+            return ConfigValue(int_vec)
+
+        # Double list
+        elif isinstance(first_item, float) or isinstance(first_item, np.floating):
+            for item in collection:
+                double_vec.push_back(<double>item)
+            return ConfigValue(double_vec)
+
+        # String list
+        elif isinstance(first_item, str):
+            for item in collection:
+                str_vec.push_back(str(item).encode("utf-8"))
+            return ConfigValue(str_vec)
+        # Fall back to double vector
+        else:
+            try:
+                return convert_to_vector_of_doubles(collection)
+            except:
+                raise ValueError(f"Unable to convert collection with items of type {type(first_item)}")
+
 
 cdef class SimState:
     cdef Driver driver_state
