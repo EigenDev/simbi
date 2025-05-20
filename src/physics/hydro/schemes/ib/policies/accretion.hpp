@@ -70,6 +70,16 @@ namespace simbi::ibsystem::body_functions {
             return q * q * (1.0 + 2.0 * r_norm);
         }
 
+        // helper function for smooth transitions
+        template <typename T>
+        DEV T smoothstep(T x)
+        {
+            // CLamp x to [0,1]
+            x = std::min(std::max(x, T(0.0)), T(1.0));
+            // smoothstep polynomial: 3x^2 - 2x^3
+            return x * x * (3.0 - 2.0 * x);
+        }
+
         // calculate radial accretion profile
         template <typename T, size_type Dims>
         DEV T calculate_radial_accretion_profile(
