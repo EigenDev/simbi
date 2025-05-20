@@ -64,6 +64,7 @@ namespace simbi::ibsystem {
         spatial_vector_t<T, Dims> force;
         T mass;
         T radius;
+        bool two_way_coupling;
 
         // optional components using Maybe monad
         Maybe<GravitationalComponent<T>> gravitational;
@@ -80,6 +81,7 @@ namespace simbi::ibsystem {
               force(spatial_vector_t<T, Dims>()),
               mass(T(0)),
               radius(T(0)),
+              two_way_coupling(false),
               gravitational(Nothing),
               accretion(Nothing)
         {
@@ -89,7 +91,8 @@ namespace simbi::ibsystem {
             const spatial_vector_t<T, Dims>& position,
             const spatial_vector_t<T, Dims>& velocity,
             T mass,
-            T radius
+            T radius,
+            bool two_way_coupling = false
         )
             : type(type),
               position(position),
@@ -97,6 +100,7 @@ namespace simbi::ibsystem {
               force(spatial_vector_t<T, Dims>()),
               mass(mass),
               radius(radius),
+              two_way_coupling(two_way_coupling),
               gravitational(Nothing),
               accretion(Nothing)
         {
@@ -110,6 +114,7 @@ namespace simbi::ibsystem {
               force(other.force),
               mass(other.mass),
               radius(other.radius),
+              two_way_coupling(other.two_way_coupling),
               gravitational(other.gravitational),
               accretion(other.accretion)
         {
@@ -122,6 +127,7 @@ namespace simbi::ibsystem {
               force(std::move(other.force)),
               mass(other.mass),
               radius(other.radius),
+              two_way_coupling(other.two_way_coupling),
               gravitational(std::move(other.gravitational)),
               accretion(std::move(other.accretion))
         {
@@ -130,14 +136,15 @@ namespace simbi::ibsystem {
         DUAL constexpr Body& operator=(const Body& other)
         {
             if (this != &other) {
-                type          = other.type;
-                position      = other.position;
-                velocity      = other.velocity;
-                force         = other.force;
-                mass          = other.mass;
-                radius        = other.radius;
-                gravitational = other.gravitational;
-                accretion     = other.accretion;
+                type             = other.type;
+                position         = other.position;
+                velocity         = other.velocity;
+                force            = other.force;
+                mass             = other.mass;
+                radius           = other.radius;
+                two_way_coupling = other.two_way_coupling;
+                gravitational    = other.gravitational;
+                accretion        = other.accretion;
             }
             return *this;
         }
@@ -145,24 +152,30 @@ namespace simbi::ibsystem {
         DUAL constexpr Body& operator=(Body&& other) noexcept
         {
             if (this != &other) {
-                type          = other.type;
-                position      = std::move(other.position);
-                velocity      = std::move(other.velocity);
-                force         = std::move(other.force);
-                mass          = other.mass;
-                radius        = other.radius;
-                gravitational = std::move(other.gravitational);
-                accretion     = std::move(other.accretion);
+                type             = other.type;
+                position         = std::move(other.position);
+                velocity         = std::move(other.velocity);
+                force            = std::move(other.force);
+                mass             = other.mass;
+                radius           = other.radius;
+                two_way_coupling = other.two_way_coupling;
+                gravitational    = std::move(other.gravitational);
+                accretion        = std::move(other.accretion);
             }
             return *this;
         }
 
-        DUAL Body<T, Dims>
-        with_gravitational(T softening, bool two_way = false) const
+        DUAL Body<T, Dims> with_gravitational(T softening) const
         {
             Body<T, Dims> new_body = *this;
-            new_body.gravitational =
-                GravitationalComponent<T>{softening, two_way};
+            new_body.gravitational = GravitationalComponent<T>{softening};
+            return new_body;
+        }
+
+        DUAL Body<T, Dims> with_rigid(T inertia, bool apply_no_slip)
+        {
+            Body<T, Dims> new_body = *this;
+            new_body.rigid         = RigidComponent<T>{inertia, apply_no_slip};
             return new_body;
         }
 
@@ -272,13 +285,6 @@ namespace simbi::ibsystem {
             return gravitational
                 .map([](const auto& g) { return g.softening_length; })
                 .unwrap_or(T(0));
-        }
-
-        DUAL bool two_way_coupling() const
-        {
-            return gravitational
-                .map([](const auto& g) { return g.two_way_coupling; })
-                .unwrap_or(false);
         }
 
         // accretion
