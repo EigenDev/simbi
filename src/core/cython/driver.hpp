@@ -80,16 +80,8 @@ namespace simbi {
                         scale_factor_derivative
                     );
                 }
-                else if (regime == "srhd") {
-                    simulate<1, HydroRegime::SRHD>(
-                        state,
-                        init_cond,
-                        scale_factor,
-                        scale_factor_derivative
-                    );
-                }
                 else {
-                    simulate<1, HydroRegime::RMHD>(
+                    simulate<1, HydroRegime::SRHD>(
                         state,
                         init_cond,
                         scale_factor,
@@ -106,16 +98,8 @@ namespace simbi {
                         scale_factor_derivative
                     );
                 }
-                else if (regime == "srhd") {
-                    simulate<2, HydroRegime::SRHD>(
-                        state,
-                        init_cond,
-                        scale_factor,
-                        scale_factor_derivative
-                    );
-                }
                 else {
-                    simulate<2, HydroRegime::RMHD>(
+                    simulate<2, HydroRegime::SRHD>(
                         state,
                         init_cond,
                         scale_factor,

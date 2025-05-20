@@ -32,16 +32,12 @@ namespace simbi {
             std::function<real(real)> const& scale_factor_derivative
         )
         {
-            using sr_rm_or_nt = std::variant<
+            using sr_or_nt = std::variant<
                 std::unique_ptr<Newtonian<1>>,
-                std::unique_ptr<SRHD<1>>,
-                std::unique_ptr<RMHD<1>>>;
-            auto self = [&]() -> sr_rm_or_nt {
+                std::unique_ptr<SRHD<1>>>;
+            auto self = [&]() -> sr_or_nt {
                 if (regime == "srhd") {
                     return std::make_unique<SRHD<1>>(state, init_cond);
-                }
-                else if (regime == "srmhd") {
-                    return std::make_unique<RMHD<1>>(state, init_cond);
                 }
                 else {
                     return std::make_unique<Newtonian<1>>(state, init_cond);
@@ -65,16 +61,12 @@ namespace simbi {
             std::function<real(real)> const& scale_factor_derivative
         )
         {
-            using sr_rm_or_nt = std::variant<
+            using sr_or_nt = std::variant<
                 std::unique_ptr<Newtonian<2>>,
-                std::unique_ptr<SRHD<2>>,
-                std::unique_ptr<RMHD<2>>>;
-            auto self = [&]() -> sr_rm_or_nt {
+                std::unique_ptr<SRHD<2>>>;
+            auto self = [&]() -> sr_or_nt {
                 if (regime == "srhd") {
                     return std::make_unique<SRHD<2>>(state, init_cond);
-                }
-                else if (regime == "srmhd") {
-                    return std::make_unique<RMHD<2>>(state, init_cond);
                 }
                 else {
                     return std::make_unique<Newtonian<2>>(state, init_cond);

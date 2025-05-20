@@ -71,7 +71,7 @@ namespace simbi {
         using base_t = HydroBase<Newtonian<dim>, dim, Regime::NEWTONIAN>;
 
         // isothermal EOS
-        bool isothermal_, locally_isothermal_;
+        bool isothermal_, locally_isothermal_, shakura_sunyaev_alpha_;
         real sound_speed_squared_;
 
       protected:
@@ -89,14 +89,8 @@ namespace simbi {
         static constexpr std::string_view regime = "classical";
 
         template <typename T>
-        using RiemannFuncPointer = conserved_t (T::*)(
-            const primitive_t&,
-            const primitive_t&,
-            const luint,
-            const real,
-            const conserved_t&,
-            const conserved_t&
-        ) const;
+        using RiemannFuncPointer =
+            conserved_t (T::*)(const primitive_t&, const primitive_t&, const luint, const real, const conserved_t&, const conserved_t&) const;
         RiemannFuncPointer<Newtonian<dim>> riemann_solve;
 
         // Constructors

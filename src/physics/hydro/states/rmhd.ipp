@@ -625,8 +625,8 @@ DUAL RMHD<dim>::conserved_t RMHD<dim>::calc_hllc_flux(
         const auto np2 = next_perm(nhat, 2);
         // the normal component of the magnetic field is assumed to
         // be continuous across the interface, so bnL = bnR = bn
-        const auto bn = hll_state.bcomponent(nhat);
-        // const auto bn = bface;
+        // const auto bn = hll_state.bcomponent(nhat);
+        const auto bn = bface;
         // const real bn  = hll_state.bcomponent(nhat);
         const real bp1 = hll_state.bcomponent(np1);
         const real bp2 = hll_state.bcomponent(np2);
@@ -1057,8 +1057,7 @@ DUAL RMHD<dim>::conserved_t RMHD<dim>::calc_hlld_flux(
         const auto np2 = next_perm(nhat, 2);
         // the normal component of the magnetic field is assumed to
         // be continuous across the interface, so bnL = bnR = bn
-        const auto bn = hll_state.bcomponent(nhat);
-        // const auto bn = bface;
+        const auto bn = bface;
         // const real bn = hll_state.bcomponent(nhat);
 
         // Eq. (12)
@@ -1160,9 +1159,11 @@ DUAL RMHD<dim>::conserved_t RMHD<dim>::calc_hlld_flux(
 
         // do compound inequalities in two steps
         const auto on_left =
-            (vface < laL && vface > aLm) || (vface > laL && vface < vnc);
+            (safe_less_than(vface, vnc) && safe_greater_than(vface, laL)) ||
+            (safe_less_than(vface, laL) && safe_greater_than(vface, aLm));
         const auto at_contact =
-            (vface < vnc && vface > laL) || (vface > vnc && vface < laR);
+            (safe_less_than(vface, laR) && safe_greater_than(vface, vnc)) ||
+            (safe_less_than(vface, vnc) && safe_greater_than(vface, laL));
 
         const auto uc = on_left ? uL : uR;
         const auto pa = on_left ? prAL : prAR;
@@ -1678,19 +1679,19 @@ void RMHD<dim>::init_simulation()
     const auto& yP = this->full_yvertex_policy();
     const auto& zP = this->full_zvertex_policy();
     // allocate space for Riemann fluxes
-    fri.resize(xP.get_real_extent())
+    fri.resize(xP.get_active_extent())
         .reshape(
             {this->active_nz() + 2,
              this->active_ny() + 2,
              this->active_nx() + 1}
         );
-    gri.resize(yP.get_real_extent())
+    gri.resize(yP.get_active_extent())
         .reshape(
             {this->active_nz() + 2,
              this->active_ny() + 1,
              this->active_nx() + 2}
         );
-    hri.resize(zP.get_real_extent())
+    hri.resize(zP.get_active_extent())
         .reshape(
             {this->active_nz() + 1,
              this->active_ny() + 2,

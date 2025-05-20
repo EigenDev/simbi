@@ -168,15 +168,17 @@ namespace simbi {
             auto xblockdim = std::min(grid.active_gridsize(0), gpu_block_dimx_);
             auto yblockdim = std::min(grid.active_gridsize(1), gpu_block_dimy_);
             auto zblockdim = std::min(grid.active_gridsize(2), gpu_block_dimz_);
-            config.shared_mem_bytes =
-                calculate_optimal_shared_mem(xblockdim, yblockdim, zblockdim);
 
             if constexpr (global::on_gpu) {
                 if (xblockdim * yblockdim * zblockdim < global::WARP_SIZE) {
-                    if (grid.total_gridsize(2) > 1) {
+                    // even if we are doing 2D or 3D runs, sometimes the symmery
+                    // means that one or more of the dimensions collapses, so
+                    // we place most of the threads along the effective
+                    // dimensions of the problem
+                    if (grid.active_gridsize(2) > 1) {
                         xblockdim = yblockdim = zblockdim = 4;
                     }
-                    else if (grid.total_gridsize(1) > 1) {
+                    else if (grid.active_gridsize(1) > 1) {
                         xblockdim = yblockdim = 16;
                         zblockdim             = 1;
                     }
@@ -186,12 +188,15 @@ namespace simbi {
                     }
                 }
             }
+            config.shared_mem_bytes =
+                calculate_optimal_shared_mem(xblockdim, yblockdim, zblockdim);
 
             full_policy_ = ExecutionPolicy(
                 grid.dimensions(),
                 {xblockdim, yblockdim, zblockdim},
                 config
             );
+
             fullxvertex_policy_ = ExecutionPolicy(
                 grid.flux_shape(0),
                 {xblockdim, yblockdim, zblockdim},
@@ -220,7 +225,7 @@ namespace simbi {
             size_type zblockdim
         ) const
         {
-            // Calculate the optimal shared memory size based on block
+            // calculate the optimal shared memory size based on block
             // dimensions
             return std::max(
                        xblockdim * yblockdim * zblockdim,

@@ -258,6 +258,18 @@ namespace simbi {
             return 0;
         }
 
+        DUAL constexpr auto normal_vec(const size_type side) const
+        {
+            if (side < 2 * Dims) {
+                const size_type dir = side / 2;
+                const auto nhat     = unit_vectors::get<Dims>(dir + 1);
+                // if side is even, then the normal vector
+                // points in the negative direction
+                return nhat;
+            }
+            return unit_vector_t<Dims>{};
+        }
+
         DUAL auto area_normal(const spatial_vector_t<real, Dims>& nhat) const
         {
             // deterine the direction of the area normal
@@ -373,7 +385,6 @@ namespace simbi {
             constexpr int dir = Dir == GridDirection::X1   ? 1
                                 : Dir == GridDirection::X2 ? 2
                                                            : 3;
-
             if constexpr (dir == 1) {
                 if (geo_info_.spacing_type(0) == Cellspacing::LINEAR) {
                     return get_face_linear<dir>(ii, side == 0);
@@ -503,6 +514,19 @@ namespace simbi {
             }
         }
 
+        DUAL auto min_cell_width() const
+        {
+            if constexpr (Dims == 1) {
+                return widths_[0];
+            }
+            else if constexpr (Dims == 2) {
+                return my_min<real>(widths_[0], widths_[1]);
+            }
+            else if constexpr (Dims == 3) {
+                return my_min3<real>(widths_[0], widths_[1], widths_[2]);
+            }
+        }
+
         // accessors
         DUAL constexpr auto geometry() const { return geo_info_.geometry(); }
         DUAL constexpr auto centroid() const { return centroid_; }
@@ -570,7 +594,8 @@ namespace simbi {
                 // for multiple ghost layers with log spacing, apply ratio
                 // multiple times
                 if (is_lower) {
-                    // for lower boundary, divide by the ratio ghost_layer times
+                    // for lower boundary, divide by the ratio ghost_layer
+                    // times
                     for (size_type ii = 0; ii < ghost_layer; ii++) {
                         face_pos /= log_ratio;
                     }
@@ -590,16 +615,16 @@ namespace simbi {
 
             // proper handling for different geometries
             if (geo_info_.geometry() != Geometry::CARTESIAN) {
-                if (boundary_dim ==
-                    1) {   // theta (phi) coordinate in spherical (cylindrical)
+                if (boundary_dim == 1) {   // theta (phi) coordinate in
+                                           // spherical (cylindrical)
                     if (geo_info_.geometry() == Geometry::SPHERICAL) {
                         // handle spherical coordinates
                         if (is_lower && ghost_pos[boundary_dim] < 0) {
                             // Reflection across θ=0 pole
                             ghost_pos[boundary_dim] = -ghost_pos[boundary_dim];
 
-                            // In spherical coordinates, crossing the pole also
-                            // means phi changes by phi (if we have 3D)
+                            // In spherical coordinates, crossing the pole
+                            // also means phi changes by phi (if we have 3D)
                             if constexpr (Dims > 2) {
                                 ghost_pos[2] += M_PI;
                                 if (ghost_pos[2] > 2 * M_PI) {

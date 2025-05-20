@@ -181,7 +181,7 @@ namespace simbi {
 
         constexpr auto get_full_extent() const { return nzones; }
 
-        constexpr auto get_real_extent() const { return nzones; }
+        constexpr auto get_active_extent() const { return nzones; }
 
         constexpr auto set_shared_mem_bytes(size_type bytes)
         {

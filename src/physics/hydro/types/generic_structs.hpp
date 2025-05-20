@@ -75,19 +75,6 @@ namespace simbi {
         concept Newtonian = R == Regime::NEWTONIAN;
     }   // namespace sim_type
 
-    template <typename T>
-    concept VectorLike = requires(T t) {
-        // must have array-like access returning real
-        { t[0] } -> std::convertible_to<real>;
-
-        // must have size() method returning size_type
-        { t.size() } -> std::convertible_to<size_type>;
-
-        // must inherit from BaseStorage
-        // requires std::
-        // is_base_of_v<BaseStorage<typename T::value_type, T::dimensions>, T>;
-    };
-
     struct MignoneDelZannaVariables {
         real lamL, lamR, aL, aR, dL, dR, vjL, vjR, vkL, vkR, vnorm{0.0};
     };
@@ -905,6 +892,11 @@ namespace simbi {
             else {
                 return velocity() * rho();
             }
+        }
+
+        DUAL auto specific_energy(real gamma) const
+        {
+            return energy(gamma) / rho();
         }
 
         DEV constexpr auto calc_magnetic_four_vector() const

@@ -82,7 +82,6 @@ cdef class SimState:
 
         cdef PyObjWrapper a_cpp = PyObjWrapper(a)
         cdef PyObjWrapper adot_cpp = PyObjWrapper(adot)
-        print("Running simulation with state:")
         self.driver_state.run(
             state,
             sim_info["dimensionality"],

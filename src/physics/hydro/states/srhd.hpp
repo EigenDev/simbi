@@ -227,12 +227,12 @@ namespace simbi {
             const real v3 = prim->vcomponent(3);
 
             return WaveSpeeds{
-              std::abs(v1 + cs / (1 + v1 * cs)),
-              std::abs(v1 - cs / (1 - v1 * cs)),
-              std::abs(v2 + cs / (1 + v2 * cs)),
-              std::abs(v2 - cs / (1 - v2 * cs)),
-              std::abs(v3 + cs / (1 + v3 * cs)),
-              std::abs(v3 - cs / (1 - v3 * cs)),
+              std::abs((v1 + cs) / (1 + v1 * cs)),
+              std::abs((v1 - cs) / (1 - v1 * cs)),
+              std::abs((v2 + cs) / (1 + v2 * cs)),
+              std::abs((v2 - cs) / (1 - v2 * cs)),
+              std::abs((v3 + cs) / (1 + v3 * cs)),
+              std::abs((v3 - cs) / (1 - v3 * cs)),
             };
         }
 

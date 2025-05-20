@@ -54,6 +54,14 @@ namespace simbi {
     concept FourVector =
         T == VectorType::SPACETIME || T == VectorType::MAGNETIC_FOUR;
 
+    template <typename T>
+    concept VectorLike = requires(T vec, size_t i) {
+        { vec[i] } -> std::convertible_to<typename T::value_type>;
+        { vec.size() } -> std::convertible_to<size_t>;
+        { T::dimensions } -> std::convertible_to<size_t>;
+        { T::vec_type } -> std::convertible_to<VectorType>;
+    };
+
     // forward declarations
     template <typename T, size_type Dims, VectorType Type>
     class Vector;
@@ -356,7 +364,7 @@ namespace simbi {
     // Vector: pure value-based immutable vector with direct storage
     // -------------------------------------------------------------
     template <typename T, size_type Dims, VectorType Type = VectorType::GENERAL>
-    class alignas(16) Vector
+    class Vector
     {
       private:
         // direct storage
@@ -511,88 +519,6 @@ namespace simbi {
             return fp::map(*this, [](const T& x) { return -x; });
         }
 
-        // arithmetic operations
-
-        // element-wise addition
-        template <typename U, size_type OtherDims, VectorType OtherType>
-        DUAL constexpr auto
-        operator+(const Vector<U, OtherDims, OtherType>& other) const
-        {
-            // traditional for loop version
-            // using result_t = detail::promote_t<T, U>;
-            // Vector<result_t, Dims, detail::promote_vector_t<Type, OtherType>>
-            //     result;
-            // for (size_type ii = 0; ii < Dims; ++ii) {
-            //     result[ii] = storage_[ii] + static_cast<result_t>(other[ii]);
-            // }
-            // return result;
-
-            using result_t = detail::promote_t<T, U>;
-            return fp::zip(
-                *this,
-                other,
-                [](const auto& x, const auto& y) -> result_t { return x + y; }
-            );
-        }
-
-        // element-wise subtraction
-        template <typename U, size_type OtherDims, VectorType OtherType>
-        DUAL constexpr auto
-        operator-(const Vector<U, OtherDims, OtherType>& other) const
-        {
-            // traditional for loop version
-            // using result_t = detail::promote_t<T, U>;
-            // Vector<result_t, Dims, detail::promote_vector_t<Type, OtherType>>
-            //     result;
-            // for (size_type ii = 0; ii < Dims; ++ii) {
-            //     result[ii] = storage_[ii] - static_cast<result_t>(other[ii]);
-            // }
-            // return result;
-
-            using result_t = detail::promote_t<T, U>;
-            return fp::zip(
-                *this,
-                other,
-                [](const auto& x, const auto& y) -> result_t { return x - y; }
-            );
-        }
-
-        // scalar multiplication
-        template <typename U>
-        DUAL constexpr auto operator*(U scalar) const
-        {
-            // traditional for loop version
-            // using result_t = detail::promote_t<T, U>;
-            // Vector<result_t, Dims, Type> result;
-            // for (size_type ii = 0; ii < Dims; ++ii) {
-            //     result[ii] = static_cast<result_t>(scalar) * storage_[ii];
-            // }
-            // return result;
-
-            using result_t = detail::promote_t<T, U>;
-            return fp::map(*this, [scalar](const auto& x) -> result_t {
-                return scalar * x;
-            });
-        }
-
-        // scalar division
-        template <typename U>
-        DUAL constexpr auto operator/(U scalar) const
-        {
-            // traditional for loop version
-            // using result_t = detail::promote_t<T, U>;
-            // Vector<result_t, Dims, Type> result;
-            // for (size_type ii = 0; ii < Dims; ++ii) {
-            //     result[ii] = static_cast<result_t>(storage_[ii]) / scalar;
-            // }
-            // return result;
-
-            using result_t = detail::promote_t<T, U>;
-            return fp::map(*this, [scalar](const auto& x) -> result_t {
-                return x / scalar;
-            });
-        }
-
         // compound assignment (+=, -=, *=, /=)
         template <typename U, size_type OtherDims, VectorType OtherType>
         DUAL constexpr auto
@@ -618,30 +544,6 @@ namespace simbi {
             // return *this;
 
             return *this = *this - other;
-        }
-
-        template <typename U>
-        DUAL constexpr auto operator*=(U scalar)
-        {
-            // traditional for loop version
-            // for (size_type ii = 0; ii < Dims; ++ii) {
-            //     storage_[ii] *= static_cast<T>(scalar);
-            // }
-            // return *this;
-
-            return *this = *this * scalar;
-        }
-
-        template <typename U>
-        DUAL constexpr auto operator/=(U scalar)
-        {
-            // traditional for loop version
-            // for (size_type ii = 0; ii < Dims; ++ii) {
-            //     storage_[ii] /= static_cast<T>(scalar);
-            // }
-            // return *this;
-
-            return *this = *this / scalar;
         }
 
         // create a view to this vector
@@ -746,13 +648,6 @@ namespace simbi {
             return std::move(v).template get<I>();
         }
     };
-
-    // scalar multiplication from the left
-    template <typename U, typename T, size_type Dims, VectorType Type>
-    DUAL constexpr auto operator*(U scalar, const Vector<T, Dims, Type>& vec)
-    {
-        return vec * scalar;
-    }
 
     // -------------------------------------------------------------
     // VectorView: non-owning view of vector data
@@ -929,88 +824,6 @@ namespace simbi {
             return Vector<T, Dims, Type>(data_);
         }
 
-        // arithmetic operations
-        // scalar multiplication
-        template <typename U>
-        DUAL constexpr auto operator*(U scalar) const
-        {
-            // traditional for loop version
-            // using result_t = detail::promote_t<T, U>;
-            // Vector<result_t, Dims, Type> result;
-            // for (size_type ii = 0; ii < Dims; ++ii) {
-            //     result[ii] = static_cast<result_t>(scalar) * data_[ii];
-            // }
-            // return result;
-
-            using result_t = detail::promote_t<T, U>;
-            return fp::map(*this, [scalar](const auto& x) -> result_t {
-                return scalar * x;
-            });
-        }
-
-        // scalar division
-        template <typename U>
-        DUAL constexpr auto operator/(U scalar) const
-        {
-            // traditional for loop version
-            // using result_t = detail::promote_t<T, U>;
-            // Vector<result_t, Dims, Type> result;
-            // for (size_type ii = 0; ii < Dims; ++ii) {
-            //     result[ii] = static_cast<result_t>(data_[ii]) / scalar;
-            // }
-            // return result;
-
-            using result_t = detail::promote_t<T, U>;
-            return fp::map(*this, [scalar](const auto& x) -> result_t {
-                return x / scalar;
-            });
-        }
-
-        // addition
-        template <typename U, VectorType OtherType>
-        DUAL constexpr auto operator+(const Vector<U, Dims, OtherType>& other
-        ) const
-        {
-            // traditional for loop version
-            // using result_t = detail::promote_t<T, U>;
-            // Vector<result_t, Dims, detail::promote_vector_t<Type, OtherType>>
-            //     result;
-            // for (size_type ii = 0; ii < Dims; ++ii) {
-            //     result[ii] = data_[ii] + static_cast<result_t>(other[ii]);
-            // }
-            // return result;
-
-            using result_t = detail::promote_t<T, U>;
-            return fp::zip(
-                *this,
-                other,
-                [](const auto& x, const auto& y) -> result_t { return x + y; }
-            );
-        }
-
-        // subtraction
-        template <typename U, VectorType OtherType>
-        DUAL constexpr auto operator-(const Vector<U, Dims, OtherType>& other
-        ) const
-        {
-            // traditional for loop version
-            using result_t = detail::promote_t<T, U>;
-            Vector<result_t, Dims, detail::promote_vector_t<Type, OtherType>>
-                result;
-            for (size_type ii = 0; ii < Dims; ++ii) {
-                result[ii] = data_[ii] - static_cast<result_t>(other[ii]);
-            }
-            return result;
-
-            // using result_t = detail::promote_t<T, U>;
-            // return fp::zip(
-            //     *this,
-            //     other,
-            //     [](const auto& x, const auto& y) -> result_t { return x - y;
-            //     }
-            // );
-        }
-
         // norm
         DUAL constexpr auto norm() const { return to_vector().norm(); }
 
@@ -1050,6 +863,100 @@ namespace simbi {
             return const_reverse_iterator(data_);
         }
     };
+
+    // vector-like scalar multiplication
+    template <VectorLike Vec, typename U>
+    DUAL constexpr auto operator*(const Vec& vec, U scalar)
+        requires(std::is_arithmetic_v<U>)
+    {
+        using result_t = detail::promote_t<typename Vec::value_type, U>;
+        return fp::map(vec, [scalar](const auto& x) -> result_t {
+            return static_cast<result_t>(scalar) * x;
+        });
+    }
+
+    template <VectorLike Vec, typename U>
+    DUAL constexpr auto operator*(U scalar, const Vec& vec)
+        requires(std::is_arithmetic_v<U>)
+    {
+        using result_t = detail::promote_t<typename Vec::value_type, U>;
+        return fp::map(vec, [scalar](const auto& x) -> result_t {
+            return static_cast<result_t>(scalar) * x;
+        });
+    }
+
+    // vector-like scalar division
+    template <VectorLike Vec, typename U>
+    DUAL constexpr auto operator/(const Vec& vec, U scalar)
+        requires(std::is_arithmetic_v<U>)
+    {
+        using result_t = detail::promote_t<typename Vec::value_type, U>;
+        return fp::map(vec, [scalar](const auto& x) -> result_t {
+            return static_cast<result_t>(x) / static_cast<result_t>(scalar);
+        });
+    }
+
+    // vector-like scalar multiply assignment
+    template <VectorLike Vec, typename U>
+    DUAL constexpr auto& operator*=(Vec& vec, U scalar)
+        requires(std::is_arithmetic_v<U>)
+    {
+        using result_t = detail::promote_t<typename Vec::value_type, U>;
+        for (size_t i = 0; i < Vec::dimensions; ++i) {
+            vec[i] *= static_cast<result_t>(scalar);
+        }
+        return vec;
+    }
+
+    // vector-like scalar divide assignment
+    template <VectorLike Vec, typename U>
+    DUAL constexpr auto& operator/=(Vec& vec, U scalar)
+        requires(std::is_arithmetic_v<U>)
+    {
+        using result_t = detail::promote_t<typename Vec::value_type, U>;
+        for (size_t i = 0; i < Vec::dimensions; ++i) {
+            vec[i] /= static_cast<result_t>(scalar);
+        }
+        return vec;
+    }
+
+    template <VectorLike Vec1, VectorLike Vec2>
+    DUAL constexpr auto operator+(const Vec1& lhs, const Vec2& rhs)
+        requires(Vec1::dimensions == Vec2::dimensions)
+    {
+        using T               = typename Vec1::value_type;
+        using U               = typename Vec2::value_type;
+        using result_t        = detail::promote_t<T, U>;
+        constexpr size_t Dims = Vec1::dimensions;
+        constexpr VectorType ResultType =
+            detail::promote_vector_t<Vec1::vec_type, Vec2::vec_type>;
+
+        Vector<result_t, Dims, ResultType> result;
+        for (size_t i = 0; i < Dims; ++i) {
+            result[i] =
+                static_cast<result_t>(lhs[i]) + static_cast<result_t>(rhs[i]);
+        }
+        return result;
+    }
+
+    template <VectorLike Vec1, VectorLike Vec2>
+    DUAL constexpr auto operator-(const Vec1& lhs, const Vec2& rhs)
+        requires(Vec1::dimensions == Vec2::dimensions)
+    {
+        using T               = typename Vec1::value_type;
+        using U               = typename Vec2::value_type;
+        using result_t        = detail::promote_t<T, U>;
+        constexpr size_t Dims = Vec1::dimensions;
+        constexpr VectorType ResultType =
+            detail::promote_vector_t<Vec1::vec_type, Vec2::vec_type>;
+
+        Vector<result_t, Dims, ResultType> result;
+        for (size_t i = 0; i < Dims; ++i) {
+            result[i] =
+                static_cast<result_t>(lhs[i]) - static_cast<result_t>(rhs[i]);
+        }
+        return result;
+    }
 
     // -------------------------------------------------------------
     // type aliases for common vector types
@@ -1177,29 +1084,30 @@ namespace simbi {
 
     // overload ostream operator for printing vectors
     template <typename T, size_type Dims, VectorType Type>
-    std::ostream& operator<<(std::ostream& os, const Vector<T, Dims, Type>& v)
+    DUAL std::ostream&
+    operator<<(std::ostream& os, const Vector<T, Dims, Type>& v)
     {
         os << "[";
         for (size_type i = 0; i < Dims; ++i) {
             os << v[i];
-            // if (ii < Dims - 1) {
-            os << ", ";
-            // }
+            if (i < Dims - 1) {
+                os << ", ";
+            }
         }
         os << "]";
         return os;
     }
 
     template <typename T, size_type Dims, VectorType Type>
-    std::ostream&
+    DUAL std::ostream&
     operator<<(std::ostream& os, const ConstVectorView<T, Dims, Type>& v)
     {
         os << "[";
         for (size_type i = 0; i < Dims; ++i) {
             os << v[i];
-            // if (i < Dims - 1) {
-            os << ", ";
-            // }
+            if (i < Dims - 1) {
+                os << ", ";
+            }
         }
         os << "]";
         return os;

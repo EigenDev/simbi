@@ -377,6 +377,30 @@ namespace simbi {
             return (val * val) < global::epsilon;
         }
 
+        template <typename T>
+        DUAL bool approx_equal(T a, T b)
+        {
+            return std::abs(a - b) < global::epsilon;
+        }
+
+        template <typename T>
+        DUAL bool less_than_or_equal(T a, T b)
+        {
+            return (a < b) || is_close(a, b);
+        }
+
+        template <typename T>
+        DUAL bool safe_less_than(T a, T b)
+        {
+            return a < b && !approx_equal(a, b);
+        }
+
+        template <typename T>
+        DUAL bool safe_greater_than(T a, T b)
+        {
+            return a > b && !approx_equal(a, b);
+        }
+
         std::string getColorCode(Color color);
 
         // display the CPU / GPU device properties
