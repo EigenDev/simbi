@@ -267,6 +267,10 @@ namespace simbi {
                        (cell.normal(1) - cell.normal(0));
             }
             else if constexpr (Dir == GridDirection::X2) {
+                if (cell.geometry() == Geometry::AXIS_CYLINDRICAL) {
+                    // this is dphi
+                    return 2.0 * M_PI;
+                }
                 if constexpr (Dims > 1) {
                     return cell.normal(3) - cell.normal(2);
                 }
@@ -275,6 +279,10 @@ namespace simbi {
                 }
             }
             else {
+                if (cell.geometry() == Geometry::AXIS_CYLINDRICAL) {
+                    // this is dz
+                    return cell.normal(3) - cell.normal(2);
+                }
                 if constexpr (Dims < 3) {
                     return 1.0;
                 }
@@ -293,8 +301,14 @@ namespace simbi {
             faces[0].area   = rl * dz * dphi;
             faces[1].area   = rr * dz * dphi;
             if constexpr (Dims > 1) {
-                faces[2].area = (rr - rl) * dz;
-                faces[3].area = (rr - rl) * dz;
+                if (cell.geometry() == Geometry::AXIS_CYLINDRICAL) {
+                    faces[2].area = 0.5 * (rr * rr - rl * rl) * dphi;
+                    faces[3].area = 0.5 * (rr * rr - rl * rl) * dphi;
+                }
+                else {
+                    faces[2].area = (rr - rl) * dphi;
+                    faces[3].area = (rr - rl) * dphi;
+                }
                 if constexpr (Dims > 2) {
                     const auto rmean = cell.centroid_coordinate(0);
                     faces[4].area    = rmean * (rr - rl) * dphi;
@@ -310,8 +324,16 @@ namespace simbi {
             auto gamma
         )
         {
+            // special care must be taken for axisymmetry
+            // or cylindrical-polar coordinates. In axisymmetry,
+            // the phi velocity is zero, but out of convenience, we
+            // store the z component in the second component of the
+            // velocity vector. This is done to avoid having to
+            // rearrange the velocity vector in the axisymmetric
+            // case
+            const bool axis  = cell.geometry() == Geometry::AXIS_CYLINDRICAL;
             const real v1    = prims.proper_velocity(1);
-            const real v2    = prims.proper_velocity(2);
+            const real v2    = axis ? 0.0 : prims.proper_velocity(2);
             const real pt    = prims.total_pressure();
             const auto bmu   = prims.calc_magnetic_four_vector();
             const real wt    = prims.enthalpy_density(gamma);
