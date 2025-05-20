@@ -1,6 +1,5 @@
 import numpy as np
-from dataclasses import dataclass
-from ..config.constants import (
+from ..types.constants import (
     Regime,
     CoordSystem,
     TimeStepping,

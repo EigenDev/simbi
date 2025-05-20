@@ -9,7 +9,7 @@ from simbi.core.config.bodies import (
     BinaryConfig,
     ImmersedBodyConfig,
 )
-from simbi.functional.reader import BodyCapability, has_capability
+from ..types.constants import BodyCapability, has_capability
 from ..config.settings import MeshSettings, IOSettings, GridSettings, SimulationSettings
 from ..config.initialization import InitializationConfig
 from ...functional.maybe import Maybe
@@ -97,7 +97,7 @@ def try_checkpoint_initialization(
             overwrite["isothermal"] = bool(metadata["adiabatic_index"] == 1.0)
 
         if "immersed_bodies" in kwargs:
-            if metadata["system_config"] is None:
+            if "system_config" not in metadata:
                 overwrite["immersed_bodies"] = []
                 for key, body in kwargs["immersed_bodies"].items():
                     overwrite["immersed_bodies"].append(
@@ -106,8 +106,23 @@ def try_checkpoint_initialization(
                             mass=body["mass"],
                             velocity=body["velocity"],
                             position=body["position"],
+                            force=body["force"],
                             radius=body["radius"],
-                            specifics=body.get("specifics", None),
+                            # get all body properties
+                            # that aren't the basics
+                            specifics={
+                                k: v
+                                for k, v in body.items()
+                                if k
+                                not in [
+                                    "type",
+                                    "mass",
+                                    "velocity",
+                                    "position",
+                                    "force",
+                                    "radius",
+                                ]
+                            },
                         )
                     )
             else:
@@ -176,7 +191,7 @@ def try_checkpoint_initialization(
                 grid_config=GridSettings.from_dict(
                     overwrite_if_needed(settings["grid"], chkpt.metadata),
                     spatial_order=chkpt.metadata["spatial_order"],
-                    is_mhd=chkpt.metadata["is_mhd"],
+                    is_mhd="mhd" in chkpt.metadata["regime"],
                 ),
                 io_config=IOSettings.from_dict(
                     overwrite_if_needed(settings["io"], chkpt.metadata)

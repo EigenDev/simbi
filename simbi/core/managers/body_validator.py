@@ -1,9 +1,8 @@
-from ..config.constants import BodyType
+from ..types.constants import BodyCapability
 from ..config.bodies import (
     ImmersedBodyConfig,
 )
 from ...functional.maybe import Maybe
-from typing import Any
 from dataclasses import asdict
 
 
@@ -12,13 +11,13 @@ class BodyConfigValidator:
 
     basic_reqs = {"mass", "radius", "velocity", "position"}
     REQUIRED_PARAMS = {
-        BodyType.GRAVITATIONAL: set(
+        BodyCapability.GRAVITATIONAL: set(
             (*basic_reqs, "softening_length", "two_way_coupling")
         ),
-        BodyType.ELASTIC: set((*basic_reqs, "stiffness", "damping")),
-        BodyType.RIGID: basic_reqs,
-        BodyType.SINK: set((*basic_reqs, "accretion_efficiency")),
-        BodyType.GRAVITATIONAL_SINK: set(
+        BodyCapability.ELASTIC: set((*basic_reqs, "stiffness", "damping")),
+        BodyCapability.RIGID: basic_reqs,
+        BodyCapability.ACCRETION: set((*basic_reqs, "accretion_efficiency")),
+        BodyCapability.ACCRETION: set(
             (
                 *basic_reqs,
                 "softening_length",
@@ -34,7 +33,7 @@ class BodyConfigValidator:
         try:
             body_dict = asdict(body_config)
             # Validate body type
-            body_type = BodyType(body_dict.get("body_type", "").lower())
+            body_type = BodyCapability(body_dict["body_type"])
 
             # Check required parameters
             required = cls.REQUIRED_PARAMS[body_type]

@@ -8,7 +8,7 @@ from simbi.core.config.bodies import ImmersedBodyConfig
 from simbi.core.types.typing import ExpressionDict
 from simbi.functional.helpers import to_tuple_of_tuples
 from ...core.config.bodies import BodySystemConfig
-from .constants import (
+from ..types.constants import (
     CoordSystem,
     Regime,
     TimeStepping,

@@ -1,5 +1,5 @@
 from typing import Sequence
-from ..config.constants import Regime
+from ..types.constants import Regime
 from ...functional.helpers import to_iterable
 
 

@@ -1,14 +1,17 @@
 from typing import Optional, Sequence
 from dataclasses import dataclass, field
+from ..types.constants import BodyCapability
 
 
 @dataclass(frozen=True)
 class ImmersedBodyConfig:
-    body_type: str
+    body_type: BodyCapability
     mass: float
     velocity: Sequence[float]
     position: Sequence[float]
     radius: float
+    two_way_coupling: bool = field(default=False)
+    force: Sequence[float] = field(default_factory=lambda: [0.0, 0.0, 0.0])
     specifics: Optional[dict[str, float | int | bool]] = None
 
 
