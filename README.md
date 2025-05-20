@@ -131,7 +131,8 @@
   - [mypy](https://mypy-lang.org)
   - [cogapp](https://pypi.org/project/cogapp)
   - [halo](https://pypi.org/project/halo)
-
+  - [rich](https://github.com/Textualize/rich)
+    *Pretty-printing console outputs*
 </td>
 <td>
 
@@ -154,8 +155,6 @@
 - [rich-argparse](https://pypi.org/project/rich-argparse)
   *Improved CLI argument parsing*
 
-- [rich](https://github.com/Textualize/rich)
-  *Pretty-printing console outputs*
 
 </td>
 </tr>
