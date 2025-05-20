@@ -420,6 +420,11 @@ class BaseConfig(metaclass=abc.ABCMeta):
         """checks whether the simulation is locally isothermal"""
         return False
 
+    @simbi_property(group="sim_state")
+    def shakura_sunyaev_alpha(self) -> float:
+        """Shakura-Sunyaev alpha parameter for disk simulations"""
+        return 0.0
+
     @simbi_property(group="io")
     def local_sound_speed_expressions(self) -> ExpressionDict:
         """Expressions for the sound speed"""
