@@ -47,7 +47,23 @@ namespace simbi::expression {
           {"MIN", ExprOp::MIN},
           {"MAX", ExprOp::MAX},
           {"ATAN2", ExprOp::ATAN2},
-          {"IF_THEN_ELSE", ExprOp::IF_THEN_ELSE}
+          {"IF_THEN_ELSE", ExprOp::IF_THEN_ELSE},
+          {"FLOOR", ExprOp::FLOOR},
+          {"CEIL", ExprOp::CEIL},
+          {"MOD", ExprOp::MOD},
+          {"SGN", ExprOp::SGN},
+          {"BITWISE_AND", ExprOp::BITWISE_AND},
+          {"BITWISE_OR", ExprOp::BITWISE_OR},
+          {"BITWISE_XOR", ExprOp::BITWISE_XOR},
+          {"BITWISE_NOT", ExprOp::BITWISE_NOT},
+          {"BITWISE_LEFT_SHIFT", ExprOp::BITWISE_LEFT_SHIFT},
+          {"BITWISE_RIGHT_SHIFT", ExprOp::BITWISE_RIGHT_SHIFT},
+          {"LOGICAL_AND", ExprOp::LOGICAL_AND},
+          {"LOGICAL_OR", ExprOp::LOGICAL_OR},
+          {"LOGICAL_XOR", ExprOp::LOGICAL_XOR},
+          {"LOGICAL_NAND", ExprOp::LOGICAL_NAND},
+          {"LOGICAL_NOR", ExprOp::LOGICAL_NOR},
+          {"LOGICAL_XNOR", ExprOp::LOGICAL_XNOR}
         };
 
         auto it = op_map.find(op_str);

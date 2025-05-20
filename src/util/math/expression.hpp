@@ -49,6 +49,7 @@ namespace simbi::expression {
         SQRT,    // square root
         MIN,     // minimum of two values
         MAX,     // maximum of two values
+        MOD,     // modulus operation
         SINH,
         COSH,
         TANH,
@@ -56,6 +57,8 @@ namespace simbi::expression {
         ACOSH,
         ATANH,
         SGN,
+        CEIL,
+        FLOOR,
         ATAN2,
         // bitwise operations
         BITWISE_AND,           // bitwise AND

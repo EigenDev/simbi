@@ -288,6 +288,12 @@ namespace simbi::expression {
                         registers[instr.register_operands.operand2]
                     );
                     break;
+                case ExprOp::MOD:
+                    registers[result_reg] = std::fmod(
+                        registers[instr.register_operands.operand1],
+                        registers[instr.register_operands.operand2]
+                    );
+                    break;
                 case ExprOp::SINH:
                     registers[result_reg] =
                         std::sinh(registers[instr.register_operands.operand1]);
@@ -319,6 +325,14 @@ namespace simbi::expression {
                             : (registers[instr.register_operands.operand1] < 0.0
                                    ? -1.0
                                    : 0.0);
+                    break;
+                case ExprOp::FLOOR:
+                    registers[result_reg] =
+                        std::floor(registers[instr.register_operands.operand1]);
+                    break;
+                case ExprOp::CEIL:
+                    registers[result_reg] =
+                        std::ceil(registers[instr.register_operands.operand1]);
                     break;
                 case ExprOp::BITWISE_AND:
                     registers[result_reg] =
@@ -875,6 +889,32 @@ namespace simbi::expression {
                 );
                 return left > right ? left : right;
             }
+            case ExprOp::MOD: {
+                real left = evaluate_expr(
+                    nodes,
+                    node.children.left,
+                    x1,
+                    x2,
+                    x3,
+                    t,
+                    dt,
+                    parameters
+                );
+                real right = evaluate_expr(
+                    nodes,
+                    node.children.right,
+                    x1,
+                    x2,
+                    x3,
+                    t,
+                    dt,
+                    parameters
+                );
+                if (right == 0.0) {
+                    HANDLE_ERROR("Division by zero in modulo operation");
+                }
+                return std::fmod(left, right);
+            }
 
             // math functions
             case ExprOp::SIN: {
@@ -1169,6 +1209,32 @@ namespace simbi::expression {
                     parameters
                 );
                 return helpers::sgn(value);
+            }
+            case ExprOp::FLOOR: {
+                real value = evaluate_expr(
+                    nodes,
+                    node.children.left,
+                    x1,
+                    x2,
+                    x3,
+                    t,
+                    dt,
+                    parameters
+                );
+                return std::floor(value);
+            }
+            case ExprOp::CEIL: {
+                real value = evaluate_expr(
+                    nodes,
+                    node.children.left,
+                    x1,
+                    x2,
+                    x3,
+                    t,
+                    dt,
+                    parameters
+                );
+                return std::ceil(value);
             }
 
             // conditional operation
@@ -1680,6 +1746,8 @@ namespace simbi::expression {
                                 case ExprOp::ACOS:
                                 case ExprOp::ATAN:
                                 case ExprOp::SGN:
+                                case ExprOp::FLOOR:
+                                case ExprOp::CEIL:
                                 case ExprOp::SINH:
                                 case ExprOp::COSH:
                                 case ExprOp::TANH:
@@ -1699,6 +1767,7 @@ namespace simbi::expression {
                                 case ExprOp::POWER:
                                 case ExprOp::MIN:
                                 case ExprOp::MAX:
+                                case ExprOp::MOD:
                                 case ExprOp::ATAN2:
                                 case ExprOp::LT:
                                 case ExprOp::LE:
@@ -1862,6 +1931,15 @@ namespace simbi::expression {
                                 break;
                             case ExprOp::MAX:
                                 result = std::max(
+                                    entry.child_values[0],
+                                    entry.child_values[1]
+                                );
+                                break;
+                            case ExprOp::MOD:
+                                if (entry.child_values[1] == 0.0) {
+                                    HANDLE_ERROR("Division by zero");
+                                }
+                                result = std::fmod(
                                     entry.child_values[0],
                                     entry.child_values[1]
                                 );
@@ -2051,6 +2129,12 @@ namespace simbi::expression {
                                 break;
                             case ExprOp::SGN:
                                 result = helpers::sgn(entry.child_values[0]);
+                                break;
+                            case ExprOp::FLOOR:
+                                result = std::floor(entry.child_values[0]);
+                                break;
+                            case ExprOp::CEIL:
+                                result = std::ceil(entry.child_values[0]);
                                 break;
                             default:
                                 HANDLE_ERROR("Unknown operation type");
