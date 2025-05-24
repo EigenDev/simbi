@@ -261,10 +261,6 @@ namespace simbi::ibsystem {
                     if (thread_idx < max_bodies_) {
                         shared_deltas[thread_idx] = BodyDelta<T, Dims>{
                           thread_idx,
-                          spatial_vector_t<T, Dims>{},
-                          0,
-                          0,
-                          0
                         };
                     }
                     gpu::api::synchronize();
