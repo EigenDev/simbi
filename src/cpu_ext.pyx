@@ -83,13 +83,13 @@ cdef ConfigValue convert_collection(collection):
             nested_vec.push_back([<double>x for x in item])
         return ConfigValue(nested_vec)
 
-    # List of dictionaries (bodies)
+    # Sequence of dictionaries (bodies)
     elif isinstance(first_item, dict):
         for item in collection:
             dict_list.push_back(convert_python_to_config_dict(item))
         return ConfigValue(dict_list)
 
-    # List of same type
+    # Sequence of same type
     else:
         # Integer list
         if isinstance(first_item, int) or isinstance(first_item, np.integer):
