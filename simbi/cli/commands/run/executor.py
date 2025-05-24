@@ -1,5 +1,5 @@
 import os
-from typing import List, Dict
+from typing import Sequence, Dict
 from argparse import Namespace
 from ....simulator import Hydro
 from .... import logger
@@ -7,9 +7,9 @@ from typing import Any
 
 
 def run_simulation(
-    states: List[Hydro],
-    kwargs: Dict[int, Dict[str, Any]],
-    state_docs: List[str],
+    states: Sequence[Hydro],
+    kwargs: dict[int, dict[str, Any]],
+    state_docs: Sequence[str],
     args: Namespace,
 ) -> None:
     """Run simulation with configured states"""

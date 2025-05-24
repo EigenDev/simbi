@@ -2,7 +2,7 @@ import ast
 import sys
 import importlib
 from pathlib import Path
-from typing import List, Dict, Any, Optional, Sequence, Tuple, Set
+from typing import Sequence, Any, Optional, Set
 from argparse import ArgumentParser, Namespace
 from ....simulator import Hydro
 from ....detail import bcolors
@@ -10,7 +10,7 @@ from ....core.config.base_config import BaseConfig
 from ...utils.type_checker import type_check_input
 
 
-def _build_inheritance_graph(root: ast.Module) -> Dict[str, Set[str]]:
+def _build_inheritance_graph(root: ast.Module) -> dict[str, Set[str]]:
     """Build graph of class inheritance relationships"""
     inheritance_graph = {}
 
@@ -24,7 +24,7 @@ def _build_inheritance_graph(root: ast.Module) -> Dict[str, Set[str]]:
 
 
 def _get_derived_classes(
-    graph: Dict[str, Set[str]], base_class: str = "BaseConfig"
+    graph: dict[str, Set[str]], base_class: str = "BaseConfig"
 ) -> Set[str]:
     """Find all classes that inherit from base_class directly or indirectly"""
     derived = set()
@@ -43,7 +43,7 @@ def _get_derived_classes(
     return derived
 
 
-def _get_setup_classes(script: str) -> List[str]:
+def _get_setup_classes(script: str) -> Sequence[str]:
     """Extract all classes that inherit from BaseConfig directly or indirectly"""
     with open(script) as setup_file:
         root = ast.parse(setup_file.read())
@@ -63,7 +63,7 @@ def _configure_single_state(
     parser: ArgumentParser,
     args: Namespace,
     argv: Optional[Sequence],
-) -> Tuple[Optional[Hydro], Dict[str, Any], str]:
+) -> tuple[Optional[Hydro], dict[str, Any], str]:
     """Configure single hydro state"""
 
     # Import problem class
@@ -116,7 +116,7 @@ def use_arg_or_default(arg_value, config_value):
     return arg_value if arg_value is not None else config_value
 
 
-def _build_kwargs_dict(config: BaseConfig, args: Namespace) -> Dict[str, Any]:
+def _build_kwargs_dict(config: BaseConfig, args: Namespace) -> dict[str, Any]:
     """Build kwargs dictionary for simulation"""
     spatial_order = args.spatial_order
     temporal_order = args.time_order
@@ -146,7 +146,7 @@ def _build_kwargs_dict(config: BaseConfig, args: Namespace) -> Dict[str, Any]:
 
 def configure_state(
     args: Namespace, argv: Optional[Sequence]
-) -> tuple[List[Hydro], Dict[int, Dict[str, Any]], List[str]]:
+) -> tuple[Sequence[Hydro], dict[int, dict[str, Any]], Sequence[str]]:
     """Configure hydro state from setup script"""
     parser = getattr(args, "main_parser")
     script = args.setup_script

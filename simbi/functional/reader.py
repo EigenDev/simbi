@@ -1,3 +1,4 @@
+from typing_extensions import AnyStr
 import h5py
 import numpy as np
 from types import TracebackType
@@ -218,7 +219,7 @@ class LazySimulationReader:
         self._immersed_bodies_cache = {}
         # load immersed bodies data
         ib_group = file_obj["immersed_bodies"]
-        ib_attrs = dict(ib_group.attrs)
+        ib_attrs: dict[str, Any] = dict(ib_group.attrs)
         # get the number of bodies
         body_count: int = int(ib_attrs["count"])
         # Read data for each body
@@ -302,8 +303,8 @@ class LazySimulationReader:
         }
 
         if "immersed_bodies" in file_obj:
-            ib_group = dict(file_obj["immersed_bodies"])
-            ib_attrs = dict(file_obj["immersed_bodies"].attrs)
+            ib_group: dict[str, Any] = dict(file_obj["immersed_bodies"])
+            ib_attrs: dict[str, Any] = dict(file_obj["immersed_bodies"].attrs)
             ref_frame: str = ib_attrs["reference_frame"].decode("utf-8")
             self._metadata_cache["reference_frame"] = ref_frame
             if "system_config" in ib_group:
@@ -673,7 +674,7 @@ class LazySimulationReader:
 
         Args:
             field_name: Name for the derived field
-            dependencies: List of fields this derived field depends on
+            dependencies: Sequence of fields this derived field depends on
             compute_func: Function that computes the derived field from dependencies
 
         Returns:

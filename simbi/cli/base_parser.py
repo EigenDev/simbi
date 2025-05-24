@@ -1,6 +1,6 @@
 import sys
 from argparse import ArgumentParser, Namespace
-from typing import Any, Optional
+from typing import Any, Optional, Sequence
 
 
 class BaseParser(ArgumentParser):
@@ -46,7 +46,9 @@ class BaseParser(ArgumentParser):
         self.exit(2)
 
     def parse_known_args(
-        self, args: Optional[Any] = None, namespace: Optional[Namespace] = None
+        self,
+        args: Optional[Sequence[Any]] = None,
+        namespace: Optional[Namespace] = None,
     ) -> tuple[Namespace, list[str]]:
         """Override to handle subcommand help printing"""
         # Get actual args if none provided
@@ -65,11 +67,12 @@ class BaseParser(ArgumentParser):
         # Normal parsing
         try:
             parsed_args, argv = super().parse_known_args(args, namespace)
-            self.command = getattr(parsed_args, "command", None)
+            self.command = getattr(parsed_args, "command", "")
             setattr(parsed_args, "main_parser", self)
             setattr(parsed_args, "active_parser", self._subparser_map[self.command])
-            return parsed_args, argv
-        except Exception as e:
+            if parsed_args:
+                return parsed_args, argv
+        except Exception:
             if self.command:
                 self.parse_args([self.command, "--help"])
             else:

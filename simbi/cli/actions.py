@@ -1,4 +1,4 @@
-from argparse import Action, ArgumentParser, Namespace, SUPPRESS, Action
+from argparse import Action, ArgumentParser, Namespace, SUPPRESS
 from typing import Optional, Any, Sequence
 from pathlib import Path
 from ..detail import bcolors
@@ -26,7 +26,13 @@ class print_the_version(Action):
             option_strings, dest, nargs=0, default=SUPPRESS, **kwargs
         )
 
-    def __call__(self, parser, namespace, values, option_string, **kwargs):
+    def __call__(
+        self,
+        parser: ArgumentParser,
+        namespace: Namespace,
+        values: str | Sequence[Any] | None,
+        option_string: str | None = None,
+    ):
         from simbi import __version__ as version
 
         print(f"SIMBI version {version}")
@@ -39,7 +45,13 @@ class print_available_configs(Action):
             option_strings, dest, nargs=0, default=SUPPRESS, **kwargs
         )
 
-    def __call__(self, parser, namespace, values, option_string, **kwargs):
+    def __call__(
+        self,
+        parser: ArgumentParser,
+        namespace: Namespace,
+        values: str | Sequence[Any] | None,
+        option_string: str | None = None,
+    ):
         available_configs = get_available_configs()
         available_configs = sorted([Path(conf).stem for conf in available_configs])
 

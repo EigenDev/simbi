@@ -261,7 +261,7 @@ def compute_num_polar_zones(
     rmin: float,
     rmax: float,
     nr: int,
-    zpd: int,
+    zpd: Optional[int] = None,
     theta_bounds: tuple[float, float] = (0.0, np.pi),
 ) -> int:
     if zpd is not None:

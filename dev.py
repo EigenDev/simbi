@@ -5,7 +5,9 @@ import json
 import os
 import logging
 from pathlib import Path
-from typing import Optional, Dict, List, Tuple, Any
+from typing import Optional, Sequence, Any
+
+from cmasher.utils import Callable
 
 # Constants
 CACHE_FILE = "simbi_build_cache.txt"
@@ -66,10 +68,12 @@ def compose(*funcs):
     return composed_function
 
 
-def safe_run(func, default=None, error_log=None):
+def safe_run(
+    func: Callable[..., Any], default: str, error_log: str
+) -> Callable[..., Any]:
     """Higher-order function to safely run a function with error handling."""
 
-    def safe_func(*args, **kwargs):
+    def safe_func(*args, **kwargs) -> str:
         try:
             return func(*args, **kwargs)
         except Exception as e:
@@ -113,7 +117,7 @@ def suggest_gpu_architectures(platform: str) -> str:
     return ""
 
 
-def parse_gpu_architectures(arch_str: str, platform: str) -> List[str]:
+def parse_gpu_architectures(arch_str: str, platform: str) -> Sequence[str]:
     """Convert comma-separated architecture string into appropriate format."""
     if not arch_str:
         return []
@@ -226,7 +230,11 @@ def is_tool(name: str) -> bool:
 
 
 def run_subprocess(
-    cmd: List[str], env=None, check=True, capture=False, cwd=None
+    cmd: Sequence[str],
+    env: Optional[dict[str, str]] = None,
+    check: bool = True,
+    capture: bool = False,
+    cwd: Optional[str] = None,
 ) -> subprocess.CompletedProcess:
     """Run a subprocess with better error handling."""
     try:
@@ -242,18 +250,16 @@ def run_subprocess(
         result = subprocess.run(cmd, **kwargs)
         return result
 
-    except subprocess.SubprocessError as e:
+    except subprocess.CalledProcessError as e:
         logger.error(f"Command failed: {' '.join(cmd)}")
-        if hasattr(e, "stdout") and e.stdout:
-            logger.error(f"STDOUT:\n{e.stdout}")
-        if hasattr(e, "stderr") and e.stderr:
-            logger.error(f"STDERR:\n{e.stderr}")
+        logger.error(f"STDOUT:\n{e.stdout}")
+        logger.error(f"STDERR:\n{e.stderr}")
         if check:
-            raise
-        return e
+            raise e
+        return subprocess.CompletedProcess(cmd, e.returncode, e.stdout, e.stderr)
 
 
-def get_output(command: List[str]) -> str:
+def get_output(command: Sequence[str]) -> str:
     """Run command and return its output as a string."""
     return safe_run(
         lambda: subprocess.check_output(command).decode("utf-8").strip(),
@@ -406,10 +412,10 @@ def find_gpu_runtime_dir() -> str:
 
     # Strategy 1: Find CUDA via nvcc
     def find_via_nvcc():
-        if not is_tool("nvcc"):
+        if not (tool := get_tool("nvcc")):
             return None
 
-        which_nvcc = Path(get_tool("nvcc"))
+        which_nvcc = Path(tool)
         # Try to extract from path
         for path in which_nvcc.parents:
             if "cuda" in str(path).lower():
@@ -527,7 +533,7 @@ def check_minimal_dependencies() -> None:
 # =================================================================
 
 
-def read_from_cache() -> Optional[Dict[str, Any]]:
+def read_from_cache() -> Optional[dict[str, Any]]:
     """Read configuration from cache file."""
     cached_args = Path(CACHE_FILE)
     if cached_args.exists():
@@ -544,7 +550,7 @@ def read_from_cache() -> Optional[Dict[str, Any]]:
         return None
 
 
-def check_cache_compatibility(cached_vars: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+def check_cache_compatibility(cached_vars: dict[str, Any]) -> Optional[dict[str, Any]]:
     """Check if cached configuration is compatible with current version."""
     if not cached_vars:
         return None
@@ -583,7 +589,7 @@ def write_to_cache(args: argparse.Namespace) -> None:
 
 
 def merge_cached_config(
-    args: argparse.Namespace, cli_args: List[str]
+    args: argparse.Namespace, cli_args: set[str]
 ) -> argparse.Namespace:
     """Merge cached configuration with command line arguments."""
     cached_vars = read_from_cache()
@@ -673,7 +679,7 @@ def validate_configuration(args: argparse.Namespace) -> argparse.Namespace:
 
 def configure(
     args: argparse.Namespace, reconfigure: str, hdf5_include: str, gpu_include: str
-) -> List[str]:
+) -> Sequence[str]:
     """Create meson configure command."""
     if args.gpu_compilation == "enabled" and (
         args.dev_arch is None or args.dev_arch == "" or args.dev_arch == 0
@@ -723,7 +729,7 @@ def configure(
 # =================================================================
 
 
-def parse_the_arguments() -> Tuple[argparse.ArgumentParser, argparse.Namespace]:
+def parse_the_arguments() -> tuple[argparse.ArgumentParser, argparse.Namespace]:
     """Parse command line arguments."""
     parser = argparse.ArgumentParser(
         "Parser for building and installing simbi with meson"
@@ -875,7 +881,7 @@ def parse_the_arguments() -> Tuple[argparse.ArgumentParser, argparse.Namespace]:
 # =================================================================
 
 
-def build_simbi(args: argparse.Namespace) -> tuple[str]:
+def build_simbi(args: argparse.Namespace) -> tuple[str, str]:
     """Build the simbi package."""
     simbi_dir = Path().resolve()
 
@@ -995,7 +1001,8 @@ def install_simbi(args: argparse.Namespace) -> None:
     p2 = subprocess.Popen(
         ["grep", "-v", "Requirement already satisfied"], stdin=p1.stdout
     )
-    p1.stdout.close()
+    if p1.stdout is not None:
+        p1.stdout.close()
     p2.communicate()
 
     # Clean up

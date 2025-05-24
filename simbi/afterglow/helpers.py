@@ -5,7 +5,7 @@ from numpy.typing import NDArray
 from typing import Union
 from astropy.cosmology import FlatLambdaCDM
 from simbi import compute_num_polar_zones, get_dimensionality, read_file
-from astropy import units, constants
+from astropy import units
 
 cosmo = FlatLambdaCDM(
     H0=70 * units.km / units.s / units.Mpc, Tcmb0=2.725 * units.K, Om0=0.3
@@ -91,7 +91,9 @@ def get_dL(z):
         return 1e28 * units.cm
 
 
-def calc_rhat(theta: NDArray, phi: NDArray) -> NDArray:
+def calc_rhat(
+    theta: NDArray[np.floating], phi: NDArray[np.floating] | float
+) -> NDArray:
     return np.array(
         [np.sin(theta) * np.cos(phi), np.sin(theta) * np.sin(phi), np.cos(theta)]
     )
