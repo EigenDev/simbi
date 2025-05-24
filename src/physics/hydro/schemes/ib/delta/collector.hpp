@@ -259,9 +259,8 @@ namespace simbi::ibsystem {
 
                     // init shared memory
                     if (thread_idx < max_bodies_) {
-                        shared_deltas[thread_idx] = BodyDelta<T, Dims>{
-                          thread_idx,
-                        };
+                        shared_deltas[thread_idx] =
+                            BodyDelta<T, Dims>{thread_idx};
                     }
                     gpu::api::synchronize();
 
