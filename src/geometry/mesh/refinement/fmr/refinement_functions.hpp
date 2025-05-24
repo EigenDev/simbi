@@ -118,9 +118,12 @@ namespace simbi::refinement {
 
         // parallel implementation for 1D case
         if constexpr (Dims == 1) {
-            parallel_for(policy, fine_min[0], fine_max[0], [&op](size_type ii) {
-                op({ii});
-            });
+            parallel_for(
+                policy,
+                fine_min[0],
+                fine_max[0],
+                [op] DEV(size_type ii) { op({ii}); }
+            );
         }
         // sequential implementation for higher dimensions for now
         // TODO: extend to parallel for higher dimensions
@@ -256,7 +259,7 @@ namespace simbi::refinement {
                 policy,
                 region.min_bounds[0],
                 region.max_bounds[0],
-                [&op](size_type ii) { op({ii}); }
+                [op] DEV(size_type ii) { op({ii}); }
             );
         }
         // sequential implementation for higher dimensions for now
