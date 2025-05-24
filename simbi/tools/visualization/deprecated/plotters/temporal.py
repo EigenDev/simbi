@@ -4,8 +4,6 @@ from argparse import ArgumentParser
 from dataclasses import dataclass
 from typing import Optional, Any
 from numpy.typing import NDArray
-from itertools import cycle
-from cycler import cycler
 from simbi.tools.visualization.core.mixins import (
     AnimationMixin,
     CoordinatesMixin,

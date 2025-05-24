@@ -2,7 +2,7 @@ import argparse
 from itertools import cycle
 from typing import Any, Optional, Dict
 from ..config.config import PlotGroup, StyleGroup, AnimationGroup, MultidimGroup
-from .constants import FIELD_ALIASES, VALID_PLOT_TYPES, FIELD_CHOICES, LEGEND_LOCATIONS
+from ..constants import FIELD_ALIASES, VALID_PLOT_TYPES, FIELD_CHOICES, LEGEND_LOCATIONS
 from ....cli.base_parser import BaseParser
 
 
@@ -112,19 +112,6 @@ class ParseKVActionToList(argparse.Action):
                 raise argparse.ArgumentError(self, str(message))
 
 
-class CycleAction(argparse.Action):
-    """Custom action to turn list of items into cycle"""
-
-    def __call__(
-        self,
-        parser: argparse.ArgumentParser,
-        namespace: argparse.Namespace,
-        values: Any,
-        option_string: Optional[str] = None,
-    ) -> None:
-        setattr(namespace, self.dest, cycle(values))
-
-
 class PlottingArgumentBuilder:
     """Handles parsing of plotting arguments"""
 
@@ -148,6 +135,15 @@ class PlottingArgumentBuilder:
             (
                 ["--plot-type"],
                 {"type": str, "choices": VALID_PLOT_TYPES, "help": "plot type"},
+            ),
+            (
+                ["--theme"],
+                {
+                    "default": "default",
+                    "type": str,
+                    "help": "theme to use for visualization",
+                    "choices": ["default", "dark", "scientific"],
+                },
             ),
             (
                 ["--fields"],
@@ -276,7 +272,7 @@ class PlottingArgumentBuilder:
             ),
             (
                 ["--labels"],
-                {"default": None, "nargs": "+", "help": "list of legend labels"},
+                {"default": [], "nargs": "+", "help": "list of legend labels"},
             ),
             (
                 ["--xlims"],
@@ -446,6 +442,7 @@ class PlottingArgumentBuilder:
                     "nargs": "+",
                     "type": colorbar_limits,
                     "action": CycleAction,
+                    "dest": "color_range",
                     "help": "The colorbar range(s)",
                 },
             ),
@@ -524,7 +521,7 @@ class PlottingArgumentBuilder:
             (
                 ["--cbar-orient"],
                 {
-                    "dest": "cbar_orient",
+                    "dest": "colorbar_orientation",
                     "default": "vertical",
                     "type": str,
                     "help": "Colorbar orientation",
@@ -549,7 +546,7 @@ class PlottingArgumentBuilder:
                     "help": "coordinates of fixed vars for (n-m)d projection",
                     "action": ParseKVActionToList,
                     "nargs": "+",
-                    "default": {"xj": ["0.0"], "xk": ["0.0"]},
+                    "default": ["xj=0.0", "xk=0.0"],
                 },
             ),
             (
@@ -629,7 +626,7 @@ class PlottingArgumentBuilder:
         ]
 
     @staticmethod
-    def _build_config(args: Dict[str, Any]) -> Dict[str, Any]:
+    def _build_config(args: dict[str, Any]) -> dict[str, Any]:
         config = {
             "plot": PlotGroup(
                 setup=args["setup"],
@@ -707,14 +704,14 @@ class PlottingArgumentBuilder:
         return config
 
     @staticmethod
-    def get_config(args: argparse.Namespace) -> Dict[str, Any]:
+    def get_config(args: argparse.Namespace) -> dict[str, Any]:
         """Parse arguments into configuration groups"""
         # get all args except the first one which is the command name
         args_dict = vars(args)
         return PlottingArgumentBuilder()._build_config(args_dict)
 
     @staticmethod
-    def _validate_config(config: Dict[str, Any]) -> None:
+    def _validate_config(config: dict[str, Any]) -> None:
         """Validate configuration groups"""
         # Validate plot settings
         if config["plot"].ndim < 1:

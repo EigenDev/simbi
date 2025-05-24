@@ -15,9 +15,9 @@ except ImportError:
 class BasePlotter(ABC):
     def __init__(self, config: dict[str, Any]):
         self.config = config
-        self.frames: List[Any] = []
+        self.frames: Sequence[Any] = []
         self.fig: Optional[Figure] = None
-        self.axes: Optional[List[Axes]] = None
+        self.axes: Optional[Sequence[Axes]] = None
 
     @abstractmethod
     def create_figure(self) -> None:

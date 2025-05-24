@@ -2,7 +2,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 from argparse import ArgumentParser
 from ..core.mixins import DataHandlerMixin, AnimationMixin, CoordinatesMixin
-from typing import Optional, Tuple, Any
+from typing import Optional, Any
 from numpy.typing import NDArray
 from ..core.base import BasePlotter
 from ..utils.io import DataManager
@@ -75,7 +75,7 @@ class HistogramPlotter(BasePlotter, DataHandlerMixin, AnimationMixin, Coordinate
 
     def _compute_histogram(
         self, fields: dict, var: np.ndarray
-    ) -> Tuple[np.ndarray, np.ndarray]:
+    ) -> tuple[np.ndarray, np.ndarray]:
         """Compute histogram data"""
         gamma_beta = fields["gamma_beta"]
         gbs = np.geomspace(1e-5, gamma_beta.max() + 1.0e-4, 128)
@@ -87,7 +87,7 @@ class HistogramPlotter(BasePlotter, DataHandlerMixin, AnimationMixin, Coordinate
 
     def _fit_power_law(
         self, gbs: np.ndarray, hist_data: np.ndarray
-    ) -> Optional[Tuple[float, float]]:
+    ) -> Optional[tuple[float, float]]:
         """Fit power law to histogram data"""
         if not self.powerfit:
             return None

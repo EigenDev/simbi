@@ -2,7 +2,7 @@ import math
 from dataclasses import dataclass
 from itertools import cycle
 from math import pi
-from typing import Any, List, Optional, Tuple
+from typing import Any, Sequence, Optional
 
 import matplotlib.colors as mcolors
 import matplotlib.pyplot as plt
@@ -87,7 +87,7 @@ class PlotTextStyle:
 class PlotStyle:
     """Plot style configuration"""
 
-    spines: List[str] = ("top", "right")
+    spines: Sequence[str] = ("top", "right")
     grid: bool = False
     axis_below: bool = True
 
@@ -270,7 +270,7 @@ class PlotFormatter:
 
     @staticmethod
     def create_label(
-        field: str, coords: Optional[Tuple[float, float]] = None, units: bool = False
+        field: str, coords: Optional[tuple[float, float]] = None, units: bool = False
     ) -> str:
         """Create formatted label"""
         label = field
@@ -293,7 +293,7 @@ class PlotFormatter:
             ax.set_yscale("log")
 
     @staticmethod
-    def set_ticks(ax: Axes, ticks: Optional[List[float]] = None) -> None:
+    def set_ticks(ax: Axes, ticks: Optional[Sequence[float]] = None) -> None:
         """Set axis ticks"""
         if ticks:
             ax.set_xticks(ticks)

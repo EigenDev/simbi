@@ -1,5 +1,5 @@
 from dataclasses import dataclass, field
-from typing import Optional, List, Tuple, Dict, Any, Sequence
+from typing import Optional, Sequence, Any
 from pathlib import Path
 from enum import Enum
 from itertools import cycle
@@ -17,9 +17,9 @@ class PlotGroup:
     """Basic plot configuration"""
 
     setup: str
-    files: List[Path]
+    files: Sequence[Path]
     plot_type: PlotType
-    fields: List[str] = field(default_factory=lambda: ["rho"])
+    fields: Sequence[str] = field(default_factory=lambda: ["rho"])
     ndim: int = 1
     cartesian: bool = False
     xmax: Optional[float] = None
@@ -36,27 +36,27 @@ class PlotGroup:
 class StyleGroup:
     """Plot style configuration"""
 
-    color_maps: List[str] = field(default_factory=lambda: cycle(["viridis"]))
+    color_maps: Sequence[str] = field(default_factory=lambda: cycle(["viridis"]))
     log: bool = False
     semilogx: bool = False
     semilogy: bool = False
     units: bool = False
-    fig_dims: Tuple[float, float] = (10, 6)
+    fig_dims: tuple[float, float] = (10, 6)
     legend: bool = True
     legend_loc: Optional[str] = None
-    labels: Optional[List[str]] = None
-    xlims: Tuple[Optional[float], Optional[float]] = (None, None)
-    ylims: Tuple[Optional[float], Optional[float]] = (None, None)
+    labels: Optional[Sequence[str]] = None
+    xlims: tuple[Optional[float], Optional[float]] = (None, None)
+    ylims: tuple[Optional[float], Optional[float]] = (None, None)
     xmax: Optional[float] = None
     power: float = 1.0
     transparent: bool = False
     black_background: bool = False
     annotation_loc: str = "upper right"
     annotation_text: str = ""
-    annotation_anchor: Tuple[float, float] = (1.0, 1.0)
+    annotation_anchor: tuple[float, float] = (1.0, 1.0)
     bipolar: bool = False
     use_tex: bool = False
-    color_range: list[Tuple[float, float]] = cycle([(None, None)])
+    color_range: list[tuple[float, float]] = cycle([(None, None)])
     print: bool = False
     pictorial: bool = False
     scale_downs: Sequence[float] = field(default_factory=lambda: [1.0])
@@ -80,12 +80,12 @@ class StyleGroup:
 class MultidimGroup:
     """Multidimensional plot settings"""
 
-    projection: Tuple[int, int, int] = (1, 2, 3)
+    projection: tuple[int, int, int] = (1, 2, 3)
     box_depth: float = 0.0
     bipolar: bool = False
     patches: int = 1
     slice_along: Optional[str] = None
-    coords: Dict[str, list[str]] = field(
+    coords: dict[str, list[str]] = field(
         default_factory=lambda: {"xj": ["0.0"], "xk": ["0.0"]}
     )
 

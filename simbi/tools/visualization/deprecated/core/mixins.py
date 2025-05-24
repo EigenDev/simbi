@@ -12,7 +12,7 @@ from ....functional.helpers import calc_any_mean
 from ....functional.reader import read_file
 from ... import utility as util
 from ...utility import get_field_str
-from ..core.constants import FIELD_ALIASES
+from ..constants.alias import FIELD_ALIASES
 from ....core.types.constants import BodyCapability, has_capability
 
 
