@@ -104,15 +104,6 @@ namespace simbi::visc {
         const real v3x3L = px3L.vcomponent(3);
         const real v3x3R = px3R.vcomponent(3);
 
-        // calc velocity gradients using the available states
-        // if divergence across left face, the sign is we
-        // take the backwards difference. Otherwise, the forward
-        // difference
-        // const auto div_sign_x1 = (Dir == 1) ? ((face == 0) ? -1.0 : 1.0)
-        // : 1.0; const auto div_sign_x2 = (Dir == 2) ? ((face == 0) ? -1.0
-        // : 1.0) : 1.0; const auto div_sign_x3 = (Dir == 3) ? ((face == 0) ?
-        // -1.0 : 1.0) : 1.0;
-
         // diagonal terms
         const real dv1_dx1 = (v1x1R - v1x1L) / cell.width(0);
         const real dv2_dx2 = (v2x2R - v2x2L) / cell.width(1);
