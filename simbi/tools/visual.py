@@ -1,59 +1,105 @@
-from .visualization.config import Config
-from .visualization.core import BasePlotter
-from .visualization.plotters import (
-    TemporalPlotter,
-    LinePlotter,
-    MultidimPlotter,
-    HistogramPlotter,
-)
-from .visualization.utils.formatting import PlotTextStyle
-from .utility import get_dimensionality
 from typing import Any
-
-
-def create_plotter(config: Config) -> BasePlotter:
-    # Create appropriate plotter with configuration
-    if config["plot"].plot_type == "line":
-        return LinePlotter(config)
-    elif config["plot"].plot_type == "multidim":
-        return MultidimPlotter(config)
-    elif config["plot"].plot_type == "temporal":
-        return TemporalPlotter(config)
-    elif config["plot"].plot_type == "histogram":
-        return HistogramPlotter(config)
-    else:
-        raise ValueError(f"plot type {config['plot'].plot_type} not an option")
+from .visualization import api
 
 
 def visualize(config: dict[str, Any]) -> None:
-    """Create visualization based on parser configuration"""
-    config["plot"].ndim = get_dimensionality(config["plot"].files)
+    """
+    Legacy entry point for visualization.
 
-    # if no plot type is specified, default to the dimensionality of the data
-    if config["plot"].plot_type is None:
-        if config["plot"].ndim == 1 or config["multidim"].slice_along is not None:
-            config["plot"].plot_type = "line"
-        else:
-            config["plot"].plot_type = "multidim"
+    Translates old config-based calls to the new component-based API.
+    """
+    # Extract key configuration sections
+    plot_config = config["plot"]
+    style_config = config["style"]
+    multidim_config = config["multidim"]
+    animation_config = config["animation"]
 
-    # initialize plot text and font style from config
-    PlotTextStyle(config)
+    # Extract common parameters
+    files = plot_config["files"]
+    fields = plot_config["fields"]
+    setup_name = plot_config["setup"]
+    plot_type = plot_config["plot_type"]
+    save_as = plot_config["save_as"]
 
-    # Parse arguments into configuration groups
-    plotter = create_plotter(config)
+    # Create kwargs from configuration
+    kwargs = _build_api_kwargs(
+        plot_config, style_config, multidim_config, animation_config
+    )
 
-    # Execute visualization
-    with plotter:
-        if config["plot"].kind == "movie":
-            if config["plot"].plot_type == "temporal":
-                raise ValueError(
-                    "Movie visualization is not supported for temporal plots."
-                )
-            plotter.animate()
-        else:
-            plotter.plot()
+    # Determine if we're creating an animation
+    is_animation = plot_config["kind"] == "movie"
 
-        if not config["plot"].save_as:
-            plotter.show()
-        else:
-            plotter.save()
+    # Call appropriate API function
+    if is_animation:
+        if plot_type == "line":
+            api.animate_line(
+                files, fields, save_as, True, animation_config["frame_rate"], **kwargs
+            )
+        elif plot_type == "multidim":
+            api.animate_multidim(
+                files, fields, save_as, True, animation_config["frame_rate"], **kwargs
+            )
+        elif plot_type == "histogram":
+            api.animate_histogram(
+                files, fields, save_as, True, animation_config["frame_rate"], **kwargs
+            )
+        elif plot_type == "temporal":
+            api.animate_temporal(
+                files, fields, save_as, True, animation_config["frame_rate"], **kwargs
+            )
+    else:
+        if plot_type == "line":
+            api.plot_line(files, fields, save_as, True, **kwargs)
+        elif plot_type == "multidim":
+            api.plot_multidim(files, fields, save_as, True, **kwargs)
+        elif plot_type == "histogram":
+            api.plot_histogram(files, fields, save_as, True, **kwargs)
+        elif plot_type == "temporal":
+            api.plot_temporal(files, fields, save_as, True, **kwargs)
+
+
+def _build_api_kwargs(
+    plot_config: dict[str, Any],
+    style_config: dict[str, Any],
+    multidim_config: dict[str, Any],
+    animation_config: dict[str, Any],
+) -> dict[str, Any]:
+    """Convert config dict to kwargs for API functions"""
+    kwargs = {}
+
+    # Plot configuration
+    kwargs["ndim"] = plot_config["ndim"]
+    kwargs["setup"] = plot_config["setup"]
+
+    if "hist_type" in plot_config:
+        kwargs["hist_type"] = plot_config["hist_type"]
+    if "powerfit" in plot_config:
+        kwargs["powerfit"] = plot_config["powerfit"]
+    if "weight" in plot_config:
+        kwargs["weight"] = plot_config["weight"]
+
+    # Style configuration
+    kwargs["cmap"] = style_config["color_maps"]
+    kwargs["log"] = style_config["log"]
+    kwargs["power"] = style_config["power"]
+    kwargs["fig_dims"] = style_config["fig_dims"]
+    kwargs["dpi"] = style_config["dpi"]
+    kwargs["legend"] = style_config["legend"]
+    kwargs["xlims"] = style_config["xlims"]
+    kwargs["ylims"] = style_config["ylims"]
+    kwargs["draw_bodies"] = style_config["draw_immersed_bodies"]
+    kwargs["color_range"] = style_config["color_range"]
+    kwargs["units"] = style_config["units"]
+
+    if "orbital_params" in style_config and style_config["orbital_params"]:
+        kwargs["orbital_params"] = style_config["orbital_params"]
+
+    # Multidim configuration
+    kwargs["projection"] = multidim_config["projection"]
+    kwargs["box_depth"] = multidim_config["box_depth"]
+    kwargs["bipolar"] = multidim_config["bipolar"]
+    kwargs["slice_along"] = multidim_config["slice_along"]
+    kwargs["coords"] = multidim_config["coords"]
+
+    # Remove None values
+    return {k: v for k, v in kwargs.items() if v is not None}

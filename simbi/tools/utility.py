@@ -7,7 +7,6 @@ import numpy as np
 import matplotlib.pyplot as plt
 from typing import Union, Any, Optional
 from numpy.typing import NDArray
-from ..functional import LazySimulationReader
 from ..functional.helpers import find_nearest
 from dataclasses import dataclass, field
 from enum import Enum
