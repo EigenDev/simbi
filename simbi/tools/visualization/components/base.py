@@ -52,7 +52,7 @@ class Component(ABC):
         if field:
             from ...utility import get_field_str
 
-            field_info = get_field_str(field)[0]
+            field_info = get_field_str(field)
         else:
             field_info = ""
 
@@ -65,7 +65,7 @@ class Component(ABC):
                 self.ax, self.state.data.setup, self.state.config, field_info
             )
 
-        self.ax.set_aspect("equal", adjustable="box")
+        # self.ax.set_aspect("equal")
 
     @abstractmethod
     def setup(self) -> None:

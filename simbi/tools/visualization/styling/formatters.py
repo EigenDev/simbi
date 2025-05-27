@@ -26,8 +26,8 @@ class AxisFormatter:
     def _format_line_plot(self, ax, setup, config, field_info):
         """Format a line plot axis"""
         # Set labels
-        ax.set_xlabel(f"${config.get('style', {}).get('xlabel', 'x')}$")
-        if len(config.get("plot", {}).get("fields", [])) == 1:
+        ax.set_xlabel(f"${config['style']['xlabel']}$")
+        if len(config["plot"]["fields"]) == 1:
             ax.set_ylabel(f"{field_info}")
 
         # Set title
@@ -43,8 +43,8 @@ class AxisFormatter:
             ax.set_ylim(ylims)
 
         # Show legend if needed
-        if config.get("style", {}).get("legend", True) and len(ax.get_lines()) > 1:
-            ax.legend()
+        # if config["style"]["legend"] and len(ax.get_lines()) > 1:
+        #     ax.legend()
 
     def _format_multidim_plot(self, ax, setup, config, field_info):
         """Format a multidimensional plot axis"""

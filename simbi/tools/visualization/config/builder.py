@@ -26,7 +26,7 @@ class ConfigBuilder:
         # Distribute arguments to their proper sections
         for arg_name, value in args.items():
             # Skip None values and private args (starting with _)
-            if value is None or arg_name.startswith("_"):
+            if arg_name.startswith("_"):
                 continue
 
             # Get section, possible transformation, and final name

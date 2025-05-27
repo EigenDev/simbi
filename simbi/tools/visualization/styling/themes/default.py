@@ -29,7 +29,7 @@ default_theme = Theme(
     grid=False,
     # Figure styling
     fig_size=(8, 6),
-    dpi=100,
+    dpi=300,
     # Polar styling
     polar_style={
         "grid": False,

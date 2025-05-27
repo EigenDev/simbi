@@ -11,7 +11,13 @@ from .bridge import SimbiDataBridge
 class Figure:
     """Main visualization container"""
 
-    def __init__(self, config: dict[str, Any], theme: str = "default"):
+    def __init__(
+        self,
+        config: dict[str, Any],
+        nfiles: int = 1,
+        nfields: int = 1,
+        theme: str = "default",
+    ):
         self.config = config
         self.state = VisualizationState(config=config)
         self.pipeline = DataPipeline(self.state)
@@ -22,7 +28,7 @@ class Figure:
 
         # Set and apply theme :D (!)
         self.theme = theme
-        ThemeManager.set_theme(self.theme)
+        ThemeManager.set_theme(self.theme, nfiles=nfiles, nfields=nfields)
 
     def create_figure(self) -> None:
         """Create the matplotlib figure and axes"""
@@ -71,9 +77,6 @@ class Figure:
         """Render all components"""
         if not self.fig:
             self.initialize()
-
-        # Process data
-        transformed_data = self.pipeline.process()
 
         # Render each component
         for component in self.components:

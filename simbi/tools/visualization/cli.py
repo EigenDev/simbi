@@ -172,8 +172,12 @@ def setup_parser(parser: argparse.ArgumentParser) -> None:
     )
     parser.add_argument("--legend-loc", help="Location of legend")
     parser.add_argument("--labels", nargs="+", help="Labels for plots", default=[])
-    parser.add_argument("--xlims", nargs=2, type=float, help="X axis limits")
-    parser.add_argument("--ylims", nargs=2, type=float, help="Y axis limits")
+    parser.add_argument(
+        "--xlims", nargs=2, type=float, default=[None, None], help="X axis limits"
+    )
+    parser.add_argument(
+        "--ylims", nargs=2, type=float, default=[None, None], help="Y axis limits"
+    )
     parser.add_argument("--xlabel", default="x", help="X axis label")
     parser.add_argument("--ylabel", default="y", help="Y axis label")
     parser.add_argument("--nplots", type=int, default=1, help="Number of subplots")

@@ -28,11 +28,11 @@ class ThemeManager:
             return cls._themes["default"]
 
     @classmethod
-    def set_theme(cls, theme_name):
+    def set_theme(cls, theme_name: str, nfiles: int = 1, nfields: int = 1) -> bool:
         """Set the current theme"""
         if theme_name in cls._themes:
             cls._current_theme = theme_name
-            cls._themes[theme_name].apply()
+            cls._themes[theme_name].apply(nfiles, nfields)
             return True
         return False
 

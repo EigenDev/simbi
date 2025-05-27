@@ -3,6 +3,8 @@ from typing import Any, Sequence
 import matplotlib as mpl
 import numpy as np
 import matplotlib.pyplot as plt
+from cycler import cycler
+from itertools import cycle
 
 
 @dataclass
@@ -50,9 +52,19 @@ class Theme:
         }
     )
 
-    def apply(self):
+    def apply(self, nfiles: int = 1, nfields: int = 1):
         """Apply theme to matplotlib global settings"""
         plt.style.use("default")  # Reset to defaults
+
+        colormap = plt.get_cmap(next(cycle(self.color_maps)))
+        nlines = nfields
+        nind_curves = nfields * nfiles
+        colors = np.array([colormap(k) for k in np.linspace(0.1, 0.9, nind_curves)])
+        linestyles = [x[0] for x in zip(cycle(["-", "--", ":", "-."]), range(nlines))]
+        if len(colors) == len(linestyles):
+            default_cycler = cycler(color=colors) + (cycler(linestyle=linestyles))
+        else:
+            default_cycler = cycler(linestyle=linestyles) * cycler(color=colors)
 
         plt.rcParams.update(
             {
@@ -70,9 +82,7 @@ class Theme:
                 "ytick.color": self.text_color,
                 # Line settings
                 "lines.linewidth": self.line_width,
-                "axes.prop_cycle": plt.cycler(
-                    color=self.color_cycle, linestyle=self.line_styles
-                ),
+                "axes.prop_cycle": default_cycler,
                 # Figure settings
                 "figure.figsize": self.fig_size,
                 # "figure.dpi": self.dpi,

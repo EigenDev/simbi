@@ -35,36 +35,69 @@ def plot_line(
             config[section].update(values)
 
     # Create figure
-    fig = Figure(config, theme=theme)
+    fig = Figure(config, nfiles=len(files), nfields=len(fields), theme=theme)
 
     # Add title component
     fig.add(TitleComponent, "title", setup=config["plot"]["setup"], ax_title=True)
 
-    # Add line components for each field
-    for i, field in enumerate(fields):
-        # Get label for this field
-        label = (
-            kwargs.get("labels", [field])[i]
-            if i < len(kwargs.get("labels", []))
-            else field
-        )
+    # Determine if we're plotting multiple files (not in animation mode)
+    is_multi_file = len(files) > 1 and not kwargs.get("animate", False)
+    single_field = len(fields) == 1
 
-        # Get color for this field
-        colors = kwargs.get("colors", [f"C{i}" for i in range(len(fields))])
-        color = colors[i % len(colors)]
+    # When we have a single field across multiple files, use the field name as y-label
+    # Otherwise, each field will appear in the legend
+    use_field_as_ylabel = single_field
 
-        fig.add(
-            LinePlotComponent,
-            f"line_{i}",
-            field=field,
-            label=label,
-            color=color,
-            linewidth=kwargs.get("linewidth", 2),
-        )
+    # In multi-file mode, load all files at once before creating components
+    if is_multi_file:
+        # Create a separate component for each field, that will handle all files
+        for field_idx, field in enumerate(fields):
+            # For single field case, use field as y-axis label
+            # For multiple fields, use field names in legend
+            show_as_label = use_field_as_ylabel
 
-    # Load first file and render
-    fig.load_data(files[0])
-    fig.render()
+            # Create the component
+            fig.add(
+                LinePlotComponent,
+                f"line_{field_idx}",
+                field=field,
+                linewidth=kwargs.get("linewidth", 2),
+                show_as_label=show_as_label,
+                is_multi_file=True,
+                files=files,
+                fields=fields,
+            )
+
+        # Load first file and render (components will handle other files)
+        fig.load_data(files[0])
+        fig.render()
+    else:
+        # Single file mode (or animation mode)
+        # Load data from the first file
+        fig.load_data(files[0])
+
+        # Add components for each field
+        for field_idx, field in enumerate(fields):
+            # Get label for this field
+            label = (
+                kwargs.get("labels", [field])[field_idx]
+                if field_idx < len(kwargs.get("labels", []))
+                else field
+            )
+
+            # Add the component
+            fig.add(
+                LinePlotComponent,
+                f"line_{field_idx}",
+                field=field,
+                label=label,
+                linewidth=kwargs.get("linewidth", 2),
+                show_as_label=single_field,
+                is_multi_file=False,
+            )
+
+        # Render the components
+        fig.render()
 
     # Save if requested
     if save_as:
