@@ -78,7 +78,7 @@ cdef ConfigValue convert_collection(collection):
     cdef vector[double] double_vec
 
     # Nested lists/arrays
-    if isinstance(first_item, (list, tuple, np.ndarray)):
+    if isinstance(first_item, (list, tuple, np.ndarray, np.flatiter)):
         for item in collection:
             nested_vec.push_back([<double>x for x in item])
         return ConfigValue(nested_vec)
