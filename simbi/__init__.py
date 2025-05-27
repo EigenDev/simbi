@@ -7,23 +7,21 @@ from .functional.helpers import (
     calc_any_mean,
 )
 from .simulator import Hydro
-from .core.config.base_config import BaseConfig
-from .core.types.dynarg import DynamicArg
+from .core.config.base_config import SimbiBaseConfig
+
+from .core.config.fields import SimbiField
 from .version import __version_tuple__
 from .libs.rad_hydro import py_calc_fnu, py_log_events
 from .tools.utility import get_dimensionality
 from .functional.reader import read_file
-from .core.managers.property import simbi_property, simbi_class_property
+
+# from .core.managers.property import simbi_property, simbi_class_property
 from .core.types.typing import (
     InitialStateType,
-    GeneratorTuple,
     GasStateGenerator,
-    PureHydroStateGenerator,
     MHDStateGenerators,
-    PrimitiveStateFunc,
-    StateGenerator,
 )
-from .core.config.bodies import (
+from .core.types.bodies import (
     ImmersedBodyConfig,
     GravitationalSystemConfig,
     BinaryConfig,
@@ -36,22 +34,15 @@ from .detail import bcolors
 logger = logging.logger
 
 __all__ = [
-    "BaseConfig",
-    "DynamicArg",
+    "SimbiBaseConfig",
     "Hydro",
     "py_calc_fnu",
     "py_log_events",
-    "simbi_property",
-    "simbi_class_property",
     "get_dimensionality",
     "read_file",
     "InitialStateType",
-    "GeneratorTuple",
     "GasStateGenerator",
-    "PureHydroStateGenerator",
     "MHDStateGenerators",
-    "PrimitiveStateFunc",
-    "StateGenerator",
     "ImmersedBodyConfig",
     "GravitationalSystemConfig",
     "BinaryConfig",
@@ -62,6 +53,6 @@ __all__ = [
     "compute_num_polar_zones",
     "calc_centroid",
     "calc_any_mean",
-    # "BodyCapability",
+    "SimbiField",
 ]
 __version__ = ".".join(map(str, __version_tuple__))

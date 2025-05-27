@@ -1,37 +1,32 @@
-from typing import Generator, Callable, Sequence, Union, Any
-from numpy.typing import NDArray
-import numpy as np
+"""
+Type definitions for simbi.
 
+This module provides type annotations for the simbi framework.
+"""
+
+from typing import Callable, Generator, Sequence, Union, TypeVar, Any
+
+# Type for a generator that yields gas state tuples
 GasStateGenerator = Generator[Sequence[float], None, None]
-StaggereBFieldGenerator = Generator[float, None, None]
 
-PureHydroStateGenerator = Callable[[], GasStateGenerator]
+# Function that returns a gas state generator
+GasStateFunction = Callable[[], GasStateGenerator]
+
+# Type for staggered B-field generators
+StaggeredBFieldGenerator = Generator[float, None, None]
+
+# Function that returns a B-field generator
+BFieldFunction = Callable[[], StaggeredBFieldGenerator]
+
+# Type for MHD state generators (gas state + B-fields)
 MHDStateGenerators = tuple[
-    Callable[[], GasStateGenerator],
-    Callable[[], StaggereBFieldGenerator],
-    Callable[[], StaggereBFieldGenerator],
-    Callable[[], StaggereBFieldGenerator],
+    GasStateFunction,
+    BFieldFunction,
+    BFieldFunction,
+    BFieldFunction,
 ]
 
-
-GeneratorTuple = tuple[
-    GasStateGenerator,  # gas state
-    StaggereBFieldGenerator,  # Bx
-    StaggereBFieldGenerator,  # By
-    StaggereBFieldGenerator,  # Bz
-]
-InitialStateType = Union[PureHydroStateGenerator, MHDStateGenerators]
-
-PrimitiveStateFunc = (
-    Callable[[], GasStateGenerator]
-    | Callable[
-        [],
-        GeneratorTuple,
-    ]
-)
-
-StateGenerator = GasStateGenerator | GeneratorTuple
-
-FloatOrArray = Union[float, NDArray[np.floating[Any]]]
+# Initial state can be either a pure hydro generator or MHD generators
+InitialStateType = Union[GasStateFunction, MHDStateGenerators]
 
 ExpressionDict = dict[str, object]

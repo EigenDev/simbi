@@ -6,7 +6,7 @@ from typing import Sequence, Any, Optional, Set
 from argparse import ArgumentParser, Namespace
 from ....simulator import Hydro
 from ....detail import bcolors
-from ....core.config.base_config import BaseConfig
+from ....core.config.base_config import SimbiBaseConfig
 from ...utils.type_checker import type_check_input
 
 
@@ -24,7 +24,7 @@ def _build_inheritance_graph(root: ast.Module) -> dict[str, Set[str]]:
 
 
 def _get_derived_classes(
-    graph: dict[str, Set[str]], base_class: str = "BaseConfig"
+    graph: dict[str, Set[str]], base_class: str = "SimbiBaseConfig"
 ) -> Set[str]:
     """Find all classes that inherit from base_class directly or indirectly"""
     derived = set()
@@ -44,17 +44,17 @@ def _get_derived_classes(
 
 
 def _get_setup_classes(script: str) -> Sequence[str]:
-    """Extract all classes that inherit from BaseConfig directly or indirectly"""
+    """Extract all classes that inherit from SimbiBaseConfig."""
     with open(script) as setup_file:
         root = ast.parse(setup_file.read())
 
     # Build inheritance relationships
     inheritance_graph = _build_inheritance_graph(root)
 
-    # Find all derived classes
-    setup_classes = _get_derived_classes(inheritance_graph)
+    # Find all derived classes of SimbiBaseConfig
+    setup_classes = _get_derived_classes(inheritance_graph, "SimbiBaseConfig")
 
-    return sorted(setup_classes)  # Sort for deterministic order
+    return sorted(setup_classes)
 
 
 def _configure_single_state(
@@ -63,7 +63,7 @@ def _configure_single_state(
     parser: ArgumentParser,
     args: Namespace,
     argv: Optional[Sequence],
-) -> tuple[Optional[Hydro], dict[str, Any], str]:
+) -> tuple[Optional[Hydro], str]:
     """Configure single hydro state"""
 
     # Import problem class
@@ -71,82 +71,34 @@ def _configure_single_state(
         importlib.import_module(f"{base_script}"), f"{setup_class}"
     )
 
-    # check if the user has passed any non-void arguments
+    # Setup CLI
     run_parser = getattr(args, "active_parser")
-    problem_class_t.setup_cli(parser, run_parser)
-    problem_class_t.parse_args_and_update_configuration()
+    problem_class_t.setup_cli(run_parser)
 
-    problem_class: Any = problem_class_t()
+    # Create an instance of the config class
+    problem_class = problem_class_t.from_cli(parser)
 
     if args.info:
-        print(
-            f"{bcolors.YELLOW}Printing dynamic arguments in {setup_class}{bcolors.ENDC}"
-        )
+        print(f"{bcolors.YELLOW}Printing parameters in {setup_class}{bcolors.ENDC}")
         del problem_class
-        return None, {}, ""
-        # sys.exit(0)
+        return None, ""
 
-    _setup_logging(problem_class, args)
+    # Set checkpoint file if provided
+    if args.checkpoint is not None:
+        problem_class.checkpoint_file = args.checkpoint
 
     # Create hydro state
-    if args.checkpoint is not None:
-        BaseConfig.set_checkpoint_file(args.checkpoint)
-    state: Hydro = Hydro(problem_class)
-    kwarg_dict = _build_kwargs_dict(problem_class, args)
+    state = Hydro(problem_class)
 
     return (
         state,
-        kwarg_dict,
         problem_class.__doc__ or f"No docstring: {setup_class}",
     )
 
 
-def _setup_logging(config: BaseConfig, args: Namespace) -> None:
-    """Setup logging configuration"""
-    if args.log_output:
-        config.log_output = True
-        config.set_logdir(
-            args.log_directory or args.data_directory or config.data_directory
-        )
-    config.trace_memory = args.trace_mem
-
-
-def use_arg_or_default(arg_value, config_value):
-    """Use arg value if provided, otherwise fallback to config value"""
-    return arg_value if arg_value is not None else config_value
-
-
-def _build_kwargs_dict(config: BaseConfig, args: Namespace) -> dict[str, Any]:
-    """Build kwargs dictionary for simulation"""
-    spatial_order = args.spatial_order
-    temporal_order = args.time_order
-    if config.order_of_integration == "first" or args.order == "first":
-        spatial_order = "pcm"
-        temporal_order = "rk1"
-    elif config.order_of_integration == "second" or args.order == "second":
-        spatial_order = "plm"
-        temporal_order = "rk2"
-    elif config.order_of_integration is not None:
-        raise ValueError("Order of integration must be 'first' or 'second'")
-
-    return {
-        "spatial_order": spatial_order or config.spatial_order,
-        "temporal_order": temporal_order or config.temporal_order,
-        "cfl": args.cfl,
-        "checkpoint_interval": args.checkpoint_interval,
-        "tstart": args.tstart,
-        "tend": args.tend,
-        "solver": args.solver,
-        "plm_theta": args.plm_theta,
-        "data_directory": args.data_directory,
-        "quirk_smoothing": args.quirk_smoothing,
-        "compute_mode": args.compute_mode,
-    }
-
-
 def configure_state(
     args: Namespace, argv: Optional[Sequence]
-) -> tuple[Sequence[Hydro], dict[int, dict[str, Any]], Sequence[str]]:
+) -> tuple[Sequence[Hydro], Sequence[str]]:
     """Configure hydro state from setup script"""
     parser = getattr(args, "main_parser")
     script = args.setup_script
@@ -156,23 +108,24 @@ def configure_state(
 
     setup_classes = _get_setup_classes(script)
     if not setup_classes:
-        raise ValueError("Invalid simbi configuration")
+        raise ValueError(
+            "Invalid simbi configuration - no classes that extend SimbiBaseConfig found"
+        )
+
     if args.type_check:
         type_check_input(script)
 
     states = []
     state_docs = []
-    kwargs = {}
 
     for idx, setup_class in enumerate(setup_classes):
-        state, kwarg_dict, doc = _configure_single_state(
+        state, doc = _configure_single_state(
             base_script, setup_class, parser, args, argv
         )
         states.append(state)
-        kwargs[idx] = kwarg_dict
         state_docs.append(doc)
 
     if args.info:
         sys.exit(0)
 
-    return states, kwargs, state_docs
+    return states, state_docs

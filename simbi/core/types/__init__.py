@@ -1,41 +1,12 @@
+"""
+Core type definitions for simbi.
+
+This module provides type definitions and constants used throughout the framework.
+"""
+
 from .typing import (
-    GeneratorTuple,
-    GasStateGenerator,
-    PureHydroStateGenerator,
-    MHDStateGenerators,
     InitialStateType,
-    PrimitiveStateFunc,
-    StateGenerator,
-)
-from .constants import (
-    BodyCapability,
-    ExtendedEnum,
-    CoordSystem,
-    Regime,
-    BoundaryCondition,
-    CellSpacing,
-    TimeStepping,
-    SpatialOrder,
-    Solver,
-    has_capability,
+    GasStateGenerator,
 )
 
-__all__ = [
-    "GeneratorTuple",
-    "GasStateGenerator",
-    "PureHydroStateGenerator",
-    "MHDStateGenerators",
-    "InitialStateType",
-    "PrimitiveStateFunc",
-    "StateGenerator",
-    "BodyCapability",
-    "ExtendedEnum",
-    "CoordSystem",
-    "Regime",
-    "BoundaryCondition",
-    "CellSpacing",
-    "TimeStepping",
-    "SpatialOrder",
-    "Solver",
-    "has_capability",
-]
+__all__ = ["InitialStateType", "GasStateGenerator"]

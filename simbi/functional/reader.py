@@ -4,7 +4,7 @@ import numpy as np
 from types import TracebackType
 from typing import Any, Callable, Optional, Union, Sequence
 from numpy.typing import NDArray
-from ..core import BodyCapability, has_capability
+from ..core.types.bodies import BodyCapability, has_capability
 from ..physics.calculations import (
     VectorComponent,
     enthalpy_density,
@@ -660,6 +660,13 @@ class LazySimulationReader:
                 )
                 / np.sqrt((metadata["adiabatic_index"] * fields["p"] / fields["rho"]))
             ),
+        )
+        pipeline["chi_dens"] = self.get_derived_field(
+            "chi_dens",
+            ["rho", "chi", *vector(ndim, "v")],
+            lambda fields: fields["rho"]
+            * fields["chi"]
+            * lorentz_factor(vec_from_dict(fields, ndim, "v"), metadata["regime"]),
         )
         return pipeline
 

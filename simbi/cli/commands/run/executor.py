@@ -1,14 +1,12 @@
 import os
-from typing import Sequence, Dict
+from typing import Sequence
 from argparse import Namespace
 from ....simulator import Hydro
 from .... import logger
-from typing import Any
 
 
 def run_simulation(
     states: Sequence[Hydro],
-    kwargs: dict[int, dict[str, Any]],
     state_docs: Sequence[str],
     args: Namespace,
 ) -> None:
@@ -19,7 +17,7 @@ def run_simulation(
         logger.info("=" * 80)
         logger.info(state_docs[idx])
         logger.info("=" * 80)
-        sim_state.simulate(**kwargs[idx])
+        sim_state.simulate(compute_mode=args.compute_mode)
 
 
 def _configure_environment(args: Namespace) -> None:

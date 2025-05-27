@@ -1,17 +1,12 @@
-from .gpu import GPUConfig
-from .bodies import (
-    ImmersedBodyConfig,
-    GravitationalSystemConfig,
-    BinaryConfig,
-    BinaryComponentConfig,
-)
-from .base_config import BaseConfig
+"""
+Configuration system for simbi simulations.
 
-__all__ = [
-    "BaseConfig",
-    "GPUConfig",
-    "ImmersedBodyConfig",
-    "GravitationalSystemConfig",
-    "BinaryConfig",
-    "BinaryComponentConfig",
-]
+This module provides the classes and utilities for defining,
+validating, and managing simulation configurations.
+"""
+
+from .base_config import SimbiBaseConfig
+from .fields import SimbiField
+from .parameters import CLIConfigurableModel
+
+__all__ = ["SimbiBaseConfig", "SimbiField", "CLIConfigurableModel"]

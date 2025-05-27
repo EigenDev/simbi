@@ -341,6 +341,11 @@ namespace simbi {
             derived.cons2prim_impl();
             adapt_dt();
 
+            std::cout << "step: " << step() << std::endl;
+            std::cout << "using pcm: " << using_pcm() << std::endl;
+            std::cout << "using rk1: " << using_rk1() << std::endl;
+            std::cin.get();
+
             // main simulation loop
             detail::logger::with_logger(derived, tend(), [&] {
                 // single timestep advance

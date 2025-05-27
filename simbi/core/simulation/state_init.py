@@ -1,259 +1,339 @@
+"""
+Streamlined simulation state initialization.
+
+This module provides efficient functions for creating and initializing simulation states.
+"""
+
+from dataclasses import dataclass
+from typing import Optional, cast
 import numpy as np
 from numpy.typing import NDArray
-from dataclasses import dataclass
-from typing import Any, Sequence
 
-from simbi.core.config.bodies import (
-    GravitationalSystemConfig,
-    BinaryComponentConfig,
-    BinaryConfig,
-    ImmersedBodyConfig,
-)
-from ..types.constants import BodyCapability, has_capability
-from ..config.settings import MeshSettings, IOSettings, GridSettings, SimulationSettings
-from ..config.initialization import InitializationConfig
-from ...functional.maybe import Maybe
-from ...io.checkpoint import load_checkpoint
-from ...physics import construct_conserved_state
+from ...functional import Maybe
+from ..config.base_config import SimbiBaseConfig
+from ..types.typing import InitialStateType, GasStateFunction, MHDStateGenerators
+import itertools
 
 
-@dataclass(frozen=True)
-class SimulationBundle:
-    """Complete simulation state and configuration"""
+@dataclass
+class SimulationState:
+    """Container for simulation state data."""
 
-    mesh_config: MeshSettings
-    grid_config: GridSettings
-    io_config: IOSettings
-    sim_config: SimulationSettings
-    state: NDArray[np.floating[Any]]
-    staggered_bfields: Sequence[NDArray[np.floating[Any]]]
-
-    def update_from_cli_args(self, cli_args: dict[str, Any]) -> "SimulationBundle":
-        """Update simulation bundle with new configuration"""
-        # check if all the cli_args keys are None, if so, return self
-        if all(value is None for value in cli_args.values()):
-            return self
-
-        return SimulationBundle(
-            mesh_config=MeshSettings.update_from(self.mesh_config, cli_args),
-            grid_config=GridSettings.update_from(self.grid_config, cli_args),
-            io_config=IOSettings.update_from(self.io_config, cli_args),
-            sim_config=SimulationSettings.update_from(self.sim_config, cli_args),
-            state=self.state,
-            staggered_bfields=self.staggered_bfields,
-        )
+    primitive_state: NDArray[np.floating]  # (nvars, nx, ny, nz)
+    conserved_state: NDArray[np.floating]  # (nvars, nx, ny, nz)
+    staggered_bfields: Optional[list[NDArray[np.floating]]] = None
+    config: Optional[SimbiBaseConfig] = None
 
 
-def try_checkpoint_initialization(
-    setup: tuple[InitializationConfig, dict[str, Any]],
-) -> Maybe[SimulationBundle]:
-    """Try to initialize from checkpoint"""
-    config = setup[0]
-    if config.checkpoint_file is None:
-        return Maybe(None)
+def is_mhd_generator(gen: InitialStateType) -> bool:
+    """Check if generator is for MHD simulation."""
+    return not callable(gen) and len(gen) == 4
 
-    # a user might have settings in their problem
-    # class that are not present inside the checkpoint
-    # metdata. If this happens, we use the defaults
-    # given inside the problem
 
-    def overwrite_if_needed(
-        settings: dict[str, Any], metadata: dict[str, Any], **kwargs: Any
-    ) -> dict[str, Any]:
-        meta_set = {key for key in metadata.keys()}
-        overwrite = settings.copy()
-        overwrite.update({k: metadata[k] for k in overwrite.keys() if k in meta_set})
-        non_intersecting = set(settings.keys()) - meta_set
-        if "bounds" in non_intersecting:
-            if metadata["effective_dimensions"] == 3:
-                overwrite["bounds"] = (
-                    (float(metadata["x1min"]), float(metadata["x1max"])),
-                    (float(metadata["x2min"]), float(metadata["x2max"])),
-                    (float(metadata["x3min"]), float(metadata["x3max"])),
-                )
-            elif metadata["effective_dimensions"] == 2:
-                overwrite["bounds"] = (
-                    (float(metadata["x1min"]), float(metadata["x1max"])),
-                    (float(metadata["x2min"]), float(metadata["x2max"])),
-                )
-            else:
-                overwrite["bounds"] = (
-                    (float(metadata["x1min"]), float(metadata["x1max"])),
-                )
-        elif "resolution" in non_intersecting:
-            nghosts = 2 * (1 + (metadata["spatial_order"] == "plm"))
-            overwrite["resolution"] = (
-                int(metadata["nx"] - nghosts),
-                int(metadata["ny"] - nghosts),
-                int(metadata["nz"] - nghosts),
+def primitive_to_conserved(
+    primitive: NDArray[np.floating],
+    config: SimbiBaseConfig,
+    staggered_bfields: Optional[list[NDArray[np.floating]]] = None,
+) -> NDArray[np.floating]:
+    """
+    Convert primitive variables to conserved variables.
+
+    This is a streamlined conversion function that handles both hydro and MHD.
+    """
+    # Extract key variables from config
+    adiabatic_index = config.adiabatic_index
+    regime = config.regime.value
+    is_mhd = config.is_mhd
+
+    # Create output array same shape as input
+    conserved = np.zeros_like(primitive)
+
+    # Handle special case for isothermal EOS
+    isothermal = abs(adiabatic_index - 1.0) < 1e-10
+
+    # Extract primitive variables
+    # Format is: [density, vel_x, vel_y, vel_z, pressure, ...]
+    pidx = (
+        4 if is_mhd else config.dimensionality + 1
+    )  # Pressure index in primitive array
+    rho, *velocities, pressure = primitive[0], *primitive[1:pidx], primitive[pidx]
+
+    # Calculate square of velocity
+    vsq = velocities[0] ** 2
+    if config.dimensionality > 1:
+        vsq += velocities[1] ** 2
+    if config.dimensionality > 2 or is_mhd:
+        vsq += velocities[2] ** 2
+
+    lorentz: float | NDArray[np.floating] = 1.0
+    # Calculate Lorentz factor for relativistic simulations
+    if "sr" in regime:
+        if np.any(vsq >= 1.0):
+            raise ValueError("Velocity exceeds speed of light")
+        lorentz = 1.0 / np.sqrt(1.0 - vsq)
+
+    # Conserved density (D)
+    conserved[0] = rho * lorentz
+
+    # Conserved momentum (m = ρhγ²v for relativistic, ρv for classical)
+    if "sr" in regime:
+        # Relativistic enthalpy
+        h = 1.0 + adiabatic_index * pressure / ((adiabatic_index - 1.0) * rho)
+        for i in range(3):
+            conserved[i + 1] = rho * h * lorentz**2 * velocities[i]
+    else:
+        # Classical momentum
+        for i in range(3):
+            conserved[i + 1] = rho * velocities[i]
+
+    # Energy equation
+    energy_index = config.dimensionality + 1
+    if isothermal:
+        # For isothermal flows, we store sound speed squared in energy slot
+        conserved[energy_index] = config.ambient_sound_speed**2
+    elif "sr" in regime:
+        # Relativistic energy
+        h = 1.0 + adiabatic_index * pressure / ((adiabatic_index - 1.0) * rho)
+        conserved[energy_index] = rho * h * lorentz**2 - pressure - rho * lorentz
+    else:
+        # Classical energy
+        conserved[energy_index] = pressure / (adiabatic_index - 1.0) + 0.5 * rho * vsq
+
+    # Handle magnetic fields for MHD
+    if is_mhd and staggered_bfields:
+        # Calculate cell-centered magnetic fields from staggered fields
+        b_mean = get_cell_centered_bfields(staggered_bfields)
+
+        # Store magnetic fields in conserved array
+        conserved[5] = b_mean[0]
+        conserved[6] = b_mean[1]
+        conserved[7] = b_mean[2]
+
+        # Adjust energy and momentum for magnetic contribution
+        b_squared = b_mean[0] ** 2 + b_mean[1] ** 2 + b_mean[2] ** 2
+        if "sr" in regime:
+            # SRMHD energy
+            v_dot_b = (
+                velocities[0] * b_mean[0]
+                + velocities[1] * b_mean[1]
+                + velocities[2] * b_mean[2]
             )
-        elif "checkpoint_index" in non_intersecting:
-            try:
-                overwrite["checkpoint_index"] = int(metadata["checkpoint_index"])
-            except KeyError:  # for legacy reasons
-                overwrite["checkpoint_index"] = int(metadata["checkpoint_idx"])
-        elif "default_start_time" in non_intersecting:
-            overwrite["default_start_time"] = metadata["time"]
-            overwrite["isothermal"] = bool(metadata["adiabatic_index"] == 1.0)
+            h = 1.0 + adiabatic_index * pressure / ((adiabatic_index - 1.0) * rho)
+            conserved[energy_index] += 0.5 * (b_squared + vsq * b_squared - v_dot_b**2)
+            for i in range(3):
+                conserved[i + 1] += b_squared * velocities[i] - v_dot_b * b_mean[i]
+        else:
+            # MHD energy
+            conserved[energy_index] += 0.5 * b_squared
 
-        if "immersed_bodies" in kwargs:
-            if "system_config" not in metadata:
-                overwrite["immersed_bodies"] = []
-                for key, body in kwargs["immersed_bodies"].items():
-                    overwrite["immersed_bodies"].append(
-                        ImmersedBodyConfig(
-                            body_type=body["type"],
-                            mass=body["mass"],
-                            velocity=body["velocity"],
-                            position=body["position"],
-                            force=body["force"],
-                            radius=body["radius"],
-                            # get all body properties
-                            # that aren't the basics
-                            specifics={
-                                k: v
-                                for k, v in body.items()
-                                if k
-                                not in [
-                                    "type",
-                                    "mass",
-                                    "velocity",
-                                    "position",
-                                    "force",
-                                    "radius",
-                                ]
-                            },
-                        )
-                    )
-            else:
-                # check if there are two bodies that are gravitational,
-                # if so, this is likely a binary system
-                if len(kwargs["immersed_bodies"]) == 2:
-                    body1 = kwargs["immersed_bodies"]["body_0"]
-                    body2 = kwargs["immersed_bodies"]["body_1"]
-                    system_config = metadata["system_config"]
+    # Passive scalar (if present)
+    # if primitive.shape[0] > 5:
+    #     conserved[-1] = conserved[0] * primitive[-1]
 
-                    overwrite["body_system"] = GravitationalSystemConfig(
-                        prescribed_motion=system_config["prescribed_motion"],
-                        reference_frame=system_config["reference_frame"],
-                        system_type="binary",
-                        binary_config=BinaryConfig(
-                            semi_major=system_config["semi_major"],
-                            eccentricity=system_config["eccentricity"],
-                            mass_ratio=system_config["mass_ratio"],
-                            total_mass=body1["mass"] + body2["mass"],
-                            components=[
-                                BinaryComponentConfig(
-                                    mass=body1["mass"],
-                                    radius=body1["radius"],
-                                    is_an_accretor=has_capability(
-                                        body1["type"], BodyCapability.ACCRETION
-                                    ),
-                                    softening_length=body1["softening_length"],
-                                    two_way_coupling=False,
-                                    accretion_efficiency=body1["accretion_efficiency"],
-                                    accretion_radius=body1["accretion_radius"],
-                                    total_accreted_mass=body1["total_accreted_mass"],
-                                    position=body1["position"],
-                                    velocity=body1["velocity"],
-                                    force=body1["force"],
-                                ),
-                                BinaryComponentConfig(
-                                    mass=body2["mass"],
-                                    radius=body2["radius"],
-                                    is_an_accretor=has_capability(
-                                        body2["type"], BodyCapability.ACCRETION
-                                    ),
-                                    softening_length=body2["softening_length"],
-                                    two_way_coupling=False,
-                                    accretion_efficiency=body2["accretion_efficiency"],
-                                    accretion_radius=body2["accretion_radius"],
-                                    total_accreted_mass=body2["total_accreted_mass"],
-                                    position=body2["position"],
-                                    velocity=body2["velocity"],
-                                    force=body2["force"],
-                                ),
-                            ],
-                        ),
-                    )
-        return overwrite
+    return conserved
 
-    settings = setup[1]
 
-    res = (
-        Maybe.of(config.checkpoint_file)
-        .bind(load_checkpoint)
-        .map(
-            lambda chkpt: SimulationBundle(
-                mesh_config=MeshSettings.from_dict(
-                    overwrite_if_needed(settings["mesh"], chkpt.metadata)
-                ),
-                grid_config=GridSettings.from_dict(
-                    overwrite_if_needed(settings["grid"], chkpt.metadata),
-                    spatial_order=chkpt.metadata["spatial_order"],
-                    is_mhd="mhd" in chkpt.metadata["regime"],
-                ),
-                io_config=IOSettings.from_dict(
-                    overwrite_if_needed(settings["io"], chkpt.metadata)
-                ),
-                sim_config=SimulationSettings.from_dict(
-                    overwrite_if_needed(
-                        settings["sim_state"],
-                        chkpt.metadata,
-                        immersed_bodies=chkpt.immersed_bodies,
-                    )
-                ),
-                state=chkpt.state.to_numpy(),
-                staggered_bfields=chkpt.staggered_bfields,
-            )
-        )
+def get_cell_centered_bfields(
+    staggered_bfields: list[NDArray[np.floating]],
+) -> list[NDArray[np.floating]]:
+    """
+    Convert staggered magnetic fields to cell-centered fields.
+
+    Args:
+        staggered_bfields: List of staggered B-field components
+
+    Returns:
+        List of cell-centered B-field components
+    """
+    if not staggered_bfields or len(staggered_bfields) != 3:
+        return []
+
+    # Simple averaging of adjacent face values
+    b1, b2, b3 = staggered_bfields
+
+    # Handle edges based on shapes
+    b1_centered = 0.5 * (b1[..., :-1] + b1[..., 1:])
+    b2_centered = 0.5 * (b2[:, :-1, :] + b2[:, 1:, :])
+    b3_centered = 0.5 * (b3[:-1, ...] + b3[1:, ...])
+
+    return [b1_centered, b2_centered, b3_centered]
+
+
+def pad_staggered_fields(
+    staggered_bfields: list[NDArray[np.floating]],
+) -> list[NDArray[np.floating]]:
+    """Pad staggered magnetic fields along appropriate directions."""
+    if not staggered_bfields:
+        return []
+
+    b1, b2, b3 = staggered_bfields
+
+    # Pad each field appropriately
+    # Note: B1 is staggered in x, B2 in y, B3 in z
+    b1_padded = np.pad(b1, ((1, 1), (1, 1), (0, 0)), "edge")
+    b2_padded = np.pad(b2, ((1, 1), (0, 0), (1, 1)), "edge")
+    b3_padded = np.pad(b3, ((0, 0), (1, 1), (1, 1)), "edge")
+
+    return [b1_padded, b2_padded, b3_padded]
+
+
+def initialize_state(config: SimbiBaseConfig) -> SimulationState:
+    """
+    Initialize simulation state from configuration.
+
+    This function:
+    i). Determines grid dimensions
+    ii). Initializes arrays for primitive variables
+    iii). Populates arrays using generator functions from config
+    iv). Converts primitive variables to conserved variables
+    v). Returns a complete SimulationState object
+
+    Args:
+        config: The simulation configuration
+
+    Returns:
+        Complete simulation state with both primitive and conserved variables
+    """
+    from ...functional import to_iterable
+
+    # Determine grid dimensions from resolution
+    if isinstance(config.resolution, int):
+        nx, ny, nz = config.resolution, 1, 1
+        resolution = [nx, ny, nz]
+    else:
+        resolution = list(config.resolution)
+        nx = resolution[0]
+        ny = resolution[1] if len(resolution) > 1 else 1
+        nz = resolution[2] if len(resolution) > 2 else 1
+
+    # Adjust for MHD (always 3D)
+    if config.is_mhd:
+        ny = max(ny, 1)
+        nz = max(nz, 1)
+        active_resolution = [nx, ny, nz]
+    else:
+        active_resolution = list(r for r in resolution if r > 1)
+
+    # Determine ghost cell padding
+    pad_width = 1 + (config.spatial_order.value == "plm")
+
+    # Number of variables
+    nvars = config.nvars
+
+    # Create array for primitive variables with ghost cells
+    padded_shape = (nvars,) + tuple(
+        r + 2 * pad_width for r in to_iterable(active_resolution)[::-1]
+    )
+    primitive = np.zeros(padded_shape, dtype=np.float64)
+
+    # Get appropriate generator(s)
+    generator = config.initial_primitive_state()
+    staggered_bfields: list[NDArray[np.floating]] = []
+
+    # Handle MHD generators
+    if is_mhd_generator(generator):
+        # Unpack MHD generators
+        gen_tuple = cast(MHDStateGenerators, generator)
+        gas_gen, b1_gen, b2_gen, b3_gen = gen_tuple
+
+        # Initialize staggered magnetic field arrays
+        b1_shape = (nz, ny, nx + 1)
+        b2_shape = (nz, ny + 1, nx)
+        b3_shape = (nz + 1, ny, nx)
+
+        # Use generators to fill magnetic field arrays
+        staggered_bfields = [
+            np.fromiter(b1_gen(), dtype=float).reshape(b1_shape),
+            np.fromiter(b2_gen(), dtype=float).reshape(b2_shape),
+            np.fromiter(b3_gen(), dtype=float).reshape(b3_shape),
+        ]
+
+        # Get gas state generator
+        gas_state = gas_gen()
+    else:
+        # Pure hydro case - just get the gas state generator
+        gas_state = cast(GasStateFunction, generator)()
+
+    # Peek at first value to determine number of components
+    values_iter, gas_iter = itertools.tee(gas_state)
+    first_values = next(values_iter)
+    n_components = len(first_values)
+
+    interior = (slice(pad_width, -pad_width),) * len(active_resolution)
+    interior_shape = primitive[:n_components, *interior].shape
+    primitive[:n_components, *interior] = np.fromiter(
+        gas_iter, dtype=(float, n_components)
+    ).T.reshape(interior_shape)
+
+    conserved = np.zeros_like(primitive)
+    # Convert primitive to conserved variables
+    conserved[:nvars, *interior] = primitive_to_conserved(
+        primitive[:nvars, *interior], config, staggered_bfields
     )
 
-    if res.is_error():
-        raise ValueError("Error loading checkpoint") from res.error
+    # Fill the ghost cells at the edges with values from the interior
+    ndim = len(active_resolution)
+    for dim in range(ndim):
+        # Create slices for each dimension
+        for j in range(pad_width):
+            # Fill left boundary ghost cells
+            left_ghost_slices = [slice(None)] * (ndim + 1)  # +1 for variables dimension
+            left_ghost_slices[dim + 1] = slice(j, j + 1)
 
-    return res
+            left_interior_slices = [slice(None)] * (ndim + 1)
+            left_interior_slices[dim + 1] = slice(pad_width, pad_width + 1)
 
+            conserved[tuple(left_ghost_slices)] = conserved[tuple(left_interior_slices)]
 
-def try_fresh_initialization(
-    config: InitializationConfig, settings: dict[str, dict[str, Any]]
-) -> Maybe[SimulationBundle]:
-    """Initialize from initial conditions"""
-    return (
-        Maybe.of(config)
-        .bind(
-            lambda c: construct_conserved_state(
-                settings["sim_state"]["regime"],
-                settings["sim_state"]["adiabatic_index"],
-                c.evaluate(
-                    pad_width=1 + (settings["sim_state"]["spatial_order"] == "plm"),
-                    nvars=settings["sim_state"]["nvars"],
-                ).unwrap(),
-            )
-        )
-        .map(
-            lambda init: SimulationBundle(
-                mesh_config=MeshSettings.from_dict(settings["mesh"]),
-                grid_config=GridSettings.from_dict(
-                    settings["grid"],
-                    spatial_order=settings["sim_state"]["spatial_order"],
-                    is_mhd=settings["sim_state"]["is_mhd"],
-                ),
-                io_config=IOSettings.from_dict(settings["io"]),
-                sim_config=SimulationSettings.from_dict(settings["sim_state"]),
-                state=init.state.to_numpy(),
-                staggered_bfields=init.staggered_bfields,
-            )
-        )
+            # Fill right boundary ghost cells
+            right_ghost_slices = [slice(None)] * (ndim + 1)
+            right_ghost_slices[dim + 1] = slice(-j - 1, -j if j > 0 else None)
+
+            right_interior_slices = [slice(None)] * (ndim + 1)
+            right_interior_slices[dim + 1] = slice(-pad_width - 1, -pad_width)
+
+            conserved[tuple(right_ghost_slices)] = conserved[
+                tuple(right_interior_slices)
+            ]
+
+    if config.is_mhd:
+        # Pad staggered fields
+        staggered_bfields = pad_staggered_fields(staggered_bfields)
+
+    # Create and return simulation state
+    return SimulationState(
+        primitive_state=primitive,
+        conserved_state=conserved,
+        staggered_bfields=staggered_bfields,
+        config=config,
     )
 
 
-def initialize_simulation(
-    config: InitializationConfig, settings: dict[str, dict[str, Any]]
-) -> Maybe[SimulationBundle]:
-    """Initialize simulation using chain of responsibility"""
-    return (
-        Maybe.of((config, settings))
-        .bind(try_checkpoint_initialization)
-        .or_else(try_fresh_initialization(config, settings))
-    )
+def load_or_initialize_state(
+    config: SimbiBaseConfig,
+) -> Maybe[SimulationState]:
+    """
+    Load state from checkpoint if specified or initialize from scratch.
+
+    Args:
+        config: Simulation configuration
+
+    Returns:
+        SimulationState loaded from checkpoint or initialized from config
+    """
+    from ..io.checkpoint import load_checkpoint_to_state
+
+    # Try to load from checkpoint if specified
+    if config.checkpoint_file:
+        checkpoint_state = load_checkpoint_to_state(config.checkpoint_file, config)
+        if not checkpoint_state.is_error():
+            print(
+                f"Successfully loaded state from checkpoint: {config.checkpoint_file}"
+            )
+            return checkpoint_state
+        else:
+            print(f"Failed to load checkpoint: {checkpoint_state.error}")
+            print("Falling back to initializing from config...")
+
+    # Initialize from config and wrap in Maybe for consistency
+    return Maybe.of(initialize_state(config))

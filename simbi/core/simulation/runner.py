@@ -1,73 +1,131 @@
-from dataclasses import dataclass
-from ..config import GPUConfig
-from ...io.logging import logger
-from ...io.summary import print_simulation_parameters
-from ...functional.utilities import pipe
-from ...functional.helpers import tuple_of_tuples, print_progress, to_tuple_of_pairs
-from .builder import SimStateBuilder
-from typing import Any
-from ..simulation.state_init import SimulationBundle
-import numpy as np
-import os
+"""
+Simulation execution.
+
+This module provides components for running simulations with the Cython backend.
+"""
+
 import importlib
+import os
+from dataclasses import dataclass
+from typing import Any, Optional, cast
+
+from ..config.base_config import SimbiBaseConfig
+from ..serialization.executor import SimulationExecutor
+from .state_init import SimulationState, load_or_initialize_state
 
 
-@dataclass(frozen=True)
+@dataclass
 class SimulationRunner:
-    bundle: SimulationBundle
+    """Manages the execution of a simulation.
 
-    def _configure_gpu_environment(self) -> None:
-        """Configure GPU environment variables"""
-        gpu_config = GPUConfig.from_dimension(self.bundle.mesh_config.dimensionality)
-        os.environ["GPU_BLOCK_X"] = str(gpu_config.block_dims[0])
-        os.environ["GPU_BLOCK_Y"] = str(gpu_config.block_dims[1])
-        os.environ["GPU_BLOCK_Z"] = str(gpu_config.block_dims[2])
-        logger.info(f"Using GPU block dimensions: {gpu_config.block_dims}")
+    This class orchestrates the initialization, execution, and output
+    handling for a simulation.
 
-    def _setup_compute_environment(self, compute_mode: str) -> Any:
-        """Configure compute environment and return execution module"""
-        if compute_mode in ["cpu", "omp"]:
-            logger.verbose(
-                "Using OpenMP multithreading"
-                if "USE_OMP" in os.environ
-                else "Using STL std::thread multithreading"
-            )
-        else:
-            self._configure_gpu_environment()
+    Attributes:
+        config: The configuration for the simulation
+        state: The current simulation state
+    """
 
+    config: SimbiBaseConfig
+    state: Optional[SimulationState] = None
+
+    def initialize(self) -> "SimulationRunner":
+        """Initialize the simulation state.
+
+        Returns:
+            Self for method chaining
+        """
+        self.state = load_or_initialize_state(self.config).unwrap()
+        return self
+
+    def _configure_backend(self, compute_mode: str = "cpu") -> Any:
+        """Configure and load the appropriate backend.
+
+        Args:
+            compute_mode: Backend compute mode ('cpu', 'omp', or 'gpu')
+
+        Returns:
+            The backend module or class
+        """
+        # Configure block dimensions for GPU
+        if compute_mode == "gpu":
+            # Set environment variables for block dimensions based on dimensionality
+            dims = {1: (128, 1, 1), 2: (16, 16, 1), 3: (4, 4, 4)}
+            dim = min(3, self.config.dimensionality)
+            block_dims = dims[dim]
+
+            os.environ["GPU_BLOCK_X"] = str(block_dims[0])
+            os.environ["GPU_BLOCK_Y"] = str(block_dims[1])
+            os.environ["GPU_BLOCK_Z"] = str(block_dims[2])
+            print(f"Using GPU block dimensions: {block_dims}")
+
+        # Import the appropriate module
         lib_mode = "cpu" if compute_mode in ["cpu", "omp"] else "gpu"
-        return getattr(
-            importlib.import_module(f".{lib_mode}_ext", package="simbi.libs"),
-            "SimState",
+        try:
+            simulation_module = importlib.import_module(f"simbi.libs.{lib_mode}_ext")
+            return simulation_module.SimState
+        except ImportError as e:
+            print(f"Error loading simulation backend: {e}")
+            print("Running in demo mode - no actual simulation will be executed")
+            return None
+
+    def run(self, compute_mode: str = "cpu") -> None:
+        """Run the simulation.
+
+        Args:
+            compute_mode: Backend compute mode ('cpu', 'omp', or 'gpu')
+        """
+        if self.state is None:
+            self.initialize()
+            self.state = cast(SimulationState, self.state)
+
+        # Convert configuration to execution format
+        execution_dict = SimulationExecutor.to_execution_dict(
+            self.config, self.state.staggered_bfields
         )
 
-    def _prepare_simulation_state(self, cli_args: dict[str, Any]) -> dict[str, Any]:
-        """Convert SimulationBundle to execution format"""
+        # Configure backend
+        backend = self._configure_backend(compute_mode)
+        if backend is None:
+            print("Demo mode: Simulation would execute with parameters:")
+            for key, value in sorted(execution_dict.items()):
+                print(f"  {key}: {value}")
+            return
 
-        return SimStateBuilder.build(self.bundle.update_from_cli_args(cli_args))
-
-    def _execute_simulation(self, executor: Any, sim_state: dict[str, Any]) -> None:
-        """Execute simulation using loaded module"""
-        state_contig = self.bundle.state.reshape(self.bundle.state.shape[0], -1)
-        print_progress()
-
-        executor().run(
-            state=state_contig,
-            sim_info=sim_state,
-            a=self.bundle.mesh_config.scale_factor or (lambda t: 1.0),
-            adot=self.bundle.mesh_config.scale_factor_derivative or (lambda t: 0.0),
+        # Print key simulation parameters
+        print(
+            f"Running {self.config.dimensionality}D {self.config.regime.value} simulation"
         )
+        print(f"Resolution: {execution_dict['resolution']}")
+        print(f"CFL number: {execution_dict['cfl_number']}")
+        print(f"Output directory: {execution_dict['data_directory']}")
+        print(f"Adiabatic: {execution_dict['adiabatic_index']}")
+        print(f"Solver: {execution_dict['solver']}")
+        print(f"Time step: {execution_dict['temporal_order']}")
+        print(f"Spatial order: {execution_dict['spatial_order']}")
+        zzz = input("Press Enter to continue or Ctrl+C to abort...")
+        # Run the simulation
+        if self.state.conserved_state is not None:
+            # Reshape for contiguous memory layout
+            state_contig = self.state.conserved_state.reshape(
+                self.state.conserved_state.shape[0], -1
+            )
 
-    def _print_simulation_summary_(self, sim_state: dict[str, Any]) -> dict[str, Any]:
-        """pretty print simulation parameters"""
-        return print_simulation_parameters(sim_state)
+            # Create scale factor and derivative functions
+            a = self.config.scale_factor or (lambda t: 1.0)
+            adot = self.config.scale_factor_derivative or (lambda t: 0.0)
+            # Execute the simulation
+            backend().run(state=state_contig, sim_info=execution_dict, a=a, adot=adot)
+        else:
+            print("Error: Simulation state not initialized properly")
 
-    def run(self, **cli_args: Any) -> None:
-        """Run simulation with functional composition"""
-        pipe(
-            None,
-            lambda _: self._setup_compute_environment(cli_args["compute_mode"]),
-            lambda executor: (executor, self._prepare_simulation_state(cli_args)),
-            lambda args: (args[0], self._print_simulation_summary_(args[1])),
-            lambda args: self._execute_simulation(args[0], args[1]),
-        )
+
+def run_simulation(config: SimbiBaseConfig, compute_mode: str = "cpu") -> None:
+    """Run a simulation with the given configuration.
+
+    Args:
+        config: The simulation configuration
+        compute_mode: Backend compute mode ('cpu', 'omp', or 'gpu')
+    """
+    runner = SimulationRunner(config)
+    runner.run(compute_mode=compute_mode)
