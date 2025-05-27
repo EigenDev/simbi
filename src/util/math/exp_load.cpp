@@ -162,7 +162,7 @@ namespace simbi::expression {
     ndarray<real> get_parameters(const ConfigDict& expr_data)
     {
         if (!(expr_data.contains("parameters") &&
-              expr_data.at("parameters").is_array())) {
+              expr_data.at("parameters").is_array_of_floats())) {
             return ndarray<real>{};
         }
 
