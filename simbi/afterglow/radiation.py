@@ -110,10 +110,10 @@ def parse_args(parser: argparse.ArgumentParser, args: argparse.Namespace):
         nargs="+",
     )
     afterglow_parser.add_argument(
-        "--xlims", help="x limits in plot", default=None, type=float, nargs="+"
+        "--xlims", help="x limits in plot", default=[None, None], type=float, nargs="+"
     )
     afterglow_parser.add_argument(
-        "--ylims", help="y limits in plot", default=None, type=float, nargs="+"
+        "--ylims", help="y limits in plot", default=[None, None], type=float, nargs="+"
     )
     afterglow_parser.add_argument(
         "--fig-dims", help="figure dimensions", default=(5, 4), type=float, nargs="+"
