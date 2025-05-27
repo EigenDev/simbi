@@ -91,7 +91,7 @@ namespace simbi {
         {
             return std::holds_alternative<std::string>(value);
         }
-        bool is_array() const
+        bool is_array_of_floats() const
         {
             return std::holds_alternative<std::vector<real>>(value);
         }
@@ -161,7 +161,7 @@ namespace simbi {
                 return std::get<std::string>(value);
             }
             else if constexpr (std::is_same_v<T, std::vector<real>>) {
-                if (!is_array()) {
+                if (!is_array_of_floats()) {
                     throw std::runtime_error("Not an array value");
                 }
                 return std::get<std::vector<real>>(value);
@@ -225,7 +225,7 @@ namespace simbi {
         template <typename T, size_type Dims>
         spatial_vector_t<T, Dims> to_spatial_vector() const
         {
-            if (!is_array()) {
+            if (!is_array_of_floats()) {
                 throw std::runtime_error("Not an array value");
             }
 

@@ -310,18 +310,16 @@ struct InitialConditions {
         {
             // Resolution
             if (init.contains("resolution") &&
-                init.at("resolution").is_array()) {
+                init.at("resolution").is_array_of_ints()) {
                 auto res =
                     init.at("resolution").template get<std::vector<int>>();
-                if (res.size() >= 1) {
-                    init.nx = res[0];
-                }
-                if (res.size() >= 2) {
-                    init.ny = res[1];
-                }
-                if (res.size() >= 3) {
-                    init.nz = res[2];
-                }
+
+                const auto nghosts = 2 * (1 + (init.spatial_order == "plm"));
+                const auto is_mhd  = init.at("is_mhd").template get<bool>();
+
+                init.nx = res[0] + nghosts;
+                init.ny = res[1] + nghosts * (res[1] > 1 || is_mhd);
+                init.nz = res[2] + nghosts * (res[2] > 1 || is_mhd);
             }
             else {
                 // Try individual nx, ny, nz
@@ -494,7 +492,7 @@ struct InitialConditions {
             if (value.is_real_number()) {
                 props[name] = static_cast<real>(value.get<double>());
             }
-            else if (value.is_array()) {
+            else if (value.is_array_of_floats()) {
                 props[name] = value.get<std::vector<double>>();
             }
             else if (value.is_bool()) {
@@ -508,7 +506,7 @@ struct InitialConditions {
             simbi::ConfigDict& props
         )
         {
-            if (dict.contains(name) && dict.at(name).is_array()) {
+            if (dict.contains(name) && dict.at(name).is_array_of_floats()) {
                 props[name] = dict.at(name).template get<std::vector<double>>();
             }
         }
