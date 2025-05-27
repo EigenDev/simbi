@@ -245,7 +245,7 @@ namespace simbi {
     };
 
     constexpr auto comp_wave_speed    = WaveSpeedEstimate::MIGNONE_AND_BODO_05;
-    constexpr auto comp_ct_type       = CTTYPE::MdZ;
+    constexpr auto comp_ct_type       = CTTYPE::CONTACT;
     constexpr auto comp_slope_limiter = LIMITER::MINMOD;
     constexpr auto comp_hllc_type     = HLLCTYPE::CLASSICAL;
 }   // namespace simbi
