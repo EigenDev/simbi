@@ -44,6 +44,7 @@ def primitive_to_conserved(
     adiabatic_index = config.adiabatic_index
     regime = config.regime.value
     is_mhd = config.is_mhd
+    ndim = config.dimensionality
 
     # Create output array same shape as input
     conserved = np.zeros_like(primitive)
@@ -79,11 +80,11 @@ def primitive_to_conserved(
     if "sr" in regime:
         # Relativistic enthalpy
         h = 1.0 + adiabatic_index * pressure / ((adiabatic_index - 1.0) * rho)
-        for i in range(3):
+        for i in range(ndim):
             conserved[i + 1] = rho * h * lorentz**2 * velocities[i]
     else:
         # Classical momentum
-        for i in range(3):
+        for i in range(ndim):
             conserved[i + 1] = rho * velocities[i]
 
     # Energy equation
@@ -118,7 +119,6 @@ def primitive_to_conserved(
                 + velocities[1] * b_mean[1]
                 + velocities[2] * b_mean[2]
             )
-            h = 1.0 + adiabatic_index * pressure / ((adiabatic_index - 1.0) * rho)
             conserved[energy_index] += 0.5 * (b_squared + vsq * b_squared - v_dot_b**2)
             for i in range(3):
                 conserved[i + 1] += b_squared * velocities[i] - v_dot_b * b_mean[i]
@@ -126,9 +126,8 @@ def primitive_to_conserved(
             # MHD energy
             conserved[energy_index] += 0.5 * b_squared
 
-    # Passive scalar (if present)
-    # if primitive.shape[0] > 5:
-    #     conserved[-1] = conserved[0] * primitive[-1]
+    # Passive scalar
+    conserved[-1] = conserved[0] * primitive[-1]
 
     return conserved
 
