@@ -27,6 +27,7 @@ version.py
 *.txt
 *.so
 *.log
+*.sh
 
 # Automatically added by dev.py
 build*/
