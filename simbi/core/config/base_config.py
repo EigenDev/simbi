@@ -105,7 +105,7 @@ class SimbiBaseConfig(CLIConfigurableModel):
         "outflow", description="Boundary conditions"
     )
 
-    plm_theta: float = SimbiField(0.5, description="PLM theta parameter")
+    plm_theta: float = SimbiField(1.5, description="PLM theta parameter")
 
     locally_isothermal: bool = SimbiField(
         False, description="Use locally isothermal equation of state"
@@ -113,7 +113,7 @@ class SimbiBaseConfig(CLIConfigurableModel):
 
     default_start_time: float = SimbiField(0.0, description="Simulation start time")
 
-    default_end_time: float = SimbiField(0.0, description="Simulation end time")
+    default_end_time: float = SimbiField(1.0, description="Simulation end time")
 
     viscosity: float = SimbiField(0.0, description="Viscosity coefficient")
 

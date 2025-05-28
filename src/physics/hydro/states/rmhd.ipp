@@ -1515,23 +1515,6 @@ void RMHD<dim>::update_magnetic_component(const ExecutionPolicy<>& policy)
             prim
         );
 
-        // if (nhat == 3) {
-        //     const auto res =
-        //         b_view.value() -
-        //         this->time_step() * curl_component<nhat>(cell, efield);
-        //     if (ii == 0 && jj == 0 && kk == 0) {
-        //         std::cout << "iter: " << this->current_iter() << std::endl;
-        //         std::cout << "B3 at k-1/2: " << b_view.value() << " -> " <<
-        //         res
-        //                   << std::endl;
-        //     }
-        //     else if (ii == 0 && jj == 0 && kk == 1) {
-        //         std::cout << "iter: " << this->current_iter() << std::endl;
-        //         std::cout << "B3 at k+1/2: " << b_view.value() << " -> " <<
-        //         res
-        //                   << std::endl;
-        //     }
-        // }
         return b_view.value() -
                this->time_step() * curl_component<nhat>(cell, efield);
     };

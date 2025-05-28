@@ -103,7 +103,6 @@ class SimulationRunner:
         print(f"Solver: {execution_dict['solver']}")
         print(f"Time step: {execution_dict['temporal_order']}")
         print(f"Spatial order: {execution_dict['spatial_order']}")
-        zzz = input("Press Enter to continue or Ctrl+C to abort...")
         # Run the simulation
         if self.state.conserved_state is not None:
             # Reshape for contiguous memory layout
