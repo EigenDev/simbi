@@ -468,6 +468,19 @@ namespace simbi {
                 return static_cast<Derived*>(this);
             }
         };
+
+        // allow for scalar multiplication from right-hand side
+        template <size_type Dims, typename Derived, Regime R>
+        DUAL anyHydro<Dims, Derived, R>
+        operator*(const real c, const anyHydro<Dims, Derived, R>& hydro)
+        {
+            anyHydro<Dims, Derived, R> result;
+            for (luint ii = 0; ii < anyHydro<Dims, Derived, R>::nmem; ii++) {
+                result[ii] = c * hydro[ii];
+            }
+            return result;
+        }
+
     }   // namespace generic_hydro
 
     //=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-==-=-=-=-=-=-=-=-=-=-=-=-=-=-=-==--=-=-=-=-=-=-=-=-
@@ -676,11 +689,14 @@ namespace simbi {
             return this->bcomponent(nhat);
         }
 
-        DUAL auto pressure(const real gamma, bool isothermal, real cs2) const
+        DUAL auto pressure(const real gamma, bool isothermal) const
             requires sim_type::Newtonian<R>
         {
             if (isothermal) {
-                return dens() * cs2;
+                // for isothermal runs, we store
+                // the square of the sound speed
+                // in the energy density
+                return dens() * nrg();
             }
             const auto vel = momentum() / dens();
             return (gamma - 1.0) *
@@ -1243,7 +1259,7 @@ namespace simbi {
 
         DUAL constexpr real pStar() const
         {
-            if constexpr (nvals > 4) {
+            if constexpr (nvals > 5) {
                 return vals_[5];
             }
             else if constexpr (R == Regime::NEWTONIAN && Dims == 1) {
