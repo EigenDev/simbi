@@ -299,7 +299,6 @@ class SimulationParameterSummary:
                     "adiabatic_index",
                     "gamma",
                     "isothermal",
-                    "locally_isothermal",
                     "shakura_sunyaev_alpha",
                     "ambient_sound_speed",
                     "is_mhd",
@@ -349,8 +348,8 @@ class SimulationParameterSummary:
                 "title": " ___ Simulation Runtime",
                 "ascii": "|>_>|",
                 "params": [
-                    "default_start_time",
-                    "default_end_time",
+                    "start_time",
+                    "end_time",
                     "time",
                     "final_time",
                 ],
