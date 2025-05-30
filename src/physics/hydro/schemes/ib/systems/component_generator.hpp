@@ -59,7 +59,6 @@
 #include "physics/hydro/schemes/ib/systems/component_body_system.hpp"
 #include "physics/hydro/schemes/ib/systems/system_config.hpp"
 #include "util/tools/helpers.hpp"
-#include <cstdint>
 
 using namespace simbi::ibsystem::body_functions::binary;
 using namespace simbi::config;
@@ -192,7 +191,7 @@ namespace simbi::ibsystem {
     Body<T, Dims> create_individual_body(const ConfigDict& props)
     {
         // basic body properties
-        const auto caps = config::try_read<BodyCapability>(props, "body_type");
+        const auto caps = config::try_read<BodyCapability>(props, "capability");
         const auto pos_vec = config::try_read_vec<T, Dims>(props, "position");
         const auto vel_vec = config::try_read_vec<T, Dims>(props, "velocity");
         const auto mass    = config::try_read<real>(props, "mass");
@@ -212,7 +211,6 @@ namespace simbi::ibsystem {
 
         // create body
         Body<T, Dims> body(pos_vec, vel_vec, mass, radius, two_way);
-
         // add gravitational body capability if properties exist
         if (has_capability(caps.value(), BodyCapability::GRAVITATIONAL)) {
             const auto soft = config::try_read<real>(props, "softening_length");
@@ -325,7 +323,7 @@ namespace simbi::ibsystem {
         const bool two_way =
             try_read<bool>(component, "two_way_coupling").value();
 
-        if (mass <= 0.0 || radius <= 0.0) {
+        if (mass < 0.0 || radius < 0.0) {
             throw std::runtime_error("Mass and radius must be positive values");
         }
 
