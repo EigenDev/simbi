@@ -199,7 +199,7 @@ namespace simbi::ibsystem::functions {
 
             for (const auto& [body_idx, body] : accretor_bodies) {
                 // Apply accretion effects
-                auto [fluid_change, body_delta] = apply_accretion_effect(
+                auto [fluid_change, body_delta] = apply_simple_accretion(
                     body_idx,
                     body,
                     prim,
