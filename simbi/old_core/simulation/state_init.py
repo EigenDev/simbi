@@ -92,8 +92,8 @@ def try_checkpoint_initialization(
                 overwrite["checkpoint_index"] = int(metadata["checkpoint_index"])
             except KeyError:  # for legacy reasons
                 overwrite["checkpoint_index"] = int(metadata["checkpoint_idx"])
-        elif "default_start_time" in non_intersecting:
-            overwrite["default_start_time"] = metadata["time"]
+        elif "start_time" in non_intersecting:
+            overwrite["start_time"] = metadata["time"]
             overwrite["isothermal"] = bool(metadata["adiabatic_index"] == 1.0)
 
         if "immersed_bodies" in kwargs:
@@ -102,7 +102,7 @@ def try_checkpoint_initialization(
                 for key, body in kwargs["immersed_bodies"].items():
                     overwrite["immersed_bodies"].append(
                         ImmersedBodyConfig(
-                            body_type=body["type"],
+                            body_capability=body["body_capability"],
                             mass=body["mass"],
                             velocity=body["velocity"],
                             position=body["position"],
@@ -115,7 +115,7 @@ def try_checkpoint_initialization(
                                 for k, v in body.items()
                                 if k
                                 not in [
-                                    "type",
+                                    "body_capability",
                                     "mass",
                                     "velocity",
                                     "position",
@@ -147,7 +147,8 @@ def try_checkpoint_initialization(
                                     mass=body1["mass"],
                                     radius=body1["radius"],
                                     is_an_accretor=has_capability(
-                                        body1["type"], BodyCapability.ACCRETION
+                                        body1["body_capability"],
+                                        BodyCapability.ACCRETION,
                                     ),
                                     softening_length=body1["softening_length"],
                                     two_way_coupling=False,
@@ -162,7 +163,8 @@ def try_checkpoint_initialization(
                                     mass=body2["mass"],
                                     radius=body2["radius"],
                                     is_an_accretor=has_capability(
-                                        body2["type"], BodyCapability.ACCRETION
+                                        body2["body_capability"],
+                                        BodyCapability.ACCRETION,
                                     ),
                                     softening_length=body2["softening_length"],
                                     two_way_coupling=False,

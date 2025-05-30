@@ -62,5 +62,5 @@ class BodyCapability(IntFlag):
     RIGID = 1 << 4
 
 
-def has_capability(body_type: BodyCapability, capability: BodyCapability) -> bool:
-    return bool(body_type & capability)
+def has_capability(body_capability: BodyCapability, capability: BodyCapability) -> bool:
+    return bool(body_capability & capability)
