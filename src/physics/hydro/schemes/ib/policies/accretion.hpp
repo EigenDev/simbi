@@ -55,6 +55,7 @@
 #include "physics/hydro/schemes/ib/delta/body_delta.hpp"
 #include "physics/hydro/schemes/ib/systems/body.hpp"
 #include "physics/hydro/types/context.hpp"
+#include "util/tools/helpers.hpp"
 
 namespace simbi::ibsystem::body_functions {
     namespace accretion {
@@ -317,7 +318,7 @@ namespace simbi::ibsystem::body_functions {
             const auto cs_ambient_sq = cs_ambient * cs_ambient;
             const auto canon_bondi   = 2.0 * body.mass / cs_ambient_sq;
             const auto r_bondi       = [=]() {
-                if (cs_ambient > 0.0) {
+                if (!goes_to_zero(cs_ambient)) {
                     // sometimes, we are working with locally isothermal
                     // flows, so global ambient sound speed is meaningless
                     return std::min(canon_bondi, body.accretion_radius());
@@ -411,6 +412,63 @@ namespace simbi::ibsystem::body_functions {
 
             return {conserved_t{}, delta};
         }
+
+        template <typename T, size_type Dims, typename Primitive>
+        DEV std::pair<typename Primitive::counterpart_t, BodyDelta<T, Dims>>
+        apply_simple_accretion(
+            size_type body_idx,
+            const Body<T, Dims>& body,
+            const Primitive& prim,
+            const Cell<Dims>& mesh_cell,
+            const HydroContext& context,
+            T dt
+        )
+        {
+            using conserved_t = Primitive::counterpart_t;
+            auto delta        = BodyDelta<T, Dims>{body_idx};
+
+            // Get position vector from sink to cell center
+            const auto r_vector =
+                mesh_cell.cartesian_centroid() - body.position;
+            const auto distance = r_vector.norm();
+
+            // Simple radius check with constant accretion rate inside radius
+            if (distance <= body.accretion_radius()) {
+                // Accrete fixed fraction of available mass per timestep
+                const T cell_size           = mesh_cell.max_cell_width();
+                const T local_cs            = prim.sound_speed(context.gamma);
+                const T sound_crossing_time = cell_size / local_cs;
+                const T stability_limit     = dt / (sound_crossing_time);
+                const T max_accretion       = std::min(
+                    body.accretion_efficiency(),
+                    std::min(0.5, stability_limit)
+                );
+
+                // Calculate accreted quantities
+                const T accreted_density =
+                    max_accretion * prim.labframe_density();
+                const auto accreted_momentum =
+                    max_accretion * prim.spatial_momentum(context.gamma);
+                const T accreted_energy =
+                    max_accretion * prim.energy(context.gamma);
+
+                // Create conserved state with removed material
+                conserved_t result(
+                    -accreted_density,
+                    -accreted_momentum,
+                    -accreted_energy
+                );
+
+                // Update body statistics
+                const auto dV              = mesh_cell.volume();
+                delta.accreted_mass_delta  = dV * accreted_density;
+                delta.accretion_rate_delta = dV * accreted_density / dt;
+                return {result, delta};
+            }
+
+            return {conserved_t{}, delta};
+        }
+
     }   // namespace accretion
 
 }   // namespace simbi::ibsystem::body_functions
