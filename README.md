@@ -131,6 +131,7 @@
   - [mypy](https://mypy-lang.org)
   - [cogapp](https://pypi.org/project/cogapp)
   - [halo](https://pypi.org/project/halo)
+  - [pydantic](https://pydantic-docs.helpmanual.io)
   - [rich](https://github.com/Textualize/rich)
     *Pretty-printing console outputs*
 </td>

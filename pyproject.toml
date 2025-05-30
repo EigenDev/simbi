@@ -35,6 +35,7 @@ dependencies = [
     "astropy",
     "halo",
     "rich",
+    "pyndatic",
 ]
 
 [project.optional-dependencies]
