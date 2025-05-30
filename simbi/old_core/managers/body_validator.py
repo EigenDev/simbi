@@ -33,10 +33,10 @@ class BodyConfigValidator:
         try:
             body_dict = asdict(body_config)
             # Validate body type
-            body_type = BodyCapability(body_dict["body_type"])
+            body_capability = BodyCapability(body_dict["capability"])
 
             # Check required parameters
-            required = cls.REQUIRED_PARAMS[body_type]
+            required = cls.REQUIRED_PARAMS[body_capability]
             missing = required - set(body_dict.keys())
             if missing:
                 if "specifics" in body_dict:
@@ -91,7 +91,7 @@ class BodyConfigValidator:
             # Return validated body config
             return Maybe.of(
                 ImmersedBodyConfig(
-                    body_type=body_type,
+                    body_capability=body_capability,
                     mass=mass,
                     radius=radius,
                     velocity=vel,
