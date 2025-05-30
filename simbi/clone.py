@@ -1,14 +1,14 @@
 from pathlib import Path
 
 setup_clone = """# Auto-generate setup script template to quickly get up
-# and running with the code! All @simbi_property types 
-# that have a default type can be removed completely if 
+# and running with the code! All @simbi_property types
+# that have a default type can be removed completely if
 # one does not plan on changing any of these fields
 
 from simbi import (
-    BaseConfig, 
-    DynamicArg, 
-    simbi_class_property, 
+    BaseConfig,
+    DynamicArg,
+    simbi_class_property,
     simbi_property
 )
 from simbi.typing import InitialStateType
@@ -61,11 +61,11 @@ class {setup_name}(BaseConfig):
         return None
 
     @simbi_property
-    def default_start_time(self) -> Union[DynamicArg, float]:
+    def start_time(self) -> Union[DynamicArg, float]:
         return 0.0
 
     @simbi_property
-    def default_end_time(self) -> Union[DynamicArg, float]:
+    def end_time(self) -> Union[DynamicArg, float]:
         return 1.0
 
     @simbi_property
@@ -87,7 +87,7 @@ class {setup_name}(BaseConfig):
     @simbi_property
     def use_quirk_smoothing(self) -> bool:
         return False
-        
+
     @simbi_property
     def cfl_number(self) -> float:
         return 0.1
