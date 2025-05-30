@@ -79,40 +79,53 @@ class CLIConfigurableModel(BaseModel):
         group = parser.add_argument_group(f"{group_name} parameters")
 
         for field_name, field_info in cls.model_fields.items():
-            # Skip private fields
-            if field_name.startswith("_"):
-                continue
+            try:
+                # Skip private fields
+                if field_name.startswith("_"):
+                    continue
 
-            # Get CLI info if available
-            cli_info: Optional[CLIInfo] = None
-            extra = cast(Optional[dict[str, Any]], field_info.json_schema_extra)
+                # Get CLI info if available
+                cli_info: Optional[CLIInfo] = None
+                extra = cast(Optional[dict[str, Any]], field_info.json_schema_extra)
 
-            if extra and "cli_info" in extra:
-                cli_info = cast(CLIInfo, extra["cli_info"])
+                if extra and "cli_info" in extra:
+                    cli_info = cast(CLIInfo, extra["cli_info"])
 
-            if cli_info and cli_info.get("expose_cli", True):
-                # This field should be exposed on CLI
-                cli_name = cli_info["cli_name"]
-                kwargs: dict[str, Any] = {
-                    "help": cli_info["help_text"]
-                    or field_info.description
-                    or f"Set {field_name}",
-                    "dest": field_name,
-                }
+                if cli_info and cli_info.get("expose_cli", True):
+                    # This field should be exposed on CLI
+                    cli_name = cli_info["cli_name"]
+                    kwargs: dict[str, Any] = {
+                        "help": cli_info["help_text"]
+                        or field_info.description
+                        or f"Set {field_name}",
+                        "dest": field_name,
+                    }
 
-                # Add choices if specified
-                if cli_info["choices"]:
-                    kwargs["choices"] = cli_info["choices"]
+                    # Add choices if specified
+                    if cli_info["choices"]:
+                        kwargs["choices"] = cli_info["choices"]
 
-                # Set default if available
-                if field_info.default is not None and field_info.default is not ...:
-                    kwargs["default"] = field_info.default
+                    # Set default if available
+                    if field_info.default is not None and field_info.default is not ...:
+                        kwargs["default"] = field_info.default
 
-                # Handle different types
-                cls._add_type_info(kwargs, field_info)
+                    # Handle different types
+                    cls._add_type_info(kwargs, field_info)
 
-                # Add the argument to the parser
-                group.add_argument(f"--{cli_name}", **kwargs)
+                    # Add the argument to the parser
+                    group.add_argument(f"--{cli_name}", **kwargs)
+            except argparse.ArgumentError as e:
+                # if the argument already exists, skip it
+                # this can happen if multiple models register the same argument
+                # e.g. if they have the same field name
+                if "argument --" in str(e):
+                    continue
+                raise e
+            except Exception as e:
+                # Catch any other errors and provide a clear message
+                raise ValueError(
+                    f"Error registering CLI parameter '{field_name}': {e}"
+                ) from e
 
     @classmethod
     def _add_type_info(cls, kwargs: dict[str, Any], field_info: Any) -> None:
