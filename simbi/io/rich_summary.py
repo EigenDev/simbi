@@ -28,12 +28,13 @@ class RichSimulationSummary:
         self.styles = {
             "header": Style(color="bright_cyan", bold=True),
             "subheader": Style(color="cyan", bold=True),
-            "param_name": Style(color="bright_white"),
-            "param_value": Style(color="bright_yellow"),
+            "param_name": Style(color="white"),
+            "param_value": Style(color="bright_white"),
             "grid_params": Style(color="bright_cyan"),
             "physics_params": Style(color="bright_cyan"),
             "boundary_params": Style(color="bright_cyan"),
             "numerical_params": Style(color="bright_cyan"),
+            "runtime_params": Style(color="bright_cyan"),
             "custom_params": Style(color="bright_cyan"),
             "output_params": Style(color="bright_cyan"),
             "statistics": Style(color="bright_white", italic=True),
@@ -50,6 +51,7 @@ class RichSimulationSummary:
             "Boundary Conditions": box.HEAVY,
             "Time Configuration": box.SIMPLE_HEAVY,
             "Numerical Method": box.MINIMAL,
+            "Simulation Runtime": box.SIMPLE,
             "Output": box.SQUARE,
             "Statistics": box.DOUBLE_EDGE,
         }
@@ -105,6 +107,8 @@ class RichSimulationSummary:
             category_style = self.styles["numerical_params"]
         elif "Output" in category:
             category_style = self.styles["output_params"]
+        elif "Runtime" in category:
+            category_style = self.styles["runtime_params"]
         elif "Custom" in category:
             category_style = self.styles["custom_params"]
         else:
@@ -123,7 +127,7 @@ class RichSimulationSummary:
         # add columns
         table.add_column("Parameter", style=self.styles["param_name"], justify="right")
         table.add_column("Value", style=self.styles["param_value"])
-        table.add_column("Description", style="bright_white", justify="left")
+        table.add_column("Description", style="white", justify="left")
 
         # add rows for each parameter
         for name, value in params.items():
@@ -175,9 +179,10 @@ class RichSimulationSummary:
             "ny": "Number of cells in x2-direction",
             "nz": "Number of cells in x3-direction",
             "gamma": "Adiabatic index",
-            "cfl": "Courant-Friedrichs-Lewy condition",
+            "cfl_number": "Courant-Friedrichs-Lewy condition",
             "dt": "Timestep size",
-            "tmax": "Maximum simulation time",
+            "start_time": "Simulation start time",
+            "end_time": "Simulation end time",
             "reconstruction_method": "Spatial reconstruction scheme",
             "x1_spacing": "Grid spacing in x1-direction",
             "x2_spacing": "Grid spacing in x2-direction",
@@ -187,12 +192,15 @@ class RichSimulationSummary:
             "x3bounds": "Physical bounds in x3-direction",
             "dimensionality": "Number of dimensions (1, 2, or 3)",
             "coord_system": "Coordinate system (cartesian, cylindrical, spherical)",
-            "regime": "Physical regime (classical, srhd, srmdh)",
+            "regime": "Physical regime (classical, srhd, srmhd)",
             "adiabatic_index": "Adiabatic index for the gas",
             "isothermal": "Isothermal condition (True/False)",
-            "locally_isothermal": "Locally isothermal condition (True/False)",
             "is_mhd": "Magnetohydrodynamics (True/False)",
+            "is_relativistic": "Relativistic regime (True/False)",
+            "shakura_sunyaev_alpha": "Shakura-Sunyaev alpha parameter",
             "viscosity": "Viscosity coefficient",
+            "ambient_sound_speed": "Ambient sound speed",
+            "use_quirk_smoothing": "Use Quirk (1994) smoothing (True/False)",
             "solver": "Riemann solver used",
             "spatial_order": "Spatial reconstruction schemes",
             "temporal_order": "temporal integration scheme",
@@ -207,7 +215,7 @@ class RichSimulationSummary:
             "bx2_outer_expressions": "User-defined outer boundary conditions for outer x2 boundary",
             "bx3_inner_expressions": "User-defined inner boundary conditions for inner x3 boundary",
             "bx3_outer_expressions": "User-defined outer boundary conditions for outer x3 boundary",
-            "gravity_source_expressions": "Gravity source term epxressions",
+            "gravity_source_expressions": "Gravity source term expressions",
             "hydro_source_expressions": "Hydrodynamic source term expressions",
             "local_sound_speed_expressions": "Local sound speed expressions",
         }
@@ -324,16 +332,27 @@ class RichSimulationSummary:
 
         # compute statistics
         stats = {}
-        if "nx" in params and "ny" in params:
-            # calculate memory usage similar to summary.py but simpler
-            nx, ny = params.get("nx", 1), params.get("ny", 1)
-            nz = params.get("nz", 1)
-            cells = nx * ny * nz
-            # rough estimate - 8 conserved variables * 8 bytes per double
-            bytes_per_cell = 8 * 8
-            memory_bytes = cells * bytes_per_cell
-            stats["estimated_memory_gb"] = memory_bytes / (1024**3)
-            stats["cells_per_dim"] = (nx, ny, nz)
+        ni, nj, nk = params["resolution"]
+        nghosts = 2 * (1 + (params["spatial_order"].value == "plm"))
+        if params["is_mhd"]:
+            nx = ni + nghosts
+            ny = nj + nghosts
+            nz = nk + nghosts
+        else:
+            nx = ni + nghosts
+            ny = nj + nghosts * (params["dimensionality"] >= 2)
+            nz = nk + nghosts * (params["dimensionality"] == 3)
+
+        cells = nx * ny * nz
+        # rough estimate - 8 conserved variables * 8 bytes per double
+        nvars = 9 if params["is_mhd"] else params["dimensionality"] + 2
+        bytes_per_cell = 8 * nvars
+        pressure_guess = params["regime"].value == "srhd"
+        mhd_extras = 6 if params["is_mhd"] else 0
+        narrays = 2 + pressure_guess + mhd_extras
+        memory_bytes = cells * bytes_per_cell * narrays
+        stats["estimated_memory_gb"] = memory_bytes / (1024**3)
+        stats["cells_per_dim"] = (ni, nj, nk)
 
         # create statistics panel
         stats_panel = self.create_statistics_panel(stats)
