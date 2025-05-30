@@ -22,7 +22,7 @@ class ArgumentMapping:
         "cmap": "style",
         "log": "style",
         "power": "style",
-        "fig_dims": "style",
+        "fig_size": "style",
         "dpi": "style",
         "legend": "style",
         "xlims": "style",

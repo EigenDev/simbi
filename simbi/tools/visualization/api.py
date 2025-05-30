@@ -35,7 +35,13 @@ def plot_line(
             config[section].update(values)
 
     # Create figure
-    fig = Figure(config, nfiles=len(files), nfields=len(fields), theme=theme)
+    fig = Figure(
+        config,
+        nfiles=len(files),
+        nfields=len(fields),
+        theme=theme,
+        user_fig_size=kwargs.get("fig_size"),
+    )
 
     # Add title component
     fig.add(TitleComponent, "title", setup=config["plot"]["setup"], ax_title=True)
@@ -134,7 +140,7 @@ def plot_multidim(
     is_cartesian = kwargs.get("is_cartesian", True)
 
     # Create figure
-    fig = Figure(config, theme=theme)
+    fig = Figure(config, theme=theme, user_fig_size=kwargs.get("fig_size"))
 
     # Add title component
     fig.add(
@@ -197,7 +203,7 @@ def plot_histogram(
             config[section].update(values)
 
     # Create figure
-    fig = Figure(config, theme=theme)
+    fig = Figure(config, theme=theme, user_fig_size=kwargs.get("fig_size"))
 
     # Add title component
     fig.add(TitleComponent, "title", setup=config["plot"]["setup"], ax_title=True)
@@ -251,7 +257,7 @@ def plot_temporal(
             config[section].update(values)
 
     # Create figure
-    fig = Figure(config, theme=theme)
+    fig = Figure(config, theme=theme, user_fig_size=kwargs.get("fig_size"))
 
     # Add title component
     fig.add(TitleComponent, "title", setup=config["plot"]["setup"], ax_title=True)

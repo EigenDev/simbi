@@ -1,8 +1,8 @@
-from .theme import Theme
 from .themes.default import default_theme
 from .themes.scientific import scientific_theme
 from .themes.dark import dark_theme
 from .formatters import AxisFormatter, ColorbarFormatter
+from typing import Optional
 
 
 class ThemeManager:
@@ -28,11 +28,17 @@ class ThemeManager:
             return cls._themes["default"]
 
     @classmethod
-    def set_theme(cls, theme_name: str, nfiles: int = 1, nfields: int = 1) -> bool:
+    def set_theme(
+        cls,
+        theme_name: str,
+        nfiles: int = 1,
+        nfields: int = 1,
+        user_fig_size: Optional[tuple[float, float]] = None,
+    ) -> bool:
         """Set the current theme"""
         if theme_name in cls._themes:
             cls._current_theme = theme_name
-            cls._themes[theme_name].apply(nfiles, nfields)
+            cls._themes[theme_name].apply(nfiles, nfields, user_fig_size)
             return True
         return False
 

@@ -21,6 +21,7 @@ class MultidimPlotComponent(Component):
         x1, x2 = self.bridge.transform_coordinates(file_mesh, file_setup)
         lx1 = len(x1)
         lx2 = len(x2)
+
         # Create empty pcolormesh plot
         self.mesh = self.ax.pcolormesh(
             x1,
@@ -70,9 +71,9 @@ class MultidimPlotComponent(Component):
         # Draw each immersed body
         for body_id, body in self.state.data.immersed_bodies.items():
             # Determine radius based on body type
-            from ....core.types.constants import BodyCapability, has_capability
+            from ....core.types.bodies import BodyCapability, has_capability
 
-            if has_capability(body.get("type", 0), BodyCapability.ACCRETION):
+            if has_capability(body.get("capability", 0), BodyCapability.ACCRETION):
                 radius = body.get("accretion_radius", 0.0)
             else:
                 radius = body.get("radius", 0.0)
@@ -132,22 +133,53 @@ class MultidimPlotComponent(Component):
 
         return xx_shifted, yy, var
 
-    def _generate_theta_values(self, x2max: float, npatches: int) -> np.ndarray:
-        """Generate theta values for patches"""
-        base = np.zeros(npatches)
-        for i in range(npatches):
-            if i == 0:
-                base[i] = 0
+    def _generate_theta_values(self, x2max: float, nfields: int) -> np.ndarray:
+        """Generate theta values for distributing fields around polar plots
+
+        Args:
+            x2max: Original maximum theta value from the data
+            nfields: Number of fields being plotted
+
+        Returns:
+            Array of theta shift values for each field
+        """
+        # For simple bipolar display with one field
+        if nfields == 1:
+            return np.array([0.0])
+
+        # For two fields, put them in opposite sides
+        elif nfields == 2:
+            # First field at original position, second field mirrored
+            if abs(x2max - np.pi) < 1e-6:  # Half circle data (0 to π)
+                return np.array([0.0, -np.pi])
+            else:  # Quarter circle data (0 to π/2) or other
+                return np.array([0.0, -x2max])
+
+        # Three fields need special treatment based on original angular coverage
+        elif nfields == 3:
+            if abs(x2max - np.pi / 2) < 1e-6:  # Quarter circle data
+                # Three quadrants: first, fourth, second
+                return np.array([0.0, -np.pi / 2, np.pi / 2])
+            elif abs(x2max - np.pi) < 1e-6:  # Half circle data
+                # Divide the half-circle into three equal parts
+                section = 2 * np.pi / 3
+                return np.array([0.0, -section, section])
             else:
-                base[i] = -x2max * i
-                if base[i] < -2 * x2max:  # Wrap around if needed
-                    base[i] += 4 * x2max
-        return base
+                # For other ranges, divide the full circle
+                return np.array([i * 2 * np.pi / 3 for i in range(3)])
+
+        # Four fields can use all four quadrants
+        elif nfields == 4:
+            return np.array([0.0, np.pi / 2, -np.pi / 2, -np.pi])
+
+        # For more fields, distribute evenly
+        else:
+            return np.array([i * 2 * np.pi / nfields for i in range(nfields)])
 
     def _project_3d_data(self, var: np.ndarray) -> np.ndarray:
         """Project 3D data to 2D based on configuration"""
-        depth = self.state.config.get("multidim", {}).get("box_depth", 0)
-        projection = self.state.config.get("multidim", {}).get("projection", [1, 2, 3])
+        depth = self.state.config["multidim"]["box_depth"]
+        projection = self.state.config["multidim"]["projection"]
 
         # Find nearest depth index
         from ....functional.helpers import find_nearest
@@ -193,32 +225,49 @@ class MultidimPlotComponent(Component):
         is_cartesian = setup.get("is_cartesian", True)
 
         # Handle polar patches if needed
-        if not is_cartesian and self.state.config.get("multidim", {}).get(
-            "bipolar", False
-        ):
-            # Get number of patches
-            nfields = len(self.state.config.get("plot", {}).get("fields", ["rho"]))
-            npatches = nfields
-            if nfields == 1:
-                npatches += 1
-            if self.state.config.get("multidim", {}).get("bipolar", False):
-                npatches *= 2
-
-            # Get patch index
-            patch_idx = int(self.id.split("_")[-1]) % npatches
-
-            # Generate theta values
-            thetas = self._generate_theta_values(setup.get("x2max", np.pi), npatches)
-
-            # Get coordinates
+        if not is_cartesian:
+            # Get standard coordinates
             xx, yy = self.bridge.transform_coordinates(mesh, setup)
 
-            # Apply patch position
-            xx, yy, var = self._place_at_patch(
-                xx, yy, var, patch_idx, thetas[patch_idx]
-            )
+            # Get field index and total number of fields
+            fields = self.state.config.get("plot", {}).get("fields", ["rho"])
+            nfields = len(fields)
+            field_idx = int(self.id.split("_")[-1])
+            x2max = setup.get("x2max", np.pi)
+
+            # Handle traditional bipolar mode if enabled
+            if self.state.config["multidim"]["bipolar"]:
+                npatches = nfields
+                if nfields == 1:
+                    npatches += 1
+                npatches *= 2  # Double for bipolar
+
+                patch_idx = field_idx % npatches
+                thetas = self._generate_theta_values(x2max, npatches)
+                xx, yy, var = self._place_at_patch(
+                    xx, yy, var, patch_idx, thetas[patch_idx]
+                )
+            else:
+                # Use enhanced polar field placement
+                thetas = self._generate_theta_values(x2max, nfields)
+                theta_shift = thetas[field_idx % len(thetas)]
+
+                # Determine quadrant based on theta shift
+                quadrant = 0  # Default to first quadrant
+                if theta_shift < 0:
+                    quadrant = 1 if abs(theta_shift) < np.pi / 2 else 2
+                elif theta_shift >= np.pi / 2:
+                    quadrant = 3
+
+                # Apply the appropriate shift
+                xx, yy, var = self._place_at_patch(xx, yy, var, quadrant, theta_shift)
+                # Special case for single field with quarter/half circle data
+                if nfields == 1 and (
+                    abs(x2max - np.pi / 2) < 1e-6 or abs(x2max - np.pi) < 1e-6
+                ):
+                    self.create_mirror = True
         else:
-            # Get standard coordinates
+            # Get standard Cartesian coordinates
             xx, yy = self.bridge.transform_coordinates(mesh, setup)
 
         # Create or update the mesh
@@ -228,7 +277,17 @@ class MultidimPlotComponent(Component):
             else:
                 X, Y = xx, yy
 
+            if self.state.data.setup["coord_system"] == "spherical":
+                var = var.T  # Transpose for correct orientation
+
             # Update mesh with new data
+            # self.mesh = self.ax.pcolormesh(
+            #     xx,
+            #     yy,
+            #     var,
+            #     cmap=self.props.get("cmap", "viridis"),
+            #     shading="auto",
+            # )
             self.mesh.set_array(var.ravel())
 
             # Update normalization
@@ -283,14 +342,23 @@ class MultidimPlotComponent(Component):
             if self.state.config.get("style", {}).get("draw_immersed_bodies", False):
                 self._draw_immersed_bodies()
 
-            # Handle axisymmetric cylindrical coordinates by mirroring
+            # Handle mirroring cases
             if (
+                not is_cartesian
+                and hasattr(self, "create_mirror")
+                and self.create_mirror
+            ):
+                # For enhanced polar display, create mirror mesh
+                self._add_mirror_mesh(X, Y, var, field, color_range)
+            elif (
                 setup.get("coord_system") == "axis_cylindrical"
                 and not hasattr(self, "mirror_mesh")
                 and not self.props.get("is_mirror", False)
             ):
+                # For standard axisymmetric cylindrical coordinates
                 self._add_mirror_mesh(X, Y, var, field, color_range)
 
+        # Format the axis using the centralized formatter
         self.format_axis()
 
         return self.mesh
@@ -304,10 +372,29 @@ class MultidimPlotComponent(Component):
         color_range: tuple,
     ) -> None:
         """Add a mirrored mesh for axisymmetric cylindrical coordinates"""
-        # Create mirrored mesh
-        self.mirror_mesh = self.ax.pcolormesh(
-            -xx, yy, var, cmap=self.mesh.get_cmap(), shading="auto", norm=self.mesh.norm
-        )
+
+        # For enhanced polar plots with mirroring
+        if hasattr(self, "create_mirror"):
+            pass
+            # Mirror across the y-axis for polar plots
+            self.mirror_mesh = self.ax.pcolormesh(
+                -xx,
+                yy,
+                var,
+                cmap=self.mesh.get_cmap(),
+                shading="auto",
+                norm=self.mesh.norm,
+            )
+        else:
+            # For standard axisymmetric cylindrical coordinates
+            self.mirror_mesh = self.ax.pcolormesh(
+                -xx,
+                yy,
+                var,
+                cmap=self.mesh.get_cmap(),
+                shading="auto",
+                norm=self.mesh.norm,
+            )
 
         # Store reference
         self.state.plot_elements[f"{self.id}_mirror_mesh"] = self.mirror_mesh

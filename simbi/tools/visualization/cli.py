@@ -164,7 +164,7 @@ def setup_parser(parser: argparse.ArgumentParser) -> None:
         action=CycleAction,
     )
     parser.add_argument(
-        "--fig-dims", nargs=2, type=float, help="Figure dimensions (width height)"
+        "--fig-size", nargs=2, type=float, help="Figure dimensions (width height)"
     )
     parser.add_argument("--dpi", type=int, default=300, help="Output DPI")
     parser.add_argument(
@@ -216,10 +216,13 @@ def setup_parser(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
         "--projection",
         type=tuple_arg,
+        default=(1, 2, 3),
         help="Projection axes (x y z)",
         choices=[(1, 2, 3), (1, 3, 2), (2, 1, 3), (2, 3, 1), (3, 1, 2), (3, 2, 1)],
     )
-    parser.add_argument("--box-depth", type=float, help="Depth for 3D projection")
+    parser.add_argument(
+        "--box-depth", type=float, help="Depth for 3D projection", default=0.0
+    )
     parser.add_argument("--bipolar", action="store_true", help="Use bipolar plotting")
     parser.add_argument(
         "--bbox-inches",

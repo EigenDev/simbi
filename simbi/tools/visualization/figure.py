@@ -1,5 +1,5 @@
 from .styling import ThemeManager
-from typing import Any, Sequence, Type
+from typing import Any, Sequence, Type, Optional
 import matplotlib.pyplot as plt
 from .state.core import VisualizationState
 from .components.base import Component
@@ -17,6 +17,7 @@ class Figure:
         nfiles: int = 1,
         nfields: int = 1,
         theme: str = "default",
+        user_fig_size: Optional[tuple[float, float]] = None,
     ):
         self.config = config
         self.state = VisualizationState(config=config)
@@ -28,11 +29,13 @@ class Figure:
 
         # Set and apply theme :D (!)
         self.theme = theme
-        ThemeManager.set_theme(self.theme, nfiles=nfiles, nfields=nfields)
+        ThemeManager.set_theme(
+            self.theme, nfiles=nfiles, nfields=nfields, user_fig_size=user_fig_size
+        )
 
     def create_figure(self) -> None:
         """Create the matplotlib figure and axes"""
-        figsize = self.config.get("style", {}).get("fig_dims", (10, 6))
+        figsize = self.config["style"]["fig_size"]
 
         # Check if polar projection is needed
         is_cartesian = True  # Default
@@ -44,7 +47,9 @@ class Figure:
             self.fig, ax = plt.subplots(figsize=figsize)
         else:
             self.fig, ax = plt.subplots(
-                figsize=figsize, subplot_kw={"projection": "polar"}
+                figsize=figsize,
+                subplot_kw={"projection": "polar"},
+                constrained_layout=True,
             )
 
         self.axes["main"] = ax

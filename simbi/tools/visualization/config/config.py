@@ -41,7 +41,7 @@ class StyleGroup:
     semilogx: bool = False
     semilogy: bool = False
     units: bool = False
-    fig_dims: tuple[float, float] = (10, 6)
+    fig_size: tuple[float, float] = (10, 6)
     legend: bool = True
     legend_loc: Optional[str] = None
     labels: Optional[Sequence[str]] = None

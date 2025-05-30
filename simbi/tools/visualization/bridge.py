@@ -139,7 +139,7 @@ class SimbiDataBridge:
 
         # Handle polar coordinates
         if not setup.get("is_cartesian", True):
-            xx, yy = np.meshgrid(mesh["x1v"], mesh["x2v"])[::-1]
+            xx, yy = mesh["x2v"], mesh["x1v"]
 
             # Handle bipolar configuration
             if self.state.config.get("multidim", {}).get("bipolar", False):

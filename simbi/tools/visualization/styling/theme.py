@@ -1,5 +1,5 @@
 from dataclasses import dataclass, field
-from typing import Any, Sequence
+from typing import Any, Sequence, Optional
 import matplotlib as mpl
 import numpy as np
 import matplotlib.pyplot as plt
@@ -52,7 +52,12 @@ class Theme:
         }
     )
 
-    def apply(self, nfiles: int = 1, nfields: int = 1):
+    def apply(
+        self,
+        nfiles: int = 1,
+        nfields: int = 1,
+        user_fig_size: Optional[tuple[float, float]] = None,
+    ):
         """Apply theme to matplotlib global settings"""
         plt.style.use("default")  # Reset to defaults
 
@@ -84,7 +89,7 @@ class Theme:
                 "lines.linewidth": self.line_width,
                 "axes.prop_cycle": default_cycler,
                 # Figure settings
-                "figure.figsize": self.fig_size,
+                # "figure.figsize": user_fig_size or self.fig_size,
                 # "figure.dpi": self.dpi,
                 "savefig.transparent": self.transparent,
                 # Text rendering settings

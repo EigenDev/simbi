@@ -151,7 +151,7 @@ class AnimationMixin:
                     patch.remove()
 
                 for body in immersed_bodies.values():
-                    if has_capability(body["type"], BodyCapability.ACCRETION):
+                    if has_capability(body["capability"], BodyCapability.ACCRETION):
                         radius = body["accretion_radius"]
                     else:
                         radius = body["radius"]

@@ -7,6 +7,24 @@ from numpy.typing import NDArray
 class AxisFormatter:
     """Formats plot axes based on data and configuration"""
 
+    def format_polar_axis(self, ax, setup, config, field_info):
+        """Format a polar axis based on plot type"""
+        half_sphere = setup["x2max"] <= np.pi / 2
+        nfields = len(config["plot"]["fields"])
+        if half_sphere and nfields <= 2:
+            theta_min = -90
+            theta_max = 90
+        else:
+            theta_min = 0
+            theta_max = 360
+        ax.set_theta_zero_location("N")  # Set zero at the top
+        ax.set_theta_direction(-1)
+        # remove r labels
+        ax.set_thetamin(theta_min)
+        ax.set_thetamax(theta_max)
+        ax.set_yticklabels([])  # Remove radial labels
+        ax.set_rmin(setup["x1min"])
+
     def format_cartesian_axis(self, ax, setup, config, field_info):
         """Format a Cartesian axis based on plot type"""
         plot_type = config.get("plot", {}).get("plot_type", "line")
@@ -85,7 +103,7 @@ class AxisFormatter:
         ax.set_title(title)
 
         # Set aspect ratio for 2D plots
-        ax.set_aspect("equal", adjustable="box")
+        ax.set_aspect("equal")
 
         # Set limits if provided
         xlims = config.get("style", {}).get("xlims", (None, None))
