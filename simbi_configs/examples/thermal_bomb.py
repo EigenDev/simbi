@@ -68,9 +68,9 @@ class ThermalBomb(SimbiBaseConfig):
 
     solver: Solver = SimbiField(Solver.HLLC, description="Numerical solver")
 
-    default_start_time: float = SimbiField(0.0, description="Simulation start time")
+    start_time: float = SimbiField(0.0, description="Simulation start time")
 
-    default_end_time: float = SimbiField(1.0, description="Simulation end time")
+    end_time: float = SimbiField(1.0, description="Simulation end time")
 
     def __init__(self, **data: Any) -> None:
         super().__init__(**data)
