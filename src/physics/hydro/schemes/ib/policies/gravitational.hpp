@@ -56,6 +56,7 @@
 #include "physics/hydro/schemes/ib/delta/body_delta.hpp"
 #include "physics/hydro/schemes/ib/systems/body.hpp"
 #include "physics/hydro/types/context.hpp"
+#include <cmath>
 
 namespace simbi::ibsystem::body_functions {
     namespace gravitational {
