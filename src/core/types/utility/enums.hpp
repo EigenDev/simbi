@@ -80,6 +80,8 @@ namespace simbi {
         HLLD,
         HLLC,
         HLLE,
+        AUSM_PLUS,
+        SLAU,
     };
 
     enum class TIMESTEP_TYPE {
