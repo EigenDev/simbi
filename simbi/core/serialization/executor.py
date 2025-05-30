@@ -109,7 +109,7 @@ class SimulationExecutor:
                 # Convert body to dict and process attributes
                 body_dict = {
                     "id": i,
-                    "type": body.body_type,
+                    "capability": body.capability,
                     "mass": body.mass,
                     "radius": body.radius,
                     "position": body.position,
