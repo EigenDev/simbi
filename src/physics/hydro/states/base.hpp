@@ -70,7 +70,6 @@
 #include "physics/hydro/schemes/viscosity/viscous.hpp"   // for visc::get_minimum_viscous_time
 #include "physics/hydro/types/context.hpp"           // for HydroContext
 #include "physics/hydro/types/generic_structs.hpp"   // for anyConserved, anyPrimitive
-#include "util/tools/device_api.hpp"
 #include "util/tools/helpers.hpp"
 #include <limits>
 
