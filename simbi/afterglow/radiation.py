@@ -116,7 +116,7 @@ def parse_args(parser: argparse.ArgumentParser, args: argparse.Namespace):
         "--ylims", help="y limits in plot", default=[None, None], type=float, nargs="+"
     )
     afterglow_parser.add_argument(
-        "--fig-dims", help="figure dimensions", default=(5, 4), type=float, nargs="+"
+        "--fig-size", help="figure dimensions", default=(5, 4), type=float, nargs="+"
     )
     afterglow_parser.add_argument("--title", help="title of plot", default=None)
     afterglow_parser.add_argument(
