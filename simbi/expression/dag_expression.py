@@ -26,7 +26,6 @@ __all__ = [
     "acos",
     "atan",
     "exp",
-    "abs",
     "max_expr",
     "min_expr",
     "floor",
@@ -167,6 +166,10 @@ class Expr:
             self._graph,
             self._graph.add_node("power", self._node_id, other_expr._node_id),
         )
+
+    def __abs__(self) -> Expr:
+        """Absolute value of the expression."""
+        return Expr(self._graph, self._graph.add_node("abs", self._node_id))
 
     def __neg__(self) -> Expr:
         return Expr(self._graph, self._graph.add_node("negate", self._node_id))
@@ -338,15 +341,6 @@ def atanh(expr: Expr) -> Expr:
 def exp(expr: Expr) -> Expr:
     """Exponential function."""
     return Expr(expr._graph, expr._graph.add_node("exp", expr._node_id))
-
-
-def abs(expr: Expr | float) -> Expr:
-    """Absolute value function."""
-    if isinstance(expr, Expr):
-        return Expr(expr._graph, expr._graph.add_node("abs", expr._node_id))
-    else:
-        val = constant(expr)
-        return Expr(val._graph, val._graph.add_node("abs", val._node_id))
 
 
 def max_expr(expr1: Expr, expr2: Expr) -> Expr:
@@ -577,6 +571,16 @@ class CompiledExpr:
                     values[node_id] = 0.0  # we handle division by zero
                 else:
                     values[node_id] = values[input_ids[0]] / denominator
+            elif op == "le":
+                values[node_id] = float(values[input_ids[0]] <= values[input_ids[1]])
+            elif op == "lt":
+                values[node_id] = float(values[input_ids[0]] < values[input_ids[1]])
+            elif op == "ge":
+                values[node_id] = float(values[input_ids[0]] >= values[input_ids[1]])
+            elif op == "gt":
+                values[node_id] = float(values[input_ids[0]] > values[input_ids[1]])
+            elif op == "abs":
+                values[node_id] = abs(values[input_ids[0]])
             # math functions
             elif op == "power":
                 values[node_id] = values[input_ids[0]] ** values[input_ids[1]]
@@ -723,6 +727,42 @@ class CompiledExpr:
             elif op == "negate":
                 expressions.append(
                     {"op": "NEG", "left": node_map[input_ids[0]], "right": -1}
+                )
+            elif op == "abs":
+                expressions.append(
+                    {"op": "ABS", "left": node_map[input_ids[0]], "right": -1}
+                )
+            elif op == "lt":
+                expressions.append(
+                    {
+                        "op": "LT",
+                        "left": node_map[input_ids[0]],
+                        "right": node_map[input_ids[1]],
+                    }
+                )
+            elif op == "le":
+                expressions.append(
+                    {
+                        "op": "LE",
+                        "left": node_map[input_ids[0]],
+                        "right": node_map[input_ids[1]],
+                    }
+                )
+            elif op == "gt":
+                expressions.append(
+                    {
+                        "op": "GT",
+                        "left": node_map[input_ids[0]],
+                        "right": node_map[input_ids[1]],
+                    }
+                )
+            elif op == "ge":
+                expressions.append(
+                    {
+                        "op": "GE",
+                        "left": node_map[input_ids[0]],
+                        "right": node_map[input_ids[1]],
+                    }
                 )
             elif op == "sqrt":
                 expressions.append(
