@@ -71,7 +71,7 @@ namespace simbi {
         using base_t = HydroBase<Newtonian<dim>, dim, Regime::NEWTONIAN>;
 
         // isothermal EOS
-        bool isothermal_, locally_isothermal_, shakura_sunyaev_alpha_;
+        bool isothermal_, shakura_sunyaev_alpha_;
         real sound_speed_squared_;
 
       protected:
@@ -89,8 +89,14 @@ namespace simbi {
         static constexpr std::string_view regime = "classical";
 
         template <typename T>
-        using RiemannFuncPointer =
-            conserved_t (T::*)(const primitive_t&, const primitive_t&, const luint, const real, const conserved_t&, const conserved_t&) const;
+        using RiemannFuncPointer = conserved_t (T::*)(
+            const primitive_t&,
+            const primitive_t&,
+            const luint,
+            const real,
+            const conserved_t&,
+            const conserved_t&
+        ) const;
         RiemannFuncPointer<Newtonian<dim>> riemann_solve;
 
         // Constructors
@@ -110,6 +116,24 @@ namespace simbi {
             const auto& primsL,
             const auto& primsR,
             const luint nhat
+        ) const;
+
+        DUAL conserved_t calc_ausm_flux(
+            const auto& prL,
+            const auto& prR,
+            const luint nhat,
+            const real vface  = 0.0,
+            const auto& viscL = {},
+            const auto& viscR = {}
+        ) const;
+
+        DUAL conserved_t calc_slau_flux(
+            const auto& prL,
+            const auto& prR,
+            const luint nhat,
+            const real vface  = 0.0,
+            const auto& viscL = {},
+            const auto& viscR = {}
         ) const;
 
         DUAL conserved_t calc_hllc_flux(
@@ -136,8 +160,17 @@ namespace simbi {
                 case Solver::HLLE:
                     this->riemann_solve = &Newtonian<dim>::calc_hlle_flux;
                     break;
-                default:
+                case Solver::HLLC:
                     this->riemann_solve = &Newtonian<dim>::calc_hllc_flux;
+                    break;
+                case Solver::AUSM_PLUS:
+                    this->riemann_solve = &Newtonian<dim>::calc_ausm_flux;
+                    break;
+                case Solver::SLAU:
+                    this->riemann_solve = &Newtonian<dim>::calc_slau_flux;
+                    break;
+                default:
+                    this->riemann_solve = &Newtonian<dim>::calc_hlle_flux;
                     break;
             }
         }

@@ -23,13 +23,11 @@ Newtonian<dim>::Newtonian(
 )
     : HydroBase<Newtonian<dim>, dim, Regime::NEWTONIAN>(state, init_conditions),
       isothermal_(init_conditions.isothermal),
-      locally_isothermal_(init_conditions.locally_isothermal),
       shakura_sunyaev_alpha_(init_conditions.shakura_sunyaev_alpha),
       sound_speed_squared_(init_conditions.sound_speed_squared)
 {
     this->context_.gamma               = gamma;
     this->context_.is_isothermal       = goes_to_zero(gamma - 1.0);
-    this->context_.locally_isothermal  = locally_isothermal_;
     this->context_.alpha_ss            = shakura_sunyaev_alpha_;
     this->context_.ambient_sound_speed = std::sqrt(sound_speed_squared_);
 }
@@ -46,24 +44,14 @@ void Newtonian<dim>::cons2prim_impl()
 {
     atomic::simbi_atomic<bool> local_failure{false};
     this->prims_.transform(
-        [gamma     = this->gamma,
-         loc       = local_failure.get(),
-         iso       = isothermal_,
-         local_iso = locally_isothermal_,
-         cs2       = sound_speed_squared_] DEV(auto& prim, const auto& cons_var)
-            -> Maybe<primitive_t> {
+        [gamma = this->gamma, loc = local_failure.get(), iso = isothermal_] DEV(
+            auto& prim,
+            const auto& cons_var
+        ) -> Maybe<primitive_t> {
             const auto& rho = cons_var.dens();
             const auto vel  = cons_var.momentum() / rho;
             const auto& chi = cons_var.chi() / rho;
-            const auto pre  = [&]() {
-                if (local_iso) {
-                    // if isothermal, the energy term is a proxy for the sound
-                    // speed squared. This is for optimization purposes
-                    const auto cs2_local = cons_var.nrg();
-                    return rho * cs2_local;
-                }
-                return cons_var.pressure(gamma, iso, cs2);
-            }();
+            const auto pre  = cons_var.pressure(gamma, iso);
 
             if (pre < 0 || !std::isfinite(pre)) {
                 // store the invalid state
@@ -103,108 +91,145 @@ DUAL Newtonian<dim>::eigenvals_t Newtonian<dim>::calc_eigenvals(
     const real vR   = primsR.vcomponent(nhat);
     const real pR   = primsR.press();
 
-    const real csR = std::sqrt(gamma * pR / rhoR);
-    const real csL = std::sqrt(gamma * pL / rhoL);
+    const auto csL = std::sqrt(gamma * pL / rhoL);
+    const auto csR = std::sqrt(gamma * pR / rhoR);
+
     switch (this->solver_type()) {
         case Solver::HLLC: {
-            // Pressure-based wave speed estimates (Batten et al. 1997)
-            const auto rho_bar = 0.5 * (rhoL + rhoR);
-            const auto c_bar   = 0.5 * (csL + csR);
-            const real pvrs =
-                0.5 * (pL + pR) - 0.5 * (vR - vL) * rho_bar * c_bar;
-            const real pmin = my_min(pL, pR);
-            const real pmax = my_max(pL, pR);
+            if (isothermal_) {
 
-            real pStar;
-            // define Q_user as in Toro's book
-            // Section 9.5.1, Equations (9.46) and (9.47)
-            constexpr auto q_user = 2.0;
-            if (pmax / pmin <= q_user && pmin <= pvrs && pvrs <= pmax) {
-                // PVRS estimate if pressure ratio is small
-                pStar = pvrs;
-                // aStar = 0.5 * (vL + vR) - 0.5 * (pR - pL) / (rho_bar *
-                // c_bar);
-            }
-            else if (pvrs <= pmin) {   // use the two rarefaction approximation
-                if (isothermal_) {
-                    // Isothermal case - simplified wave speed estimate
-                    pStar = (rhoL * csL * pR + rhoR * csR * pL -
-                             rhoL * rhoR * csL * csR * (vR - vL)) /
-                            (rhoL * csL + rhoR * csR);
-                    // aStar = 0.5 * (vL + vR) + 0.5 * (pR - pL) /
-                    //                               (rhoL * csL + rhoR * csR);
+                // For isothermal: cs should be constant, but use local values
+                // for robustness
+                const real cs_avg = 0.5 * (csL + csR);
+
+                // Isothermal p* calculation using Riemann invariants
+                // u* = 0.5 * [(uL + uR) + cs * ln(rhoL/rhoR)]
+                const real u_star =
+                    0.5 * (vL + vR + cs_avg * std::log(rhoL / rhoR));
+
+                // For isothermal: solve for rho* using Riemann invariants
+                // From left state: u* + cs*ln(rho*) = uL + cs*ln(rhoL)
+                // From right state: u* - cs*ln(rho*) = uR - cs*ln(rhoR)
+                const real ln_rho_star_from_L =
+                    (vL - u_star) / cs_avg + std::log(rhoL);
+                const real ln_rho_star_from_R =
+                    (u_star - vR) / cs_avg + std::log(rhoR);
+                const real ln_rho_star =
+                    0.5 * (ln_rho_star_from_L + ln_rho_star_from_R);
+                const real rho_star = std::exp(ln_rho_star);
+
+                // p* = rho* * cs^2 for isothermal
+                const real pStar = rho_star * cs_avg * cs_avg;
+
+                // Wave speeds for isothermal case
+                real qL, qR;
+
+                if (pStar <= pL) {
+                    // Rarefaction wave on left
+                    qL = 1.0;
                 }
                 else {
-                    // Two-rarefaction approximation for adiabatic case
+                    // Shock wave on left - isothermal Rankine-Hugoniot
+                    // For isothermal shocks: rho2/rho1 = p2/p1 (since cs =
+                    // constant)
+                    qL = std::sqrt(pStar / pL);
+                }
+
+                if (pStar <= pR) {
+                    // Rarefaction wave on right
+                    qR = 1.0;
+                }
+                else {
+                    // Shock wave on right - isothermal Rankine-Hugoniot
+                    qR = std::sqrt(pStar / pR);
+                }
+
+                // Signal speeds
+                const real aL = vL - csL * qL;
+                const real aR = vR + csR * qR;
+
+                // Contact wave speed (same formula works for isothermal)
+                const real aStar =
+                    (pR - pL + rhoL * vL * (aL - vL) - rhoR * vR * (aR - vR)) /
+                    (rhoL * (aL - vL) - rhoR * (aR - vR));
+
+                if constexpr (dim == 1) {
+                    return {aL, aR, aStar, pStar};
+                }
+                else {
+                    return {aL, aR, csL, csR, aStar, pStar};
+                }
+            }
+            else {
+                real pStar, qL, qR;
+                // ---- Standard adiabatic case ----
+                const auto rho_bar = 0.5 * (rhoL + rhoR);
+                const auto c_bar   = 0.5 * (csL + csR);
+                const real pvrs =
+                    0.5 * (pL + pR) - 0.5 * (vR - vL) * rho_bar * c_bar;
+                const real pmin = my_min(pL, pR);
+                const real pmax = my_max(pL, pR);
+
+                constexpr auto q_user = 2.0;
+                if (pmax / pmin <= q_user && pmin <= pvrs && pvrs <= pmax) {
+                    pStar = pvrs;
+                }
+                else if (pvrs <= pmin) {
                     const real gamma_factor = (gamma - 1.0) / (2.0 * gamma);
                     const real pL_pow       = std::pow(pL, gamma_factor);
                     const real pR_pow       = std::pow(pR, gamma_factor);
-                    // const real pLR          = std::pow(pL / pR,
-                    // gamma_factor);
-
-                    pStar = std::pow(
+                    pStar                   = std::pow(
                         (csL + csR - 0.5 * (gamma - 1.0) * (vR - vL)) /
                             (csL / pL_pow + csR / pR_pow),
                         1.0 / gamma_factor
                     );
-                    // aStar = (pLR * vL / csL + vR / csR +
-                    //          2.0 * (pLR - 1.0) / (gamma - 1.0)) /
-                    //         (pLR / csL + 1.0 / csR);
                 }
-            }
-            else {   // use the two-shock approximation
-                // alpha_K and beta_K take the place of A_K and B_K in Toro's
-                // book
-                const real alpha_L = 2.0 / ((gamma + 1) * rhoL);
-                const real alpha_R = 2.0 / ((gamma + 1) * rhoR);
-                const real beta_L  = (gamma - 1) / (gamma + 1) * pL;
-                const real beta_R  = (gamma - 1) / (gamma + 1) * pR;
-                const real p0      = my_max(0.0, pvrs);
-                const real gL      = std::sqrt(alpha_L / (p0 + beta_L));
-                const real gR      = std::sqrt(alpha_R / (p0 + beta_R));
-                pStar = (gL * pL + gR * pR - (vR - vL)) / (gL + gR);
-                // aStar = 0.5 * (vL + vR) +
-                //         0.5 * ((pStar - pR) * gR - (pStar - pL) * gL);
-            }
+                else {
+                    const real alpha_L = 2.0 / ((gamma + 1) * rhoL);
+                    const real alpha_R = 2.0 / ((gamma + 1) * rhoR);
+                    const real beta_L  = (gamma - 1) / (gamma + 1) * pL;
+                    const real beta_R  = (gamma - 1) / (gamma + 1) * pR;
+                    const real p0      = my_max(0.0, pvrs);
+                    const real gL      = std::sqrt(alpha_L / (p0 + beta_L));
+                    const real gR      = std::sqrt(alpha_R / (p0 + beta_R));
+                    pStar = (gL * pL + gR * pR - (vR - vL)) / (gL + gR);
+                }
 
-            // Compute wave speeds using pressure estimate
-            real qL, qR;
-            if (pStar <= pL) {
-                // Rarefaction wave on left side
-                qL = 1.0;
-            }
-            else {
-                // Shock wave on left side - use Rankine-Hugoniot relation
-                qL = std::sqrt(
-                    1.0 + ((gamma + 1.0) / (2.0 * gamma)) * (pStar / pL - 1.0)
-                );
-            }
+                // Compute q factors for adiabatic case
+                if (pStar <= pL) {
+                    qL = 1.0;
+                }
+                else {
+                    qL = std::sqrt(
+                        1.0 +
+                        ((gamma + 1.0) / (2.0 * gamma)) * (pStar / pL - 1.0)
+                    );
+                }
+                if (pStar <= pR) {
+                    qR = 1.0;
+                }
+                else {
+                    qR = std::sqrt(
+                        1.0 +
+                        ((gamma + 1.0) / (2.0 * gamma)) * (pStar / pR - 1.0)
+                    );
+                }
 
-            if (pStar <= pR) {
-                // Rarefaction wave on right side
-                qR = 1.0;
-            }
-            else {
-                // Shock wave on right side - use Rankine-Hugoniot relation
-                qR = std::sqrt(
-                    1.0 + ((gamma + 1.0) / (2.0 * gamma)) * (pStar / pR - 1.0)
-                );
-            }
+                // Signal speeds
+                const real aL = vL - csL * qL;
+                const real aR = vR + csR * qR;
 
-            // Signal speeds - left and right waves
-            const real aL = vL - csL * qL;   // Left wave speed
-            const real aR = vR + csR * qR;   // Right wave speed
+                // Middle wave speed (contact discontinuity)
+                const real aStar =
+                    (pR - pL + rhoL * vL * (aL - vL) - rhoR * vR * (aR - vR)) /
+                    (rhoL * (aL - vL) - rhoR * (aR - vR));
 
-            // Middle wave speed (contact discontinuity)
-            const real aStar =
-                (pR - pL + rhoL * vL * (aL - vL) - rhoR * vR * (aR - vR)) /
-                (rhoL * (aL - vL) - rhoR * (aR - vR));
-
-            if constexpr (dim == 1) {
-                return {aL, aR, aStar, pStar};
-            }
-            else {
-                return {aL, aR, csL, csR, aStar, pStar};
+                if constexpr (dim == 1) {
+                    return {aL, aR, aStar, pStar};
+                }
+                else {
+                    return {aL, aR, csL, csR, aStar, pStar};
+                }
             }
         }
 
@@ -214,7 +239,7 @@ DUAL Newtonian<dim>::eigenvals_t Newtonian<dim>::calc_eigenvals(
             return {aL, aR};
         }
     }
-};
+}
 
 //===================================================================================================================
 //                                            FLUX CALCULATIONS
@@ -237,8 +262,8 @@ DUAL Newtonian<dim>::conserved_t Newtonian<dim>::calc_hlle_flux(
     auto fL           = prL.to_flux(gamma, unit_vectors::get<dim>(nhat));
     auto fR           = prR.to_flux(gamma, unit_vectors::get<dim>(nhat));
     if (!goes_to_zero(this->viscosity())) {
-        fL -= viscL;   // add the viscous stress to Reynolds
-        fR -= viscR;   // add the viscous stress to Reynolds
+        fL -= viscL;   // add the viscous stress to momentum flux
+        fR -= viscR;   // add the viscous stress to momentum flux
     }
 
     auto net_flux = [&] {
@@ -285,8 +310,8 @@ DUAL Newtonian<dim>::conserved_t Newtonian<dim>::calc_hllc_flux(
     auto fL           = prL.to_flux(gamma, unit_vectors::get<dim>(nhat));
     auto fR           = prR.to_flux(gamma, unit_vectors::get<dim>(nhat));
     if (!goes_to_zero(this->viscosity())) {
-        fL -= viscL;   // add the viscous stress to Reynolds
-        fR -= viscR;   // add the viscous stress to Reynolds
+        fL -= viscL;   // subtract the viscous stress from momentum flux tensor
+        fR -= viscR;   // subtract the viscous stress from momentum flux tensor
     }
 
     // Quick checks before moving on with rest of computation
@@ -426,6 +451,417 @@ DUAL Newtonian<dim>::conserved_t Newtonian<dim>::calc_hllc_flux(
         return net_flux;
     }
 };
+
+template <int dim>
+DUAL Newtonian<dim>::conserved_t Newtonian<dim>::calc_slau_flux(
+    const auto& prL,
+    const auto& prR,
+    const luint nhat,
+    const real vface,
+    const auto& viscL,
+    const auto& viscR
+) const
+{
+    // I had a lot of fun checking out
+    // A sequel to AUSM, Part II: AUSM+-up for all speeds by Meng-Sing Liou
+    // and this works great for low-Mach flows and isothermal flows
+    // https://www.sciencedirect.com/science/article/pii/S0021999105004274
+    // and then I learned about Simple Low Dissipation AUSM (SLAU)
+    // by Shima & Kitamura (2009-2011) adn wanted to implement it
+    // slau parameters
+    constexpr real beta  = 1.0 / 8.0;   // pressure diffusion parameter
+    constexpr real alpha = 2.0;         // mach number scaling
+
+    // get primitive variables
+    const real rhoL = prL.rho();
+    const real rhoR = prR.rho();
+    const real pL   = prL.press();
+    const real pR   = prR.press();
+    const real vL   = prL.vcomponent(nhat);
+    const real vR   = prR.vcomponent(nhat);
+
+    // compute sound speeds - gamma handles isothermal case
+    const real csL = std::sqrt(gamma * pL / rhoL);
+    const real csR = std::sqrt(gamma * pR / rhoR);
+
+    // interface sound speed and density
+    const real cs_half  = 0.5 * (csL + csR);
+    const real rho_half = 0.5 * (rhoL + rhoR);
+
+    // mach numbers
+    const real ML = vL / csL;
+    const real MR = vR / csR;
+
+    // slau mach number functions
+    auto M_plus_slau = [](real M) -> real {
+        if (M >= 1.0) {
+            return M;
+        }
+        else if (M <= -1.0) {
+            return 0.0;
+        }
+        else {
+            return 0.25 * (M + 1.0) * (M + 1.0);
+        }
+    };
+
+    auto M_minus_slau = [](real M) -> real {
+        if (M >= 1.0) {
+            return 0.0;
+        }
+        else if (M <= -1.0) {
+            return M;
+        }
+        else {
+            return -0.25 * (M - 1.0) * (M - 1.0);
+        }
+    };
+
+    // slau pressure functions
+    auto P_plus_slau = [](real M) -> real {
+        if (M >= 1.0) {
+            return 1.0;
+        }
+        else if (M <= -1.0) {
+            return 0.0;
+        }
+        else {
+            return 0.25 * (M + 1.0) * (M + 1.0) * (2.0 - M);
+        }
+    };
+
+    auto P_minus_slau = [](real M) -> real {
+        if (M >= 1.0) {
+            return 0.0;
+        }
+        else if (M <= -1.0) {
+            return 1.0;
+        }
+        else {
+            return 0.25 * (M - 1.0) * (M - 1.0) * (2.0 + M);
+        }
+    };
+
+    // split mach numbers and pressures
+    const real M_plus_L  = M_plus_slau(ML);
+    const real M_minus_R = M_minus_slau(MR);
+    const real P_plus_L  = P_plus_slau(ML);
+    const real P_minus_R = P_minus_slau(MR);
+
+    // slau interface mach number with pressure weighting
+    const real M_ausm = M_plus_L + M_minus_R;
+
+    // pressure-weighted interface velocity for better contact preservation
+    const real u_tilde = (pL * vR + pR * vL) / (pL + pR);
+    const real M_tilde = u_tilde / cs_half;
+
+    // slau modification parameter
+    const real chi = my_min(1.0, my_max(std::abs(ML), std::abs(MR)));
+
+    // slau interface mach number
+    const real M_half = chi * M_ausm + (1.0 - chi) * M_tilde;
+
+    // interface pressure with slau enhancement
+    const real p_ausm = P_plus_L * pL + P_minus_R * pR;
+
+    // pressure diffusion term for contact preservation
+    const real p_diffusion = -beta * rho_half * cs_half *
+                             my_max(std::abs(ML), std::abs(MR)) * (pR - pL);
+
+    // velocity diffusion term
+    const real vel_diffusion =
+        -alpha * cs_half * rho_half * P_plus_L * P_minus_R * (vR - vL);
+
+    const real p_half = p_ausm + p_diffusion;
+
+    // mass flux
+    const real mass_flux = cs_half * rho_half * M_half;
+
+    // get conservative variables and base fluxes
+    const auto uL = prL.to_conserved(gamma);
+    const auto uR = prR.to_conserved(gamma);
+    auto fL       = prL.to_flux(gamma, unit_vectors::get<dim>(nhat));
+    auto fR       = prR.to_flux(gamma, unit_vectors::get<dim>(nhat));
+
+    // apply viscous corrections if needed
+    if (!goes_to_zero(this->viscosity())) {
+        fL -= viscL;
+        fR -= viscR;
+    }
+
+    // construct slau flux
+    conserved_t slau_flux;
+
+    // density flux
+    slau_flux.dens() = mass_flux;
+
+    // momentum flux with pressure weighting for better contact preservation
+    if (mass_flux >= 0.0) {
+        // upwind from left but with slau modifications
+        slau_flux.mcomponent(nhat) = mass_flux * vL + p_half + vel_diffusion;
+
+        // transverse momentum components
+        if constexpr (dim > 1) {
+            for (luint i = 1; i <= dim; ++i) {
+                if (i != nhat) {
+                    const real u_trans_L = prL.vcomponent(i);
+                    const real u_trans_R = prR.vcomponent(i);
+                    // pressure-weighted transverse velocity
+                    const real u_trans_interface =
+                        (pL * u_trans_R + pR * u_trans_L) / (pL + pR);
+                    slau_flux.mcomponent(i) =
+                        mass_flux *
+                        (chi * u_trans_L + (1.0 - chi) * u_trans_interface);
+                }
+            }
+        }
+
+        // energy flux
+        if (!isothermal_) {
+            const real HL = (uL.nrg() + pL) / rhoL;   // specific enthalpy
+            const real HR = (uR.nrg() + pR) / rhoR;
+            // pressure-weighted enthalpy for better contact preservation
+            const real H_interface = (pL * HR + pR * HL) / (pL + pR);
+            slau_flux.nrg() =
+                mass_flux * (chi * HL + (1.0 - chi) * H_interface);
+        }
+        else {
+            // for isothermal, energy is not evolved
+            slau_flux.nrg() = 0.0;
+        }
+    }
+    else {
+        // upwind from right but with slau modifications
+        slau_flux.mcomponent(nhat) = mass_flux * vR + p_half + vel_diffusion;
+
+        // transverse momentum components
+        if constexpr (dim > 1) {
+            for (luint i = 1; i <= dim; ++i) {
+                if (i != nhat) {
+                    const real u_trans_L = prL.vcomponent(i);
+                    const real u_trans_R = prR.vcomponent(i);
+                    // pressure-weighted transverse velocity
+                    const real u_trans_interface =
+                        (pL * u_trans_R + pR * u_trans_L) / (pL + pR);
+                    slau_flux.mcomponent(i) =
+                        mass_flux *
+                        (chi * u_trans_R + (1.0 - chi) * u_trans_interface);
+                }
+            }
+        }
+
+        // energy flux
+        if (!isothermal_) {
+            const real HL = (uL.nrg() + pL) / rhoL;   // specific enthalpy
+            const real HR = (uR.nrg() + pR) / rhoR;
+            // pressure-weighted enthalpy for better contact preservation
+            const real H_interface = (pL * HR + pR * HL) / (pL + pR);
+            slau_flux.nrg() =
+                mass_flux * (chi * HR + (1.0 - chi) * H_interface);
+        }
+        else {
+            // for isothermal, energy is not evolved
+            slau_flux.nrg() = 0.0;
+        }
+    }
+
+    // handle scalar concentration with slau pressure weighting
+    const real chi_interface = (pL * prR.chi() + pR * prL.chi()) / (pL + pR);
+    if (mass_flux >= 0.0) {
+        slau_flux.chi() =
+            mass_flux * (chi * prL.chi() + (1.0 - chi) * chi_interface);
+    }
+    else {
+        slau_flux.chi() =
+            mass_flux * (chi * prR.chi() + (1.0 - chi) * chi_interface);
+    }
+
+    // apply face velocity correction
+    const auto avg_state = (mass_flux >= 0.0) ? uL : uR;
+    return slau_flux - avg_state * vface;
+}
+
+template <int dim>
+DUAL Newtonian<dim>::conserved_t Newtonian<dim>::calc_ausm_flux(
+    const auto& prL,
+    const auto& prR,
+    const luint nhat,
+    const real vface,
+    const auto& viscL,
+    const auto& viscR
+) const
+{
+    constexpr real alpha = 3.0 / 16.0;   // Low-Mach enhancement parameter
+    constexpr real Kp    = 0.75;         // Pressure diffusion coefficient
+    constexpr real sigma = 1.0;   // Scaling parameter for pressure diffusion
+
+    // get primitive variables
+    const real rhoL = prL.rho();
+    const real rhoR = prR.rho();
+    const real pL   = prL.press();
+    const real pR   = prR.press();
+    const real vL   = prL.vcomponent(nhat);
+    const real vR   = prR.vcomponent(nhat);
+
+    // compute sound speeds
+    const real csL = std::sqrt(gamma * pL / rhoL);
+    const real csR = std::sqrt(gamma * pR / rhoR);
+
+    // interface sound speed (Roe mean for simplicity)
+    const real cs_half = (std::sqrt(rhoL) * csL + std::sqrt(rhoR) * csR) /
+                         (std::sqrt(rhoL) + std::sqrt(rhoR));
+
+    // Mach numbers
+    const real ML = vL / csL;
+    const real MR = vR / csR;
+
+    // AUSM+-up Mach number splitting functions
+    auto M_plus_up = [](real M) -> real {
+        if (std::abs(M) >= 1.0) {
+            return 0.5 * (M + std::abs(M));
+        }
+        else {
+            const real M2   = M * M;
+            const real beta = alpha * M * (M2 - 1.0) * (M2 - 1.0);
+            return 0.25 * (M + 1.0) * (M + 1.0) + beta;
+        }
+    };
+
+    auto M_minus_up = [](real M) -> real {
+        if (std::abs(M) >= 1.0) {
+            return 0.5 * (M - std::abs(M));
+        }
+        else {
+            const real M2   = M * M;
+            const real beta = alpha * M * (M2 - 1.0) * (M2 - 1.0);
+            return -0.25 * (M - 1.0) * (M - 1.0) - beta;
+        }
+    };
+
+    // AUSM+-up  pressure splitting functions
+    auto P_plus_up = [](real M) -> real {
+        if (std::abs(M) >= 1.0) {
+            return 0.5 * (1.0 + sgn(M));
+        }
+        else {
+            const real M2          = M * M;
+            const real base        = 0.25 * (M + 1.0) * (M + 1.0) * (2.0 - M);
+            const real enhancement = alpha * M * (M2 - 1.0) * (M2 - 1.0);
+            return base + enhancement;
+        }
+    };
+
+    auto P_minus_up = [](real M) -> real {
+        if (std::abs(M) >= 1.0) {
+            return 0.5 * (1.0 - sgn(M));
+        }
+        else {
+            const real M2          = M * M;
+            const real base        = 0.25 * (M - 1.0) * (M - 1.0) * (2.0 + M);
+            const real enhancement = alpha * M * (M2 - 1.0) * (M2 - 1.0);
+            return base - enhancement;
+        }
+    };
+
+    // split Mach numbers and pressures using AUSM+-up functions
+    const real M_plus_L  = M_plus_up(ML);
+    const real M_minus_R = M_minus_up(MR);
+    const real P_plus_L  = P_plus_up(ML);
+    const real P_minus_R = P_minus_up(MR);
+
+    // interface Mach number
+    const real M_half = M_plus_L + M_minus_R;
+
+    // AUSM+-up pressure with diffusion term
+    const real p_base      = P_plus_L * pL + P_minus_R * pR;
+    const real p_diffusion = -Kp * P_plus_L * P_minus_R * (rhoL + rhoR) *
+                             cs_half * (vR - vL) * sigma;
+    const real p_half = p_base + p_diffusion;
+
+    // mass flux
+    const real mass_flux =
+        cs_half * ((M_half > 0.0) ? M_half * rhoL : M_half * rhoR);
+
+    // get conservative variables and base fluxes
+    const auto uL = prL.to_conserved(gamma);
+    const auto uR = prR.to_conserved(gamma);
+    auto fL       = prL.to_flux(gamma, unit_vectors::get<dim>(nhat));
+    auto fR       = prR.to_flux(gamma, unit_vectors::get<dim>(nhat));
+
+    // apply viscous corrections if needed
+    if (!goes_to_zero(this->viscosity())) {
+        fL -= viscL;
+        fR -= viscR;
+    }
+
+    // construct AUSM+-up flux
+    conserved_t ausm_flux;
+
+    if (mass_flux >= 0.0) {
+        // upwind from left
+        ausm_flux.dens() = mass_flux;
+
+        // momentum fluxes: convective part + pressure part
+        ausm_flux.mcomponent(nhat) = mass_flux * vL + p_half;
+
+        // transverse momentum components
+        if constexpr (dim > 1) {
+            for (luint i = 1; i <= dim; ++i) {
+                if (i != nhat) {
+                    ausm_flux.mcomponent(i) = mass_flux * prL.vcomponent(i);
+                }
+            }
+        }
+
+        // energy flux
+        if (!isothermal_) {
+            const real HL   = (uL.nrg() + pL) / rhoL;   // specific enthalpy
+            ausm_flux.nrg() = mass_flux * HL;
+        }
+        else {
+            // for isothermal, energy is not evolved
+            ausm_flux.nrg() = 0.0;
+        }
+    }
+    else {
+        // upwind from right
+        ausm_flux.dens() = mass_flux;
+
+        // momentum fluxes: convective part + pressure part
+        ausm_flux.mcomponent(nhat) = mass_flux * vR + p_half;
+
+        // transverse momentum components
+        if constexpr (dim > 1) {
+            for (luint i = 1; i <= dim; ++i) {
+                if (i != nhat) {
+                    ausm_flux.mcomponent(i) = mass_flux * prR.vcomponent(i);
+                }
+            }
+        }
+
+        // energy flux
+        if (!isothermal_) {
+            const real HR   = (uR.nrg() + pR) / rhoR;   // specific enthalpy
+            ausm_flux.nrg() = mass_flux * HR;
+        }
+        else {
+            // for isothermal, energy is not evolved
+            ausm_flux.nrg() = 0.0;
+        }
+    }
+
+    // handle scalar concentration
+    if (ausm_flux.dens() < 0.0) {
+        ausm_flux.chi() = prR.chi() * ausm_flux.dens();
+    }
+    else {
+        ausm_flux.chi() = prL.chi() * ausm_flux.dens();
+    }
+
+    // Aapply face velocity correction
+    const auto avg_state = (mass_flux >= 0.0) ? uL : uR;
+    return ausm_flux - avg_state * vface;
+}
 
 //===================================================================================================================
 //                                            UDOT CALCULATIONS
