@@ -122,9 +122,9 @@ namespace simbi::expression {
                     node.ternary.condition =
                         expr_node.at("condition").template get<int>();
                     node.ternary.then_expr =
-                        expr_node.at("then").template get<int>();
+                        expr_node.at("true_case").template get<int>();
                     node.ternary.else_expr =
-                        expr_node.at("else").template get<int>();
+                        expr_node.at("false_case").template get<int>();
                 }
                 else {
                     // Binary/unary operations
