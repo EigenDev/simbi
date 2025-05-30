@@ -4,7 +4,7 @@ Type definitions for simbi.
 This module provides type annotations for the simbi framework.
 """
 
-from typing import Callable, Generator, Sequence, Union, TypeVar, Any
+from typing import Callable, Generator, Sequence, Union
 
 # Type for a generator that yields gas state tuples
 GasStateGenerator = Generator[Sequence[float], None, None]
