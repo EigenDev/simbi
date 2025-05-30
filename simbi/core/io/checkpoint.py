@@ -51,7 +51,7 @@ def load_immersed_bodies_or_body_system(
                         mass=body1["mass"],
                         radius=body1["radius"],
                         is_an_accretor=has_capability(
-                            body1["type"], BodyCapability.ACCRETION
+                            body1["capability"], BodyCapability.ACCRETION
                         ),
                         softening_length=body1["softening_length"],
                         two_way_coupling=False,
@@ -66,7 +66,7 @@ def load_immersed_bodies_or_body_system(
                         mass=body2["mass"],
                         radius=body2["radius"],
                         is_an_accretor=has_capability(
-                            body2["type"], BodyCapability.ACCRETION
+                            body2["capability"], BodyCapability.ACCRETION
                         ),
                         softening_length=body2["softening_length"],
                         two_way_coupling=False,
@@ -83,7 +83,7 @@ def load_immersed_bodies_or_body_system(
 
     return [
         ImmersedBodyConfig(
-            body_type=body["body_type"],
+            capability=body["capability"],
             mass=body["mass"],
             radius=body["radius"],
             position=tuple(body["position"]),
@@ -95,7 +95,7 @@ def load_immersed_bodies_or_body_system(
                 for k, v in body.items()
                 if k
                 not in {
-                    "body_type",
+                    "capability",
                     "mass",
                     "radius",
                     "position",
@@ -184,9 +184,8 @@ def load_checkpoint_to_state(
                     coord_system=CoordSystem(metadata["coord_system"]),
                     adiabatic_index=float(metadata["adiabatic_index"]),
                     spatial_order=SpatialOrder(metadata["spatial_order"]),
-                    locally_isothermal=bool(metadata.get("locally_isothermal", False)),
-                    ambient_sound_speed=float(metadata.get("ambient_sound_speed", 0.0)),
-                    default_start_time=float(metadata.get("time", 0.0)),
+                    # ambient_sound_speed=float(metadata.get("ambient_sound_speed", 0.0)),
+                    start_time=float(metadata.get("time", 0.0)),
                     checkpoint_index=int(metadata.get("checkpoint_index", 0)),
                     x1_spacing=metadata["x1_spaxing"],
                     x2_spacing=metadata["x2_spacing"],
@@ -196,12 +195,12 @@ def load_checkpoint_to_state(
                     checkpoint_interval=float(metadata["checkpoint_interval"]),
                     temporal_order=TimeStepping(metadata["temporal_order"]),
                     data_directory=metadata["data_directory"],
-                    immersed_bodies=ib_config
-                    if isinstance(ib_config, Sequence)
-                    else [],
-                    body_system=ib_config
-                    if isinstance(ib_config, GravitationalSystemConfig)
-                    else None,
+                    # immersed_bodies=ib_config
+                    # if isinstance(ib_config, Sequence)
+                    # else [],
+                    # body_system=ib_config
+                    # if isinstance(ib_config, GravitationalSystemConfig)
+                    # else None,
                 ),
             )
         )
