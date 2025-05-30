@@ -10,6 +10,7 @@ movies/
 scripts/
 simbi/tools/extras/*
 version.py
+Doxyfile
 .clangd
 .vscode/
 .cache/
@@ -28,6 +29,7 @@ version.py
 *.so
 *.log
 *.sh
+*.json
 
 # Automatically added by dev.py
 build*/
