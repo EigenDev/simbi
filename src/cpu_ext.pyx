@@ -21,7 +21,7 @@ cdef ConfigDict convert_python_to_config_dict(py_dict):
         elif isinstance(value, bool):
             result[cpp_key] = ConfigValue(<cbool>value)
         elif isinstance(value, int) or isinstance(value, np.integer):
-            if key == "body_type":
+            if key == "capability":
                 result[cpp_key] = ConfigValue(<BodyCapability>value)
             else:
                 result[cpp_key] = ConfigValue(<int>value)
@@ -86,6 +86,8 @@ cdef ConfigValue convert_collection(collection):
     # Sequence of dictionaries (bodies)
     elif isinstance(first_item, dict):
         for item in collection:
+            if not isinstance(item, dict):
+                raise ValueError(f"Expected a dictionary, got {type(item)}")
             dict_list.push_back(convert_python_to_config_dict(item))
         return ConfigValue(dict_list)
 
@@ -103,11 +105,22 @@ cdef ConfigValue convert_collection(collection):
                 double_vec.push_back(<double>item)
             return ConfigValue(double_vec)
 
+        # Enum list
+        elif isinstance(first_item, Enum):
+            if isinstance(first_item.value, str):
+                for item in collection:
+                    str_vec.push_back(item.value.encode("utf-8"))
+                return ConfigValue(str_vec)
+            elif isinstance(first_item.value, int):
+                for item in collection:
+                    int_vec.push_back(item.value)
+                return ConfigValue(int_vec)
         # String list
         elif isinstance(first_item, str):
             for item in collection:
                 str_vec.push_back(str(item).encode("utf-8"))
             return ConfigValue(str_vec)
+
         # Fall back to double vector
         else:
             try:
