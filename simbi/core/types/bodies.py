@@ -12,19 +12,19 @@ class BodyCapability(IntFlag):
     RIGID = 1 << 4
 
 
-def has_capability(body_type: BodyCapability, capability: BodyCapability) -> bool:
-    return bool(body_type & capability)
+def has_capability(body_capability: BodyCapability, capability: BodyCapability) -> bool:
+    return bool(body_capability & capability)
 
 
 @dataclass(frozen=True)
 class ImmersedBodyConfig:
-    body_type: BodyCapability
+    capability: BodyCapability
     mass: float
     velocity: Sequence[float]
     position: Sequence[float]
     radius: float
     two_way_coupling: bool = field(default=False)
-    force: Sequence[float] = field(default_factory=lambda: [0.0, 0.0, 0.0])
+    force: Sequence[float] = field(default_factory=lambda: (0.0, 0.0, 0.0))
     specifics: Optional[dict[str, float | int | bool]] = None
 
 
@@ -37,9 +37,9 @@ class BinaryComponentConfig:
     two_way_coupling: bool
     accretion_efficiency: float
     accretion_radius: float
-    position: Sequence[float] = field(default_factory=lambda: [0.0, 0.0, 0.0])
-    velocity: Sequence[float] = field(default_factory=lambda: [0.0, 0.0, 0.0])
-    force: Sequence[float] = field(default_factory=lambda: [0.0, 0.0, 0.0])
+    position: Sequence[float] = field(default_factory=lambda: (0.0, 0.0, 0.0))
+    velocity: Sequence[float] = field(default_factory=lambda: (0.0, 0.0, 0.0))
+    force: Sequence[float] = field(default_factory=lambda: (0.0, 0.0, 0.0))
     total_accreted_mass: float = 0.0
 
 
