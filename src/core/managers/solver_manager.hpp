@@ -112,11 +112,13 @@ namespace simbi {
     {
       private:
         // Move maps inside class as static members
-        static constexpr std::array<std::pair<std::string_view, Solver>, 3>
+        static constexpr std::array<std::pair<std::string_view, Solver>, 5>
             solver_map_data = {
               {{"hllc", Solver::HLLC},
                {"hlle", Solver::HLLE},
-               {"hlld", Solver::HLLD}}
+               {"hlld", Solver::HLLD},
+               {"ausm_plus", Solver::AUSM_PLUS},
+               {"slau", Solver::SLAU}}
         };
 
         static constexpr BiMap<std::string_view, BoundaryCondition, 4>
