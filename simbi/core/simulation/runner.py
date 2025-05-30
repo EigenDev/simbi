@@ -9,6 +9,9 @@ import os
 from dataclasses import dataclass
 from typing import Any, Optional, cast
 
+from simbi.functional.helpers import print_progress
+from simbi.io.summary import print_simulation_parameters
+
 from ..config.base_config import SimbiBaseConfig
 from ..serialization.executor import SimulationExecutor
 from .state_init import SimulationState, load_or_initialize_state
@@ -93,16 +96,10 @@ class SimulationRunner:
             return
 
         # Print key simulation parameters
-        print(
-            f"Running {self.config.dimensionality}D {self.config.regime.value} simulation"
-        )
-        print(f"Resolution: {execution_dict['resolution']}")
-        print(f"CFL number: {execution_dict['cfl_number']}")
-        print(f"Output directory: {execution_dict['data_directory']}")
-        print(f"Adiabatic: {execution_dict['adiabatic_index']}")
-        print(f"Solver: {execution_dict['solver']}")
-        print(f"Time step: {execution_dict['temporal_order']}")
-        print(f"Spatial order: {execution_dict['spatial_order']}")
+        print_simulation_parameters(execution_dict)
+        # Give the user a moment to read the parameters
+        print_progress()
+
         # Run the simulation
         if self.state.conserved_state is not None:
             # Reshape for contiguous memory layout
