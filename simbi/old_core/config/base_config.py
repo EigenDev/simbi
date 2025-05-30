@@ -194,11 +194,11 @@ class BaseConfig(metaclass=abc.ABCMeta):
         return None
 
     @simbi_property(group="sim_state")
-    def default_start_time(self) -> Union[DynamicArg, float]:
+    def start_time(self) -> Union[DynamicArg, float]:
         return 0.0
 
     @simbi_property(group="sim_state")
-    def default_end_time(self) -> Union[DynamicArg, float]:
+    def end_time(self) -> Union[DynamicArg, float]:
         return 1.0
 
     @simbi_property(group="sim_state")
@@ -380,21 +380,18 @@ class BaseConfig(metaclass=abc.ABCMeta):
         return dimensionality + 3
 
     @simbi_derived_property(
-        depends_on=["log_checkpoints_tuple", "default_end_time", "default_start_time"],
+        depends_on=["log_checkpoints_tuple", "end_time", "start_time"],
         group="sim_state",
     )
     def dlogt(
         self,
         log_checkpoints_tuple: tuple[bool, int],
-        default_end_time: float,
-        default_start_time: float,
+        end_time: float,
+        start_time: float,
     ) -> float:
         """return the logarithmic time spacing from the log_output flag"""
         if log_checkpoints_tuple[0]:
-            return (
-                math.log10(default_end_time / default_start_time)
-                / log_checkpoints_tuple[1]
-            )
+            return math.log10(end_time / start_time) / log_checkpoints_tuple[1]
         return 0.0
 
     @final

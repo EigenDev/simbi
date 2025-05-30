@@ -5,7 +5,7 @@ from ..types.constants import BodyCapability
 
 @dataclass(frozen=True)
 class ImmersedBodyConfig:
-    body_type: BodyCapability
+    capability: BodyCapability
     mass: float
     velocity: Sequence[float]
     position: Sequence[float]

@@ -284,8 +284,8 @@ class SimulationSettings(BaseSettings):
     def from_dict(cls, setup: dict[str, Any]) -> "SimulationSettings":
         return cls(
             adiabatic_index=setup["adiabatic_index"],
-            tstart=setup["default_start_time"],
-            tend=setup["default_end_time"],
+            tstart=setup["start_time"],
+            tend=setup["end_time"],
             cfl=setup["cfl_number"],
             regime=Regime(setup["regime"]),
             temporal_order=TimeStepping(setup["temporal_order"]),
