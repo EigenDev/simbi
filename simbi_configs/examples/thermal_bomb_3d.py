@@ -1,129 +1,151 @@
 import math
-from simbi import (
-    BaseConfig,
-    simbi_property,
-    DynamicArg,
-    compute_num_polar_zones,
+from simbi.core.config.base_config import SimbiBaseConfig
+from simbi.core.config.fields import SimbiField
+from simbi.core.types.input import (
+    CoordSystem,
+    Regime,
+    CellSpacing,
+    Solver,
+    BoundaryCondition,
 )
-from simbi.typing import InitialStateType
-from typing import Sequence, Generator, Any
+from simbi.core.types.typing import GasStateGenerator, InitialStateType
+from simbi import compute_num_polar_zones
+from typing import Any
 
+# Constants
 RHO_AMB = 1.0
 T_AMB = 1e-10
 NU = 3.0
 
 
-class thermalBomb(BaseConfig):
+class ThermalBomb3D(SimbiBaseConfig):
     """The Thermal Bomb
     Launch a relativistic blast wave on a 3D Spherical Logarithmic mesh with variable zones per decade in radius
     """
 
-    class config:
-        e0 = DynamicArg("e0", 10.0, help="energy scale", var_type=float)
-        rho0 = DynamicArg("rho0", 1.0, help="density scale", var_type=float)
-        rinit = DynamicArg("rinit", 0.1, help="intial grid radius", var_type=float)
-        rend = DynamicArg("rend", 1.0, help="radial extent", var_type=float)
-        k = DynamicArg("k", 0.0, help="density power law k", var_type=float)
-        full_sphere = DynamicArg(
-            "full-sphere",
-            False,
-            help="flag for full_sphere computation",
-            var_type=bool,
-            action="store_true",
-        )
-        zpd = DynamicArg(
-            "zpd", 64, help="number of radial zones per decade", var_type=int
-        )
-        adiabatic_index = DynamicArg(
-            "ad-gamma", 4.0 / 3.0, help="Adiabtic gas index", var_type=float
+    # Configuration parameters
+    e0: float = SimbiField(10.0, description="Energy scale")
+    rho0: float = SimbiField(1.0, description="Density scale")
+    rinit: float = SimbiField(0.1, description="Initial grid radius")
+    rend: float = SimbiField(1.0, description="Radial extent")
+    k: float = SimbiField(0.0, description="Density power law exponent")
+    zpd: int = SimbiField(64, description="Number of radial zones per decade")
+    full_sphere: bool = SimbiField(
+        False, description="Flag for full sphere computation"
+    )
+
+    # Required fields from SimbiBaseConfig - will be set during __init__
+    resolution: tuple[int, int, int] = SimbiField(
+        (0, 0, 0), description="Grid resolution (calculated)"
+    )
+
+    bounds: list[tuple[float, float]] = SimbiField(
+        [(0.0, 0.0), (0.0, 0.0), (0.0, 0.0)],
+        description="Domain boundaries (calculated)",
+    )
+
+    coord_system: CoordSystem = SimbiField(
+        CoordSystem.SPHERICAL, description="Coordinate system"
+    )
+
+    regime: Regime = SimbiField(Regime.SRHD, description="Physics regime")
+
+    adiabatic_index: float = SimbiField(4.0 / 3.0, description="Adiabatic index")
+
+    # Optional customizations
+    x1_spacing: CellSpacing = SimbiField(
+        CellSpacing.LOG, description="Grid spacing in radial direction"
+    )
+
+    boundary_conditions: list[BoundaryCondition] = SimbiField(
+        [
+            BoundaryCondition.REFLECTING,
+            BoundaryCondition.OUTFLOW,
+            BoundaryCondition.REFLECTING,
+            BoundaryCondition.REFLECTING,
+            BoundaryCondition.PERIODIC,
+            BoundaryCondition.PERIODIC,
+        ],
+        description="Boundary conditions for 3D (6 faces)",
+    )
+
+    solver: Solver = SimbiField(Solver.HLLC, description="Numerical solver")
+
+    default_start_time: float = SimbiField(0.0, description="Simulation start time")
+
+    default_end_time: float = SimbiField(1.0, description="Simulation end time")
+
+    def __init__(self, **data: Any) -> None:
+        super().__init__(**data)
+
+        # Calculate number of radial zones based on zones per decade
+        ndec = math.log10(self.rend / self.rinit)
+        self._nr = round(self.zpd * ndec)
+
+        # Set theta boundaries based on full_sphere flag
+        self._theta_min = 0
+        self._theta_max = math.pi if self.full_sphere else 0.5 * math.pi
+
+        # Set phi boundaries for full 3D
+        self._phi_min = 0
+        self._phi_max = 2.0 * math.pi
+
+        # Calculate number of polar zones
+        self._npolar = compute_num_polar_zones(
+            rmin=float(self.rinit),
+            rmax=float(self.rend),
+            nr=self._nr,
+            theta_bounds=(self._theta_min, self._theta_max),
+            zpd=int(self.zpd),
         )
 
-    def __init__(self) -> None:
-        ndec = math.log10(self.config.rend / self.config.rinit)
-        self.nr = round(self.config.zpd * ndec)
-        self.theta_min = 0
-        self.theta_max = math.pi if self.config.full_sphere else 0.5 * math.pi
-        self.phi_min = 0
-        self.phi_max = 2.0 * math.pi
-        self.npolar = compute_num_polar_zones(
-            rmin=self.config.rinit,
-            rmax=self.config.rend,
-            nr=self.nr,
-            theta_bounds=(self.theta_min, self.theta_max),
-        )
-        self.nphi = self.npolar
+        # Set number of azimuthal zones equal to polar zones
+        self._nphi = self._npolar
 
-    @simbi_property
+        # Update resolution and bounds fields
+        self.resolution = (self._nr, self._npolar, self._nphi)
+        self.bounds = [
+            (self.rinit, self.rend),
+            (self._theta_min, self._theta_max),
+            (self._phi_min, self._phi_max),
+        ]
+
     def initial_primitive_state(self) -> InitialStateType:
-        def gas_state() -> Generator[tuple[float, ...], None, None]:
-            ni, nj, nk = self.resolution
-            explosion_radius = self.config.rinit * 1.5
-            dlogr = math.log10(self.config.rend / self.config.rinit) / ni
-            for k in range(nk):
-                for j in range(nj):
-                    for i in range(ni):
-                        r = self.config.rinit * 10 ** (i * dlogr)
-                        rho = RHO_AMB * r ** (-self.config.k)
+        """Generate initial primitive state for the 3D thermal bomb.
+
+        Returns:
+            Generator function that yields primitive variables
+        """
+
+        def gas_state() -> GasStateGenerator:
+            nr, npolar, nphi = self.resolution
+            explosion_radius = self.rinit * 1.5
+            dlogr = math.log10(self.rend / self.rinit) / nr
+
+            for k in range(nphi):
+                for j in range(npolar):
+                    for i in range(nr):
+                        # Logarithmic radial grid
+                        r = self.rinit * 10 ** (i * dlogr)
+
+                        # Density with power law profile
+                        rho = RHO_AMB * r ** (-self.k)
+
+                        # Pressure inside vs. outside the explosion region
                         if r <= explosion_radius:
-                            pre = (self.config.adiabatic_index - 1.0) * (
+                            # Energy deposition inside explosion radius
+                            pre = (self.adiabatic_index - 1.0) * (
                                 3.0
-                                * self.config.e0
+                                * self.e0
                                 / (NU + 1)
                                 / math.pi
                                 / explosion_radius**NU
                             )
                         else:
+                            # Ambient conditions outside explosion radius
                             pre = T_AMB * rho
-                        yield (
-                            rho,
-                            0.0,
-                            0.0,
-                            0.0,
-                            pre,
-                        )
+
+                        # 3D primitive variables (rho, vr, vtheta, vphi, p)
+                        yield (rho, 0.0, 0.0, 0.0, pre)
 
         return gas_state
-
-    @simbi_property
-    def bounds(self) -> Sequence[Sequence[Any]]:
-        return (
-            (self.config.rinit, self.config.rend),
-            (self.theta_min, self.theta_max),
-            (self.phi_min, self.phi_max),
-        )
-
-    @simbi_property
-    def x1_spacing(self) -> str:
-        return "log"
-
-    @simbi_property
-    def coord_system(self) -> str:
-        return "spherical"
-
-    @simbi_property
-    def resolution(self) -> Sequence[int]:
-        return (self.nr, self.npolar, self.nphi)
-
-    @simbi_property
-    def adiabatic_index(self) -> DynamicArg:
-        return self.config.adiabatic_index
-
-    @simbi_property
-    def regime(self) -> str:
-        return "srhd"
-
-    @simbi_property
-    def default_start_time(self) -> float:
-        return 0.0
-
-    @simbi_property
-    def default_end_time(self) -> float:
-        return 1.0
-
-    @simbi_property
-    def solver(self) -> str:
-        return "hllc"
-
-    @simbi_property
-    def boundary_conditions(self) -> Sequence[str]:
-        return ["reflecting", "outflow", "outflow", "outflow", "outflow", "outflow"]

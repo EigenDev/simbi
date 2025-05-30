@@ -1,126 +1,131 @@
 import math
-from simbi import (
-    BaseConfig,
-    DynamicArg,
-    simbi_property,
-    compute_num_polar_zones,
+from simbi.core.config.base_config import SimbiBaseConfig
+from simbi.core.config.fields import SimbiField
+from simbi.core.types.input import (
+    BoundaryCondition,
+    CoordSystem,
+    Regime,
+    CellSpacing,
+    Solver,
 )
-from simbi.typing import InitialStateType
+from simbi.core.types.typing import GasStateGenerator, InitialStateType
+from simbi import compute_num_polar_zones
+from typing import Any
 
-from typing import Any, Sequence, Generator
-
-
+# Constants
 RHO_AMB = 1.0
 T_AMB = 1e-10
 NU = 3.0
 
 
-class SedovTaylor(BaseConfig):
+class SedovTaylor(SimbiBaseConfig):
     """The Sedov Taylor Problem
-    Sedov-Taylor Explosion on a 2D Spherical Logarithmic mesh with variable zones per decade in radius
+    Sedov-Taylor Explosion on a 2D Spherical logarithmic mesh with variable zones per decade in radius
     """
 
-    class config:
-        e0 = DynamicArg("e0", 1.0, help="energy scale", var_type=float)
-        rho0 = DynamicArg("rho0", 1.0, help="density scale", var_type=float)
-        rinit = DynamicArg("rinit", 0.1, help="intial grid radius", var_type=float)
-        rend = DynamicArg("rend", 1.0, help="radial extent", var_type=float)
-        k = DynamicArg("k", 0.0, help="density power law k", var_type=float)
-        full_sphere = DynamicArg(
-            "full_sphere",
-            False,
-            help="flag for full_sphere computation",
-            var_type=bool,
-            action="store_true",
-        )
-        zpd = DynamicArg(
-            "zpd", 1024, help="number of radial zones per decade", var_type=int
-        )
-        adiabatic_index = DynamicArg(
-            "ad-gamma", 5.0 / 3.0, help="Adiabtic gas index", var_type=float
+    # Configuration parameters
+    e0: float = SimbiField(1.0, description="Energy scale")
+    rho0: float = SimbiField(1.0, description="Density scale")
+    rinit: float = SimbiField(0.1, description="Initial grid radius")
+    rend: float = SimbiField(1.0, description="Radial extent")
+    k: float = SimbiField(0.0, description="Density power law exponent")
+    zpd: int = SimbiField(1024, description="Number of radial zones per decade")
+    full_sphere: bool = SimbiField(
+        False, description="Flag for full sphere computation"
+    )
+
+    # Required fields from SimbiBaseConfig - will be set during __init__
+    resolution: tuple[int, int] = SimbiField(
+        (0, 0), description="Grid resolution (calculated)"
+    )
+
+    bounds: list[tuple[float, float]] = SimbiField(
+        [(0.0, 0.0), (0.0, 0.0)], description="Domain boundaries (calculated)"
+    )
+
+    coord_system: CoordSystem = SimbiField(
+        CoordSystem.SPHERICAL, description="Coordinate system"
+    )
+
+    regime: Regime = SimbiField(Regime.CLASSICAL, description="Physics regime")
+
+    adiabatic_index: float = SimbiField(5.0 / 3.0, description="Adiabatic index")
+
+    # Optional customizations
+    x1_spacing: CellSpacing = SimbiField(
+        CellSpacing.LOG, description="Grid spacing in radial direction"
+    )
+
+    boundary_conditions: list[BoundaryCondition] = SimbiField(
+        [
+            BoundaryCondition.REFLECTING,
+            BoundaryCondition.OUTFLOW,
+            BoundaryCondition.REFLECTING,
+            BoundaryCondition.REFLECTING,
+        ],
+        description="Boundary conditions",
+    )
+
+    solver: Solver = SimbiField(Solver.HLLC, description="Numerical solver")
+
+    default_start_time: float = SimbiField(0.0, description="Simulation start time")
+
+    default_end_time: float = SimbiField(1.0, description="Simulation end time")
+
+    def __init__(self, **data: Any) -> None:
+        super().__init__(**data)
+
+        # Calculate number of radial zones based on zones per decade
+        ndec = math.log10(self.rend / self.rinit)
+        self._nr = round(self.zpd * ndec)
+
+        # Set theta boundaries based on full_sphere flag
+        self._theta_min = 0
+        self._theta_max = math.pi if self.full_sphere else 0.5 * math.pi
+
+        # Calculate number of polar zones
+        self._npolar = compute_num_polar_zones(
+            rmin=float(self.rinit),
+            rmax=float(self.rend),
+            nr=self._nr,
+            theta_bounds=(self._theta_min, self._theta_max),
+            zpd=int(self.zpd),
         )
 
-    def __init__(self) -> None:
-        ndec = math.log10(self.config.rend / self.config.rinit)
-        self.nr = round(self.config.zpd * ndec)
-        self.theta_min = 0
-        self.theta_max = math.pi if self.config.full_sphere else 0.5 * math.pi
-        self.npolar = compute_num_polar_zones(
-            rmin=float(self.config.rinit),
-            rmax=float(self.config.rend),
-            nr=self.nr,
-            theta_bounds=(self.theta_min, self.theta_max),
-            zpd=int(self.config.zpd),
-        )
+        # Update resolution and bounds fields
+        self.resolution = (self._nr, self._npolar)
+        self.bounds = [(self.rinit, self.rend), (self._theta_min, self._theta_max)]
 
-    @simbi_property
     def initial_primitive_state(self) -> InitialStateType:
-        def gas_state() -> Generator[tuple[float, ...], None, None]:
-            ni, nj = self.resolution
-            explosion_radius = self.config.rinit * 1.5
-            dlogr = math.log10(self.config.rend / self.config.rinit) / ni
-            for j in range(nj):
-                for i in range(ni):
-                    r = self.config.rinit * 10 ** (i * dlogr)
-                    rho = RHO_AMB * r ** (-self.config.k)
+        """Generate initial primitive state for Sedov-Taylor explosion.
+
+        Returns:
+            Generator function that yields primitive variables
+        """
+
+        def gas_state() -> GasStateGenerator:
+            nr, npolar = self.resolution
+            explosion_radius = self.rinit * 1.5
+            dlogr = math.log10(self.rend / self.rinit) / nr
+
+            for j in range(npolar):
+                for i in range(nr):
+                    # Logarithmic radial grid
+                    r = self.rinit * 10 ** (i * dlogr)
+
+                    # Density with power law profile
+                    rho = RHO_AMB * r ** (-self.k)
+
+                    # Pressure inside vs. outside the explosion region
                     if r <= explosion_radius:
-                        pre = (self.config.adiabatic_index - 1.0) * (
-                            3.0
-                            * self.config.e0
-                            / (NU + 1)
-                            / math.pi
-                            / explosion_radius**NU
+                        # Energy deposition inside explosion radius
+                        pre = (self.adiabatic_index - 1.0) * (
+                            3.0 * self.e0 / (NU + 1) / math.pi / explosion_radius**NU
                         )
                     else:
+                        # Ambient conditions outside explosion radius
                         pre = T_AMB * rho
-                    yield (
-                        rho,
-                        0.0,
-                        0.0,
-                        pre,
-                    )
+
+                    yield (rho, 0.0, 0.0, pre)
 
         return gas_state
-
-    @simbi_property
-    def bounds(self) -> Sequence[Sequence[float]]:
-        return (
-            (self.config.rinit.value, self.config.rend.value),
-            (self.theta_min, self.theta_max),
-        )
-
-    @simbi_property
-    def x1_spacing(self) -> str:
-        return "log"
-
-    @simbi_property
-    def coord_system(self) -> str:
-        return "spherical"
-
-    @simbi_property
-    def resolution(self) -> Sequence[Any]:
-        return (self.nr, self.npolar)
-
-    @simbi_property
-    def adiabatic_index(self) -> DynamicArg:
-        return self.config.adiabatic_index
-
-    @simbi_property
-    def regime(self) -> str:
-        return "classical"
-
-    @simbi_property
-    def default_start_time(self) -> float:
-        return 0.0
-
-    @simbi_property
-    def default_end_time(self) -> float:
-        return 1.0
-
-    @simbi_property
-    def solver(self) -> str:
-        return "hllc"
-
-    @simbi_property
-    def boundary_conditions(self) -> Sequence[str]:
-        return ["reflecting", "outflow", "outflow", "outflow"]

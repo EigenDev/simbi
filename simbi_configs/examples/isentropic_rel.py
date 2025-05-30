@@ -5,7 +5,7 @@ from numpy.typing import NDArray
 
 from simbi.core.config.base_config import SimbiBaseConfig
 from simbi.core.config.fields import SimbiField
-from simbi.core.types.input import CellSpacing, CoordSystem, Regime
+from simbi.core.types.input import CellSpacing, CoordSystem, Regime, BoundaryCondition
 from simbi.core.types.typing import GasStateGenerator, InitialStateType
 from pydantic import validator
 
@@ -100,7 +100,9 @@ class IsentropicRelWave(SimbiBaseConfig):
         CellSpacing.LINEAR, description="Grid spacing in x1 direction"
     )
 
-    boundary_conditions: str = SimbiField("periodic", description="Boundary conditions")
+    boundary_conditions: BoundaryCondition = SimbiField(
+        BoundaryCondition.PERIODIC, description="Boundary conditions"
+    )
 
     # Validators
     @validator("alpha")

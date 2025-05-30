@@ -1,56 +1,63 @@
-from simbi import BaseConfig, DynamicArg, simbi_property
-from simbi.typing import InitialStateType
-from typing import Sequence, Generator
+from simbi.core.config.base_config import SimbiBaseConfig
+from simbi.core.config.fields import SimbiField
+from simbi.core.types.input import CoordSystem, Regime
+from simbi.core.types.typing import GasStateGenerator, InitialStateType
 
 
-class MartiMuller3D(BaseConfig):
+class MartiMuller3D(SimbiBaseConfig):
     """
-    Marti & Muller (2003), Relativistic  Shock Tube Problem on 3D Mesh
+    Marti & Muller (2003), Relativistic Shock Tube Problem on 3D Mesh
     """
 
-    class config:
-        nzones = DynamicArg("nzones", 100, help="number of grid zones", var_type=int)
-        adiabatic_index = DynamicArg(
-            "ad-gamma", 4.0 / 3.0, help="Adiabatic gas index", var_type=float
-        )
+    # Required fields from SimbiBaseConfig
+    resolution: tuple[int, int, int] = SimbiField(
+        (100, 100, 100), description="Grid resolution"
+    )
 
-    @simbi_property
+    bounds: list[tuple[float, float]] = SimbiField(
+        [(0.0, 1.0), (0.0, 1.0), (0.0, 1.0)], description="Domain boundaries"
+    )
+
+    coord_system: CoordSystem = SimbiField(
+        CoordSystem.CARTESIAN, description="Coordinate system"
+    )
+
+    regime: Regime = SimbiField(Regime.SRHD, description="Physics regime")
+
+    adiabatic_index: float = SimbiField(4.0 / 3.0, description="Adiabatic index")
+
     def initial_primitive_state(self) -> InitialStateType:
-        def gas_state() -> Generator[tuple[float, ...], None, None]:
-            ni, nj, nk = self.resolution
-            xextent = self.bounds[0][1] - self.bounds[0][0]
-            dx = xextent / ni
-            for k in range(nk):
-                for j in range(nj):
-                    for i in range(ni):
-                        xi = self.bounds[0][0] + i * dx
+        """Generate initial primitive state for 3D Marti & Muller shock tube.
+
+        Returns:
+            Generator function that yields primitive variables
+        """
+
+        def gas_state() -> GasStateGenerator:
+            nx, ny, nz = self.resolution
+            xmin, xmax = self.bounds[0]
+            xextent = xmax - xmin
+            dx = xextent / nx
+
+            for k in range(nz):
+                for j in range(ny):
+                    for i in range(nx):
+                        xi = xmin + (i + 0.5) * dx  # Cell center
                         if xi <= 0.5 * xextent:
-                            yield (10.0, 0.0, 0.0, 0.0, 13.33)
+                            yield (
+                                10.0,
+                                0.0,
+                                0.0,
+                                0.0,
+                                13.33,
+                            )  # Left state: (rho, vx, vy, vz, p)
                         else:
-                            yield (1.0, 0.0, 0.0, 0.0, 1e-10)
+                            yield (
+                                1.0,
+                                0.0,
+                                0.0,
+                                0.0,
+                                1e-10,
+                            )  # Right state: (rho, vx, vy, vz, p)
 
         return gas_state
-
-    @simbi_property
-    def bounds(self) -> Sequence[Sequence[float]]:
-        return ((0.0, 1.0), (0.0, 1.0), (0.0, 1.0))
-
-    @simbi_property
-    def x1_spacing(self) -> str:
-        return "linear"
-
-    @simbi_property
-    def coord_system(self) -> str:
-        return "cartesian"
-
-    @simbi_property
-    def resolution(self) -> Sequence[DynamicArg]:
-        return (self.config.nzones, self.config.nzones, self.config.nzones)
-
-    @simbi_property
-    def adiabatic_index(self) -> DynamicArg:
-        return self.config.adiabatic_index
-
-    @simbi_property
-    def regime(self) -> str:
-        return "srhd"

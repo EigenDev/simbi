@@ -4,7 +4,12 @@ from functools import partial
 
 from simbi.core.config.base_config import SimbiBaseConfig
 from simbi.core.config.fields import SimbiField
-from simbi.core.types.input import CoordSystem, Regime, CellSpacing, Solver
+from simbi.core.types.input import (
+    CoordSystem,
+    Regime,
+    CellSpacing,
+    Solver,
+)
 from simbi.core.types.typing import (
     InitialStateType,
     GasStateGenerator,

@@ -1,8 +1,15 @@
-from simbi import BaseConfig, DynamicArg, simbi_property
-from simbi.typing import InitialStateType
-from typing import Sequence, Generator, Iterator, Any
-from dataclasses import dataclass
 from functools import partial
+from dataclasses import dataclass
+from typing import Iterator, Any, cast
+
+from simbi.core.config.base_config import SimbiBaseConfig
+from simbi.core.config.fields import SimbiField
+from simbi.core.types.input import CoordSystem, Regime, CellSpacing, Solver
+from simbi.core.types.typing import (
+    InitialStateType,
+    GasStateGenerator,
+    MHDStateGenerators,
+)
 
 
 @dataclass(frozen=True)
@@ -24,34 +31,51 @@ class MHDState:
         yield self.p
 
 
-class MagneticShockTube(BaseConfig):
+class MagneticShockTube(SimbiBaseConfig):
     """
     Mignone, Ugliano, & Bodo (2009), 1D SRMHD test problems.
     """
 
-    class config:
-        nzones = DynamicArg("nzones", 100, help="number of grid zones", var_type=int)
-        adiabatic_index = DynamicArg(
-            "ad-gamma", (5 / 3), help="Adiabatic gas index", var_type=float
-        )
-        problem = DynamicArg(
-            "problem",
-            "contact",
-            help="problem number from Mignone & Bodo (2006)",
-            var_type=str,
-            choices=[
-                "contact",
-                "rotational",
-                "st-1",
-                "st-2",
-                "st-3",
-                "st-4",
-            ],
-        )
+    # Configuration parameters
+    adiabatic_index: float = SimbiField(5.0 / 3.0, description="Adiabatic index")
 
-    def __init__(self, **kwargs: Any) -> None:
-        super().__init__(**kwargs)
-        self.problem_states = {
+    problem: str = SimbiField(
+        "contact",
+        description="Problem type from Mignone, Ugliano, & Bodo (2009)",
+        choices=[
+            "contact",
+            "rotational",
+            "st-1",
+            "st-2",
+            "st-3",
+            "st-4",
+        ],
+    )
+
+    # Required fields from SimbiBaseConfig
+    resolution: tuple[int, int, int] = SimbiField(
+        (100, 1, 1), description="Grid resolution"
+    )
+
+    bounds: list[tuple[float, float]] = SimbiField(
+        [(0.0, 1.0)], description="Domain boundaries"
+    )
+
+    coord_system: CoordSystem = SimbiField(
+        CoordSystem.CARTESIAN, description="Coordinate system"
+    )
+    regime: Regime = SimbiField(Regime.SRMHD, description="Physics regime")
+    solver: Solver = SimbiField(Solver.HLLD, description="Numerical solver")
+
+    # Optional customizations
+    x1_spacing: CellSpacing = SimbiField(
+        CellSpacing.LINEAR, description="Grid spacing in x1 direction"
+    )
+
+    def __init__(self, **data: Any) -> None:
+        super().__init__(**data)
+        # Initialize problem states dictionary
+        self._problem_states = {
             "contact": (
                 MHDState(10.0, 0.0, 0.7, 0.2, 1.0, 5.0, 1.0, 0.5),
                 MHDState(1.00, 0.0, 0.7, 0.2, 1.0, 5.0, 1.0, 0.5),
@@ -78,61 +102,52 @@ class MagneticShockTube(BaseConfig):
             ),
         }
 
-    @simbi_property
     def initial_primitive_state(self) -> InitialStateType:
-        def gas_state() -> Generator[tuple[float, ...], None, None]:
+        """Generate initial primitive state for SRMHD shock tube.
+
+        Returns:
+            Tuple of generator functions for gas state and B-fields
+        """
+
+        def gas_state() -> GasStateGenerator:
+            """Generate gas state variables"""
             ni, nj, nk = self.resolution
-            state = self.problem_states[str(self.config.problem)]
-            xextent = self.bounds[1] - self.bounds[0]
+            state = self._problem_states[self.problem]
+            xmin, xmax = self.bounds[0]
+            xextent = xmax - xmin
             dx = xextent / ni
+
             for k in range(nk):
                 for j in range(nj):
                     for i in range(ni):
-                        xi = self.bounds[0] + i * dx
-                        if xi < 0.5:
-                            yield tuple(state[0])
+                        xi = xmin + (i + 0.5) * dx  # Cell center
+                        if xi < 0.5 * xextent:
+                            yield tuple(state[0])  # Left state
                         else:
-                            yield tuple(state[1])
+                            yield tuple(state[1])  # Right state
 
-        def bfield(bn: str) -> Generator[float, None, None]:
-            state = self.problem_states[str(self.config.problem)]
+        def bfield(bn: str) -> GasStateGenerator:
+            """Generate B-field component values"""
+            state = self._problem_states[self.problem]
             ni, nj, nk = self.resolution
-            xextent = self.bounds[1] - self.bounds[0]
+            xmin, xmax = self.bounds[0]
+            xextent = xmax - xmin
             dx = xextent / ni
+
+            # Adjust dimensions based on which field component
             for k in range(nk + (bn == "b3")):
                 for j in range(nj + (bn == "b2")):
                     for i in range(ni + (bn == "b1")):
-                        xi = self.bounds[0] + i * dx
+                        xi = xmin + i * dx
                         if xi < 0.5 * xextent:
-                            yield getattr(state[0], bn)
+                            yield getattr(state[0], bn)  # Left state
                         else:
-                            yield getattr(state[1], bn)
+                            yield getattr(state[1], bn)  # Right state
 
-        bx = partial(bfield, "b1")
-        by = partial(bfield, "b2")
-        bz = partial(bfield, "b3")
-        return gas_state, bx, by, bz
+        # Create partial functions for each B-field component
+        bx_gen = partial(bfield, "b1")
+        by_gen = partial(bfield, "b2")
+        bz_gen = partial(bfield, "b3")
 
-    @simbi_property
-    def bounds(self) -> Sequence[float]:
-        return (0.0, 1.0)
-
-    @simbi_property
-    def x1_spacing(self) -> str:
-        return "linear"
-
-    @simbi_property
-    def coord_system(self) -> str:
-        return "cartesian"
-
-    @simbi_property
-    def resolution(self) -> tuple[DynamicArg, int, int]:
-        return (self.config.nzones, 1, 1)
-
-    @simbi_property
-    def adiabatic_index(self) -> DynamicArg:
-        return self.config.adiabatic_index
-
-    @simbi_property
-    def regime(self) -> str:
-        return "srmhd"
+        # Return tuple of generator functions
+        return cast(MHDStateGenerators, (gas_state, bx_gen, by_gen, bz_gen))

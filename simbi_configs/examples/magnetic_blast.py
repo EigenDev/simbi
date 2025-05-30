@@ -1,9 +1,22 @@
 import math
-from simbi import BaseConfig, simbi_property, DynamicArg
-from simbi.typing import InitialStateType
-from typing import Sequence, Generator
 from functools import partial
 
+from simbi.core.config.base_config import SimbiBaseConfig
+from simbi.core.config.fields import SimbiField
+from simbi.core.types.input import (
+    CoordSystem,
+    BoundaryCondition,
+    Regime,
+    CellSpacing,
+)
+from simbi.core.types.typing import (
+    InitialStateType,
+    GasStateGenerator,
+    StaggeredBFieldGenerator,
+)
+from simbi.old_core.types.constants import BoundaryCondition
+
+# Constants for the blast wave setup
 XMIN = -6.0
 XMAX = 6.0
 P_EXP = 1.0
@@ -12,43 +25,79 @@ R_EXP = 0.08
 R_STOP = 1.0
 
 
-class MagneticBomb(BaseConfig):
+class MagneticBomb(SimbiBaseConfig):
     """The Magnetic Bomb
     Launch a cylindrical relativistic magnetized blast wave
     """
 
-    class config:
-        rho0 = DynamicArg("rho0", 1.0e-4, help="density scale", var_type=float)
-        p0 = DynamicArg("p0", 3.0e-5, help="pressure scale", var_type=float)
-        b0 = DynamicArg("b0", 0.1, help="magnetic field scale", var_type=float)
-        nzones = DynamicArg(
-            "nzones", 256, help="number of zones in x and y", var_type=int
-        )
-        adiabatic_index = DynamicArg(
-            "ad-gamma", 4.0 / 3.0, help="Adiabtic gas index", var_type=float
-        )
+    # Configuration parameters
+    rho0: float = SimbiField(1.0e-4, description="Density scale")
+    p0: float = SimbiField(3.0e-5, description="Pressure scale")
+    b0: float = SimbiField(0.1, description="Magnetic field scale")
 
-    @simbi_property
+    # Required fields from SimbiBaseConfig
+    resolution: tuple[int, int] = SimbiField((256, 256), description="Grid resolution")
+
+    bounds: list[tuple[float, float]] = SimbiField(
+        [(XMIN, XMAX), (XMIN, XMAX)], description="Domain boundaries"
+    )
+
+    coord_system: CoordSystem = SimbiField(
+        CoordSystem.CARTESIAN, description="Coordinate system"
+    )
+
+    regime: Regime = SimbiField(Regime.SRMHD, description="Physics regime")
+
+    adiabatic_index: float = SimbiField(4.0 / 3.0, description="Adiabatic index")
+
+    # Optional customizations with non-default values
+    solver: Solver = SimbiField(Solver.HLLE, description="Numerical solver")
+
+    boundary_conditions: list[BoundaryCondition] = SimbiField(
+        [BoundaryCondition.OUTFLOW], description="Boundary conditions"
+    )
+
+    x1_spacing: CellSpacing = SimbiField(
+        CellSpacing.LINEAR, description="Grid spacing in x1 direction"
+    )
+
+    start_time: float = SimbiField(0.0, description="Simulation start time")
+
+    end_time: float = SimbiField(4.0, description="Simulation end time")
+
     def initial_primitive_state(self) -> InitialStateType:
-        def gas_state() -> Generator[tuple[float, ...]]:
-            ni, nj, nk = self.resolution
+        """Generate initial primitive state for magnetic blast wave.
+
+        Returns:
+            Tuple of generator functions for gas state and B-fields
+        """
+
+        # Gas state generator for density, velocity, and pressure
+        def gas_state() -> GasStateGenerator:
+            ni, nj = self.resolution
+            nk = 1
             xbounds = self.bounds[0]
             ybounds = self.bounds[1]
             dx = (xbounds[1] - xbounds[0]) / ni
             dy = (ybounds[1] - ybounds[0]) / nj
-            rho_amb = float(self.config.rho0)
-            pre_amb = float(self.config.p0)
+
+            rho_amb = float(self.rho0)
+            pre_amb = float(self.p0)
             pslope = (P_EXP - pre_amb) / (R_STOP - R_EXP)
             rhoslope = (RHO_EXP - rho_amb) / (R_STOP - R_EXP)
+
             for k in range(nk):
                 for j in range(nj):
-                    y = ybounds[0] + j * dy
+                    y = ybounds[0] + (j + 0.5) * dy
                     for i in range(ni):
-                        x = xbounds[0] + i * dx
+                        x = xbounds[0] + (i + 0.5) * dx
                         r = math.sqrt(x**2 + y**2)
+
                         if r < R_EXP:
+                            # Inside explosion region
                             yield (RHO_EXP, 0.0, 0.0, 0.0, P_EXP)
                         elif r > R_EXP and r < R_STOP:
+                            # Transition region
                             yield (
                                 RHO_EXP - rhoslope * (r - R_EXP),
                                 0.0,
@@ -57,60 +106,28 @@ class MagneticBomb(BaseConfig):
                                 P_EXP - pslope * (r - R_EXP),
                             )
                         else:
+                            # Ambient region
                             yield (rho_amb, 0.0, 0.0, 0.0, pre_amb)
 
-        def b_field(bn: str) -> Generator[float, None, None]:
-            ni, nj, nk = self.resolution
+        # B-field generator function
+        def b_field(bn: str) -> StaggeredBFieldGenerator:
+            """Generate B-field component values"""
+            ni, nj = self.resolution
+            nk = 1
+
+            # Different grid sizes for different components due to staggering
             for k in range(nk + (bn == "bz")):
                 for j in range(nj + (bn == "by")):
                     for i in range(ni + (bn == "bx")):
                         if bn == "bx":
-                            yield float(self.config.b0)
+                            yield float(self.b0)
                         else:
                             yield 0.0
 
-        bx = partial(b_field, "bx")
-        by = partial(b_field, "by")
-        bz = partial(b_field, "bz")
+        # Create partial functions for each B-field component
+        bx_gen = partial(b_field, "bx")
+        by_gen = partial(b_field, "by")
+        bz_gen = partial(b_field, "bz")
 
-        return (gas_state, bx, by, bz)
-
-    @simbi_property
-    def bounds(self) -> Sequence[Sequence[float]]:
-        return ((XMIN, XMAX), (XMIN, XMAX))
-
-    @simbi_property
-    def x1_spacing(self) -> str:
-        return "linear"
-
-    @simbi_property
-    def coord_system(self) -> str:
-        return "cartesian"
-
-    @simbi_property
-    def resolution(self) -> Sequence[int | DynamicArg]:
-        return (self.config.nzones, self.config.nzones, 1)
-
-    @simbi_property
-    def adiabatic_index(self) -> DynamicArg:
-        return self.config.adiabatic_index
-
-    @simbi_property
-    def regime(self) -> str:
-        return "srmhd"
-
-    @simbi_property
-    def default_start_time(self) -> float:
-        return 0.0
-
-    @simbi_property
-    def default_end_time(self) -> float:
-        return 4.0
-
-    @simbi_property
-    def solver(self) -> str:
-        return "hlle"
-
-    @simbi_property
-    def boundary_conditions(self) -> Sequence[str]:
-        return ["outflow"]
+        # Return tuple of generator functions
+        return (gas_state, bx_gen, by_gen, bz_gen)

@@ -1,76 +1,77 @@
-from simbi import BaseConfig, DynamicArg, simbi_property
-from simbi.typing import InitialStateType
-from typing import Sequence, Generator
+from simbi.core.config.base_config import SimbiBaseConfig
+from simbi.core.config.fields import SimbiField
+from simbi.core.types.input import CoordSystem, Regime, CellSpacing, Solver
+from simbi.core.types.typing import GasStateGenerator, InitialStateType
+from pathlib import Path
 
 
-class StationaryWaveHLL(BaseConfig):
+class StationaryWaveHLL(SimbiBaseConfig):
     """
     Stationary Wave Test Problems in 1D Newtonian Fluid using HLL solver
     """
 
-    class config:
-        nzones = DynamicArg("nzones", 400, help="number of grid zones", var_type=int)
-        adiabatic_index = DynamicArg(
-            "ad-gamma", 5.0 / 3.0, help="Adiabatic gas index", var_type=float
-        )
+    # Required fields from SimbiBaseConfig
+    resolution: int = SimbiField(400, description="Grid resolution")
 
-    @simbi_property
+    bounds: list[tuple[float, float]] = SimbiField(
+        [(0.0, 1.0)], description="Domain boundaries"
+    )
+
+    coord_system: CoordSystem = SimbiField(
+        CoordSystem.CARTESIAN, description="Coordinate system"
+    )
+
+    regime: Regime = SimbiField(Regime.CLASSICAL, description="Physics regime")
+
+    adiabatic_index: float = SimbiField(5.0 / 3.0, description="Adiabatic index")
+
+    # Optional customizations
+    x1_spacing: CellSpacing = SimbiField(
+        CellSpacing.LINEAR, description="Grid spacing in x1 direction"
+    )
+
+    solver: Solver = SimbiField(Solver.HLLE, description="Numerical solver")
+
+    data_directory: Path = SimbiField(
+        Path("data/stationary/hlle"), description="Output data directory"
+    )
+
     def initial_primitive_state(self) -> InitialStateType:
-        def gas_state() -> Generator[tuple[float, ...], None, None]:
-            ni = self.resolution
-            xextent = self.bounds[1] - self.bounds[0]
-            dx = xextent / ni
-            for i in range(ni):
-                xi = self.bounds[0] + i * dx
-                if xi < 0.5 * xextent:
-                    yield (1.4, 0.0, 1.0)
+        """Generate initial primitive state for stationary wave.
+
+        Returns:
+            Generator function that yields primitive variables
+        """
+
+        def gas_state() -> GasStateGenerator:
+            nx = self.resolution
+            xmin, xmax = self.bounds[0]
+            xextent = xmax - xmin
+            dx = xextent / nx
+
+            for i in range(nx):
+                x = xmin + (i + 0.5) * dx  # Cell center
+
+                # Different density on left half, same velocity and pressure throughout
+                if x < 0.5 * xextent:
+                    yield (1.4, 0.0, 1.0)  # Left state: (rho, v, p)
                 else:
-                    yield (1.0, 0.0, 1.0)
+                    yield (1.0, 0.0, 1.0)  # Right state: (rho, v, p)
 
         return gas_state
-
-    @simbi_property
-    def bounds(self) -> Sequence[float]:
-        return (0.0, 1.0)
-
-    @simbi_property
-    def x1_spacing(self) -> str:
-        return "linear"
-
-    @simbi_property
-    def coord_system(self) -> str:
-        return "cartesian"
-
-    @simbi_property
-    def resolution(self) -> DynamicArg:
-        return self.config.nzones
-
-    @simbi_property
-    def adiabatic_index(self) -> DynamicArg:
-        return self.config.adiabatic_index
-
-    @simbi_property
-    def regime(self) -> str:
-        return "classical"
-
-    @simbi_property
-    def solver(self) -> str:
-        return "hlle"
-
-    @simbi_property
-    def data_directory(self) -> str:
-        return "data/stationary/hlle"
 
 
 class StationaryWaveHLLC(StationaryWaveHLL):
     """
-    Stationary Wave Test Problems in 1D Newtonian Fluid using HLLC Toro et al. (1992) solver
+    Stationary Wave Test Problems in 1D Newtonian Fluid using HLLC solver
     """
 
-    @simbi_property
-    def solver(self) -> str:
-        return "hllc"
+    # Override only the solver and data directory
+    solver: Solver = SimbiField(
+        Solver.HLLC, description="HLLC numerical solver (Toro et al. 1992)"
+    )
 
-    @simbi_property
-    def data_directory(self) -> str:
-        return "data/stationary/hllc"
+    data_directory: Path = SimbiField(
+        Path("data/stationary/hllc"),
+        description="Output data directory for HLLC solver",
+    )
