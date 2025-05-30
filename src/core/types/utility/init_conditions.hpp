@@ -63,7 +63,7 @@ struct InitialConditions {
     real plm_theta, gamma, cfl, tend, sound_speed_squared;
     luint nx, ny, nz, checkpoint_index;
     bool quirk_smoothing, homologous, mesh_motion;
-    bool isothermal, locally_isothermal;
+    bool isothermal;
     real shakura_sunyaev_alpha;
     std::vector<std::vector<real>> bfield;
     std::string data_directory, coord_system, solver;
@@ -205,8 +205,8 @@ struct InitialConditions {
         static void build_basic_properties(InitialConditions& init)
         {
             // Time settings
-            init.time = init.get<real>("tstart", 0.0);
-            init.tend = init.get<real>("tend", 1.0);
+            init.time = init.get<real>("start_time", 0.0);
+            init.tend = init.get<real>("end_time", 1.0);
             init.checkpoint_interval =
                 init.get<real>("checkpoint_interval", 0.1);
             init.dlogt            = init.get<real>("dlogt", 0.0);
@@ -220,7 +220,7 @@ struct InitialConditions {
             init.plm_theta       = init.get<real>("plm_theta", 1.5);
             init.quirk_smoothing = init.get<bool>("quirk_smoothing", false);
             init.regime          = init.get<std::string>("regime", "classical");
-            init.cfl             = init.get<real>("cfl", 0.3);
+            init.cfl             = init.get<real>("cfl_number", 0.3);
             init.viscosity       = init.get<real>("viscosity", 0.0);
 
             // I/O settings
@@ -350,14 +350,14 @@ struct InitialConditions {
             // Equation of state
             init.gamma      = init.get<real>("adiabatic_index", 5.0 / 3.0);
             init.isothermal = init.get<bool>("isothermal", false);
-            init.locally_isothermal =
-                init.get<bool>("locally_isothermal", false);
             init.shakura_sunyaev_alpha =
                 init.get<real>("shakura_sunyaev_alpha", 0.0);
 
-            real sound_speed = init.get<real>("sound_speed", 1.0);
-            if (sound_speed != 0.0) {
-                init.sound_speed_squared = sound_speed * sound_speed;
+            real ambient_sound_speed =
+                init.get<real>("ambient_sound_speed", 1.0);
+            if (ambient_sound_speed != 0.0) {
+                init.sound_speed_squared =
+                    ambient_sound_speed * ambient_sound_speed;
             }
 
             // Magnetic field (if present)
@@ -432,15 +432,16 @@ struct InitialConditions {
             init.immersed_bodies.clear();
 
             // Check if bodies are provided in list format
-            if (init.contains("bodies") && init.at("bodies").is_list()) {
+            if (init.contains("immersed_bodies") &&
+                init.at("immersed_bodies").is_list()) {
                 const auto& bodies_list =
-                    init.at("bodies")
+                    init.at("immersed_bodies")
                         .template get<std::list<simbi::ConfigDict>>();
 
                 for (const auto& body_dict : bodies_list) {
                     // extract body type from the dict!
-                    if (!body_dict.contains("body_type") ||
-                        !body_dict.at("body_type").is_body_cap()) {
+                    if (!body_dict.contains("capability") ||
+                        !body_dict.at("capability").is_body_cap()) {
                         continue;   // Skip invalid body entries
                     }
 
@@ -453,7 +454,7 @@ struct InitialConditions {
                     add_scalar_property(body_dict, "mass", props);
                     add_scalar_property(body_dict, "radius", props);
                     add_boolean_property(body_dict, "two_way_coupling", props);
-                    add_body_property(body_dict, "body_type", props);
+                    add_body_property(body_dict, "capability", props);
 
                     // add specifics/extra properties
                     // this is a dictionary of properties that are specific to
@@ -470,7 +471,7 @@ struct InitialConditions {
 
                     // add other properties (not in specifics)
                     for (const auto& [key, value] : body_dict) {
-                        if (key != "body_type" && key != "position" &&
+                        if (key != "capability" && key != "position" &&
                             key != "velocity" && key != "mass" &&
                             key != "radius" && key != "specifics") {
                             add_property(key, value, props);
