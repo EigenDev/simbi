@@ -13,7 +13,6 @@ from typing import (
     Union,
     Sequence,
     Callable,
-    cast,
     get_args,
     get_origin,
 )
@@ -31,6 +30,7 @@ from ..types.input import (
     TimeStepping,
     CellSpacing,
     Solver,
+    BoundaryCondition,
 )
 from ..types.bodies import BodySystemConfig, ImmersedBodyConfig
 from .parameters import CLIConfigurableModel
@@ -101,37 +101,18 @@ class SimbiBaseConfig(CLIConfigurableModel):
         None, description="Checkpoint file to resume from"
     )
 
-    boundary_conditions: Union[str, Sequence[str]] = SimbiField(
-        "outflow", description="Boundary conditions"
+    boundary_conditions: Union[BoundaryCondition, Sequence[BoundaryCondition]] = (
+        SimbiField("outflow", description="Boundary conditions")
     )
 
     plm_theta: float = SimbiField(1.5, description="PLM theta parameter")
 
-    locally_isothermal: bool = SimbiField(
-        False, description="Use locally isothermal equation of state"
-    )
+    start_time: float = SimbiField(0.0, description="Simulation start time")
 
-    default_start_time: float = SimbiField(0.0, description="Simulation start time")
-
-    default_end_time: float = SimbiField(1.0, description="Simulation end time")
-
-    viscosity: float = SimbiField(0.0, description="Viscosity coefficient")
+    end_time: float = SimbiField(1.0, description="Simulation end time")
 
     order_of_integration: Optional[str] = SimbiField(
         None, description="Order of integration for the simulation"
-    )
-
-    # Isothermal physics
-    ambient_sound_speed: float = SimbiField(
-        0.0, description="Ambient sound speed for isothermal simulations"
-    )
-
-    shakura_sunyaev_alpha: float = SimbiField(
-        0.0, description="Shakura-Sunyaev alpha parameter for disk simulations"
-    )
-
-    buffer_parameters: dict[str, float] = SimbiField(
-        default_factory=dict, description="Buffer zone parameters for disk simulations"
     )
 
     # Logging configuration
@@ -145,66 +126,121 @@ class SimbiBaseConfig(CLIConfigurableModel):
         False, description="Log parameter setup information"
     )
 
-    # Scale factor and derivative as callable
-    scale_factor: Optional[Callable[[float], float]] = SimbiField(
-        None, description="Scale factor function a(t)"
-    )
+    # Isothermal physics
+    @computed_field
+    @property
+    def ambient_sound_speed(self) -> float:
+        """Ambient sound speed for isothermal simulations"""
+        if self.isothermal:
+            return (self.adiabatic_index - 1.0) / self.adiabatic_index
+        return 0.0
 
-    scale_factor_derivative: Optional[Callable[[float], float]] = SimbiField(
-        None, description="Time derivative of scale factor"
-    )
+    @computed_field
+    @property
+    def shakura_sunyaev_alpha(self) -> float:
+        """Shakura-Sunyaev alpha parameter for accretion disk simulations"""
+        return 0.0
+
+    @computed_field
+    @property
+    def viscosity(self) -> float:
+        """Viscosity coefficient for simulations"""
+        return 0.0
+
+    @computed_field
+    @property
+    def scale_factor(self) -> Optional[Callable[[float], float]]:
+        """Scale factor for mesh motion, if applicable"""
+        return None
+
+    @computed_field
+    @property
+    def scale_factor_derivative(self) -> Optional[Callable[[float], float]]:
+        """Derivative of the scale factor for mesh motion, if applicable"""
+        return None
 
     # Boundary condition expressions
-    bx1_inner_expressions: ExpressionDict = SimbiField(
-        default_factory=dict, description="Inner x1 boundary expressions"
-    )
+    @computed_field
+    @property
+    def buffer_parameters(self) -> dict[str, float]:
+        """Buffer parameters for boundary conditions"""
+        return {}
 
-    bx1_outer_expressions: ExpressionDict = SimbiField(
-        default_factory=dict, description="Outer x1 boundary expressions"
-    )
+    @computed_field
+    @property
+    def bx1_inner_expressions(self) -> ExpressionDict:
+        """Inner x1 boundary expressions"""
+        return {}
 
-    bx2_inner_expressions: ExpressionDict = SimbiField(
-        default_factory=dict, description="Inner x2 boundary expressions"
-    )
+    @computed_field
+    @property
+    def bx1_outer_expressions(self) -> ExpressionDict:
+        """Outer x1 boundary expressions"""
+        return {}
 
-    bx2_outer_expressions: ExpressionDict = SimbiField(
-        default_factory=dict, description="Outer x2 boundary expressions"
-    )
+    @computed_field
+    @property
+    def bx2_inner_expressions(self) -> ExpressionDict:
+        """Inner x2 boundary expressions"""
+        return {}
 
-    bx3_inner_expressions: ExpressionDict = SimbiField(
-        default_factory=dict, description="Inner x3 boundary expressions"
-    )
+    @computed_field
+    @property
+    def bx2_outer_expressions(self) -> ExpressionDict:
+        """Outer x2 boundary expressions"""
+        return {}
 
-    bx3_outer_expressions: ExpressionDict = SimbiField(
-        default_factory=dict, description="Outer x3 boundary expressions"
-    )
+    @computed_field
+    @property
+    def bx3_inner_expressions(self) -> ExpressionDict:
+        """Inner x3 boundary expressions"""
+        return {}
+
+    @computed_field
+    @property
+    def bx3_outer_expressions(self) -> ExpressionDict:
+        """Outer x3 boundary expressions"""
+        return {}
 
     # Source term expressions
-    hydro_source_expressions: ExpressionDict = SimbiField(
-        default_factory=dict, description="Hydro source term expressions"
-    )
+    @computed_field
+    @property
+    def hydro_source_expressions(self) -> ExpressionDict:
+        """Hydro source term expressions"""
+        return {}
 
-    gravity_source_expressions: ExpressionDict = SimbiField(
-        default_factory=dict, description="Gravity source term expressions"
-    )
+    @computed_field
+    @property
+    def gravity_source_expressions(self) -> ExpressionDict:
+        """Gravity source term expressions"""
+        return {}
 
-    local_sound_speed_expressions: ExpressionDict = SimbiField(
-        default_factory=dict, description="Local sound speed expressions"
-    )
+    @computed_field
+    @property
+    def local_sound_speed_expressions(self) -> ExpressionDict:
+        """Local sound speed expressions"""
+        return {}
 
     # Body physics
-    body_system: Optional[BodySystemConfig] = SimbiField(
-        None, description="Body system configuration"
-    )
+    @computed_field
+    @property
+    def body_system(self) -> Optional[BodySystemConfig]:
+        """Get the body system configuration"""
+        return None
 
-    immersed_bodies: list[ImmersedBodyConfig] = SimbiField(
-        default_factory=list, description="Immersed bodies configuration"
-    )
+    @computed_field
+    @property
+    def immersed_bodies(self) -> list[ImmersedBodyConfig]:
+        """Get the list of immersed bodies configuration"""
+        return []
 
     @computed_field
     @property
     def dimensionality(self) -> int:
         """Compute the dimensionality from resolution"""
+        if self.regime in [Regime.SRMHD]:
+            return 3  # MHD is always 3D
+
         if isinstance(self.resolution, int):
             return 1
         return len(self.resolution)
@@ -259,23 +295,26 @@ class SimbiBaseConfig(CLIConfigurableModel):
         """Return logarithmic time spacing"""
         log_enabled, num_outputs = self.log_checkpoints_tuple
         if log_enabled and num_outputs > 0:
-            return (
-                math.log10(self.default_end_time / self.default_start_time)
-                / num_outputs
-            )
+            return math.log10(self.end_time / self.start_time) / num_outputs
         return 0.0
+
+    @computed_field
+    @property
+    def locally_isothermal(self) -> bool:
+        """Check if the simulation is locally isothermal"""
+        return False
 
     @model_validator(mode="after")
     def validate_isothermal_settings(self) -> "SimbiBaseConfig":
         """Validate isothermal simulation settings"""
         if (
             self.isothermal
-            and not self.locally_isothermal
             and self.ambient_sound_speed <= 0
+            and not self.locally_isothermal
         ):
             raise ValueError(
-                "For isothermal simulations (gamma=1), the ambient sound speed *must* be defined "
-                "unless locally_isothermal is set to True."
+                "Ambient sound speed must be positive / non-zero for isothermal simulations"
+                " unless you explicity set locally_isothermal to True."
             )
         return self
 
