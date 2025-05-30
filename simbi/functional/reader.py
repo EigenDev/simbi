@@ -232,7 +232,7 @@ class LazySimulationReader:
             position = body_group["position"][:].tolist()
             velocity = body_group["velocity"][:].tolist()
             force = body_group["force"][:].tolist()
-            body_type = BodyCapability(int(body_group.attrs["capabilities"]))
+            body_capability = BodyCapability(int(body_group.attrs["capabilities"]))
             # Check body type
             self._immersed_bodies_cache[f"body_{i}"] = {
                 "mass": mass,
@@ -240,17 +240,17 @@ class LazySimulationReader:
                 "position": position,
                 "velocity": velocity,
                 "force": force,
-                "type": body_type,
+                "capability": body_capability,
             }
 
             # For accretors, read additional properties
-            if has_capability(body_type, BodyCapability.GRAVITATIONAL):
+            if has_capability(body_capability, BodyCapability.GRAVITATIONAL):
                 self._immersed_bodies_cache[f"body_{i}"].update(
                     {
                         "softening_length": body_group["softening_length"][()].item(),
                     }
                 )
-            if has_capability(body_type, BodyCapability.ACCRETION):
+            if has_capability(body_capability, BodyCapability.ACCRETION):
                 self._immersed_bodies_cache[f"body_{i}"].update(
                     {
                         "accretion_rate": body_group["accretion_rate"][()].item(),
@@ -263,7 +263,7 @@ class LazySimulationReader:
                         ].item(),
                     }
                 )
-            if has_capability(body_type, BodyCapability.RIGID):
+            if has_capability(body_capability, BodyCapability.RIGID):
                 self._immersed_bodies_cache[f"body_{i}"].update(
                     {
                         "inertia": body_group["inertia"][()].item(),
@@ -271,7 +271,7 @@ class LazySimulationReader:
                     }
                 )
 
-            if has_capability(body_type, BodyCapability.DEFORMABLE):
+            if has_capability(body_capability, BodyCapability.DEFORMABLE):
                 self._immersed_bodies_cache[f"body_{i}"].update(
                     {
                         "yield_stress": body_group["yield_stress"][()].item(),
@@ -279,7 +279,7 @@ class LazySimulationReader:
                     }
                 )
 
-            if has_capability(body_type, BodyCapability.ELASTIC):
+            if has_capability(body_capability, BodyCapability.ELASTIC):
                 self._immersed_bodies_cache[f"body_{i}"].update(
                     {
                         "elastic_modulus": body_group["elastic_modulus"][()].item(),
