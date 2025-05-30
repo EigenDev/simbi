@@ -91,7 +91,7 @@ def primitive_to_conserved(
     energy_index = config.dimensionality + 1
     if isothermal:
         # For isothermal flows, we store sound speed squared in energy slot
-        conserved[energy_index] = config.ambient_sound_speed**2
+        conserved[energy_index] = pressure / rho
     elif "sr" in regime:
         # Relativistic energy
         h = 1.0 + adiabatic_index * pressure / ((adiabatic_index - 1.0) * rho)
