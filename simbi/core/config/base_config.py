@@ -123,7 +123,7 @@ class SimbiBaseConfig(CLIConfigurableModel):
     )
 
     log_parameter_setup: bool = SimbiField(
-        False, description="Log parameter setup information"
+        True, description="Log parameter setup information"
     )
 
     # Isothermal physics
@@ -317,6 +317,101 @@ class SimbiBaseConfig(CLIConfigurableModel):
                 " unless you explicity set locally_isothermal to True."
             )
         return self
+
+    @model_validator(mode="after")
+    def log_parameters_if_enabled(self) -> "SimbiBaseConfig":
+        """Log parameters if log_parameter_setup is enabled."""
+        if self.log_parameter_setup:
+            self.print_parameters()
+        return self
+
+    def print_parameters(self) -> None:
+        """
+        Print parameters that are unique to this problem class and don't exist in the base class.
+
+        This method focuses only on problem-specific parameters that extend beyond what's
+        available in the base configuration.
+        """
+        import logging
+        import sys
+        from datetime import datetime
+
+        # Set up logger if not already configured
+        logger = logging.getLogger("simbi")
+        if not logger.handlers:
+            handler = logging.StreamHandler(sys.stdout)
+            formatter = logging.Formatter("%(message)s")
+            handler.setFormatter(formatter)
+            logger.addHandler(handler)
+            logger.setLevel(logging.INFO)
+
+        # Set up file logging if enabled
+        if self.log_output:
+            timestr = datetime.now().strftime("%Y%m%d-%H%M%S")
+            log_dir = Path(self.data_directory) / "logs"
+            log_dir.mkdir(parents=True, exist_ok=True)
+            logfile = log_dir / f"simbi_{timestr}.log"
+
+            file_handler = logging.FileHandler(logfile)
+            file_handler.setFormatter(logging.Formatter("%(message)s"))
+            logger.addHandler(file_handler)
+            logger.info(f"Writing log file: {logfile}")
+
+        # Get the class of the current instance and the base class
+        current_class = self.__class__
+        base_class = SimbiBaseConfig
+
+        # Print header with class name
+        logger.info(f"\n{current_class.__name__} Parameters:")
+        logger.info("=" * 80)
+
+        # Find fields that exist in the current class but not in the base class
+        problem_fields = {}
+
+        # Check each field in the current class
+        for field_name, field_info in current_class.model_fields.items():
+            # Skip private fields and CLI parser
+            if field_name.startswith("_") or field_name == "cli_parser":
+                continue
+
+            # Only include fields that don't exist in the base class
+            if field_name not in base_class.model_fields:
+                value = getattr(self, field_name)
+                description = field_info.description or ""
+                problem_fields[field_name] = (value, description)
+
+        # Print fields in a nicely formatted table
+        for name, (value, description) in sorted(problem_fields.items()):
+            # Format the value based on its type
+            if isinstance(value, float):
+                # Use scientific notation for large/small values
+                if value != 0 and (abs(value) < 0.001 or abs(value) > 1000):
+                    formatted_value = f"{value:.4e}"
+                else:
+                    formatted_value = f"{value:.4f}"
+            elif isinstance(value, (np.ndarray, list, tuple)):
+                if len(str(value)) > 20:  # Truncate long arrays
+                    formatted_value = f"{str(value)[:20]}..."
+                else:
+                    formatted_value = str(value)
+            elif callable(value) and not isinstance(value, (type, np.ndarray)):
+                # Skip callable objects
+                continue
+            else:
+                formatted_value = str(value)
+
+            # Truncate long values
+            if len(formatted_value) > 30:
+                formatted_value = formatted_value[:27] + "..."
+
+            # Print the parameter
+            logger.info(f"{name:.<30} {formatted_value:<30} {description}")
+
+        # Print a message if no unique fields were found
+        if not problem_fields:
+            logger.info("No unique parameters defined in this problem class.")
+
+        logger.info("=" * 80)
 
     # Method to generate initial state
     def initial_primitive_state(self) -> InitialStateType:
