@@ -91,7 +91,7 @@ class RichSimulationSummary:
         # get appropriate box style for this category or default to ROUNDED
         box_style = self.boxes.get(category, box.ROUNDED)
 
-        active_params = any(not not p for p in params.values())
+        active_params = any(p for p in params.values())
         if not active_params:
             # if no parameters are active, return an empty table
             return Table(box=box_style, title=category, width=TABLE_WIDTH)
@@ -132,6 +132,10 @@ class RichSimulationSummary:
         # add rows for each parameter
         for name, value in params.items():
             if value is None:
+                continue
+            elif value == {}:
+                continue
+            elif value == []:
                 continue
 
             if "expression" in name:

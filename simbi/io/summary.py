@@ -515,8 +515,6 @@ class SimulationParameterSummary:
 def print_simulation_parameters(params: dict[str, Any]) -> dict[str, Any]:
     """Print a summary of the simulation parameters"""
     try:
-        from rich.console import Console
-
         # Import locally to avoid dependency issues
         from .rich_summary import print_rich_simulation_parameters
 
