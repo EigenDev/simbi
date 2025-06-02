@@ -179,14 +179,20 @@ def labframe_energy_density(
 ) -> Array:
     """Calculate the labframe energy density"""
     vsq = sum(v**2 for v in vel)
-    lorentz = 1.0 / np.sqrt(1.0 - vsq)
     if regime == "classical":
-        return pre / (gamma - 1.0) + 0.5 * vsq
+        if gamma == 1.0:
+            # for the isothermal case,
+            # we store the sound speed squared in the
+            # energy density
+            return pre / rho
+        return pre / (gamma - 1.0) + 0.5 * rho * vsq
     elif regime == "srhd":
+        lorentz = 1.0 / np.sqrt(1.0 - vsq)
         return np.asarray(
             rho * lorentz**2 * enthalpy(rho, pre, gamma, regime) - pre - rho * lorentz
         )
     elif regime == "srmhd":
+        lorentz = 1.0 / np.sqrt(1.0 - vsq)
         bsq = sum(b**2 for b in bfield)
         return np.asarray(
             rho * lorentz**2 * enthalpy(rho, pre, gamma, regime)
