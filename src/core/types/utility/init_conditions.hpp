@@ -1,557 +1,283 @@
 /**
- *  *=============================================================================
- *  *           SIMBI - Special Relativistic Magnetohydrodynamics Code
- *  *=============================================================================
- *  *
- *  * @file            init_conditions.hpp
- *  * @brief           a struct to hold initial conditions for the simulation
- *  * @details
- *  *
- *  * @version         0.8.0
- *  * @date            2025-02-26
- *  * @author          Marcus DuPont
- *  * @email           marcus.dupont@princeton.edu
- *  *
- *  *==============================================================================
- *  * @build           Requirements & Dependencies
- *  *==============================================================================
- *  * @requires        C++20
- *  * @depends         CUDA >= 11.0, HDF5 >= 1.12, OpenMP >= 4.5
- *  * @platform        Linux, MacOS
- *  * @parallel        GPU (CUDA, HIP), CPU (OpenMP)
- *  *
- *  *==============================================================================
- *  * @documentation   Reference & Notes
- *  *==============================================================================
- *  * @usage
- *  * @note
- *  * @warning
- *  * @todo
- *  * @bug
- *  * @performance
- *  *
- *  *==============================================================================
- *  * @testing        Quality Assurance
- *  *==============================================================================
- *  * @test
- *  * @benchmark
- *  * @validation
- *  *
- *  *==============================================================================
- *  * @history        Version History
- *  *==============================================================================
- *  * 2025-02-26      v0.8.0      Initial implementation
- *  *
- *  *==============================================================================
- *  * @copyright (C) 2025 Marcus DuPont. All rights reserved.
- *  *==============================================================================
+ *=============================================================================
+ *           SIMBI - Special Relativistic Magnetohydrodynamics Code
+ *=============================================================================
+ *
+ * @file            init_conditions.hpp
+ * @brief
+ * @details
+ *
+ * @version         0.8.0
+ * @date            2025-06-02
+ * @author          Marcus DuPont
+ * @email           marcus.dupont@princeton.edu
+ *
+ *==============================================================================
+ * @build           Requirements & Dependencies
+ *==============================================================================
+ * @requires        C++20
+ * @depends         CUDA >= 11.0, HDF5 >= 1.12, OpenMP >= 4.5
+ * @platform        Linux, MacOS
+ * @parallel        GPU (CUDA, HIP), CPU (OpenMP)
+ *
+ *==============================================================================
+ * @documentation   Reference & Notes
+ *==============================================================================
+ * @usage
+ * @note
+ * @warning
+ * @todo
+ * @bug
+ * @performance
+ *
+ *==============================================================================
+ * @testing        Quality Assurance
+ *==============================================================================
+ * @test
+ * @benchmark
+ * @validation
+ *
+ *==============================================================================
+ * @history        Version History
+ *==============================================================================
+ * 2025-06-02      v0.8.0      Initial implementation
+ *
+ *==============================================================================
+ * @copyright (C) 2025 Marcus DuPont. All rights reserved.
+ *==============================================================================
  */
+
+
 #ifndef INIT_CONDITIONS_HPP
 #define INIT_CONDITIONS_HPP
 
-#include "build_options.hpp"   // for real
-#include "config_dict.hpp"     // for ConfigDict
-#include "core/types/utility/enums.hpp"
-#include "enums.hpp"
-#include <cstdint>
-#include <memory>
-#include <unordered_map>
+#include "build_options.hpp"
+#include "config_dict_visitor.hpp"
+#include "init_conditions_visitor.hpp"
+#include <list>
+#include <string>
 #include <utility>
+#include <vector>
 
-struct InitialConditions {
-    real time, checkpoint_interval, dlogt, viscosity;
-    real plm_theta, gamma, cfl, tend, sound_speed_squared;
-    luint nx, ny, nz, checkpoint_index;
-    bool quirk_smoothing, homologous, mesh_motion;
-    bool isothermal;
-    real shakura_sunyaev_alpha;
-    std::vector<std::vector<real>> bfield;
-    std::string data_directory, coord_system, solver;
-    std::string x1_spacing, x2_spacing, x3_spacing, regime;
-    std::string hydro_source_lib, gravity_source_lib, boundary_source_lib;
-    std::string spatial_order, temporal_order;
-    std::vector<std::string> boundary_conditions;
-    std::pair<real, real> x1bounds;
-    std::pair<real, real> x2bounds;
-    std::pair<real, real> x3bounds;
-    bool enable_peer_access{true}, managed_memory{false};
-    simbi::ConfigDict config;
-    std::vector<simbi::ConfigDict> immersed_bodies;
+namespace simbi {
 
-    // user-defined expressions to be evaluated
-    simbi::ConfigDict bx1_outer_expressions, bx1_inner_expressions;
-    simbi::ConfigDict bx2_outer_expressions, bx2_inner_expressions;
-    simbi::ConfigDict bx3_outer_expressions, bx3_inner_expressions;
-    simbi::ConfigDict hydro_source_expressions;
-    simbi::ConfigDict gravity_source_expressions;
-    simbi::ConfigDict local_sound_speed_expressions;
+    struct InitialConditions {
+        // Existing fields
+        real time;
+        real checkpoint_interval;
+        real dlogt;
+        real viscosity;
+        real plm_theta;
+        real gamma;
+        real cfl;
+        real tend;
+        real sound_speed_squared;
+        real shakura_sunyaev_alpha;
 
-    std::tuple<size_type, size_type, size_type> active_zones() const
-    {
-        const auto nghosts = 2 * (1 + (spatial_order == "plm"));
-        return std::make_tuple(
-            nx - nghosts,
-            std::max<lint>(ny - nghosts, 1),
-            std::max<lint>(nz - nghosts, 1)
-        );
-    }
+        luint nx;
+        luint ny;
+        luint nz;
+        luint checkpoint_index;
+        luint dimensionality;
+        luint nvars;
 
-    // Basic dictionary access methods
-    bool contains(const std::string& key) const
-    {
-        return config.find(key) != config.end();
-    }
+        bool quirk_smoothing;
+        bool homologous;
+        bool mesh_motion;
+        bool isothermal;
+        bool is_mhd;
+        bool is_relativistic;
 
-    const simbi::ConfigValue& at(const std::string& key) const
-    {
-        static const simbi::ConfigValue empty_value;
-        auto it = config.find(key);
-        return (it != config.end()) ? it->second : empty_value;
-    }
+        std::vector<std::vector<real>> bfield;
 
-    template <typename T>
-    T get(const std::string& key, const T& default_value) const
-    {
-        if (!contains(key)) {
-            return default_value;
+        std::string data_directory;
+        std::string coord_system;
+        std::string solver;
+        std::string x1_spacing;
+        std::string x2_spacing;
+        std::string x3_spacing;
+        std::string regime;
+        std::string spatial_order;
+        std::string temporal_order;
+
+        std::vector<std::string> boundary_conditions;
+
+        std::pair<real, real> x1bounds;
+        std::pair<real, real> x2bounds;
+        std::pair<real, real> x3bounds;
+
+        ConfigDict config;
+        std::vector<ConfigDict> immersed_bodies;
+
+        ConfigDict bx1_outer_expressions;
+        ConfigDict bx1_inner_expressions;
+        ConfigDict bx2_outer_expressions;
+        ConfigDict bx2_inner_expressions;
+        ConfigDict bx3_outer_expressions;
+        ConfigDict bx3_inner_expressions;
+        ConfigDict hydro_source_expressions;
+        ConfigDict gravity_source_expressions;
+        ConfigDict local_sound_speed_expressions;
+
+        // gpu-related fields
+        bool enable_peer_access{true};
+        bool managed_memory{false};
+
+        // New method to accept a visitor
+        template <typename Visitor>
+        void accept(Visitor& visitor)
+        {
+            // Call visitor methods for each field group
+            visitor
+                .visit_time_parameters(time, tend, dlogt, checkpoint_interval);
+            visitor.visit_resolution(nx, ny, nz);
+            visitor.visit_physics_parameters(
+                gamma,
+                cfl,
+                sound_speed_squared,
+                viscosity,
+                shakura_sunyaev_alpha
+            );
+            visitor.visit_flags(
+                quirk_smoothing,
+                homologous,
+                mesh_motion,
+                isothermal
+            );
+            visitor.visit_bounds(x1bounds, x2bounds, x3bounds);
+            visitor.visit_coordinates(
+                coord_system,
+                x1_spacing,
+                x2_spacing,
+                x3_spacing
+            );
+            visitor.visit_solver_settings(
+                solver,
+                spatial_order,
+                temporal_order,
+                regime,
+                plm_theta
+            );
+            visitor.visit_boundary_conditions(boundary_conditions);
+            visitor.visit_source_expressions(
+                bx1_inner_expressions,
+                bx1_outer_expressions,
+                bx2_inner_expressions,
+                bx2_outer_expressions,
+                bx3_inner_expressions,
+                bx3_outer_expressions,
+                hydro_source_expressions,
+                gravity_source_expressions,
+                local_sound_speed_expressions
+            );
+            visitor.visit_immersed_bodies(immersed_bodies);
+            visitor.visit_magnetic_field(bfield);
+            visitor.visit_output_settings(data_directory, checkpoint_index);
+            visitor.visit_computed_properties(
+                dimensionality,
+                is_mhd,
+                is_relativistic,
+                nvars
+            );
         }
-        try {
-            return at(key).template get<T>();
-        }
-        catch (...) {
-            return default_value;
-        }
-    }
 
-    simbi::ConfigDict get_dict(const std::string& key) const
-    {
-        if (!contains(key) || !at(key).is_dict()) {
-            return {};   // Return empty dict
-        }
-        return at(key).template get<simbi::ConfigDict>();
-    }
+        // Factory method using visitor pattern
+        static InitialConditions create(const ConfigDict& config)
+        {
+            InitialConditions result{};
 
-    simbi::ConfigValue get_nested(const std::string& nested_key) const
-    {
-        std::istringstream ss(nested_key);
-        std::string key;
-        std::vector<std::string> keys;
+            // First apply defaults
+            DefaultsVisitor defaults_visitor;
+            result.accept(defaults_visitor);
 
-        while (std::getline(ss, key, '.')) {
-            keys.push_back(key);
+            // Then populate from config
+            ConfigDictVisitor config_visitor(config);
+            result.accept(config_visitor);
+
+            // Validate the configuration
+            ValidationVisitor validation_visitor;
+            result.accept(validation_visitor);
+
+            // Store the original config for reference
+            result.config = config;
+
+            return result;
         }
 
-        if (keys.empty()) {
-            return {};
-        }
+        // Existing methods...
+        std::tuple<size_type, size_type, size_type> active_zones() const
+        {
+            const auto nghosts = 2 * (1 + (spatial_order == "plm"));
+            return std::make_tuple(
+                nx - nghosts,
+                std::max<lint>(ny - nghosts, 1),
+                std::max<lint>(nz - nghosts, 1)
+            );
+        };
+        bool contains(const std::string& key) const
+        {
+            return config.find(key) != config.end();
+        };
+        const ConfigValue& at(const std::string& key) const
+        {
+            static const ConfigValue empty_value;
+            auto it = config.find(key);
+            return (it != config.end()) ? it->second : empty_value;
+        };
 
-        const simbi::ConfigDict* current_dict = &config;
-        for (size_t i = 0; i < keys.size() - 1; ++i) {
-            auto it = current_dict->find(keys[i]);
-            if (it == current_dict->end() || !it->second.is_dict()) {
-                return {};   // Key not found or not a dictionary
+        template <typename T>
+        T get(const std::string& key) const
+        {
+            if (!contains(key)) {
+                throw std::runtime_error("Key not found: " + key);
             }
-            current_dict = &std::get<simbi::ConfigDict>(it->second.value);
-        }
-
-        auto it = current_dict->find(keys.back());
-        if (it == current_dict->end()) {
-            return {};   // Final key not found
-        }
-
-        return it->second;
-    }
-
-    // Builder class for InitialConditions
-    class Builder
-    {
-      public:
-        static InitialConditions
-        from_config(const simbi::ConfigDict& config_dict)
+            try {
+                return at(key).get<T>();
+            }
+            catch (const std::bad_cast&) {
+                throw std::runtime_error("Type mismatch for key: " + key);
+            }
+        };
+        ConfigDict get_dict(const std::string& key) const
         {
-            InitialConditions init;
-            // Store the full config for reference
-            init.config = config_dict;
+            if (!contains(key) || !at(key).is_dict()) {
+                return {};   // Return empty dict
+            }
+            return at(key).get<ConfigDict>();
+        };
 
-            // Build basic properties
-            build_basic_properties(init);
-
-            // Build boundary conditions
-            build_boundary_conditions(init);
-
-            // Build bounds
-            build_bounds(init);
-
-            // Build mesh properties
-            build_mesh_properties(init);
-
-            // Build physics properties
-            build_physics_properties(init);
-
-            // Build source libraries
-            build_source_libraries(init);
-
-            // Build immersed bodies (if present)
-            build_immersed_bodies(init);
-
-            // Build source expressions
-            build_source_expressions(init);
-
-            return init;
-        }
-
-      private:
-        // Helper methods to build different parts of InitialConditions
-        static void build_basic_properties(InitialConditions& init)
+        ConfigValue get_nested(const std::string& nested_key) const
         {
-            // Time settings
-            init.time = init.get<real>("start_time", 0.0);
-            init.tend = init.get<real>("end_time", 1.0);
-            init.checkpoint_interval =
-                init.get<real>("checkpoint_interval", 0.1);
-            init.dlogt            = init.get<real>("dlogt", 0.0);
-            init.checkpoint_index = init.get<luint>("checkpoint_index", 0);
+            std::istringstream ss(nested_key);
+            std::string key;
+            std::vector<std::string> keys;
 
-            // Solver settings
-            init.solver        = init.get<std::string>("solver", "hllc");
-            init.spatial_order = init.get<std::string>("spatial_order", "plm");
-            init.temporal_order =
-                init.get<std::string>("temporal_order", "rk2");
-            init.plm_theta       = init.get<real>("plm_theta", 1.5);
-            init.quirk_smoothing = init.get<bool>("quirk_smoothing", false);
-            init.regime          = init.get<std::string>("regime", "classical");
-            init.cfl             = init.get<real>("cfl_number", 0.3);
-            init.viscosity       = init.get<real>("viscosity", 0.0);
+            while (std::getline(ss, key, '.')) {
+                keys.push_back(key);
+            }
 
-            // I/O settings
-            init.data_directory =
-                init.get<std::string>("data_directory", "data/");
-        }
+            if (keys.empty()) {
+                return {};
+            }
 
-        static void build_boundary_conditions(InitialConditions& init)
-        {
-            if (init.contains("boundary_conditions")) {
-                if (init.at("boundary_conditions").is_array_of_strings()) {
-                    init.boundary_conditions =
-                        init.at("boundary_conditions")
-                            .get<std::vector<std::string>>();
+            const simbi::ConfigDict* current_dict = &config;
+            for (size_t i = 0; i < keys.size() - 1; ++i) {
+                auto it = current_dict->find(keys[i]);
+                if (it == current_dict->end() || !it->second.is_dict()) {
+                    return {};   // Key not found or not a dictionary
                 }
-                else if (init.at("boundary_conditions").is_string()) {
-                    // Single boundary condition for all boundaries
-                    std::string bc = init.at("boundary_conditions")
-                                         .template get<std::string>();
-                    // Create vector with appropriate size based on
-                    // dimensionality
-                    int ndims = 1;
-                    if (init.contains("dimensionality")) {
-                        ndims = init.get<int>("dimensionality", 1);
-                    }
-                    else if (init.contains("resolution")) {
-                        auto res = init.at("resolution")
-                                       .template get<std::vector<real>>();
-                        ndims = res.size();
-                    }
-                    init.boundary_conditions.resize(2 * ndims, bc);
-                }
-            }
-            else {
-                // default to outflow for all boundaries
-                int ndims = 1;
-                if (init.contains("dimensionality")) {
-                    ndims = init.get<int>("dimensionality", 1);
-                }
-                else if (init.contains("resolution")) {
-                    auto res =
-                        init.at("resolution").template get<std::vector<real>>();
-                    ndims = res.size();
-                }
-                init.boundary_conditions.resize(2 * ndims, "outflow");
-            }
-        }
-
-        static void build_bounds(InitialConditions& init)
-        {
-            if (init.contains("bounds") &&
-                init.at("bounds").is_nested_array_of_floats()) {
-                auto bounds =
-                    init.at("bounds")
-                        .template get<std::vector<std::vector<real>>>();
-                if (bounds.size() >= 1 && bounds[0].size() >= 2) {
-                    init.x1bounds = std::make_pair(bounds[0][0], bounds[0][1]);
-                }
-                if (bounds.size() >= 2 && bounds[1].size() >= 2) {
-                    init.x2bounds = std::make_pair(bounds[1][0], bounds[1][1]);
-                }
-                if (bounds.size() >= 3 && bounds[2].size() >= 2) {
-                    init.x3bounds = std::make_pair(bounds[2][0], bounds[2][1]);
-                }
-            }
-            else {
-                // get individual x1bounds, x2bounds, x3bounds
-                if (init.contains("x1bounds") &&
-                    init.at("x1bounds").is_pair()) {
-                    init.x1bounds = init.at("x1bounds")
-                                        .template get<std::pair<real, real>>();
-                }
-                if (init.contains("x2bounds") &&
-                    init.at("x2bounds").is_pair()) {
-                    init.x2bounds = init.at("x2bounds")
-                                        .template get<std::pair<real, real>>();
-                }
-                if (init.contains("x3bounds") &&
-                    init.at("x3bounds").is_pair()) {
-                    init.x3bounds = init.at("x3bounds")
-                                        .template get<std::pair<real, real>>();
-                }
-            }
-        }
-
-        static void build_mesh_properties(InitialConditions& init)
-        {
-            // Resolution
-            if (init.contains("resolution") &&
-                init.at("resolution").is_array_of_ints()) {
-                auto res =
-                    init.at("resolution").template get<std::vector<int>>();
-
-                const auto nghosts = 2 * (1 + (init.spatial_order == "plm"));
-                const auto is_mhd  = init.at("is_mhd").template get<bool>();
-
-                init.nx = res[0] + nghosts;
-                init.ny = res[1] + nghosts * (res[1] > 1 || is_mhd);
-                init.nz = res[2] + nghosts * (res[2] > 1 || is_mhd);
-            }
-            else {
-                // Try individual nx, ny, nz
-                // python should take care of this, though
-                // so maybe I'll remove this later
-                // TODO: rethink this part
-                init.nx = init.get<luint>("nx", 100);
-                init.ny = init.get<luint>("ny", 1);
-                init.nz = init.get<luint>("nz", 1);
+                current_dict = &std::get<simbi::ConfigDict>(it->second.value);
             }
 
-            // Coordinate system
-            init.coord_system =
-                init.get<std::string>("coord_system", "cartesian");
-
-            // Grid spacing
-            init.x1_spacing = init.get<std::string>("x1_spacing", "linear");
-            init.x2_spacing = init.get<std::string>("x2_spacing", "linear");
-            init.x3_spacing = init.get<std::string>("x3_spacing", "linear");
-
-            // Mesh motion
-            init.mesh_motion = init.get<bool>("mesh_motion", false);
-            init.homologous  = init.get<bool>("is_homologous", false);
-        }
-
-        static void build_physics_properties(InitialConditions& init)
-        {
-            // Equation of state
-            init.gamma      = init.get<real>("adiabatic_index", 5.0 / 3.0);
-            init.isothermal = init.get<bool>("isothermal", false);
-            init.shakura_sunyaev_alpha =
-                init.get<real>("shakura_sunyaev_alpha", 0.0);
-
-            real ambient_sound_speed =
-                init.get<real>("ambient_sound_speed", 1.0);
-            if (ambient_sound_speed != 0.0) {
-                init.sound_speed_squared =
-                    ambient_sound_speed * ambient_sound_speed;
+            auto it = current_dict->find(keys.back());
+            if (it == current_dict->end()) {
+                return {};   // Final key not found
             }
 
-            // Magnetic field (if present)
-            if (init.contains("bfield") &&
-                init.at("bfield").is_nested_array_of_floats()) {
-                init.bfield =
-                    init.at("bfield")
-                        .template get<std::vector<std::vector<real>>>();
-            }
-        }
-
-        static void build_source_libraries(InitialConditions& init)
-        {
-            init.hydro_source_lib =
-                init.get<std::string>("hydro_source_lib", "");
-            init.gravity_source_lib =
-                init.get<std::string>("gravity_source_lib", "");
-            init.boundary_source_lib =
-                init.get<std::string>("boundary_source_lib", "");
-        }
-
-        static void build_source_expressions(InitialConditions& init)
-        {
-            // Load expressions for boundary conditions
-            if (init.contains("bx1_inner_expressions")) {
-                init.bx1_inner_expressions =
-                    init.get_dict("bx1_inner_expressions");
-            }
-            if (init.contains("bx1_outer_expressions")) {
-                init.bx1_outer_expressions =
-                    init.get_dict("bx1_outer_expressions");
-            }
-            if (init.contains("bx2_inner_expressions")) {
-                init.bx2_inner_expressions =
-                    init.get_dict("bx2_inner_expressions");
-            }
-            if (init.contains("bx2_outer_expressions")) {
-                init.bx2_outer_expressions =
-                    init.get_dict("bx2_outer_expressions");
-            }
-            if (init.contains("bx3_inner_expressions")) {
-                init.bx3_inner_expressions =
-                    init.get_dict("bx3_inner_expressions");
-            }
-            if (init.contains("bx3_outer_expressions")) {
-                init.bx3_outer_expressions =
-                    init.get_dict("bx3_outer_expressions");
-            }
-
-            // Load expressions for hydro sources
-            if (init.contains("hydro_source_expressions")) {
-                init.hydro_source_expressions =
-                    init.get_dict("hydro_source_expressions");
-            }
-
-            // Load expressions for gravity sources
-            if (init.contains("gravity_source_expressions")) {
-                init.gravity_source_expressions =
-                    init.get_dict("gravity_source_expressions");
-            }
-
-            // Load expressions for locally defined sound speed
-            if (init.contains("local_sound_speed_expressions")) {
-                init.local_sound_speed_expressions =
-                    init.get_dict("local_sound_speed_expressions");
-            }
-        }
-
-        static void build_immersed_bodies(InitialConditions& init)
-        {
-            // Clear existing bodies
-            init.immersed_bodies.clear();
-
-            // Check if bodies are provided in list format
-            if (init.contains("immersed_bodies") &&
-                init.at("immersed_bodies").is_list()) {
-                const auto& bodies_list =
-                    init.at("immersed_bodies")
-                        .template get<std::list<simbi::ConfigDict>>();
-
-                for (const auto& body_dict : bodies_list) {
-                    // extract body type from the dict!
-                    if (!body_dict.contains("capability") ||
-                        !body_dict.at("capability").is_body_cap()) {
-                        continue;   // Skip invalid body entries
-                    }
-
-                    // create property map
-                    simbi::ConfigDict props;
-
-                    // add the required properties
-                    add_vector_property(body_dict, "position", props);
-                    add_vector_property(body_dict, "velocity", props);
-                    add_scalar_property(body_dict, "mass", props);
-                    add_scalar_property(body_dict, "radius", props);
-                    add_boolean_property(body_dict, "two_way_coupling", props);
-                    add_body_property(body_dict, "capability", props);
-
-                    // add specifics/extra properties
-                    // this is a dictionary of properties that are specific to
-                    // the body type
-                    if (body_dict.contains("specifics") &&
-                        body_dict.at("specifics").is_dict()) {
-                        const auto& specifics =
-                            body_dict.at("specifics")
-                                .template get<simbi::ConfigDict>();
-                        for (const auto& [key, value] : specifics) {
-                            add_property(key, value, props);
-                        }
-                    }
-
-                    // add other properties (not in specifics)
-                    for (const auto& [key, value] : body_dict) {
-                        if (key != "capability" && key != "position" &&
-                            key != "velocity" && key != "mass" &&
-                            key != "radius" && key != "specifics") {
-                            add_property(key, value, props);
-                        }
-                    }
-
-                    // add to immersed_bodies
-                    init.immersed_bodies.push_back(props);
-                }
-            }
-        }
-
-        static void add_property(
-            const std::string& name,
-            const simbi::ConfigValue& value,
-            simbi::ConfigDict& props
-        )
-        {
-            if (value.is_real_number()) {
-                props[name] = static_cast<real>(value.get<double>());
-            }
-            else if (value.is_array_of_floats()) {
-                props[name] = value.get<std::vector<double>>();
-            }
-            else if (value.is_bool()) {
-                props[name] = value.get<bool>();
-            }
-        }
-
-        static void add_vector_property(
-            const simbi::ConfigDict& dict,
-            const std::string& name,
-            simbi::ConfigDict& props
-        )
-        {
-            if (dict.contains(name) && dict.at(name).is_array_of_floats()) {
-                props[name] = dict.at(name).template get<std::vector<double>>();
-            }
-        }
-
-        static void add_scalar_property(
-            const simbi::ConfigDict& dict,
-            const std::string& name,
-            simbi::ConfigDict& props
-        )
-        {
-            if (dict.contains(name) && dict.at(name).is_real_number()) {
-                props[name] =
-                    static_cast<real>(dict.at(name).template get<double>());
-            }
-        }
-        static void add_boolean_property(
-            const simbi::ConfigDict& dict,
-            const std::string& name,
-            simbi::ConfigDict& props
-        )
-        {
-            if (dict.contains(name) && dict.at(name).is_bool()) {
-                props[name] = dict.at(name).template get<bool>();
-            }
-        }
-
-        static void add_body_property(
-            const simbi::ConfigDict& dict,
-            const std::string& name,
-            simbi::ConfigDict& props
-        )
-        {
-            if (dict.contains(name) && dict.at(name).is_body_cap()) {
-                props[name] =
-                    dict.at(name).template get<simbi::BodyCapability>();
-            }
-        }
+            return it->second;
+        };
     };
 
-    // static factory method to create InitialConditions from ConfigDict
-    static InitialConditions create(const simbi::ConfigDict& config)
-    {
-        return Builder::from_config(config);
-    }
-};
+}   // namespace simbi
 
-#endif
+#endif   // INIT_CONDITIONS_HPP
