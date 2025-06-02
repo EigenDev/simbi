@@ -606,6 +606,10 @@ namespace simbi {
         auto spatial_order() const { return solver_config_.spatial_order(); }
         auto temporal_order() const { return solver_config_.temporal_order(); }
         DUAL auto viscosity() const { return solver_config_.viscosity(); }
+        DUAL auto shakura_sunyaev_alpha() const
+        {
+            return solver_config_.shakura_sunyaev_alpha();
+        }
 
         // accessors from time manager class
         DUAL auto time() const { return time_manager_.time(); }
@@ -673,6 +677,7 @@ namespace simbi {
 
         // some mixed accesors
         DUAL auto time_step() const { return dt() * step(); }
+        DUAL auto cfl_number() const { return cfl_; }
         // accessors from grid manager class
         auto nx() const { return mesh_.grid().total_gridsize(0); }
         auto ny() const { return mesh_.grid().total_gridsize(1); }
