@@ -16,8 +16,6 @@ from pydantic import computed_field
 from pathlib import Path
 from typing import Any
 
-from simbi.old_core.types.constants import BoundaryCondition
-
 
 class KeplerianRingTest(SimbiBaseConfig):
     """
@@ -50,11 +48,7 @@ class KeplerianRingTest(SimbiBaseConfig):
     adiabatic_index: float = SimbiField(1.0, description="Adiabatic index (isothermal)")
 
     # Optional fields with non-default values
-    ambient_sound_speed: float = SimbiField(
-        0.01, description="Ambient sound speed for isothermal simulations"
-    )
-
-    solver: Solver = SimbiField(Solver.HLLC, description="Numerical solver")
+    solver: Solver = SimbiField(Solver.AUSM_PLUS, description="Numerical solver")
 
     data_directory: Path = SimbiField(
         Path("data/kepler/"), description="Output data directory"
@@ -104,6 +98,11 @@ class KeplerianRingTest(SimbiBaseConfig):
             "r_outer": r_outer,
             "damp_time": self.buffer_damp_time * T_orb,
         }
+
+    @computed_field
+    @property
+    def ambient_sound_speed(self) -> float:
+        return 0.01  # Isothermal sound speed (constant)
 
     @computed_field
     @property
