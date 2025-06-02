@@ -107,16 +107,14 @@ class ArgumentMapping:
 
 
 def parse_key_value_pairs(
-    pairs: Sequence[str], value_converter: Callable[[str], T] = str
+    pairs: dict[str, Any], value_converter: Callable[[str], T] = str
 ) -> dict[str, T]:
     """Parse key=value pairs into a dictionary"""
     if not pairs:
         return {}
 
     result = {}
-    for pair in pairs:
-        key, value = pair.split("=")
-
+    for key, value in pairs.items():
         # Handle existing keys
         if key in result:
             if isinstance(result[key], list):
