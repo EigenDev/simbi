@@ -69,7 +69,7 @@ cdef extern from "build_options.hpp":
 cdef extern from "core/types/utility/init_conditions.hpp":
     ctypedef variant[real, vector[real]] PropertyValue "InitialConditions::PropertyValue"
 
-cdef extern from "core/types/utility/init_conditions.hpp":
+cdef extern from "core/types/utility/init_conditions.hpp" namespace "simbi":
     cdef cppclass InitialConditions:
         @staticmethod
         InitialConditions create(ConfigDict sim_dict) except +
