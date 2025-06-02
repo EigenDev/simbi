@@ -19,17 +19,13 @@ class ParseKVAction(argparse.Action):
         values: Any,
         option_string: str | None = None,
     ) -> None:
-        setattr(namespace, self.dest, dict())
-        for each in values:
-            try:
-                key, value = each.split("=")
-                if "," in value:
-                    value = value.split(",")
-                getattr(namespace, self.dest)[key] = value
-            except ValueError as ex:
-                message = "\nTraceback: {}".format(ex)
-                message += "\nError on '{}' || It should be 'key=value'".format(each)
-                raise argparse.ArgumentError(self, str(message))
+        try:
+            the_dict = dict(map(lambda x: x.split("="), values))
+        except ValueError as ex:
+            message = "\nTraceback: {}".format(ex)
+            message += "\nError on '{}' || It should be 'key=value'".format(each)
+            raise argparse.ArgumentError(self, str(message))
+        setattr(namespace, self.dest, the_dict)
 
 
 class ParseKVActionToList(argparse.Action):
@@ -209,7 +205,7 @@ def setup_parser(parser: argparse.ArgumentParser) -> None:
         nargs="+",
         help="Slice coordinates (key=value format)",
         action=ParseKVActionToList,
-        default=("xj=0.0", "xk=0.0"),
+        default={"xj": [0.0], "xk": [0.0]},
     )
 
     # Multidim options
@@ -301,7 +297,7 @@ def setup_parser(parser: argparse.ArgumentParser) -> None:
         "--orbital-params",
         nargs="+",
         help="Orbital parameters (key=value format)",
-        action=ParseKVActionToList,
+        action=ParseKVAction,
     )
     parser.add_argument(
         "--inset",
