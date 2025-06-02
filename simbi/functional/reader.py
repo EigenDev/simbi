@@ -26,10 +26,7 @@ def vector(ndim: int, name: str) -> Sequence[str]:
 
 
 def vec_from_dict(the_dict: dict[str, Any], ndim: int, name: str) -> Sequence[Array]:
-    try:
-        return [the_dict[f"{name}{i}"] for i in range(1, ndim + 1)]
-    except KeyError:
-        return [np.zeros(1)] * ndim
+    return [the_dict.get(f"{name}{i}", 0.0) for i in range(1, ndim + 1)]
 
 
 class LazySimulationReader:
@@ -291,6 +288,9 @@ class LazySimulationReader:
         """Load and process metadata from file."""
 
         raw_metadata = dict(file_obj["sim_info"].attrs)
+        boundary_conditions = [
+            b.decode("utf-8") for b in file_obj["boundary_conditions"][:]
+        ]
         # decode byte strings if present
         self._metadata_cache = {
             k: v.decode("utf-8") if isinstance(v, bytes) else v
@@ -299,6 +299,18 @@ class LazySimulationReader:
         # turn numpy uint8 into bool
         self._metadata_cache = {
             k: bool(v) if isinstance(v, np.uint8) else v
+            for k, v in self._metadata_cache.items()
+        }
+
+        # turn numpy float64 into float
+        self._metadata_cache = {
+            k: float(v) if isinstance(v, np.floating) else v
+            for k, v in self._metadata_cache.items()
+        }
+
+        # turn numpy int64 into int
+        self._metadata_cache = {
+            k: int(v) if isinstance(v, np.integer) else v
             for k, v in self._metadata_cache.items()
         }
 
@@ -325,13 +337,19 @@ class LazySimulationReader:
                     for k, v in self._metadata_cache["system_config"].items()
                 }
 
+        nghosts = 1 + (self._metadata_cache["spatial_order"] == "plm")
         # derived metadata
         self._metadata_cache.update(
             {
                 "is_cartesian": self._metadata_cache["geometry"]
                 in ["cartesian", "axis_cylindrical", "cylindrical"],
+                "is_mhd": "mhd" in self._metadata_cache["regime"],
                 "coord_system": self._metadata_cache.pop("geometry"),
                 "time": self._metadata_cache.pop("current_time", 0.0),
+                "active_x": self._metadata_cache["nx"] - 2 * nghosts,
+                "active_y": max(self._metadata_cache["ny"] - 2 * nghosts, 1),
+                "active_z": max(self._metadata_cache["nz"] - 2 * nghosts, 1),
+                "boundary_conditions": boundary_conditions,
             }
         )
 
@@ -420,6 +438,9 @@ class LazySimulationReader:
     def _average_field(self, data: Array, field_name: str) -> Array:
         if self._is_gas_variable(field_name):
             return data
+
+        if "mhd" not in self.metadata["regime"]:
+            return np.zeros(1)
 
         if field_name == "b1":
             bview = data[1:-1, 1:-1] if self.unpad_mode else data
