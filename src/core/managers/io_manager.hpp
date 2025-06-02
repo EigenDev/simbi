@@ -202,7 +202,7 @@ namespace simbi {
 
         // accessors
         auto& data_directory() const { return data_directory_; }
-        auto& data_directory() { return data_directory_; }
+        // auto& data_directory() { return data_directory_; }
         auto current_iter() const { return current_iter_; }
         auto checkpoint_zones() const { return checkpoint_zones_; }
         auto checkpoint_index() const { return checkpoint_idx_; }
