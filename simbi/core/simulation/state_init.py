@@ -21,8 +21,8 @@ class SimulationState:
 
     primitive_state: NDArray[np.floating]  # (nvars, nx, ny, nz)
     conserved_state: NDArray[np.floating]  # (nvars, nx, ny, nz)
+    config: SimbiBaseConfig
     staggered_bfields: Optional[list[NDArray[np.floating]]] = None
-    config: Optional[SimbiBaseConfig] = None
 
 
 def is_mhd_generator(gen: InitialStateType) -> bool:
@@ -324,15 +324,8 @@ def load_or_initialize_state(
 
     # Try to load from checkpoint if specified
     if config.checkpoint_file:
-        checkpoint_state = load_checkpoint_to_state(config.checkpoint_file, config)
-        if not checkpoint_state.is_error():
-            print(
-                f"Successfully loaded state from checkpoint: {config.checkpoint_file}"
-            )
-            return checkpoint_state
-        else:
-            print(f"Failed to load checkpoint: {checkpoint_state.error}")
-            print("Falling back to initializing from config...")
+        checkpoint_state = load_checkpoint_to_state(config)
+        return checkpoint_state
 
     # Initialize from config and wrap in Maybe for consistency
     return Maybe.of(initialize_state(config))

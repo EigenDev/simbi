@@ -307,13 +307,19 @@ namespace simbi {
 
             // write simulation information in attributes and then close the
             // file
-            auto time_val         = state.time();
-            auto dt_val           = state.dt();
-            auto nx_val           = state.nx();
-            auto ny_val           = state.ny();
-            auto nz_val           = state.nz();
-            bool using_fourvel    = global::using_four_velocity;
-            bool mesh_moving      = state.mesh().mesh_is_moving();
+            auto current_time          = state.time();
+            auto end_time              = state.tend();
+            auto cfl_number            = state.cfl_number();
+            auto plm_theta             = state.plm_theta();
+            auto viscosity             = state.viscosity();
+            auto shakura_sunyaev_alpha = state.shakura_sunyaev_alpha();
+            auto dt_val                = state.dt();
+            auto nx_val                = state.nx();
+            auto ny_val                = state.ny();
+            auto nz_val                = state.nz();
+            bool using_fourvel         = global::using_four_velocity;
+            bool using_quirk_smoothing = state.quirk_smoothing();
+            bool mesh_moving           = state.mesh().mesh_is_moving();
             auto x1min            = state.mesh().geometry_state().min_bound(0);
             auto x1max            = state.mesh().geometry_state().max_bound(0);
             auto x2min            = state.mesh().geometry_state().min_bound(1);
@@ -321,10 +327,12 @@ namespace simbi {
             auto x3min            = state.mesh().geometry_state().min_bound(2);
             auto x3max            = state.mesh().geometry_state().max_bound(2);
             auto checkpoint_index = state.io().checkpoint_index();
-            auto gamma_val        = state.adiabatic_index();
-            auto spatial_order    = state.spatial_order();
-            auto temporal_order   = state.temporal_order();
-            auto geometry         = state.mesh().geometry_to_c_str();
+            auto checkpoint_interval =
+                state.time_manager().checkpoint_interval();
+            auto gamma_val      = state.adiabatic_index();
+            auto spatial_order  = state.spatial_order();
+            auto temporal_order = state.temporal_order();
+            auto geometry       = state.mesh().geometry_to_c_str();
             auto x1_spacing =
                 cell2str.at(state.mesh().geometry_state().spacing_type(0));
             auto x2_spacing =
@@ -334,11 +342,17 @@ namespace simbi {
 
             const std::vector<std::pair<std::string, const void*>> attributes =
                 {
-                  {"current_time", &time_val},
+                  {"current_time", &current_time},
+                  {"end_time", &end_time},
+                  {"cfl_number", &cfl_number},
                   {"time_step", &dt_val},
+                  {"plm_theta", &plm_theta},
+                  {"viscosity", &viscosity},
+                  {"shakura_sunyaev_alpha", &shakura_sunyaev_alpha},
                   {"spatial_order", spatial_order.c_str()},
                   {"temporal_order", temporal_order.c_str()},
                   {"using_gamma_beta", &using_fourvel},
+                  {"using_quirk_smoothing", &using_quirk_smoothing},
                   {"mesh_motion", &mesh_moving},
                   {"x1max", &x1max},
                   {"x1min", &x1min},
@@ -351,19 +365,23 @@ namespace simbi {
                   {"ny", &ny_val},
                   {"nz", &nz_val},
                   {"checkpoint_index", &checkpoint_index},
+                  {"checkpoint_interval", &checkpoint_interval},
                   {"geometry", geometry},
                   {"regime", regime.c_str()},
                   {"dimensions", &state.dimensions},
                   {"x1_spacing", x1_spacing.c_str()},
                   {"x2_spacing", x2_spacing.c_str()},
                   {"x3_spacing", x3_spacing.c_str()},
+                  {"data_directory", data_directory.c_str()},
+                  {"solver", state.solver_config().solver_name().data()},
                 };
 
             for (const auto& [name, value] : attributes) {
                 H5::DataType type;
                 if (name == "spatial_order" || name == "temporal_order" ||
                     name == "geometry" || name == "regime" ||
-                    name.find("_spacing") != std::string::npos) {
+                    name.find("_spacing") != std::string::npos ||
+                    name == "solver" || name == "data_directory") {
 
                     type = H5::StrType(H5::PredType::C_S1, 256);
                 }

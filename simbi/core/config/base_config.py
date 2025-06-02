@@ -5,7 +5,7 @@ This module provides the foundational configuration model that defines
 the structure and validation rules for simulation configurations.
 """
 
-from pydantic import computed_field, model_validator
+from pydantic import computed_field, model_validator, PrivateAttr
 from typing import (
     Any,
     ClassVar,
@@ -15,12 +15,15 @@ from typing import (
     Callable,
     get_args,
     get_origin,
+    final,
 )
 import argparse
 import math
 from pathlib import Path
 import numpy as np
 from numpy.typing import NDArray
+
+from simbi.core.io.ib_load import load_immersed_bodies_or_body_system
 
 from ..types.typing import InitialStateType, ExpressionDict
 from ..types.input import (
@@ -32,7 +35,10 @@ from ..types.input import (
     Solver,
     BoundaryCondition,
 )
-from ..types.bodies import BodySystemConfig, ImmersedBodyConfig
+from ..types.bodies import (
+    BodySystemConfig,
+    ImmersedBodyConfig,
+)
 from .parameters import CLIConfigurableModel
 from .fields import SimbiField
 
@@ -44,6 +50,10 @@ class SimbiBaseConfig(CLIConfigurableModel):
     Problem implementations should extend this class and provide problem-specific
     parameters and methods.
     """
+
+    _from_checkpoint_called: ClassVar[bool] = False
+    _body_system: BodySystemConfig = PrivateAttr(default_factory=BodySystemConfig)
+    _immersed_bodies: list[ImmersedBodyConfig] = PrivateAttr(default_factory=list)
 
     # Track CLI parser for global access
     cli_parser: ClassVar[Optional[argparse.ArgumentParser]] = None
@@ -131,8 +141,6 @@ class SimbiBaseConfig(CLIConfigurableModel):
     @property
     def ambient_sound_speed(self) -> float:
         """Ambient sound speed for isothermal simulations"""
-        if self.isothermal:
-            return (self.adiabatic_index - 1.0) / self.adiabatic_index
         return 0.0
 
     @computed_field
@@ -234,6 +242,29 @@ class SimbiBaseConfig(CLIConfigurableModel):
         """Get the list of immersed bodies configuration"""
         return []
 
+    def set_body_system(self, body_system: BodySystemConfig) -> None:
+        """Set the body system configuration from checkpoint data."""
+        if not isinstance(body_system, BodySystemConfig):
+            raise TypeError("body_system must be an instance of BodySystemConfig")
+        self._body_system = body_system
+
+    def set_immersed_bodies(
+        self, immersed_bodies: Union[ImmersedBodyConfig, Sequence[ImmersedBodyConfig]]
+    ) -> None:
+        """Set the immersed bodies configuration from checkpoint data."""
+        if isinstance(immersed_bodies, ImmersedBodyConfig):
+            self._immersed_bodies = [immersed_bodies]
+        elif isinstance(immersed_bodies, list):
+            if not all(isinstance(b, ImmersedBodyConfig) for b in immersed_bodies):
+                raise TypeError(
+                    "All immersed bodies must be instances of ImmersedBodyConfig"
+                )
+            self._immersed_bodies = list(immersed_bodies)
+        else:
+            raise TypeError(
+                "immersed_bodies must be an ImmersedBodyConfig or a list of them"
+            )
+
     @computed_field
     @property
     def dimensionality(self) -> int:
@@ -243,7 +274,7 @@ class SimbiBaseConfig(CLIConfigurableModel):
 
         if isinstance(self.resolution, int):
             return 1
-        return len(self.resolution)
+        return sum(d > 1 for d in self.resolution)
 
     @computed_field
     @property
@@ -283,7 +314,7 @@ class SimbiBaseConfig(CLIConfigurableModel):
 
     @computed_field
     @property
-    def is_homlogous(self) -> bool:
+    def is_homologous(self) -> bool:
         """Check if the simulation is homologous"""
         if self.mesh_motion and self.coord_system in [CoordSystem.SPHERICAL]:
             return True
@@ -307,6 +338,9 @@ class SimbiBaseConfig(CLIConfigurableModel):
     @model_validator(mode="after")
     def validate_isothermal_settings(self) -> "SimbiBaseConfig":
         """Validate isothermal simulation settings"""
+        if self._from_checkpoint_called:
+            # Skip validation if loading from checkpoint
+            return self
         if (
             self.isothermal
             and self.ambient_sound_speed <= 0
@@ -315,6 +349,15 @@ class SimbiBaseConfig(CLIConfigurableModel):
             raise ValueError(
                 "Ambient sound speed must be positive / non-zero for isothermal simulations"
                 " unless you explicity set locally_isothermal to True."
+            )
+        return self
+
+    @model_validator(mode="after")
+    def validate_plm_theta(self) -> "SimbiBaseConfig":
+        """Validate PLM theta parameter."""
+        if self.spatial_order == SpatialOrder.PLM and not (0.0 < self.plm_theta <= 2.0):
+            raise ValueError(
+                "PLM theta must be in the range (0, 2] when using PLM spatial order."
             )
         return self
 
@@ -456,3 +499,96 @@ class SimbiBaseConfig(CLIConfigurableModel):
                             continue
 
         return data
+
+    @final
+    def merge_with_checkpoint(
+        self,
+        checkpoint_metadata: dict[str, Any],
+        immersed_bodies_config: Optional[
+            Union[BodySystemConfig, Sequence[ImmersedBodyConfig]]
+        ] = None,
+    ) -> "SimbiBaseConfig":
+        """
+        Create a new config using this (default) config as base,
+        with checkpoint state data overlaid.
+        """
+        # Extract only the "state" fields that should come from checkpoint
+        state_fields = {
+            "resolution",
+            "bounds",
+            "start_time",
+            "end_time",
+            "checkpoint_index",
+            "adiabatic_index",
+            "cfl_number",
+            "data_directory",
+            "solver",
+            # "boundary_conditions",
+            "plm_theta",
+            "spatial_order",
+            "temporal_order",
+        }
+
+        # Build update dict with only the fields that exist in checkpoint
+        updates = {
+            field: checkpoint_metadata[field]
+            for field in state_fields
+            if field in checkpoint_metadata and field in self.model_fields
+        }
+
+        if isinstance(immersed_bodies_config, BodySystemConfig):
+            self.set_body_system(immersed_bodies_config)
+        elif isinstance(immersed_bodies_config, list):
+            self.set_immersed_bodies(immersed_bodies_config)
+
+        # Create new config with checkpoint state but keeping all computed fields
+        return self.model_copy(update=updates)
+
+    # Factory method to load from some checkpoint or configuration file
+    @final
+    @classmethod
+    def from_checkpoint_and_default(
+        cls,
+        default_config: "SimbiBaseConfig",
+        metadata: dict[str, Any],
+        immersed_bodies_metadata: dict[str, Any],
+    ) -> "SimbiBaseConfig":
+        """Create config from checkpoint data."""
+        # Process checkpoint metadata into the right format
+        checkpoint_data = {
+            "resolution": tuple(
+                r
+                for r, _ in zip(
+                    [metadata["active_x"], metadata["active_y"], metadata["active_z"]],
+                    range(default_config.dimensionality),
+                )
+            ),
+            "start_time": float(metadata["time"]),
+            "end_time": float(metadata["end_time"]),
+            "adiabatic_index": float(metadata["adiabatic_index"]),
+            "cfl_number": float(metadata["cfl_number"]),
+            "data_directory": Path(metadata["data_directory"]),
+            "solver": Solver(metadata["solver"]),
+            "boundary_conditions": (
+                [BoundaryCondition(b) for b in metadata["boundary_conditions"]]
+                if isinstance(metadata["boundary_conditions"], list)
+                else [BoundaryCondition(metadata["boundary_conditions"])]
+            ),
+            "plm_theta": float(metadata["plm_theta"]),
+            "spatial_order": SpatialOrder(metadata["spatial_order"]),
+            "temporal_order": TimeStepping(metadata["temporal_order"]),
+            "checkpoint_index": int(metadata["checkpoint_index"]),
+            "checkpoint_interval": float(metadata["checkpoint_interval"]),
+            "x1_spacing": CellSpacing(metadata["x1_spacing"]),
+            "x2_spacing": CellSpacing(metadata["x2_spacing"]),
+            "x3_spacing": CellSpacing(metadata["x3_spacing"]),
+            "coord_system": CoordSystem(metadata["coord_system"]),
+            "regime": Regime(metadata["regime"]),
+        }
+
+        ib_config = load_immersed_bodies_or_body_system(
+            metadata, immersed_bodies_metadata
+        )
+
+        # Let the default config merge itself with checkpoint data
+        return default_config.merge_with_checkpoint(checkpoint_data, ib_config)

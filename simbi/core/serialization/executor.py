@@ -5,6 +5,7 @@ This module provides utilities to convert SimbiBaseConfig objects into
 a format suitable for passing to the Cython/C++ backend.
 """
 
+import dataclasses
 from dataclasses import dataclass
 from typing import Any, Sequence, Union, Optional
 from pathlib import Path
@@ -62,13 +63,18 @@ class SimulationExecutor:
             "nvars",
             "is_relativistic",
             "mesh_motion",
-            "is_homlogous",
+            "is_homologous",
             "dlogt",
+            "_immersed_bodes",  # might be loaded from checkpoint
+            "_body_system",  # might be loaded from checkpoint
         ]
 
         for field in computed_fields:
             if hasattr(config, field):
-                model_dict[field] = getattr(config, field)
+                if dataclasses.is_dataclass(getattr(config, field)):
+                    model_dict[field] = dataclasses.asdict(getattr(config, field))
+                else:
+                    model_dict[field] = getattr(config, field)
 
         # Process bounds to separate x1, x2, x3 bounds
         bounds = config.bounds
@@ -101,28 +107,6 @@ class SimulationExecutor:
         for key, value in list(model_dict.items()):
             if callable(value):
                 model_dict[key] = None
-
-        # Handle immersed bodies if present
-        if config.immersed_bodies:
-            bodies_list = []
-            for i, body in enumerate(config.immersed_bodies):
-                # Convert body to dict and process attributes
-                body_dict = {
-                    "id": i,
-                    "capability": body.capability,
-                    "mass": body.mass,
-                    "radius": body.radius,
-                    "position": body.position,
-                    "velocity": body.velocity,
-                    "force": body.force,
-                    # Add any body-specific attributes
-                    **(body.specifics or {}),
-                }
-                bodies_list.append(body_dict)
-
-            model_dict["immersed_bodies"] = bodies_list
-        else:
-            model_dict["immersed_bodies"] = []
 
         # Normalize resolution to 3D array for backend
         resolution = model_dict["resolution"]

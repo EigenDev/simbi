@@ -7,6 +7,7 @@ This module provides components for running simulations with the Cython backend.
 import importlib
 import os
 from dataclasses import dataclass
+from sys import executable
 from typing import Any, Optional, cast
 
 from simbi.functional.helpers import print_progress
@@ -39,6 +40,7 @@ class SimulationRunner:
             Self for method chaining
         """
         self.state = load_or_initialize_state(self.config).unwrap()
+        self.config = self.state.config
         return self
 
     def _configure_backend(self, compute_mode: str = "cpu") -> Any:
@@ -110,6 +112,7 @@ class SimulationRunner:
             # Create scale factor and derivative functions
             a = self.config.scale_factor or (lambda t: 1.0)
             adot = self.config.scale_factor_derivative or (lambda t: 0.0)
+
             # Execute the simulation
             backend().run(state=state_contig, sim_info=execution_dict, a=a, adot=adot)
         else:
