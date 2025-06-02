@@ -111,11 +111,10 @@ namespace simbi {
     class SolverManager
     {
       private:
-        // Move maps inside class as static members
         static constexpr std::array<std::pair<std::string_view, Solver>, 5>
             solver_map_data = {
-              {{"hllc", Solver::HLLC},
-               {"hlle", Solver::HLLE},
+              {{"hlle", Solver::HLLE},
+               {"hllc", Solver::HLLC},
                {"hlld", Solver::HLLD},
                {"ausm_plus", Solver::AUSM_PLUS},
                {"slau", Solver::SLAU}}
@@ -161,7 +160,7 @@ namespace simbi {
         bool use_pcm_;
         bool using_rk1_;
         bool quirk_smoothing_;
-        real plm_theta_, step_, viscosity_;
+        real plm_theta_, step_, viscosity_, shakura_sunyaev_alpha_;
 
         // Physics flags
         bool null_gravity_{true};
@@ -180,7 +179,8 @@ namespace simbi {
               quirk_smoothing_(init.quirk_smoothing),
               plm_theta_(init.plm_theta),
               step_((temporal_order_ == "rk1") ? 1.0 : 0.5),
-              viscosity_(init.viscosity)
+              viscosity_(init.viscosity),
+              shakura_sunyaev_alpha_(init.shakura_sunyaev_alpha)
         {
             set_boundary_conditions(init.boundary_conditions);
         }
@@ -206,6 +206,12 @@ namespace simbi {
 
         // Accessors
         DUAL auto solver_type() const { return solver_type_; }
+        DUAL auto solver_name() const
+        {
+            return std::string_view(
+                solver_map_data[static_cast<size_t>(solver_type_)].first
+            );
+        }
         DUAL auto spatial_order() const { return spatial_order_; }
         DUAL auto temporal_order() const { return temporal_order_; }
         DUAL bool is_pcm() const { return use_pcm_; }
@@ -220,6 +226,10 @@ namespace simbi {
         DUAL auto set_null_sources(bool state) { null_sources_ = state; }
         DUAL auto set_null_gravity(bool state) { null_gravity_ = state; }
         DUAL auto viscosity() const { return viscosity_; }
+        DUAL auto shakura_sunyaev_alpha() const
+        {
+            return shakura_sunyaev_alpha_;
+        }
     };
 }   // namespace simbi
 
