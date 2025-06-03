@@ -143,7 +143,7 @@ class Figure:
 
     def tight_layout(self) -> None:
         """Adjust layout to prevent overlap"""
-        if self.fig:
+        if self.fig and not any(ax.name == "polar" for ax in self.fig.get_axes()):
             self.fig.tight_layout()
 
     def show(self) -> None:

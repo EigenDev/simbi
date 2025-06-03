@@ -1,3 +1,4 @@
+from matplotlib.collections import QuadMesh
 import matplotlib.pyplot as plt
 import numpy as np
 from typing import Any
@@ -23,7 +24,11 @@ class AxisFormatter:
         ax.set_thetamin(theta_min)
         ax.set_thetamax(theta_max)
         ax.set_yticklabels([])  # Remove radial labels
+        ax.set_xticklabels([])  # Remove angular labels
         ax.set_rmin(setup["x1min"])
+        ax.set_rmax(config["style"]["xmax"] or setup["x1max"])
+        if half_sphere:
+            ax.set_position([0.1, -0.45, 0.8, 2])
 
     def format_cartesian_axis(self, ax, setup, config, field_info):
         """Format a Cartesian axis based on plot type"""
@@ -141,7 +146,7 @@ class AxisFormatter:
         # Set title with time information
         time = setup.get("time", 0.0)
         setup_name = config.get("plot", {}).get("setup", "Simulation")
-        ax.set_title(f"{setup_name} t = {time:.2f}")
+        ax.set_title(f"{setup_name}")
 
         # Set limits if provided
         xlims = config.get("style", {}).get("xlims", (None, None))
@@ -159,7 +164,7 @@ class ColorbarFormatter:
     def add_cartesian_colorbar(
         fig: plt.Figure,
         ax: plt.Axes,
-        mesh: dict[str, NDArray[np.floating]],
+        mesh: QuadMesh,
         field: str,
         config: dict[str, Any],
     ) -> None:
@@ -191,7 +196,7 @@ class ColorbarFormatter:
     def add_polar_colorbar(
         fig: plt.Figure,
         ax: plt.Axes,
-        mesh: dict[str, Any],
+        mesh: QuadMesh,
         field: str,
         config: dict[str, Any],
         setup: dict[str, Any],
@@ -200,7 +205,7 @@ class ColorbarFormatter:
         import numpy as np
 
         # Get field information
-        fields = config.get("plot", {}).get("fields", ["rho"])
+        fields = config["plot"]["fields"]
         field_idx = fields.index(field) if field in fields else 0
         nfields = len(fields)
 
@@ -211,17 +216,21 @@ class ColorbarFormatter:
         # Determine orientation
         orientation = "horizontal" if half_sphere else "vertical"
 
+        # Get the position of the current polar axis
+        polar_pos = ax.get_position()
+
         # Position colorbar based on orientation
         if orientation == "horizontal":
-            # Place under half-circle plot
-            width = 0.78 / nfields
-            x = 0.05 + ((nfields - 1 - field_idx) * (width + 0.1))
+            # Center horizontally under the polar plot
+            width = min(0.6, 0.78 / nfields)  # Cap width for better appearance
+            x = polar_pos.x0 + (polar_pos.width - width) / 2 - 0.01
             cax = fig.add_axes([x, 0.2, width, 0.03])
         else:
-            # Place beside full circle plot
+            # Center vertically to the right of the polar plot
             height = 0.8 / (2 if max_angle < np.pi else 1)
-            x = 0.90 if field_idx == 0 else 0.09
-            cax = fig.add_axes([x, 0.1, 0.03, height])
+            x = polar_pos.x0 + polar_pos.width + 0.05  # Right side with small padding
+            y = polar_pos.y0 + (polar_pos.height - height) / 2
+            cax = fig.add_axes([x, y, 0.03, height])
 
         # Create colorbar
         cbar = fig.colorbar(mesh, cax=cax, orientation=orientation)

@@ -27,7 +27,7 @@ class TitleComponent(Component):
 
         # Apply time scaling if using orbital parameters
         time_unit = ""
-        if self.state.config.get("style", {}).get("orbital_params"):
+        if self.state.config["style"]["orbital_params"]:
             import math
 
             p = self.state.config["style"]["orbital_params"]
@@ -42,27 +42,25 @@ class TitleComponent(Component):
             time_unit = "orbit(s)"
 
         # Format title text
-        setup_name = self.state.config.get("plot", {}).get("setup", "Simulation")
+        setup_name = self.state.config["plot"].get("setup", "Simulation")
         title_text = f"{setup_name} t = {time:.2f} {time_unit}"
 
         # For animation, it's better to remove and recreate the title
         # rather than update an existing one
-        if setup.get("is_cartesian", True) or self.state.config.get("multidim", {}).get(
-            "slice_along"
-        ):
+        if setup["is_cartesian"] or self.state.config["multidim"]["slice_along"]:
             # Remove old title if it exists
             # if self.title_artist:
-            #     self.title_artist.remove()
+            # self.title_artist.remove()
 
             # Create new title
             self.title_artist = self.ax.set_title(title_text)
             return self.title_artist
         else:
             # For polar plots, handle suptitle
-            if self.suptitle_artist:
-                self.suptitle_artist.remove()
+            # if self.suptitle_artist:
+            # self.suptitle_artist.remove()
 
-            y_pos = 0.95 if setup.get("x2max", np.pi) == np.pi else 0.8
+            y_pos = 0.95 if setup.get("x2max", np.pi) == np.pi else 0.92
             self.suptitle_artist = self.fig.suptitle(title_text, y=y_pos)
             return self.suptitle_artist
 

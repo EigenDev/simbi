@@ -34,6 +34,9 @@ class MultidimPlotComponent(Component):
         # Store reference
         self.state.plot_elements[f"{self.id}_mesh"] = self.mesh
 
+        if x2[-1] == 0.5 * np.pi:
+            self.ax.set_position([0.1, -0.45, 0.8, 2])
+
     def _add_colorbar(self, field: str) -> plt.colorbar:
         """Add colorbar to the plot with appropriate positioning"""
         # Determine if we're using polar coordinates

@@ -1,8 +1,7 @@
 import numpy as np
 import matplotlib.pyplot as plt
 from abc import ABC, abstractmethod
-from typing import Optional, Any, List
-from matplotlib.animation import FuncAnimation
+from typing import Optional, Any, Sequence
 from matplotlib.figure import Figure
 from matplotlib.axes import Axes
 
@@ -66,7 +65,10 @@ class BasePlotter(ABC):
         """Display plot"""
         if not self.fig:
             raise RuntimeError("No figure to display")
-        self.fig.tight_layout()
+
+        # if the axes is a polar plot, do not use tight_layout
+        if self.axes[0].name != "polar":
+            self.fig.tight_layout()
         plt.show()
 
     def __enter__(self):
