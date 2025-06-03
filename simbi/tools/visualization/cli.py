@@ -282,6 +282,35 @@ def setup_parser(parser: argparse.ArgumentParser) -> None:
     )
     parser.add_argument("--annot-text", nargs="+", help="Annotation text")
     parser.add_argument("--power", type=float, default=1.0, help="Power norm exponent")
+    parser.add_argument(
+        "--nlinestyles",
+        type=int,
+        help="Number of line styles to use for line plots",
+    )
+    parser.add_argument(
+        "--bbox-kind",
+        choices=["tight", "standard", "full"],
+        default="tight",
+        help="Bounding box kind for saving figures",
+    )
+    parser.add_argument(
+        "--annotation-anchor",
+        nargs=2,
+        type=float,
+        default=(1.0, 1.0),
+        help="Annotation anchor point (x, y)",
+    )
+    parser.add_argument(
+        "--annotation-text",
+        type=str,
+        default="",
+        help="Text to display in the annotation",
+    )
+    parser.add_argument(
+        "--xmax",
+        type=float,
+        help="Maximum x value for plots (overrides xlims)",
+    )
 
     # Histogram options
     parser.add_argument(
