@@ -336,7 +336,7 @@ namespace simbi {
                         static_cast<int>((sim_state.time() / end_time) * 100.0)
                     );
                     table.print();
-                };
+                }
             };
 
             template <typename sim_state_t, typename F>

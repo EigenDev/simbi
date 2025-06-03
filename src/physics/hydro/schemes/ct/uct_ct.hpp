@@ -108,7 +108,7 @@ namespace simbi {
                     static_cast<real>(0.5) * (fw_mdz.dL + fe_mdz.dL),
                     static_cast<real>(0.5) * (fw_mdz.dR + fe_mdz.dR)
                 );
-            };
+            }
 
             template <typename Flux>
             static DUAL auto compute_a_coefficients(
@@ -129,7 +129,7 @@ namespace simbi {
                     static_cast<real>(0.5) * (fw_mdz.aL + fe_mdz.aL),
                     static_cast<real>(0.5) * (fw_mdz.aR + fe_mdz.aR)
                 );
-            };
+            }
 
             template <typename Flux>
             static DUAL auto compute_transverse_velocities(

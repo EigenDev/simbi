@@ -47,7 +47,6 @@
  *==============================================================================
  */
 
-
 #ifndef INIT_CONDITIONS_HPP
 #define INIT_CONDITIONS_HPP
 
@@ -213,17 +212,19 @@ namespace simbi {
                 std::max<lint>(ny - nghosts, 1),
                 std::max<lint>(nz - nghosts, 1)
             );
-        };
+        }
+
         bool contains(const std::string& key) const
         {
             return config.find(key) != config.end();
-        };
+        }
+
         const ConfigValue& at(const std::string& key) const
         {
             static const ConfigValue empty_value;
             auto it = config.find(key);
             return (it != config.end()) ? it->second : empty_value;
-        };
+        }
 
         template <typename T>
         T get(const std::string& key) const
@@ -237,14 +238,15 @@ namespace simbi {
             catch (const std::bad_cast&) {
                 throw std::runtime_error("Type mismatch for key: " + key);
             }
-        };
+        }
+
         ConfigDict get_dict(const std::string& key) const
         {
             if (!contains(key) || !at(key).is_dict()) {
                 return {};   // Return empty dict
             }
             return at(key).get<ConfigDict>();
-        };
+        }
 
         ConfigValue get_nested(const std::string& nested_key) const
         {
@@ -275,7 +277,7 @@ namespace simbi {
             }
 
             return it->second;
-        };
+        }
     };
 
 }   // namespace simbi
