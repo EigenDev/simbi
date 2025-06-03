@@ -70,10 +70,91 @@ py3.extension_module(
 #Check and configure GPU compilation
 if get_option('gpu_compilation').enabled()
     hdf5_inc = hdf5_dep.get_variable('includedir', cmake: 'HDF5_INCLUDE_DIRS', default_value: '')
+    # Method 1: Try dependency variable first
+    if hdf5_dep.found()
+        # Try multiple possible variable names
+        foreach var_name : ['includedir', 'include_dir', 'INCLUDE_DIRS']
+            if hdf5_inc == ''
+                hdf5_inc = hdf5_dep.get_variable(var_name, cmake: 'HDF5_' + var_name.to_upper(), default_value: '')
+            endif
+        endforeach
+    endif
+
+    # Method 2: Try pkg-config if dependency variable failed
     if hdf5_inc == ''
-        # fallback to pkg-config --cflags-only-I hdf5
-        hdf5_inc = run_command('pkg-config', '--cflags-only-I', 'hdf5', check: true).stdout().strip()
-        hdf5_inc = hdf5_inc.replace('-I', '')
+        pkg_config = find_program('pkg-config', required: false)
+        if pkg_config.found()
+            pkg_result = run_command(pkg_config, '--cflags-only-I', 'hdf5', check: false)
+            if pkg_result.returncode() == 0
+                hdf5_inc_raw = pkg_result.stdout().strip()
+                # Extract include path from -I flags
+                hdf5_inc_list = []
+                foreach flag : hdf5_inc_raw.split()
+                    if flag.startswith('-I')
+                        hdf5_inc_list += flag.substring(2)
+                    endif
+                endforeach
+                if hdf5_inc_list.length() > 0
+                    hdf5_inc = hdf5_inc_list[0]  # Use first include path
+                endif
+            endif
+        endif
+    endif
+
+    # Method 3: Try common system locations
+    if hdf5_inc == ''
+        common_hdf5_paths = [
+            '/usr/include/hdf5',
+            '/usr/local/include/hdf5',
+            '/opt/homebrew/include',  # macOS Homebrew
+            '/usr/include/hdf5/serial',  # Ubuntu/Debian
+            '/usr/include',
+            '/usr/local/include',
+        ]
+
+        foreach path : common_hdf5_paths
+            if hdf5_inc == '' and fs.exists(path / 'hdf5.h')
+                hdf5_inc = path
+                message('Found HDF5 headers at: ' + path)
+            endif
+        endforeach
+    endif
+
+    # Method 4: Try to find hdf5.h using compiler
+    if hdf5_inc == ''
+        cc = meson.get_compiler('c')
+        if cc.has_header('hdf5.h', dependencies: hdf5_dep)
+            # If compiler can find it with the dependency, we can use empty string
+            # and rely on the dependency's include paths
+            hdf5_inc = ''
+            message('HDF5 headers found via compiler dependency')
+        endif
+    endif
+
+    # Final fallback and validation
+    if hdf5_inc == ''
+        warning('Could not determine HDF5 include directory. GPU compilation may fail.')
+        # Set to empty and hope the dependency handles it
+        hdf5_inc = ''
+    else
+        # Validate the path exists
+        if not fs.exists(hdf5_inc / 'hdf5.h')
+            warning('HDF5 include directory found but hdf5.h not present at: ' + hdf5_inc)
+        else
+            message('Using HDF5 include directory: ' + hdf5_inc)
+        endif
+    endif
+
+    # Build include directories list
+    include_dirs = [
+        meson.current_source_dir() / 'src',
+        '.',
+        meson.current_build_dir(),
+    ]
+
+    # Only add hdf5_inc if it's not empty
+    if hdf5_inc != ''
+        include_dirs += hdf5_inc
     endif
     include_dirs = [
         meson.current_source_dir() + '/src',
