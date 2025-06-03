@@ -112,14 +112,10 @@ namespace simbi {
                 }
                 else {
                     // Get corner primitives
-                    const auto ene =
-                        flux_stencil.prim(Dir::NE).ecomponent(nhat);
-                    const auto enw =
-                        flux_stencil.prim(Dir::NW).ecomponent(nhat);
-                    const auto ese =
-                        flux_stencil.prim(Dir::SE).ecomponent(nhat);
-                    const auto esw =
-                        flux_stencil.prim(Dir::SW).ecomponent(nhat);
+                    auto ene = flux_stencil.prim(Dir::NE).ecomponent(nhat);
+                    auto enw = flux_stencil.prim(Dir::NW).ecomponent(nhat);
+                    auto ese = flux_stencil.prim(Dir::SE).ecomponent(nhat);
+                    auto esw = flux_stencil.prim(Dir::SW).ecomponent(nhat);
 
                     return CTScheme::compute_emf(
                         fw,
