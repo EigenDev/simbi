@@ -12,6 +12,8 @@ from pathlib import Path
 from numpy.typing import NDArray
 import numpy as np
 
+from simbi.old_core.types.constants import BoundaryCondition
+
 from ..config.base_config import SimbiBaseConfig
 
 
@@ -152,5 +154,7 @@ class SimulationExecutor:
             return bcs * num_faces
 
         else:
-            # Default to outflow for unspecified boundaries
-            return ["outflow"] * num_faces
+            # Case 4: Extrapolate missing boundary conditions
+            # Calculate how many faces are missing
+            missing_faces = num_faces - num_bcs
+            return bcs + [BoundaryCondition.OUTFLOW] * missing_faces
