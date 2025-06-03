@@ -71,17 +71,8 @@ py3.extension_module(
 if get_option('gpu_compilation').enabled()
     fs = import('fs')
     hdf5_inc = hdf5_dep.get_variable('includedir', cmake: 'HDF5_INCLUDE_DIRS', default_value: '')
-    # Method 1: Try dependency variable first
-    if hdf5_dep.found()
-        # Try multiple possible variable names
-        foreach var_name : ['includedir', 'include_dir', 'INCLUDE_DIRS']
-            if hdf5_inc == ''
-                hdf5_inc = hdf5_dep.get_variable(var_name, cmake: 'HDF5_' + var_name.to_upper(), default_value: '')
-            endif
-        endforeach
-    endif
 
-    # Method 2: Try pkg-config if dependency variable failed
+    # Try pkg-config if dependency variable failed
     if hdf5_inc == ''
         pkg_config = find_program('pkg-config', required: false)
         if pkg_config.found()
@@ -102,7 +93,7 @@ if get_option('gpu_compilation').enabled()
         endif
     endif
 
-    # Method 3: Try common system locations
+    # Try common system locations
     if hdf5_inc == ''
         common_hdf5_paths = [
             '/usr/include/hdf5',
@@ -121,7 +112,7 @@ if get_option('gpu_compilation').enabled()
         endforeach
     endif
 
-    # Method 4: Try to find hdf5.h using compiler
+    # Try to find hdf5.h using compiler
     if hdf5_inc == ''
         cc = meson.get_compiler('c')
         if cc.has_header('hdf5.h', dependencies: hdf5_dep)
@@ -132,7 +123,7 @@ if get_option('gpu_compilation').enabled()
         endif
     endif
 
-    # Final fallback and validation
+    # Final validation
     if hdf5_inc == ''
         warning('Could not determine HDF5 include directory. GPU compilation may fail.')
     else
