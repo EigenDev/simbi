@@ -1132,7 +1132,6 @@ def install_simbi(args: argparse.Namespace) -> None:
     # Check if UV is available and use it for installation
     if is_tool("uv"):
         logger.info("UV package manager detected, using UV for installation")
-        print(python_exec)
         if python_exec:
             install_cmd = [
                 "uv",
