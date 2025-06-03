@@ -6,10 +6,11 @@ from rich.layout import Layout
 from rich.progress import Progress, SpinnerColumn, TextColumn, BarColumn
 from rich.style import Style
 from rich import box
+from ..functional import get_memory_usage
 
 import time
 import math
-from typing import Any
+from typing import Any, Sequence
 
 from .summary import SimulationParameterSummary
 
@@ -337,26 +338,9 @@ class RichSimulationSummary:
                 tables.append(table)
 
         # compute statistics
-        stats = {}
+        stats: dict[str, int | float | Sequence[Any]] = {}
         ni, nj, nk = params["resolution"]
-        nghosts = 2 * (1 + (params["spatial_order"].value == "plm"))
-        if params["is_mhd"]:
-            nx = ni + nghosts
-            ny = nj + nghosts
-            nz = nk + nghosts
-        else:
-            nx = ni + nghosts
-            ny = nj + nghosts * (params["dimensionality"] >= 2)
-            nz = nk + nghosts * (params["dimensionality"] == 3)
-
-        cells = nx * ny * nz
-        # rough estimate - 8 conserved variables * 8 bytes per double
-        nvars = 9 if params["is_mhd"] else params["dimensionality"] + 2
-        bytes_per_cell = 8 * nvars
-        pressure_guess = params["regime"].value == "srhd"
-        mhd_extras = 6 if params["is_mhd"] else 0
-        narrays = 2 + pressure_guess + mhd_extras
-        memory_bytes = cells * bytes_per_cell * narrays
+        memory_bytes = float(get_memory_usage())
         stats["estimated_memory_gb"] = memory_bytes / (1024**3)
         stats["cells_per_dim"] = (ni, nj, nk)
 

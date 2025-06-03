@@ -189,12 +189,6 @@ def _add_global_args(parser: ArgumentParser) -> None:
     #     type=str,
     #     default=None,
     # )
-    parser.add_argument(
-        "--trace-mem",
-        help="flag to trace memory usage of python instance",
-        action=BooleanOptionalAction,
-        default=False,
-    )
 
 
 def _add_onthefly_args(parser: ArgumentParser) -> None:

@@ -28,7 +28,16 @@ __all__ = [
     "order_of_mag",
     "to_tuple_of_tuples",
     "is_dataclass_instance",
+    "get_memory_usage",
 ]
+
+
+def get_memory_usage() -> int:
+    """Returns memory usage in kilobytes."""
+    import resource
+
+    usage = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
+    return usage
 
 
 def is_dataclass_instance(obj: Type[Any]) -> bool:
