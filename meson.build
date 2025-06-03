@@ -7,7 +7,7 @@ project(
     'cython',
     version: run_command('git', 'describe', '--tag', '--abbrev=0', check: true).stdout().strip(),
     license: 'MIT',
-    default_options: {'cpp_std': 'c++20', 'cpp_args': ['-march=native']},
+    default_options: {'cpp_std': 'c++20', 'cpp_args': ['-march=native'], 'warning_level': '3'},
 )
 
 #Add common project arguments
@@ -15,8 +15,8 @@ add_project_arguments(
     [
         '-DNPY_NO_DEPRECATED_API=NPY_1_7_API_VERSION',
         '-DCYTHON_EXTERN_C=extern "C++"',
-        '-Wall',
-        '-Wextra',
+        '-Wno-nested-anon-types',
+        '-Wno-gnu-anonymous-struct',
     ],
     language: 'cpp',
 )
