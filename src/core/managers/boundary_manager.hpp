@@ -216,9 +216,6 @@ namespace simbi {
                         real_idx += real_coords[d] * full_strides[d];
                     }
 
-                    const auto real_coord = unravel_idx(real_idx, full_shape);
-                    std::cout << coords << " -> " << real_coord << std::endl;
-
                     // Copy from interior to ghost
                     data[idx] = data[real_idx];
                 }
