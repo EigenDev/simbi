@@ -325,7 +325,6 @@ namespace simbi {
         {
             data_directory   = dict.at("data_directory").get<std::string>();
             checkpoint_index = dict.at("checkpoint_index").get<luint>();
-            std::cout << "done visitng output settings" << std::endl;
         }
 
         void visit_computed_properties(
