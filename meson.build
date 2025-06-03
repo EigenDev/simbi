@@ -69,6 +69,7 @@ py3.extension_module(
 
 #Check and configure GPU compilation
 if get_option('gpu_compilation').enabled()
+    fs = import('fs')
     hdf5_inc = hdf5_dep.get_variable('includedir', cmake: 'HDF5_INCLUDE_DIRS', default_value: '')
     # Method 1: Try dependency variable first
     if hdf5_dep.found()
