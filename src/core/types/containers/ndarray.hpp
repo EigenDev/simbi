@@ -238,9 +238,9 @@ namespace simbi {
         auto& reshape(const collapsable<Dims>& new_shape)
         {
             // Verify total size matches
-            size_type new_size = this->compute_size(new_shape.vals);
             assert(
-                new_size == this->size_ && "New shape must match total size"
+                this->compute_size(new_shape.vals) == this->size_ &&
+                "New shape must match total size"
             );
 
             // Update shape and strides
@@ -254,9 +254,9 @@ namespace simbi {
         )
         {
             // Verify total size matches
-            size_type new_size = this->compute_size(new_shape.vals);
             assert(
-                new_size == this->size_ && "New shape must match total size"
+                this->compute_size(new_shape.vals) == this->size_ &&
+                "New shape must match total size"
             );
 
             // Update shape and strides
