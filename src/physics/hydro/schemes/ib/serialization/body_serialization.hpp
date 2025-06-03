@@ -68,7 +68,7 @@ namespace simbi::ibsystem {
         std::function<T(size_t)> extractor;
 
         // Metadata (optional)
-        ConfigDict metadata;
+        // ConfigDict metadata;
     };
 
     // Property serialization trait for different property types

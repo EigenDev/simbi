@@ -134,13 +134,12 @@ namespace simbi {
         }
 
         // placement new
-        static constexpr void*
-        operator new(std::size_t size, void* ptr) noexcept
+        static constexpr void* operator new(std::size_t, void* ptr) noexcept
         {
             return ptr;
         }
 
-        static constexpr void operator delete(void* ptr, void* place) noexcept
+        static constexpr void operator delete(void*, void*) noexcept
         {
             // placement delete is a no-op ;^]
         }

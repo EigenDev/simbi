@@ -286,7 +286,6 @@ namespace simbi {
                     int n,
                     const sim_state_t& sim_state,
                     double speed,
-                    double delta_t,
                     double end_time,
                     steady_clock::time_point start_time
                 )
@@ -413,7 +412,6 @@ namespace simbi {
                                 n,
                                 sim_state,
                                 speed,
-                                delta_t,
                                 end_time,
                                 start_time
                             );
@@ -452,7 +450,6 @@ namespace simbi {
                     n,
                     sim_state,
                     speed,
-                    delta_t,
                     end_time,
                     start_time
                 );

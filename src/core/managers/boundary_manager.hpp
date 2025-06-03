@@ -121,7 +121,7 @@ namespace simbi {
             ndarray<T, Dims>& full_array,
             const array_view<T, Dims>& interior_view,
             // Array indicating which dimensions are "ghost"
-            const array_t<bool, Dims>& is_ghost_dim
+            const std::array<bool, 3>& is_ghost_dim
         ) const
         {
             auto* data = full_array.data();
@@ -205,6 +205,9 @@ namespace simbi {
                     for (size_type d = 0; d < Dims; d++) {
                         real_idx += real_coords[d] * full_strides[d];
                     }
+
+                    const auto real_coord = unravel_idx(real_idx, full_shape);
+                    std::cout << coords << " -> " << real_coord << std::endl;
 
                     // Copy from interior to ghost
                     data[idx] = data[real_idx];
@@ -399,8 +402,8 @@ namespace simbi {
                     (void) time_step;
                     // Return a no-op lambda when T is not conserved
                     return [] DEV(
-                               const auto& coords,
-                               const BoundaryFace fc,
+                               const auto&,
+                               const BoundaryFace,
                                const auto& val
                            ) { return val; };
                 }
@@ -548,13 +551,13 @@ namespace simbi {
             );
         }
 
-        void set_ghost_dims(const array_t<bool, Dims>& ghost_dims)
+        void set_ghost_dims(const std::array<bool, 3>& ghost_dims)
         {
             ghost_dims_ = ghost_dims;
         }
 
       private:
-        array_t<bool, Dims> ghost_dims_{false};
+        std::array<bool, 3> ghost_dims_{false};
 
         DEV uarray<Dims>
         unravel_idx(size_type idx, const uarray<Dims>& shape) const

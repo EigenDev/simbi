@@ -88,13 +88,8 @@ namespace simbi {
     template <>
     struct OperationTraits<PointwiseOp> {
         template <typename T, typename Policy, typename F, typename... Arrays>
-        static void execute(
-            T* data,
-            size_t size,
-            F op,
-            const Policy& policy,
-            Arrays*... arrays
-        )
+        static void
+        execute(T* data, F op, const Policy& policy, Arrays*... arrays)
         {
             if constexpr (global::on_gpu) {
                 DeviceOperator<F, T, Arrays...> device_op(op, data, arrays...);
@@ -114,13 +109,8 @@ namespace simbi {
     template <>
     struct OperationTraits<PointwiseOpIdx> {
         template <typename T, typename Policy, typename F, typename... Arrays>
-        static void execute(
-            T* data,
-            size_t size,
-            F op,
-            const Policy& policy,
-            Arrays*... arrays
-        )
+        static void
+        execute(T* data, F op, const Policy& policy, Arrays*... arrays)
         {
             if constexpr (global::on_gpu) {
                 DeviceOperator<F, T, Arrays...> device_op(op, data, arrays...);

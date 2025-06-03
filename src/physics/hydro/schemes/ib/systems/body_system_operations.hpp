@@ -119,11 +119,8 @@ namespace simbi::ibsystem::functions {
     }
 
     template <typename T, size_type Dims>
-    ComponentBodySystem<T, Dims> update_body_system(
-        ComponentBodySystem<T, Dims>&& system,
-        const T time,
-        const T dt
-    )
+    ComponentBodySystem<T, Dims>
+    update_body_system(ComponentBodySystem<T, Dims>&& system, const T dt)
     {
         using system_t = ComponentBodySystem<T, Dims>;
         // update the body system

@@ -34,7 +34,7 @@ void SRHD<dim>::cons2prim_impl()
     atomic::simbi_atomic<bool> local_failure{false};
     this->prims_.transform(
         [gamma = this->gamma, loc = local_failure.get()] DEV(
-            auto& prim,
+            auto& /*prim*/,
             const auto& cvar,
             auto& pguess
         ) -> Maybe<primitive_t> {
@@ -350,12 +350,11 @@ void SRHD<dim>::advance_impl()
         for (int q = 1; q > -1; q--) {
             // q = 0 is L, q = 1 is R
             const auto sign = (q == 1) ? 1 : -1;
-            res -= fri[q] * cell.inverse_volume(0) * cell.area(0 + q) * sign;
+            res -= fri[q] * cell.inverse_volume() * cell.area(0 + q) * sign;
             if constexpr (dim > 1) {
-                res -=
-                    gri[q] * cell.inverse_volume(1) * cell.area(2 + q) * sign;
+                res -= gri[q] * cell.inverse_volume() * cell.area(2 + q) * sign;
                 if constexpr (dim > 2) {
-                    res -= hri[q] * cell.inverse_volume(2) * cell.area(4 + q) *
+                    res -= hri[q] * cell.inverse_volume() * cell.area(4 + q) *
                            sign;
                 }
             }
@@ -476,7 +475,7 @@ void SRHD<dim>::init_simulation()
     pressure_guesses_.resize(this->cons_.size())
         .reshape({this->nz(), this->ny(), this->nx()});
     pressure_guesses_.transform(
-        [] DEV(auto& p, const auto& cons) {
+        [] DEV(auto& /*p*/, const auto& cons) {
             const auto d = cons.dens();
             const auto s = cons.momentum().norm();
             const auto e = cons.nrg();

@@ -68,7 +68,6 @@ namespace simbi::visc {
             const PrimType& px3L,
             const PrimType& px3R,
             const Cell<Dims>& cell,
-            size_type face,
             real nu
         )
     {

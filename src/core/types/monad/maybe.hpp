@@ -57,10 +57,6 @@ namespace simbi {
 
     struct nothing_t {
         DUAL constexpr explicit nothing_t() : error_code(ErrorCode::NONE) {}
-        DUAL constexpr explicit nothing_t(const char* message)
-            : error_code(ErrorCode::NONE)
-        {
-        }
         DUAL constexpr explicit nothing_t(ErrorCode code) : error_code(code) {}
 
         // copy constructor

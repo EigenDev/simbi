@@ -585,13 +585,16 @@ namespace simbi {
                     "Checkpoint interval must be positive"
                 );
             }
+            if (dlogt < 0.0) {
+                throw std::runtime_error("dlogt must be non-negative");
+            }
         }
 
         // Resolution fields
         void visit_resolution(luint& nx, luint& ny, luint& nz) override
         {
-            if (nx == 0) {
-                throw std::runtime_error("X resolution cannot be zero");
+            if (nx == 0 || ny == 0 || nz == 0) {
+                throw std::runtime_error("Resolution cannot be zero");
             }
         }
 
@@ -609,14 +612,22 @@ namespace simbi {
             if (cfl <= 0.0 || cfl > 1.0) {
                 throw std::runtime_error("CFL must be in (0, 1]");
             }
+            if (shakura_sunyaev_alpha < 0.0) {
+                throw std::runtime_error(
+                    "Shakura-Sunyaev alpha must be non-negative"
+                );
+            }
+            if (viscosity < 0.0) {
+                throw std::runtime_error("Viscosity must be non-negative");
+            }
+            if (sound_speed_squared < 0.0) {
+                throw std::runtime_error(
+                    "Sound speed squared must be positive"
+                );
+            }
         }
 
-        void visit_flags(
-            bool& quirk_smoothing,
-            bool& homologous,
-            bool& mesh_motion,
-            bool& isothermal
-        ) override
+        void visit_flags(bool&, bool&, bool&, bool&) override
         {
             // No specific validation for flags, but could be added if needed
         }
@@ -648,6 +659,21 @@ namespace simbi {
             // Validate coordinate system and spacing types if needed
             if (coord_system.empty()) {
                 throw std::runtime_error("Coordinate system cannot be empty");
+            }
+            if (!(x1_spacing == "linear") && !(x1_spacing == "log")) {
+                throw std::runtime_error(
+                    "X1 spacing must be 'linear' or 'log'"
+                );
+            }
+            if (!(x2_spacing == "linear") && !(x2_spacing == "log")) {
+                throw std::runtime_error(
+                    "X2 spacing must be 'linear' or 'log'"
+                );
+            }
+            if (!(x3_spacing == "linear") && !(x3_spacing == "log")) {
+                throw std::runtime_error(
+                    "X3 spacing must be 'linear' or 'log'"
+                );
             }
         }
 
@@ -686,49 +712,41 @@ namespace simbi {
         }
 
         void visit_source_expressions(
-            ConfigDict& bx1_inner_expressions,
-            ConfigDict& bx1_outer_expressions,
-            ConfigDict& bx2_inner_expressions,
-            ConfigDict& bx2_outer_expressions,
-            ConfigDict& bx3_inner_expressions,
-            ConfigDict& bx3_outer_expressions,
-            ConfigDict& hydro_source_expressions,
-            ConfigDict& gravity_source_expressions,
-            ConfigDict& local_sound_speed_expressions
+            ConfigDict&,
+            ConfigDict&,
+            ConfigDict&,
+            ConfigDict&,
+            ConfigDict&,
+            ConfigDict&,
+            ConfigDict&,
+            ConfigDict&,
+            ConfigDict&
         ) override
         {
             // Validate expressions if needed
         }
 
-        void
-        visit_immersed_bodies(std::vector<ConfigDict>& immersed_bodies) override
+        void visit_immersed_bodies(std::vector<ConfigDict>&) override
         {
             // Validate immersed bodies if needed
         }
 
-        void
-        visit_magnetic_field(std::vector<std::vector<real>>& bfield) override
+        void visit_magnetic_field(std::vector<std::vector<real>>&) override
         {
             // Validate magnetic field if needed
         }
 
-        void visit_output_settings(
-            std::string& data_directory,
-            luint& checkpoint_index
-        ) override
+        void visit_output_settings(std::string& data_directory, luint&) override
         {
             if (data_directory.empty()) {
                 throw std::runtime_error("Data directory cannot be empty");
-            }
-            if (checkpoint_index < 0) {
-                throw std::runtime_error("Checkpoint index cannot be negative");
             }
         }
 
         void visit_computed_properties(
             luint& dimensionality,
-            bool& is_mhd,
-            bool& is_relativistic,
+            bool&,
+            bool&,
             luint& nvars
         ) override
         {

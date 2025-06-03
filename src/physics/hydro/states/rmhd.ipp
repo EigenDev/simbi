@@ -46,7 +46,7 @@ void RMHD<dim>::cons2prim_impl()
     this->prims_.transform(
         [gamma = this->gamma,
          loc   = local_failure.get(
-         )] DEV(auto& prim, const auto& c) -> Maybe<primitive_t> {
+         )] DEV(auto& /* prim */, const auto& c) -> Maybe<primitive_t> {
             const real d      = c.dens();
             const auto mom    = c.momentum();
             const real tau    = c.nrg();
@@ -100,7 +100,7 @@ void RMHD<dim>::cons2prim_impl()
                 }
                 if (iter >= global::MAX_ITER || !std::isfinite(ff)) {
                     loc->store(true);
-                    return simbi::None([iter]() -> const ErrorCode {
+                    return simbi::None([iter]() -> ErrorCode {
                         if (iter >= global::MAX_ITER) {
                             return ErrorCode::MAX_ITER;
                         }
@@ -237,7 +237,7 @@ RMHD<dim>::cons2prim_single(const auto& cons) const
             f_upper  = ff;
         }
         if (iter >= global::MAX_ITER || !std::isfinite(ff)) {
-            return simbi::None([iter]() -> const ErrorCode {
+            return simbi::None([iter]() -> ErrorCode {
                 if (iter >= global::MAX_ITER) {
                     return ErrorCode::MAX_ITER;
                 }
@@ -470,7 +470,7 @@ DUAL RMHD<dim>::conserved_t RMHD<dim>::calc_hlle_flux(
     const auto& prR,
     const luint nhat,
     const real vface,
-    const real bface
+    const real /* bface */   // bface is not used in this scheme
 ) const
 {
     const auto uL     = prL.to_conserved(gamma);
@@ -568,7 +568,7 @@ DUAL RMHD<dim>::conserved_t RMHD<dim>::calc_hlle_flux(
         }
     }
     else {
-        net_flux.calc_electric_field(unit_vectors::get<dim>(nhat), nhat);
+        net_flux.calc_electric_field(unit_vectors::get<dim>(nhat));
     }
     return net_flux;
 };
@@ -1312,21 +1312,21 @@ template <int dim>
 void RMHD<dim>::sync_flux_boundaries()
 {
     // sync only in perpendicular directions
-    this->conserved_boundary_manager().template sync_boundaries<flux_tag>(
+    this->flux_boundary_manager().template sync_boundaries<flux_tag>(
         this->full_xvertex_policy(),
         fri,
         fri.contract({1, 1, 0}),
         this->bcs(),
         this->mesh()
     );
-    this->conserved_boundary_manager().template sync_boundaries<flux_tag>(
+    this->flux_boundary_manager().template sync_boundaries<flux_tag>(
         this->full_yvertex_policy(),
         gri,
         gri.contract({1, 0, 1}),
         this->bcs(),
         this->mesh()
     );
-    this->conserved_boundary_manager().template sync_boundaries<flux_tag>(
+    this->flux_boundary_manager().template sync_boundaries<flux_tag>(
         this->full_zvertex_policy(),
         hri,
         hri.contract({0, 1, 1}),
@@ -1402,7 +1402,7 @@ template <int dim>
 void RMHD<dim>::riemann_fluxes()
 {
     fri.contract({1, 1, 0}).stencil_transform(
-        [this] DEV(auto& fr, const auto& prim, const auto& bface) {
+        [this] DEV(auto& /* fr */, const auto& prim, const auto& bface) {
             // fluxes in i direction, centered at i-1/2
             const auto& pL = prim.at(-1, 0, 0);
             const auto& pR = prim.at(+0, 0, 0);
@@ -1427,7 +1427,7 @@ void RMHD<dim>::riemann_fluxes()
     );
 
     gri.contract({1, 0, 1}).stencil_transform(
-        [this] DEV(auto& gr, const auto& prim, const auto& bface) {
+        [this] DEV(auto& /* gr*/, const auto& prim, const auto& bface) {
             // fluxes in j direction, centered at j-1/2
             const auto& pL = prim.at(0, -1, 0);
             const auto& pR = prim.at(0, +0, 0);
@@ -1452,7 +1452,7 @@ void RMHD<dim>::riemann_fluxes()
     );
 
     hri.contract({0, 1, 1}).stencil_transform(
-        [this] DEV(auto& hr, const auto& prim, const auto& bface) {
+        [this] DEV(auto& /*hr*/, const auto& prim, const auto& bface) {
             // fluxes in k direction, centered at k-1/2
             const auto& pL = prim.at(0, 0, -1);
             const auto& pR = prim.at(0, 0, +0);
@@ -1559,13 +1559,13 @@ void RMHD<dim>::advance_conserved()
         for (int q = 1; q > -1; q--) {
             // q = 0 is L, q = 1 is R
             const auto sign = (q == 1) ? 1 : -1;
-            res -= fr.at(q, 0, 0) * cell.inverse_volume(0) * cell.area(0 + q) *
+            res -= fr.at(q, 0, 0) * cell.inverse_volume() * cell.area(0 + q) *
                    sign;
             if constexpr (dim > 1) {
-                res -= gr.at(0, q, 0) * cell.inverse_volume(1) *
+                res -= gr.at(0, q, 0) * cell.inverse_volume() *
                        cell.area(2 + q) * sign;
                 if constexpr (dim > 2) {
-                    res -= hr.at(0, 0, q) * cell.inverse_volume(2) *
+                    res -= hr.at(0, 0, q) * cell.inverse_volume() *
                            cell.area(4 + q) * sign;
                 }
             }

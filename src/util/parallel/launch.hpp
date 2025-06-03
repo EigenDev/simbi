@@ -80,6 +80,9 @@ namespace simbi {
                 policy.shared_mem_bytes>>>(f, args...);
         }
 #else
+        (void) device;   // Avoid unused parameter warning
+        (void) stream;   // Avoid unused parameter warning
+        (void) policy;   // Avoid unused parameter warning
         f(args...);
 #endif
     }

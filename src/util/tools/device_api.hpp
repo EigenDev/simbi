@@ -71,7 +71,8 @@ namespace simbi {
 #if GPU_CODE
                 return devGetErrorString(devError_t(status));
 #else
-                return "there was a problem with the mainframe";
+                return "Simulated GPU Error: " +
+                       std::to_string(static_cast<int>(status));
 #endif
             }
 
@@ -218,7 +219,9 @@ namespace simbi {
                 else {
                     return devAtomicMin(address, val);
                 }
-
+#else
+                // Fallback for non-GPU code
+                return *address = std::min(*address, val);
 #endif
             };
 
@@ -233,6 +236,8 @@ namespace simbi {
                 else {
                     return devAtomicAddReal(address, val);
                 }
+#else
+                return *address += val;   // Fallback for non-GPU code
 #endif
             };
 

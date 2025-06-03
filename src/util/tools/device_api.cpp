@@ -13,6 +13,12 @@ namespace simbi {
                     status,
                     "Synchronous copy from host to dev failed"
                 );
+#else
+                // If not GPU_CODE, void the params
+                (void) to;
+                (void) from;
+                (void) bytes;
+
 #endif
             }
 
@@ -26,6 +32,11 @@ namespace simbi {
                     status,
                     "Synchronous copy from dev to host failed"
                 );
+#else
+                (void) to;
+                (void) from;
+                (void) bytes;
+
 #endif
             }
 
@@ -39,6 +50,10 @@ namespace simbi {
                     status,
                     "Synchronous copy from dev to dev failed"
                 );
+#else
+                (void) to;
+                (void) from;
+                (void) bytes;
 #endif
             }
 
@@ -52,6 +67,9 @@ namespace simbi {
                     status,
                     "Failed to allocate resources on device"
                 );
+#else
+                (void) obj;
+                (void) elements;
 #endif
             }
 
@@ -65,6 +83,9 @@ namespace simbi {
                     status,
                     "Failed to allocate resources on device"
                 );
+#else
+                (void) obj;
+                (void) elements;
 #endif
             }
 
@@ -76,6 +97,8 @@ namespace simbi {
                     status,
                     "Failed to free resources from device"
                 );
+#else
+                (void) obj;
 #endif
             }
 
@@ -85,6 +108,10 @@ namespace simbi {
                 auto status =
                     simbi::gpu::error::status_t(devMemset(obj, val, bytes));
                 simbi::gpu::error::check_err(status, "Failed to memset");
+#else
+                (void) obj;
+                (void) val;
+                (void) bytes;
 #endif
             };
 
@@ -97,6 +124,9 @@ namespace simbi {
                     status,
                     "Failed to synchronize event"
                 );
+#else
+                (void) a;
+
 #endif
             };
 
@@ -105,6 +135,8 @@ namespace simbi {
 #if GPU_CODE
                 auto status = simbi::gpu::error::status_t(devEventCreate(a));
                 simbi::gpu::error::check_err(status, "Failed to create event");
+#else
+                (void) a;
 #endif
             };
 
@@ -113,6 +145,8 @@ namespace simbi {
 #if GPU_CODE
                 auto status = simbi::gpu::error::status_t(devEventDestroy(a));
                 simbi::gpu::error::check_err(status, "Failed to destroy event");
+#else
+                (void) a;
 #endif
             };
 
@@ -121,6 +155,8 @@ namespace simbi {
 #if GPU_CODE
                 auto status = simbi::gpu::error::status_t(devEventRecord(a));
                 simbi::gpu::error::check_err(status, "Failed to record event");
+#else
+                (void) a;
 #endif
             };
 
@@ -134,6 +170,10 @@ namespace simbi {
                     status,
                     "Failed to get event elapsed time"
                 );
+#else
+                (void) time;
+                (void) a;
+                (void) b;
 #endif
             };
 
@@ -146,6 +186,8 @@ namespace simbi {
                     status,
                     "Failed to get device count"
                 );
+#else
+                (void) devCount;
 #endif
             };
 
@@ -159,6 +201,9 @@ namespace simbi {
                     status,
                     "Failed to get device properties"
                 );
+#else
+                (void) props;
+                (void) i;
 #endif
             };
 
@@ -175,6 +220,8 @@ namespace simbi {
 #if GPU_CODE
                 auto status = error::status_t(devSetDevice(device));
                 error::check_err(status, "Failed to set device");
+#else
+                (void) device;
 #endif
             };
 
@@ -183,6 +230,8 @@ namespace simbi {
 #if GPU_CODE
                 auto status = error::status_t(devStreamCreate(stream));
                 error::check_err(status, "Failed to create stream");
+#else
+                (void) stream;
 #endif
             };
 
@@ -191,6 +240,8 @@ namespace simbi {
 #if GPU_CODE
                 auto status = error::status_t(devStreamDestroy(stream));
                 error::check_err(status, "Failed to destroy stream");
+#else
+                (void) stream;
 #endif
             };
 
@@ -199,6 +250,8 @@ namespace simbi {
 #if GPU_CODE
                 auto status = error::status_t(devStreamSynchronize(stream));
                 error::check_err(status, "Failed to synchronize stream");
+#else
+                (void) stream;
 #endif
             };
 
@@ -212,6 +265,10 @@ namespace simbi {
                 auto status =
                     error::status_t(devStreamWaitEvent(stream, event, flags));
                 error::check_err(status, "Failed to wait for event");
+#else
+                (void) stream;
+                (void) event;
+                (void) flags;
 #endif
             };
 
@@ -221,6 +278,10 @@ namespace simbi {
                 auto status =
                     error::status_t(devPrefetchAsync(obj, bytes, device));
                 error::check_err(status, "Failed to prefetch to device");
+#else
+                (void) obj;
+                (void) bytes;
+                (void) device;
 #endif
             };
 
@@ -230,6 +291,9 @@ namespace simbi {
                 auto stat = error::status_t(devStreamQuery(stream));
                 // *status   = stat;
                 error::check_err(stat, "Failed to query stream");
+#else
+                (void) stream;
+                (void) status;
 #endif
             };
 
@@ -246,6 +310,12 @@ namespace simbi {
                     devMemcpyAsync(dst, src, bytes, kind, stream)
                 );
                 error::check_err(status, "Failed to copy asynchronously");
+#else
+                (void) dst;
+                (void) src;
+                (void) bytes;
+                (void) kind;
+                (void) stream;
 #endif
             };
 
@@ -255,6 +325,9 @@ namespace simbi {
                 auto status =
                     error::status_t(devEnablePeerAccess(device, flags));
                 error::check_err(status, "Failed to enable peer access");
+#else
+                (void) device;
+                (void) flags;
 #endif
             };
 
@@ -277,6 +350,13 @@ namespace simbi {
                     stream
                 ));
                 error::check_err(status, "Failed to copy peer asynchronously");
+#else
+                (void) dst;
+                (void) dst_device;
+                (void) src;
+                (void) src_device;
+                (void) bytes;
+                (void) stream;
 #endif
             };
 
@@ -286,6 +366,10 @@ namespace simbi {
                 auto status =
                     error::status_t(devMemcpyFromSymbol(dst, symbol, count));
                 error::check_err(status, "Failed to copy from symbol");
+#else
+                (void) dst;
+                (void) symbol;
+                (void) count;
 #endif
             }
 
@@ -295,6 +379,10 @@ namespace simbi {
                 auto status =
                     error::status_t(devHostRegister(ptr, size, flags));
                 error::check_err(status, "Failed to register host memory");
+#else
+                (void) ptr;
+                (void) size;
+                (void) flags;
 #endif
             }
 
@@ -303,6 +391,8 @@ namespace simbi {
 #if GPU_CODE
                 auto status = error::status_t(devHostUnregister(ptr));
                 error::check_err(status, "Failed to unregister host memory");
+#else
+                (void) ptr;
 #endif
             }
 
@@ -322,6 +412,11 @@ namespace simbi {
                     stream
                 ));
                 error::check_err(status, "Failed to copy host to device");
+#else
+                (void) dst;
+                (void) src;
+                (void) bytes;
+                (void) stream;
 #endif
             }
 
@@ -341,6 +436,11 @@ namespace simbi {
                     stream
                 ));
                 error::check_err(status, "Failed to copy device to host");
+#else
+                (void) dst;
+                (void) src;
+                (void) bytes;
+                (void) stream;
 #endif
             }
 
@@ -349,6 +449,9 @@ namespace simbi {
 #if GPU_CODE
                 auto status = error::status_t(devMallocHost(ptr, size));
                 error::check_err(status, "Failed to allocate aligned memory");
+#else
+                (void) ptr;
+                (void) size;
 #endif
             }
 
@@ -371,6 +474,13 @@ namespace simbi {
                     stream
                 ));
                 error::check_err(status, "Failed to launch kernel");
+#else
+                (void) function;
+                (void) grid;
+                (void) block;
+                (void) args;
+                (void) shared_mem;
+                (void) stream;
 #endif
             }
 

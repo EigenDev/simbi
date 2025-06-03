@@ -50,7 +50,7 @@ namespace simbi::expression {
         size_type instruction_count,
         const int* mapped_output_indices,
         size_type output_count,
-        int reg_count,
+        // int reg_count,
         real x1,
         real x2,
         real x3,

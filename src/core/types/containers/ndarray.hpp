@@ -291,7 +291,7 @@ namespace simbi {
             }
             this->strides_ = this->compute_strides(this->shape_);
             return *this;
-            // fill(fill_value);
+            fill(fill_value);
         }
 
         void resize_capacity(size_type new_capacity)
@@ -597,7 +597,6 @@ namespace simbi {
         {
             OperationTraits<PointwiseOp>::execute(
                 mem_.data(),
-                this->size_,
                 op,
                 policy,
                 arrays.data()...
@@ -615,7 +614,6 @@ namespace simbi {
         {
             OperationTraits<PointwiseOp>::execute(
                 mem_.data(),
-                this->size_,
                 op,
                 policy,
                 arrays.data()...
@@ -651,7 +649,6 @@ namespace simbi {
         {
             OperationTraits<PointwiseOpIdx>::execute(
                 mem_.data(),
-                this->size_,
                 op,
                 policy,
                 arrays.data()...

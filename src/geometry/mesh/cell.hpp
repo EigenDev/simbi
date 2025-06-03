@@ -556,13 +556,7 @@ namespace simbi {
             return centroid_[ii];
         }
 
-        DUAL constexpr auto inverse_volume(const size_type ii) const
-        {
-            // if (geo_info_.geometry() == Geometry::CARTESIAN) {
-            //     return 1.0 / widths_[ii];
-            // }
-            return 1.0 / dV_;
-        }
+        DUAL constexpr auto inverse_volume() const { return 1.0 / dV_; }
 
         DUAL spatial_vector_t<real, Dims> calculate_ghost_position(
             size_type boundary_dim,

@@ -305,10 +305,6 @@ namespace simbi {
         //              HELPER OVERLOADS
         //==========================================================================
 
-        template <int dim, typename T>
-        KERNEL void
-        deviceReduceWarpAtomicKernel(T* self, real* dt_min, lint nmax);
-
         /**
          * @brief Get the Flops count in GB / s
          *
@@ -405,87 +401,6 @@ namespace simbi {
 
         // display the CPU / GPU device properties
         void display_device_properties();
-
-        /**
-         * @brief perform the reduction within the warp
-         *
-         * @param val
-         * @return reduced min in the warp
-         */
-        inline DEV real warpReduceMin(real val)
-        {
-#if CUDA_CODE
-            // Adapted from https://stackoverflow.com/a/59883722/13874039
-            // to work with older cuda versions
-            int mask;
-#if __CUDA_ARCH__ >= 700
-            mask = __match_any_sync(__activemask(), val);
-#else
-            const int tid = threadIdx.z * blockDim.x * blockDim.y +
-                            threadIdx.y * blockDim.x + threadIdx.x;
-            unsigned tmask = __activemask();
-            for (int i = 0; i < global::WARP_SIZE; i++) {
-                unsigned long long tval =
-                    __shfl_sync(tmask, (unsigned long long) val, i);
-                unsigned my_mask =
-                    __ballot_sync(tmask, (tval == (unsigned long long) val));
-                if (i == (tid & (global::WARP_SIZE - 1))) {
-                    mask = my_mask;
-                }
-            }
-#endif
-            for (int offset = global::WARP_SIZE / 2; offset > 0; offset /= 2) {
-                real next_val = __shfl_down_sync(mask, val, offset);
-                val           = (val < next_val) ? val : next_val;
-            }
-            return val;
-#elif HIP_CODE
-            for (int offset = global::WARP_SIZE / 2; offset > 0; offset /= 2) {
-                real next_val = __shfl_down(val, offset);
-                val           = (val < next_val) ? val : next_val;
-            }
-            return val;
-#else
-            return 0.0;
-#endif
-        };
-
-        /**
-         * @brief perform the reduction in the GPU block
-         *
-         * @param val
-         * @return block reduced value
-         */
-        inline DEV real blockReduceMin(real val)
-        {
-#if GPU_CODE
-            static __shared__ real
-                shared[global::WARP_SIZE];   // Shared mem for 32 (Nvidia) / 64
-                                             // (AMD) partial mins
-            const int tid = threadIdx.z * blockDim.x * blockDim.y +
-                            threadIdx.y * blockDim.x + threadIdx.x;
-            const int bsz = blockDim.x * blockDim.y * blockDim.z;
-            int lane      = tid % global::WARP_SIZE;
-            int wid       = tid / global::WARP_SIZE;
-
-            val = warpReduceMin(val);   // Each warp performs partial reduction
-            if (lane == 0) {
-                shared[wid] = val;   // Write reduced value to shared memory
-            }
-            __syncthreads();   // Wait for all partial reductions
-
-            // printf("Lane[%d]: %f\n", lane, shared[lane]);
-            // read from shared memory only if that warp existed
-            val = (tid < bsz / global::WARP_SIZE) ? shared[lane] : val;
-
-            if (wid == 0) {
-                val = warpReduceMin(val);   // Final reduce within first warp
-            }
-            return val;
-#else
-            return 0.0;
-#endif
-        };
 
         /**
          * @brief the next permutation in the set {1,2} or {1, 2, 3}

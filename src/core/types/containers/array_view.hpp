@@ -228,7 +228,7 @@ namespace simbi {
             }
 
             // Get center position
-            DUAL const auto position() const
+            DUAL auto position() const
             {
                 uarray<3> pos3d = {0, 0, 0};
                 pos3d[0]        = center_[0];
@@ -242,7 +242,7 @@ namespace simbi {
             }
 
             // get global position
-            DUAL const auto global_position() const
+            DUAL auto global_position() const
             {
                 uarray<3> pos3d = {0, 0, 0};
                 pos3d[0]        = center_[0] + offsets_[Dims - 1];
@@ -345,7 +345,7 @@ namespace simbi {
             }
 
             // Get center position
-            DUAL const auto position() const
+            DUAL auto position() const
             {
                 uarray<3> pos3d = {0, 0, 0};
                 pos3d[0]        = center_[0];
@@ -359,7 +359,7 @@ namespace simbi {
             }
 
             // get global position
-            DUAL const auto global_position() const
+            DUAL auto global_position() const
             {
                 uarray<3> pos3d = {0, 0, 0};
                 pos3d[0]        = center_[0] + offsets_[Dims - 1];

@@ -247,7 +247,7 @@ namespace simbi::ibsystem {
 
             parallel_for(
                 block_policy,
-                [this, block_results_ptr, total_cells] DEV(luint idx) {
+                [this, block_results_ptr, total_cells] DEV(luint) {
                     // block index
                     const size_type block_idx  = get_block_id();
                     const size_type thread_idx = get_thread_id();

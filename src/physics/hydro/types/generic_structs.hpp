@@ -653,10 +653,7 @@ namespace simbi {
         // in MHD runs, the magnetic components are actually the EMF fluxes
         // so we add a method to get the electric field which is simply - nhat x
         // F
-        DUAL auto calc_electric_field(
-            const unit_vector_t<Dims>& nhat,
-            const luint ehat = 1
-        )
+        DUAL auto calc_electric_field(const unit_vector_t<Dims>& nhat)
             requires sim_type::MHD<R>
         {
             // since the flux vector magnetic field components are actually

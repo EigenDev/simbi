@@ -458,14 +458,14 @@ namespace simbi {
         }
 
         static constexpr auto calculate_geometrical_source_terms(
-            const auto& prims,
-            const auto& cell,
+            const auto&,
+            const auto&,
             auto& cons,
-            auto gamma
+            auto
         )
         {
             // Do nothing
-            for (int qq = 0; qq < Dims; qq++) {
+            for (size_type qq = 0; qq < Dims; qq++) {
                 cons[qq + 1] = 0.0;
             }
         }

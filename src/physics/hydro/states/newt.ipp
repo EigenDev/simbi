@@ -45,7 +45,7 @@ void Newtonian<dim>::cons2prim_impl()
     atomic::simbi_atomic<bool> local_failure{false};
     this->prims_.transform(
         [gamma = this->gamma, loc = local_failure.get(), iso = isothermal_] DEV(
-            auto& prim,
+            auto& /* prim */,
             const auto& cons_var
         ) -> Maybe<primitive_t> {
             const auto& rho = cons_var.dens();
@@ -882,12 +882,11 @@ void Newtonian<dim>::advance_impl()
         for (int q = 1; q > -1; q--) {
             // q = 0 is L, q = 1 is R
             const auto sign = (q == 1) ? 1 : -1;
-            res -= fri[q] * cell.inverse_volume(0) * cell.area(0 + q) * sign;
+            res -= fri[q] * cell.inverse_volume() * cell.area(0 + q) * sign;
             if constexpr (dim > 1) {
-                res -=
-                    gri[q] * cell.inverse_volume(1) * cell.area(2 + q) * sign;
+                res -= gri[q] * cell.inverse_volume() * cell.area(2 + q) * sign;
                 if constexpr (dim > 2) {
-                    res -= hri[q] * cell.inverse_volume(2) * cell.area(4 + q) *
+                    res -= hri[q] * cell.inverse_volume() * cell.area(4 + q) *
                            sign;
                 }
             }
@@ -957,41 +956,23 @@ void Newtonian<dim>::advance_impl()
             }
 
             const auto [viscxL, viscxR] = visc::viscous_flux<
-                1>(pLx, pRx, pLy, pRy, pLz, pRz, cell, q, this->viscosity());
+                1>(pLx, pRx, pLy, pRy, pLz, pRz, cell, this->viscosity());
 
             fri[q] = (this->*riemann_solve)(pLx, pRx, 1, vface, viscxL, viscxR);
 
             if constexpr (dim > 1) {
                 vface = cell.velocity(q + 2);
 
-                const auto [viscyL, viscyR] = visc::viscous_flux<2>(
-                    pLx,
-                    pRx,
-                    pLy,
-                    pRy,
-                    pLz,
-                    pRz,
-                    cell,
-                    q,
-                    this->viscosity()
-                );
+                const auto [viscyL, viscyR] = visc::viscous_flux<
+                    2>(pLx, pRx, pLy, pRy, pLz, pRz, cell, this->viscosity());
                 gri[q] =
                     (this->*riemann_solve)(pLy, pRy, 2, vface, viscyL, viscyR);
             }
             if constexpr (dim > 2) {
                 vface = cell.velocity(q + 4);
 
-                const auto [visczL, visczR] = visc::viscous_flux<3>(
-                    pLx,
-                    pRx,
-                    pLy,
-                    pRy,
-                    pLz,
-                    pRz,
-                    cell,
-                    q,
-                    this->viscosity()
-                );
+                const auto [visczL, visczR] = visc::viscous_flux<
+                    3>(pLx, pRx, pLy, pRy, pLz, pRz, cell, this->viscosity());
                 hri[q] =
                     (this->*riemann_solve)(pLz, pRz, 3, vface, visczL, visczR);
             }

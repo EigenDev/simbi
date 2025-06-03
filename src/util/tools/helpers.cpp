@@ -41,7 +41,7 @@ namespace simbi {
 
         void catch_signals()
         {
-            const static auto signal_handler = [](int sig) {
+            const static auto signal_handler = [](int) {
                 killsig_received = true;
             };
             std::signal(SIGTERM, signal_handler);
