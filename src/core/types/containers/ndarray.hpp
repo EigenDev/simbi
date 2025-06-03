@@ -290,8 +290,8 @@ namespace simbi {
                 this->shape_[ii] = 1;
             }
             this->strides_ = this->compute_strides(this->shape_);
-            return *this;
             fill(fill_value);
+            return *this;
         }
 
         void resize_capacity(size_type new_capacity)
