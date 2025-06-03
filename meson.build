@@ -135,8 +135,6 @@ if get_option('gpu_compilation').enabled()
     # Final fallback and validation
     if hdf5_inc == ''
         warning('Could not determine HDF5 include directory. GPU compilation may fail.')
-        # Set to empty and hope the dependency handles it
-        hdf5_inc = ''
     else
         # Validate the path exists
         if not fs.exists(hdf5_inc / 'hdf5.h')
@@ -157,11 +155,5 @@ if get_option('gpu_compilation').enabled()
     if hdf5_inc != ''
         include_dirs += hdf5_inc
     endif
-    include_dirs = [
-        meson.current_source_dir() + '/src',
-        '.',
-        meson.current_build_dir(),
-        hdf5_inc,
-    ]
     subdir('gpu')
 endif
