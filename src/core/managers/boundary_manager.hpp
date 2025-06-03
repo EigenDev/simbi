@@ -53,6 +53,7 @@
 #include "build_options.hpp"
 #include "core/managers/io_manager.hpp"
 #include "core/traits.hpp"
+#include "core/types/alias/alias.hpp"
 #include "core/types/containers/array_view.hpp"
 #include "core/types/containers/ndarray.hpp"
 #include "core/types/monad/maybe.hpp"
@@ -107,6 +108,108 @@ namespace simbi {
                     }
                 }
             }
+
+            if (std::any_of(ghost_dims_.begin(), ghost_dims_.end(), [](bool v) {
+                    return v;
+                })) {
+                symmetric_copy(policy, full_array, interior_view, ghost_dims_);
+            }
+        }
+
+        void symmetric_copy(
+            const ExecutionPolicy<>& policy,
+            ndarray<T, Dims>& full_array,
+            const array_view<T, Dims>& interior_view,
+            // Array indicating which dimensions are "ghost"
+            const array_t<bool, Dims>& is_ghost_dim
+        ) const
+        {
+            auto* data = full_array.data();
+            auto radii = [&]() {
+                uarray<Dims> rad;
+                for (size_type ii = 0; ii < Dims; ++ii) {
+                    rad[ii] =
+                        (full_array.shape()[ii] - interior_view.shape()[ii]) /
+                        2;
+                }
+                return rad;
+            }();
+
+            parallel_for(
+                policy,
+                [data,
+                 radii,
+                 full_shape     = full_array.shape(),
+                 full_strides   = full_array.strides(),
+                 interior_shape = interior_view.shape(),
+                 is_ghost_dim,
+                 this] DEV(size_type idx) {
+                    // Get coordinates of this point
+                    auto coords = unravel_idx(idx, full_shape);
+                    auto rshape = interior_shape;
+                    // reverse shape if row major
+                    if constexpr (!global::col_major) {
+                        std::reverse(rshape.begin(), rshape.end());
+                    }
+
+                    // Skip interior points
+                    if (!is_boundary_point(coords, rshape, radii) &&
+                        !is_corner_point(coords, rshape, radii)) {
+                        return;
+                    }
+
+                    // Check if this point is in a ghost dimension
+                    bool needs_ghost_copy = false;
+                    for (size_type dim = 0; dim < Dims; ++dim) {
+                        if (!is_ghost_dim[dim]) {
+                            continue;
+                        }
+
+                        if (coords[dim] < radii[dim] ||
+                            coords[dim] >= rshape[dim] + radii[dim]) {
+                            needs_ghost_copy = true;
+                            break;
+                        }
+                    }
+
+                    if (!needs_ghost_copy) {
+                        return;
+                    }
+
+                    // Create coordinates that point to the corresponding
+                    // interior position
+                    auto real_coords = coords;
+
+                    // For each ghost dimension, adjust to use the corresponding
+                    // interior point
+                    for (size_type dim = 0; dim < Dims; ++dim) {
+                        if (!is_ghost_dim[dim]) {
+                            continue;
+                        }
+
+                        // If we're outside the interior in this dimension, map
+                        // to the nearest interior point
+                        if (coords[dim] < radii[dim]) {
+                            real_coords[dim] =
+                                radii[dim];   // Map to first interior point
+                        }
+                        else if (coords[dim] >= rshape[dim] + radii[dim]) {
+                            real_coords[dim] =
+                                rshape[dim] + radii[dim] -
+                                1;   // Map to last interior point
+                        }
+                    }
+
+                    // Calculate linear index for the interior point
+                    size_type real_idx = 0;
+                    for (size_type d = 0; d < Dims; d++) {
+                        real_idx += real_coords[d] * full_strides[d];
+                    }
+
+                    // Copy from interior to ghost
+                    data[idx] = data[real_idx];
+                }
+            );
         }
 
         template <typename TagType = conserved_tag>
@@ -445,7 +548,14 @@ namespace simbi {
             );
         }
 
+        void set_ghost_dims(const array_t<bool, Dims>& ghost_dims)
+        {
+            ghost_dims_ = ghost_dims;
+        }
+
       private:
+        array_t<bool, Dims> ghost_dims_{false};
+
         DEV uarray<Dims>
         unravel_idx(size_type idx, const uarray<Dims>& shape) const
         {

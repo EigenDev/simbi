@@ -226,6 +226,16 @@ namespace simbi {
         {
             init_body_system(init_conditions);
             context_.viscosity = viscosity();
+            if (init_conditions.is_mhd) {
+                // sometime the effective dimensions of the problem
+                // is lower than the physical dimensions. To account for this,
+                // we simply perform symmetric copies into the ghost dimensions
+                const auto [xactive, yactive, zactive] =
+                    init_conditions.active_zones();
+                conserved_boundary_manager_.set_ghost_dims(
+                    {false, yactive == 1, zactive == 1}
+                );
+            }
         }
 
         DEV conserved_t hydro_sources(const auto& prims, const auto& cell) const
