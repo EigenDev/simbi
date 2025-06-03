@@ -137,6 +137,8 @@ class RichSimulationSummary:
                 continue
             elif value == []:
                 continue
+            elif value == 0 and name != "start_time":
+                continue
 
             if "expression" in name:
                 the_value = "user-defined"
