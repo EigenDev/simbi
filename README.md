@@ -165,7 +165,7 @@
 
 <div align="center">
 
-### 🚀 Quick Install
+### 🚀 One-Step Installation
 
 </div>
 
@@ -173,28 +173,24 @@
 CC=<your_c_compiler> CXX=<your_cpp_compiler> python dev.py install [options]
 ```
 
-<div align="center">
+SIMBI automatically detects and uses UV for dependency management if available, providing faster and more reliable package installations.
 
-### ⚙️ Manual Install
+<details>
+<summary><b>📋 Common Installation Options</b></summary>
 
-</div>
-Setup with Meson**:
+- `--visual-extras` - Include visualization dependencies
+- `--cli-extras` - Include CLI enhancement dependencies
+- `--gpu-compilation` - Enable GPU support
+- `--dev-arch <arch>` - Specify GPU architecture code(s)
+- `--gpu-platform {cuda,hip}` - Choose GPU platform
+- `--debug` - Build with debug symbols
+- `--release` - Build optimized release version
 
+For the complete list of options run:
 ```bash
-CC=<your_c_compiler> CXX=<your_cpp_compiler> meson setup <build_dir> -D<some_option>
+python dev.py install --help
 ```
-
-2. **Build and install**:
-
-```bash
-ninja -v -C <build_dir> install
-```
-
-or
-
-```bash
-meson install -C <build_dir>
-```
+</details>
 
 <details>
 <summary><b>⚠️ GPU Compilation Notes</b></summary>
@@ -207,9 +203,9 @@ When compiling for GPU, you must provide your GPU's architecture identifier:
 CC=<your_c_compiler> CXX=<your_cpp_compiler> python dev.py install --gpu-compilation --dev-arch 70 [options]
 ```
 
-#### Manual Setup
+#### AMD Example (MI100, gfx908)
 ```bash
-CC=<your_c_compiler> CXX=<your_cpp_compiler> meson setup <build_dir> -Dgpu_arch=70 -Dgpu_compilation=enabled [options]
+CC=<your_c_compiler> CXX=<your_cpp_compiler> python dev.py install --gpu-compilation --gpu-platform hip --dev-arch gfx908 [options]
 ```
 
 </details>
@@ -246,12 +242,12 @@ simbi run marti-muller \
 ```bash
 # Plot specific fields
 simbi plot data/1000.chkpt.000_100.h5 \
-  "Marti \& Muller Problem 1" \
+  --setup "Marti \& Muller Problem 1" \
   --field rho v p
 
 # General format
 simbi plot <checkpoint_file> \
-  "<name_of_physics_setup>" \
+  --setup "<name_of_physics_setup>" \
   --field <field_string> [options]
 ```
 
@@ -281,11 +277,11 @@ This creates a skeleton configuration in the `simbi_configs` directory that you 
 <td width="50%">
 
 ### Physics Regimes
-- **SRMHD**: `regime="srmhd"`
+- **SRMHD**: `regime=Regime.SRMHD`
   *Special Relativistic Magnetohydrodynamics*
-- **SRHD**: `regime="srhd"`
+- **SRHD**: `regime=Regime.SRHD`
   *Special Relativistic Hydrodynamics*
-- **Newtonian**: `regime="classical"`
+- **Newtonian**: `regime=Regime.CLASSICAL`
   *Newtonian Hydrodynamics*
 
 ### Mesh Control
@@ -312,14 +308,19 @@ This creates a skeleton configuration in the `simbi_configs` directory that you 
    bc_x2max, bc_x3min, bc_x3max]
   ```
 - Types:
-  - `periodic`
-  - `reflecting`
-  - `outflow`
-  - `dynamic`
+  - `BoundaryCondition.PERIODIC`
+  - `BoundaryCondition.REFLECTING`
+  - `BoundaryCondition.OUTFLOW`
+  - `BoundaryCondition.DYNAMIC`
 
 ### Additional Features
 - **Passive Scalar Tracking**:
-  - `passive_scalar` property
+  - simply set the last "extra" element in the state array.
+  For example,
+  ```python
+  yield (rho, v, p) # no passive scalars
+  yield (rho, v, p, passive_scalar) # with one passive scalar
+  ```
 - **Immersed Boundary Method**:
   - `body_system` property (impermeable by default)
 - **Gravity Source Terms**:
