@@ -1312,21 +1312,21 @@ template <int dim>
 void RMHD<dim>::sync_flux_boundaries()
 {
     // sync only in perpendicular directions
-    this->flux_boundary_manager().template sync_boundaries<flux_tag>(
+    this->conserved_boundary_manager().template sync_boundaries<flux_tag>(
         this->full_xvertex_policy(),
         fri,
         fri.contract({1, 1, 0}),
         this->bcs(),
         this->mesh()
     );
-    this->flux_boundary_manager().template sync_boundaries<flux_tag>(
+    this->conserved_boundary_manager().template sync_boundaries<flux_tag>(
         this->full_yvertex_policy(),
         gri,
         gri.contract({1, 0, 1}),
         this->bcs(),
         this->mesh()
     );
-    this->flux_boundary_manager().template sync_boundaries<flux_tag>(
+    this->conserved_boundary_manager().template sync_boundaries<flux_tag>(
         this->full_zvertex_policy(),
         hri,
         hri.contract({0, 1, 1}),

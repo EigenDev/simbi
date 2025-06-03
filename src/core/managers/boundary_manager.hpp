@@ -109,10 +109,20 @@ namespace simbi {
                 }
             }
 
-            if (std::any_of(ghost_dims_.begin(), ghost_dims_.end(), [](bool v) {
-                    return v;
-                })) {
-                symmetric_copy(policy, full_array, interior_view, ghost_dims_);
+            if constexpr (is_conserved_v<T> &&
+                          std::is_same_v<TagType, conserved_tag>) {
+                if (std::any_of(
+                        ghost_dims_.begin(),
+                        ghost_dims_.end(),
+                        [](bool v) { return v; }
+                    )) {
+                    symmetric_copy(
+                        policy,
+                        full_array,
+                        interior_view,
+                        ghost_dims_
+                    );
+                }
             }
         }
 

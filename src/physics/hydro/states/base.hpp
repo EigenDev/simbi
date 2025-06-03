@@ -167,7 +167,6 @@ namespace simbi {
         SolverManager solver_config_;
         util::smart_ptr<IOManager<Dims>> io_manager_;
         boundary_manager<conserved_t, Dims> conserved_boundary_manager_;
-        boundary_manager<conserved_t, Dims> flux_boundary_manager_;
 
         bool was_interrupted_{false};
         bool has_crashed_{false};
@@ -597,10 +596,6 @@ namespace simbi {
         const auto& conserved_boundary_manager() const
         {
             return conserved_boundary_manager_;
-        }
-        const auto& flux_boundary_manager() const
-        {
-            return flux_boundary_manager_;
         }
 
         auto adiabatic_index() const { return gamma; }
