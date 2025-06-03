@@ -232,7 +232,7 @@ namespace simbi {
                 // we simply perform symmetric copies into the ghost dimensions
                 const auto [xx, yy, zz] = init_conditions.active_zones();
                 conserved_boundary_manager_.set_ghost_dims(
-                    {false, xx == 1, yy == 1}
+                    {false, yy == 1, zz == 1}
                 );
             }
         }
