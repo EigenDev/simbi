@@ -206,7 +206,7 @@ namespace simbi {
 
         // Accessors
         DUAL auto solver_type() const { return solver_type_; }
-        DUAL auto solver_name() const
+        auto solver_name() const
         {
             return std::string_view(
                 solver_map_data[static_cast<size_t>(solver_type_)].first
