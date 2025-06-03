@@ -5,9 +5,7 @@ import json
 import os
 import logging
 from pathlib import Path
-from typing import Optional, Sequence, Any
-
-from cmasher.utils import Callable
+from typing import Optional, Sequence, Any, Callable
 
 # Constants
 CACHE_FILE = "simbi_build_cache.txt"
@@ -505,7 +503,7 @@ def check_minimal_dependencies() -> None:
             sys.exit(1)
 
     # Check for Python dependencies
-    python_deps = ["mesonbuild", "numpy", "cython", "cogapp"]
+    python_deps = ["meson", "numpy", "cython", "cogapp"]
 
     def check_import(dep: str) -> bool:
         try:
@@ -521,7 +519,20 @@ def check_minimal_dependencies() -> None:
             f"Installing missing Python dependencies: {', '.join(missing_py_deps)}"
         )
         try:
-            run_subprocess([sys.executable, "-m", "pip", "install"] + missing_py_deps)
+            # check if using UV, if so, use it to install dependencies
+            if is_tool("uv"):
+                run_subprocess(
+                    ["uv", "pip", "install"] + missing_py_deps,
+                    check=True,
+                    capture=True,
+                )
+            else:
+                # Fallback to standard pip
+                run_subprocess(
+                    [sys.executable, "-m", "pip", "install"] + missing_py_deps
+                )
+
+            # run_subprocess([sys.executable, "-m", "pip", "install"] + missing_py_deps)
         except subprocess.SubprocessError:
             logger.warning("Failed to install some Python dependencies")
             if not confirm("Continue anyway?"):
@@ -818,6 +829,18 @@ def parse_the_arguments() -> tuple[argparse.ArgumentParser, argparse.Namespace]:
         choices=["cuda", "hip", "None"],
         help="flag to set the gpu platform for compilation",
     )
+    build_parser.add_argument(
+        "--create-venv",
+        choices=["yes", "no", "ask"],
+        default="ask",
+        help="create a dedicated virtual environment for simbi (yes/no/ask)",
+    )
+    build_parser.add_argument(
+        "--venv-path",
+        type=str,
+        default=".simbi-venv",
+        help="path for the simbi virtual environment (default: .simbi-venv)",
+    )
 
     compile_type = build_parser.add_mutually_exclusive_group()
     compile_type.add_argument(
@@ -879,6 +902,117 @@ def parse_the_arguments() -> tuple[argparse.ArgumentParser, argparse.Namespace]:
 # =================================================================
 # Build Operations
 # =================================================================
+
+
+def setup_virtual_environment(args: argparse.Namespace) -> Optional[str]:
+    """
+    Set up a virtual environment for simbi if requested.
+
+    Returns the path to the activated venv's python executable if created, None otherwise.
+    """
+    venv_choice = args.create_venv
+
+    # If set to ask, prompt the user
+    if venv_choice == "ask":
+        choices = ["y", "yes", "n", "no"]
+        response = ""
+        while response.lower() not in choices:
+            response = input(
+                "Would you like to create a dedicated virtual environment for simbi? [y/n]: "
+            )
+        venv_choice = "yes" if response.lower() in ["y", "yes"] else "no"
+
+    if venv_choice == "no":
+        logger.info("Skipping virtual environment creation")
+        return None
+
+    # Determine the venv path
+    venv_path = Path(args.venv_path).resolve()
+
+    if venv_path.exists():
+        logger.warning(f"Virtual environment already exists at {venv_path}")
+        if not confirm("Use existing virtual environment?"):
+            if confirm("Delete and recreate the virtual environment?"):
+                import shutil
+
+                shutil.rmtree(venv_path)
+            else:
+                logger.info("Skipping virtual environment creation")
+                return None
+
+    logger.info(f"Creating virtual environment at {venv_path}")
+
+    # Create the virtual environment using either UV or standard venv
+    if is_tool("uv"):
+        logger.info("Using UV to create virtual environment")
+        try:
+            run_subprocess(["uv", "venv", str(venv_path)])
+
+            # Get the python executable path
+            if sys.platform == "win32":
+                python_exec = str(venv_path / "Scripts" / "python.exe")
+            else:
+                python_exec = str(venv_path / "bin" / "python")
+
+            logger.info("Virtual environment created successfully!")
+
+            # Print activation instructions
+            logger.info("To activate the virtual environment in the future, run:")
+            if sys.platform == "win32":
+                logger.info(f"   {venv_path}\\Scripts\\activate")
+            else:
+                logger.info(f"   source {venv_path}/bin/activate")
+
+            return python_exec
+
+        except subprocess.CalledProcessError as e:
+            logger.error(f"Failed to create UV virtual environment: {e}")
+            if confirm("Try using standard venv module instead?"):
+                pass  # Fall through to standard venv creation
+            else:
+                return None
+
+    # Use standard venv if UV is not available or UV venv creation failed
+    try:
+        import venv
+
+        logger.info("Using Python's built-in venv module to create virtual environment")
+        venv.create(venv_path, with_pip=True)
+
+        # Get the python executable path
+        if sys.platform == "win32":
+            python_exec = str(venv_path / "Scripts" / "python.exe")
+        else:
+            python_exec = str(venv_path / "bin" / "python")
+
+        logger.info("Virtual environment created successfully!")
+
+        # Print activation instructions
+        logger.info("To activate the virtual environment in the future, run:")
+        if sys.platform == "win32":
+            logger.info(f"   {venv_path}\\Scripts\\activate")
+        else:
+            logger.info(f"   source {venv_path}/bin/activate")
+
+        # Install pip and required tools
+        run_subprocess(
+            [
+                python_exec,
+                "-m",
+                "pip",
+                "install",
+                "--upgrade",
+                "pip",
+                "wheel",
+                "setuptools",
+            ]
+        )
+
+        return python_exec
+
+    except Exception as e:
+        logger.error(f"Failed to create virtual environment: {e}")
+        return None
 
 
 def build_simbi(args: argparse.Namespace) -> tuple[str, str]:
@@ -981,6 +1115,10 @@ def build_simbi(args: argparse.Namespace) -> tuple[str, str]:
 
 def install_simbi(args: argparse.Namespace) -> None:
     """Install the simbi package."""
+    # Set up a virtual environment if requested
+    python_exec = setup_virtual_environment(args)
+
+    # Continue with normal installation
     egg_dir, build_dir = build_simbi(args)
 
     extras = "" if not args.visual_extras else "[visual]"
@@ -991,13 +1129,32 @@ def install_simbi(args: argparse.Namespace) -> None:
         "." + extras if args.install_mode == "default" else "-e" + "." + extras
     )
 
-    # Install with pip
+    # Check if UV is available and use it for installation
+    if is_tool("uv"):
+        logger.info("UV package manager detected, using UV for installation")
+        print(python_exec)
+        if python_exec:
+            install_cmd = [
+                "uv",
+                "pip",
+                "install",
+                "--python",
+                python_exec,
+                install_mode,
+            ]
+        else:
+            install_cmd = ["uv", "pip", "install", install_mode]
+    else:
+        logger.info("Using standard pip for installation")
+        if python_exec:
+            install_cmd = [python_exec, "-m", "pip", "install", install_mode]
+        else:
+            install_cmd = [sys.executable, "-m", "pip", "install", install_mode]
+
     logger.info(f"Installing simbi with mode: {install_mode}")
 
     # Use popen + grep to filter out "already satisfied" messages
-    p1 = subprocess.Popen(
-        [sys.executable, "-m", "pip", "install", install_mode], stdout=subprocess.PIPE
-    )
+    p1 = subprocess.Popen(install_cmd, stdout=subprocess.PIPE)
     p2 = subprocess.Popen(
         ["grep", "-v", "Requirement already satisfied"], stdin=p1.stdout
     )
@@ -1008,7 +1165,18 @@ def install_simbi(args: argparse.Namespace) -> None:
     # Clean up
     logger.info("Cleaning up build artifacts")
     run_subprocess(["rm", "-rf", f"{egg_dir}", f"{build_dir}"], check=False)
-    logger.info("Installation complete!")
+
+    # Final message
+    if python_exec:
+        venv_path = Path(args.venv_path).resolve()
+        logger.info("Installation complete in virtual environment!")
+        logger.info("To use simbi, first activate the virtual environment:")
+        if sys.platform == "win32":
+            logger.info(f"   {venv_path}\\Scripts\\activate")
+        else:
+            logger.info(f"   source {venv_path}/bin/activate")
+    else:
+        logger.info("Installation complete!")
 
 
 def uninstall_simbi(args: argparse.Namespace) -> None:

@@ -193,6 +193,33 @@ python dev.py install --help
 </details>
 
 <details>
+<summary><b>🔄 Virtual Environment</b></summary>
+
+By default, SIMBI will ask if you want to create a dedicated virtual environment during installation. This keeps your SIMBI installation isolated from your system Python.
+
+To explicitly create or skip a virtual environment:
+```bash
+# Always create a virtual environment
+python dev.py install --create-venv yes
+
+# Never create a virtual environment
+python dev.py install --create-venv no
+
+# Specify a custom path for the virtual environment
+python dev.py install --create-venv yes --venv-path /path/to/env
+```
+
+Once installed in a virtual environment, you'll need to activate it before using SIMBI:
+```bash
+# On Linux/macOS
+source .simbi-venv/bin/activate
+
+# On Windows
+.simbi-venv\Scripts\activate
+```
+</details>
+
+<details>
 <summary><b>⚠️ GPU Compilation Notes</b></summary>
 
 When compiling for GPU, you must provide your GPU's architecture identifier:
