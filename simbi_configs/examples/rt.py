@@ -93,7 +93,7 @@ class RayleighTaylor(SimbiBaseConfig):
                     vy = (
                         self.vamp
                         * 0.25
-                        * (1 + math.cos(4.0 * math.pi * x))
+                        * (1.0 + math.cos(4.0 * math.pi * x))
                         * (1.0 + math.cos(3.0 * math.pi * y))
                     )
 
