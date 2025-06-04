@@ -208,6 +208,7 @@ class RichSimulationSummary:
             "viscosity": "Viscosity coefficient",
             "ambient_sound_speed": "Ambient sound speed",
             "use_quirk_smoothing": "Use Quirk (1994) smoothing (True/False)",
+            "use_fleischmann_limiter": "Use Fleischmann et al. (2020) low-Mach HLLC fix (True / False)",
             "solver": "Riemann solver used",
             "spatial_order": "Spatial reconstruction schemes",
             "temporal_order": "temporal integration scheme",

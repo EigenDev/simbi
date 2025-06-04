@@ -135,12 +135,14 @@ namespace simbi {
 
         void visit_flags(
             bool& quirk_smoothing,
+            bool& fleischmann,
             bool& homologous,
             bool& mesh_motion,
             bool& isothermal
         ) override
         {
             quirk_smoothing = dict.at("use_quirk_smoothing").get<bool>();
+            fleischmann     = dict.at("use_fleischmann_limiter").get<bool>();
             homologous      = dict.at("is_homologous").get<bool>();
             mesh_motion     = dict.at("mesh_motion").get<bool>();
             isothermal      = dict.at("isothermal").get<bool>();
@@ -446,12 +448,14 @@ namespace simbi {
 
         void visit_flags(
             bool& quirk_smoothing,
+            bool& fleischmann,
             bool& homologous,
             bool& mesh_motion,
             bool& isothermal
         ) override
         {
             quirk_smoothing = false;
+            fleischmann     = false;
             homologous      = false;
             mesh_motion     = false;
             isothermal      = false;
@@ -627,7 +631,7 @@ namespace simbi {
             }
         }
 
-        void visit_flags(bool&, bool&, bool&, bool&) override
+        void visit_flags(bool&, bool&, bool&, bool&, bool&) override
         {
             // No specific validation for flags, but could be added if needed
         }

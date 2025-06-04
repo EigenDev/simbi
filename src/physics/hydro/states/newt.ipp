@@ -3,6 +3,7 @@
 #include "core/types/utility/atomic_bool.hpp"   // for shared_atomic_bool
 #include "io/exceptions.hpp"
 #include "physics/hydro/schemes/viscosity/viscous.hpp"
+#include "physics/hydro/types/generic_structs.hpp"
 #include "util/tools/device_api.hpp"
 #include "util/tools/helpers.hpp"
 #include <cmath>   // for max, min
@@ -50,7 +51,7 @@ void Newtonian<dim>::cons2prim_impl()
         ) -> Maybe<primitive_t> {
             const auto& rho = cons_var.dens();
             const auto vel  = cons_var.momentum() / rho;
-            const auto& chi = cons_var.chi() / rho;
+            const auto chi  = cons_var.chi() / rho;
             const auto pre  = cons_var.pressure(gamma, iso);
 
             if (pre < 0 || !std::isfinite(pre)) {
@@ -153,12 +154,7 @@ DUAL Newtonian<dim>::eigenvals_t Newtonian<dim>::calc_eigenvals(
                     (pR - pL + rhoL * vL * (aL - vL) - rhoR * vR * (aR - vR)) /
                     (rhoL * (aL - vL) - rhoR * (aR - vR));
 
-                if constexpr (dim == 1) {
-                    return {aL, aR, aStar, pStar};
-                }
-                else {
-                    return {aL, aR, csL, csR, aStar, pStar};
-                }
+                return {aL, aR, aStar, pStar};
             }
             else {
                 real pStar, qL, qR;
@@ -170,11 +166,15 @@ DUAL Newtonian<dim>::eigenvals_t Newtonian<dim>::calc_eigenvals(
                 const real pmin = my_min(pL, pR);
                 const real pmax = my_max(pL, pR);
 
+                // Section 9.5.2 of Toro's book suggests a user-defined
+                // threshold for the PVRS case
                 constexpr auto q_user = 2.0;
                 if (pmax / pmin <= q_user && pmin <= pvrs && pvrs <= pmax) {
+                    // PVRS case
                     pStar = pvrs;
                 }
                 else if (pvrs <= pmin) {
+                    // two-rarefaction case
                     const real gamma_factor = (gamma - 1.0) / (2.0 * gamma);
                     const real pL_pow       = std::pow(pL, gamma_factor);
                     const real pR_pow       = std::pow(pR, gamma_factor);
@@ -185,6 +185,7 @@ DUAL Newtonian<dim>::eigenvals_t Newtonian<dim>::calc_eigenvals(
                     );
                 }
                 else {
+                    // two-shock case
                     const real alpha_L = 2.0 / ((gamma + 1) * rhoL);
                     const real alpha_R = 2.0 / ((gamma + 1) * rhoR);
                     const real beta_L  = (gamma - 1) / (gamma + 1) * pL;
@@ -224,12 +225,7 @@ DUAL Newtonian<dim>::eigenvals_t Newtonian<dim>::calc_eigenvals(
                     (pR - pL + rhoL * vL * (aL - vL) - rhoR * vR * (aR - vR)) /
                     (rhoL * (aL - vL) - rhoR * (aR - vR));
 
-                if constexpr (dim == 1) {
-                    return {aL, aR, aStar, pStar};
-                }
-                else {
-                    return {aL, aR, csL, csR, aStar, pStar};
-                }
+                return {aL, aR, aStar, pStar};
             }
         }
 
@@ -302,6 +298,13 @@ DUAL Newtonian<dim>::conserved_t Newtonian<dim>::calc_hllc_flux(
     const auto& viscR
 ) const
 {
+    if constexpr (dim > 1) {
+        if (this->quirk_smoothing() &&
+            quirk_strong_shock(prL.press(), prR.press())) {
+            return calc_hlle_flux(prL, prR, nhat, vface, viscL, viscR);
+        }
+    }
+
     const auto lambda = calc_eigenvals(prL, prR, nhat);
     const real aL     = lambda.aL();
     const real aR     = lambda.aR();
@@ -363,73 +366,47 @@ DUAL Newtonian<dim>::conserved_t Newtonian<dim>::calc_hllc_flux(
         }
     }
     else {
-        const real cL    = lambda.csL();
-        const real cR    = lambda.csR();
         const real aStar = lambda.aStar();
         const real pStar = lambda.pStar();
-        // Apply the low-Mach HLLC fix found in Fleischmann et al 2020:
-        // https://www.sciencedirect.com/science/article/pii/S0021999120305362
-        constexpr real ma_lim = 0.10;
 
         // --------------Compute the L Star State----------
         real pressure = prL.press();
         real rho      = uL.dens();
-        real m1       = uL.mcomponent(1);
-        real m2       = uL.mcomponent(2);
-        real m3       = uL.mcomponent(3);
-        real edens    = uL.nrg();
-        real cofactor = 1.0 / (aL - aStar);
+        auto mom      = uL.momentum();
+        real nrg      = uL.nrg();
+        real fac      = 1.0 / (aL - aStar);
 
-        const real vL = prL.vcomponent(nhat);
-        const real vR = prR.vcomponent(nhat);
+        const real vL   = prL.vcomponent(nhat);
+        const real vR   = prR.vcomponent(nhat);
+        const auto ehat = unit_vectors::get<dim>(nhat);
 
         // Left Star State in x-direction of coordinate lattice
-        real rhostar = cofactor * (aL - vL) * rho;
-        real m1star  = cofactor * (m1 * (aL - vL) +
-                                  kronecker(nhat, 1) * (-pressure + pStar));
-        real m2star  = cofactor * (m2 * (aL - vL) +
-                                  kronecker(nhat, 2) * (-pressure + pStar));
-        real m3star  = cofactor * (m3 * (aL - vL) +
-                                  kronecker(nhat, 3) * (-pressure + pStar));
-        real estar =
-            cofactor * (edens * (aL - vL) + pStar * aStar - pressure * vL);
-        const auto starStateL = [=] {
-            if constexpr (dim == 2) {
-                return conserved_t{rhostar, m1star, m2star, estar};
-            }
-            else {
-                return conserved_t{rhostar, m1star, m2star, m3star, estar};
-            }
-        }();
+        real rhostar = fac * (aL - vL) * rho;
+        auto mstar   = fac * (mom * (aL - vL) + ehat * (pStar - pressure));
+        real estar = fac * (nrg * (aL - vL) + (pStar * aStar - pressure * vL));
+        const auto starStateL = conserved_t{rhostar, mstar, estar};
 
         pressure = prR.press();
         rho      = uR.dens();
-        m1       = uR.mcomponent(1);
-        m2       = uR.mcomponent(2);
-        m3       = uR.mcomponent(3);
-        edens    = uR.nrg();
-        cofactor = 1.0 / (aR - aStar);
+        mom      = uR.momentum();
+        nrg      = uR.nrg();
+        fac      = 1.0 / (aR - aStar);
 
-        rhostar = cofactor * (aR - vR) * rho;
-        m1star  = cofactor *
-                 (m1 * (aR - vR) + kronecker(nhat, 1) * (-pressure + pStar));
-        m2star = cofactor *
-                 (m2 * (aR - vR) + kronecker(nhat, 2) * (-pressure + pStar));
-        m3star = cofactor *
-                 (m3 * (aR - vR) + kronecker(nhat, 3) * (-pressure + pStar));
-        estar = cofactor * (edens * (aR - vR) + pStar * aStar - pressure * vR);
-        const auto starStateR = [=] {
-            if constexpr (dim == 2) {
-                return conserved_t{rhostar, m1star, m2star, estar};
-            }
-            else {
-                return conserved_t{rhostar, m1star, m2star, m3star, estar};
-            }
-        }();
+        rhostar = fac * (aR - vR) * rho;
+        mstar   = fac * (mom * (aR - vR) + ehat * (-pressure + pStar));
+        estar   = fac * (nrg * (aR - vR) + (pStar * aStar - pressure * vR));
+        const auto starStateR = conserved_t{rhostar, mstar, estar};
 
-        const real ma_local = my_max(std::abs(vL / cL), std::abs(vR / cR));
-        const real phi =
-            std::sin(my_min<real>(1.0, ma_local / ma_lim) * M_PI * 0.5);
+        // Apply the low-Mach HLLC fix found in Fleischmann et al 2020:
+        // https://www.sciencedirect.com/science/article/pii/S0021999120305362
+        const real phi = EntropyDetector::compute_adaptive_phi(
+            prL,
+            prR,
+            unit_vectors::get<dim>(nhat),
+            gamma,
+            // flag for Fleischmann et al. (2020) low-Mach fix
+            this->fleischmann_limiter()
+        );
         const real aL_lm          = phi * aL;
         const real aR_lm          = phi * aR;
         const auto face_starState = (aStar <= 0) ? starStateR : starStateL;

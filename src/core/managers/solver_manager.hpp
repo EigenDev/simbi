@@ -159,7 +159,7 @@ namespace simbi {
         std::string temporal_order_;
         bool use_pcm_;
         bool using_rk1_;
-        bool quirk_smoothing_;
+        bool quirk_smoothing_, fleischmann_limiter_;
         real plm_theta_, step_, viscosity_, shakura_sunyaev_alpha_;
 
         // Physics flags
@@ -177,6 +177,7 @@ namespace simbi {
               use_pcm_(spatial_order_ == "pcm"),
               using_rk1_(temporal_order_ == "rk1"),
               quirk_smoothing_(init.quirk_smoothing),
+              fleischmann_limiter_(init.fleischmann_limiter),
               plm_theta_(init.plm_theta),
               step_((temporal_order_ == "rk1") ? 1.0 : 0.5),
               viscosity_(init.viscosity),
@@ -217,6 +218,7 @@ namespace simbi {
         DUAL bool is_pcm() const { return use_pcm_; }
         DUAL bool is_rk1() const { return using_rk1_; }
         DUAL bool is_quirk() const { return quirk_smoothing_; }
+        DUAL bool is_fleischmann() const { return fleischmann_limiter_; }
         DUAL auto plm_theta() const { return plm_theta_; }
         DUAL bool null_gravity() const { return null_gravity_; }
         DUAL bool null_sources() const { return null_sources_; }

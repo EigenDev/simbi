@@ -81,6 +81,7 @@ namespace simbi {
         luint nvars;
 
         bool quirk_smoothing;
+        bool fleischmann_limiter;
         bool homologous;
         bool mesh_motion;
         bool isothermal;
@@ -139,6 +140,7 @@ namespace simbi {
             );
             visitor.visit_flags(
                 quirk_smoothing,
+                fleischmann_limiter,
                 homologous,
                 mesh_motion,
                 isothermal

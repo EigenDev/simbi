@@ -47,7 +47,6 @@
  *==============================================================================
  */
 
-
 #ifndef INIT_CONDITIONS_VISITOR_HPP
 #define INIT_CONDITIONS_VISITOR_HPP
 
@@ -93,6 +92,7 @@ namespace simbi {
         // Boolean flags
         virtual void visit_flags(
             bool& quirk_smoothing,
+            bool& fleischmann,
             bool& homologous,
             bool& mesh_motion,
             bool& isothermal

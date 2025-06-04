@@ -605,6 +605,10 @@ namespace simbi {
         DUAL auto using_pcm() const { return solver_config_.is_pcm(); }
         auto using_rk1() const { return solver_config_.is_rk1(); }
         DUAL auto quirk_smoothing() const { return solver_config_.is_quirk(); }
+        DUAL auto fleischmann_limiter() const
+        {
+            return solver_config_.is_fleischmann();
+        }
         DUAL auto null_gravity() const { return solver_config_.null_gravity(); }
         DUAL auto null_sources() const { return solver_config_.null_sources(); }
         DUAL auto plm_theta() const { return solver_config_.plm_theta(); }

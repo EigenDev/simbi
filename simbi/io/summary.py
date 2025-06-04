@@ -320,6 +320,7 @@ class SimulationParameterSummary:
                     "plm_theta",
                     "cfl_number",
                     "use_quirk_smoothing",
+                    "use_fleischmann_limiter",
                     "order_of_integration",
                 ],
                 "descriptions": {

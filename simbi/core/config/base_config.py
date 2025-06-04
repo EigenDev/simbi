@@ -101,6 +101,10 @@ class SimbiBaseConfig(CLIConfigurableModel):
     )
 
     use_quirk_smoothing: bool = SimbiField(False, description="Use Quirk smoothing")
+    use_fleischmann_limiter: bool = SimbiField(
+        False,
+        description="Use the Fleischmann et al. 2020 mechanism for low-Mach fixes tot eh HLLC solver",
+    )
 
     checkpoint_interval: float = SimbiField(0.1, description="Checkpoint interval")
     checkpoint_index: int = SimbiField(
