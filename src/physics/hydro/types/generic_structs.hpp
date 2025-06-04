@@ -1213,8 +1213,7 @@ namespace simbi {
 
     template <size_type Dims, Regime R>
     struct Eigenvals {
-        constexpr static int nvals =
-            4 + 2 * (R == Regime::NEWTONIAN && Dims > 1);
+        constexpr static int nvals = 4;
         real vals_[nvals];
 
         Eigenvals()  = default;
@@ -1239,30 +1238,186 @@ namespace simbi {
 
         DUAL constexpr real asR() const { return vals_[3]; }
 
-        DUAL constexpr real csL() const { return vals_[2]; }
+        DUAL constexpr real aStar() const { return vals_[2]; }
 
-        DUAL constexpr real csR() const { return vals_[3]; }
+        DUAL constexpr real pStar() const { return vals_[3]; }
+    };
 
-        DUAL constexpr real aStar() const
+    struct EntropyDetector {
+        DEV static real
+        compute_local_mach(const auto& prL, const auto& prR, real gamma)
         {
-            if constexpr (nvals > 4) {
-                return vals_[4];
-            }
-            else if constexpr (R == Regime::NEWTONIAN && Dims == 1) {
-                return vals_[2];
-            }
-            return static_cast<real>(0.0);
+            const auto velL          = prL.velocity();
+            const auto velR          = prR.velocity();
+            const auto sound_speed_L = prL.sound_speed(gamma);
+            const auto sound_speed_R = prR.sound_speed(gamma);
+
+            // use the maximum of the Mach numbers from both sides
+            // as suggested by Fleischmann et al. (2020)
+            const real mach_L = vecops::norm(velL) / sound_speed_L;
+            const real mach_R = vecops::norm(velR) / sound_speed_R;
+
+            return my_max(mach_L, mach_R);
         }
 
-        DUAL constexpr real pStar() const
+        DEV static real
+        detect_interface_correction(const auto& prL, const auto& prR)
         {
-            if constexpr (nvals > 5) {
-                return vals_[5];
+            // detect material interfaces (RT-style contact discontinuities)
+            const real rho_jump = std::abs(prL.rho() - prR.rho()) /
+                                  (0.5 * (prL.rho() + prR.rho()));
+            const real pressure_jump = std::abs(prL.press() - prR.press()) /
+                                       (0.5 * (prL.press() + prR.press()));
+
+            // interface = large density jump, small pressure jump (nearly
+            // isentropic)
+            const bool is_contact = (rho_jump > 0.1) && (pressure_jump < 0.05);
+
+            if (is_contact) {
+                // need moderate dissipation to prevent interface oscillations
+                return 0.4;   // fixed moderate phi for interfaces
             }
-            else if constexpr (R == Regime::NEWTONIAN && Dims == 1) {
-                return vals_[3];
+            else {
+                return 0.0;   // no correction
             }
-            return static_cast<real>(0.0);
+        }
+
+        DEV static real detect_shock_correction(
+            const auto& prL,
+            const auto& prR,
+            real gamma,
+            const auto& nhat
+        )
+        {
+            // entropy production (shocks increase entropy)
+            const real sL = std::log(prL.press()) - gamma * std::log(prL.rho());
+            const real sR = std::log(prR.press()) - gamma * std::log(prR.rho());
+            const real entropy_production = sR - sL;
+
+            // velocity convergence (shocks compress flow)
+            const real vL_normal = vecops::dot(prL.velocity(), nhat);
+            const real vR_normal = vecops::dot(prR.velocity(), nhat);
+            const real velocity_convergence =
+                vL_normal - vR_normal;   // > 0 for compression
+
+            // combined shock indicator
+            const bool is_shock =
+                (entropy_production > 0.01) && (velocity_convergence > 0.0);
+
+            if (is_shock) {
+                return 1.0;   // force standard HLLC for shocks
+            }
+            else {
+                return 0.0;   // no correction
+            }
+        }
+
+        DEV static real detect_stagnation_correction(
+            const auto& prL,
+            const auto& prR,
+            real gamma
+        )
+        {
+            // detect very low velocity regions (want maximum LM treatment)
+            const real cL     = prL.sound_speed(gamma);
+            const real cR     = prR.sound_speed(gamma);
+            const real vL_mag = vecops::norm(prL.velocity());
+            const real vR_mag = vecops::norm(prR.velocity());
+
+            const real mach_L   = vL_mag / cL;
+            const real mach_R   = vR_mag / cR;
+            const real max_mach = my_max(mach_L, mach_R);
+
+            if (max_mach < 0.01) {
+                // nearly stagnant → force low dissipation
+                return -0.5;   // negative correction to reduce phi
+            }
+            else {
+                return 0.0;   // no correction
+            }
+        }
+
+        DEV static real detect_alignment_correction(
+            const auto& prL,
+            const auto& prR,
+            real gamma,
+            const auto& nhat
+        )
+        {
+            // check if flow is aligned with interface (carbuncle risk)
+            const real vL_normal = vecops::dot(prL.velocity(), nhat);
+            const real vR_normal = vecops::dot(prR.velocity(), nhat);
+            const real vL_mag    = vecops::norm(prL.velocity());
+            const real vR_mag    = vecops::norm(prR.velocity());
+
+            if (vL_mag > 1e-10 && vR_mag > 1e-10) {
+                const real alignment_L   = std::abs(vL_normal) / vL_mag;
+                const real alignment_R   = std::abs(vR_normal) / vR_mag;
+                const real max_alignment = my_max(alignment_L, alignment_R);
+
+                // high speed + high alignment = carbuncle risk
+                const real avg_mach = 0.5 * (vL_mag / prL.sound_speed(gamma) +
+                                             vR_mag / prR.sound_speed(gamma));
+
+                if ((max_alignment > 0.8) && (avg_mach > 0.5)) {
+                    return 1.0;   // force standard HLLC to prevent carbuncle
+                }
+            }
+
+            return 0.0;   // no correction
+        }
+
+        DEV static real compute_adaptive_phi(
+            const auto& prL,
+            const auto& prR,
+            const auto& nhat,
+            real gamma,
+            bool use_fleischmann
+        )
+        {
+            if (!use_fleischmann) {
+                return 1.0;   // no adaptive phi, use standard HLLC
+            }
+
+            // base Mach number criterion
+            // This number is found in Fleischamnn et al. (2020)
+            // A shock-stable modification of the HLLC Riemann solver with
+            // reduced numerical dissipation
+            constexpr real mach_lim = 0.1;
+            const real ma_local     = compute_local_mach(prL, prR, gamma);
+            real phi = std::sin(my_min(1.0, ma_local / mach_lim) * M_PI * 0.5);
+
+            // physics-based corrections
+            const real correction_factors[] = {
+              detect_interface_correction(
+                  prL,
+                  prR
+              ),   // boost phi for interfaces
+              detect_shock_correction(
+                  prL,
+                  prR,
+                  gamma,
+                  nhat
+              ),   // force phi=1 for shocks
+              detect_stagnation_correction(
+                  prL,
+                  prR,
+                  gamma
+              ),   // reduce phi for stagnant regions
+              detect_alignment_correction(
+                  prL,
+                  prR,
+                  gamma,
+                  nhat
+              )   // boost phi for aligned flows
+            };
+
+            // apply the strongest correction
+            for (auto factor : correction_factors) {
+                phi = my_max(phi, factor);
+            }
+
+            return my_min(1.0, phi);
         }
     };
 
