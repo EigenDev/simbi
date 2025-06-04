@@ -42,7 +42,7 @@ gpu_settings = {
             '--compiler-options',
             '-fPIC',
         ],
-        'link_args': [f'-L@cuda_root@/lib64','-lcudart', '-lcuda'],
+        'link_args': [f'-L@cuda_root@/lib64','-lcudart'],
         'inter_link_args': ['-dlink', '-Xcompiler', '-fPIC'],
         'extra_link_args': ['-lcudadevrt'],
         'gpu_dependency': cuda
