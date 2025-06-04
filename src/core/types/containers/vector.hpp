@@ -80,7 +80,7 @@ namespace simbi {
 
     namespace vecops {
         // dot product
-        template <typename Vec1, typename Vec2>
+        template <VectorLike Vec1, VectorLike Vec2>
         DUAL constexpr auto dot(const Vec1& a, const Vec2& b)
         {
             // traditional for loop version
@@ -98,15 +98,15 @@ namespace simbi {
         }
 
         // norm
-        template <typename T, size_type Dims, VectorType Type>
-        DUAL constexpr auto norm(const Vector<T, Dims, Type>& vec)
+        template <VectorLike Vec>
+        DUAL constexpr auto norm(const Vec& vec)
         {
             return std::sqrt(dot(vec, vec));
         }
 
         // normalize
-        template <typename T, size_type Dims, VectorType Type>
-        DUAL constexpr auto normalize(const Vector<T, Dims, Type>& vec)
+        template <VectorLike Vec>
+        DUAL constexpr auto normalize(const Vec& vec)
         {
             // tradiational for loop version
             // const auto n = norm(vec);
@@ -116,7 +116,7 @@ namespace simbi {
             // }
             // return result;
 
-            using result_t = detail::promote_t<T, double>;
+            using result_t = detail::promote_t<typename Vec::value_type, real>;
             const auto n   = norm(vec);
             return n > 0 ? fp::map(
                                vec,
@@ -126,7 +126,7 @@ namespace simbi {
         }
 
         // cross product
-        template <typename Vec1, typename Vec2>
+        template <VectorLike Vec1, VectorLike Vec2>
         DUAL constexpr auto cross(const Vec1& a, const Vec2& b)
             requires(Vec1::dimensions == 3 && Vec2::dimensions == 3)
         {
@@ -141,7 +141,7 @@ namespace simbi {
         }
 
         // cross product magnitude for Dim = 2
-        template <typename Vec1, typename Vec2>
+        template <VectorLike Vec1, VectorLike Vec2>
         DUAL constexpr auto cross(const Vec1& a, const Vec2& b)
             requires(Vec1::dimensions == 2 && Vec2::dimensions == 2)
         {
@@ -149,7 +149,7 @@ namespace simbi {
         }
 
         // cross product component
-        template <typename Vec1, typename Vec2>
+        template <VectorLike Vec1, VectorLike Vec2>
         DUAL constexpr auto
         cross_component(const Vec1& a, const Vec2& b, size_type ehat)
         {
@@ -192,7 +192,7 @@ namespace simbi {
         }
 
         // helpers to rotate vectors by some angle
-        template <typename Vec, typename T>
+        template <VectorLike Vec, typename T>
         DEV static constexpr auto rotate_2D(const Vec& vec, const T& angle)
         {
             return Vector<T, 2, VectorType::SPATIAL>{
@@ -201,7 +201,7 @@ namespace simbi {
             };
         }
 
-        template <typename Vec, typename T>
+        template <VectorLike Vec, typename T>
         DEV static constexpr auto rotate_3D(const Vec& vec, const T& angle)
         {
             return Vec{
@@ -212,7 +212,7 @@ namespace simbi {
         }
 
         // general rotation function that checks the dimension at compile-time
-        template <typename Vec, typename T>
+        template <VectorLike Vec, typename T>
         DEV static constexpr auto rotate(const Vec& vec, const T& angle)
         {
             if constexpr (Vec::dimensions == 2) {
@@ -223,7 +223,7 @@ namespace simbi {
             }
         }
 
-        template <typename Vec>
+        template <VectorLike Vec>
         DEV auto constexpr spherical_to_cartesian(const Vec& vec)
         {
             if constexpr (Vec::dimensions == 1) {
@@ -244,7 +244,7 @@ namespace simbi {
             }
         }
 
-        template <typename Vec>
+        template <VectorLike Vec>
         DEV auto constexpr cylindrical_to_cartesian(const Vec& vec)
         {
             if constexpr (Vec::dimensions == 1) {
@@ -265,7 +265,7 @@ namespace simbi {
             }
         }
 
-        template <typename Vec>
+        template <VectorLike Vec>
         DEV auto constexpr cartesian_to_spherical(const Vec& vec)
         {
             if constexpr (Vec::dimensions == 1) {
@@ -283,7 +283,7 @@ namespace simbi {
             }
         }
 
-        template <typename Vec>
+        template <VectorLike Vec>
         DEV auto constexpr centralize_cartesian_to_spherical(const Vec& vec)
         {
             if constexpr (Vec::dimensions == 1) {
@@ -300,7 +300,7 @@ namespace simbi {
             }
         }
 
-        template <typename Vec>
+        template <VectorLike Vec>
         DEV auto constexpr centralize_cartesian_to_cylindrical(const Vec& vec)
         {
             if constexpr (Vec::dimensions == 1) {
@@ -317,7 +317,7 @@ namespace simbi {
             }
         }
 
-        template <typename Vec>
+        template <VectorLike Vec>
         DEV auto constexpr cartesian_to_cylindrical(const Vec& vec)
         {
             if constexpr (Vec::dimensions == 1) {
@@ -333,7 +333,7 @@ namespace simbi {
 
         // convert a cartesian vector to a curvlinear
         // coordinate system
-        template <typename Vec>
+        template <VectorLike Vec>
         DEV auto to_geometry(const Vec& vec, Geometry geometry)
         {
             if (geometry == Geometry::SPHERICAL) {
@@ -349,7 +349,7 @@ namespace simbi {
 
         // project some vector onto the mesh
         // using the mesh basis vectors
-        template <typename Vec>
+        template <VectorLike Vec>
         DEV auto centralize(const Vec& vec, Geometry mesh_geometry)
         {
             switch (mesh_geometry) {
