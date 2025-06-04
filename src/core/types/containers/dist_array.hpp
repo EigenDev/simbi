@@ -67,8 +67,8 @@ namespace simbi {
         }
         void sync_to_devices()
         {
-            for (size_type i = 0; i < device_fragments_.size(); ++i) {
-                device_fragments_[i].data.copy_from(host_data_);
+            for (size_type ii = 0; ii < device_fragments_.size(); ++ii) {
+                device_fragments_[ii].data.copy_from(host_data_);
             }
             host_dirty_ = false;
         }
