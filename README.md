@@ -252,15 +252,15 @@ CC=<your_c_compiler> CXX=<your_cpp_compiler> python dev.py install --gpu-compila
 ```bash
 # Full path
 simbi run simbi_configs/examples/marti_muller.py \
-  --mode gpu --nzones 100 --ad-index 1.4
+  --mode gpu --nzones 100 --adiabatic-index 1.4
 
 # Shorthand
 simbi run marti_muller \
-  --mode gpu --nzones 100 --ad-index 1.4
+  --mode gpu --nzones 100 --adiabatic-index 1.4
 
 # Dash-case also works
 simbi run marti-muller \
-  --mode gpu --nzones 100 --ad-index 1.4
+  --mode gpu --nzones 100 --adiabatic-index 1.4
 ```
 </td>
 
