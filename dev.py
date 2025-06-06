@@ -353,12 +353,44 @@ def find_hdf5_include() -> str:
     # Try h5cc
     try:
         h5cc_show = strategies[1]()
+
+        # First, try to extract include directories directly
+        include_dirs = [
+            inc_dir[2:] for inc_dir in h5cc_show if inc_dir.startswith("-I")
+        ]
+        if include_dirs:
+            # Remove duplicates while preserving order
+            unique_includes = []
+            for inc in include_dirs:
+                if inc not in unique_includes:
+                    unique_includes.append(inc)
+
+            # Check each include directory for HDF5 headers
+            for inc_dir in unique_includes:
+                inc_path = Path(inc_dir)
+                # Check if this directory contains HDF5 headers
+                if (inc_path / "hdf5.h").exists() or (
+                    inc_path / "hdf5" / "hdf5.h"
+                ).exists():
+                    return str(inc_dir)
+
+        # If no include directory has HDF5 headers, fall back to lib directory method
         lib_dirs = [lib_dir[2:] for lib_dir in h5cc_show if lib_dir.startswith("-L")]
         if lib_dirs:
-            hdf5_libpath = Path(" ".join(lib_dirs))
-            include_dir = str(hdf5_libpath.parents[0] / "include")
-            if Path(include_dir).exists():
-                return include_dir
+            # Check each unique library directory
+            unique_libs = []
+            for lib in lib_dirs:
+                if lib not in unique_libs:
+                    unique_libs.append(lib)
+
+            for lib_dir in unique_libs:
+                lib_path = Path(lib_dir)
+                include_dir = lib_path.parents[0] / "include"
+                if include_dir.exists() and (
+                    (include_dir / "hdf5.h").exists()
+                    or (include_dir / "hdf5" / "hdf5.h").exists()
+                ):
+                    return str(include_dir)
     except (subprocess.SubprocessError, FileNotFoundError):
         pass
 
