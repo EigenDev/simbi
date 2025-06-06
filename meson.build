@@ -86,10 +86,11 @@ if get_option('gpu_compilation').enabled()
         meson.current_build_dir(),
         pybind11_include,
         python_include,
+        hdf5_inc,
         numpy_include,
     ]
 
-    if hdf5_inc != ''
+    if hdf5_inc == ''
         error('HDF5 include directory was not found for GPU compilation')
     endif
     subdir('gpu')
