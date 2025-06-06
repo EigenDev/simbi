@@ -733,6 +733,7 @@ def configure(
         f"-Dbuildtype={args.build_type}",
         reconfigure,
         f"-Dprogress_bar={args.progress_bar}",
+        f"-Dhdf5_inc={hdf5_include}",
         f"-Dshared_memory={args.shared_memory}",
     ]
     return command

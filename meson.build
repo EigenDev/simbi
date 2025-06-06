@@ -73,70 +73,7 @@ py3.extension_module(
 #Check and configure GPU compilation
 if get_option('gpu_compilation').enabled()
     fs = import('fs')
-    hdf5_inc = hdf5_dep.get_variable('includedir', cmake: 'HDF5_INCLUDE_DIRS', default_value: '')
-
-    # Try pkg-config if dependency variable failed
-    if hdf5_inc == ''
-        pkg_config = find_program('pkg-config', required: false)
-        if pkg_config.found()
-            pkg_result = run_command(pkg_config, '--cflags-only-I', 'hdf5', check: false)
-            if pkg_result.returncode() == 0
-                hdf5_inc_raw = pkg_result.stdout().strip()
-                # Extract include path from -I flags
-                hdf5_inc_list = []
-                foreach flag : hdf5_inc_raw.split()
-                    if flag.startswith('-I')
-                        hdf5_inc_list += flag.substring(2)
-                    endif
-                endforeach
-                if hdf5_inc_list.length() > 0
-                    hdf5_inc = hdf5_inc_list[0]  # Use first include path
-                endif
-            endif
-        endif
-    endif
-
-    # Try common system locations
-    if hdf5_inc == ''
-        common_hdf5_paths = [
-            '/usr/include/hdf5',
-            '/usr/local/include/hdf5',
-            '/opt/homebrew/include',  # macOS Homebrew
-            '/usr/include/hdf5/serial',  # Ubuntu/Debian
-            '/usr/include',
-            '/usr/local/include',
-        ]
-
-        foreach path : common_hdf5_paths
-            if hdf5_inc == '' and fs.exists(path / 'hdf5.h')
-                hdf5_inc = path
-                message('Found HDF5 headers at: ' + path)
-            endif
-        endforeach
-    endif
-
-    # Try to find hdf5.h using compiler
-    if hdf5_inc == ''
-        cc = meson.get_compiler('c')
-        if cc.has_header('hdf5.h', dependencies: hdf5_dep)
-            # If compiler can find it with the dependency, we can use empty string
-            # and rely on the dependency's include paths
-            hdf5_inc = ''
-            message('HDF5 headers found via compiler dependency')
-        endif
-    endif
-
-    # Final validation
-    if hdf5_inc == ''
-        warning('Could not determine HDF5 include directory. GPU compilation may fail.')
-    else
-        # Validate the path exists
-        if not fs.exists(hdf5_inc / 'hdf5.h')
-            warning('HDF5 include directory found but hdf5.h not present at: ' + hdf5_inc)
-        else
-            message('Using HDF5 include directory: ' + hdf5_inc)
-        endif
-    endif
+    hdf5_inc = get_option('hdf5_inc')
 
     # Build include directories list
     include_dirs = [
@@ -146,9 +83,8 @@ if get_option('gpu_compilation').enabled()
         pybind11_include,
     ]
 
-    # Only add hdf5_inc if it's not empty
     if hdf5_inc != ''
-        include_dirs += hdf5_inc
+        error('HDF5 include directory was not found for GPU compilation')
     endif
     subdir('gpu')
 endif
