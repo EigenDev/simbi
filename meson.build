@@ -23,6 +23,9 @@ add_project_arguments(
 py3 = import('python').find_installation('python3', required: true)
 py_install_dir = meson.current_source_dir() + '/simbi/libs'
 pybind11_dep = dependency('pybind11')
+pybind11_include = run_command(
+    py3, ['-c', 'import pybind11; print(pybind11.get_include())'], check: true
+).stdout().strip()
 
 #show maximum of n errors before stopping the build
 # cc = meson.get_compiler('cpp')
@@ -140,6 +143,7 @@ if get_option('gpu_compilation').enabled()
         meson.current_source_dir() / 'src',
         '.',
         meson.current_build_dir(),
+        pybind11_include,
     ]
 
     # Only add hdf5_inc if it's not empty
