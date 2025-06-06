@@ -73,7 +73,7 @@ py3.extension_module(
 #Check and configure GPU compilation
 if get_option('gpu_compilation').enabled()
     fs = import('fs')
-    hdf5_inc = get_option('hdf5_inc')
+    hdf5_inc = get_option('hdf5_inc').value()
 
     # Build include directories list
     include_dirs = [
