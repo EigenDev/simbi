@@ -74,6 +74,10 @@ py3.extension_module(
 if get_option('gpu_compilation').enabled()
     fs = import('fs')
     hdf5_inc = get_option('hdf5_inc')
+    python_include = run_command(
+        py3, ['-c', 'import sysconfig; print(sysconfig.get_path("include"))'],
+        check: true
+    ).stdout().strip()
 
     # Build include directories list
     include_dirs = [
@@ -81,6 +85,8 @@ if get_option('gpu_compilation').enabled()
         '.',
         meson.current_build_dir(),
         pybind11_include,
+        python_include,
+        numpy_include,
     ]
 
     if hdf5_inc != ''
