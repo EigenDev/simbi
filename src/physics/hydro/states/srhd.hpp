@@ -54,12 +54,9 @@
 #include "core/types/containers/ndarray.hpp"   // for ndarray
 #include "core/types/monad/maybe.hpp"          // for Maybe
 #include "core/types/utility/enums.hpp"        // for TIMESTEP_TYPE
-#include "geometry/mesh/mesh.hpp"              // for Mesh
 #include "physics/hydro/types/generic_structs.hpp"   // for Eigenvals, mag_four_vec
-#include "util/parallel/exec_policy.hpp"             // for ExecutionPolicy
 #include "util/tools/helpers.hpp"                    // for my_min, my_max, ...
 #include <functional>                                // for function
-#include <optional>                                  // for optional
 #include <type_traits>                               // for conditional_t
 #include <vector>                                    // for vector
 
@@ -97,7 +94,8 @@ namespace simbi {
         /* Methods */
         SRHD();
         SRHD(
-            std::vector<std::vector<real>>& state,
+            auto&& init_cons,
+            auto&& init_prim,
             InitialConditions& init_conditions
         );
         ~SRHD();

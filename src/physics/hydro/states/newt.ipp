@@ -19,10 +19,15 @@ Newtonian<dim>::Newtonian() = default;
 // Overloaded Constructor
 template <int dim>
 Newtonian<dim>::Newtonian(
-    std::vector<std::vector<real>>& state,
+    auto&& init_cons,
+    auto&& init_prims,
     InitialConditions& init_conditions
 )
-    : HydroBase<Newtonian<dim>, dim, Regime::NEWTONIAN>(state, init_conditions),
+    : HydroBase<Newtonian<dim>, dim, Regime::NEWTONIAN>(
+          std::move(init_cons),
+          std::move(init_prims),
+          init_conditions
+      ),
       isothermal_(init_conditions.isothermal),
       shakura_sunyaev_alpha_(init_conditions.shakura_sunyaev_alpha),
       sound_speed_squared_(init_conditions.sound_speed_squared)

@@ -270,10 +270,10 @@ def initialize_state(config: SimbiBaseConfig) -> SimulationState:
         primitive[:nvars, *interior], config, staggered_bfields
     )
 
-    # Fill the ghost cells at the edges with values from the interior
+    # fill the ghost cells at the edges with values from the interior
     ndim = len(active_resolution)
     for dim in range(ndim):
-        # Create slices for each dimension
+        # create slices for each dimension
         for j in range(pad_width):
             # Fill left boundary ghost cells
             left_ghost_slices = [slice(None)] * (ndim + 1)  # +1 for variables dimension
@@ -283,6 +283,7 @@ def initialize_state(config: SimbiBaseConfig) -> SimulationState:
             left_interior_slices[dim + 1] = slice(pad_width, pad_width + 1)
 
             conserved[tuple(left_ghost_slices)] = conserved[tuple(left_interior_slices)]
+            primitive[tuple(left_ghost_slices)] = primitive[tuple(left_interior_slices)]
 
             # Fill right boundary ghost cells
             right_ghost_slices = [slice(None)] * (ndim + 1)
@@ -292,6 +293,9 @@ def initialize_state(config: SimbiBaseConfig) -> SimulationState:
             right_interior_slices[dim + 1] = slice(-pad_width - 1, -pad_width)
 
             conserved[tuple(right_ghost_slices)] = conserved[
+                tuple(right_interior_slices)
+            ]
+            primitive[tuple(right_ghost_slices)] = primitive[
                 tuple(right_interior_slices)
             ]
 

@@ -104,7 +104,8 @@ namespace simbi {
 
         // Overloaded Constructor
         Newtonian(
-            std::vector<std::vector<real>>& state,
+            auto&& init_conserved,
+            auto&& init_prims,
             InitialConditions& init_conditions
         );
 

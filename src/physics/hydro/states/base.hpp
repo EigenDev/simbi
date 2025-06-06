@@ -57,6 +57,7 @@
 #include "core/managers/solver_manager.hpp"        // for SolverManager
 #include "core/managers/time_manager.hpp"          // for TimeManager
 #include "core/types/containers/collapsable.hpp"
+#include "core/types/containers/ndarray.hpp"
 #include "core/types/containers/vector.hpp"
 #include "core/types/utility/init_conditions.hpp"   // for InitialConditions
 #include "core/types/utility/managed.hpp"           // for Managed
@@ -85,6 +86,43 @@ namespace simbi {
         using eigenvals_t = Eigenvals<Dims, R>;
         using function_t  = typename helpers::real_func<Dims>::type;
 
+        void simulate(
+            const std::function<real(real)> a,
+            const std::function<real(real)> adot
+        )
+        {
+            auto& derived = static_cast<Derived&>(*this);
+            // cons_.resize(this->total_zones()).reshape({nz(), ny(), nx()});
+            // prims_.resize(this->total_zones()).reshape({nz(), ny(), nx()});
+
+            if (using_refinement_) {
+                init_refinement_levels();
+            }
+
+            // init simulation
+            derived.init_simulation();
+            // derived.cons2prim_impl();
+            adapt_dt();
+
+            // main simulation loop
+            detail::logger::with_logger(derived, tend(), [&] {
+                // single timestep advance
+                advance_system();
+
+                // update time
+                time_manager_.advance(step());
+
+                // move the mesh if needed
+                mesh_.geometry_state().move_grid(a, adot, time(), time_step());
+            });
+        }
+
+      protected:
+        // common state members
+        ndarray<Maybe<primitive_t>, Dims> prims_;
+        ndarray<conserved_t, Dims> cons_;
+
+      public:
         template <typename D>
         struct WaveSpeedFunctor {
             // pointers work better on gpu
@@ -154,7 +192,6 @@ namespace simbi {
 
       private:
         // state
-        std::vector<std::vector<real>> state_;
         std::atomic<bool> in_failure_state_;
 
         // physical / numerical parameters
@@ -171,19 +208,7 @@ namespace simbi {
         bool was_interrupted_{false};
         bool has_crashed_{false};
 
-        void deallocate_state()
-        {
-            for (auto& vec : state_) {
-                vec.clear();
-            }
-            state_.clear();
-            state_.shrink_to_fit();
-        }
-
       protected:
-        // Common state members
-        ndarray<Maybe<primitive_t>, Dims> prims_;
-        ndarray<conserved_t, Dims> cons_;
         util::smart_ptr<ibsystem::ComponentBodySystem<real, Dims>> body_system_;
         util::smart_ptr<ibsystem::GridBodyDeltaCollector<real, Dims>>
             collector_;
@@ -204,10 +229,12 @@ namespace simbi {
         ~HydroBase() = default;
 
         HydroBase(
-            std::vector<std::vector<real>> state,
+            ndarray<conserved_t, Dims>&& init_conserved,
+            ndarray<Maybe<primitive_t>, Dims>&& init_primitives,
             InitialConditions& init_conditions
         )
-            : state_(std::move(state)),
+            : prims_(std::move(init_primitives)),
+              cons_(std::move(init_conserved)),
               in_failure_state_(false),
               gamma_(init_conditions.gamma),
               cfl_(init_conditions.cfl),
@@ -323,43 +350,6 @@ namespace simbi {
                     2
                 );
             }
-        }
-
-        void simulate(
-            const std::function<real(real)> a,
-            const std::function<real(real)> adot
-        )
-        {
-            auto& derived = static_cast<Derived&>(*this);
-            cons_.resize(this->total_zones()).reshape({nz(), ny(), nx()});
-            prims_.resize(this->total_zones()).reshape({nz(), ny(), nx()});
-            for (size_type ii = 0; ii < this->total_zones(); ii++) {
-                for (int q = 0; q < conserved_t::nmem; q++) {
-                    cons_[ii][q] = state_[q][ii];
-                }
-            }
-            deallocate_state();
-
-            if (using_refinement_) {
-                init_refinement_levels();
-            }
-
-            // init simulation
-            derived.init_simulation();
-            derived.cons2prim_impl();
-            adapt_dt();
-
-            // main simulation loop
-            detail::logger::with_logger(derived, tend(), [&] {
-                // single timestep advance
-                advance_system();
-
-                // update time
-                time_manager_.advance(step());
-
-                // move the mesh if needed
-                mesh_.geometry_state().move_grid(a, adot, time(), time_step());
-            });
         }
 
         void advance_system()
@@ -585,7 +575,6 @@ namespace simbi {
         // accessors
         const auto& primitives() const { return prims_; }
         const auto& conserveds() const { return cons_; }
-        const auto& state() const { return state_; }
         DUAL const auto& mesh() const { return mesh_; }
         const auto& exec_policy_manager() const { return exec_policy_manager_; }
         const auto& time_manager() const { return time_manager_; }

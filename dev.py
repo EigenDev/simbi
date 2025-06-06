@@ -503,11 +503,14 @@ def check_minimal_dependencies() -> None:
             sys.exit(1)
 
     # Check for Python dependencies
-    python_deps = ["meson", "numpy", "cython", "cogapp"]
+    python_deps = ["meson", "numpy", "pybind11", "cogapp"]
 
     def check_import(dep: str) -> bool:
         try:
-            __import__(dep.split("[")[0] if "[" in dep else dep)
+            if dep == "meson":
+                __import__("mesonbuild")
+            else:
+                __import__(dep.split("[")[0] if "[" in dep else dep)
             return True
         except ImportError:
             return False

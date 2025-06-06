@@ -51,6 +51,7 @@
 #define MEMORY_MANAGER_HPP
 
 #include "core/types/alias/alias.hpp"
+#include "core/types/monad/maybe.hpp"
 #include "core/types/utility/smart_ptr.hpp"
 
 namespace simbi {
@@ -194,6 +195,48 @@ namespace simbi {
                 );
                 device_data_ = unique_ptr<T, gpuDeleter<T>>(device_ptr);
             }
+        }
+
+        void reference_external(
+            T* data_ptr,
+            size_type size,
+            bool take_ownership = false
+        )
+        {
+            // Clean up existing data if needed
+            this->size_ = size;
+
+            if (take_ownership) {
+                // take ownership - copy the data
+                host_data_ = util::make_unique_array<T[]>(size);
+                // std::memcpy(host_data_.get(), data_ptr, size * sizeof(T));
+            }
+            else {
+                // just reference the data without copying or owning it
+                // we use a custom deleter that does nothing when the pointer is
+                // released
+                host_data_ = util::smart_ptr<T[]>(data_ptr, [](T*) {});
+            }
+
+            // reset device data and sync state
+            if constexpr (global::on_gpu) {
+                device_data_.reset();
+                is_synced_ = false;
+            }
+        }
+
+        template <typename V, typename U>
+        void construct_maybe_wrapper(const U* raw_data, size_type size)
+        {
+            // allocate storage for Maybe<V> objects
+            this->allocate(size);
+
+            // construct Maybe<V> objects directly in the allocated storage
+            for (size_type i = 0; i < size; ++i) {
+                new (&(host_data()[i])) Maybe<V>(raw_data[i]);
+            }
+
+            is_synced_ = false;
         }
 
         T* data()

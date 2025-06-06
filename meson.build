@@ -23,6 +23,7 @@ add_project_arguments(
 #Python installation directory
 py3 = import('python').find_installation('python3', required: true)
 py_install_dir = meson.current_source_dir() + '/simbi/libs'
+pybind11_dep = dependency('pybind11')
 
 #show maximum of n errors before stopping the build
 # cc = meson.get_compiler('cpp')
@@ -52,13 +53,14 @@ subdir('simbi/afterglow')
 general_dependencies = [
     openmp_dep,
     hdf5_dep,
-    py3.dependency()
+    py3.dependency(),
+    pybind11_dep,
 ]
 all_inc = include_directories(numpy_include, 'src')
 #CPU Extension Module
 py3.extension_module(
     'cpu_ext',
-    ['src/cpu_ext.pyx'] + sources,
+    ['src/core/pybind11/binding.cpp'] + sources,
     include_directories: all_inc,
     cpp_args: ['-DGPU_CODE=0'],
     dependencies: general_dependencies,

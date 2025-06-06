@@ -22,10 +22,15 @@ RMHD<dim>::RMHD() = default;
 // Overloaded Constructor
 template <int dim>
 RMHD<dim>::RMHD(
-    std::vector<std::vector<real>>& state,
+    auto&& init_cons,
+    auto&& init_prims,
     InitialConditions& init_conditions
 )
-    : HydroBase<RMHD<dim>, dim, Regime::RMHD>(state, init_conditions),
+    : HydroBase<RMHD<dim>, dim, Regime::RMHD>(
+          std::move(init_cons),
+          std::move(init_prims),
+          init_conditions
+      ),
       bstag1(std::move(init_conditions.bfield[0])),
       bstag2(std::move(init_conditions.bfield[1])),
       bstag3(std::move(init_conditions.bfield[2]))

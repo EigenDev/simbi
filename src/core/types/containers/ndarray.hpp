@@ -61,6 +61,7 @@
 #include "util/parallel/parallel_for.hpp"            // for parallel_for
 #include "util/tools/helpers.hpp"                    // for unravel_index
 #include <cassert>                                   // for assert
+#include <type_traits>
 namespace simbi {
 
     template <typename T, size_type Dims = 1>
@@ -156,6 +157,61 @@ namespace simbi {
             }
             this->strides_ = this->compute_strides(this->shape_);
             fill(fill_value);
+        }
+
+        // ctor from external data
+        ndarray(
+            T* external_data,
+            const collapsable<Dims>& shape,
+            bool take_ownership
+        )
+        {
+            // set up metadata
+            this->shape_   = shape;
+            this->strides_ = this->compute_strides(this->shape_);
+            this->size_    = this->compute_size(this->shape_);
+
+            size_type total_size = 1;
+            for (auto dim : shape.vals) {
+                total_size *= dim;
+            }
+
+            mem_.reference_external(external_data, total_size, take_ownership);
+            this->owns_data_ = take_ownership;
+        }
+
+        template <typename U>
+        ndarray(const U* external_data, const collapsable<Dims>& shape)
+        {
+            constexpr bool is_maybe_type = is_specialization_of_maybe<T>::value;
+
+            // set shape and compute strides
+            this->shape_   = shape;
+            this->strides_ = this->compute_strides(shape);
+
+            // calculate total size
+            size_type total_size = 1;
+            for (auto dim : shape.vals) {
+                total_size *= dim;
+            }
+
+            // update size
+            this->size_ = total_size;
+
+            if constexpr (is_maybe_type) {
+                // if T is a Maybe<X>, construct Maybe objects from raw data
+                mem_.template construct_maybe_wrapper<
+                    typename T::value_type,
+                    U>(external_data, total_size);
+            }
+            else {
+                // just copy the data for non-Maybe types
+                mem_.allocate(total_size);
+                for (size_type i = 0; i < total_size; ++i) {
+                    mem_.host_data()[i] = T(external_data[i]);
+                }
+                mem_.sync_to_device();
+            }
         }
 
         void copy_from(const ndarray& source, const ExecutionPolicy<>& policy)
@@ -782,6 +838,15 @@ namespace simbi {
       private:
         memory_manager<T> mem_;
         size_type capacity_ = 0;
+        bool owns_data_{true};
+
+        template <typename>
+        struct is_specialization_of_maybe : std::false_type {
+        };
+
+        template <typename U>
+        struct is_specialization_of_maybe<Maybe<U>> : std::true_type {
+        };
     };
 }   // namespace simbi
 #endif

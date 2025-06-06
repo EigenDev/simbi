@@ -203,6 +203,17 @@ namespace simbi {
                 other.ctrl  = nullptr;
             }
 
+            // Ctor with custom deleter
+            template <
+                typename U,
+                typename D = default_delete<U>,
+                typename = std::enable_if_t<std::is_convertible_v<U*, ptr_t*>>>
+            smart_ptr(U* pData, D deleter = D())
+                : pData(pData),
+                  ctrl(new typed_control_block<U, D>(pData, std::move(deleter)))
+            {
+            }
+
             ~smart_ptr() { release(); }
 
             // add support for derived-to-base conversion
@@ -407,6 +418,17 @@ namespace simbi {
             {
                 other.pData = nullptr;
                 other.ctrl  = nullptr;
+            }
+
+            // ctor with custom deleter
+            template <typename DelterT>
+            smart_ptr(ptr_t* pData, DelterT delete_func)
+                : pData(pData),
+                  ctrl(new typed_control_block<ptrT[], DelterT>(
+                      pData,
+                      std::move(delete_func)
+                  ))
+            {
             }
 
             ~smart_ptr() { release(); }

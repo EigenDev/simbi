@@ -68,7 +68,7 @@ class SimulationRunner:
         lib_mode = "cpu" if compute_mode in ["cpu", "omp"] else "gpu"
         try:
             simulation_module = importlib.import_module(f"simbi.libs.{lib_mode}_ext")
-            return simulation_module.SimState
+            return simulation_module
         except ImportError as e:
             print(f"Error loading simulation backend: {e}")
             print("Running in demo mode - no actual simulation will be executed")
@@ -104,17 +104,28 @@ class SimulationRunner:
 
         # Run the simulation
         if self.state.conserved_state is not None:
-            # Reshape for contiguous memory layout
-            state_contig = self.state.conserved_state.reshape(
+            # Reshape for contiguous memory layout.
+            # Since the backend expects an array of structs
+            # layout, we transpose the conserved state.
+            cons_contig = self.state.conserved_state.reshape(
                 self.state.conserved_state.shape[0], -1
-            )
+            ).T
+            prim_contig = self.state.primitive_state.reshape(
+                self.state.primitive_state.shape[0], -1
+            ).T
 
             # Create scale factor and derivative functions
             a = self.config.scale_factor or (lambda t: 1.0)
             adot = self.config.scale_factor_derivative or (lambda t: 0.0)
 
             # Execute the simulation
-            backend().run(state=state_contig, sim_info=execution_dict, a=a, adot=adot)
+            backend.run_simulation(
+                cons_array=cons_contig,
+                prim_array=prim_contig,
+                sim_info=execution_dict,
+                a=a,
+                adot=adot,
+            )
         else:
             print("Error: Simulation state not initialized properly")
 

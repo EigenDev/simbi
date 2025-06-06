@@ -99,12 +99,11 @@ if hip.found() or cuda.found()
 
     py3.extension_module(
         'gpu_ext',
-        ['../src/gpu_ext.pyx'] + gpu_objs,
+        ['../src/core/pybind11/binding.cpp'] + gpu_objs,
         link_args: settings['link_args'],
         include_directories: include_directories('..', '../src', numpy_include),
         dependencies: general_dependencies + settings['gpu_dependency'],
         cpp_args: ['-DMANAGED_MEMORY'],
-        override_options: ['cython_language=cpp'],
         install: true,
         install_dir: py_install_dir,
     )

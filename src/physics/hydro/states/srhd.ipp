@@ -14,10 +14,15 @@ SRHD<dim>::SRHD() = default;
 // Overloaded Constructor
 template <int dim>
 SRHD<dim>::SRHD(
-    std::vector<std::vector<real>>& state,
+    auto&& init_cons,
+    auto&& init_prims,
     InitialConditions& init_conditions
 )
-    : HydroBase<SRHD<dim>, dim, Regime::SRHD>(state, init_conditions)
+    : HydroBase<SRHD<dim>, dim, Regime::SRHD>(
+          std::move(init_cons),
+          std::move(init_prims),
+          init_conditions
+      )
 {
 }
 

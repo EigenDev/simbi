@@ -27,7 +27,7 @@ dynamic = ["version", "readme"]
 dependencies = [
     "numpy",
     "h5py",
-    "cython",
+    "pybind11",
     "meson",
     "mypy",
     "matplotlib",

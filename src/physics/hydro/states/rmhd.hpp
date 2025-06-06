@@ -113,7 +113,8 @@ namespace simbi {
 
         RMHD();
         RMHD(
-            std::vector<std::vector<real>>& state,
+            auto&& init_cons,
+            auto&& init_prims,
             InitialConditions& init_conditions
         );
 
