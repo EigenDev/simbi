@@ -144,10 +144,6 @@ namespace simbi {
         virtual void
         visit_immersed_bodies(std::vector<ConfigDict>& immersed_bodies) = 0;
 
-        // Magnetic field
-        virtual void
-        visit_magnetic_field(std::vector<std::vector<real>>& bfield) = 0;
-
         // Output settings
         virtual void visit_output_settings(
             std::string& data_directory,

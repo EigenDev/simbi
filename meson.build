@@ -4,7 +4,6 @@ project(
     'simbi',
     'c',
     'cpp',
-    'cython',
     version: run_command('git', 'describe', '--tag', '--abbrev=0', check: true).stdout().strip(),
     license: 'MIT',
     default_options: {'cpp_std': 'c++20', 'cpp_args': ['-march=native'], 'warning_level': '3'},
@@ -60,11 +59,10 @@ all_inc = include_directories(numpy_include, 'src')
 #CPU Extension Module
 py3.extension_module(
     'cpu_ext',
-    ['src/core/pybind11/binding.cpp'] + sources,
+    ['src/core/pybind11/cpu_binding.cpp'] + sources,
     include_directories: all_inc,
     cpp_args: ['-DGPU_CODE=0'],
     dependencies: general_dependencies,
-    override_options: ['cython_language=cpp'],
     install: true,
     install_dir: py_install_dir
 )

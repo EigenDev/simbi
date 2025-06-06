@@ -24,6 +24,7 @@ template <int dim>
 RMHD<dim>::RMHD(
     auto&& init_cons,
     auto&& init_prims,
+    auto&& staggered_bfields,
     InitialConditions& init_conditions
 )
     : HydroBase<RMHD<dim>, dim, Regime::RMHD>(
@@ -31,9 +32,9 @@ RMHD<dim>::RMHD(
           std::move(init_prims),
           init_conditions
       ),
-      bstag1(std::move(init_conditions.bfield[0])),
-      bstag2(std::move(init_conditions.bfield[1])),
-      bstag3(std::move(init_conditions.bfield[2]))
+      bstag1(std::move(staggered_bfields[0])),
+      bstag2(std::move(staggered_bfields[1])),
+      bstag3(std::move(staggered_bfields[2]))
 {
 }
 

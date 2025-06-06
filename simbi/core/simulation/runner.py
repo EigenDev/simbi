@@ -85,9 +85,7 @@ class SimulationRunner:
             self.state = cast(SimulationState, self.state)
 
         # Convert configuration to execution format
-        execution_dict = SimulationExecutor.to_execution_dict(
-            self.config, self.state.staggered_bfields
-        )
+        execution_dict = SimulationExecutor.to_execution_dict(self.config)
 
         # Configure backend
         backend = self._configure_backend(compute_mode)
@@ -117,11 +115,16 @@ class SimulationRunner:
             # Create scale factor and derivative functions
             a = self.config.scale_factor or (lambda t: 1.0)
             adot = self.config.scale_factor_derivative or (lambda t: 0.0)
+            if self.state.staggered_bfields:
+                staggered_fields = [b.flat for b in self.state.staggered_bfields]
+            else:
+                staggered_fields = []
 
             # Execute the simulation
             backend.run_simulation(
                 cons_array=cons_contig,
                 prim_array=prim_contig,
+                staggered_bfields=staggered_fields,
                 sim_info=execution_dict,
                 a=a,
                 adot=adot,

@@ -115,6 +115,7 @@ namespace simbi {
         RMHD(
             auto&& init_cons,
             auto&& init_prims,
+            auto&& staggered_bfields,
             InitialConditions& init_conditions
         );
 

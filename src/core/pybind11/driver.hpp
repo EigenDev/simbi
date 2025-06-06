@@ -19,6 +19,7 @@ namespace simbi {
         inline void run_simulation(
             py::array_t<real, py::array::c_style> cons_array,
             py::array_t<real, py::array::c_style> prim_array,
+            py::list staggered_bfields,
             py::dict sim_info,
             py::function a_func,
             py::function adot_func
@@ -47,6 +48,7 @@ namespace simbi {
             hydrostate::dispatch_simulation(
                 cons_array,
                 prim_array,
+                staggered_bfields,
                 dims,
                 regime_str,
                 init_cond,

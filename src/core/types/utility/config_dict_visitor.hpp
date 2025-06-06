@@ -307,19 +307,6 @@ namespace simbi {
             }
         }
 
-        void
-        visit_magnetic_field(std::vector<std::vector<real>>& bfield) override
-        {
-            if (dict.contains("bfield") &&
-                dict.at("bfield").is_nested_array_of_floats()) {
-                bfield =
-                    dict.at("bfield").get<std::vector<std::vector<real>>>();
-            }
-            else {
-                bfield.clear();
-            }
-        }
-
         void visit_output_settings(
             std::string& data_directory,
             luint& checkpoint_index
@@ -536,12 +523,6 @@ namespace simbi {
             immersed_bodies.clear();   // No default immersed bodies
         }
 
-        void
-        visit_magnetic_field(std::vector<std::vector<real>>& bfield) override
-        {
-            bfield.clear();   // No default magnetic field
-        }
-
         void visit_output_settings(
             std::string& data_directory,
             luint& checkpoint_index
@@ -733,11 +714,6 @@ namespace simbi {
         void visit_immersed_bodies(std::vector<ConfigDict>&) override
         {
             // Validate immersed bodies if needed
-        }
-
-        void visit_magnetic_field(std::vector<std::vector<real>>&) override
-        {
-            // Validate magnetic field if needed
         }
 
         void visit_output_settings(std::string& data_directory, luint&) override

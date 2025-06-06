@@ -61,7 +61,7 @@
 namespace simbi {
 
     struct InitialConditions {
-        // Existing fields
+        // existing fields
         real time;
         real checkpoint_interval;
         real dlogt;
@@ -87,8 +87,6 @@ namespace simbi {
         bool isothermal;
         bool is_mhd;
         bool is_relativistic;
-
-        std::vector<std::vector<real>> bfield;
 
         std::string data_directory;
         std::string coord_system;
@@ -172,7 +170,6 @@ namespace simbi {
                 local_sound_speed_expressions
             );
             visitor.visit_immersed_bodies(immersed_bodies);
-            visitor.visit_magnetic_field(bfield);
             visitor.visit_output_settings(data_directory, checkpoint_index);
             visitor.visit_computed_properties(
                 dimensionality,

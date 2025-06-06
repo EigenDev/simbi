@@ -99,7 +99,7 @@ if hip.found() or cuda.found()
 
     py3.extension_module(
         'gpu_ext',
-        ['../src/core/pybind11/binding.cpp'] + gpu_objs,
+        ['../src/core/pybind11/gpu_binding.cpp'] + gpu_objs,
         link_args: settings['link_args'],
         include_directories: include_directories('..', '../src', numpy_include),
         dependencies: general_dependencies + settings['gpu_dependency'],

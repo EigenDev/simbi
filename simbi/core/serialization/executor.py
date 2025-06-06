@@ -32,7 +32,6 @@ class SimulationExecutor:
     @staticmethod
     def to_execution_dict(
         config: SimbiBaseConfig,
-        staggered_bfields: Optional[list[NDArray[np.floating]]] = None,
     ) -> dict[str, Any]:
         """
         Convert configuration to execution dictionary.
@@ -118,11 +117,6 @@ class SimulationExecutor:
             model_dict["resolution"] = [resolution[0], 1, 1]
         elif len(resolution) == 2:
             model_dict["resolution"] = [resolution[0], resolution[1], 1]
-
-        if staggered_bfields is not None:
-            model_dict["bfield"] = [b.flat for b in staggered_bfields]
-        else:
-            model_dict["bfield"] = []
 
         return model_dict
 

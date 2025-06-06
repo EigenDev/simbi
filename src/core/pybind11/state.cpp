@@ -1,4 +1,6 @@
 #include "state.hpp"
+#include "build_options.hpp"
+#include "core/types/containers/ndarray.hpp"
 #include "physics/hydro/states/newt.hpp"
 #include "physics/hydro/states/rmhd.hpp"
 #include "physics/hydro/states/srhd.hpp"
@@ -22,7 +24,7 @@ namespace simbi {
 
         // 1D Newtonian
         template <>
-        void simulate<1, Regime::NEWTONIAN>(
+        void simulate_pure_hydro<1, Regime::NEWTONIAN>(
             ndarray<anyConserved<1, Regime::NEWTONIAN>, 1>&& cons,
             ndarray<Maybe<anyPrimitive<1, Regime::NEWTONIAN>>, 1>&& prim,
             InitialConditions& init_cond,
@@ -40,7 +42,7 @@ namespace simbi {
 
         // 1D SRHD
         template <>
-        void simulate<1, Regime::SRHD>(
+        void simulate_pure_hydro<1, Regime::SRHD>(
             ndarray<anyConserved<1, Regime::SRHD>, 1>&& cons,
             ndarray<Maybe<anyPrimitive<1, Regime::SRHD>>, 1>&& prim,
             InitialConditions& init_cond,
@@ -58,7 +60,7 @@ namespace simbi {
 
         // 2D Newtonian
         template <>
-        void simulate<2, Regime::NEWTONIAN>(
+        void simulate_pure_hydro<2, Regime::NEWTONIAN>(
             ndarray<anyConserved<2, Regime::NEWTONIAN>, 2>&& cons,
             ndarray<Maybe<anyPrimitive<2, Regime::NEWTONIAN>>, 2>&& prim,
             InitialConditions& init_cond,
@@ -76,7 +78,7 @@ namespace simbi {
 
         // 2D SRHD
         template <>
-        void simulate<2, Regime::SRHD>(
+        void simulate_pure_hydro<2, Regime::SRHD>(
             ndarray<anyConserved<2, Regime::SRHD>, 2>&& cons,
             ndarray<Maybe<anyPrimitive<2, Regime::SRHD>>, 2>&& prim,
             InitialConditions& init_cond,
@@ -94,7 +96,7 @@ namespace simbi {
 
         // 3D Newtonian
         template <>
-        void simulate<3, Regime::NEWTONIAN>(
+        void simulate_pure_hydro<3, Regime::NEWTONIAN>(
             ndarray<anyConserved<3, Regime::NEWTONIAN>, 3>&& cons,
             ndarray<Maybe<anyPrimitive<3, Regime::NEWTONIAN>>, 3>&& prim,
             InitialConditions& init_cond,
@@ -112,7 +114,7 @@ namespace simbi {
 
         // 3D SRHD
         template <>
-        void simulate<3, Regime::SRHD>(
+        void simulate_pure_hydro<3, Regime::SRHD>(
             ndarray<anyConserved<3, Regime::SRHD>, 3>&& cons,
             ndarray<Maybe<anyPrimitive<3, Regime::SRHD>>, 3>&& prim,
             InitialConditions& init_cond,
@@ -130,9 +132,10 @@ namespace simbi {
 
         // 3D RMHD
         template <>
-        void simulate<3, Regime::RMHD>(
+        void simulate_mhd<3, Regime::RMHD>(
             ndarray<anyConserved<3, Regime::RMHD>, 3>&& cons,
             ndarray<Maybe<anyPrimitive<3, Regime::RMHD>>, 3>&& prim,
+            std::vector<ndarray<real, 3>>&& staggered_bfields,
             InitialConditions& init_cond,
             std::function<real(real)> const& scale_factor,
             std::function<real(real)> const& scale_factor_derivative
@@ -141,6 +144,7 @@ namespace simbi {
             auto simulator = std::make_unique<RMHD<3>>(
                 std::move(cons),
                 std::move(prim),
+                std::move(staggered_bfields),
                 init_cond
             );
             simulator->simulate(scale_factor, scale_factor_derivative);

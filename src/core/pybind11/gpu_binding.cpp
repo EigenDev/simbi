@@ -6,24 +6,6 @@
 
 namespace py = pybind11;
 
-PYBIND11_MODULE(cpu_ext, m)
-{
-    m.doc() =
-        "SIMBI - Special Relativistic Magnetohydrodynamics Simulation Code";
-
-    // expose cpu-specific simulation driver
-    m.def(
-        "run_simulation",
-        &simbi::driver::run_simulation,
-        py::arg("cons_array"),
-        py::arg("prim_array"),
-        py::arg("sim_info"),
-        py::arg("a"),
-        py::arg("adot"),
-        "Run a SIMBI simulation with the provided state and parameters"
-    );
-}
-
 PYBIND11_MODULE(gpu_ext, m)
 {
     m.doc() =
@@ -35,6 +17,7 @@ PYBIND11_MODULE(gpu_ext, m)
         &simbi::driver::run_simulation,
         py::arg("cons_array"),
         py::arg("prim_array"),
+        py::arg("staggered_bfields"),
         py::arg("sim_info"),
         py::arg("a"),
         py::arg("adot"),
