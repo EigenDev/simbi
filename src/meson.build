@@ -2,9 +2,6 @@
 sources = files(
     'util/tools/helpers.cpp',
     'io/exceptions.cpp',
-    # 'physics/hydro/states/rmhd.cpp',
-    # 'physics/hydro/states/srhd.cpp',
-    # 'physics/hydro/states/newt.cpp',
     'util/tools/device_api.cpp',
     'util/math/exp_load.cpp',
     'util/math/evaluator.cpp',
