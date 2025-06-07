@@ -49,16 +49,15 @@
 #ifndef TABULATE_HPP
 #define TABULATE_HPP
 
+#include "build_options.hpp"              // for real, STATIC, luint, lint
 #include "core/types/utility/enums.hpp"   // for Color
 #include <algorithm>
-#include <chrono>
-#include <functional>
 #include <iomanip>
 #include <iostream>
 #include <mutex>
 #include <numeric>
+#include <sstream>
 #include <string>
-#include <thread>
 #include <vector>
 
 namespace simbi {
@@ -101,6 +100,11 @@ namespace simbi {
         Gradient
     };
 
+    enum class DisplayMode {
+        Static,    // Static display, no updates
+        Dynamic,   // Dynamic display with updates
+    };
+
     struct Intializers {
         BorderStyle style              = BorderStyle::Double;
         int pad                        = 2;
@@ -113,6 +117,7 @@ namespace simbi {
         Color errorColor               = Color::RED;
         Color titleColor               = Color::BOLD;
         Color messageBoardColor        = Color::LIGHT_CYAN;
+        DisplayMode displayMode        = DisplayMode::Dynamic;
     };
 
     struct CellFormat {
@@ -173,6 +178,7 @@ namespace simbi {
         Color titleColor;
         std::vector<std::vector<CellFormat>> cell_formats;
         BorderCharacters current_border;
+        DisplayMode displayMode;
 
         // Add this method to set border characters based on style
         void updateBorderCharacters()
@@ -310,6 +316,51 @@ namespace simbi {
             for (size_t i = 0; i < row.size(); ++i) {
                 columnWidths[i] =
                     std::max(columnWidths[i], static_cast<int>(row[i].size()));
+            }
+        }
+
+        int calculateTotalWidth() const
+        {
+            // calc the total width of the table based on column widths and
+            // padding
+            if (columnWidths.empty()) {
+                return 0;
+            }
+
+            int totalWidth =
+                std::accumulate(columnWidths.begin(), columnWidths.end(), 0);
+            // add padding and border characters
+            totalWidth += columnWidths.size() * (2 * padding + 1) + 1;
+            return totalWidth;
+        }
+
+        void setMinimumWidth(int width)
+        {
+            // calc current width
+            int currentWidth = calculateTotalWidth();
+
+            if (width <= currentWidth) {
+                return;   // Nothing to do, table is already wider
+            }
+
+            // distribute extra width among columns
+            int extraWidth   = width - currentWidth;
+            int columnsCount = columnWidths.size();
+
+            if (columnsCount == 0) {
+                return;
+            }
+
+            // add extra padding to each column
+            int extraPerColumn = extraWidth / columnsCount;
+            int remainder      = extraWidth % columnsCount;
+
+            for (size_t ii = 0; ii < columnWidths.size(); ++ii) {
+                columnWidths[ii] += extraPerColumn;
+                if (ii < static_cast<size_t>(remainder)) {
+                    // distrivute the remainder evenly
+                    columnWidths[ii] += 1;
+                }
             }
         }
 
@@ -601,7 +652,8 @@ namespace simbi {
               infoColor(init.infoColor),
               errorColor(init.errorColor),
               messageBoardColor(init.messageBoardColor),
-              titleColor(init.titleColor)
+              titleColor(init.titleColor),
+              displayMode(init.displayMode)
         {
             updateBorderCharacters();
         }
@@ -722,8 +774,10 @@ namespace simbi {
         void print()
         {
             std::lock_guard<std::mutex> lock(mtx);
-            std::cout << "\033[H\033[J";   // move cursor to home position
-                                           // and clear screen
+            if (displayMode == DisplayMode::Dynamic) {
+                std::cout << "\033[H\033[J";   // move cursor to home position
+                                               // and clear screen
+            }
             if (!title.empty()) {
                 int totalWidth = std::accumulate(
                                      columnWidths.begin(),
@@ -778,7 +832,7 @@ namespace simbi {
                 }
             }
 
-            if (showProgressBar) {
+            if (showProgressBar && displayMode == DisplayMode::Dynamic) {
                 printProgressBar();
                 printSeparator(false, true, false);
             }

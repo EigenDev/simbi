@@ -8,6 +8,8 @@ sources = files(
     'util/math/linearize.cpp',
     'core/pybind11/config_converter.cpp',
     'core/pybind11/state.cpp',
+    'io/console/statistics.cpp',
+    'io/tabulate/table.cpp'
 )
 
 headers = files(

@@ -1,5 +1,4 @@
 #include "util/tools/helpers.hpp"
-#include "core/types/monad/maybe.hpp"
 #include "io/exceptions.hpp"
 #include <iomanip>
 #include <thread>
@@ -94,71 +93,6 @@ namespace simbi {
             }
 
             return str;
-        }
-
-        void display_device_properties()
-        {
-// Adapted from:
-// https://stackoverflow.com/questions/5689028/how-to-get-card-specs-programmatically-in-cuda
-#if GPU_CODE
-            const int kb = 1024;
-            const int mb = kb * kb;
-            int devCount;
-            gpu::api::getDeviceCount(&devCount);
-            std::cout << std::string(80, '=') << "\n";
-            std::cout << "GPU Device(s): " << std::endl << std::endl;
-
-            for (int i = 0; i < devCount; ++i) {
-                devProp_t props;
-                gpu::api::getDeviceProperties(&props, i);
-                std::cout << "  Device number:   " << i << std::endl;
-                std::cout << "  Device name:     " << props.name << ": "
-                          << props.major << "." << props.minor << std::endl;
-                std::cout << "  Global memory:   " << props.totalGlobalMem / mb
-                          << "mb" << std::endl;
-                std::cout << "  Shared memory:   "
-                          << props.sharedMemPerBlock / kb << "kb" << std::endl;
-                std::cout << "  Constant memory: " << props.totalConstMem / kb
-                          << "kb" << std::endl;
-                std::cout << "  Block registers: " << props.regsPerBlock
-                          << std::endl
-                          << std::endl;
-
-                std::cout << "  Warp size:         " << props.warpSize
-                          << std::endl;
-                std::cout << "  Threads per block: " << props.maxThreadsPerBlock
-                          << std::endl;
-                std::cout << "  Max block dimensions: [ "
-                          << props.maxThreadsDim[0] << ", "
-                          << props.maxThreadsDim[1] << ", "
-                          << props.maxThreadsDim[2] << " ]" << std::endl;
-                std::cout << "  Max grid dimensions:  [ "
-                          << props.maxGridSize[0] << ", "
-                          << props.maxGridSize[1] << ", "
-                          << props.maxGridSize[2] << " ]" << std::endl;
-                std::cout << "  Memory Clock Rate (KHz): "
-                          << props.memoryClockRate << std::endl;
-                std::cout << "  Memory Bus Width (bits): "
-                          << props.memoryBusWidth << std::endl;
-                std::cout << "  Peak Memory Bandwidth (GB/s): "
-                          << 2.0 * props.memoryClockRate *
-                                 (props.memoryBusWidth / 8) / 1.0e6
-                          << std::endl;
-                ;
-                gpu_theoretical_bw = 2.0 * props.memoryClockRate *
-                                     (props.memoryBusWidth / 8) / 1.0e6;
-            }
-#else
-            const auto processor_count = std::thread::hardware_concurrency();
-            std::cout << std::string(80, '=') << "\n";
-            std::cout << "CPU Compute Thread(s): " << processor_count
-                      << std::endl;
-
-#endif
-            // Because I need all of the previous text off of the screen before
-            // the simulation starts and the table gets generated, we insert
-            // about 40 new to effectively scroll the screen up
-            std::cout << std::string(40, '\n');
         }
 
         /**

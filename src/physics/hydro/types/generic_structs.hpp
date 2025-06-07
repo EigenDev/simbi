@@ -1180,7 +1180,7 @@ namespace simbi {
                         << "]\n";
                 }
             }
-            table.postError(oss.str());
+            table.post_error(oss.str());
         }
     };
 

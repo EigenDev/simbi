@@ -69,12 +69,8 @@ namespace simbi {
         void write_hdf5(
             const std::string data_directory,
             const std::string filename,
-            const T& state,
-            auto& table
+            const T& state
         );
-
-        template <typename Sim_type>
-        void write_to_file(Sim_type& sim_state, auto& table);
 
         template <typename Sim_type>
         void write_to_file(Sim_type& sim_state, auto& table)
@@ -118,20 +114,20 @@ namespace simbi {
                 sim_state.checkpoint_zones()
             );
             sim_state.update_next_checkpoint_location();
-            write_hdf5(data_directory, filename, sim_state, table);
+            write_hdf5(data_directory, filename, sim_state);
+            table.post_info(
+                "Checkpoint written to: " + data_directory + filename
+            );
         }
 
         template <typename T>
         void write_hdf5(
             const std::string data_directory,
             const std::string filename,
-            const T& state,
-            auto& table
+            const T& state
         )
         {
             const auto full_filename = data_directory + filename;
-            table.postInfo("[Writing checkpoint: " + full_filename + "]");
-            table.print();
 
             // Create a new file using the default property list.
             H5::H5File file(full_filename, H5F_ACC_TRUNC);

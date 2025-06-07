@@ -50,15 +50,14 @@
 #define LOGGER_HPP
 
 #include "build_options.hpp"   // for real, Platform, global::BuildPlatform, luint
-#include "core/traits.hpp"     // for is_relativistic
 #include "io/console/printb.hpp"       // for writeln, writefl
-#include "io/console/tabulate.hpp"     // for PrettyTable
 #include "io/exceptions.hpp"           // for SimulationFailureException
 #include "io/hdf5/checkpoint.hpp"      // for write_to_file
+#include "io/tabulate/table.hpp"       // for Table, etc
+#include "statistics.hpp"              // for display_system_info
 #include "util/tools/device_api.hpp"   // for gpuEventCreate, gpuEventDestroy
 #include "util/tools/helpers.hpp"      // for catch_signals, Inter...
 #include <chrono>                      // for time_point, high_resolution_clock
-#include <cmath>                       // for INFINITY, pow
 #include <iostream>      // for operator<<, char_traits, basic_ost...
 #include <memory>        // for allocator
 #include <type_traits>   // for conditional_t
@@ -211,7 +210,7 @@ namespace simbi {
 
                 template <typename sim_state_t>
                 void
-                emit_troubled_cells(sim_state_t& sim_state, PrettyTable& table)
+                emit_troubled_cells(sim_state_t& sim_state, io::Table& table)
                 {
                     auto unwravel_idx = [&](luint idx,
                                             const std::vector<luint>& shape) {
@@ -269,10 +268,10 @@ namespace simbi {
                 void emit_exception(
                     sim_state_t& sim_state,
                     auto& err,
-                    PrettyTable& table
+                    io::Table& table
                 )
                 {
-                    table.postError(std::string("Exception: ") + err.what());
+                    table.post_error(std::string("Exception: ") + err.what());
                     sim_state.sync_to_host();
                     sim_state.has_crashed();
                     io::write_to_file(sim_state, table);
@@ -282,7 +281,7 @@ namespace simbi {
                 // Print the benchmark results
                 template <typename sim_state_t>
                 void emit_benchmarks(
-                    PrettyTable& table,
+                    io::Table& table,
                     int n,
                     const sim_state_t& sim_state,
                     double speed,
@@ -308,7 +307,7 @@ namespace simbi {
                             << seconds;
                         return oss.str();
                     };
-                    table.updateRow(
+                    table.update_row(
                         1,
                         {std::to_string(n),
                          [&]() {
@@ -332,10 +331,10 @@ namespace simbi {
                          format_time(elapsed_seconds),
                          format_time(estimated_time_left)}
                     );
-                    table.setProgress(
+                    table.set_progress(
                         static_cast<int>((sim_state.time() / end_time) * 100.0)
                     );
-                    table.print();
+                    table.refresh();
                 }
             };
 
@@ -353,22 +352,23 @@ namespace simbi {
                 auto start_time = steady_clock::now();
                 CursorManager cursor_manager;
 
-                display_device_properties();
+                statistics::display_system_info();
 
                 // use pretty table to print the results
-                PrettyTable table;
-                table.setTheme(TableTheme::Cyberpunk);
-                table.setTitle("Simulation Benchmarks");
-                table.setMessageBoardTitle("Simulation Messages");
-                table.addRow(
-                    {"Iteration",
-                     "Time",
-                     "Time Step",
-                     "Speed",
-                     "Time Elapsed",
-                     "Time Remaining"}
+                auto table = simbi::io::TableFactory::create_elegant_table(
+                    "Simulation Benchmarks",
+                    io::DisplayMode::Dynamic,
+                    io::ProgressBar::Enabled
                 );
-                table.addRow({"0", "0", "0", "0", "00:00:00", "00:00:00"});
+                table.set_header(
+                    {"Iteration", "Time", "dt", "Speed", "Elapsed", "ETA"}
+                );
+                // add initial row with placeholders
+                table.add_row({"0", "0.0", "0.0", "0.0", "00:00:00", "00:00:00"}
+                );
+
+                // print the initial table
+                table.print();
 
                 // if at the very beginning of the simulation
                 // write the initial state to a file
@@ -424,7 +424,7 @@ namespace simbi {
                         }
                         // Write to a file at every checkpoint interval
                         if (sim_state.time_to_write_checkpoint()) {
-                            table.setProgress(
+                            table.set_progress(
                                 static_cast<int>(
                                     (sim_state.time() / end_time) * 100.0
                                 )

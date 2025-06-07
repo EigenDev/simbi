@@ -399,9 +399,6 @@ namespace simbi {
 
         std::string getColorCode(Color color);
 
-        // display the CPU / GPU device properties
-        void display_device_properties();
-
         /**
          * @brief the next permutation in the set {1,2} or {1, 2, 3}
          *
