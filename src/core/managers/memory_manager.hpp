@@ -203,7 +203,7 @@ namespace simbi {
             bool take_ownership = false
         )
         {
-            // Clean up existing data if needed
+            // clean up existing data if needed
             this->size_ = size;
 
             if (take_ownership) {
@@ -220,8 +220,14 @@ namespace simbi {
 
             // reset device data and sync state
             if constexpr (global::on_gpu) {
-                device_data_.reset();
-                is_synced_ = false;
+                // we need to allocate device memory before it can be used
+                T* device_ptr;
+                gpu::api::malloc(
+                    reinterpret_cast<void**>(&device_ptr),
+                    this->size_ * sizeof(T)
+                );
+                device_data_ = unique_ptr<T, gpuDeleter<T>>(device_ptr);
+                is_synced_   = false;
             }
         }
 
@@ -260,6 +266,16 @@ namespace simbi {
         void sync_to_device()
         {
             if constexpr (global::on_gpu) {
+                // check if device memory is allocated
+                if (!device_data_) {
+                    T* device_ptr;
+                    gpu::api::malloc(
+                        reinterpret_cast<void**>(&device_ptr),
+                        this->size_ * sizeof(T)
+                    );
+                    device_data_ = unique_ptr<T, gpuDeleter<T>>(device_ptr);
+                }
+
                 gpu::api::copyHostToDevice(
                     device_data_.get(),
                     host_data_.get(),
