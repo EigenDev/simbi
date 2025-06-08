@@ -107,8 +107,7 @@ def labframe_energy(
             rho * lorentz**2 * enthalpy
             - pressure
             - rho * lorentz
-            + 0.5 * bsq
-            + 0.5 * (bsq * vsq - vdb**2)
+            + 0.5 * (bsq + bsq * vsq - vdb**2)
         )
 
     return res
@@ -155,7 +154,7 @@ def labframe_energy_density(
             rho * lorentz**2 * enthalpy(rho, pre, gamma, regime)
             - pre
             - rho * lorentz
-            + 0.5 * (bsq**2 + vsq * bsq - dot_product(vel, bfield) ** 2)
+            + 0.5 * (bsq + vsq * bsq - dot_product(vel, bfield) ** 2)
         )
     else:
         raise NotImplementedError(f"Regime '{regime}' not implemented")
@@ -183,11 +182,14 @@ def labframe_momentum(
             regime,
         )
         d = labframe_density(rho, vel, regime)
-
+        magnetic_part: Array | float
         if regime == "srmhd":
             bsq = np.array((sum(b**2 for b in bfield)), dtype=float)
             vdb = dot_product(vel, bfield)
-            magnetic_part = bsq * vel - vdb * bfield
+            # call squeeze to collapse along singleton dimensions
+            magnetic_part = np.array(
+                [bsq * v - vdb * b for v, b in zip(vel, bfield)]
+            ).squeeze()
         else:
             magnetic_part = 0.0
 
@@ -200,7 +202,12 @@ def labframe_momentum(
     elif mode == VectorMode.All:
         return mom_vec
     else:
-        return np.asarray(mom_vec[int(mode.value)])
+        mom_comp = np.asarray(mom_vec[int(mode.value)])
+        if mom_comp.shape != vel[mode.value].shape:
+            raise ValueError(
+                f"Momentum component shape {mom_comp.shape} does not match velocity shape {vel[mode.value].shape}"
+            )
+        return mom_comp
 
 
 def magnetic_pressure(

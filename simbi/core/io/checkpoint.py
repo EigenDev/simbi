@@ -42,6 +42,7 @@ def load_checkpoint_to_state(default_config: SimbiBaseConfig) -> Maybe[Simulatio
                     [
                         x["rho"],
                         *[x[f"v{i}"] for i in range(1, metadata["dimensions"] + 1)],
+                        x["p"],
                         *(
                             [
                                 x[f"b{i}_mean"]
@@ -50,7 +51,6 @@ def load_checkpoint_to_state(default_config: SimbiBaseConfig) -> Maybe[Simulatio
                             if "mhd" in metadata["regime"]
                             else []
                         ),
-                        x["p"],
                         x["chi"],
                     ],
                     dtype=np.float64,
@@ -59,6 +59,7 @@ def load_checkpoint_to_state(default_config: SimbiBaseConfig) -> Maybe[Simulatio
                     [
                         x["D"],
                         *[x[f"m{i}"] for i in range(1, metadata["dimensions"] + 1)],
+                        x["energy"],
                         *(
                             [
                                 x[f"b{i}_mean"]
@@ -67,7 +68,6 @@ def load_checkpoint_to_state(default_config: SimbiBaseConfig) -> Maybe[Simulatio
                             if "mhd" in metadata["regime"]
                             else []
                         ),
-                        x["energy"],
                         x["chi_dens"],
                     ],
                     dtype=np.float64,
