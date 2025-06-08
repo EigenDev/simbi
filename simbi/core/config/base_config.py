@@ -278,7 +278,7 @@ class SimbiBaseConfig(CLIConfigurableModel):
 
         if isinstance(self.resolution, int):
             return 1
-        return sum(d > 1 for d in self.resolution)
+        return sum(int(d > 1) for d in self.resolution)
 
     @computed_field
     @property
@@ -566,7 +566,9 @@ class SimbiBaseConfig(CLIConfigurableModel):
                     [metadata["active_x"], metadata["active_y"], metadata["active_z"]],
                     range(default_config.dimensionality),
                 )
-            ),
+            )
+            if default_config.dimensionality > 1
+            else metadata["active_x"],
             "start_time": float(metadata["time"]),
             "end_time": float(metadata["end_time"]),
             "adiabatic_index": float(metadata["adiabatic_index"]),
