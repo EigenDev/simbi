@@ -2,7 +2,6 @@ import numpy as np
 from numpy.typing import NDArray
 from typing import Any, Sequence
 from enum import Enum, IntEnum
-from ..physics import StateVector
 
 Array = NDArray[np.floating[Any]]
 nested_array = Sequence[Array]
@@ -17,48 +16,6 @@ class VectorComponent(IntEnum):
 class VectorMode(Enum):
     Magnitude = "magnitude"
     All = "all"
-
-
-def calculate_state_vector(
-    adiabatic_index: float,
-    rho: Array,
-    velocity: nested_array,
-    pressure: Array,
-    chi: Array,
-    regime: str,
-    bfields: nested_array,
-) -> StateVector:
-    """Pure function to calculate state vector"""
-    try:
-        validate_eos(adiabatic_index, regime)
-        dens = labframe_density(rho, velocity, regime)
-        mom = labframe_momentum(
-            rho,
-            pressure,
-            velocity,
-            [] if bfields is None else bfields,
-            adiabatic_index,
-            regime,
-        )
-
-        energy = labframe_energy(
-            adiabatic_index,
-            rho,
-            pressure,
-            velocity,
-            [] if bfields is None else bfields,
-            regime,
-        )
-
-        return StateVector(
-            density=dens,
-            momentum=list(mom),
-            energy=energy,
-            rho_chi=dens * chi,
-            mean_magnetic_field=bfields,
-        )
-    except Exception as e:
-        raise ValueError(f"Error calculating state vector: {e}")
 
 
 def elemental_multiply(a: nested_array, b: nested_array) -> Any:
