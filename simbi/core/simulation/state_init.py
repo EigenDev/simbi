@@ -76,7 +76,7 @@ def primitive_to_conserved(
     # Conserved density (D)
     conserved[0] = rho * lorentz
 
-    # Conserved momentum (m = ρhγ²v for relativistic, ρv for classical)
+    # Conserved momentum (m = ρh\gamma^2v for relativistic, \rho v for classical)
     if "sr" in regime:
         # Relativistic enthalpy
         h = 1.0 + adiabatic_index * pressure / ((adiabatic_index - 1.0) * rho)

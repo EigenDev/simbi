@@ -101,7 +101,7 @@ namespace simbi {
 
             // init simulation
             derived.init_simulation();
-            // derived.cons2prim_impl();
+            derived.cons2prim_impl();
             adapt_dt();
 
             // main simulation loop
