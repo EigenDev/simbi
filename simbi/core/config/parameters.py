@@ -192,8 +192,6 @@ class CLIConfigurableModel(BaseModel):
         """
         assert cls.cli_parser is not None
         namespace = main_parser.parse_args()
-        if namespace.info:
-            cls.cli_parser.print_help()
         return cls.from_namespace(namespace)
 
     @classmethod

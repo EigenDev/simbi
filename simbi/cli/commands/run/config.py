@@ -80,7 +80,7 @@ def _configure_single_state(
 
     if args.info:
         print(f"{bcolors.YELLOW}Printing parameters in {setup_class}{bcolors.ENDC}")
-        del problem_class
+        problem_class.cli_parser.print_help()
         return None, ""
 
     # Set checkpoint file if provided
