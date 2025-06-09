@@ -126,7 +126,8 @@
   - [Meson](https://mesonbuild.com)
   - [Ninja](https://ninja-build.org)
 - **Libraries**:
-  - [Cython](https://cython.org)
+  - [pybind11](https://pybind11.readthedocs.io)
+    *For C++/Python bindings*
   - HDF5 libraries
   - [mypy](https://mypy-lang.org)
   - [cogapp](https://pypi.org/project/cogapp)

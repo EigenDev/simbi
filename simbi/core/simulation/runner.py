@@ -1,7 +1,7 @@
 """
 Simulation execution.
 
-This module provides components for running simulations with the Cython backend.
+This module provides components for running simulations with the Pybind11 backend.
 """
 
 import importlib

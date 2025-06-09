@@ -12,8 +12,6 @@ project(
 #Add common project arguments
 add_project_arguments(
     [
-        '-DNPY_NO_DEPRECATED_API=NPY_1_7_API_VERSION',
-        '-DCYTHON_EXTERN_C=extern "C++"',
         '-Wno-nested-anon-types',
         '-Wno-gnu-anonymous-struct',
     ],

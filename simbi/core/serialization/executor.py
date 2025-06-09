@@ -2,7 +2,7 @@
 Configuration serialization for simulation execution.
 
 This module provides utilities to convert SimbiBaseConfig objects into
-a format suitable for passing to the Cython/C++ backend.
+a format suitable for passing to the Pybind11/C++ backend.
 """
 
 import dataclasses
