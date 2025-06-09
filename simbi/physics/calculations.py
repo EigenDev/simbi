@@ -71,48 +71,6 @@ def labframe_density(rho: Array, velocity: nested_array, regime: str) -> Array:
     return rho * lorentz_factor(velocity, regime)
 
 
-def labframe_energy(
-    adiabatic_index: float,
-    rho: Array,
-    pressure: Array,
-    velocity: nested_array,
-    bfields: nested_array,
-    regime: str,
-) -> Array:
-    if adiabatic_index == 1.0:
-        # this wll be a proxy for the sound speed squared
-        return pressure / rho
-    res: Array
-    bsq = dot_product(bfields, bfields) if np.any(bfields) else 0.0
-    vdb = dot_product(velocity, bfields) if np.any(bfields) else 0.0
-    vsq = dot_product(velocity, velocity)
-    lorentz = lorentz_factor(velocity, regime)
-    enthalpy = spec_enthalpy(adiabatic_index, rho, pressure, regime)
-
-    if regime == "classical":
-        if adiabatic_index == 1.0:
-            # Isothermal case - internal energy term not needed
-            res = 0.5 * rho * vsq + 0.5 * bsq
-        else:
-            # Adiabatic case
-            res = pressure / (adiabatic_index - 1.0) + 0.5 * rho * vsq + 0.5 * bsq
-    else:
-        # Relativistic case - isothermal not allowed
-        if adiabatic_index == 1.0:
-            raise ValueError(
-                "Isothermal EOS (gamma=1) is not physically valid for relativistic flows"
-            )
-        enthalpy = spec_enthalpy(adiabatic_index, rho, pressure, regime)
-        res = (
-            rho * lorentz**2 * enthalpy
-            - pressure
-            - rho * lorentz
-            + 0.5 * (bsq + bsq * vsq - vdb**2)
-        )
-
-    return res
-
-
 def enthalpy(
     rho: Array,
     pre: Array,
