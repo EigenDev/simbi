@@ -6,7 +6,6 @@
 //==================================
 //              GPU HELPERS
 //==================================
-real gpu_theoretical_bw = 1.0;
 using namespace H5;
 
 namespace simbi {

@@ -1803,9 +1803,7 @@ namespace simbi {
                     case MessageType::Error:
                         msg_color = theme_config.error_color;
                         break;
-                    case MessageType::Debug:
-                        msg_color = theme_config.debug_color;
-                        break;
+                    default: msg_color = theme_config.debug_color; break;
                 }
 
                 // split message by newlines and print each line separately
