@@ -295,7 +295,7 @@ This creates a skeleton configuration in the `simbi_configs` directory that you 
 </div>
 
 <div align="left">
-<i>Note: <code>--mode</code>, <code>--resolution</code>, and <code>--adiabatic-index</code> are global CLI options, but if you define your own problem-specific options, it is import that their names do not clash with the global cli args. Run <code>simbi run <problem> --info </code> to print a help output that lists all of the available global CLI arguments.</i>
+<i>Note: <code>--mode</code>, <code>--resolution</code>, and <code>--adiabatic-index</code> are global CLI options, but if you define your own problem-specific options, it is import that their names do not clash with the global cli args. Run <code>simbi run &lt; problem &gt; --info </code> to print a help output that lists all of the available global CLI arguments.</i>
 </div>
 
 ## 🔬 Physics Features
