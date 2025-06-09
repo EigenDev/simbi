@@ -16,7 +16,6 @@ from simbi.core.types.typing import GasStateGenerator, InitialStateType
 from pydantic import computed_field
 from pathlib import Path
 
-from simbi.old_core.types.constants import BoundaryCondition
 
 PERTURBATION_SCALE = 0.5e-3  # Scale for random perturbations
 

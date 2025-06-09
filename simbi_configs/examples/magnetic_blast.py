@@ -14,7 +14,6 @@ from simbi.core.types.typing import (
     GasStateGenerator,
     StaggeredBFieldGenerator,
 )
-from simbi.old_core.types.constants import BoundaryCondition
 
 # Constants for the blast wave setup
 XMIN = -6.0
