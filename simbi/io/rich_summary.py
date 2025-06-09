@@ -266,6 +266,13 @@ class RichSimulationSummary:
             steps = math.ceil(stats["tmax"] / stats["dt"])
             stats_table.add_row("Estimated Timesteps", f"{steps:,}", "")
 
+        if "gpu_block_dims" in stats:
+            gpu_dims = stats["gpu_block_dims"]
+            stats_table.add_row(
+                "GPU Block Dimensions",
+                f"X: {gpu_dims[0]}, Y: {gpu_dims[1]}, Z: {gpu_dims[2]}",
+                "",
+            )
         return Panel(
             stats_table,
             title="Simulation Statistics",
@@ -344,6 +351,8 @@ class RichSimulationSummary:
         memory_bytes = float(get_memory_usage())
         stats["estimated_memory_gb"] = memory_bytes / (1024**3)
         stats["cells_per_dim"] = (ni, nj, nk)
+        if params["gpu_block_dims"] is not None:
+            stats["gpu_block_dims"] = tuple(params["gpu_block_dims"])
 
         # create statistics panel
         stats_panel = self.create_statistics_panel(stats)

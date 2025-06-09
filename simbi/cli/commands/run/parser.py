@@ -7,7 +7,7 @@ from argparse import (
 )
 from typing import Optional
 from ....detail import max_thread_count
-from ...actions import ComputeModeAction
+from ...actions import ComputeModeAction, RegisterGPUBlockDimensions
 from ....detail import bcolors
 from pathlib import Path
 from ...actions import print_available_configs, get_available_configs
@@ -43,103 +43,6 @@ def validate_simbi_script(param):
     return param
 
 
-def _add_overridable_args(parser: ArgumentParser) -> None:
-    """_summary_
-
-    Args:
-        parser (ArgumentParser): _description_
-    """
-    ...
-    # parser.add_argument(
-    #     "--tstart", help="start time for simulation", default=None, type=float
-    # )
-    # parser.add_argument(
-    #     "--tend", help="end time for simulation", default=None, type=float
-    # )
-    # parser.add_argument(
-    #     "--dlogt",
-    #     help="logarithmic time bin spacing for checkpoints",
-    #     default=None,
-    #     type=float,
-    # )
-    # parser.add_argument(
-    #     "--plm-theta",
-    #     help="piecewise linear construction parameter",
-    #     default=None,
-    #     type=float,
-    # )
-    # parser.add_argument(
-    #     "--cfl",
-    #     help="Courant-Friedrichs-Lewy stability number",
-    #     default=None,
-    #     type=float,
-    # )
-    # parser.add_argument(
-    #     "--solver",
-    #     help="flag for hydro solver",
-    #     default=None,
-    #     choices=["hllc", "hlle", "hlld"],
-    # )
-    # parser.add_argument(
-    #     "--checkpoint-interval",
-    #     help="checkpoint interval spacing in simulation time units",
-    #     default=None,
-    #     type=float,
-    # )
-    # parser.add_argument(
-    #     "--data-directory",
-    #     help="directory to save checkpoint files",
-    #     default=None,
-    #     type=str,
-    # )
-    # parser.add_argument(
-    #     "--boundary-conditions",
-    #     help="boundary condition for inner boundary",
-    #     default=None,
-    #     nargs="+",
-    #     choices=["reflecting", "outflow", "inflow", "periodic"],
-    # )
-    # parser.add_argument(
-    #     "--engine-duration",
-    #     help="duration of hydrodynamic source terms",
-    #     default=None,
-    #     type=float,
-    # )
-    # parser.add_argument(
-    #     "--quirk-smoothing",
-    #     help="flag to activate Quirk (1994) smoothing at poles",
-    #     default=None,
-    #     action=BooleanOptionalAction,
-    # )
-    # parser.add_argument(
-    #     "--constant-sources",
-    #     help="flag to indicate source terms provided are constant",
-    #     default=None,
-    #     action="store_true",
-    # )
-    # parser.add_argument(
-    #     "--time-order",
-    #     help="set the order of time integration",
-    #     default=None,
-    #     type=str,
-    #     choices=["rk1", "rk2"],
-    # )
-    # parser.add_argument(
-    #     "--spatial-order",
-    #     help="set the order of spatial integration",
-    #     default=None,
-    #     type=str,
-    #     choices=["pcm", "plm"],
-    # )
-    # parser.add_argument(
-    #     "--order",
-    #     help="order of time *and* space integrtion",
-    #     default=None,
-    #     type=str,
-    #     choices=["first", "second"],
-    # )
-
-
 def _add_global_args(parser: ArgumentParser) -> None:
     """"""
     parser.add_argument(
@@ -163,6 +66,7 @@ def _add_global_args(parser: ArgumentParser) -> None:
         help="gpu dim3 thread block dimensions",
         default=[],
         type=int,
+        action=RegisterGPUBlockDimensions,
         nargs="+",
     )
     parser.add_argument(
@@ -177,18 +81,6 @@ def _add_global_args(parser: ArgumentParser) -> None:
         action=ComputeModeAction,
         const="omp",
     )
-    # parser.add_argument(
-    #     "--log-output",
-    #     help="log the simulation params to a file",
-    #     action="store_true",
-    #     default=False,
-    # )
-    # parser.add_argument(
-    #     "--log-directory",
-    #     help="directory to place the log file",
-    #     type=str,
-    #     default=None,
-    # )
 
 
 def _add_onthefly_args(parser: ArgumentParser) -> None:
@@ -230,7 +122,6 @@ def setup_parser(subparsers) -> None:
     )
 
     # Add group arguments
-    _add_overridable_args(overridable)
     _add_global_args(global_args)
     _add_onthefly_args(onthefly)
 

@@ -7,8 +7,8 @@ This module provides components for running simulations with the Cython backend.
 import importlib
 import os
 from dataclasses import dataclass
-from sys import executable
-from typing import Any, Optional, cast
+from typing import Callable, Sequence, Optional, cast
+from types import ModuleType
 
 from simbi.functional.helpers import print_progress
 from simbi.io.summary import print_simulation_parameters
@@ -16,6 +16,7 @@ from simbi.io.summary import print_simulation_parameters
 from ..config.base_config import SimbiBaseConfig
 from ..serialization.executor import SimulationExecutor
 from .state_init import SimulationState, load_or_initialize_state
+from ...io.logging import logger
 
 
 @dataclass
@@ -43,7 +44,9 @@ class SimulationRunner:
         self.config = self.state.config
         return self
 
-    def _configure_backend(self, compute_mode: str = "cpu") -> Any:
+    def _configure_backend(
+        self, compute_mode: str = "cpu"
+    ) -> tuple[Optional[ModuleType], Optional[Sequence[int]]]:
         """Configure and load the appropriate backend.
 
         Args:
@@ -52,6 +55,7 @@ class SimulationRunner:
         Returns:
             The backend module or class
         """
+        runtime_block_dims: Optional[Sequence[int]] = None
         # Configure block dimensions for GPU
         if compute_mode == "gpu":
             # Set environment variables for block dimensions based on dimensionality
@@ -59,20 +63,35 @@ class SimulationRunner:
             dim = min(3, self.config.dimensionality)
             block_dims = dims[dim]
 
-            os.environ["GPU_BLOCK_X"] = str(block_dims[0])
-            os.environ["GPU_BLOCK_Y"] = str(block_dims[1])
-            os.environ["GPU_BLOCK_Z"] = str(block_dims[2])
-            print(f"Using GPU block dimensions: {block_dims}")
+            # if enviornment variables are not set, set them
+            if dim == 1 and "GPU_BLOCK_X" not in os.environ:
+                os.environ["GPU_BLOCK_X"] = str(block_dims[0])
+                os.environ["GPU_BLOCK_Y"] = "1"
+                os.environ["GPU_BLOCK_Z"] = "1"
+            elif dim == 2 and "GPU_BLOCK_X" not in os.environ:
+                os.environ["GPU_BLOCK_X"] = str(block_dims[0])
+                os.environ["GPU_BLOCK_Y"] = str(block_dims[1])
+                os.environ["GPU_BLOCK_Z"] = "1"
+            elif dim == 3 and "GPU_BLOCK_X" not in os.environ:
+                os.environ["GPU_BLOCK_X"] = str(block_dims[0])
+                os.environ["GPU_BLOCK_Y"] = str(block_dims[1])
+                os.environ["GPU_BLOCK_Z"] = str(block_dims[2])
+
+            runtime_block_dims = (
+                int(os.environ.get("GPU_BLOCK_X", block_dims[0])),
+                int(os.environ.get("GPU_BLOCK_Y", block_dims[1])),
+                int(os.environ.get("GPU_BLOCK_Z", block_dims[2])),
+            )
 
         # Import the appropriate module
         lib_mode = "cpu" if compute_mode in ["cpu", "omp"] else "gpu"
         try:
             simulation_module = importlib.import_module(f"simbi.libs.{lib_mode}_ext")
-            return simulation_module
+            return simulation_module, runtime_block_dims
         except ImportError as e:
-            print(f"Error loading simulation backend: {e}")
-            print("Running in demo mode - no actual simulation will be executed")
-            return None
+            logger.info(f"Error loading simulation backend: {e}")
+            logger.info("Running in demo mode - no actual simulation will be executed")
+            return None, None
 
     def run(self, compute_mode: str = "cpu") -> None:
         """Run the simulation.
@@ -88,15 +107,15 @@ class SimulationRunner:
         execution_dict = SimulationExecutor.to_execution_dict(self.config)
 
         # Configure backend
-        backend = self._configure_backend(compute_mode)
+        backend, gpu_block_dims = self._configure_backend(compute_mode)
         if backend is None:
-            print("Demo mode: Simulation would execute with parameters:")
+            logger.info("Demo mode: Simulation would execute with parameters:")
             for key, value in sorted(execution_dict.items()):
-                print(f"  {key}: {value}")
+                logger.info(f"  {key}: {value}")
             return
 
         # Print key simulation parameters
-        print_simulation_parameters(execution_dict)
+        print_simulation_parameters(execution_dict, gpu_block_dims)
         # Give the user a moment to read the parameters
         print_progress()
 
@@ -130,7 +149,7 @@ class SimulationRunner:
                 adot=adot,
             )
         else:
-            print("Error: Simulation state not initialized properly")
+            logger.info("Error: Simulation state not initialized properly")
 
 
 def run_simulation(config: SimbiBaseConfig, compute_mode: str = "cpu") -> None:

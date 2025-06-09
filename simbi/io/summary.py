@@ -5,7 +5,7 @@ This module provides tools for formatting, grouping, and displaying
 simulation parameters in a visually appealing way (imo).
 """
 
-from typing import Any, Optional
+from typing import Any, Optional, Sequence
 import numpy as np
 from .logging import logger
 from ..functional.helpers import tuple_of_tuples, to_tuple_of_pairs
@@ -513,16 +513,19 @@ class SimulationParameterSummary:
         return sim_state
 
 
-def print_simulation_parameters(params: dict[str, Any]) -> dict[str, Any]:
+def print_simulation_parameters(
+    params: dict[str, Any], gpu_block_dims: Optional[Sequence[int]]
+) -> None:
     """Print a summary of the simulation parameters"""
+    local_params = params.copy()
+    local_params["gpu_block_dims"] = gpu_block_dims
     try:
         # Import locally to avoid dependency issues
         from .rich_summary import print_rich_simulation_parameters
 
-        print_rich_simulation_parameters(params)
+        print_rich_simulation_parameters(local_params)
     except ImportError:
         # Fall back to the original version if Rich is not available
         summary = SimulationParameterSummary()
-        summary_string = summary.generate_parameter_summary(params)
+        summary_string = summary.generate_parameter_summary(local_params)
         print(summary_string)
-    return params

@@ -7,14 +7,12 @@ a format suitable for passing to the Cython/C++ backend.
 
 import dataclasses
 from dataclasses import dataclass
-from typing import Any, Sequence, Union, Optional
+from typing import Any, Sequence, Union
 from pathlib import Path
-from numpy.typing import NDArray
-import numpy as np
 
-from simbi.old_core.types.constants import BoundaryCondition
 
 from ..config.base_config import SimbiBaseConfig
+from ..types.input import BoundaryCondition
 
 
 @dataclass

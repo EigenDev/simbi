@@ -20,6 +20,39 @@ class ComputeModeAction(Action):
         setattr(namespace, "compute_mode", self.const)
 
 
+class RegisterGPUBlockDimensions(Action):
+    """takes the user input, and sets the environment variables for GPU block dimensions"""
+
+    def __init__(self, option_strings, dest, **kwargs):
+        return super().__init__(option_strings, dest=dest, **kwargs)
+
+    def __call__(
+        self,
+        parser: ArgumentParser,
+        namespace: Namespace,
+        values: Sequence[int] | None,
+        option_string: str | None = None,
+    ):
+        import os
+
+        if values is not None and len(values) == 3:
+            os.environ["GPU_BLOCK_X"] = str(values[0])
+            os.environ["GPU_BLOCK_Y"] = str(values[1])
+            os.environ["GPU_BLOCK_Z"] = str(values[2])
+        elif values is not None and len(values) == 2:
+            os.environ["GPU_BLOCK_X"] = str(values[0])
+            os.environ["GPU_BLOCK_Y"] = str(values[1])
+            os.environ["GPU_BLOCK_Z"] = "1"
+        elif values is not None and len(values) == 1:
+            os.environ["GPU_BLOCK_X"] = str(values[0])
+            os.environ["GPU_BLOCK_Y"] = "1"
+            os.environ["GPU_BLOCK_Z"] = "1"
+        else:
+            raise ValueError(
+                "GPU block dimensions must be specified as 1, 2, or 3 integers."
+            )
+
+
 class print_the_version(Action):
     def __init__(self, option_strings, dest, **kwargs):
         return super().__init__(
