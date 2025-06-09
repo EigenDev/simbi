@@ -959,7 +959,7 @@ namespace simbi {
         std::string Table::create_gradient_text(
             const std::string& text,
             Color start_color,
-            Color end_color
+            Color /* end_color */
         ) const
         {
             // simple gradient effect - can be enhanced with truecolor support
@@ -1808,27 +1808,38 @@ namespace simbi {
                         break;
                 }
 
-                os << get_color_code(theme_config.border_color)
-                   << border_chars.vertical << " ";
-                os << get_color_code(msg_color);
+                // split message by newlines and print each line separately
+                std::istringstream stream(msg.text);
+                std::string line;
+                while (std::getline(stream, line)) {
+                    os << get_color_code(theme_config.border_color)
+                       << border_chars.vertical << " ";
+                    os << get_color_code(msg_color);
 
-                std::string message_text = msg.text;
-                if (message_text.length() > total_width - 4) {
-                    message_text =
-                        message_text.substr(0, total_width - 7) + "...";
-                }
-                else {
-                    message_text += std::string(
-                        total_width - 4 - message_text.length(),
-                        ' '
-                    );
-                }
+                    if (line.length() > total_width - 4) {
+                        line = line.substr(0, total_width - 7) + "...";
+                    }
+                    else {
+                        line +=
+                            std::string(total_width - 4 - line.length(), ' ');
+                    }
 
-                os << message_text;
-                os << reset_color() << " "
-                   << get_color_code(theme_config.border_color)
-                   << border_chars.vertical << "\n";
+                    os << line;
+                    os << reset_color() << " "
+                       << get_color_code(theme_config.border_color)
+                       << border_chars.vertical << "\n";
+                }
                 os << reset_color();
+
+                // add a separator line between messages (but not after the last
+                // message)
+                if (&msg != &messages.back()) {
+                    os << get_color_code(theme_config.border_color);
+                    os << border_chars.vertical;
+                    os << std::string(total_width - 2, ' ');
+                    os << border_chars.vertical << "\n";
+                    os << reset_color();
+                }
             }
 
             // bottom border
