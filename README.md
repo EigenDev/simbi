@@ -253,15 +253,15 @@ CC=<your_c_compiler> CXX=<your_cpp_compiler> python dev.py install --gpu-compila
 ```bash
 # Full path
 simbi run simbi_configs/examples/marti_muller.py \
-  --mode gpu --nzones 100 --adiabatic-index 1.4
+  --mode gpu --resolution 100 --adiabatic-index 1.4
 
 # Shorthand
 simbi run marti_muller \
-  --mode gpu --nzones 100 --adiabatic-index 1.4
+  --mode gpu --resolution 100 --adiabatic-index 1.4
 
 # Dash-case also works
 simbi run marti-muller \
-  --mode gpu --nzones 100 --adiabatic-index 1.4
+  --mode gpu --resolution 100 --adiabatic-index 1.4
 ```
 </td>
 
@@ -295,7 +295,7 @@ This creates a skeleton configuration in the `simbi_configs` directory that you 
 </div>
 
 <div align="left">
-<i>Note: <code>--mode</code> is a global CLI option, while <code>--nzones</code> and <code>--ad-index</code> are problem-specific options defined in the configuration script.</i>
+<i>Note: <code>--mode</code>, <code>--resolution</code>, and <code>--adiabatic-index</code> are global CLI options, but if you define your own problem-specific options, it is import that their names do not clash with the global cli args. Run <code>simbi run <problem> --info </code> to print a help output that lists all of the available global CLI arguments.</i>
 </div>
 
 ## 🔬 Physics Features
