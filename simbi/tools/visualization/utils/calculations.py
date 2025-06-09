@@ -64,7 +64,7 @@ def labframe_energy_density(
             rho * lorentz**2 * enthalpy(rho, pre, gamma, regime)
             - pre
             - rho * lorentz
-            + 0.5 * (bsq**2 + vsq * bsq - np.dot(vel, bfield) ** 2)
+            + 0.5 * (bsq + vsq * bsq - np.dot(vel, bfield) ** 2)
         )
     else:
         raise NotImplementedError(f"Regime '{regime}' not implemented")
