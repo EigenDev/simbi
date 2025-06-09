@@ -1831,12 +1831,14 @@ namespace simbi {
 
                 // add a separator line between messages (but not after the last
                 // message)
-                if (&msg != &messages.back()) {
-                    os << get_color_code(theme_config.border_color);
-                    os << border_chars.vertical;
-                    os << std::string(total_width - 2, ' ');
-                    os << border_chars.vertical << "\n";
-                    os << reset_color();
+                if (msg.type == MessageType::Error) {
+                    if (&msg != &messages.back()) {
+                        os << get_color_code(theme_config.border_color);
+                        os << border_chars.vertical;
+                        os << std::string(total_width - 2, ' ');
+                        os << border_chars.vertical << "\n";
+                        os << reset_color();
+                    }
                 }
             }
 

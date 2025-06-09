@@ -1,4 +1,5 @@
 #include "io/console/statistics.hpp"
+#include "build_options.hpp"
 #include "io/tabulate/table.hpp"
 #include <iomanip>
 #include <iostream>
@@ -571,7 +572,8 @@ namespace simbi {
                     block_dim << "[" << props.maxThreadsDim[0] << ", "
                               << props.maxThreadsDim[1] << ", "
                               << props.maxThreadsDim[2] << "]";
-                    gpu_table.add_row({"Max Block Dimensions", block_dim.str()}
+                    gpu_table.add_row(
+                        {"Max Block Dimensions", block_dim.str()}
                     );
 
                     std::ostringstream grid_dim;
@@ -585,13 +587,12 @@ namespace simbi {
 
                 // print the GPU table
                 gpu_table.print();
-
-                std::cout << std::string(40, '\n');
             }
 #endif
 
             // add space to scroll the screen up before simulation starts
-            std::cout << std::string(40, '\n');
+            const auto vspace = global::on_sm ? 42 : 40;
+            std::cout << std::string(vspace, '\n');
         }
 
     }   // namespace statistics
