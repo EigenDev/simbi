@@ -49,7 +49,7 @@
 #ifndef NDARRAY_HPP
 #define NDARRAY_HPP
 
-#include "build_options.hpp"                       // for global::on_gpu, rea;
+#include "config.hpp"                              // for platform::is_gpu, rea;
 #include "core/managers/array_props.hpp"           // for array_properties
 #include "core/managers/memory_manager.hpp"        // for memory_manager
 #include "core/traits.hpp"                         // for is_maybe
@@ -378,7 +378,7 @@ namespace simbi {
             mem_      = std::move(new_mem);
             capacity_ = new_capacity;
 
-            if constexpr (global::on_gpu) {
+            if constexpr (platform::is_gpu) {
                 mem_.sync_to_device();
             }
         }
@@ -404,7 +404,7 @@ namespace simbi {
         {
             push_back(value);
             // If using GPU, synchronize just the changed element
-            if constexpr (global::on_gpu) {
+            if constexpr (platform::is_gpu) {
                 mem_.sync_to_device();
             }
         }
@@ -432,7 +432,7 @@ namespace simbi {
             this->strides_ = this->compute_strides(this->shape_);
 
             // If using GPU, synchronize just the changed element
-            if constexpr (global::on_gpu) {
+            if constexpr (platform::is_gpu) {
                 mem_.sync_to_device();
             }
         }
@@ -443,7 +443,7 @@ namespace simbi {
         {
             emplace_back(std::forward<Args>(args)...);
             // If using GPU, synchronize just the changed element
-            if constexpr (global::on_gpu) {
+            if constexpr (platform::is_gpu) {
                 mem_.sync_to_device();
             }
         }
@@ -629,7 +629,7 @@ namespace simbi {
         template <typename F>
         void transform(F op, const ExecutionPolicy<>& policy)
         {
-            if constexpr (global::on_gpu) {
+            if constexpr (platform::is_gpu) {
                 mem_.ensure_device_synced();
                 parallel_for(policy, [=, this] DEV(size_type ii) {
                     mem_[ii] = op(mem_[ii]);
@@ -681,7 +681,7 @@ namespace simbi {
         template <typename F>
         void transform_with_indices(F op, const ExecutionPolicy<>& policy)
         {
-            if constexpr (global::on_gpu) {
+            if constexpr (platform::is_gpu) {
                 mem_.ensure_device_synced();
                 parallel_for(policy, [=, this] DEV(size_type ii) {
                     mem_[ii] = op(mem_[ii], ii);
@@ -714,7 +714,7 @@ namespace simbi {
         template <typename U, typename F>
         U reduce(U init, F reduce_op, const ExecutionPolicy<>& policy) const
         {
-            if constexpr (global::on_gpu) {
+            if constexpr (platform::is_gpu) {
                 ndarray<U> result(1, init);
                 result.sync_to_device();
                 auto result_ptr      = result.data();
@@ -723,7 +723,7 @@ namespace simbi {
 
                 // First pass: each thread block computes a partial reduction
                 parallel_for(policy, [=] DEV(size_type idx) {
-                    extern __shared__ U shared_data[];
+                    extern SHARED U shared_data[];
 
                     // Each thread initializes with its own value
                     U thread_val = reduce_op(init, arr[idx], idx);
@@ -752,7 +752,7 @@ namespace simbi {
 
                     // Write block result to global memory
                     if (tid == 0) {
-                        gpu::api::atomicMin(&result_ptr[0], shared_data[0]);
+                        gpu::api::atomic_min(&result_ptr[0], shared_data[0]);
                     }
                 });
 
@@ -800,7 +800,7 @@ namespace simbi {
         {
             ndarray<size_type, 1> indices(this->size());
 
-            if constexpr (global::on_gpu) {
+            if constexpr (platform::is_gpu) {
                 int count = 0;
                 // mem_.ensure_device_synced();
                 indices.sync_to_device();
@@ -811,7 +811,7 @@ namespace simbi {
                 parallel_for(policy, [=, this] DEV(size_type idx) {
                     if (op(arr[idx])) {
                         auto current_count =
-                            gpu::api::atomicAdd<int>(count_ptr, 1);
+                            gpu::api::atomic_add<int>(count_ptr, 1);
                         indices_ptr[current_count] = idx;
                     }
                 });

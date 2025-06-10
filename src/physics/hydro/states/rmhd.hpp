@@ -51,7 +51,7 @@
 #define RMHD_HPP
 
 #include "base.hpp"                               // for HydroBase
-#include "build_options.hpp"                      // for real, HD, lint, luint
+#include "config.hpp"                             // for real, HD, lint, luint
 #include "core/managers/boundary_manager.hpp"     // for BoundaryManager
 #include "core/types/containers/ndarray.hpp"      // for ndarray
 #include "core/types/monad/maybe.hpp"             // for Maybe

@@ -1,5 +1,5 @@
 #include "evaluator.hpp"
-#include "build_options.hpp"
+#include "config.hpp"
 #include "util/math/expression.hpp"
 #include "util/tools/helpers.hpp"
 #include <cmath>
@@ -1908,7 +1908,8 @@ namespace simbi::expression {
                             case ExprOp::POWER:
                                 if (entry.child_values[0] < 0.0 &&
                                     entry.child_values[1] !=
-                                        static_cast<int>(entry.child_values[1]
+                                        static_cast<int>(
+                                            entry.child_values[1]
                                         )) {
                                     HANDLE_ERROR(
                                         "Negative base with non-integer "
@@ -2207,7 +2208,7 @@ namespace simbi::expression {
     )
     {
         for (int i = 0; i < num_components; ++i) {
-            if constexpr (global::on_gpu) {
+            if constexpr (platform::is_gpu) {
                 // gpu version uses non-recursive evaluation
                 // this avoids stack overflow issues
                 results[i] = evaluate_expr_nonrecursive(

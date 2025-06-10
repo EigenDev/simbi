@@ -6,7 +6,7 @@
 #ifndef ALGORITHMS_HPP
 #define ALGORITHMS_HPP
 
-#include "build_options.hpp"
+#include "config.hpp"
 #include <algorithm>
 
 namespace simbi::algorithms {
@@ -26,7 +26,7 @@ namespace simbi::algorithms {
     template <typename InputIt, typename OutputIt>
     DUAL OutputIt copy(InputIt first, InputIt last, OutputIt d_first)
     {
-        if constexpr (!global::on_gpu) {
+        if constexpr (!platform::is_gpu) {
             return std::copy(first, last, d_first);
         }
 
@@ -40,7 +40,7 @@ namespace simbi::algorithms {
     template <typename InputIt, typename Size, typename OutputIt>
     DUAL OutputIt copy_n(InputIt first, Size count, OutputIt result)
     {
-        if constexpr (!global::on_gpu) {
+        if constexpr (!platform::is_gpu) {
             return std::copy_n(first, count, result);
         }
         for (Size i = 0; i < count; ++i) {
@@ -53,7 +53,7 @@ namespace simbi::algorithms {
     template <typename InputIt, typename OutputIt>
     DUAL OutputIt move(InputIt first, InputIt last, OutputIt d_first)
     {
-        if constexpr (!global::on_gpu) {
+        if constexpr (!platform::is_gpu) {
             return std::move(first, last, d_first);
         }
         while (first != last) {
@@ -66,7 +66,7 @@ namespace simbi::algorithms {
     template <typename ForwardIt, typename T>
     DUAL void fill(ForwardIt first, ForwardIt last, const T& value)
     {
-        if constexpr (!global::on_gpu) {
+        if constexpr (!platform::is_gpu) {
             std::fill(first, last, value);
         }
         while (first != last) {
@@ -78,7 +78,7 @@ namespace simbi::algorithms {
     template <typename OutputIt, typename Size, typename T>
     DUAL OutputIt fill_n(OutputIt first, Size count, const T& value)
     {
-        if constexpr (!global::on_gpu) {
+        if constexpr (!platform::is_gpu) {
             return std::fill_n(first, count, value);
         }
         for (Size i = 0; i < count; ++i) {
@@ -92,7 +92,7 @@ namespace simbi::algorithms {
     DUAL void
     swap_ranges(ForwardIt1 first1, ForwardIt1 last1, ForwardIt2 first2)
     {
-        if constexpr (!global::on_gpu) {
+        if constexpr (!platform::is_gpu) {
             std::swap_ranges(first1, last1, first2);
         }
         else {
@@ -106,7 +106,7 @@ namespace simbi::algorithms {
     template <typename T>
     DUAL void swap(T& a, T& b)
     {
-        if constexpr (!global::on_gpu) {
+        if constexpr (!platform::is_gpu) {
             std::swap(a, b);
         }
         else {
@@ -120,7 +120,7 @@ namespace simbi::algorithms {
     template <typename BidirectionalIt>
     DUAL void reverse(BidirectionalIt first, BidirectionalIt last)
     {
-        if constexpr (!global::on_gpu) {
+        if constexpr (!platform::is_gpu) {
             std::reverse(first, last);
         }
         else {
@@ -135,7 +135,7 @@ namespace simbi::algorithms {
     // template <typename F, typename... Args>
     // DUAL constexpr auto invoke(F&& f, Args&&... args)
     // {
-    //     if constexpr (!global::on_gpu) {
+    //     if constexpr (!platform::is_gpu) {
     //         return std::invoke(std::forward<F>(f),
     //         std::forward<Args>(args)...);
     //     }

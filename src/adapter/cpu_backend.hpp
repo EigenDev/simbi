@@ -4,7 +4,7 @@
  *=============================================================================
  *
  * @file            cpu_backend.hpp
- * @brief
+ * @brief           CPU implementation of device backend
  * @details
  *
  * @version         0.8.0
@@ -16,34 +16,10 @@
  * @build           Requirements & Dependencies
  *==============================================================================
  * @requires        C++20
- * @depends         CUDA >= 11.0, HDF5 >= 1.12, OpenMP >= 4.5
+ * @depends         None
  * @platform        Linux, MacOS
- * @parallel        GPU (CUDA, HIP), CPU (OpenMP)
+ * @parallel        CPU (OpenMP)
  *
- *==============================================================================
- * @documentation   Reference & Notes
- *==============================================================================
- * @usage
- * @note
- * @warning
- * @todo
- * @bug
- * @performance
- *
- *==============================================================================
- * @testing        Quality Assurance
- *==============================================================================
- * @test
- * @benchmark
- * @validation
- *
- *==============================================================================
- * @history        Version History
- *==============================================================================
- * 2025-06-09      v0.8.0      Initial implementation
- *
- *==============================================================================
- * @copyright (C) 2025 Marcus DuPont. All rights reserved.
  *==============================================================================
  */
 
@@ -51,19 +27,27 @@
 #define CPU_BACKEND_HPP
 
 #include "device_backend.hpp"
+#include "device_types.hpp"
 #include <algorithm>   // for std::min
 #include <chrono>      // for timing
 #include <cstring>     // for memcpy, memset
 #include <memory>      // for aligned_alloc
+#include <thread>      // for std::thread::hardware_concurrency
 
 namespace simbi::adapter {
+    // Helper function to handle unused parameters
+    template <typename T>
+    inline void unused_param(const T& /*param*/)
+    {
+    }
 
     // CPU backend specialization
     template <>
     class DeviceBackend<cpu_backend_tag>
     {
+
       public:
-        // memory operations
+        // Memory operations
         void copy_host_to_device(void* to, const void* from, std::size_t bytes)
         {
             std::memcpy(to, from, bytes);
@@ -104,75 +88,83 @@ namespace simbi::adapter {
             std::memset(obj, val, bytes);
         }
 
-        // event handling (using std::chrono for timing)
-        void event_create(void** event)
+        // Event handling (using std::chrono for timing)
+        void event_create(adapter::event_t<cpu_backend_tag>* event)
         {
-            auto* timestamp =
-                new std::chrono::high_resolution_clock::time_point();
-            *event = static_cast<void*>(timestamp);
+            // Create a new event and initialize it
+            *event = std::chrono::high_resolution_clock::time_point();
         }
 
-        void event_destroy(void* event)
+        void event_destroy(adapter::event_t<cpu_backend_tag> /*event*/)
         {
-            auto* timestamp =
-                static_cast<std::chrono::high_resolution_clock::time_point*>(
-                    event
-                );
-            delete timestamp;
+            // no-op on CPU, events are just time points
         }
 
-        void event_record(void* event)
+        void event_record(adapter::event_t<cpu_backend_tag>& event)
         {
-            auto* timestamp =
-                static_cast<std::chrono::high_resolution_clock::time_point*>(
-                    event
-                );
-            *timestamp = std::chrono::high_resolution_clock::now();
+            // Record the current time
+            event = std::chrono::high_resolution_clock::now();
         }
 
-        void event_synchronize(void* event)
+        void event_synchronize(adapter::event_t<cpu_backend_tag> /*event*/)
         {
-            // no-op on CPU, events are implicitly synchronized
-            (void) event;
+            // No-op on CPU, events are implicitly synchronized
         }
 
-        void event_elapsed_time(float* time, void* start, void* end)
+        void event_elapsed_time(
+            float* time,
+            adapter::event_t<cpu_backend_tag> start,
+            adapter::event_t<cpu_backend_tag> end
+        )
         {
-            auto* start_time =
-                static_cast<std::chrono::high_resolution_clock::time_point*>(
-                    start
-                );
-            auto* end_time =
-                static_cast<std::chrono::high_resolution_clock::time_point*>(
-                    end
-                );
-
+            // Calculate elapsed time between two events
             auto duration =
                 std::chrono::duration_cast<std::chrono::microseconds>(
-                    *end_time - *start_time
+                    end - start
                 )
                     .count();
-            // convert to milliseconds
+
+            // Convert to milliseconds to match CUDA behavior
             *time = static_cast<float>(duration) / 1000.0f;
         }
 
-        // device management (CPU fallbacks)
+        // Device management
         void get_device_count(int* count)
         {
-            // cpu backend reports a single "device"
+            // CPU backend reports a single "device"
             *count = 1;
         }
 
-        void get_device_properties(void* props, int device)
+        void get_device_properties(
+            adapter::device_properties_t<cpu_backend_tag>* props,
+            int device
+        )
         {
-            // no properties to report for CPU
-            (void) props;
-            (void) device;
+            // Validate device ID
+            if (device != 0) {
+                throw error::runtime_error(
+                    error::status_t::error,
+                    "Invalid device ID for CPU backend: " +
+                        std::to_string(device)
+                );
+            }
+
+            // Set generic CPU properties
+            std::strncpy(props->name, "CPU", sizeof(props->name) - 1);
+            props->major = 1;
+            props->minor = 0;
+            props->totalGlobalMem =
+                0;   // Unknown, could use system calls to determine
+            props->multiProcessorCount = std::thread::hardware_concurrency();
+            props->maxThreadsPerBlock  = 1;
+            props->maxThreadsPerMultiProcessor = 1;
+            props->maxThreadsDim               = types::dim3(1, 1, 1);
+            props->maxGridSize                 = types::dim3(1, 1, 1);
         }
 
         void set_device(int device)
         {
-            // calidate device ID (only 0 is valid for CPU)
+            // Validate device ID (only 0 is valid for CPU)
             if (device != 0) {
                 throw error::runtime_error(
                     error::status_t::error,
@@ -184,53 +176,51 @@ namespace simbi::adapter {
 
         void device_synchronize()
         {
-            // no-op on CPU, all operations are synchronous
+            // No-op on CPU, all operations are synchronous
         }
 
         // Stream operations (CPU fallbacks)
-        void stream_create(void** stream)
+        void stream_create(adapter::stream_t<cpu_backend_tag>* stream)
         {
-            // dummy stream for compatibility
-            *stream = nullptr;
+            // Dummy stream for compatibility
+            *stream = {};
         }
 
-        void stream_destroy(void* stream)
+        void stream_destroy(adapter::stream_t<cpu_backend_tag> /*stream*/)
         {
-            // no-op for CPU
-            (void) stream;
+            // No-op for CPU
         }
 
-        void stream_synchronize(void* stream)
+        void stream_synchronize(adapter::stream_t<cpu_backend_tag> /*stream*/)
         {
-            // no-op for CPU
-            (void) stream;
+            // No-op for CPU
+        }
+
+        void stream_wait_event(
+            adapter::stream_t<cpu_backend_tag> /*stream*/,
+            adapter::event_t<cpu_backend_tag> /*event*/,
+            unsigned int /*flags*/ = 0
+        )
+        {
+            // No-op for CPU
         }
 
         void
-        stream_wait_event(void* stream, void* event, unsigned int flags = 0)
+        stream_query(adapter::stream_t<cpu_backend_tag> /*stream*/, int* status)
         {
-            // no-op for CPU
-            (void) stream;
-            (void) event;
-            (void) flags;
-        }
-
-        void stream_query(void* stream, int* status)
-        {
-            // always report streams as completed on CPU
-            (void) stream;
+            // Always report streams as completed on CPU
             *status = 0;   // 0 typically means "completed" in GPU APIs
         }
 
-        // asynchronous operations (synchronous on CPU)
+        // Asynchronous operations (synchronous on CPU)
         void async_copy_host_to_device(
             void* to,
             const void* from,
             std::size_t bytes,
-            void* stream
+            adapter::stream_t<cpu_backend_tag> /*stream*/
         )
         {
-            (void) stream;   // ignore stream parameter on CPU
+            // ignore stream parameter on CPU
             copy_host_to_device(to, from, bytes);
         }
 
@@ -238,10 +228,10 @@ namespace simbi::adapter {
             void* to,
             const void* from,
             std::size_t bytes,
-            void* stream
+            adapter::stream_t<cpu_backend_tag> /*stream*/
         )
         {
-            (void) stream;   // ignore stream parameter on CPU
+            // ignore stream parameter on CPU
             copy_device_to_host(to, from, bytes);
         }
 
@@ -249,10 +239,10 @@ namespace simbi::adapter {
             void* to,
             const void* from,
             std::size_t bytes,
-            void* stream
+            adapter::stream_t<cpu_backend_tag> /*stream*/
         )
         {
-            (void) stream;   // ignore stream parameter on CPU
+            // ignore stream parameter on CPU
             copy_device_to_device(to, from, bytes);
         }
 
@@ -260,21 +250,19 @@ namespace simbi::adapter {
             void* to,
             const void* from,
             std::size_t bytes,
-            int kind,
-            void* stream
+            adapter::memcpy_kind_t<cpu_backend_tag> /*kind*/,
+            adapter::stream_t<cpu_backend_tag> /*stream*/
         )
         {
-            (void) kind;     // kind is meaningless on CPU
-            (void) stream;   // ignore stream parameter on CPU
+            // kind is meaningless on CPU
+            // ignore stream parameter on CPU
             std::memcpy(to, from, bytes);
         }
 
-        // peer operations (no-ops on CPU)
-        void enable_peer_access(int device, unsigned int flags = 0)
+        // Peer operations (no-ops on CPU)
+        void enable_peer_access(int /*device*/, unsigned int /*flags*/ = 0)
         {
-            // no-op for CPU
-            (void) device;
-            (void) flags;
+            // No-op for CPU
         }
 
         void peer_copy_async(
@@ -283,10 +271,10 @@ namespace simbi::adapter {
             const void* src,
             int src_device,
             std::size_t bytes,
-            void* stream
+            adapter::stream_t<cpu_backend_tag> /*stream*/
         )
         {
-            // validate device IDs (only 0 is valid for CPU)
+            // Validate device IDs (only 0 is valid for CPU)
             if (dst_device != 0 || src_device != 0) {
                 throw error::runtime_error(
                     error::status_t::error,
@@ -294,34 +282,34 @@ namespace simbi::adapter {
                 );
             }
 
-            (void) stream;   // ignore stream parameter on CPU
+            // ignore stream parameter on CPU
             std::memcpy(dst, src, bytes);
         }
 
         // Host memory management
-        void host_register(void* ptr, std::size_t size, unsigned int flags)
+        void host_register(
+            void* /*ptr*/,
+            std::size_t /*size*/,
+            unsigned int /*flags*/
+        )
         {
-            // no-op for CPU
-            (void) ptr;
-            (void) size;
-            (void) flags;
+            // No-op for CPU
         }
 
-        void host_unregister(void* ptr)
+        void host_unregister(void* /*ptr*/)
         {
-            // no-op for CPU
-            (void) ptr;
+            // No-op for CPU
         }
 
         void aligned_malloc(void** ptr, std::size_t size)
         {
-            // use aligned_alloc with 64-byte alignment (cache line size on most
+            // Use aligned_alloc with 64-byte alignment (cache line size on most
             // CPUs)
             constexpr std::size_t alignment = 64;
-            *ptr                            = std::aligned_alloc(
-                alignment,
-                (size + alignment - 1) & ~(alignment - 1)
-            );
+            std::size_t aligned_size =
+                (size + alignment - 1) & ~(alignment - 1);
+
+            *ptr = std::aligned_alloc(alignment, aligned_size);
 
             if (*ptr == nullptr) {
                 throw error::runtime_error(
@@ -331,40 +319,46 @@ namespace simbi::adapter {
             }
         }
 
-        // specialized operations
+        // Specialized operations
         void
         memcpy_from_symbol(void* dst, const void* symbol, std::size_t count)
         {
-            // on CPU, symbols are just regular memory
+            // On CPU, symbols are just regular memory
             std::memcpy(dst, symbol, count);
         }
 
-        void
-        prefetch_to_device(const void* obj, std::size_t bytes, int device = 0)
+        void prefetch_to_device(
+            const void* /*obj*/,
+            std::size_t /*bytes*/,
+            int /*device*/ = 0
+        )
         {
-            // no-op for CPU
-            (void) obj;
-            (void) bytes;
-            (void) device;
+            // No-op for CPU
         }
 
         void launch_kernel(
-            void* function,
-            types::dim3 grid,
-            types::dim3 block,
-            void** args,
-            std::size_t shared_mem,
-            void* stream
+            adapter::function_t<cpu_backend_tag> function,
+            types::dim3 /*grid*/,
+            types::dim3 /*block*/,
+            void** /*args*/,
+            std::size_t /*shared_mem*/,
+            adapter::stream_t<cpu_backend_tag> /*stream*/
         )
         {
-            // cannot implement kernel launching for CPU without more context
-            throw error::runtime_error(
-                error::status_t::error,
-                "Kernel launching not implemented for CPU backend"
-            );
+            // Simple implementation for CPU: just call the function directly
+            // This assumes function is a standard function pointer
+            if (function) {
+                function();
+            }
+            else {
+                throw error::runtime_error(
+                    error::status_t::error,
+                    "CPU kernel launch failed: null function pointer"
+                );
+            }
         }
 
-        // atomic operations
+        // Atomic operations
         template <typename T>
         T atomic_min(T* address, T val)
         {
@@ -381,10 +375,10 @@ namespace simbi::adapter {
             return old;
         }
 
-        // thread synchronization
+        // Thread synchronization
         void synchronize_threads()
         {
-            // no-op on CPU
+            // No-op on CPU
         }
     };
 

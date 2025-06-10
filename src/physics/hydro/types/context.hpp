@@ -1,7 +1,7 @@
 #ifndef CONTEXT_HPP
 #define CONTEXT_HPP
 
-#include "build_options.hpp"   // for real
+#include "config.hpp"   // for real
 namespace simbi {
     struct HydroContext {
         // The context class is a container for all the objects that are needed

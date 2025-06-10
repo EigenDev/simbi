@@ -50,7 +50,7 @@
 #ifndef SOLVER_MANAGER_HPP
 #define SOLVER_MANAGER_HPP
 
-#include "build_options.hpp"
+#include "config.hpp"
 #include "core/types/containers/ndarray.hpp"
 #include "core/types/utility/enums.hpp"
 #include "core/types/utility/init_conditions.hpp"

@@ -1,8 +1,7 @@
 
 #include "H5Cpp.h"
-#include "core/types/utility/idx_sequence.hpp"
+#include "adapter/device_adapter_api.hpp"
 #include "util/parallel/parallel_for.hpp"
-#include "util/tools/device_api.hpp"
 
 namespace simbi {
     namespace helpers {
@@ -104,7 +103,7 @@ namespace simbi {
                     res[nroots++] = -0.25 * b + 0.5 * sqrt_2m;
                 }
 
-                if constexpr (global::on_gpu) {
+                if constexpr (platform::is_gpu) {
                     iterativeQuickSort(res, 0, nroots - 1);
                 }
                 else {
@@ -130,7 +129,7 @@ namespace simbi {
                 res[nroots++] = 0.5 * (sqrt_2m - delta) - 0.25 * b;
             }
 
-            if constexpr (global::on_gpu) {
+            if constexpr (platform::is_gpu) {
                 iterativeQuickSort(res, 0, 3);
             }
             else {
@@ -217,56 +216,8 @@ namespace simbi {
             }
         }
 
-        template <int dim, BlockAx axis, typename T>
-        DUAL T axid(T idx, T ni, T nj, T kk)
-        {
-            if constexpr (dim == 1) {
-                if constexpr (axis != BlockAx::I) {
-                    return 0;
-                }
-                return idx;
-            }
-            else if constexpr (dim == 2) {
-                if constexpr (axis == BlockAx::I) {
-                    if constexpr (global::on_gpu) {
-                        return blockDim.x * blockIdx.x + threadIdx.x;
-                    }
-                    return idx % ni;
-                }
-                else if constexpr (axis == BlockAx::J) {
-                    if constexpr (global::on_gpu) {
-                        return blockDim.y * blockIdx.y + threadIdx.y;
-                    }
-                    return idx / ni;
-                }
-                else {
-                    return 0;
-                }
-            }
-            else {
-                if constexpr (axis == BlockAx::I) {
-                    if constexpr (global::on_gpu) {
-                        return blockDim.x * blockIdx.x + threadIdx.x;
-                    }
-                    return get_column(idx, ni, nj, kk);
-                }
-                else if constexpr (axis == BlockAx::J) {
-                    if constexpr (global::on_gpu) {
-                        return blockDim.y * blockIdx.y + threadIdx.y;
-                    }
-                    return get_row(idx, ni, nj, kk);
-                }
-                else {
-                    if constexpr (global::on_gpu) {
-                        return blockDim.z * blockIdx.z + threadIdx.z;
-                    }
-                    return get_height(idx, ni, nj);
-                }
-            }
-        }
-
         template <typename T, typename U>
-        inline real getFlops(
+        inline real get_flops(
             const luint dim,
             const luint radius,
             const luint total_zones,

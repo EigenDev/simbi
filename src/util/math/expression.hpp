@@ -1,7 +1,7 @@
 #ifndef EXPRESSION_HPP
 #define EXPRESSION_HPP
 
-#include "build_options.hpp"
+#include "config.hpp"
 
 namespace simbi::expression {
     // expanded operation types to match python implementation :)

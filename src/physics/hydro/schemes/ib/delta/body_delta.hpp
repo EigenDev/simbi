@@ -49,7 +49,7 @@
 #ifndef BODY_DELTA_HPP
 #define BODY_DELTA_HPP
 
-#include "build_options.hpp"
+#include "config.hpp"
 #include "core/types/containers/vector.hpp"   // for spatial_vector_t
 
 namespace simbi::ibsystem {

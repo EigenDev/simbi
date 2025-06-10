@@ -91,7 +91,7 @@ namespace simbi {
                 return singleton;
             }
 
-            void queueUp(const std::function<void()>& job)
+            void queue_up(const std::function<void()>& job)
             {
                 {
                     std::unique_lock<std::mutex> lock(queue_mutex);
@@ -131,7 +131,7 @@ namespace simbi {
                 step();
 
                 for ([[maybe_unused]] auto& worker : threads) {
-                    queueUp([block_start, block_end, func] {
+                    queue_up([block_start, block_end, func] {
                         for (index_type q = block_start; q < block_end; q++) {
                             func(q);
                         }
@@ -139,7 +139,7 @@ namespace simbi {
                     step();
                 }
 
-                waitUntilFinished();
+                wait_until_finished();
             }
 
             template <typename index_type, typename F>
@@ -177,7 +177,7 @@ namespace simbi {
                 blockStep();
 
                 for ([[maybe_unused]] auto& worker : threads) {
-                    queueUp([block_start, block_end, step, func] {
+                    queue_up([block_start, block_end, step, func] {
                         for (index_type q = block_start; q < block_end;
                              q += step) {
                             func(q);
@@ -186,7 +186,7 @@ namespace simbi {
                     blockStep();
                 }
 
-                waitUntilFinished();
+                wait_until_finished();
             }
 
             bool poolBusy()
@@ -260,7 +260,7 @@ namespace simbi {
                 }
             }
 
-            void waitUntilFinished()
+            void wait_until_finished()
             {
                 std::unique_lock<std::mutex> latch(queue_mutex);
                 cv_finished.wait(latch, [this] {
@@ -297,7 +297,7 @@ namespace simbi {
         };
 
         // Global accessor function
-        inline ThreadPool& getThreadPool()
+        inline ThreadPool& get_thread_pool()
         {
             static ThreadPool& pool = ThreadPool::instance(get_nthreads());
             return pool;
@@ -307,8 +307,9 @@ namespace simbi {
         T fetch_minimum(std::atomic<T>& a, T val)
         {
             T old = a.load(std::memory_order_relaxed);
-            while (old > val &&
-                   !a.compare_exchange_weak(old, val, std::memory_order_relaxed)
+            while (
+                old > val &&
+                !a.compare_exchange_weak(old, val, std::memory_order_relaxed)
             ) {
                 // Add a backoff strategy if necessary
             }

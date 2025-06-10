@@ -50,7 +50,7 @@
 #define COMPONENT_BODY_SYSTEM_HPP
 
 #include "body.hpp"
-#include "build_options.hpp"
+#include "config.hpp"
 #include "core/types/containers/ndarray.hpp"
 #include "core/types/containers/vector.hpp"
 #include "core/types/utility/config_dict.hpp"
@@ -94,9 +94,9 @@ namespace simbi::ibsystem {
                 if (auto binary_config = dynamic_cast<BinarySystemConfig<T>*>(
                         other.system_config_.get()
                     )) {
-                    system_config_ =
-                        util::make_unique<BinarySystemConfig<T>>(*binary_config
-                        );
+                    system_config_ = util::make_unique<BinarySystemConfig<T>>(
+                        *binary_config
+                    );
                 }
             }
         }
@@ -292,7 +292,8 @@ namespace simbi::ibsystem {
         bool is_binary() const
         {
             if (system_config_) {
-                return dynamic_cast<BinarySystemConfig<T>*>(system_config_.get()
+                return dynamic_cast<BinarySystemConfig<T>*>(
+                           system_config_.get()
                        ) != nullptr;
             }
             return false;
@@ -331,10 +332,11 @@ namespace simbi::ibsystem {
                                                            return body.mass;
                                                        }});
 
-            properties
-                .push_back(PropertyDescriptor<T>{"radius", [body](size_t) {
-                                                     return body.radius;
-                                                 }});
+            properties.push_back(
+                PropertyDescriptor<T>{"radius", [body](size_t) {
+                                          return body.radius;
+                                      }}
+            );
 
             properties.push_back(
                 PropertyDescriptor<spatial_vector_t<T, Dims>>{
@@ -360,10 +362,9 @@ namespace simbi::ibsystem {
             // Add component-specific properties
             if (body.gravitational.has_value()) {
                 properties.push_back(
-                    PropertyDescriptor<T>{
-                      "softening_length",
-                      [body](size_t) { return body.softening_length(); }
-                    }
+                    PropertyDescriptor<T>{"softening_length", [body](size_t) {
+                                              return body.softening_length();
+                                          }}
                 );
 
                 properties.push_back(
@@ -383,10 +384,9 @@ namespace simbi::ibsystem {
                 );
 
                 properties.push_back(
-                    PropertyDescriptor<T>{
-                      "accretion_radius",
-                      [body](size_t) { return body.accretion_radius(); }
-                    }
+                    PropertyDescriptor<T>{"accretion_radius", [body](size_t) {
+                                              return body.accretion_radius();
+                                          }}
                 );
 
                 properties.push_back(
@@ -397,55 +397,50 @@ namespace simbi::ibsystem {
                 );
 
                 properties.push_back(
-                    PropertyDescriptor<T>{
-                      "accretion_rate",
-                      [body](size_t) { return body.accretion_rate(); }
-                    }
+                    PropertyDescriptor<T>{"accretion_rate", [body](size_t) {
+                                              return body.accretion_rate();
+                                          }}
                 );
             }
 
             if (body.rigid.has_value()) {
-                properties
-                    .push_back(PropertyDescriptor<T>{"inertia", [body](size_t) {
-                                                         return body.inertia();
-                                                     }});
                 properties.push_back(
-                    PropertyDescriptor<bool>{
-                      "apply_no_slip",
-                      [body](size_t) { return body.apply_no_slip(); }
-                    }
+                    PropertyDescriptor<T>{"inertia", [body](size_t) {
+                                              return body.inertia();
+                                          }}
+                );
+                properties.push_back(
+                    PropertyDescriptor<bool>{"apply_no_slip", [body](size_t) {
+                                                 return body.apply_no_slip();
+                                             }}
                 );
             }
 
             if (body.elastic.has_value()) {
                 properties.push_back(
-                    PropertyDescriptor<T>{
-                      "elastic_modulus",
-                      [body](size_t) { return body.elastic_modulus(); }
-                    }
+                    PropertyDescriptor<T>{"elastic_modulus", [body](size_t) {
+                                              return body.elastic_modulus();
+                                          }}
                 );
 
                 properties.push_back(
-                    PropertyDescriptor<T>{
-                      "poisson_ratio",
-                      [body](size_t) { return body.poisson_ratio(); }
-                    }
+                    PropertyDescriptor<T>{"poisson_ratio", [body](size_t) {
+                                              return body.poisson_ratio();
+                                          }}
                 );
             }
 
             if (body.deformable.has_value()) {
                 properties.push_back(
-                    PropertyDescriptor<T>{
-                      "yield_stress",
-                      [body](size_t) { return body.yield_stress(); }
-                    }
+                    PropertyDescriptor<T>{"yield_stress", [body](size_t) {
+                                              return body.yield_stress();
+                                          }}
                 );
 
                 properties.push_back(
-                    PropertyDescriptor<T>{
-                      "plastic_strain",
-                      [body](size_t) { return body.plastic_strain(); }
-                    }
+                    PropertyDescriptor<T>{"plastic_strain", [body](size_t) {
+                                              return body.plastic_strain();
+                                          }}
                 );
             }
 

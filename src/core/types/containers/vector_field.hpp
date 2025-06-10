@@ -49,7 +49,7 @@
 #ifndef VECTOR_FIELD_HPP
 #define VECTOR_FIELD_HPP
 
-#include "build_options.hpp"
+#include "config.hpp"
 #include "core/types/containers/vector.hpp"
 
 namespace simbi {

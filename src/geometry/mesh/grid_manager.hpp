@@ -49,7 +49,7 @@
 #ifndef GRID_MANAGER_HPP
 #define GRID_MANAGER_HPP
 
-#include "build_options.hpp"                        // for DUAL
+#include "config.hpp"                               // for DUAL
 #include "core/types/containers/array.hpp"          // for array
 #include "core/types/utility/enums.hpp"             // for Geometry, Cellspacing
 #include "core/types/utility/init_conditions.hpp"   // for InitialConditions

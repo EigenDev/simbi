@@ -1,14 +1,15 @@
 #ifndef ATOMIC_BOOL_HPP
 #define ATOMIC_BOOL_HPP
 
-#include "build_options.hpp"
+#include "adapter/device_types.hpp"
 #include "core/types/utility/managed.hpp"
 #include "managed.hpp"
 #include "smart_ptr.hpp"
 
 namespace simbi::atomic {
+    using shared_atomic_bool_t = adapter::types::atomic_bool<>;
     template <typename T>
-    class simbi_atomic
+    class simbi_atomic : public Managed<global::managed_memory>
     {
       public:
         simbi_atomic()                               = delete;
@@ -18,8 +19,7 @@ namespace simbi::atomic {
         simbi_atomic& operator=(simbi_atomic&&)      = delete;
         ~simbi_atomic()                              = default;
 
-        simbi_atomic(const T& value)
-            : value_(new shared_atomic_bool<Managed<>>(value))
+        simbi_atomic(const T& value) : value_(new shared_atomic_bool_t(value))
         {
         }
 
@@ -40,12 +40,12 @@ namespace simbi::atomic {
         auto* get() const { return value_.get(); }
         T load() const
         {
-            gpu::api::deviceSynch();
+            gpu::api::device_synch();
             return value_->load();
         }
 
       private:
-        util::smart_ptr<shared_atomic_bool<Managed<>>> value_;
+        util::smart_ptr<shared_atomic_bool_t> value_;
     };
 }   // namespace simbi::atomic
 

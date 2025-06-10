@@ -50,7 +50,7 @@
 #ifndef GEOMETRY_MANAGER_HPP
 #define GEOMETRY_MANAGER_HPP
 
-#include "build_options.hpp"
+#include "config.hpp"
 #include "core/types/containers/array.hpp"
 #include "core/types/utility/enums.hpp"
 #include "core/types/utility/init_conditions.hpp"

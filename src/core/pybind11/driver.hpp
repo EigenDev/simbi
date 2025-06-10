@@ -1,7 +1,7 @@
 #ifndef DRIVER_HPP
 #define DRIVER_HPP
 
-#include "build_options.hpp"
+#include "config.hpp"
 #include "config_converter.hpp"
 #include "core/types/utility/init_conditions.hpp"
 #include "state.hpp"

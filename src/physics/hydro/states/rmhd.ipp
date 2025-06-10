@@ -1,4 +1,4 @@
-#include "build_options.hpp"
+#include "config.hpp"
 #include "core/types/containers/vector.hpp"
 #include "core/types/utility/atomic_bool.hpp"   // for shared_atomic_bool
 #include "core/types/utility/enums.hpp"
@@ -51,8 +51,8 @@ void RMHD<dim>::cons2prim_impl()
     atomic::simbi_atomic<bool> local_failure{false};
     this->prims_.transform(
         [gamma = this->gamma,
-         loc   = local_failure.get(
-         )] DEV(auto& /* prim */, const auto& c) -> Maybe<primitive_t> {
+         loc   = local_failure.get()] DEV(auto& /* prim */, const auto& c)
+            -> Maybe<primitive_t> {
             const real d      = c.dens();
             const auto mom    = c.momentum();
             const real tau    = c.nrg();
@@ -104,10 +104,10 @@ void RMHD<dim>::cons2prim_impl()
                     mu_upper = mu;
                     f_upper  = ff;
                 }
-                if (iter >= global::MAX_ITER || !std::isfinite(ff)) {
+                if (iter >= constants::max_iterations || !std::isfinite(ff)) {
                     loc->store(true);
                     return simbi::None([iter]() -> ErrorCode {
-                        if (iter >= global::MAX_ITER) {
+                        if (iter >= constants::max_iterations) {
                             return ErrorCode::MAX_ITER;
                         }
                         else {
@@ -242,9 +242,9 @@ RMHD<dim>::cons2prim_single(const auto& cons) const
             mu_upper = mu;
             f_upper  = ff;
         }
-        if (iter >= global::MAX_ITER || !std::isfinite(ff)) {
+        if (iter >= constants::max_iterations || !std::isfinite(ff)) {
             return simbi::None([iter]() -> ErrorCode {
-                if (iter >= global::MAX_ITER) {
+                if (iter >= constants::max_iterations) {
                     return ErrorCode::MAX_ITER;
                 }
                 else {

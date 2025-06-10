@@ -1,5 +1,6 @@
 #include "util/tools/helpers.hpp"
 #include "io/exceptions.hpp"
+#include <csignal>
 #include <iomanip>
 #include <thread>
 
@@ -11,9 +12,9 @@ using namespace H5;
 namespace simbi {
     namespace helpers {
         // Flag that detects whether program was terminated by external forces
-        sig_bool killsig_received = false;
+        std::atomic<bool> killsig_received = false;
 
-        std::string getColorCode(Color color)
+        std::string get_color_code(Color color)
         {
             switch (color) {
                 case Color::RED: return "\033[31m";
@@ -216,7 +217,7 @@ namespace simbi {
 
             // now we find the root using bisection
             const int max_iter = 50;
-            int iter           = 0;
+            size_type iter     = 0;
             real f_mid, mu_mid = 1.0;
             real f_lower = kkc_fmu49(mu_lower, beesq, rsbsq, r);
 

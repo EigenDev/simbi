@@ -6,7 +6,7 @@
 #ifndef REFINEMENT_FUNCTIONS_HPP
 #define REFINEMENT_FUNCTIONS_HPP
 
-#include "build_options.hpp"
+#include "config.hpp"
 #include "core/functional/fp.hpp"
 #include "core/types/containers/ndarray.hpp"
 #include "refinement_manager.hpp"
@@ -157,8 +157,8 @@ namespace simbi::refinement {
         ndarray<T, Dims>& coarse_data;
         size_type refinement_factor;
 
-        DUAL void operator()(const array_t<size_type, Dims>& coarse_coords
-        ) const
+        DUAL void
+        operator()(const array_t<size_type, Dims>& coarse_coords) const
         {
             std::vector<T> fine_values;
             fine_values.reserve(std::pow(refinement_factor, Dims));

@@ -49,31 +49,31 @@
 #ifndef LOGGER_HPP
 #define LOGGER_HPP
 
-#include "build_options.hpp"   // for real, Platform, global::BuildPlatform, luint
-#include "io/console/printb.hpp"       // for writeln, writefl
-#include "io/exceptions.hpp"           // for SimulationFailureException
-#include "io/hdf5/checkpoint.hpp"      // for write_to_file
-#include "io/tabulate/table.hpp"       // for Table, etc
-#include "statistics.hpp"              // for display_system_info
-#include "util/tools/device_api.hpp"   // for gpuEventCreate, gpuEventDestroy
-#include "util/tools/helpers.hpp"      // for catch_signals, Inter...
-#include <chrono>                      // for time_point, high_resolution_clock
-#include <iostream>      // for operator<<, char_traits, basic_ost...
-#include <memory>        // for allocator
-#include <type_traits>   // for conditional_t
+#include "adapter/device_adapter_api.hpp"   // for gpuEventCreate, gpuEventDestroy
+#include "config.hpp"   // for real, Platform, global::BuildPlatform, luint
+#include "io/console/printb.hpp"    // for writeln, writefl
+#include "io/exceptions.hpp"        // for SimulationFailureException
+#include "io/hdf5/checkpoint.hpp"   // for write_to_file
+#include "io/tabulate/table.hpp"    // for Table, etc
+#include "statistics.hpp"           // for display_system_info
+#include "util/tools/helpers.hpp"   // for catch_signals, Inter...
+#include <chrono>                   // for time_point, high_resolution_clock
+#include <csignal>                  // for signal handling
+#include <iostream>                 // for operator<<, char_traits, basic_ost...
+#include <type_traits>              // for conditional_t
 
 using namespace std::chrono;
 
 namespace simbi {
-    namespace detail {
+    namespace io {
         class Timer
         {
             using time_type = std::conditional_t<
-                global::on_gpu,
-                devEvent_t,
+                platform::is_gpu,
+                adapter::event_t<>,
                 high_resolution_clock::time_point>;
             using duration_type =
-                std::conditional_t<global::on_gpu, float, double>;
+                std::conditional_t<platform::is_gpu, float, double>;
             time_type tstart, tstop;
             duration_type duration;
 
@@ -90,13 +90,13 @@ namespace simbi {
                 destroy_event(tstop);
             }
 
-            void startTimer() { recordEvent(tstart); }
+            void start_timer() { record_event(tstart); }
 
             template <global::Platform P = global::BuildPlatform, typename T>
             void create_event(T& stamp)
             {
                 if constexpr (P == global::Platform::GPU) {
-                    gpu::api::eventCreate(&stamp);
+                    gpu::api::event_create(&stamp);
                 }
             }
 
@@ -104,12 +104,12 @@ namespace simbi {
             void destroy_event(T& stamp)
             {
                 if constexpr (P == global::Platform::GPU) {
-                    gpu::api::eventDestroy(stamp);
+                    gpu::api::event_destroy(stamp);
                 }
             }
 
             template <typename T>
-            void recordEvent(T& stamp)
+            void record_event(T& stamp)
             {
                 if constexpr (std::is_same_v<
                                   T,
@@ -117,23 +117,22 @@ namespace simbi {
                     stamp = high_resolution_clock::now();
                 }
                 else {
-                    gpu::api::eventRecord(stamp);
+                    gpu::api::event_record(stamp);
                 }
             }
 
             template <typename T, typename U>
-            void recordDuration(T& dt, U t1, U t2)
+            void record_duration(T& dt, U t1, U t2)
             {
                 if constexpr (std::is_same_v<
                                   U,
                                   high_resolution_clock::time_point>) {
-                    dt =
-                        static_cast<std::chrono::duration<real>>(t2 - t1).count(
-                        );
+                    dt = static_cast<std::chrono::duration<real>>(t2 - t1)
+                             .count();
                 }
                 else {
-                    gpu::api::eventSynchronize(t2);
-                    gpu::api::eventElapsedTime(&dt, t1, t2);
+                    gpu::api::event_synchronize(t2);
+                    gpu::api::event_elapsed_time(&dt, t1, t2);
                     // time output from GPU automatically in ms so convert to
                     // seconds
                     dt *= 1e-3;
@@ -142,8 +141,8 @@ namespace simbi {
 
             duration_type get_duration()
             {
-                recordEvent(tstop);
-                recordDuration(duration, tstart, tstop);
+                record_event(tstop);
+                record_duration(duration, tstart, tstop);
                 return duration;
             }
         };
@@ -364,7 +363,8 @@ namespace simbi {
                     {"Iteration", "Time", "dt", "Speed", "Elapsed", "ETA"}
                 );
                 // add initial row with placeholders
-                table.add_row({"0", "0.0", "0.0", "0.0", "00:00:00", "00:00:00"}
+                table.add_row(
+                    {"0", "0.0", "0.0", "0.0", "00:00:00", "00:00:00"}
                 );
 
                 // print the initial table
@@ -391,12 +391,12 @@ namespace simbi {
                     try {
                         //============== Compute benchmarks
                         if (sim_state.using_rk1()) {
-                            timer.startTimer();
+                            timer.start_timer();
                             f();
                             delta_t = timer.get_duration();
                         }
                         else {
-                            timer.startTimer();
+                            timer.start_timer();
                             f();
                             f();
                             delta_t = timer.get_duration();
@@ -456,7 +456,7 @@ namespace simbi {
                 logger.print_avg_speed();
             };
         }   // namespace logger
-    }   // namespace detail
+    }   // namespace io
 
 }   // namespace simbi
 #endif

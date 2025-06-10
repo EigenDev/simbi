@@ -1,10 +1,10 @@
+#include "adapter/device_adapter_api.hpp"
 #include "core/managers/boundary_manager.hpp"
 #include "core/types/containers/array.hpp"
 #include "core/types/utility/atomic_bool.hpp"   // for shared_atomic_bool
 #include "io/exceptions.hpp"
 #include "physics/hydro/schemes/viscosity/viscous.hpp"
 #include "physics/hydro/types/generic_structs.hpp"
-#include "util/tools/device_api.hpp"
 #include "util/tools/helpers.hpp"
 #include <cmath>   // for max, min
 

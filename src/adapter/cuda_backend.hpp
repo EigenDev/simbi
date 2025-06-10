@@ -4,7 +4,7 @@
  *=============================================================================
  *
  * @file            cuda_backend.hpp
- * @brief
+ * @brief           CUDA implementation of device backend
  * @details
  *
  * @version         0.8.0
@@ -16,34 +16,10 @@
  * @build           Requirements & Dependencies
  *==============================================================================
  * @requires        C++20
- * @depends         CUDA >= 11.0, HDF5 >= 1.12, OpenMP >= 4.5
+ * @depends         CUDA >= 11.0
  * @platform        Linux, MacOS
- * @parallel        GPU (CUDA, HIP), CPU (OpenMP)
+ * @parallel        GPU (CUDA)
  *
- *==============================================================================
- * @documentation   Reference & Notes
- *==============================================================================
- * @usage
- * @note
- * @warning
- * @todo
- * @bug
- * @performance
- *
- *==============================================================================
- * @testing        Quality Assurance
- *==============================================================================
- * @test
- * @benchmark
- * @validation
- *
- *==============================================================================
- * @history        Version History
- *==============================================================================
- * 2025-06-09      v0.8.0      Initial implementation
- *
- *==============================================================================
- * @copyright (C) 2025 Marcus DuPont. All rights reserved.
  *==============================================================================
  */
 
@@ -51,6 +27,7 @@
 #define CUDA_BACKEND_HPP
 
 #include "device_backend.hpp"
+#include "device_types.hpp"
 
 // only include CUDA headers if CUDA is enabled
 #if defined(CUDA_ENABLED) || (defined(GPU_CODE) && CUDA_CODE)
@@ -80,6 +57,13 @@ namespace simbi::adapter {
     class DeviceBackend<cuda_backend_tag>
     {
       public:
+        // Type aliases for this backend
+        using event_t             = event_t<cuda_backend_tag>;
+        using stream_t            = stream_t<cuda_backend_tag>;
+        using device_properties_t = device_properties_t<cuda_backend_tag>;
+        using function_t          = function_t<cuda_backend_tag>;
+        using memcpy_kind_t       = memcpy_kind_t<cuda_backend_tag>;
+
         // Memory operations
         void copy_host_to_device(void* to, const void* from, std::size_t bytes)
         {
@@ -149,53 +133,45 @@ namespace simbi::adapter {
         }
 
         // Event handling
-        void event_create(void** event)
+        void event_create(event_t* event)
         {
-            cudaEvent_t* cuda_event = static_cast<cudaEvent_t*>(event);
-            cudaError_t status      = cudaEventCreate(cuda_event);
+            cudaError_t status = cudaEventCreate(event);
             error::check_err(
                 cuda_error::check_cuda_error(status),
                 "CUDA event creation failed"
             );
         }
 
-        void event_destroy(void* event)
+        void event_destroy(event_t event)
         {
-            cudaEvent_t cuda_event = *static_cast<cudaEvent_t*>(event);
-            cudaError_t status     = cudaEventDestroy(cuda_event);
+            cudaError_t status = cudaEventDestroy(event);
             error::check_err(
                 cuda_error::check_cuda_error(status),
                 "CUDA event destruction failed"
             );
         }
 
-        void event_record(void* event)
+        void event_record(event_t event)
         {
-            cudaEvent_t cuda_event = *static_cast<cudaEvent_t*>(event);
-            cudaError_t status     = cudaEventRecord(cuda_event);
+            cudaError_t status = cudaEventRecord(event);
             error::check_err(
                 cuda_error::check_cuda_error(status),
                 "CUDA event recording failed"
             );
         }
 
-        void event_synchronize(void* event)
+        void event_synchronize(event_t event)
         {
-            cudaEvent_t cuda_event = *static_cast<cudaEvent_t*>(event);
-            cudaError_t status     = cudaEventSynchronize(cuda_event);
+            cudaError_t status = cudaEventSynchronize(event);
             error::check_err(
                 cuda_error::check_cuda_error(status),
                 "CUDA event synchronization failed"
             );
         }
 
-        void event_elapsed_time(float* time, void* start, void* end)
+        void event_elapsed_time(float* time, event_t start, event_t end)
         {
-            cudaEvent_t start_event = *static_cast<cudaEvent_t*>(start);
-            cudaEvent_t end_event   = *static_cast<cudaEvent_t*>(end);
-
-            cudaError_t status =
-                cudaEventElapsedTime(time, start_event, end_event);
+            cudaError_t status = cudaEventElapsedTime(time, start, end);
             error::check_err(
                 cuda_error::check_cuda_error(status),
                 "CUDA event elapsed time calculation failed"
@@ -212,10 +188,9 @@ namespace simbi::adapter {
             );
         }
 
-        void get_device_properties(void* props, int device)
+        void get_device_properties(device_properties_t* props, int device)
         {
-            cudaDeviceProp* cuda_props = static_cast<cudaDeviceProp*>(props);
-            cudaError_t status = cudaGetDeviceProperties(cuda_props, device);
+            cudaError_t status = cudaGetDeviceProperties(props, device);
             error::check_err(
                 cuda_error::check_cuda_error(status),
                 "CUDA get device properties failed"
@@ -241,57 +216,50 @@ namespace simbi::adapter {
         }
 
         // Stream operations
-        void stream_create(void** stream)
+        void stream_create(stream_t* stream)
         {
-            cudaStream_t* cuda_stream = static_cast<cudaStream_t*>(stream);
-            cudaError_t status        = cudaStreamCreate(cuda_stream);
+            cudaError_t status = cudaStreamCreate(stream);
             error::check_err(
                 cuda_error::check_cuda_error(status),
                 "CUDA stream creation failed"
             );
         }
 
-        void stream_destroy(void* stream)
+        void stream_destroy(stream_t stream)
         {
-            cudaStream_t cuda_stream = *static_cast<cudaStream_t*>(&stream);
-            cudaError_t status       = cudaStreamDestroy(cuda_stream);
+            cudaError_t status = cudaStreamDestroy(stream);
             error::check_err(
                 cuda_error::check_cuda_error(status),
                 "CUDA stream destruction failed"
             );
         }
 
-        void stream_synchronize(void* stream)
+        void stream_synchronize(stream_t stream)
         {
-            cudaStream_t cuda_stream = *static_cast<cudaStream_t*>(&stream);
-            cudaError_t status       = cudaStreamSynchronize(cuda_stream);
+            cudaError_t status = cudaStreamSynchronize(stream);
             error::check_err(
                 cuda_error::check_cuda_error(status),
                 "CUDA stream synchronization failed"
             );
         }
 
-        void
-        stream_wait_event(void* stream, void* event, unsigned int flags = 0)
+        void stream_wait_event(
+            stream_t stream,
+            event_t event,
+            unsigned int flags = 0
+        )
         {
-            cudaStream_t cuda_stream = *static_cast<cudaStream_t*>(&stream);
-            cudaEvent_t cuda_event   = *static_cast<cudaEvent_t*>(event);
-
-            cudaError_t status =
-                cudaStreamWaitEvent(cuda_stream, cuda_event, flags);
+            cudaError_t status = cudaStreamWaitEvent(stream, event, flags);
             error::check_err(
                 cuda_error::check_cuda_error(status),
                 "CUDA stream wait event failed"
             );
         }
 
-        void stream_query(void* stream, int* status)
+        void stream_query(stream_t stream, int* status)
         {
-            cudaStream_t cuda_stream = *static_cast<cudaStream_t*>(&stream);
-            cudaError_t cuda_status  = cudaStreamQuery(cuda_stream);
-
-            // Convert CUDA status to int
-            *status = static_cast<int>(cuda_status);
+            cudaError_t cuda_status = cudaStreamQuery(stream);
+            *status                 = static_cast<int>(cuda_status);
         }
 
         // asynchronous operations
@@ -299,16 +267,15 @@ namespace simbi::adapter {
             void* to,
             const void* from,
             std::size_t bytes,
-            void* stream
+            stream_t stream
         )
         {
-            cudaStream_t cuda_stream = *static_cast<cudaStream_t*>(&stream);
-            cudaError_t status       = cudaMemcpyAsync(
+            cudaError_t status = cudaMemcpyAsync(
                 to,
                 from,
                 bytes,
                 cudaMemcpyHostToDevice,
-                cuda_stream
+                stream
             );
 
             error::check_err(
@@ -321,16 +288,15 @@ namespace simbi::adapter {
             void* to,
             const void* from,
             std::size_t bytes,
-            void* stream
+            stream_t stream
         )
         {
-            cudaStream_t cuda_stream = *static_cast<cudaStream_t*>(&stream);
-            cudaError_t status       = cudaMemcpyAsync(
+            cudaError_t status = cudaMemcpyAsync(
                 to,
                 from,
                 bytes,
                 cudaMemcpyDeviceToHost,
-                cuda_stream
+                stream
             );
 
             error::check_err(
@@ -343,16 +309,15 @@ namespace simbi::adapter {
             void* to,
             const void* from,
             std::size_t bytes,
-            void* stream
+            stream_t stream
         )
         {
-            cudaStream_t cuda_stream = *static_cast<cudaStream_t*>(&stream);
-            cudaError_t status       = cudaMemcpyAsync(
+            cudaError_t status = cudaMemcpyAsync(
                 to,
                 from,
                 bytes,
                 cudaMemcpyDeviceToDevice,
-                cuda_stream
+                stream
             );
 
             error::check_err(
@@ -365,15 +330,11 @@ namespace simbi::adapter {
             void* to,
             const void* from,
             std::size_t bytes,
-            int kind,
-            void* stream
+            memcpy_kind_t kind,
+            stream_t stream
         )
         {
-            cudaStream_t cuda_stream = *static_cast<cudaStream_t*>(&stream);
-            cudaMemcpyKind cuda_kind = static_cast<cudaMemcpyKind>(kind);
-
-            cudaError_t status =
-                cudaMemcpyAsync(to, from, bytes, cuda_kind, cuda_stream);
+            cudaError_t status = cudaMemcpyAsync(to, from, bytes, kind, stream);
             error::check_err(
                 cuda_error::check_cuda_error(status),
                 "CUDA memcpy async failed"
@@ -396,18 +357,16 @@ namespace simbi::adapter {
             const void* src,
             int src_device,
             std::size_t bytes,
-            void* stream
+            stream_t stream
         )
         {
-            cudaStream_t cuda_stream = *static_cast<cudaStream_t*>(&stream);
-
             cudaError_t status = cudaMemcpyPeerAsync(
                 dst,
                 dst_device,
                 src,
                 src_device,
                 bytes,
-                cuda_stream
+                stream
             );
             error::check_err(
                 cuda_error::check_cuda_error(status),
@@ -465,28 +424,25 @@ namespace simbi::adapter {
         }
 
         void launch_kernel(
-            void* function,
+            function_t function,
             types::dim3 grid,
             types::dim3 block,
             void** args,
             std::size_t shared_mem,
-            void* stream
+            stream_t stream
         )
         {
-            cudaStream_t cuda_stream = *static_cast<cudaStream_t*>(&stream);
-            CUfunction cuda_function = *static_cast<CUfunction*>(&function);
-
             // convert our dim3 to CUDA dim3
             dim3 cuda_grid(grid.x, grid.y, grid.z);
             dim3 cuda_block(block.x, block.y, block.z);
 
             cudaError_t status = cudaLaunchKernel(
-                static_cast<const void*>(cuda_function),
+                static_cast<const void*>(function),
                 cuda_grid,
                 cuda_block,
                 args,
                 shared_mem,
-                cuda_stream
+                stream
             );
 
             error::check_err(
@@ -549,13 +505,12 @@ namespace simbi::adapter {
                                 val + __longlong_as_double(assumed)
                             )
                         );
+
                     } while (assumed != old);
                     return __longlong_as_double(old);
                 }
             }
             else {
-                // Integer types
-                return atomicAdd(address, val);
             }
         }
 
@@ -573,8 +528,7 @@ namespace simbi::adapter {
     template <>
     class DeviceBackend<cuda_backend_tag>
     {
-      public:
-        // all methods throw an error since CUDA is not available
+      public:   // Helper to throw not supported error
         template <typename... Args>
         void not_supported(const std::string& function_name, Args&&...)
         {
@@ -584,201 +538,254 @@ namespace simbi::adapter {
             );
         }
 
-        // memory operations
-        void copy_host_to_device(void* to, const void* from, std::size_t bytes)
+        // Memory operations
+        void copy_host_to_device(
+            void* /*to*/,
+            const void* /*from*/,
+            std::size_t /*bytes*/
+        )
         {
             not_supported("copy_host_to_device");
         }
 
-        void copy_device_to_host(void* to, const void* from, std::size_t bytes)
+        void copy_device_to_host(
+            void* /*to*/,
+            const void* /*from*/,
+            std::size_t /*bytes*/
+        )
         {
             not_supported("copy_device_to_host");
         }
 
-        void
-        copy_device_to_device(void* to, const void* from, std::size_t bytes)
+        void copy_device_to_device(
+            void* /*to*/,
+            const void* /*from*/,
+            std::size_t /*bytes*/
+        )
         {
             not_supported("copy_device_to_device");
         }
 
-        void malloc(void** obj, std::size_t bytes) { not_supported("malloc"); }
+        void malloc(void** /*obj*/, std::size_t /*bytes*/)
+        {
+            not_supported("malloc");
+        }
 
-        void malloc_managed(void** obj, std::size_t bytes)
+        void malloc_managed(void** /*obj*/, std::size_t /*bytes*/)
         {
             not_supported("malloc_managed");
         }
 
-        void free(void* obj) { not_supported("free"); }
+        void free(void* /*obj*/) { not_supported("free"); }
 
-        void memset(void* obj, int val, std::size_t bytes)
+        void memset(void* /*obj*/, int /*val*/, std::size_t /*bytes*/)
         {
             not_supported("memset");
         }
 
-        // event handling
-        void event_create(void** event) { not_supported("event_create"); }
+        // Event handling
+        void event_create(event_t<>* /*event*/)
+        {
+            not_supported("event_create");
+        }
 
-        void event_destroy(void* event) { not_supported("event_destroy"); }
+        void event_destroy(event_t<> /*event*/)
+        {
+            not_supported("event_destroy");
+        }
 
-        void event_record(void* event) { not_supported("event_record"); }
+        void event_record(event_t<> /*event*/)
+        {
+            not_supported("event_record");
+        }
 
-        void event_synchronize(void* event)
+        void event_synchronize(event_t<> /*event*/)
         {
             not_supported("event_synchronize");
         }
 
-        void event_elapsed_time(float* time, void* start, void* end)
+        void event_elapsed_time(
+            float* /*time*/,
+            event_t<> /*start*/,
+            event_t<> /*end*/
+        )
         {
             not_supported("event_elapsed_time");
         }
 
-        // device management
-        void get_device_count(int* count) { not_supported("get_device_count"); }
+        // Device management
+        void get_device_count(int* /*count*/)
+        {
+            not_supported("get_device_count");
+        }
 
-        void get_device_properties(void* props, int device)
+        void
+        get_device_properties(device_properties_t<>* /*props*/, int /*device*/)
         {
             not_supported("get_device_properties");
         }
 
-        void set_device(int device) { not_supported("set_device"); }
+        void set_device(int /*device*/) { not_supported("set_device"); }
 
         void device_synchronize() { not_supported("device_synchronize"); }
 
-        // stream operations
-        void stream_create(void** stream) { not_supported("stream_create"); }
+        // Stream operations
+        void stream_create(stream_t<>* /*stream*/)
+        {
+            not_supported("stream_create");
+        }
 
-        void stream_destroy(void* stream) { not_supported("stream_destroy"); }
+        void stream_destroy(stream_t<> /*stream*/)
+        {
+            not_supported("stream_destroy");
+        }
 
-        void stream_synchronize(void* stream)
+        void stream_synchronize(stream_t<> /*stream*/)
         {
             not_supported("stream_synchronize");
         }
 
-        void
-        stream_wait_event(void* stream, void* event, unsigned int flags = 0)
+        void stream_wait_event(
+            stream_t<> /*stream*/,
+            event_t<> /*event*/,
+            unsigned int /*flags*/ = 0
+        )
         {
             not_supported("stream_wait_event");
         }
 
-        void stream_query(void* stream, int* status)
+        void stream_query(stream_t<> /*stream*/, int* /*status*/)
         {
             not_supported("stream_query");
         }
 
         // Asynchronous operations
         void async_copy_host_to_device(
-            void* to,
-            const void* from,
-            std::size_t bytes,
-            void* stream
+            void* /*to*/,
+            const void* /*from*/,
+            std::size_t /*bytes*/,
+            stream_t<> /*stream*/
         )
         {
             not_supported("async_copy_host_to_device");
         }
 
         void async_copy_device_to_host(
-            void* to,
-            const void* from,
-            std::size_t bytes,
-            void* stream
+            void* /*to*/,
+            const void* /*from*/,
+            std::size_t /*bytes*/,
+            stream_t<> /*stream*/
         )
         {
             not_supported("async_copy_device_to_host");
         }
 
         void async_copy_device_to_device(
-            void* to,
-            const void* from,
-            std::size_t bytes,
-            void* stream
+            void* /*to*/,
+            const void* /*from*/,
+            std::size_t /*bytes*/,
+            stream_t<> /*stream*/
         )
         {
             not_supported("async_copy_device_to_device");
         }
 
         void memcpy_async(
-            void* to,
-            const void* from,
-            std::size_t bytes,
-            int kind,
-            void* stream
+            void* /*to*/,
+            const void* /*from*/,
+            std::size_t /*bytes*/,
+            memcpy_kind_t<> /*kind*/,
+            stream_t<> /*stream*/
         )
         {
             not_supported("memcpy_async");
         }
 
-        // peer operations
-        void enable_peer_access(int device, unsigned int flags = 0)
+        // Peer operations
+        void enable_peer_access(int /*device*/, unsigned int /*flags*/ = 0)
         {
             not_supported("enable_peer_access");
         }
 
         void peer_copy_async(
-            void* dst,
-            int dst_device,
-            const void* src,
-            int src_device,
-            std::size_t bytes,
-            void* stream
+            void* /*dst*/,
+            int /*dst_device*/,
+            const void* /*src*/,
+            int /*src_device*/,
+            std::size_t /*bytes*/,
+            stream_t<> /*stream*/
         )
         {
             not_supported("peer_copy_async");
         }
 
-        // host memory management
-        void host_register(void* ptr, std::size_t size, unsigned int flags)
+        // Host memory management
+        void host_register(
+            void* /*ptr*/,
+            std::size_t /*size*/,
+            unsigned int /*flags*/
+        )
         {
             not_supported("host_register");
         }
 
-        void host_unregister(void* ptr) { not_supported("host_unregister"); }
+        void host_unregister(void* /*ptr*/)
+        {
+            not_supported("host_unregister");
+        }
 
-        void aligned_malloc(void** ptr, std::size_t size)
+        void aligned_malloc(void** /*ptr*/, std::size_t /*size*/)
         {
             not_supported("aligned_malloc");
         }
 
-        // specialized operations
-        void
-        memcpy_from_symbol(void* dst, const void* symbol, std::size_t count)
+        // Specialized operations
+        void memcpy_from_symbol(
+            void* /*dst*/,
+            const void* /*symbol*/,
+            std::size_t /*count*/
+        )
         {
             not_supported("memcpy_from_symbol");
         }
 
-        void
-        prefetch_to_device(const void* obj, std::size_t bytes, int device = 0)
+        void prefetch_to_device(
+            const void* /*obj*/,
+            std::size_t /*bytes*/,
+            int /*device*/ = 0
+        )
         {
             not_supported("prefetch_to_device");
         }
 
         void launch_kernel(
-            void* function,
-            types::dim3 grid,
-            types::dim3 block,
-            void** args,
-            std::size_t shared_mem,
-            void* stream
+            function_t<> /*function*/,
+            types::dim3 /*grid*/,
+            types::dim3 /*block*/,
+            void** /*args*/,
+            std::size_t /*shared_mem*/,
+            stream_t<> /*stream*/
         )
         {
             not_supported("launch_kernel");
         }
 
-        // atomic operations
+        // Atomic operations
         template <typename T>
-        T atomic_min(T* address, T val)
+        T atomic_min(T* address, T /*val*/)
         {
             not_supported("atomic_min");
-            return *address;
+            return *address;   // Unreachable, but needed for compilation
         }
 
         template <typename T>
-        T atomic_add(T* address, T val)
+        T atomic_add(T* address, T /*val*/)
         {
             not_supported("atomic_add");
-            return *address;
+            return *address;   // Unreachable, but needed for compilation
         }
 
-        // thread synchronization
+        // Thread synchronization
         void synchronize_threads() { not_supported("synchronize_threads"); }
     };
 

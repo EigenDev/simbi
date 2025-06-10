@@ -49,7 +49,7 @@
 #ifndef SYSTEM_CONFIG_HPP
 #define SYSTEM_CONFIG_HPP
 
-#include "build_options.hpp"
+#include "config.hpp"
 #include "core/types/utility/managed.hpp"
 #include <utility>
 

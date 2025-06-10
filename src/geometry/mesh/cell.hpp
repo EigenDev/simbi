@@ -50,7 +50,7 @@
 #ifndef CELL_HPP
 #define CELL_HPP
 
-#include "build_options.hpp"
+#include "config.hpp"
 #include "core/types/utility/enums.hpp"
 #include "geometry_manager.hpp"     // for GeometryManager
 #include "geometry_traits.hpp"      // for GeomtryTraits

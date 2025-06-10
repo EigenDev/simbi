@@ -50,12 +50,12 @@
 #ifndef PARALLEL_FOR_HPP
 #define PARALLEL_FOR_HPP
 
-#include "build_options.hpp"   // for global::BuildPlatform, DEV, Platform ...
+#include "adapter/device_adapter_api.hpp"   // for api::set_device
+#include "config.hpp"   // for global::BuildPlatform, DEV, Platform ...
 #include "core/types/utility/range.hpp"    // for range
 #include "util/parallel/exec_policy.hpp"   // for ExecutionPolicy
 #include "util/parallel/launch.hpp"        // for launch
 #include "util/parallel/thread_pool.hpp"   // for (anonymous), ThreadPool, get_nthreads
-#include "util/tools/device_api.hpp"   // for api::setDevice
 
 namespace simbi {
     template <
@@ -72,29 +72,29 @@ namespace simbi {
         const auto total_work  = last - first;
         const auto num_devices = policy.devices.size();
 
-        if constexpr (global::on_gpu) {
+        if constexpr (platform::is_gpu) {
             // Enable peer access if configured
             if (policy.config.enable_peer_access) {
-                for (int i = 0; i < num_devices; i++) {
-                    for (int j = 0; j < num_devices; j++) {
+                for (size_type i = 0; i < num_devices; i++) {
+                    for (size_type j = 0; j < num_devices; j++) {
                         if (i != j) {
-                            gpu::api::enablePeerAccess(policy.devices[j]);
+                            gpu::api::enable_peer_access(policy.devices[j]);
                         }
                     }
                 }
             }
 
             // Create streams if needed
-            std::vector<simbiStream_t> local_streams;
+            std::vector<adapter::stream_t<>> local_streams;
             if (policy.streams.empty()) {
                 local_streams.resize(num_devices);
                 for (auto& stream : local_streams) {
-                    gpu::api::streamCreate(&stream);
+                    gpu::api::stream_create(&stream);
                 }
             }
 
             // Launch on each device
-            for (int dev_idx = 0; dev_idx < num_devices; ++dev_idx) {
+            for (size_type dev_idx = 0; dev_idx < num_devices; ++dev_idx) {
                 const auto device_first =
                     first + dev_idx * (total_work / num_devices);
                 const auto device_last =
@@ -111,7 +111,7 @@ namespace simbi {
                     for (auto idx : range(
                              device_first,
                              device_last,
-                             globalThreadCount()
+                             global_thread_count()
                          )) {
                         function(idx);
                     }
@@ -149,7 +149,7 @@ namespace simbi {
             // Cleanup streams
             if (policy.streams.empty()) {
                 for (auto stream : local_streams) {
-                    gpu::api::streamDestroy(stream);
+                    gpu::api::stream_destroy(stream);
                 }
             }
 
@@ -159,7 +159,8 @@ namespace simbi {
             }
         }
         else {
-            simbi::pooling::getThreadPool().parallel_for(first, last, function);
+            simbi::pooling::get_thread_pool()
+                .parallel_for(first, last, function);
         }
     }
 

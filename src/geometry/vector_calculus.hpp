@@ -49,7 +49,7 @@
 #ifndef VECTOR_CALCULUS_HPP
 #define VECTOR_CALCULUS_HPP
 
-#include "build_options.hpp"                        // for real, DEV
+#include "config.hpp"                               // for real, DEV
 #include "core/types/containers/vector_field.hpp"   // for Vector, VectorField
 #include <iostream>                                 // for cout, cin
 #include <vector>                                   // for vector

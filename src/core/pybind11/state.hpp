@@ -1,7 +1,7 @@
 #ifndef STATE_HPP
 #define STATE_HPP
 
-#include "build_options.hpp"
+#include "config.hpp"
 #include "core/types/alias/alias.hpp"
 #include "core/types/containers/collapsable.hpp"
 #include "core/types/containers/ndarray.hpp"

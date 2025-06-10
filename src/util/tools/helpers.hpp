@@ -49,16 +49,14 @@
 #ifndef HELPERS_HIP_HPP
 #define HELPERS_HIP_HPP
 
-#include "build_options.hpp"            // for real, STATIC, luint, lint
+#include "config.hpp"                   // for real, STATIC, luint, lint
 #include "core/traits.hpp"              // for is_1D_primitive, is_2D_primitive
 #include "core/types/alias/alias.hpp"   // for uarray
 #include "core/types/utility/enums.hpp"   // for Geometry, BoundaryCondition, Solver
-#include "core/types/utility/functional.hpp"   // for Function
-#include "io/exceptions.hpp"                   // for ErrorCode
-#include <cmath>                               // for sqrt, exp, INFINITY
-#include <cstdlib>                             // for abs, size_t
-#include <string>                              // for string, operator<=>
-#include <type_traits>                         // for enable_if
+#include "io/exceptions.hpp"              // for ErrorCode
+#include <cmath>                          // for sqrt, exp, INFINITY
+#include <cstdlib>                        // for abs, size_t
+#include <string>                         // for string, operator<=>
 
 // Some useful global constants
 constexpr real QUIRK_THRESHOLD = 1e-4;
@@ -317,23 +315,13 @@ namespace simbi {
          * @return float
          */
         template <typename T, typename U>
-        inline real getFlops(
+        inline real get_flops(
             const luint dim,
             const luint radius,
             const luint total_zones,
             const luint real_zones,
             const float delta_t
         );
-
-#if GPU_CODE
-        __device__ __forceinline__ real atomicMinReal(real* addr, real value)
-        {
-            real old = __int_as_real(
-                atomicMin((atomic_cast*) addr, __real_as_int(value))
-            );
-            return old;
-        }
-#endif
 
         // separate values in a string using custom delimiter
         template <const unsigned num, const char separator>
@@ -363,9 +351,6 @@ namespace simbi {
 
         template <typename T, typename index_type>
         DUAL void iterativeQuickSort(T arr[], index_type low, index_type high);
-
-        template <int dim, BlockAx axis, typename T>
-        DUAL T axid(T idx, T ni, T nj, T kk = T(0));
 
         template <typename T>
         DUAL bool goes_to_zero(T val)
@@ -397,7 +382,7 @@ namespace simbi {
             return a > b && !approx_equal(a, b);
         }
 
-        std::string getColorCode(Color color);
+        std::string get_color_code(Color color);
 
         /**
          * @brief the next permutation in the set {1,2} or {1, 2, 3}

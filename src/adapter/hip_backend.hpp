@@ -4,7 +4,7 @@
  *=============================================================================
  *
  * @file            hip_backend.hpp
- * @brief
+ * @brief           cuda implementation of device backend
  * @details
  *
  * @version         0.8.0
@@ -16,49 +16,26 @@
  * @build           Requirements & Dependencies
  *==============================================================================
  * @requires        C++20
- * @depends         CUDA >= 11.0, HDF5 >= 1.12, OpenMP >= 4.5
+ * @depends         cuda >= 11.0
  * @platform        Linux, MacOS
- * @parallel        GPU (CUDA, HIP), CPU (OpenMP)
+ * @parallel        GPU (cuda)
  *
- *==============================================================================
- * @documentation   Reference & Notes
- *==============================================================================
- * @usage
- * @note
- * @warning
- * @todo
- * @bug
- * @performance
- *
- *==============================================================================
- * @testing        Quality Assurance
- *==============================================================================
- * @test
- * @benchmark
- * @validation
- *
- *==============================================================================
- * @history        Version History
- *==============================================================================
- * 2025-06-09      v0.8.0      Initial implementation
- *
- *==============================================================================
- * @copyright (C) 2025 Marcus DuPont. All rights reserved.
  *==============================================================================
  */
 
-#ifndef HIP_BACKEND_HPP
-#define HIP_BACKEND_HPP
+#ifndef cuda_BACKEND_HPP
+#define cuda_BACKEND_HPP
 
 #include "device_backend.hpp"
+#include "device_types.hpp"
 
-// only include HIP headers if HIP is enabled
-#if defined(HIP_ENABLED) || (defined(GPU_CODE) && HIP_CODE)
+// only include cuda headers if cuda is enabled
+#if defined(cuda_ENABLED) || (defined(GPU_ENABLED) && cuda_CODE)
 #include <hip/hip_runtime.h>
 
 namespace simbi::adapter {
 
-    // error handling for HIP
+    // error handling for cuda
     namespace hip_error {
         inline error::status_t check_hip_error(hipError_t code)
         {
@@ -74,19 +51,26 @@ namespace simbi::adapter {
         }
     }   // namespace hip_error
 
-    // HIP backend specialization
+    // cuda backend specialization
     template <>
     class DeviceBackend<hip_backend_tag>
     {
       public:
-        // memory operations
+        // Type aliases for this backend
+        using event_t             = event_t<hip_backend_tag>;
+        using stream_t            = stream_t<hip_backend_tag>;
+        using device_properties_t = device_properties_t<hip_backend_tag>;
+        using function_t          = function_t<hip_backend_tag>;
+        using memcpy_kind_t       = memcpy_kind_t<hip_backend_tag>;
+
+        // Memory operations
         void copy_host_to_device(void* to, const void* from, std::size_t bytes)
         {
             hipError_t status =
                 hipMemcpy(to, from, bytes, hipMemcpyHostToDevice);
             error::check_err(
                 hip_error::check_hip_error(status),
-                "HIP copy from host to device failed"
+                "cuda copy from host to device failed"
             );
         }
 
@@ -96,7 +80,7 @@ namespace simbi::adapter {
                 hipMemcpy(to, from, bytes, hipMemcpyDeviceToHost);
             error::check_err(
                 hip_error::check_hip_error(status),
-                "HIP copy from device to host failed"
+                "cuda copy from device to host failed"
             );
         }
 
@@ -107,7 +91,7 @@ namespace simbi::adapter {
                 hipMemcpy(to, from, bytes, hipMemcpyDeviceToDevice);
             error::check_err(
                 hip_error::check_hip_error(status),
-                "HIP copy from device to device failed"
+                "cuda copy from device to device failed"
             );
         }
 
@@ -116,7 +100,7 @@ namespace simbi::adapter {
             hipError_t status = hipMalloc(obj, bytes);
             error::check_err(
                 hip_error::check_hip_error(status),
-                "HIP malloc failed"
+                "cuda malloc failed"
             );
         }
 
@@ -125,7 +109,7 @@ namespace simbi::adapter {
             hipError_t status = hipMallocManaged(obj, bytes);
             error::check_err(
                 hip_error::check_hip_error(status),
-                "HIP malloc managed failed"
+                "cuda malloc managed failed"
             );
         }
 
@@ -134,7 +118,7 @@ namespace simbi::adapter {
             hipError_t status = hipFree(obj);
             error::check_err(
                 hip_error::check_hip_error(status),
-                "HIP free failed"
+                "cuda free failed"
             );
         }
 
@@ -143,81 +127,72 @@ namespace simbi::adapter {
             hipError_t status = hipMemset(obj, val, bytes);
             error::check_err(
                 hip_error::check_hip_error(status),
-                "HIP memset failed"
+                "cuda memset failed"
             );
         }
 
-        // event handling
-        void event_create(void** event)
+        // Event handling
+        void event_create(event_t* event)
         {
-            hipEvent_t* hip_event = static_cast<hipEvent_t*>(event);
-            hipError_t status     = hipEventCreate(hip_event);
+            hipError_t status = hipEventCreate(event);
             error::check_err(
                 hip_error::check_hip_error(status),
-                "HIP event creation failed"
+                "cuda event creation failed"
             );
         }
 
-        void event_destroy(void* event)
+        void event_destroy(event_t event)
         {
-            hipEvent_t hip_event = *static_cast<hipEvent_t*>(event);
-            hipError_t status    = hipEventDestroy(hip_event);
+            hipError_t status = hipEventDestroy(event);
             error::check_err(
                 hip_error::check_hip_error(status),
-                "HIP event destruction failed"
+                "cuda event destruction failed"
             );
         }
 
-        void event_record(void* event)
+        void event_record(event_t event)
         {
-            hipEvent_t hip_event = *static_cast<hipEvent_t*>(event);
-            hipError_t status    = hipEventRecord(hip_event);
+            hipError_t status = hipEventRecord(event);
             error::check_err(
                 hip_error::check_hip_error(status),
-                "HIP event recording failed"
+                "cuda event recording failed"
             );
         }
 
-        void event_synchronize(void* event)
+        void event_synchronize(event_t event)
         {
-            hipEvent_t hip_event = *static_cast<hipEvent_t*>(event);
-            hipError_t status    = hipEventSynchronize(hip_event);
+            hipError_t status = hipEventSynchronize(event);
             error::check_err(
                 hip_error::check_hip_error(status),
-                "HIP event synchronization failed"
+                "cuda event synchronization failed"
             );
         }
 
-        void event_elapsed_time(float* time, void* start, void* end)
+        void event_elapsed_time(float* time, event_t start, event_t end)
         {
-            hipEvent_t start_event = *static_cast<hipEvent_t*>(start);
-            hipEvent_t end_event   = *static_cast<hipEvent_t*>(end);
-
-            hipError_t status =
-                hipEventElapsedTime(time, start_event, end_event);
+            hipError_t status = hipEventElapsedTime(time, start, end);
             error::check_err(
                 hip_error::check_hip_error(status),
-                "HIP event elapsed time calculation failed"
+                "cuda event elapsed time calculation failed"
             );
         }
 
-        // device management
+        // Device management
         void get_device_count(int* count)
         {
             hipError_t status = hipGetDeviceCount(count);
             error::check_err(
                 hip_error::check_hip_error(status),
-                "HIP get device count failed"
+                "cuda get device count failed"
             );
         }
 
-        void get_device_properties(void* props, int device)
+        void get_device_properties(device_properties_t* props, int device)
         {
-            hipDeviceProp_t* hip_props = static_cast<hipDeviceProp_t*>(props);
-            hipError_t status = hipGetDeviceProperties(hip_props, device);
+            hipError_t status = hipGetDeviceProperties(props, device);
             error::check_err(
                 hip_error::check_hip_error(status),
-                "HIP get device properties failed"
+                "cuda get device properties failed"
             );
         }
 
@@ -226,7 +201,7 @@ namespace simbi::adapter {
             hipError_t status = hipSetDevice(device);
             error::check_err(
                 hip_error::check_hip_error(status),
-                "HIP set device failed"
+                "cuda set device failed"
             );
         }
 
@@ -235,62 +210,55 @@ namespace simbi::adapter {
             hipError_t status = hipDeviceSynchronize();
             error::check_err(
                 hip_error::check_hip_error(status),
-                "HIP device synchronization failed"
+                "cuda device synchronization failed"
             );
         }
 
-        // stream operations
-        void stream_create(void** stream)
+        // Stream operations
+        void stream_create(stream_t* stream)
         {
-            hipStream_t* hip_stream = static_cast<hipStream_t*>(stream);
-            hipError_t status       = hipStreamCreate(hip_stream);
+            hipError_t status = hipStreamCreate(stream);
             error::check_err(
                 hip_error::check_hip_error(status),
-                "HIP stream creation failed"
+                "cuda stream creation failed"
             );
         }
 
-        void stream_destroy(void* stream)
+        void stream_destroy(stream_t stream)
         {
-            hipStream_t hip_stream = *static_cast<hipStream_t*>(&stream);
-            hipError_t status      = hipStreamDestroy(hip_stream);
+            hipError_t status = hipStreamDestroy(stream);
             error::check_err(
                 hip_error::check_hip_error(status),
-                "HIP stream destruction failed"
+                "cuda stream destruction failed"
             );
         }
 
-        void stream_synchronize(void* stream)
+        void stream_synchronize(stream_t stream)
         {
-            hipStream_t hip_stream = *static_cast<hipStream_t*>(&stream);
-            hipError_t status      = hipStreamSynchronize(hip_stream);
+            hipError_t status = hipStreamSynchronize(stream);
             error::check_err(
                 hip_error::check_hip_error(status),
-                "HIP stream synchronization failed"
+                "cuda stream synchronization failed"
             );
         }
 
-        void
-        stream_wait_event(void* stream, void* event, unsigned int flags = 0)
+        void stream_wait_event(
+            stream_t stream,
+            event_t event,
+            unsigned int flags = 0
+        )
         {
-            hipStream_t hip_stream = *static_cast<hipStream_t*>(&stream);
-            hipEvent_t hip_event   = *static_cast<hipEvent_t*>(event);
-
-            hipError_t status =
-                hipStreamWaitEvent(hip_stream, hip_event, flags);
+            hipError_t status = hipStreamWaitEvent(stream, event, flags);
             error::check_err(
                 hip_error::check_hip_error(status),
-                "HIP stream wait event failed"
+                "cuda stream wait event failed"
             );
         }
 
-        void stream_query(void* stream, int* status)
+        void stream_query(stream_t stream, int* status)
         {
-            hipStream_t hip_stream = *static_cast<hipStream_t*>(&stream);
-            hipError_t hip_status  = hipStreamQuery(hip_stream);
-
-            // convert HIP status to int
-            *status = static_cast<int>(hip_status);
+            hipError_t hip_status = hipStreamQuery(stream);
+            *status               = static_cast<int>(hip_status);
         }
 
         // asynchronous operations
@@ -298,21 +266,15 @@ namespace simbi::adapter {
             void* to,
             const void* from,
             std::size_t bytes,
-            void* stream
+            stream_t stream
         )
         {
-            hipStream_t hip_stream = *static_cast<hipStream_t*>(&stream);
-            hipError_t status      = hipMemcpyAsync(
-                to,
-                from,
-                bytes,
-                hipMemcpyHostToDevice,
-                hip_stream
-            );
+            hipError_t status =
+                hipMemcpyAsync(to, from, bytes, hipMemcpyHostToDevice, stream);
 
             error::check_err(
                 hip_error::check_hip_error(status),
-                "HIP async copy host to device failed"
+                "cuda async copy host to device failed"
             );
         }
 
@@ -320,21 +282,15 @@ namespace simbi::adapter {
             void* to,
             const void* from,
             std::size_t bytes,
-            void* stream
+            stream_t stream
         )
         {
-            hipStream_t hip_stream = *static_cast<hipStream_t*>(&stream);
-            hipError_t status      = hipMemcpyAsync(
-                to,
-                from,
-                bytes,
-                hipMemcpyDeviceToHost,
-                hip_stream
-            );
+            hipError_t status =
+                hipMemcpyAsync(to, from, bytes, hipMemcpyDeviceToHost, stream);
 
             error::check_err(
                 hip_error::check_hip_error(status),
-                "HIP async copy device to host failed"
+                "cuda async copy device to host failed"
             );
         }
 
@@ -342,21 +298,20 @@ namespace simbi::adapter {
             void* to,
             const void* from,
             std::size_t bytes,
-            void* stream
+            stream_t stream
         )
         {
-            hipStream_t hip_stream = *static_cast<hipStream_t*>(&stream);
-            hipError_t status      = hipMemcpyAsync(
+            hipError_t status = hipMemcpyAsync(
                 to,
                 from,
                 bytes,
                 hipMemcpyDeviceToDevice,
-                hip_stream
+                stream
             );
 
             error::check_err(
                 hip_error::check_hip_error(status),
-                "HIP async copy device to device failed"
+                "cuda async copy device to device failed"
             );
         }
 
@@ -364,18 +319,14 @@ namespace simbi::adapter {
             void* to,
             const void* from,
             std::size_t bytes,
-            int kind,
-            void* stream
+            memcpy_kind_t kind,
+            stream_t stream
         )
         {
-            hipStream_t hip_stream = *static_cast<hipStream_t*>(&stream);
-            hipMemcpyKind hip_kind = static_cast<hipMemcpyKind>(kind);
-
-            hipError_t status =
-                hipMemcpyAsync(to, from, bytes, hip_kind, hip_stream);
+            hipError_t status = hipMemcpyAsync(to, from, bytes, kind, stream);
             error::check_err(
                 hip_error::check_hip_error(status),
-                "HIP memcpy async failed"
+                "cuda memcpy async failed"
             );
         }
 
@@ -385,7 +336,7 @@ namespace simbi::adapter {
             hipError_t status = hipDeviceEnablePeerAccess(device, flags);
             error::check_err(
                 hip_error::check_hip_error(status),
-                "HIP enable peer access failed"
+                "cuda enable peer access failed"
             );
         }
 
@@ -395,22 +346,20 @@ namespace simbi::adapter {
             const void* src,
             int src_device,
             std::size_t bytes,
-            void* stream
+            stream_t stream
         )
         {
-            hipStream_t hip_stream = *static_cast<hipStream_t*>(&stream);
-
             hipError_t status = hipMemcpyPeerAsync(
                 dst,
                 dst_device,
                 src,
                 src_device,
                 bytes,
-                hip_stream
+                stream
             );
             error::check_err(
                 hip_error::check_hip_error(status),
-                "HIP peer copy async failed"
+                "cuda peer copy async failed"
             );
         }
 
@@ -420,7 +369,7 @@ namespace simbi::adapter {
             hipError_t status = hipHostRegister(ptr, size, flags);
             error::check_err(
                 hip_error::check_hip_error(status),
-                "HIP host register failed"
+                "cuda host register failed"
             );
         }
 
@@ -429,16 +378,16 @@ namespace simbi::adapter {
             hipError_t status = hipHostUnregister(ptr);
             error::check_err(
                 hip_error::check_hip_error(status),
-                "HIP host unregister failed"
+                "cuda host unregister failed"
             );
         }
 
         void aligned_malloc(void** ptr, std::size_t size)
         {
-            hipError_t status = hipHostMalloc(ptr, size);
+            hipError_t status = hipMallocHost(ptr, size);
             error::check_err(
                 hip_error::check_hip_error(status),
-                "HIP aligned malloc failed"
+                "cuda aligned malloc failed"
             );
         }
 
@@ -449,7 +398,7 @@ namespace simbi::adapter {
             hipError_t status = hipMemcpyFromSymbol(dst, symbol, count);
             error::check_err(
                 hip_error::check_hip_error(status),
-                "HIP memcpy from symbol failed"
+                "cuda memcpy from symbol failed"
             );
         }
 
@@ -458,39 +407,36 @@ namespace simbi::adapter {
         {
             hipError_t status = hipMemPrefetchAsync(obj, bytes, device);
             error::check_err(
-                hip_error::check_cuda_error(status),
-                "HIP prefetch to device failed"
+                hip_error::check_hip_error(status),
+                "cuda prefetch to device failed"
             );
         }
 
         void launch_kernel(
-            void* function,
+            function_t function,
             types::dim3 grid,
             types::dim3 block,
             void** args,
             std::size_t shared_mem,
-            void* stream
+            stream_t stream
         )
         {
-            hipStream_t hip_stream = *static_cast<hipStream_t*>(&stream);
-            void* hip_function     = static_cast<void*>(function);
-
-            // convert our dim3 to HIP dim3
+            // convert our dim3 to cuda dim3
             dim3 hip_grid(grid.x, grid.y, grid.z);
             dim3 hip_block(block.x, block.y, block.z);
 
             hipError_t status = hipLaunchKernel(
-                hip_function,
+                static_cast<const void*>(function),
                 hip_grid,
                 hip_block,
                 args,
                 shared_mem,
-                hip_stream
+                stream
             );
 
             error::check_err(
                 hip_error::check_hip_error(status),
-                "HIP launch kernel failed"
+                "cuda launch kernel failed"
             );
         }
 
@@ -499,7 +445,7 @@ namespace simbi::adapter {
         __device__ T atomic_min(T* address, T val)
         {
             if constexpr (std::is_floating_point_v<T>) {
-                // Use appropriate atomic implementation for HIP
+                // use type punning for floating point atomics
                 using IntType = typename std::conditional<
                     sizeof(T) == 4,
                     unsigned int,
@@ -530,239 +476,311 @@ namespace simbi::adapter {
         __device__ T atomic_add(T* address, T val)
         {
             if constexpr (std::is_floating_point_v<T>) {
-                return atomicAdd(address, val);
+                if constexpr (sizeof(T) == 4) {   // float
+                    return atomicAdd(address, val);
+                }
+                else {   // double
+                    unsigned long long int* address_as_ull =
+                        reinterpret_cast<unsigned long long int*>(address);
+                    unsigned long long int old = *address_as_ull;
+                    unsigned long long int assumed;
+
+                    do {
+                        assumed = old;
+                        old     = atomicCAS(
+                            address_as_ull,
+                            assumed,
+                            __double_as_longlong(
+                                val + __longlong_as_double(assumed)
+                            )
+                        );
+
+                    } while (assumed != old);
+                    return __longlong_as_double(old);
+                }
             }
             else {
-                // tnteger types
                 return atomicAdd(address, val);
             }
         }
 
-        // thread synchronization
+        // Thread synchronization
         __device__ void synchronize_threads() { __syncthreads(); }
     };
 
 }   // namespace simbi::adapter
 
-#else   // HIP not enabled
+#else   // cuda not enabled
 
 namespace simbi::adapter {
 
-    // stub implementation when HIP is not available
+    // stub implementation when cuda is not available
     template <>
     class DeviceBackend<hip_backend_tag>
     {
-      public:
-        // all methods throw an error since HIP is not available
+      public:   // Helper to throw not supported error
         template <typename... Args>
         void not_supported(const std::string& function_name, Args&&...)
         {
             throw error::runtime_error(
                 error::status_t::error,
-                "HIP backend not available: " + function_name + " called"
+                "cuda backend not available: " + function_name + " called"
             );
         }
 
-        // memory operations
-        void copy_host_to_device(void* to, const void* from, std::size_t bytes)
+        // Memory operations
+        void copy_host_to_device(
+            void* /*to*/,
+            const void* /*from*/,
+            std::size_t /*bytes*/
+        )
         {
             not_supported("copy_host_to_device");
         }
 
-        void copy_device_to_host(void* to, const void* from, std::size_t bytes)
+        void copy_device_to_host(
+            void* /*to*/,
+            const void* /*from*/,
+            std::size_t /*bytes*/
+        )
         {
             not_supported("copy_device_to_host");
         }
 
-        void
-        copy_device_to_device(void* to, const void* from, std::size_t bytes)
+        void copy_device_to_device(
+            void* /*to*/,
+            const void* /*from*/,
+            std::size_t /*bytes*/
+        )
         {
             not_supported("copy_device_to_device");
         }
 
-        void malloc(void** obj, std::size_t bytes) { not_supported("malloc"); }
+        void malloc(void** /*obj*/, std::size_t /*bytes*/)
+        {
+            not_supported("malloc");
+        }
 
-        void malloc_managed(void** obj, std::size_t bytes)
+        void malloc_managed(void** /*obj*/, std::size_t /*bytes*/)
         {
             not_supported("malloc_managed");
         }
 
-        void free(void* obj) { not_supported("free"); }
+        void free(void* /*obj*/) { not_supported("free"); }
 
-        void memset(void* obj, int val, std::size_t bytes)
+        void memset(void* /*obj*/, int /*val*/, std::size_t /*bytes*/)
         {
             not_supported("memset");
         }
 
-        // event handling
-        void event_create(void** event) { not_supported("event_create"); }
+        // Event handling
+        void event_create(event_t<>* /*event*/)
+        {
+            not_supported("event_create");
+        }
 
-        void event_destroy(void* event) { not_supported("event_destroy"); }
+        void event_destroy(event_t<> /*event*/)
+        {
+            not_supported("event_destroy");
+        }
 
-        void event_record(void* event) { not_supported("event_record"); }
+        void event_record(event_t<> /*event*/)
+        {
+            not_supported("event_record");
+        }
 
-        void event_synchronize(void* event)
+        void event_synchronize(event_t<> /*event*/)
         {
             not_supported("event_synchronize");
         }
 
-        void event_elapsed_time(float* time, void* start, void* end)
+        void event_elapsed_time(
+            float* /*time*/,
+            event_t<> /*start*/,
+            event_t<> /*end*/
+        )
         {
             not_supported("event_elapsed_time");
         }
 
-        // device management
-        void get_device_count(int* count) { not_supported("get_device_count"); }
+        // Device management
+        void get_device_count(int* /*count*/)
+        {
+            not_supported("get_device_count");
+        }
 
-        void get_device_properties(void* props, int device)
+        void
+        get_device_properties(device_properties_t<>* /*props*/, int /*device*/)
         {
             not_supported("get_device_properties");
         }
 
-        void set_device(int device) { not_supported("set_device"); }
+        void set_device(int /*device*/) { not_supported("set_device"); }
 
         void device_synchronize() { not_supported("device_synchronize"); }
 
-        // stream operations
-        void stream_create(void** stream) { not_supported("stream_create"); }
+        // Stream operations
+        void stream_create(stream_t<>* /*stream*/)
+        {
+            not_supported("stream_create");
+        }
 
-        void stream_destroy(void* stream) { not_supported("stream_destroy"); }
+        void stream_destroy(stream_t<> /*stream*/)
+        {
+            not_supported("stream_destroy");
+        }
 
-        void stream_synchronize(void* stream)
+        void stream_synchronize(stream_t<> /*stream*/)
         {
             not_supported("stream_synchronize");
         }
 
-        void
-        stream_wait_event(void* stream, void* event, unsigned int flags = 0)
+        void stream_wait_event(
+            stream_t<> /*stream*/,
+            event_t<> /*event*/,
+            unsigned int /*flags*/ = 0
+        )
         {
             not_supported("stream_wait_event");
         }
 
-        void stream_query(void* stream, int* status)
+        void stream_query(stream_t<> /*stream*/, int* /*status*/)
         {
             not_supported("stream_query");
         }
 
-        // asynchronous operations
+        // Asynchronous operations
         void async_copy_host_to_device(
-            void* to,
-            const void* from,
-            std::size_t bytes,
-            void* stream
+            void* /*to*/,
+            const void* /*from*/,
+            std::size_t /*bytes*/,
+            stream_t<> /*stream*/
         )
         {
             not_supported("async_copy_host_to_device");
         }
 
         void async_copy_device_to_host(
-            void* to,
-            const void* from,
-            std::size_t bytes,
-            void* stream
+            void* /*to*/,
+            const void* /*from*/,
+            std::size_t /*bytes*/,
+            stream_t<> /*stream*/
         )
         {
             not_supported("async_copy_device_to_host");
         }
 
         void async_copy_device_to_device(
-            void* to,
-            const void* from,
-            std::size_t bytes,
-            void* stream
+            void* /*to*/,
+            const void* /*from*/,
+            std::size_t /*bytes*/,
+            stream_t<> /*stream*/
         )
         {
             not_supported("async_copy_device_to_device");
         }
 
         void memcpy_async(
-            void* to,
-            const void* from,
-            std::size_t bytes,
-            int kind,
-            void* stream
+            void* /*to*/,
+            const void* /*from*/,
+            std::size_t /*bytes*/,
+            memcpy_kind_t<> /*kind*/,
+            stream_t<> /*stream*/
         )
         {
             not_supported("memcpy_async");
         }
 
-        // peer operations
-        void enable_peer_access(int device, unsigned int flags = 0)
+        // Peer operations
+        void enable_peer_access(int /*device*/, unsigned int /*flags*/ = 0)
         {
             not_supported("enable_peer_access");
         }
 
         void peer_copy_async(
-            void* dst,
-            int dst_device,
-            const void* src,
-            int src_device,
-            std::size_t bytes,
-            void* stream
+            void* /*dst*/,
+            int /*dst_device*/,
+            const void* /*src*/,
+            int /*src_device*/,
+            std::size_t /*bytes*/,
+            stream_t<> /*stream*/
         )
         {
             not_supported("peer_copy_async");
         }
 
-        // host memory management
-        void host_register(void* ptr, std::size_t size, unsigned int flags)
+        // Host memory management
+        void host_register(
+            void* /*ptr*/,
+            std::size_t /*size*/,
+            unsigned int /*flags*/
+        )
         {
             not_supported("host_register");
         }
 
-        void host_unregister(void* ptr) { not_supported("host_unregister"); }
+        void host_unregister(void* /*ptr*/)
+        {
+            not_supported("host_unregister");
+        }
 
-        void aligned_malloc(void** ptr, std::size_t size)
+        void aligned_malloc(void** /*ptr*/, std::size_t /*size*/)
         {
             not_supported("aligned_malloc");
         }
 
-        // specialized operations
-        void
-        memcpy_from_symbol(void* dst, const void* symbol, std::size_t count)
+        // Specialized operations
+        void memcpy_from_symbol(
+            void* /*dst*/,
+            const void* /*symbol*/,
+            std::size_t /*count*/
+        )
         {
             not_supported("memcpy_from_symbol");
         }
 
-        void
-        prefetch_to_device(const void* obj, std::size_t bytes, int device = 0)
+        void prefetch_to_device(
+            const void* /*obj*/,
+            std::size_t /*bytes*/,
+            int /*device*/ = 0
+        )
         {
             not_supported("prefetch_to_device");
         }
 
         void launch_kernel(
-            void* function,
-            types::dim3 grid,
-            types::dim3 block,
-            void** args,
-            std::size_t shared_mem,
-            void* stream
+            function_t<> /*function*/,
+            types::dim3 /*grid*/,
+            types::dim3 /*block*/,
+            void** /*args*/,
+            std::size_t /*shared_mem*/,
+            stream_t<> /*stream*/
         )
         {
             not_supported("launch_kernel");
         }
 
-        // atomic operations
+        // Atomic operations
         template <typename T>
-        T atomic_min(T* address, T val)
+        T atomic_min(T* address, T /*val*/)
         {
             not_supported("atomic_min");
-            return *address;
+            return *address;   // Unreachable, but needed for compilation
         }
 
         template <typename T>
-        T atomic_add(T* address, T val)
+        T atomic_add(T* address, T /*val*/)
         {
             not_supported("atomic_add");
-            return *address;
+            return *address;   // Unreachable, but needed for compilation
         }
 
-        // thread synchronization
+        // Thread synchronization
         void synchronize_threads() { not_supported("synchronize_threads"); }
     };
 
 }   // namespace simbi::adapter
 
-#endif   // HIP enabled or not
+#endif   // cuda enabled or not
 
 #endif

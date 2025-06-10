@@ -49,7 +49,7 @@
 #ifndef CT_CALCULATOR_HPP
 #define CT_CALCULATOR_HPP
 
-#include "build_options.hpp"              // for DUAL
+#include "config.hpp"              // for DUAL
 #include "core/types/utility/enums.hpp"   // for Dir, BlockAx, Plane, Corner
 #include "stencil.hpp"                    // for StencilView
 

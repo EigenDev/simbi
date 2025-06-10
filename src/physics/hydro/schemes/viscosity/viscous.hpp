@@ -49,7 +49,7 @@
 #ifndef VISCOUS_HPP
 #define VISCOUS_HPP
 
-#include "build_options.hpp"
+#include "config.hpp"
 #include "core/types/containers/array.hpp"
 #include "core/types/containers/vector.hpp"
 #include "geometry/mesh/cell.hpp"

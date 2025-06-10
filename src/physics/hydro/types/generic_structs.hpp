@@ -49,7 +49,7 @@
 #ifndef GENERIC_STRUCTS_HPP
 #define GENERIC_STRUCTS_HPP
 
-#include "build_options.hpp"
+#include "config.hpp"
 #include "core/traits.hpp"
 #include "core/types/containers/vector.hpp"
 #include "core/types/monad/maybe.hpp"
@@ -351,7 +351,7 @@ namespace simbi {
                     );
                 }
                 else {
-                    if constexpr (!global::on_gpu) {
+                    if constexpr (!platform::is_gpu) {
                         static const ZeroMagneticVectorView zero_view;
                         return zero_view;
                     }
@@ -570,7 +570,7 @@ namespace simbi {
                     }
                 }
             }
-            if constexpr (global::on_gpu) {
+            if constexpr (platform::is_gpu) {
                 asm("trap;");
                 return vals_[Offsets::v1];
             }
@@ -857,7 +857,7 @@ namespace simbi {
                     }
                 }
             }
-            if constexpr (global::on_gpu) {
+            if constexpr (platform::is_gpu) {
                 asm("trap;");
                 return vals_[Offsets::v1];
             }
@@ -1153,8 +1153,9 @@ namespace simbi {
                 oss << "location: (" << x1 << "): \n";
             }
             else if constexpr (Dims == 2) {
-                if (x2 == std::numeric_limits<real>::infinity(
-                          )) {   // an effective 1D run
+                if (x2 ==
+                    std::numeric_limits<real>::infinity()) {   // an effective
+                                                               // 1D run
                     oss << "location: (" << x1 << "): \n";
                     oss << "index: [" << ii << "]\n";
                 }
@@ -1164,8 +1165,9 @@ namespace simbi {
                 }
             }
             else {
-                if (x2 == std::numeric_limits<real>::infinity(
-                          )) {   // an effective 1D run
+                if (x2 ==
+                    std::numeric_limits<real>::infinity()) {   // an effective
+                                                               // 1D run
                     oss << "location: (" << x1 << "): \n";
                     oss << "indicies: [" << ii << "]\n";
                 }

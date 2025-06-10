@@ -50,7 +50,7 @@
 #ifndef ARRAY_HPP
 #define ARRAY_HPP
 
-#include "build_options.hpp"
+#include "config.hpp"
 #include <iostream>
 #include <stdexcept>
 
@@ -102,7 +102,7 @@ namespace simbi {
         // array_t access
         DUAL constexpr T& operator[](size_type i)
         {
-#if GPU_CODE
+#if GPU_ENABLED
             if (i >= N) {
                 // GPU-safe error handling
                 printf("array_t index out of bounds\n");
@@ -119,7 +119,7 @@ namespace simbi {
 
         DUAL constexpr const T& operator[](size_type i) const
         {
-#if GPU_CODE
+#if GPU_ENABLED
             if (i >= N) {
                 // GPU-safe error handling
                 printf("array_t index out of bounds\n");

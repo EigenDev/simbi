@@ -83,7 +83,7 @@ namespace simbi {
                 }
 
                 // Allocate and copy device data if applicable
-                if constexpr (global::on_gpu) {
+                if constexpr (platform::is_gpu) {
                     if (size_ > 0) {
                         T* device_ptr;
                         gpu::api::malloc(
@@ -94,7 +94,7 @@ namespace simbi {
 
                         // Copy data from other's device memory if available
                         if (other.device_data_) {
-                            gpu::api::copyDeviceToDevice(
+                            gpu::api::copy_device_to_device(
                                 device_data_.get(),
                                 other.device_data_.get(),
                                 size_ * sizeof(T)
@@ -137,7 +137,7 @@ namespace simbi {
                 }
 
                 // Allocate and copy device data if applicable
-                if constexpr (global::on_gpu) {
+                if constexpr (platform::is_gpu) {
                     if (size_ > 0) {
                         T* device_ptr;
                         gpu::api::malloc(
@@ -148,7 +148,7 @@ namespace simbi {
 
                         // Copy data from other's device memory if available
                         if (other.device_data_) {
-                            gpu::api::copyDeviceToDevice(
+                            gpu::api::copy_device_to_device(
                                 device_data_.get(),
                                 other.device_data_.get(),
                                 size_ * sizeof(T)
@@ -187,7 +187,7 @@ namespace simbi {
         {
             this->size_ = size;
             host_data_  = util::make_unique_array<T[]>(size);
-            if constexpr (global::on_gpu) {
+            if constexpr (platform::is_gpu) {
                 T* device_ptr;
                 gpu::api::malloc(
                     reinterpret_cast<void**>(&device_ptr),
@@ -219,7 +219,7 @@ namespace simbi {
             }
 
             // reset device data and sync state
-            if constexpr (global::on_gpu) {
+            if constexpr (platform::is_gpu) {
                 // we need to allocate device memory before it can be used
                 T* device_ptr;
                 gpu::api::malloc(
@@ -247,7 +247,7 @@ namespace simbi {
 
         T* data()
         {
-            if constexpr (global::on_gpu) {
+            if constexpr (platform::is_gpu) {
                 if (!is_synced_) {
                     sync_to_device();
                 }
@@ -257,7 +257,7 @@ namespace simbi {
         }
         DUAL T* data() const
         {
-            if constexpr (global::on_gpu) {
+            if constexpr (platform::is_gpu) {
                 return device_data_.get();
             }
             return host_data_.get();
@@ -265,7 +265,7 @@ namespace simbi {
 
         void sync_to_device()
         {
-            if constexpr (global::on_gpu) {
+            if constexpr (platform::is_gpu) {
                 // check if device memory is allocated
                 if (!device_data_) {
                     T* device_ptr;
@@ -276,7 +276,7 @@ namespace simbi {
                     device_data_ = unique_ptr<T, gpuDeleter<T>>(device_ptr);
                 }
 
-                gpu::api::copyHostToDevice(
+                gpu::api::copy_host_to_device(
                     device_data_.get(),
                     host_data_.get(),
                     this->size_ * sizeof(T)
@@ -286,8 +286,8 @@ namespace simbi {
         }
         void sync_to_host()
         {
-            if constexpr (global::on_gpu) {
-                gpu::api::copyDeviceToHost(
+            if constexpr (platform::is_gpu) {
+                gpu::api::copy_device_to_host(
                     host_data_.get(),
                     device_data_.get(),
                     this->size_ * sizeof(T)
@@ -297,7 +297,7 @@ namespace simbi {
         }
         void ensure_device_synced()
         {
-            if constexpr (global::on_gpu) {
+            if constexpr (platform::is_gpu) {
                 if (!is_synced_) {
                     sync_to_device();
                 }

@@ -51,7 +51,7 @@
 #define NEWT_HPP
 
 #include "base.hpp"                            // for HydroBase
-#include "build_options.hpp"                   // for real, DUAL, lint, luint
+#include "config.hpp"                          // for real, DUAL, lint, luint
 #include "core/types/containers/ndarray.hpp"   // for ndarray
 #include "core/types/monad/maybe.hpp"          // for Maybe
 #include "geometry/mesh/mesh.hpp"              // for Mesh

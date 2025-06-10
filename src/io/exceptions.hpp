@@ -48,7 +48,7 @@
  */
 #ifndef EXCEPTIONS_HPP
 #define EXCEPTIONS_HPP
-#include "build_options.hpp"
+#include "config.hpp"
 #include <cstdint>
 #include <exception>
 

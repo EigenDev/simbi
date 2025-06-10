@@ -50,8 +50,8 @@
 #ifndef INIT_CONDITIONS_VISITOR_HPP
 #define INIT_CONDITIONS_VISITOR_HPP
 
-#include "build_options.hpp"   // for real, luint types
-#include "config_dict.hpp"     // for ConfigDict
+#include "config.hpp"        // for real, luint types
+#include "config_dict.hpp"   // for ConfigDict
 #include <list>
 #include <string>
 #include <utility>

@@ -51,7 +51,7 @@
 #ifndef GEOMETRY_TRAITS_HPP
 #define GEOMETRY_TRAITS_HPP
 
-#include "build_options.hpp"
+#include "config.hpp"
 #include "core/types/containers/vector.hpp"   // for spatial_vector_t
 #include "core/types/utility/enums.hpp"       // for Geometry
 

@@ -50,10 +50,10 @@
 #ifndef USING_DECL_HPP
 #define USING_DECL_HPP
 
-#include "build_options.hpp"
+#include "adapter/device_adapter_api.hpp"
+#include "config.hpp"
 #include "core/types/containers/array.hpp"
 #include "core/types/utility/smart_ptr.hpp"
-#include "util/tools/device_api.hpp"
 
 namespace simbi {
     // namespace types {

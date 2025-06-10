@@ -50,7 +50,7 @@
 #ifndef ARRAY_PROPS_HPP
 #define ARRAY_PROPS_HPP
 
-#include "build_options.hpp"
+#include "config.hpp"
 #include "core/types/alias/alias.hpp"
 #include "util/tools/helpers.hpp"
 

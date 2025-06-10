@@ -49,7 +49,7 @@
  */
 #ifndef UCT_CT_HPP
 #define UCT_CT_HPP
-#include "build_options.hpp"   // for DUAL
+#include "config.hpp"   // for DUAL
 
 namespace simbi {
     namespace ct {

@@ -49,7 +49,7 @@
 #ifndef MAYBE_HPP
 #define MAYBE_HPP
 
-#include "build_options.hpp"
+#include "config.hpp"
 #include "io/exceptions.hpp"
 #include <type_traits>
 

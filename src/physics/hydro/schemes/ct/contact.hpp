@@ -48,7 +48,7 @@
  */
 #ifndef CONTACT_HPP
 #define CONTACT_HPP
-#include "build_options.hpp"
+#include "config.hpp"
 
 namespace simbi {
     namespace ct {

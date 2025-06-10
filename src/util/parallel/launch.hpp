@@ -49,7 +49,8 @@
 #ifndef LAUNCH_HPP
 #define LAUNCH_HPP
 
-#include "kernel.hpp"                      // for Kernel
+#include "adapter/device_types.hpp"
+#include "kernel.hpp"                      // for kernel
 #include "util/parallel/exec_policy.hpp"   // for ExecutionPolicy
 
 namespace simbi {
@@ -58,23 +59,23 @@ namespace simbi {
     void launch(
         const ExecutionPolicy<>& policy,
         const int device,
-        const simbiStream_t stream,
+        const adapter::stream_t<> stream,
         Function f,
         Arguments... args
     )
     {
 
-#if GPU_CODE
+#if GPU_ENABLED
         // If streams are specified, use them
         if (!policy.streams.empty()) {
-            Kernel<<<
+            kernel<<<
                 policy.get_device_grid_size(device),
                 policy.block_size,
                 policy.shared_mem_bytes,
                 stream>>>(f, args...);
         }
         else {
-            Kernel<<<
+            kernel<<<
                 policy.get_device_grid_size(device),
                 policy.block_size,
                 policy.shared_mem_bytes>>>(f, args...);

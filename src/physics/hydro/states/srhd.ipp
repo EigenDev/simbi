@@ -53,7 +53,7 @@ void SRHD<dim>::cons2prim_impl()
             // https://www.sciencedirect.com/science/article/pii/S0893965913002930
             // so far, the convergence rate is the same, but perhaps I need
             // a slight tweak
-            int iter       = 0;
+            size_type iter = 0;
             real peq       = pguess;
             const real tol = d * global::epsilon;
             real dp;
@@ -63,7 +63,7 @@ void SRHD<dim>::cons2prim_impl()
                 dp          = f / g;
                 peq -= dp;
 
-                if (iter >= global::MAX_ITER || !std::isfinite(peq)) {
+                if (iter >= constants::max_iterations || !std::isfinite(peq)) {
                     loc->store(true);
                     return simbi::None(
                         ErrorCode::MAX_ITER | ErrorCode::NON_FINITE_ROOT

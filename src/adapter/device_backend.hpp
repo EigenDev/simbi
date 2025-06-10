@@ -49,38 +49,14 @@
 #ifndef DEVICE_BACKEND_HPP
 #define DEVICE_BACKEND_HPP
 
-#include "build_options.hpp"
+#include "config.hpp"
+#include "device_types.hpp"   // for types::dim3
 #include <cstddef>
 #include <stdexcept>
 #include <string>
 #include <type_traits>
 
 namespace simbi::adapter {
-
-    // backend tags for compile-time selection
-    struct cpu_backend_tag {
-    };
-    struct cuda_backend_tag {
-    };
-    struct hip_backend_tag {
-    };
-    struct metal_backend_tag {
-    };
-    struct sycl_backend_tag {
-    };
-
-// default backend selection based on compile flags
-#if defined(CUDA_ENABLED) || (defined(GPU_CODE) && CUDA_CODE)
-    using default_backend_tag = cuda_backend_tag;
-#elif defined(HIP_ENABLED) || (defined(GPU_CODE) && HIP_CODE)
-    using default_backend_tag = hip_backend_tag;
-#elif defined(METAL_ENABLED)
-    using default_backend_tag = metal_backend_tag;
-#elif defined(SYCL_ENABLED)
-    using default_backend_tag = sycl_backend_tag;
-#else
-    using default_backend_tag = cpu_backend_tag;
-#endif
 
     // error handling utilities (reusing from existing code)
     namespace error {
@@ -131,25 +107,6 @@ namespace simbi::adapter {
             }
         }
     }   // namespace error
-
-    // common types used across all backends
-    namespace types {
-        // forward declare common types
-        struct dim3 {
-            unsigned int x, y, z;
-
-            constexpr dim3(
-                unsigned int x_ = 1,
-                unsigned int y_ = 1,
-                unsigned int z_ = 1
-            )
-                : x(x_), y(y_), z(z_)
-            {
-            }
-
-            constexpr unsigned int volume() const { return x * y * z; }
-        };
-    }   // namespace types
 
     // base device backend interface - implemented by specializations
     template <typename BackendTag>
@@ -246,10 +203,10 @@ namespace simbi::adapter {
 
         // atomic operations
         template <typename T>
-        DUAL T atomic_min(T* address, T val);
+        DEV T atomic_min(T* address, T val);
 
         template <typename T>
-        DUAL T atomic_add(T* address, T val);
+        DEV T atomic_add(T* address, T val);
 
         // thread synchronization
         DEV void synchronize_threads();
@@ -257,7 +214,7 @@ namespace simbi::adapter {
 
     // get the singleton instance of the appropriate backend
     template <typename BackendTag = default_backend_tag>
-    DeviceBackend<BackendTag>& get_device_backend()
+    DUAL DeviceBackend<BackendTag>& get_device_backend()
     {
         static DeviceBackend<BackendTag> instance;
         return instance;

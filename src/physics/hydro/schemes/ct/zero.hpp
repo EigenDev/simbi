@@ -49,7 +49,7 @@
 #ifndef ZERO_HPP
 #define ZERO_HPP
 
-#include "build_options.hpp"   // for DUAL
+#include "config.hpp"   // for DUAL
 
 namespace simbi {
     namespace ct {

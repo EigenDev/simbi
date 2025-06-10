@@ -50,10 +50,9 @@
 #ifndef BOUNDARY_MANAGER_HPP
 #define BOUNDARY_MANAGER_HPP
 
-#include "build_options.hpp"
+#include "config.hpp"
 #include "core/managers/io_manager.hpp"
 #include "core/traits.hpp"
-#include "core/types/alias/alias.hpp"
 #include "core/types/containers/array_view.hpp"
 #include "core/types/containers/ndarray.hpp"
 #include "core/types/monad/maybe.hpp"

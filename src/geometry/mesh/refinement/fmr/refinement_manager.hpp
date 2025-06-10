@@ -6,7 +6,7 @@
 #ifndef REFINEMENT_MANAGER_HPP
 #define REFINEMENT_MANAGER_HPP
 
-#include "build_options.hpp"
+#include "config.hpp"
 #include "core/functional/fp.hpp"
 #include "core/types/containers/array.hpp"
 #include <functional>

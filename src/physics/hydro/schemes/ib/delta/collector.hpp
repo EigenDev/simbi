@@ -50,7 +50,7 @@
 #define COLLECTOR_HPP
 
 #include "body_delta.hpp"
-#include "build_options.hpp"
+#include "config.hpp"
 #include "core/types/containers/array.hpp"
 #include "core/types/containers/vector.hpp"
 #include "core/types/utility/managed.hpp"   // for Managed
@@ -253,7 +253,7 @@ namespace simbi::ibsystem {
                     const size_type thread_idx = get_thread_id();
 
                     // set up shared memory for block-level reduction
-                    extern __shared__ char shared_mem[];
+                    extern SHARED char shared_mem[];
                     BodyDelta<T, Dims>* shared_deltas =
                         reinterpret_cast<BodyDelta<T, Dims>*>(shared_mem);
 
@@ -302,20 +302,20 @@ namespace simbi::ibsystem {
                             // use atomic operations for thread-safe
                             // accumulation in shared memory
                             for (size_type dim = 0; dim < Dims; ++dim) {
-                                gpu::api::atomicAdd(
+                                gpu::api::atomic_add(
                                     &shared_deltas[body_idx].force_delta[dim],
                                     delta.force_delta[dim]
                                 );
                             }
-                            gpu::api::atomicAdd(
+                            gpu::api::atomic_add(
                                 &shared_deltas[body_idx].mass_delta,
                                 delta.mass_delta
                             );
-                            gpu::api::atomicAdd(
+                            gpu::api::atomic_add(
                                 &shared_deltas[body_idx].accreted_mass_delta,
                                 delta.accreted_mass_delta
                             );
-                            gpu::api::atomicAdd(
+                            gpu::api::atomic_add(
                                 &shared_deltas[body_idx].accretion_rate_delta,
                                 delta.accretion_rate_delta
                             );
@@ -369,7 +369,7 @@ namespace simbi::ibsystem {
         apply_to(ComponentBodySystem<T, Dims>&& system)
         {
             // Use appropriate reduction strategy based on platform
-            if constexpr (global::on_gpu) {
+            if constexpr (platform::is_gpu) {
                 reduce_deltas_gpu();
             }
             else {

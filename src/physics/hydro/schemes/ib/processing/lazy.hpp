@@ -49,7 +49,7 @@
 #ifndef LAZY_OPS_HPP
 #define LAZY_OPS_HPP
 
-#include "build_options.hpp"
+#include "config.hpp"
 #include "physics/hydro/schemes/ib/systems/capability.hpp"
 #include "physics/hydro/schemes/ib/systems/component_body_system.hpp"
 
@@ -137,7 +137,7 @@ namespace simbi::ibsystem {
             DUAL reference operator*() const
             {
                 if (!current_value_) {
-                    if constexpr (global::on_gpu) {
+                    if constexpr (platform::is_gpu) {
                         printf("Dereferencing invalid iterator\n");
                         return *current_value_;
                     }
@@ -154,7 +154,7 @@ namespace simbi::ibsystem {
             DUAL pointer operator->() const
             {
                 if (!current_value_) {
-                    if constexpr (global::on_gpu) {
+                    if constexpr (platform::is_gpu) {
                         printf("Dereferencing invalid iterator\n");
                         return &(*current_value_);
                     }

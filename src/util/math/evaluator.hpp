@@ -1,7 +1,7 @@
 #ifndef EVALUATOR_HPP
 #define EVALUATOR_HPP
 
-#include "build_options.hpp"
+#include "config.hpp"
 #include "core/types/containers/ndarray.hpp"
 #include "util/math/expression.hpp"
 

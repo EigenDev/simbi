@@ -50,7 +50,7 @@
 #ifndef INIT_CONDITIONS_HPP
 #define INIT_CONDITIONS_HPP
 
-#include "build_options.hpp"
+#include "config.hpp"
 #include "config_dict_visitor.hpp"
 #include "init_conditions_visitor.hpp"
 #include <list>

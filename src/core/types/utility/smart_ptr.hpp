@@ -50,7 +50,7 @@
 #ifndef SMRT_PTR_HPP
 #define SMRT_PTR_HPP
 
-#include "build_options.hpp"
+#include "config.hpp"
 #include <atomic>
 #include <exception>
 #include <memory>
@@ -308,7 +308,7 @@ namespace simbi {
 
             void swap(smart_ptr& other) noexcept
             {
-                if constexpr (global::on_gpu) {
+                if constexpr (platform::is_gpu) {
                     control_block_base* pr = ctrl;
                     ptr_t* pd              = pData;
 
@@ -365,7 +365,7 @@ namespace simbi {
 
             DUAL void error_out() const
             {
-                if constexpr (global::on_gpu) {
+                if constexpr (platform::is_gpu) {
                     printf("[GPU ERROR]: DEREFERENCING NULL POINTER\n");
                 }
                 else {
@@ -466,7 +466,7 @@ namespace simbi {
 
             void swap(smart_ptr& other) noexcept
             {
-                if constexpr (global::on_gpu) {
+                if constexpr (platform::is_gpu) {
                     control_block_base* pr = ctrl;
                     ptr_t* pd              = pData;
 
@@ -520,7 +520,7 @@ namespace simbi {
 
             DUAL void error_out() const
             {
-                if constexpr (global::on_gpu) {
+                if constexpr (platform::is_gpu) {
                     printf("[GPU ERROR]: DEFERENCING NULL POINTER\n");
                 }
                 else {

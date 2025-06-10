@@ -6,7 +6,7 @@
 #define DIST_ARRAY_HPP
 
 #include "array_view.hpp"
-#include "build_options.hpp"
+#include "config.hpp"
 #include <initializer_list>
 #include <vector>
 

@@ -50,7 +50,7 @@
 #ifndef ARRAY_VIEW_HPP
 #define ARRAY_VIEW_HPP
 
-#include "build_options.hpp"               // for DUAL, real
+#include "config.hpp"                      // for DUAL, real
 #include "core/managers/array_props.hpp"   // for array_properties
 #include "core/traits.hpp"                 // for is_maybe_v, has_value_type
 #include "core/types/utility/operation_traits.hpp"   // for OperationTraits, StencilOp

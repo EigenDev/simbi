@@ -49,7 +49,7 @@
 #ifndef ALPHA_HPP
 #define ALPHA_HPP
 
-#include "build_options.hpp"
+#include "config.hpp"
 
 namespace simbi {
     namespace ct {

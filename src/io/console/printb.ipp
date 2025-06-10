@@ -123,8 +123,8 @@ namespace simbi {
                 }
                 else {
                     width_str = "";
-                    std::cout << getColorCode(C) << ch
-                              << getColorCode(Color::RESET);
+                    std::cout << get_color_code(C) << ch
+                              << get_color_code(Color::RESET);
                 }
                 cidx++;
             }

@@ -2,7 +2,7 @@
 #define VECTOR_HPP
 
 #include "array.hpp"
-#include "build_options.hpp"
+#include "config.hpp"
 #include "core/functional/fp.hpp"
 #include "core/types/monad/maybe.hpp"
 #include "core/types/utility/enums.hpp"

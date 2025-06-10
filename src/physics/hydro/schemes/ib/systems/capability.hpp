@@ -49,7 +49,7 @@
 #ifndef CAPABILITY_HPP
 #define CAPABILITY_HPP
 
-#include "build_options.hpp"
+#include "config.hpp"
 #include "core/types/utility/enums.hpp"
 #include <cstdint>
 

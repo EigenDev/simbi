@@ -1,5 +1,5 @@
 #include "state.hpp"
-#include "build_options.hpp"
+#include "config.hpp"
 #include "core/types/containers/ndarray.hpp"
 #include "physics/hydro/states/newt.hpp"
 #include "physics/hydro/states/rmhd.hpp"

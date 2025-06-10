@@ -50,7 +50,7 @@
 #ifndef DEVICE_OPERATORS_HPP
 #define DEVICE_OPERATORS_HPP
 
-#include "build_options.hpp"
+#include "config.hpp"
 #include "core/traits.hpp"
 #include "util/tools/helpers.hpp"   // for unravel_idx
 #include <tuple>
@@ -149,8 +149,12 @@ namespace simbi {
             };
         }
         template <size_t... Is>
-        DEV void
-        apply_stencil_op(typename MainView::template device_stencil_view<main_t>& center_view, size_type idx, std::index_sequence<Is...>)
+        DEV void apply_stencil_op(
+            typename MainView::template device_stencil_view<main_t>&
+                center_view,
+            size_type idx,
+            std::index_sequence<Is...>
+        )
         {
             center_view.value() =
                 op_(center_view, create_dependent_view<Is>(idx)...);

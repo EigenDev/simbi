@@ -49,7 +49,7 @@
 #ifndef EMF_FIELD_HPP
 #define EMF_FIELD_HPP
 
-#include "build_options.hpp"
+#include "config.hpp"
 #include "core/types/containers/vector_field.hpp"
 #include "core/types/utility/enums.hpp"
 #include "physics/hydro/schemes/ct/ct_calculator.hpp"

@@ -49,8 +49,8 @@
 #ifndef BODY_SYSTEM_OPERATIONS_HPP
 #define BODY_SYSTEM_OPERATIONS_HPP
 
-#include "build_options.hpp"           // for real, size_type, Dims
 #include "component_body_system.hpp"   // for ComponentBodySystem
+#include "config.hpp"                  // for real, size_type, Dims
 #include "physics/hydro/schemes/ib/delta/collector.hpp"
 #include "physics/hydro/schemes/ib/policies/interaction_functions.hpp"   // for apply_gravitational_force, apply_accretion_effect
 #include "physics/hydro/schemes/ib/processing/lazy.hpp"   // for LazyCapabilityView

@@ -49,7 +49,7 @@
 #ifndef IO_MANAGER_HPP
 #define IO_MANAGER_HPP
 
-#include "build_options.hpp"
+#include "config.hpp"
 #include "core/managers/solver_manager.hpp"   // for SolverManager
 #include "core/types/containers/vector.hpp"
 #include "core/types/utility/init_conditions.hpp"   // for InitialConditions
@@ -94,8 +94,8 @@ namespace simbi {
     template <size_type D, typename... Args>
     concept ValidSourceParams = requires(Args... args) {
         requires sizeof...(Args) == D + 2;
-        requires(std::convertible_to<std::remove_reference_t<Args>, real> && ...
-                ) ||
+        requires(std::convertible_to<std::remove_reference_t<Args>, real> &&
+                 ...) ||
                     (std::is_pointer_v<std::tuple_element_t<
                          sizeof...(Args) - 1,
                          std::tuple<std::remove_reference_t<Args>...>>>);
@@ -444,9 +444,9 @@ namespace simbi {
         {
             if (init.bx1_inner_expressions.size() > 0) {
                 // load the expressions :)))
-                auto [node, indices, params] =
-                    expression::load_expression_data(init.bx1_inner_expressions
-                    );
+                auto [node, indices, params] = expression::load_expression_data(
+                    init.bx1_inner_expressions
+                );
                 bx1_inner_expr_nodes_        = std::move(node);
                 bx1_inner_output_indices_    = std::move(indices);
                 bx1_inner_parameters_        = std::move(params);
@@ -454,9 +454,9 @@ namespace simbi {
             }
             if (init.bx1_outer_expressions.size() > 0) {
                 // load the expressions :)))
-                auto [node, indices, params] =
-                    expression::load_expression_data(init.bx1_outer_expressions
-                    );
+                auto [node, indices, params] = expression::load_expression_data(
+                    init.bx1_outer_expressions
+                );
                 bx1_outer_expr_nodes_        = std::move(node);
                 bx1_outer_output_indices_    = std::move(indices);
                 bx1_outer_parameters_        = std::move(params);
@@ -465,9 +465,9 @@ namespace simbi {
 
             if (init.bx2_inner_expressions.size() > 0) {
                 // load the expressions :)))
-                auto [node, indices, params] =
-                    expression::load_expression_data(init.bx2_inner_expressions
-                    );
+                auto [node, indices, params] = expression::load_expression_data(
+                    init.bx2_inner_expressions
+                );
                 bx2_inner_expr_nodes_        = std::move(node);
                 bx2_inner_output_indices_    = std::move(indices);
                 bx2_inner_parameters_        = std::move(params);
@@ -475,9 +475,9 @@ namespace simbi {
             }
             if (init.bx2_outer_expressions.size() > 0) {
                 // load the expressions :)))
-                auto [node, indices, params] =
-                    expression::load_expression_data(init.bx2_outer_expressions
-                    );
+                auto [node, indices, params] = expression::load_expression_data(
+                    init.bx2_outer_expressions
+                );
                 bx2_outer_expr_nodes_        = std::move(node);
                 bx2_outer_output_indices_    = std::move(indices);
                 bx2_outer_parameters_        = std::move(params);
@@ -486,9 +486,9 @@ namespace simbi {
 
             if (init.bx3_inner_expressions.size() > 0) {
                 // load the expressions :)))
-                auto [node, indices, params] =
-                    expression::load_expression_data(init.bx3_inner_expressions
-                    );
+                auto [node, indices, params] = expression::load_expression_data(
+                    init.bx3_inner_expressions
+                );
                 bx3_inner_expr_nodes_        = std::move(node);
                 bx3_inner_output_indices_    = std::move(indices);
                 bx3_inner_parameters_        = std::move(params);
@@ -496,9 +496,9 @@ namespace simbi {
             }
             if (init.bx3_outer_expressions.size() > 0) {
                 // load the expressions :)))
-                auto [node, indices, params] =
-                    expression::load_expression_data(init.bx3_outer_expressions
-                    );
+                auto [node, indices, params] = expression::load_expression_data(
+                    init.bx3_outer_expressions
+                );
                 bx3_outer_expr_nodes_        = std::move(node);
                 bx3_outer_output_indices_    = std::move(indices);
                 bx3_outer_parameters_        = std::move(params);

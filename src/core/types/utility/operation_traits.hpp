@@ -50,7 +50,7 @@
 #ifndef OPERATION_TRAITS_HPP
 #define OPERATION_TRAITS_HPP
 
-#include "build_options.hpp"
+#include "config.hpp"
 #include "core/traits.hpp"
 #include "device_operations.hpp"
 #include "util/parallel/parallel_for.hpp"
@@ -91,7 +91,7 @@ namespace simbi {
         static void
         execute(T* data, F op, const Policy& policy, Arrays*... arrays)
         {
-            if constexpr (global::on_gpu) {
+            if constexpr (platform::is_gpu) {
                 DeviceOperator<F, T, Arrays...> device_op(op, data, arrays...);
                 parallel_for(policy, [=] DEV(size_type ii) mutable {
                     device_op(ii);
@@ -112,7 +112,7 @@ namespace simbi {
         static void
         execute(T* data, F op, const Policy& policy, Arrays*... arrays)
         {
-            if constexpr (global::on_gpu) {
+            if constexpr (platform::is_gpu) {
                 DeviceOperator<F, T, Arrays...> device_op(op, data, arrays...);
                 parallel_for(policy, [=] DEV(size_type ii) mutable {
                     device_op(ii);
@@ -143,7 +143,7 @@ namespace simbi {
         {
             // get underlying raw type from main view
             using main_t = typename MainView::raw_type;
-            if constexpr (global::on_gpu) {
+            if constexpr (platform::is_gpu) {
                 // TODO: Implement GPU version
                 DeviceStencilOperator<F, MainView, DependentViews...> device_op(
                     op,

@@ -49,7 +49,7 @@
 #ifndef STENCIL_HPP
 #define STENCIL_HPP
 
-#include "build_options.hpp"              // for global::on_gpu
+#include "config.hpp"                     // for platform::is_gpu
 #include "core/types/alias/alias.hpp"     // for uarray
 #include "core/types/utility/enums.hpp"   // for Dir, Plane
 
@@ -178,8 +178,8 @@ namespace simbi {
                 // Base indices for cell-centers relative to corner
                 constexpr int base_i = (is_east ? 0 : -1);
                 constexpr int base_j =
-                    ((P == Plane::JK) ? (is_east ? 0 : -1) : (is_north ? 0 : -1)
-                    );
+                    ((P == Plane::JK) ? (is_east ? 0 : -1)
+                                      : (is_north ? 0 : -1));
                 constexpr int base_k = (is_north ? 0 : -1);
 
                 if constexpr (P == Plane::IJ) {

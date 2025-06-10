@@ -1,7 +1,7 @@
 #ifndef CONFIG_DICT_HPP
 #define CONFIG_DICT_HPP
 
-#include "build_options.hpp"   // for real, luint, global::managed_memory, use
+#include "config.hpp"   // for real, luint, global::managed_memory, use
 #include "core/types/containers/vector.hpp"   // for spatial_vector_t
 #include "enums.hpp"
 #include <cstdint>
@@ -97,7 +97,8 @@ namespace simbi {
         }
         bool is_nested_array_of_floats() const
         {
-            return std::holds_alternative<std::vector<std::vector<real>>>(value
+            return std::holds_alternative<std::vector<std::vector<real>>>(
+                value
             );
         }
         bool is_dict() const

@@ -19,11 +19,11 @@
 #ifndef FUNCTIONAL_PROGRAMMING_HPP
 #define FUNCTIONAL_PROGRAMMING_HPP
 
-#include "build_options.hpp"
+#include "adapter/device_adapter_api.hpp"
+#include "config.hpp"
 #include "core/types/containers/ndarray.hpp"
 #include "core/types/utility/enums.hpp"
 #include "util/parallel/exec_policy.hpp"
-#include "util/tools/device_api.hpp"
 #include <concepts>
 #include <functional>
 #include <type_traits>
@@ -308,7 +308,7 @@ namespace simbi::fp {
     template <typename T, typename F>
     T reduce(const ExecutionPolicy<>& policy, T init, F&& reduce_op)
     {
-        if constexpr (global::on_gpu) {
+        if constexpr (platform::is_gpu) {
             ndarray<T> result(1, init);
             result.sync_to_device();
             auto result_ptr      = result.data();
@@ -337,7 +337,7 @@ namespace simbi::fp {
 
                 // write block result to global memory
                 if (tid == 0) {
-                    gpu::api::atomicMin(&result_ptr[0], shared_data[0]);
+                    gpu::api::atomic_min(&result_ptr[0], shared_data[0]);
                 }
             });
 

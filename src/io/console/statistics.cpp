@@ -1,5 +1,5 @@
 #include "io/console/statistics.hpp"
-#include "build_options.hpp"
+#include "config.hpp"
 #include "io/tabulate/table.hpp"
 #include <iomanip>
 #include <iostream>
@@ -8,8 +8,8 @@
 #include <vector>
 
 // we'll need to check if GPU code is enabled
-#if GPU_CODE
-#include "util/tools/device_api.hpp"
+#if GPU_ENABLED
+#include "adapter/device_adapter_api.hpp"
 real gpu_theoretical_bw = 1.0;
 #endif
 
@@ -498,7 +498,7 @@ namespace simbi {
                 memory_table.print();
             }
 
-#if GPU_CODE
+#if GPU_ENABLED
             std::cout << std::endl;
 
             // GPU information table
@@ -508,7 +508,7 @@ namespace simbi {
                 gpu_table.set_title("GPU Information");
 
                 int dev_count;
-                gpu::api::getDeviceCount(&dev_count);
+                gpu::api::get_device_count(&dev_count);
 
                 if (dev_count == 0) {
                     // set table header for no GPU case
@@ -525,8 +525,8 @@ namespace simbi {
 
                     // we'll show info for the first GPU (can be extended to
                     // multiple)
-                    devProp_t props;
-                    gpu::api::getDeviceProperties(&props, 0);
+                    adapter::device_properties_t<> props;
+                    gpu::api::get_device_properties(&props, 0);
 
                     // add GPU details
                     gpu_table.add_row({"Device Name", props.name});

@@ -50,7 +50,7 @@
 #ifndef BINARY_HPP
 #define BINARY_HPP
 
-#include "build_options.hpp"
+#include "config.hpp"
 #include "core/types/containers/vector.hpp"
 #include "physics/hydro/schemes/ib/systems/body.hpp"
 #include "physics/hydro/schemes/ib/systems/component_body_system.hpp"
@@ -108,7 +108,7 @@ namespace simbi::ibsystem::body_functions {
             }
             else {
                 // TODO: implement eccentric orbits
-                if constexpr (global::on_gpu) {
+                if constexpr (platform::is_gpu) {
                     printf("Non-circular orbits not yet implemented\n");
                     return {
                       spatial_vector_t<T, Dims>(),

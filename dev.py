@@ -535,7 +535,7 @@ def check_minimal_dependencies() -> None:
             sys.exit(1)
 
     # Check for Python dependencies
-    python_deps = ["meson", "numpy", "pybind11", "cogapp"]
+    python_deps = ["meson", "numpy", "pybind11"]
 
     def check_import(dep: str) -> bool:
         try:
@@ -669,32 +669,6 @@ def merge_cached_config(
                 setattr(args, arg, cached_vars[arg])
 
     return args
-
-
-def generate_build_options(args: argparse.Namespace) -> None:
-    """Generate build options from configuration."""
-    try:
-        run_subprocess(
-            [
-                "cog",
-                "-d",
-                "-o",
-                "build_options.hpp.in",
-                "code_gen/build_options.hpp.in.cog",
-            ],
-            env={
-                **os.environ,
-                "GPU_ENABLED": str(args.gpu_compilation == "enabled"),
-                "GPU_PLATFORM": args.gpu_platform.upper(),
-            },
-            check=True,
-            capture=True,
-        )
-    except subprocess.CalledProcessError as e:
-        logger.error("cog failed to generate build_options.hpp.in")
-        if hasattr(e, "stderr"):
-            logger.error(e.stderr)
-        sys.exit(1)
 
 
 def validate_configuration(args: argparse.Namespace) -> argparse.Namespace:
@@ -1062,9 +1036,6 @@ def build_simbi(args: argparse.Namespace) -> tuple[str, str]:
     # Check dependencies and validate config
     check_minimal_dependencies()
     args = validate_configuration(args)
-
-    # Generate build options
-    generate_build_options(args)
 
     # Prepare the environment
     safe_path_operations(simbi_dir)

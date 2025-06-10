@@ -49,9 +49,10 @@
 #ifndef MANAGED_HPP
 #define MANAGED_HPP
 
-#include "build_options.hpp"           // for global::managed_memory
-#include "util/tools/device_api.hpp"   // for deviceSynch, gpuFree, gpuMallocManaged
-#include <cstddef>                     // for size_t
+#include "adapter/device_adapter_api.hpp"   // for deviceSynch, gpuFree, gpuMallocManaged
+#include "adapter/device_types.hpp"
+#include "config.hpp"   // for global::managed_memory
+#include <cstddef>      // for size_t
 
 namespace simbi {
     template <bool gpu_managed = global::managed_memory>
@@ -66,8 +67,8 @@ namespace simbi {
         {
             if constexpr (gpu_managed) {
                 void* ptr = nullptr;
-                gpu::api::mallocManaged(&ptr, len);
-                gpu::api::deviceSynch();
+                gpu::api::malloc_managed(&ptr, len);
+                gpu::api::device_synch();
                 return ptr;
             }
             return ::operator new(len);
@@ -76,7 +77,7 @@ namespace simbi {
         static constexpr void operator delete(void* ptr) noexcept
         {
             if constexpr (gpu_managed) {
-                gpu::api::deviceSynch();
+                gpu::api::device_synch();
                 gpu::api::free(ptr);
             }
             else {
@@ -89,8 +90,8 @@ namespace simbi {
         {
             if constexpr (gpu_managed) {
                 void* ptr = nullptr;
-                gpu::api::mallocManaged(&ptr, len);
-                gpu::api::deviceSynch();
+                gpu::api::malloc_managed(&ptr, len);
+                gpu::api::device_synch();
                 return ptr;
             }
             return ::operator new[](len);
@@ -99,7 +100,7 @@ namespace simbi {
         static constexpr void operator delete[](void* ptr) noexcept
         {
             if constexpr (gpu_managed) {
-                gpu::api::deviceSynch();
+                gpu::api::device_synch();
                 gpu::api::free(ptr);
             }
             else {
@@ -112,7 +113,7 @@ namespace simbi {
         operator delete(void* ptr, std::size_t size) noexcept
         {
             if constexpr (gpu_managed) {
-                gpu::api::deviceSynch();
+                gpu::api::device_synch();
                 gpu::api::free(ptr);
             }
             else {
@@ -125,7 +126,7 @@ namespace simbi {
         operator delete[](void* ptr, std::size_t size) noexcept
         {
             if constexpr (gpu_managed) {
-                gpu::api::deviceSynch();
+                gpu::api::device_synch();
                 gpu::api::free(ptr);
             }
             else {
@@ -148,11 +149,11 @@ namespace simbi {
         void prefetch_to_device(int device = 0) const
         {
             if constexpr (gpu_managed) {
-                simbiStream_t stream;
-                gpu::api::streamCreate(&stream);
-                gpu::api::prefetchToDevice(this, sizeof(*this), device);
-                gpu::api::streamSynchronize(stream);
-                gpu::api::streamDestroy(stream);
+                adapter::stream_t<> stream;
+                gpu::api::stream_create(&stream);
+                gpu::api::prefetch_to_device(this, sizeof(*this), device);
+                gpu::api::stream_synchronize(stream);
+                gpu::api::stream_destroy(stream);
             }
         }
     };

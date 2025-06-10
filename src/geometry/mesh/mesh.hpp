@@ -48,8 +48,8 @@
  */
 #ifndef MESH_HPP
 #define MESH_HPP
-#include "build_options.hpp"
 #include "cell.hpp"
+#include "config.hpp"
 #include "geometry_manager.hpp"
 #include "grid_manager.hpp"
 #include "util/tools/helpers.hpp"

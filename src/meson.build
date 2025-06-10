@@ -2,7 +2,6 @@
 sources = files(
     'util/tools/helpers.cpp',
     'io/exceptions.cpp',
-    'util/tools/device_api.cpp',
     'util/math/exp_load.cpp',
     'util/math/evaluator.cpp',
     'util/math/linearize.cpp',
@@ -20,7 +19,6 @@ headers = files(
     'physics/hydro/states/srhd.hpp',
     'physics/hydro/states/newt.hpp',
     'physics/hydro/states/rmhd.hpp',
-    'util/tools/device_api.hpp',
     'util/parallel/exec_policy.hpp',
     'util/parallel/kernel.hpp',
     'util/parallel/launch.hpp',

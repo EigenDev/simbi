@@ -49,7 +49,7 @@
 #ifndef BASE_HPP
 #define BASE_HPP
 
-#include "build_options.hpp"   // for real, luint, global::managed_memory, use...
+#include "config.hpp"   // for real, luint, global::managed_memory, use...
 #include "core/functional/fp.hpp"
 #include "core/managers/boundary_manager.hpp"      // for boundary_manager
 #include "core/managers/exec_policy_manager.hpp"   // for ExecutionPolicy
@@ -105,7 +105,7 @@ namespace simbi {
             adapt_dt();
 
             // main simulation loop
-            detail::logger::with_logger(derived, tend(), [&] {
+            io::logger::with_logger(derived, tend(), [&] {
                 // single timestep advance
                 advance_system();
 

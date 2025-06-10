@@ -50,6 +50,7 @@
 #ifndef EXEC_POLICY_MANAGER_HPP
 #define EXEC_POLICY_MANAGER_HPP
 
+#include "adapter/device_types.hpp"
 #include "core/types/utility/init_conditions.hpp"   // for InitialConditions
 #include "geometry/mesh/grid_manager.hpp"           // for GridManager
 #include "util/parallel/exec_policy.hpp"            // for ExecutionPolicy
@@ -66,7 +67,7 @@ namespace simbi {
         ExecutionPolicy<> xvertex_policy_, yvertex_policy_, zvertex_policy_;
         ExecutionPolicy<> fullxvertex_policy_, fullyvertex_policy_,
             fullzvertex_policy_;
-        std::vector<simbiStream_t> streams_;
+        std::vector<adapter::stream_t<>> streams_;
         std::vector<int> devices_;
 
         // GPU configuration methods
@@ -92,9 +93,9 @@ namespace simbi {
 
         void setup_multi_gpu(const InitialConditions& init)
         {
-            if constexpr (global::on_gpu) {
+            if constexpr (platform::is_gpu) {
                 int device_count;
-                gpu::api::getDeviceCount(&device_count);
+                gpu::api::get_device_count(&device_count);
 
                 // grab the requested devices from environment or use all
                 // available
@@ -109,14 +110,14 @@ namespace simbi {
                 // create streams per device
                 streams_.resize(devices_.size());
                 for (size_t i = 0; i < devices_.size(); i++) {
-                    gpu::api::setDevice(devices_[i]);
-                    gpu::api::streamCreate(&streams_[i]);
+                    gpu::api::set_device(devices_[i]);
+                    gpu::api::stream_create(&streams_[i]);
 
                     // enable peer access if configured
                     if (init.enable_peer_access) {
                         for (int j = 0; j < devices_.size(); j++) {
                             if (i != j) {
-                                gpu::api::enablePeerAccess(devices_[j]);
+                                gpu::api::enable_peer_access(devices_[j]);
                             }
                         }
                     }
@@ -169,8 +170,8 @@ namespace simbi {
             auto yblockdim = std::min(grid.active_gridsize(1), gpu_block_dimy_);
             auto zblockdim = std::min(grid.active_gridsize(2), gpu_block_dimz_);
 
-            if constexpr (global::on_gpu) {
-                if (xblockdim * yblockdim * zblockdim < global::WARP_SIZE) {
+            if constexpr (platform::is_gpu) {
+                if (xblockdim * yblockdim * zblockdim < constants::warp_size) {
                     // even if we are doing 2D or 3D runs, sometimes the symmery
                     // means that one or more of the dimensions collapses, so
                     // we place most of the threads along the effective

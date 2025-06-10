@@ -49,8 +49,8 @@
 #ifndef BODY_HPP
 #define BODY_HPP
 
-#include "build_options.hpp"
 #include "capability.hpp"
+#include "config.hpp"
 #include "core/types/containers/vector.hpp"
 #include "core/types/monad/maybe.hpp"
 
@@ -344,27 +344,31 @@ namespace simbi::ibsystem {
 
         DUAL T accretion_rate() const
         {
-            return accretion.map([](const auto& a) { return a.accretion_rate; }
+            return accretion.map(
+                                [](const auto& a) { return a.accretion_rate; }
             ).unwrap_or(T(0));
         }
 
         // elastic
         DUAL T elastic_modulus() const
         {
-            return elastic.map([](const auto& e) { return e.elastic_modulus; }
+            return elastic.map(
+                              [](const auto& e) { return e.elastic_modulus; }
             ).unwrap_or(T(0));
         }
 
         DUAL T poisson_ratio() const
         {
-            return elastic.map([](const auto& e) { return e.poisson_ratio; }
+            return elastic.map(
+                              [](const auto& e) { return e.poisson_ratio; }
             ).unwrap_or(T(0));
         }
 
         // deformable
         DUAL T yield_stress() const
         {
-            return deformable.map([](const auto& d) { return d.yield_stress; }
+            return deformable.map(
+                                 [](const auto& d) { return d.yield_stress; }
             ).unwrap_or(T(0));
         }
 
@@ -378,13 +382,15 @@ namespace simbi::ibsystem {
         // rigid
         DUAL T inertia() const
         {
-            return rigid.map([](const auto& r) { return r.inertia; }
+            return rigid.map(
+                            [](const auto& r) { return r.inertia; }
             ).unwrap_or(T(0));
         }
 
         DUAL bool apply_no_slip() const
         {
-            return rigid.map([](const auto& r) { return r.apply_no_slip; }
+            return rigid.map(
+                            [](const auto& r) { return r.apply_no_slip; }
             ).unwrap_or(false);
         }
     };

@@ -49,7 +49,7 @@
 #ifndef TIME_MANAGER_HPP
 #define TIME_MANAGER_HPP
 
-#include "build_options.hpp"
+#include "config.hpp"
 #include "core/types/utility/init_conditions.hpp"
 namespace simbi {
     class TimeManager

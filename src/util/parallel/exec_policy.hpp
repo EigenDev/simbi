@@ -49,9 +49,10 @@
 #ifndef EXEC_POLICY_HPP
 #define EXEC_POLICY_HPP
 
-#include "build_options.hpp"   // for dim3, luint, global::col_maj, simbiStream_t
+#include "adapter/device_adapter_api.hpp"   // for api::set_device
+#include "adapter/device_types.hpp"
+#include "config.hpp"                        // luint, global::col_maj,
 #include "core/types/containers/array.hpp"   // for array
-#include "util/tools/device_api.hpp"         // for api::setDevice
 #include <exception>                         // for exception
 #include <vector>                            // for vector
 
@@ -59,6 +60,7 @@ struct ExecutionException : public std::exception {
     const char* what() const throw() { return "Invalid constructor args"; }
 };
 
+using namespace simbi::adapter;
 namespace simbi {
 
     enum class MemoryType {
@@ -73,27 +75,27 @@ namespace simbi {
     };
 
     struct ExecutionPolicyConfig {
-        size_type shared_mem_bytes         = 0;
-        std::vector<simbiStream_t> streams = {};
-        std::vector<int> devices           = {0};
-        size_type batch_size               = 1024;
-        size_type min_elements_per_thread  = 1;
-        bool enable_peer_access            = true;
-        size_type halo_radius              = 2;
-        MemoryType memory_type             = MemoryType::DEVICE;
-        HaloExchangeMode halo_mode         = HaloExchangeMode::ASYNC;
+        size_type shared_mem_bytes               = 0;
+        std::vector<adapter::stream_t<>> streams = {};
+        std::vector<int> devices                 = {0};
+        size_type batch_size                     = 1024;
+        size_type min_elements_per_thread        = 1;
+        bool enable_peer_access                  = true;
+        size_type halo_radius                    = 2;
+        MemoryType memory_type                   = MemoryType::DEVICE;
+        HaloExchangeMode halo_mode               = HaloExchangeMode::ASYNC;
     };
 
     template <typename T = luint, typename U = luint>
     struct ExecutionPolicy {
         T nzones;
-        dim3 grid_size;
-        dim3 block_size;
+        adapter::types::dim3 grid_size;
+        adapter::types::dim3 block_size;
         size_type shared_mem_bytes;
-        std::vector<simbiStream_t> streams;
+        std::vector<adapter::stream_t<>> streams;
         std::vector<int> devices;
         T nzones_per_device;
-        std::vector<dim3> device_grid_sizes;
+        std::vector<adapter::types::dim3> device_grid_sizes;
         size_type batch_size;
         size_type min_elements_per_thread;
         ExecutionPolicyConfig config;
@@ -219,18 +221,24 @@ namespace simbi {
 
             // Set block size based on input
             if (block_list.size() == 1) {
-                block_size = dim3(block_list[0]);
+                block_size = adapter::types::dim3(block_list[0]);
             }
             else if (block_list.size() == 2) {
                 if constexpr (global::col_major) {
-                    block_size = dim3(block_list[1], block_list[0]);
+                    block_size =
+                        adapter::types::dim3(block_list[1], block_list[0]);
                 }
                 else {
-                    block_size = dim3(block_list[0], block_list[1]);
+                    block_size =
+                        adapter::types::dim3(block_list[0], block_list[1]);
                 }
             }
             else if (block_list.size() == 3) {
-                block_size = dim3(block_list[0], block_list[1], block_list[2]);
+                block_size = adapter::types::dim3(
+                    block_list[0],
+                    block_list[1],
+                    block_list[2]
+                );
             }
 
             // Calculate grid size per device
@@ -240,8 +248,9 @@ namespace simbi {
                                   : nzones_per_device;
 
                 if (grid_list.size() == 1) {
-                    device_grid_sizes[dev] =
-                        dim3((dev_zones + block_size.x - 1) / block_size.x);
+                    device_grid_sizes[dev] = adapter::types::dim3(
+                        (dev_zones + block_size.x - 1) / block_size.x
+                    );
                 }
                 else if (grid_list.size() == 2) {
                     // Handle 2D case considering column/row major ordering
@@ -250,10 +259,12 @@ namespace simbi {
                     luint nyBlocks =
                         (grid_list[1] + block_size.y - 1) / block_size.y;
                     if constexpr (global::col_major) {
-                        device_grid_sizes[dev] = dim3(nyBlocks, nxBlocks);
+                        device_grid_sizes[dev] =
+                            adapter::types::dim3(nyBlocks, nxBlocks);
                     }
                     else {
-                        device_grid_sizes[dev] = dim3(nxBlocks, nyBlocks);
+                        device_grid_sizes[dev] =
+                            adapter::types::dim3(nxBlocks, nyBlocks);
                     }
                 }
                 else if (grid_list.size() == 3) {
@@ -264,7 +275,8 @@ namespace simbi {
                         (grid_list[1] + block_size.y - 1) / block_size.y;
                     luint nzBlocks =
                         (grid_list[2] + block_size.z - 1) / block_size.z;
-                    device_grid_sizes[dev] = dim3(nxBlocks, nyBlocks, nzBlocks);
+                    device_grid_sizes[dev] =
+                        adapter::types::dim3(nxBlocks, nyBlocks, nzBlocks);
                 }
             }
 
@@ -272,18 +284,18 @@ namespace simbi {
             this->grid_size = device_grid_sizes[0];
         }
 
-        dim3 get_device_grid_size(int device) const
+        adapter::types::dim3 get_device_grid_size(int device) const
         {
             if (device < device_grid_sizes.size()) {
                 return device_grid_sizes[device];
             }
-            return dim3(0);
+            return adapter::types::dim3(0);
         }
 
         bool switch_to_device(int device) const
         {
             if (device < devices.size()) {
-                gpu::api::setDevice(device);
+                gpu::api::set_device(device);
                 // this->grid_size = device_grid_sizes[device];
                 return true;
             }
@@ -293,7 +305,7 @@ namespace simbi {
         void set_device(int device)
         {
             this->devices = {device};
-            gpu::api::setDevice(device);
+            gpu::api::set_device(device);
         }
 
         void set_devices(const std::vector<int>& devices)
@@ -301,18 +313,21 @@ namespace simbi {
             this->devices = devices;
         }
 
-        void add_stream(simbiStream_t stream) { streams.push_back(stream); }
+        void add_stream(adapter::stream_t<> stream)
+        {
+            streams.push_back(stream);
+        }
 
         void synchronize() const
         {
             for (const auto& stream : streams) {
-                gpu::api::streamSynchronize(stream);
+                gpu::api::stream_synchronize(stream);
             }
         }
 
         void optimize_batch_size()
         {
-            if constexpr (global::on_gpu) {
+            if constexpr (platform::is_gpu) {
                 const size_t threads_per_block =
                     block_size.x * block_size.y * block_size.z;
                 batch_size = threads_per_block * min_elements_per_thread;

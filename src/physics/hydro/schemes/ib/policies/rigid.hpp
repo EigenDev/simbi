@@ -18,7 +18,7 @@
 #ifndef RIGID_HPP
 #define RIGID_HPP
 
-#include "build_options.hpp"
+#include "config.hpp"
 #include "geometry/mesh/cell.hpp"
 #include "physics/hydro/schemes/ib/delta/body_delta.hpp"
 #include "physics/hydro/schemes/ib/systems/body.hpp"

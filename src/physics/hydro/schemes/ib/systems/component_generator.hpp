@@ -49,7 +49,7 @@
 #ifndef COMPONENT_GENERATOR_HPP
 #define COMPONENT_GENERATOR_HPP
 
-#include "build_options.hpp"
+#include "config.hpp"
 #include "core/functional/fp.hpp"
 #include "core/types/utility/config_dict.hpp"
 #include "core/types/utility/enums.hpp"

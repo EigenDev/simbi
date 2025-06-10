@@ -8,7 +8,7 @@ foreach inc : include_dirs
 endforeach
 
 gpu_flags = [
-    '-DGPU_CODE=1',
+    '-DGPU_ENABLED=1',
     '-DMANAGED_MEMORY',
 ]
 
@@ -41,6 +41,7 @@ gpu_settings = {
             '-std=c++20',
             '--compiler-options',
             '-fPIC',
+            '-DCUDA_ENABLED',
         ],
         'link_args': [f'-L@cuda_root@/lib64','-lcudart'],
         'inter_link_args': ['-dlink', '-Xcompiler', '-fPIC'],
@@ -50,7 +51,7 @@ gpu_settings = {
     'amd': {
         'compiler': 'hipcc',
         'arch': gpu_arch,
-        'args': ['-fPIC'] + gpu_arch.split(' '),
+        'args': ['-fPIC'] + gpu_arch.split(' ') + ['-DHIP_ENABLED'],
         'link_args': [f'-L@rocm_path@/lib','-lamdhip64'],
         'inter_link_args': [],
         'extra_link_args': [],
