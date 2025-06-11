@@ -26,7 +26,7 @@
 ---
 
 > [!NOTE]
-> **Research Impact**: SIMBI powers breakthrough research published in *The Astrophysical Journal* and *The Astrophysical Journal Letters*, enabling discoveries in relativistic jets, stellar explosions, and magnetized plasma dynamics at Princeton University, NYU, and institutions worldwide.
+> **Research Impact**: SIMBI powers breakthrough research published in *The Astrophysical Journal* and *The Astrophysical Journal Letters*, studying topics related to science in relativistic jets, stellar explosions, and magnetized plasma dynamics.
 
 ## ★ Overview
 
