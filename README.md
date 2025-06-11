@@ -122,6 +122,8 @@
 
 - **Compiler**: gcc ≥ 8 or clang ≥ 10 (C++20)
 - **Python**: Version ≥ 3.10
+- **Environment Management** (recommended):
+  - [uv](https://github.com/astral-sh/uv) - fast, reliable Python package manager
 - **Build Systems**:
   - [Meson](https://mesonbuild.com)
   - [Ninja](https://ninja-build.org)
@@ -162,6 +164,23 @@
 </table>
 
 ## 📦 Installation
+<details>
+<summary><b>🚀 Recommended: Installing UV</b></summary>
+
+For the best experience with SIMBI, we recommend installing UV first:
+
+```bash
+# Install UV (Unix-like systems)
+curl -sSf https://install.astral.sh | sh
+
+# Or with pip
+pip install uv
+```
+
+UV significantly improves dependency resolution and installation speed. Learn more at the [UV project page](https://github.com/astral-sh/uv).
+
+When UV is installed, SIMBI will automatically detect and use it for dependency management.
+</details>
 
 <div align="center">
 
@@ -250,7 +269,11 @@ CC=<your_c_compiler> CXX=<your_cpp_compiler> python dev.py install --gpu-compila
 <td>
 
 ```bash
-# Full path
+# Using UV (recommended)
+uv run simbi run marti_muller \
+  --mode gpu --resolution 100 --adiabatic-index 1.4
+
+# Without UV --- Full path
 simbi run simbi_configs/examples/marti_muller.py \
   --mode gpu --resolution 100 --adiabatic-index 1.4
 
@@ -267,13 +290,13 @@ simbi run marti-muller \
 <td>
 
 ```bash
-# Plot specific fields
-simbi plot data/1000.chkpt.000_100.h5 \
+# Plot specific fields (UV recommended, not required)
+<Optional: uv run> simbi plot data/1000.chkpt.000_100.h5 \
   --setup "Marti \& Muller Problem 1" \
   --field rho v p
 
 # General format
-simbi plot <checkpoint_file> \
+<Optional: uv run> simbi plot <checkpoint_file> \
   --setup "<name_of_physics_setup>" \
   --field <field_string> [options]
 ```
@@ -283,7 +306,7 @@ simbi plot <checkpoint_file> \
 
 ```bash
 # Generate config template
-simbi generate --name <name_of_setup>
+<Optional: uv run> simbi generate --name <name_of_setup>
 ```
 
 This creates a skeleton configuration in the `simbi_configs` directory that you can customize to your needs.
@@ -296,6 +319,31 @@ This creates a skeleton configuration in the `simbi_configs` directory that you 
 <div align="left">
 <i>Note: <code>--mode</code>, <code>--resolution</code>, and <code>--adiabatic-index</code> are global CLI options, but if you define your own problem-specific options, it is import that their names do not clash with the global cli args. Run <code>simbi run &lt;problem&gt; --info</code> to print a help output that lists all of the available global CLI arguments.</i>
 </div>
+
+<div align="left">
+<i>Note: <code>--mode</code>, <code>--resolution</code>, and <code>--adiabatic-index</code> are global CLI options, but if you define your own problem-specific options, it is import that their names do not clash with the global cli args. Run <code>uv run simbi run &lt;problem&gt; --info</code> to print a help output that lists all of the available global CLI arguments.</i>
+</div>
+
+### 💡 Why UV?
+
+Using UV with SIMBI (`uv run simbi ...`) provides several advantages:
+- **Faster dependency resolution**: UV resolves and installs dependencies much faster than pip
+- **Reliable isolation**: Ensures your SIMBI environment doesn't conflict with other Python projects
+- **Reproducible environments**: Easier to recreate the exact same environment across systems
+- **Compatible with conda**: If you prefer conda, you can still use UV within conda environments
+
+If you don't use UV, ensure you activate your virtual environment before running SIMBI commands.
+
+### 💡 Pro Tip: Create aliases for common commands
+
+To reduce typing with UV, consider creating aliases in your shell:
+
+```bash
+# In your .bashrc, .zshrc, etc.
+alias simbi-run="uv run simbi run"
+alias simbi-plot="uv run simbi plot"
+alias simbi-generate="uv run simbi generate"
+```
 
 ## 🔬 Physics Features
 

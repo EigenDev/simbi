@@ -50,8 +50,6 @@ logger = logging.getLogger("simbi")
 # =================================================================
 # Functional Utilities
 # =================================================================
-
-
 def compose(*funcs):
     """Compose functions from right to left."""
     if not funcs:
@@ -101,8 +99,6 @@ def try_sequentially(funcs, fallback=None):
 # =================================================================
 # GPU Architecture Management
 # =================================================================
-
-
 def suggest_gpu_architectures(platform: str) -> str:
     """Suggest default GPU architectures based on platform."""
     if platform.lower() == "cuda":
@@ -177,8 +173,6 @@ def generate_gpu_arch_flags(arch_str: str, platform: str) -> str:
 # =================================================================
 # Core Utilities
 # =================================================================
-
-
 def setup_logging(verbose: bool = False) -> None:
     """Set up a proper logging system."""
     level = logging.DEBUG if verbose else logging.INFO
@@ -275,8 +269,6 @@ def confirm(prompt: str) -> bool:
 # =================================================================
 # File System Operations
 # =================================================================
-
-
 def safe_path_operations(simbi_dir: Path) -> None:
     """Create build directory and other paths safely."""
     lib_dir = simbi_dir / "simbi/libs"
@@ -319,8 +311,6 @@ def generate_home_locator(simbi_dir: Path) -> None:
 # =================================================================
 # Dependency Management
 # =================================================================
-
-
 def find_hdf5_include() -> str:
     """Robust method to find HDF5 include directory."""
     # Try different methods to find HDF5 include path
@@ -577,8 +567,6 @@ def check_minimal_dependencies() -> None:
 # =================================================================
 # Configuration Management
 # =================================================================
-
-
 def read_from_cache() -> Optional[dict[str, Any]]:
     """Read configuration from cache file."""
     cached_args = Path(CACHE_FILE)
@@ -744,12 +732,126 @@ def configure(
     ]
     return command
 
+#==================================================================
+# Streamlined Installation Process
+# ==================================================================
+def is_in_virtualenv() -> bool:
+    """Check if the current Python executable is in a virtual environment."""
+    return sys.prefix != sys.base_prefix
+
+def activate_virtualenv(venv_path: Path) -> str:
+    """
+    Modify the current process environment to "activate" a virtual environment.
+    This function updates PATH and other environment variables similar to what
+    the activate script does, but without needing to spawn a new shell.
+
+    Returns the path to the Python executable in the virtual environment.
+    """
+    venv_path = Path(venv_path).resolve()
+
+    if sys.platform == "win32":
+        bin_dir = venv_path / "Scripts"
+        lib_dir = venv_path / "Lib" / "site-packages"
+    else:
+        bin_dir = venv_path / "bin"
+        lib_dir = venv_path / "lib" / f"python{sys.version_info.major}.{sys.version_info.minor}" / "site-packages"
+
+    # Update PATH
+    os.environ["PATH"] = f"{bin_dir}{os.pathsep}{os.environ['PATH']}"
+
+    # Set VIRTUAL_ENV environment variable
+    os.environ["VIRTUAL_ENV"] = str(venv_path)
+
+    # Update Python path
+    sys.path.insert(0, str(lib_dir))
+
+    # Update sys.prefix and sys.exec_prefix
+    sys.prefix = sys.exec_prefix = str(venv_path)
+
+    logger.info(f"Activated virtual environment at {venv_path}")
+
+    return str(bin_dir / "python")
+
+def get_python_executable(venv_path: Path) -> str:
+    """Get the path to the Python executable in a virtual environment."""
+    if sys.platform == "win32":
+        return str(venv_path / "Scripts" / "python.exe")
+    else:
+        return str(venv_path / "bin" / "python")
+
+def install_python_dependencies(python_exec: Optional[str] = None) -> None:
+    """Install required Python dependencies using either UV or pip."""
+    dependencies = ["meson", "numpy", "pybind11", "wheel", "setuptools", "setuptools-scm"]
+
+    # Use either specified Python executable or current one
+    python_to_use = python_exec or sys.executable
+
+    logger.info(f"Installing Python dependencies: {', '.join(dependencies)}")
+
+    if is_tool("uv"):
+        logger.info("Using UV to install dependencies")
+        cmd = ["uv", "pip", "install"]
+        if python_exec:
+            cmd.extend(["--python", python_exec])
+        cmd.extend(dependencies)
+    else:
+        logger.info("Using pip to install dependencies")
+        cmd = [python_to_use, "-m", "pip", "install"] + dependencies
+
+    run_subprocess(cmd)
+    logger.info("Dependencies installed successfully")
+
+def check_and_setup_environment(args: argparse.Namespace) -> Optional[str]:
+    """
+    Check if we're in a virtual environment and set one up if needed.
+    This is a wrapper function that can be called before executing any command.
+
+    Returns the path to the Python executable if we're in a virtual environment,
+    or None if we're not or if setting up failed.
+    """
+    # If we're already in a venv, just return
+    if is_in_virtualenv():
+        logger.info("Already in a virtual environment.")
+        return None
+
+    # Default venv path
+    venv_path = Path(args.venv_path if hasattr(args, 'venv_path') else "./venv").resolve()
+
+    # Check if an existing venv exists
+    if venv_path.exists() and (venv_path / "pyvenv.cfg").exists():
+        logger.info(f"Found existing virtual environment at {venv_path}")
+        if confirm("Use existing virtual environment?"):
+            python_exec = get_python_executable(venv_path)
+            activate_virtualenv(venv_path)
+            install_python_dependencies(python_exec)
+            return python_exec
+
+    # Ask to create a new venv
+    if confirm("Would you like to create a virtual environment for simbi?"):
+        logger.info(f"Creating virtual environment at {venv_path}")
+        try:
+            if is_tool("uv"):
+                logger.info("Using UV to create virtual environment")
+                run_subprocess(["uv", "venv", str(venv_path)])
+            else:
+                logger.info("Using Python's built-in venv module")
+                import venv
+                venv.create(venv_path, with_pip=True)
+
+            python_exec = get_python_executable(venv_path)
+            activate_virtualenv(venv_path)
+            install_python_dependencies(python_exec)
+
+            return python_exec
+        except Exception as e:
+            logger.error(f"Failed to create virtual environment: {e}")
+
+    return None
+
 
 # =================================================================
 # Command Line Interface
 # =================================================================
-
-
 def parse_the_arguments() -> tuple[argparse.ArgumentParser, argparse.Namespace]:
     """Parse command line arguments."""
     parser = argparse.ArgumentParser(
@@ -1027,6 +1129,21 @@ def setup_virtual_environment(args: argparse.Namespace) -> Optional[str]:
 
 def build_simbi(args: argparse.Namespace) -> tuple[str, str]:
     """Build the simbi package."""
+    # First, check if we need to set up a virtual environment
+    python_exec = check_and_setup_environment(args)
+
+    # If we got a new Python executable and we're not already using it,
+    # we need to re-execute the command in that environment
+    if python_exec and python_exec != sys.executable:
+        logger.info(f"Re-executing in the virtual environment: {python_exec}")
+        cmd = [python_exec, __file__] + sys.argv[1:]
+        os.execv(python_exec, cmd)
+        # The above call replaces the current process, so we won't reach here
+
+    # Check minimal dependencies now that we're in the right environment
+    check_minimal_dependencies()
+
+
     simbi_dir = Path().resolve()
 
     # Initialize logging
@@ -1122,8 +1239,16 @@ def build_simbi(args: argparse.Namespace) -> tuple[str, str]:
 
 def install_simbi(args: argparse.Namespace) -> None:
     """Install the simbi package."""
-    # Set up a virtual environment if requested
-    python_exec = setup_virtual_environment(args)
+    # First, check if we need to set up a virtual environment
+    python_exec = check_and_setup_environment(args)
+
+    # If we got a new Python executable and we're not already using it,
+    # we need to re-execute the command in that environment
+    if python_exec and python_exec != sys.executable:
+        logger.info(f"Re-executing in the virtual environment: {python_exec}")
+        cmd = [python_exec, __file__] + sys.argv[1:]
+        os.execv(python_exec, cmd)
+        # The above call replaces the current process, so we won't reach here
 
     # Continue with normal installation
     egg_dir, build_dir = build_simbi(args)

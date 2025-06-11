@@ -9,7 +9,7 @@ rad_src = files(
 py3.extension_module(
     'rad_hydro',
     rad_src,
-    include_directories: include_directories('src', numpy_include),
+    include_directories: include_directories('src'),
     dependencies: [
         py3.dependency(),
         openmp_dep,

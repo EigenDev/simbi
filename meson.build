@@ -1,4 +1,4 @@
-#Main Meson Build File
+# Main Meson Build File
 
 project(
     'simbi',
@@ -9,7 +9,7 @@ project(
     default_options: {'cpp_std': 'c++20', 'cpp_args': ['-march=native'], 'warning_level': '3'},
 )
 
-#Add common project arguments
+# Add common project arguments
 add_project_arguments(
     [
         '-Wno-nested-anon-types',
@@ -17,7 +17,7 @@ add_project_arguments(
     ],
     language: 'cpp',
 )
-#Python installation directory
+# Python installation directory
 py3 = import('python').find_installation('python3', required: true)
 py_install_dir = meson.current_source_dir() + '/simbi/libs'
 pybind11_dep = dependency('pybind11')
@@ -25,7 +25,8 @@ pybind11_include = run_command(
     py3, ['-c', 'import pybind11; print(pybind11.get_include())'], check: true
 ).stdout().strip()
 
-#show maximum of n errors before stopping the build
+
+# show maximum of n errors before stopping the build
 # cc = meson.get_compiler('cpp')
 # if cc.get_id() == 'clang'
 #     add_project_arguments('-ferror-limit=1', language : 'cpp')
@@ -40,8 +41,6 @@ endforeach
 conf_data.set10('FLOAT_PRECISION', get_option('precision') == 'single')
 configure_file(input: 'build_options.hpp.in', output: 'build_options.hpp', configuration: conf_data)
 
-#get numpy headers
-numpy_include = run_command(py3, ['-c', 'import numpy; print(numpy.get_include())'], check: true).stdout().strip()
 openmp_dep = dependency('openmp', language: 'cpp', required: true)
 hdf5_dep = dependency('hdf5', language: 'cpp', required: true)
 
@@ -56,7 +55,7 @@ general_dependencies = [
     py3.dependency(),
     pybind11_dep,
 ]
-all_inc = include_directories(numpy_include, 'src')
+all_inc = include_directories('src')
 #CPU Extension Module
 py3.extension_module(
     'cpu_ext',
