@@ -129,9 +129,6 @@ namespace simbi {
          *   types::size_t size = 42;
          */
         namespace types {
-            // question: why define these in a header? they should be in the
-            // cpp standard, but defining them here means they're tied to your
-            // specific implementation
             using size_type = std::size_t;
             using uint32    = std::uint32_t;
             using lint      = std::int64_t;
