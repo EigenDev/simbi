@@ -113,16 +113,10 @@ simbi run marti_muller --mode gpu --resolution 1024
 
 ### System Requirements
 
-```
-┌─── Minimum Requirements ───┬─── Recommended ───────────┐
-│                            │                           │
-│  • gcc ≥ 8 or clang ≥ 10   │  • Latest stable compiler │
-│  • Python 3.10+           │  • Python 3.11+          │
-│  • 8 GB RAM               │  • 32+ GB for 3D sims    │
-│  • Linux, macOS           │  • Ubuntu 20.04+         │
-│                            │                           │
-└────────────────────────────┴───────────────────────────┘
-```
+> [!NOTE]
+> **Minimum Requirements**: gcc ≥ 8 or clang ≥ 10, Python 3.10+, 8 GB RAM, Linux/macOS
+>
+> **Recommended**: Latest stable compiler, Python 3.11+, 32+ GB RAM for large 3D simulations, Ubuntu 20.04+
 
 ### Dependencies
 
@@ -277,16 +271,15 @@ alias simbi-plot="uv run simbi plot"
 
 ### Physics Regimes
 
-```
-┌── SRMHD ──────────────────┬── SRHD ──────────────────┬── Classical ─────────────┐
-│ Special Relativistic     │ Special Relativistic    │ Newtonian               │
-│ Magnetohydrodynamics      │ Hydrodynamics           │ Hydrodynamics           │
-│                           │                         │                         │
-│ • AGN jets                │ • Gamma-ray bursts      │ • Stellar winds         │
-│ • Pulsar wind nebulae     │ • Relativistic shocks   │ • ISM dynamics          │
-│ • Magnetic reconnection   │ • Stellar explosions    │ • Classical turbulence  │
-└───────────────────────────┴─────────────────────────┴─────────────────────────┘
-```
+> [!IMPORTANT]
+> **SRMHD** - Special Relativistic Magnetohydrodynamics
+> *Applications*: AGN jets, pulsar wind nebulae, magnetic reconnection
+>
+> **SRHD** - Special Relativistic Hydrodynamics
+> *Applications*: Gamma-ray bursts, relativistic shocks, stellar explosions
+>
+> **Classical** - Newtonian Hydrodynamics
+> *Applications*: Stellar winds, ISM dynamics, classical turbulence
 
 ### Modern Configuration System
 
@@ -369,15 +362,17 @@ def body_system(self) -> BodySystemConfig:
 
 ### Numerical Methods
 
-```
-Riemann Solvers          Coordinate Systems       Grid Spacing
-───────────────────      ──────────────────      ──────────────
-• HLLE  (entropy fix)    • Cartesian             • Linear
-• HLLC  (contact wave)   • Spherical             • Logarithmic
-• HLLD  (MHD only)       • Cylindrical
-                         • Axis-cylindrical
-                         • Planar-cylindrical
-```
+> [!NOTE]
+> **Riemann Solvers**
+> • `HLLE` - HLL solver with entropy fix
+> • `HLLC` - HLL Contact solver for hydrodynamics
+> • `HLLD` - HLL Discontinuities solver (magnetohydrodynamics only)
+>
+> **Coordinate Systems**
+> • `Cartesian` • `Spherical` • `Cylindrical` • `Axis-cylindrical` • `Planar-cylindrical`
+>
+> **Grid Spacing**
+> • `Linear` - Uniform grid spacing • `Logarithmic` - Logarithmic spacing
 
 **Boundary Conditions:**
 `PERIODIC` • `REFLECTING` • `OUTFLOW` • `DYNAMIC`
@@ -437,13 +432,20 @@ If SIMBI contributes to your research, please cite:
 
 ### Roadmap
 
-```
-Short Term              Medium Term             Long Term
-─────────────          ──────────────          ──────────────
-• Enhanced IBM         • Multi-GPU support     • MPI parallelization
-• New reconstruction   • Extended EOS library  • General relativity
-• Visualization tools  • Cloud integration     • ML integration
-```
+**Short Term**
+- [ ] Enhanced immersed boundary methods
+- [ ] Additional reconstruction schemes
+- [ ] Improved visualization tools
+
+**Medium Term**
+- [ ] Multi-GPU support
+- [ ] Extended equation of state options
+- [ ] Cloud computing integration
+
+**Long Term**
+- [ ] MPI support for distributed computing
+- [ ] General relativistic extensions
+- [ ] Machine learning integration
 
 ---
 
@@ -492,12 +494,8 @@ SIMBI is distributed under the [MIT License](https://opensource.org/licenses/MIT
 
 <div align="center">
 
-```
-╭────────────────────────────────────────────────╮
-│          Built for computational               │
-│          astrophysics research                 │
-╰────────────────────────────────────────────────╯
-```
+> [!NOTE]
+> **Built for computational astrophysics research**
 
 **[Report Bug](https://github.com/EigenDev/simbi/issues) • [Request Feature](https://github.com/EigenDev/simbi/issues) • [Contribute](https://github.com/EigenDev/simbi/contribute)**
 
