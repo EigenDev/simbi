@@ -573,7 +573,7 @@ class SimbiBaseConfig(CLIConfigurableModel):
             "end_time": float(metadata["end_time"]),
             "adiabatic_index": float(metadata["adiabatic_index"]),
             "cfl_number": float(metadata["cfl_number"]),
-            "data_directory": Path(metadata["data_directory"]),
+            # "data_directory": Path(metadata["data_directory"]),
             "solver": Solver(metadata["solver"]),
             "boundary_conditions": (
                 [BoundaryCondition(b) for b in metadata["boundary_conditions"]]
