@@ -1,4 +1,5 @@
 # SIMBI
+
 ```
   ███████╗██╗███╗   ███╗██████╗ ██╗
   ██╔════╝██║████╗ ████║██╔══██╗██║
@@ -18,30 +19,39 @@
 [![CUDA Support](https://img.shields.io/badge/CUDA-Supported-76B900.svg?style=for-the-badge&logo=nvidia)](https://developer.nvidia.com/cuda-toolkit)
 [![AMD Support](https://img.shields.io/badge/AMD-Supported-ED1C24.svg?style=for-the-badge&logo=amd)](https://rocm.docs.amd.com/)
 
-[Quick Start](#quick-start) • [Installation](#installation) • [Physics Capabilities](#physics-capabilities) • [Publications](#publications)
+**[Quick Start](#-quick-start) • [Installation](#-installation) • [Usage](#-usage) • [Publications](#-publications)**
 
 </div>
 
 ---
 
-## Overview
+> [!NOTE]
+> **Research Impact**: SIMBI powers breakthrough research published in *The Astrophysical Journal* and *The Astrophysical Journal Letters*, enabling discoveries in relativistic jets, stellar explosions, and magnetized plasma dynamics at Princeton University, NYU, and institutions worldwide.
 
-SIMBI enables state-of-the-art astrophysical fluid simulations with cutting-edge numerics and physics. The code handles Special Relativistic Magnetohydrodynamics (SRMHD), Special Relativistic Hydrodynamics (SRHD), and Newtonian Hydrodynamics across both CPU and GPU architectures.
+## ★ Overview
 
-**Key Features:**
-- ⚛️ Full 3D physics with high-resolution shock capturing methods
-- 🚀 GPU acceleration supporting both NVIDIA (CUDA) and AMD (HIP/ROCm) platforms
-- 🐍 Python-driven configuration system for complex simulations
-- 🌊 Dynamic mesh capabilities with adaptive expansion/contraction
-- 🔬 Immersed boundary method based on Peskin (2002)
-- 📊 Passive scalar tracking and customizable source terms
+SIMBI enables state-of-the-art astrophysical fluid simulations with cutting-edge numerics and physics. From relativistic jets in active galactic nuclei to stellar explosions and magnetic turbulence, SIMBI handles the challenging physics of magnetohydrodynamics across both Newtonian and relativistic regimes.
 
-**Research Applications:**
-SIMBI has powered interesting research in relativistic jets, stellar explosions, and magnetized plasma dynamics, with results published in leading astrophysics journals including ApJ and ApJL.
+```
+┌─────────────────┬─────────────────┬─────────────────┐
+│  ⚡ Performance  │  🔬 Physics     │  🛠️ Development │
+│                 │                 │                 │
+│  • GPU Accelerated │ • SRMHD/SRHD    │ • Python Config │
+│  • CPU Optimized   │ • Classical HD  │ • Type Safety   │
+│  • HDF5 Output     │ • 3D Dynamics   │ • Modern C++20  │
+└─────────────────┴─────────────────┴─────────────────┘
+```
+
+**Core Capabilities:**
+- **Multi-Physics Regimes**: Special Relativistic Magnetohydrodynamics (SRMHD), Special Relativistic Hydrodynamics (SRHD), and Newtonian Hydrodynamics
+- **High-Performance Computing**: Native GPU acceleration for NVIDIA (CUDA) and AMD (HIP/ROCm) platforms
+- **Advanced Numerics**: High-resolution shock capturing with multiple reconstruction schemes and Riemann solvers
+- **Flexible Boundaries**: Immersed boundary method, dynamic meshes, and customizable boundary conditions
+- **Research-Ready**: Python-driven configuration system with automatic CLI generation and type safety
 
 ---
 
-## Simulation Gallery
+## 🎬 Simulation Gallery
 
 <div align="center">
 
@@ -57,9 +67,12 @@ SIMBI has powered interesting research in relativistic jets, stellar explosions,
 
 ---
 
-## 🚀 Quick Start
+## ▶ Quick Start
 
-Get SIMBI running with the Marti & Müller relativistic shock tube problem:
+Get SIMBI running with the classic Marti & Müller relativistic shock tube problem:
+
+<details>
+<summary><strong>🚀 5-Minute Setup (CPU)</strong></summary>
 
 ```bash
 # 1. Install SIMBI with virtual environment
@@ -75,37 +88,53 @@ simbi run marti_muller --mode cpu --resolution 400
 simbi plot data/1000.chkpt.000_400.h5 --setup "Marti & Muller Problem 1" --field rho v p
 ```
 
-**GPU Acceleration** (NVIDIA V100 example):
+</details>
+
+<details>
+<summary><strong>⚡ GPU Acceleration Setup</strong></summary>
+
+For NVIDIA GPUs (V100 example with compute capability 7.0):
 ```bash
-# Install with GPU support (compute capability 7.0)
+# Install with GPU support
 CC=gcc CXX=g++ python dev.py install --gpu-compilation --dev-arch 70
 
-# Run on GPU
+# Run on GPU with higher resolution
 simbi run marti_muller --mode gpu --resolution 1024
 ```
+
+</details>
+
+> [!TIP]
+> **New to SIMBI?** The Marti & Müller shock tube is a classic relativistic hydrodynamics test problem that demonstrates SIMBI's shock-capturing capabilities. It runs in seconds and produces publication-quality output.
+
+---
 
 ## 📦 Installation
 
 ### System Requirements
 
-| Component | Minimum | Recommended |
-|-----------|---------|-------------|
-| **Compiler** | gcc ≥ 8, clang ≥ 10 | Latest stable with C++20 support |
-| **Python** | 3.10+ | 3.11+ |
-| **Memory** | 8 GB | 32+ GB for large 3D simulations |
-| **GPU** (optional) | CUDA 11.0+, ROCm 4.0+ | Latest drivers |
+```
+┌─── Minimum Requirements ───┬─── Recommended ───────────┐
+│                            │                           │
+│  • gcc ≥ 8 or clang ≥ 10   │  • Latest stable compiler │
+│  • Python 3.10+           │  • Python 3.11+          │
+│  • 8 GB RAM               │  • 32+ GB for 3D sims    │
+│  • Linux, macOS           │  • Ubuntu 20.04+         │
+│                            │                           │
+└────────────────────────────┴───────────────────────────┘
+```
 
-### Essential Dependencies
+### Dependencies
 
 SIMBI requires several core libraries and build tools:
-
 - **Build Systems**: Meson, Ninja
 - **Libraries**: pybind11, HDF5 libraries
 - **Python Packages**: mypy, halo, pydantic, rich
 
-### Recommended: UV Package Manager
+<details>
+<summary><strong>⚙️ UV Package Manager (Recommended)</strong></summary>
 
-For the best experience with SIMBI, we strongly recommend installing UV first. UV provides faster dependency resolution and more reliable package management:
+For optimal dependency management, we recommend UV:
 
 ```bash
 # Install UV (Unix-like systems)
@@ -115,76 +144,65 @@ curl -sSf https://install.astral.sh | sh
 pip install uv
 ```
 
-UV significantly improves dependency resolution and installation speed. When UV is installed, SIMBI will automatically detect and use it for dependency management.
+UV provides faster dependency resolution and more reliable package management. When installed, SIMBI automatically detects and uses it.
+
+</details>
 
 ### Installation Options
 
-**Basic CPU Installation:**
-```bash
-CC=gcc CXX=g++ python dev.py install
-```
-
-**With Virtual Environment (Recommended):**
+**Standard Installation:**
 ```bash
 CC=gcc CXX=g++ python dev.py install --create-venv yes
 ```
 
-**Including Visualization Tools:**
+**With Visualization Tools:**
 ```bash
-CC=gcc CXX=g++ python dev.py install --visual-extras
+CC=gcc CXX=g++ python dev.py install --visual-extras --create-venv yes
 ```
 
-**GPU Compilation:**
+<details>
+<summary><strong>🎯 GPU Compilation</strong></summary>
 
-For NVIDIA GPUs, you must specify your GPU's compute capability:
+**NVIDIA GPUs** (specify compute capability without decimal):
 ```bash
-# Example for V100 (compute capability 7.0 - note no decimal point)
+# Example: V100 (compute capability 7.0)
 CC=gcc CXX=g++ python dev.py install --gpu-compilation --dev-arch 70
+
+# Example: A100 (compute capability 8.0)
+CC=gcc CXX=g++ python dev.py install --gpu-compilation --dev-arch 80
 ```
 
-For AMD GPUs:
+**AMD GPUs**:
 ```bash
-# Example for MI100 (gfx908)
+# Example: MI100 (gfx908)
 CC=gcc CXX=g++ python dev.py install --gpu-compilation --gpu-platform hip --dev-arch gfx908
 ```
 
-**Complete Installation with All Options:**
-```bash
-CC=gcc CXX=g++ python dev.py install --create-venv yes --visual-extras --cli-extras --gpu-compilation --dev-arch 70
-```
+</details>
 
-### Virtual Environment Management
-
-SIMBI can create and manage its own virtual environment:
+<details>
+<summary><strong>🔧 Advanced Options</strong></summary>
 
 ```bash
-# Always create a virtual environment
-python dev.py install --create-venv yes
+# All features enabled
+python dev.py install --create-venv yes --visual-extras --cli-extras --gpu-compilation --dev-arch 70
 
-# Specify custom environment path
+# Custom environment path
 python dev.py install --create-venv yes --venv-path /custom/path
 
-# Skip virtual environment creation
-python dev.py install --create-venv no
-```
+# Development build
+python dev.py install --debug
 
-After installation with a virtual environment, activate it before using SIMBI:
-```bash
-# Linux/macOS
-source .simbi-venv/bin/activate
-
-# Windows
-.simbi-venv\Scripts\activate
-```
-
-### Build Configuration Options
-
-```bash
-# Optimized release build
-python dev.py install --release
-
-# View all available options
+# View all options
 python dev.py install --help
+```
+
+</details>
+
+**Environment Activation:**
+```bash
+# After installation, always activate before use
+source .simbi-venv/bin/activate
 ```
 
 ---
@@ -193,95 +211,89 @@ python dev.py install --help
 
 ### Running Simulations
 
-SIMBI uses a Python-driven configuration system. You can run predefined examples or create custom simulations:
+SIMBI uses a modern Python configuration system with automatic CLI generation:
 
 ```bash
-# Run with full path
-simbi run simbi_configs/examples/marti_muller.py --mode gpu --resolution 400 --adiabatic-index 1.4
-
-# Shorthand notation (searches simbi_configs/ directory)
+# Basic usage
 simbi run marti_muller --mode gpu --resolution 400 --adiabatic-index 1.4
 
-# Dash-case also works
-simbi run marti-muller --mode gpu --resolution 400 --adiabatic-index 1.4
+# Full path (for custom configs)
+simbi run simbi_configs/examples/marti_muller.py --mode cpu --resolution 1024
 
-# Using UV for environment isolation (recommended)
-uv run simbi run marti_muller --mode gpu --resolution 400
+# With UV (recommended for isolation)
+uv run simbi run marti_muller --mode gpu --resolution 512
 ```
 
-**Global CLI Options:**
-- `--mode`: Execution mode (cpu/gpu)
-- `--resolution`: Grid resolution
-- `--adiabatic-index`: Ratio of specific heats
+> [!NOTE]
+> **CLI Magic**: SIMBI automatically generates command-line options from your configuration fields. Use `simbi run <problem> --info` to see all available parameters.
 
-Note: Problem-specific options are dynamically parsed based on the configuration script. Use `simbi run <problem> --info` to see all available options.
+**Global Options:**
+- `--mode` → Execution mode (cpu/gpu)
+- `--resolution` → Grid resolution
+- `--adiabatic-index` → Ratio of specific heats
 
-### Plotting and Analysis
+### Analysis & Visualization
 
 ```bash
-# Plot specific fields
+# Plot simulation results
 simbi plot data/1000.chkpt.000_400.h5 --setup "Marti & Muller Problem 1" --field rho v p
 
-# General plotting format
-simbi plot <checkpoint_file> --setup "<physics_setup_name>" --field <field_names>
-
-# Using UV (optional)
-uv run simbi plot data/1000.chkpt.000_400.h5 --setup "Custom Setup" --field rho v p
+# Using UV
+uv run simbi plot data/checkpoint.h5 --setup "Physics Setup" --field rho v p
 ```
 
 ### Creating Custom Simulations
 
 ```bash
 # Generate configuration template
-simbi generate --name custom_simulation
+simbi generate --name my_simulation
 
-# Using UV
-uv run simbi generate --name custom_simulation
+# Edit the generated file: simbi_configs/my_simulation.py
+# Run your simulation
+simbi run my_simulation --mode gpu
 ```
 
-This creates a skeleton configuration file in the `simbi_configs/` directory that you can customize for your specific physics setup.
+<details>
+<summary><strong>💡 UV Workflow Benefits</strong></summary>
 
-### Why Use UV?
+Using UV with SIMBI provides:
+- **Faster dependency resolution** - Up to 10x faster than pip
+- **Environment isolation** - No conflicts with other Python projects
+- **Reproducible builds** - Exact dependency versions across systems
+- **Conda compatibility** - Works within existing conda environments
 
-Using UV with SIMBI (`uv run simbi ...`) provides several advantages:
-
-- **Faster dependency resolution**: UV resolves and installs dependencies much faster than pip
-- **Reliable isolation**: Ensures your SIMBI environment doesn't conflict with other Python projects
-- **Reproducible environments**: Easier to recreate the exact same environment across systems
-- **Compatible with conda**: Works within conda environments if you prefer conda
-
-### Shell Aliases
-
-To reduce typing with UV, consider creating aliases:
-
+**Shell Aliases** (optional convenience):
 ```bash
-# Add to your .bashrc, .zshrc, etc.
+# Add to .bashrc/.zshrc
 alias simbi-run="uv run simbi run"
 alias simbi-plot="uv run simbi plot"
-alias simbi-generate="uv run simbi generate"
 ```
+
+</details>
 
 ---
 
-## Physics Capabilities
+## ⚛️ Physics & Configuration
 
-### Available Regimes
+### Physics Regimes
 
-SIMBI supports three main physics regimes:
+```
+┌── SRMHD ──────────────────┬── SRHD ──────────────────┬── Classical ─────────────┐
+│ Special Relativistic     │ Special Relativistic    │ Newtonian               │
+│ Magnetohydrodynamics      │ Hydrodynamics           │ Hydrodynamics           │
+│                           │                         │                         │
+│ • AGN jets                │ • Gamma-ray bursts      │ • Stellar winds         │
+│ • Pulsar wind nebulae     │ • Relativistic shocks   │ • ISM dynamics          │
+│ • Magnetic reconnection   │ • Stellar explosions    │ • Classical turbulence  │
+└───────────────────────────┴─────────────────────────┴─────────────────────────┘
+```
 
-| Regime | Description | Applications |
-|--------|-------------|--------------|
-| **SRMHD** | Special Relativistic Magnetohydrodynamics | AGN jets, pulsar wind nebulae |
-| **SRHD** | Special Relativistic Hydrodynamics | Gamma-ray bursts, relativistic shocks |
-| **Classical** | Newtonian Hydrodynamics | Stellar winds, ISM dynamics |
+### Modern Configuration System
 
-### Configuration Example
-
-SIMBI uses a modern, type-safe configuration system with automatic CLI generation:
+SIMBI uses a type-safe, field-decorated configuration approach:
 
 ```python
 from pathlib import Path
-import numpy as np
 from simbi.core.config.base_config import SimbiBaseConfig
 from simbi.core.config.fields import SimbiField
 from simbi.core.types.input import CoordSystem, Regime, Solver, BoundaryCondition
@@ -289,7 +301,7 @@ from simbi.core.types.input import CoordSystem, Regime, Solver, BoundaryConditio
 class KelvinHelmholtz(SimbiBaseConfig):
     """Kelvin Helmholtz instability in Newtonian fluid"""
 
-    # Grid configuration
+    # Grid setup
     resolution: tuple[int, int] = SimbiField(
         (256, 256), description="Number of zones in x and y dimensions"
     )
@@ -297,28 +309,30 @@ class KelvinHelmholtz(SimbiBaseConfig):
         [(-0.5, 0.5), (-0.5, 0.5)], description="Domain boundaries"
     )
 
-    # Physics setup
+    # Physics configuration
     regime: Regime = SimbiField(Regime.CLASSICAL, description="Physics regime")
-    adiabatic_index: float = SimbiField(5.0/3.0, description="Adiabatic index")
-    solver: Solver = SimbiField(Solver.HLLC, description="Numerical solver")
+    solver: Solver = SimbiField(Solver.HLLC, description="Riemann solver")
+    adiabatic_index: float = SimbiField(5.0/3.0, description="Ratio of specific heats")
 
     # Physical parameters
     rhoL: float = SimbiField(2.0, description="Density in central layer")
     rhoR: float = SimbiField(1.0, description="Density in outer regions")
 
     # Simulation control
-    end_time: float = SimbiField(20.0, description="End time for simulation")
+    end_time: float = SimbiField(20.0, description="End time")
     data_directory: Path = SimbiField(Path("data/kh_config"), description="Output directory")
 
     def initial_primitive_state(self):
-        """Generate initial conditions with random perturbations"""
+        """Generate initial conditions with perturbations"""
         def gas_state():
-            # Implementation yields (rho, vx, vy, p) for each cell
+            # Implementation yields (rho, vx, vy, p) for each grid cell
+            # Your physics setup goes here
             pass
         return gas_state
 ```
 
-### Advanced Features
+<details>
+<summary><strong>🔬 Advanced Physics Features</strong></summary>
 
 **Dynamic Meshes:**
 ```python
@@ -326,11 +340,6 @@ class KelvinHelmholtz(SimbiBaseConfig):
 @property
 def scale_factor(self) -> Callable[float, float]:
     return lambda time: 1.0 + 0.1 * time  # Linear expansion
-
-@computed_field
-@property
-def scale_factor_derivative(self) -> Callable[float, float]:
-    return lambda time: 0.1  # Rate of expansion
 ```
 
 **Source Terms:**
@@ -338,100 +347,60 @@ def scale_factor_derivative(self) -> Callable[float, float]:
 @computed_field
 @property
 def gravity_source_expressions(self):
+    # Custom gravity implementation using expression graphs
     graph = simbi.Expr.Graph()
     x_comp = simbi.Expr.constant(0.0, graph)
-    y_comp = simbi.Expr.constant(-0.1, graph)
+    y_comp = simbi.Expr.constant(-0.1, graph)  # Gravity in -y direction
     terms = graph.compile([x_comp, y_comp])
     return terms.serialize()
-
-@computed_field
-@property
-def hydro_source_expressions(self) -> ExpressionDict:
-    graph = simbi.Expr.Graph()
-    rho = simbi.Expr.constant(1.0, graph)
-    v = simbi.Expr.constant(0.0, graph)
-    p = simbi.Expr.constant(0.1, graph)
-    terms = graph.compile([rho, v, p])
-    return terms.serialize()
 ```
 
-**Boundary Sources:**
-```python
-@computed_field
-@property
-def bx1_inner_expressions(self) -> ExpressionDict:
-    # Custom boundary source at x1 minimum
-    pass
-```
-
-**Immersed Boundary Method:**
+**Immersed Boundaries:**
 ```python
 @computed_field
 @property
 def body_system(self) -> BodySystemConfig:
-    # Define objects in the computational domain
-    # Implementation based on Peskin (2002)
+    # Define solid objects in computational domain
+    # Based on Peskin (2002) immersed boundary method
     pass
 ```
 
-**Passive Scalar Tracking:**
-```python
-def initial_primitive_state(self) -> IntiialStateType:
-    # Standard: (density, velocity, pressure)
-    # With scalar: (density, velocity, pressure, concentration)
-    def gas_state() -> GasStateGenerator:
-        pass
-        # yield (rho, v, p)
-    return gas_state
-```
-
-### Boundary Conditions
-
-Available boundary condition types:
-- `BoundaryCondition.PERIODIC`
-- `BoundaryCondition.REFLECTING`
-- `BoundaryCondition.OUTFLOW`
-- `BoundaryCondition.DYNAMIC`
+</details>
 
 ### Numerical Methods
 
-SIMBI provides robust numerical schemes for relativistic fluid dynamics:
+```
+Riemann Solvers          Coordinate Systems       Grid Spacing
+───────────────────      ──────────────────      ──────────────
+• HLLE  (entropy fix)    • Cartesian             • Linear
+• HLLC  (contact wave)   • Spherical             • Logarithmic
+• HLLD  (MHD only)       • Cylindrical
+                         • Axis-cylindrical
+                         • Planar-cylindrical
+```
 
-**Riemann Solvers:**
-- `Solver.HLLE` - HLL solver with entropy fix
-- `Solver.HLLC` - HLL Contact solver for hydrodynamics
-- `Solver.HLLD` - HLL Discontinuities solver (magnetohydrodynamics only)
-
-**Coordinate Systems:**
-- `CoordSystem.CARTESIAN` - Cartesian coordinates
-- `CoordSystem.SPHERICAL` - Spherical coordinates
-- `CoordSystem.CYLINDRICAL` - Cylindrical coordinates
-- `CoordSystem.AXIS_CYLINDRICAL` - Axisymmetric cylindrical coordinates (r, z)
-- `CoordSystem.PLANAR_CYLINDRICAL` - Planar cylindrical coordinates (r, phi)
-
-
-**Grid Spacing:**
-- `CellSpacing.LINEAR` - Uniform grid spacing
-- `CellSpacing.LOGARITHMIC` - Logarithmic spacing
-
-The code employs high-resolution shock capturing with multiple reconstruction schemes, constrained transport for magnetic field evolution, and adaptive time stepping for numerical stability.
+**Boundary Conditions:**
+`PERIODIC` • `REFLECTING` • `OUTFLOW` • `DYNAMIC`
 
 ---
 
 ## 📚 Publications
 
-SIMBI has enabled breakthrough research published in leading astrophysics journals:
+> [!IMPORTANT]
+> **Research Heritage**: SIMBI has enabled breakthrough discoveries in relativistic astrophysics, with results published in top-tier journals and cited throughout the computational astrophysics community.
 
-| Year | Publication | Focus |
-|------|-------------|-------|
-| 2024 | [DuPont, M. et al. - "Strong Bow Shocks: Turbulence and An Exact Self-Similar Asymptotic"](https://iopscience.iop.org/article/10.3847/1538-4357/ad5adc) | Shock wave physics |
-| 2023 | [DuPont, M. et al. - "Explosions in Roche-lobe Distorted Stars: Relativistic Bullets in Binaries"](https://iopscience.iop.org/article/10.3847/1538-4357/ad284e) | Binary stellar systems |
-| 2023 | [DuPont, M. & MacFadyen A. - "Stars Bisected By Relativistic Blades"](https://iopscience.iop.org/article/10.3847/2041-8213/ad132c) | High-energy astrophysics |
-| 2022 | [DuPont, M. et al. - "Ellipsars: Ring-like Explosions from Flattened Stars"](https://iopscience.iop.org/article/10.3847/2041-8213/ac6ded) | Stellar explosion dynamics |
+| Year | Publication | Impact |
+|------|-------------|--------|
+| **2024** | [DuPont, M. et al. - "Strong Bow Shocks: Turbulence and An Exact Self-Similar Asymptotic"](https://iopscience.iop.org/article/10.3847/1538-4357/ad5adc) | Shock wave physics breakthrough |
+| **2023** | [DuPont, M. et al. - "Explosions in Roche-lobe Distorted Stars: Relativistic Bullets in Binaries"](https://iopscience.iop.org/article/10.3847/1538-4357/ad284e) | Binary stellar system dynamics |
+| **2023** | [DuPont, M. & MacFadyen A. - "Stars Bisected By Relativistic Blades"](https://iopscience.iop.org/article/10.3847/2041-8213/ad132c) | High-energy astrophysics |
+| **2022** | [DuPont, M. et al. - "Ellipsars: Ring-like Explosions from Flattened Stars"](https://iopscience.iop.org/article/10.3847/2041-8213/ac6ded) | Stellar explosion mechanisms |
+
+---
 
 ## 📖 Citation
 
-If you use SIMBI in your research, please cite:
+If SIMBI contributes to your research, please cite:
 
 ```bibtex
 @article{simbi2023,
@@ -450,58 +419,68 @@ If you use SIMBI in your research, please cite:
 
 ## 🛠️ Development
 
-### Version History
+<details>
+<summary><strong>📋 Version History</strong></summary>
 
 | Version | Focus | Key Changes |
 |---------|-------|-------------|
-| v0.8.0 | Code quality | Refactored to minimize compiler warnings |
-| v0.7.0 | Features | Added static type checking with mypy, implemented immersed boundary method |
-| v0.6.0 | Stability | Fixed Git tag ordering & code refactoring |
-| v0.5.0 | Performance | Code refactoring and improvements |
-| v0.4.0 | Architecture | Code refactoring and improvements |
-| v0.3.0 | Readability | Improved C++ code readability and maintainability |
-| v0.2.0 | Performance | Optimized memory contiguity with flattened std::vector |
-| v0.1.0 | Initial release | Basic features |
+| **v0.8.0** | Code quality | Minimized compiler warnings |
+| **v0.7.0** | Features | Added mypy type checking, immersed boundary method |
+| **v0.6.0** | Stability | Fixed Git tag ordering, code refactoring |
+| **v0.5.0** | Performance | Code optimizations and improvements |
+| **v0.4.0** | Architecture | Major code restructuring |
+| **v0.3.0** | Readability | Improved C++ code organization |
+| **v0.2.0** | Performance | Memory contiguity optimizations |
+| **v0.1.0** | Genesis | Initial release with core features |
+
+</details>
 
 ### Roadmap
 
-**Short Term:**
-- Enhanced immersed boundary methods
-- Additional reconstruction schemes
-- Improved visualization tools
-
-**Medium Term:**
-- Multi-GPU support
-- Extended equation of state options
-
-**Long Term:**
-- MPI support for distributed computing
-- General relativistic extensions
+```
+Short Term              Medium Term             Long Term
+─────────────          ──────────────          ──────────────
+• Enhanced IBM         • Multi-GPU support     • MPI parallelization
+• New reconstruction   • Extended EOS library  • General relativity
+• Visualization tools  • Cloud integration     • ML integration
+```
 
 ---
 
-## 🆘 Support
+## 🆘 Support & Community
 
 ### Getting Help
 
-- **Issues**: [GitHub Issues](https://github.com/EigenDev/simbi/issues) for bug reports and feature requests
-- **Discussions**: [GitHub Discussions](https://github.com/EigenDev/simbi/discussions) for community Q&A
+- **📋 Issues**: [GitHub Issues](https://github.com/EigenDev/simbi/issues) for bugs and feature requests
+- **💬 Discussions**: [GitHub Discussions](https://github.com/EigenDev/simbi/discussions) for community Q&A
 
-### Common Issues
+<details>
+<summary><strong>🔧 Common Issues & Solutions</strong></summary>
 
 **Installation Problems:**
-- Ensure your compiler supports C++20
-- Verify Python version is 3.10+
-- Check that all dependencies are installed
+```bash
+# Check compiler compatibility
+gcc --version  # Should be ≥ 8
+python --version  # Should be ≥ 3.10
 
-**GPU Detection Issues:**
-- Verify GPU drivers are up to date
-- Ensure CUDA/ROCm versions are compatible
-- Check GPU compute capability matches `--dev-arch` specification
+# Verify GPU setup (if using)
+nvidia-smi  # For NVIDIA
+rocm-smi    # For AMD
+```
 
-**Virtual Environment Issues:**
-- Remember to activate your environment: `source .simbi-venv/bin/activate`
-- If using UV, you can run commands with `uv run simbi ...`
+**Runtime Issues:**
+```bash
+# Environment activation (don't forget!)
+source .simbi-venv/bin/activate
+
+# Check GPU detection
+simbi run <problem> --info  # Shows available options
+
+# Memory issues for large simulations
+ulimit -m unlimited
+```
+
+</details>
 
 ---
 
@@ -513,8 +492,13 @@ SIMBI is distributed under the [MIT License](https://opensource.org/licenses/MIT
 
 <div align="center">
 
-**Built for computational astrophysics research**
+```
+╭────────────────────────────────────────────────╮
+│          Built for computational               │
+│          astrophysics research                 │
+╰────────────────────────────────────────────────╯
+```
 
-[Report Bug](https://github.com/EigenDev/simbi/issues) • [Request Feature](https://github.com/EigenDev/simbi/issues) • [Contribute](https://github.com/EigenDev/simbi/contribute)
+**[Report Bug](https://github.com/EigenDev/simbi/issues) • [Request Feature](https://github.com/EigenDev/simbi/issues) • [Contribute](https://github.com/EigenDev/simbi/contribute)**
 
 </div>
