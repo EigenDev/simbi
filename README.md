@@ -32,15 +32,11 @@
 
 SIMBI enables state-of-the-art astrophysical fluid simulations with cutting-edge numerics and physics. From relativistic jets in active galactic nuclei to stellar explosions and magnetic turbulence, SIMBI handles the challenging physics of magnetohydrodynamics across both Newtonian and relativistic regimes.
 
-```
-┌─────────────────┬─────────────────┬─────────────────┐
-│  ⚡ Performance  │  🔬 Physics     │  🛠️ Development │
-│                 │                 │                 │
-│  • GPU Accelerated │ • SRMHD/SRHD    │ • Python Config │
-│  • CPU Optimized   │ • Classical HD  │ • Type Safety   │
-│  • HDF5 Output     │ • 3D Dynamics   │ • Modern C++20  │
-└─────────────────┴─────────────────┴─────────────────┘
-```
+| ⚡ **Performance** | 🔬 **Physics** | 🛠️ **Development** |
+|:---:|:---:|:---:|
+| GPU Accelerated | SRMHD/SRHD | Python Config |
+| CPU Optimized | Classical HD | Type Safety |
+| HDF5 Output | 3D Dynamics | Modern C++20 |
 
 **Core Capabilities:**
 - **Multi-Physics Regimes**: Special Relativistic Magnetohydrodynamics (SRMHD), Special Relativistic Hydrodynamics (SRHD), and Newtonian Hydrodynamics
@@ -494,8 +490,7 @@ SIMBI is distributed under the [MIT License](https://opensource.org/licenses/MIT
 
 <div align="center">
 
-> [!NOTE]
-> **Built for computational astrophysics research**
+**Built for computational astrophysics research**
 
 **[Report Bug](https://github.com/EigenDev/simbi/issues) • [Request Feature](https://github.com/EigenDev/simbi/issues) • [Contribute](https://github.com/EigenDev/simbi/contribute)**
 
