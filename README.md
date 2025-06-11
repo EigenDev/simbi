@@ -180,9 +180,6 @@ source .simbi-venv/bin/activate
 ### Build Configuration Options
 
 ```bash
-# Debug build with symbols
-python dev.py install --debug
-
 # Optimized release build
 python dev.py install --release
 
