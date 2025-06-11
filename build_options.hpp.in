@@ -1,0 +1,22 @@
+/**
+ * ***********************(C) COPYRIGHT 2025 Marcus DuPont**********************
+ * @file       build_options.hpp
+ * @brief      Build configuration for SIMBI
+ * @version    0.8.0
+ * @date       @BUILD_DATE@
+ * @author     Marcus DuPont
+ * @email      marcus.dupont@princeton.edu
+ */
+#ifndef BUILD_OPTIONS_HPP
+#define BUILD_OPTIONS_HPP
+
+// Basic type definitions
+#mesondefine FLOAT_PRECISION
+
+// Feature flags
+#mesondefine COLUMN_MAJOR
+#mesondefine FOUR_VELOCITY
+#mesondefine PROGRESS_BAR
+#mesondefine SHARED_MEMORY
+
+#endif   // BUILD_OPTIONS_HPP

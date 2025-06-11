@@ -31,7 +31,6 @@
 #include <algorithm>   // for std::min
 #include <chrono>      // for timing
 #include <cstring>     // for memcpy, memset
-#include <memory>      // for aligned_alloc
 #include <thread>      // for std::thread::hardware_concurrency
 
 namespace simbi::adapter {

@@ -16,7 +16,6 @@ Doxyfile
 .cache/
 .*
 !*.gitignore
-*.in
 *.h5
 *.pdf
 *.png
