@@ -325,46 +325,67 @@ class KelvinHelmholtz(SimbiBaseConfig):
 
 **Dynamic Meshes:**
 ```python
-def scale_factor(self, time):
-    return 1.0 + 0.1 * time  # Linear expansion
+@computed_field
+@property
+def scale_factor(self) -> Callable[float, float]:
+    return lambda time: 1.0 + 0.1 * time  # Linear expansion
 
-def scale_factor_derivative(self, time):
-    return 0.1  # Rate of expansion
+@computed_field
+@property
+def scale_factor_derivative(self) -> Callable[float, float]:
+    return lambda time: 0.1  # Rate of expansion
 ```
 
 **Source Terms:**
 ```python
+@computed_field
 @property
 def gravity_source_expressions(self):
-    return ["0", "-G*M/r^2", "0"]  # Gravity in y-direction
+    graph = simbi.Expr.Graph()
+    x_comp = simbi.Expr.constant(0.0, graph)
+    y_comp = simbi.Expr.constant(-0.1, graph)
+    terms = graph.compile([x_comp, y_comp])
+    return terms.serialize()
 
+@computed_field
 @property
-def hydro_source_expressions(self):
-    return ["0", "0", "0", "0", "cooling_function(T)"]  # Custom source
+def hydro_source_expressions(self) -> ExpressionDict:
+    graph = simbi.Expr.Graph()
+    rho = simbi.Expr.constant(1.0, graph)
+    v = simbi.Expr.constant(0.0, graph)
+    p = simbi.Expr.constant(0.1, graph)
+    terms = graph.compile([rho, v, p])
+    return terms.serialize()
 ```
 
 **Boundary Sources:**
 ```python
-def bx1_inner_expressions(self):
+@computed_field
+@property
+def bx1_inner_expressions(self) -> ExpressionDict:
     # Custom boundary source at x1 minimum
     pass
 ```
 
 **Immersed Boundary Method:**
 ```python
+@computed_field
 @property
-def body_system(self):
-    # Define solid objects in the computational domain
+def body_system(self) -> BodySystemConfig:
+    # Define objects in the computational domain
     # Implementation based on Peskin (2002)
     pass
 ```
 
 **Passive Scalar Tracking:**
 ```python
-def initial_conditions(self, x, y, z):
+def initial_primitive_state(self) -> IntiialStateType:
     # Standard: (density, velocity, pressure)
     # With scalar: (density, velocity, pressure, concentration)
-    return (rho, v, p, scalar)
+    def gas_state() -> GasStateGenerator:
+        pass
+        # yield (rho, v, p)
+    return gas_state
 ```
 
 ### Boundary Conditions
@@ -388,6 +409,9 @@ SIMBI provides robust numerical schemes for relativistic fluid dynamics:
 - `CoordSystem.CARTESIAN` - Cartesian coordinates
 - `CoordSystem.SPHERICAL` - Spherical coordinates
 - `CoordSystem.CYLINDRICAL` - Cylindrical coordinates
+- `CoordSystem.AXIS_CYLINDRICAL` - Axisymmetric cylindrical coordinates (r, z)
+- `CoordSystem.PLANAR_CYLINDRICAL` - Planar cylindrical coordinates (r, phi)
+
 
 **Grid Spacing:**
 - `CellSpacing.LINEAR` - Uniform grid spacing
