@@ -39,7 +39,9 @@ foreach opt : ['four_velocity', 'column_major', 'progress_bar', 'shared_memory']
     conf_data.set10(opt.to_upper(), get_option(opt))
 endforeach
 conf_data.set10('FLOAT_PRECISION', get_option('precision') == 'single')
+conf_data.set('BUILD_DATE', run_command('date', '+%Y-%m-%d %H:%M:%S', check: true).stdout().strip())
 configure_file(input: 'build_options.hpp.in', output: 'build_options.hpp', configuration: conf_data)
+
 
 openmp_dep = dependency('openmp', language: 'cpp', required: true)
 hdf5_dep = dependency('hdf5', language: 'cpp', required: true)
