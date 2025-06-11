@@ -419,6 +419,7 @@ namespace simbi::adapter {
     )
     {
         if constexpr (std::is_same_v<default_backend_tag, cpu_backend_tag>) {
+            (void) config;   // suppress unused warning for CPU backend
             // cpu implementation just calls the function directly
             kernel(std::forward<Args>(args)...);
         }
