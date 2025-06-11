@@ -57,7 +57,7 @@ class BaseParser(ArgumentParser):
 
         # Check for command without args
         if len(args) == 1 and not args[0].startswith("-"):
-            if args[0] in ["run", "plot", "clone", "afterlow"]:
+            if args[0] in ["run", "plot", "touch", "afterlow"]:
                 self.command = args[0]
                 self.parse_args([self.command, "--help"])
             else:

@@ -1,4 +1,4 @@
-from .commands import run, plot, afterglow, clone
+from .commands import run, plot, afterglow, touch
 from .actions import print_the_version
 from .utils.formatter import HelpFormatter
 from .base_parser import BaseParser
@@ -34,4 +34,4 @@ class SimbiParser(BaseParser):
         plot.setup_parser(self.subparsers)
         run.setup_parser(self.subparsers)
         afterglow.setup_parser(self.subparsers)
-        clone.setup_parser(self.subparsers)
+        touch.setup_parser(self.subparsers)
