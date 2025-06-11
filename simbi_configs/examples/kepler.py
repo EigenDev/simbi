@@ -283,7 +283,7 @@ class KeplerianRingTest(SimbiBaseConfig):
         # Energy source term
         # For isothermal gas, the internal energy target is e_int = rho*cs^2/(gamma-1)
         gamma = expr.constant(self.adiabatic_index, r.graph)
-        cs_squared = expr.constant(0.01**2, r.graph)  # cs^2
+        cs_squared = expr.constant(self.ambient_sound_speed**2, r.graph)
 
         # For gamma=1 (isothermal), we need to handle specially to avoid division by zero
         # Use a small epsilon in the denominator for safety
