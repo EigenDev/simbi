@@ -450,7 +450,6 @@ If SIMBI contributes to your research, please cite:
 ### Getting Help
 
 - **📋 Issues**: [GitHub Issues](https://github.com/EigenDev/simbi/issues) for bugs and feature requests
-- **💬 Discussions**: [GitHub Discussions](https://github.com/EigenDev/simbi/discussions) for community Q&A
 
 <details>
 <summary><strong>🔧 Common Issues & Solutions</strong></summary>
