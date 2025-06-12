@@ -26,7 +26,7 @@
 ---
 
 > [!NOTE]
-> **Research Impact**: SIMBI powers breakthrough research published in *The Astrophysical Journal* and *The Astrophysical Journal Letters*, studying topics related to relativistic jets, stellar explosions, and magnetized plasma dynamics.
+> **Research Impact**: SIMBI powers seminal research published in *The Astrophysical Journal* and *The Astrophysical Journal Letters*, studying topics related to relativistic jets, relativisitc and non-relativistic shock morphology, and stellar explosions.
 
 ## ★ Overview
 
