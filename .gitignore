@@ -29,6 +29,7 @@ Doxyfile
 *.log
 *.sh
 *.json
+*.lock
 
 # Automatically added by dev.py
 build*/
