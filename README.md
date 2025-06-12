@@ -168,14 +168,11 @@ CC=gcc CXX=g++ python dev.py install --gpu-compilation --gpu-platform hip --dev-
 <summary><strong>🔧 Advanced Options</strong></summary>
 
 ```bash
-# All features enabled
+# a bunch of features enabled
 python dev.py install --create-venv yes --visual-extras --cli-extras --gpu-compilation --dev-arch 70
 
 # Custom environment path
 python dev.py install --create-venv yes --venv-path /custom/path
-
-# Development build
-python dev.py install --debug
 
 # View all options
 python dev.py install --help
