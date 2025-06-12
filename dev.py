@@ -1314,12 +1314,6 @@ def create_parser() -> argparse.ArgumentParser:
 
     # Venv command
     venv_parser = subparsers.add_parser("venv", help="Set up a virtual environment")
-    venv_parser.add_argument(
-        "--venv-path",
-        type=str,
-        default=".venv",
-        help="Path for the virtual environment",
-    )
     venv_parser.set_defaults(func=setup_virtual_environment)
 
     # Global options
@@ -1414,12 +1408,6 @@ def _add_build_arguments(parser: argparse.ArgumentParser) -> None:
         choices=["yes", "no", "ask"],
         default="ask",
         help="Create a dedicated virtual environment for simbi (yes/no/ask)",
-    )
-    parser.add_argument(
-        "--venv-path",
-        type=str,
-        default=".venv",
-        help="Path for the simbi virtual environment (default: .venv)",
     )
 
     # Mutually exclusive options

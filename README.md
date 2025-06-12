@@ -183,7 +183,7 @@ python dev.py install --help
 **Environment Activation:**
 ```bash
 # After installation, always activate before use
-source .simbi-venv/bin/activate
+source <wherever_you_instlled_simbi>/.venv/bin/activate
 ```
 
 ---
