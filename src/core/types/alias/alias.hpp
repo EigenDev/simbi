@@ -47,13 +47,13 @@
  *  *==============================================================================
  */
 
-#ifndef USING_DECL_HPP
-#define USING_DECL_HPP
+#ifndef ALIASES_HPP
+#define ALIASES_HPP
 
 #include "adapter/device_adapter_api.hpp"
 #include "config.hpp"
-#include "core/types/containers/array.hpp"
-#include "core/types/utility/smart_ptr.hpp"
+#include "core/containers/array.hpp"
+#include "core/utility/smart_ptr.hpp"
 
 namespace simbi {
     // namespace types {

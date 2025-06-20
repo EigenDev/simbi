@@ -51,9 +51,9 @@
 
 #include "config.hpp"
 #include "core/functional/fp.hpp"
-#include "core/types/utility/config_dict.hpp"
-#include "core/types/utility/enums.hpp"
-#include "core/types/utility/smart_ptr.hpp"
+#include "core/utility/config_dict.hpp"
+#include "core/utility/enums.hpp"
+#include "core/utility/smart_ptr.hpp"
 #include "physics/hydro/schemes/ib/policies/binary.hpp"
 #include "physics/hydro/schemes/ib/systems/capability.hpp"
 #include "physics/hydro/schemes/ib/systems/component_body_system.hpp"
@@ -76,7 +76,8 @@ namespace simbi::ibsystem {
     };
 
     template <typename T, size_type Dims>
-    bool should_be_accretor(const ConfigDict& props, const Body<T, Dims>& body)
+    bool
+    should_be_accretor(const config_dict_t& props, const Body<T, Dims>& body)
     {
         return fp::any_of(
             props,
@@ -97,7 +98,7 @@ namespace simbi::ibsystem {
     }
 
     template <typename T = real>
-    bool should_be_binary_system(const ConfigDict& props)
+    bool should_be_binary_system(const config_dict_t& props)
     {
         return fp::any_of(
             props,
@@ -126,7 +127,7 @@ namespace simbi::ibsystem {
 
     template <typename T = real>
     BinaryParameters<T>
-    extract_binary_parameters(const ConfigDict& binary_props)
+    extract_binary_parameters(const config_dict_t& binary_props)
     {
         BinaryParameters<T> params;
         if (!should_be_binary_system(binary_props)) {
@@ -152,7 +153,7 @@ namespace simbi::ibsystem {
 
     template <typename T, size_type Dims>
     Body<T, Dims>
-    maybe_add_accretion(Body<T, Dims> body, const ConfigDict& props)
+    maybe_add_accretion(Body<T, Dims> body, const config_dict_t& props)
     {
 
         if (!should_be_accretor(props, body)) {
@@ -170,7 +171,8 @@ namespace simbi::ibsystem {
     }
 
     template <typename T, size_type Dims>
-    Body<T, Dims> maybe_add_rigid(Body<T, Dims> body, const ConfigDict& props)
+    Body<T, Dims>
+    maybe_add_rigid(Body<T, Dims> body, const config_dict_t& props)
     {
         const auto inertia = config::try_read<real>(props, "inertia");
         if (!inertia.has_value()) {
@@ -188,7 +190,7 @@ namespace simbi::ibsystem {
     }
 
     template <typename T, size_type Dims>
-    Body<T, Dims> create_individual_body(const ConfigDict& props)
+    Body<T, Dims> create_individual_body(const config_dict_t& props)
     {
         // basic body properties
         const auto caps = config::try_read<BodyCapability>(props, "capability");
@@ -244,7 +246,7 @@ namespace simbi::ibsystem {
 
     template <typename T, int Dims>
     spatial_vector_t<T, Dims> extract_position_vectors(
-        const ConfigDict& component,
+        const config_dict_t& component,
         const BinaryParameters<T>& params,
         int component_index
     )
@@ -269,7 +271,7 @@ namespace simbi::ibsystem {
 
     template <typename T, int Dims>
     spatial_vector_t<T, Dims> extract_velocity_vectors(
-        const ConfigDict& component,
+        const config_dict_t& component,
         const BinaryParameters<T>& params,
         int component_index
     )
@@ -299,7 +301,7 @@ namespace simbi::ibsystem {
     template <typename T, size_type Dims>
     size_t add_binary_component(
         ComponentBodySystem<T, Dims>& system,
-        const ConfigDict& component,
+        const config_dict_t& component,
         const BinaryParameters<T>& params,
         int component_index
     )
@@ -377,12 +379,12 @@ namespace simbi::ibsystem {
     template <typename T, size_type Dims>
     void configure_binary_system(
         ComponentBodySystem<T, Dims>& system,
-        const ConfigDict& sys_props
+        const config_dict_t& sys_props
     )
     {
         if constexpr (Dims >= 2) {
             const auto& binary_props =
-                sys_props.at("binary_config").template get<ConfigDict>();
+                sys_props.at("binary_config").template get<config_dict_t>();
 
             // extract binary system parameters
             BinaryParameters<T> params =
@@ -395,7 +397,7 @@ namespace simbi::ibsystem {
 
             // get binary components
             auto binary_components =
-                binary_props.at("components").get<std::list<ConfigDict>>();
+                binary_props.at("components").get<std::list<config_dict_t>>();
 
             if (binary_components.size() != 2) {
                 throw std::runtime_error(

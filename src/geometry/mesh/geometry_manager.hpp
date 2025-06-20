@@ -51,10 +51,9 @@
 #define GEOMETRY_MANAGER_HPP
 
 #include "config.hpp"
-#include "core/types/containers/array.hpp"
-#include "core/types/utility/enums.hpp"
-#include "core/types/utility/init_conditions.hpp"
-#include <map>
+#include "core/containers/array.hpp"
+#include "core/utility/enums.hpp"
+#include "core/utility/init_conditions.hpp"
 
 namespace simbi {
     // map geometry string to simbi::Geometry enum class

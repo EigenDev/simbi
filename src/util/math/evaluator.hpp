@@ -2,10 +2,11 @@
 #define EVALUATOR_HPP
 
 #include "config.hpp"
-#include "core/types/containers/ndarray.hpp"
+#include "core/containers/ndarray.hpp"
 #include "util/math/expression.hpp"
 
 namespace simbi::expression {
+    using namespace containers;
     // main evaluation function with parameter support
     DEV real evaluate_expr(
         const ExprNode* nodes,
@@ -73,7 +74,7 @@ namespace simbi::expression {
         real* outputs
     );
 
-    int get_max_register(const ndarray<LinearExprInstr>& instructions);
+    int get_max_register(const ndarray_t<LinearExprInstr>& instructions);
 
 }   // namespace simbi::expression
 

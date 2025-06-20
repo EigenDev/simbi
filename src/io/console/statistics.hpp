@@ -1,6 +1,8 @@
 #ifndef STATISTICS_HPP
 #define STATISTICS_HPP
 
+#include <cstddef>
+#include <cstdint>
 #include <iomanip>
 #include <iostream>
 #include <sstream>
@@ -15,10 +17,17 @@
 #pragma comment(lib, "pdh.lib")
 #elif defined(__APPLE__) || defined(__MACH__)
 #define PLATFORM_MACOS
+#include <mach/host_info.h>
+#include <mach/kern_return.h>
 #include <mach/mach.h>
 #include <mach/mach_host.h>
 #include <mach/mach_init.h>
+#include <mach/mach_time.h>
 #include <mach/mach_types.h>
+#include <mach/message.h>
+#include <mach/task.h>
+#include <mach/task_info.h>
+#include <mach/vm_page_size.h>
 #include <mach/vm_statistics.h>
 #include <sys/sysctl.h>
 #include <sys/types.h>

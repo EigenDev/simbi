@@ -50,7 +50,7 @@
 #ifndef BODY_SERIALIZATION_HPP
 #define BODY_SERIALIZATION_HPP
 
-#include "core/types/utility/config_dict.hpp"
+#include "core/utility/config_dict.hpp"
 #include <H5Cpp.h>
 #include <functional>
 #include <string>
@@ -68,7 +68,7 @@ namespace simbi::ibsystem {
         std::function<T(size_t)> extractor;
 
         // Metadata (optional)
-        // ConfigDict metadata;
+        // config_dict_t metadata;
     };
 
     // Property serialization trait for different property types

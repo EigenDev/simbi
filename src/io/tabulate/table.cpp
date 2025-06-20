@@ -2,14 +2,22 @@
 #include <algorithm>
 #include <chrono>
 #include <cstddef>
+#include <cstdlib>
+#include <ctime>
 #include <fstream>
 #include <iomanip>
+#include <iostream>
+#include <sstream>
+#include <string>
+#include <utility>
+#include <vector>
 
 #ifdef _WIN32
 #include <io.h>
 #include <windows.h>
 #else
 #include <sys/ioctl.h>
+#include <sys/ttycom.h>
 #include <unistd.h>
 #endif
 

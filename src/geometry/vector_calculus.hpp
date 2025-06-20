@@ -49,10 +49,10 @@
 #ifndef VECTOR_CALCULUS_HPP
 #define VECTOR_CALCULUS_HPP
 
-#include "config.hpp"                               // for real, DEV
-#include "core/types/containers/vector_field.hpp"   // for Vector, VectorField
-#include <iostream>                                 // for cout, cin
-#include <vector>                                   // for vector
+#include "config.hpp"                         // for real, DEV
+#include "core/containers/vector_field.hpp"   // for Vector, VectorField
+#include <iostream>                           // for cout, cin
+#include <vector>                             // for vector
 using namespace simbi::vector_field;
 
 namespace simbi {

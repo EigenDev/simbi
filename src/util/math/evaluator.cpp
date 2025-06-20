@@ -26,7 +26,7 @@ namespace simbi::expression {
         UNKNOWN_OPERATION
     };
 
-    int get_max_register(const ndarray<LinearExprInstr>& instructions)
+    int get_max_register(const ndarray_t<LinearExprInstr>& instructions)
     {
         int max_reg = 4;   // Start with input registers
 

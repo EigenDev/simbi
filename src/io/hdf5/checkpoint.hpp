@@ -50,8 +50,11 @@
 #define CHECKPOINT_HPP
 
 #include "config.hpp"
+#include "core/types/alias/alias.hpp"
+#include "core/utility/enums.hpp"
 #include "physics/hydro/schemes/ib/serialization/body_serialization.hpp"
 #include "physics/hydro/schemes/ib/serialization/system_serialization.hpp"
+#include <H5Cpp.h>
 #include <string>
 #include <unordered_map>
 
@@ -84,16 +87,16 @@ namespace simbi {
             auto data_directory             = sim_state.data_directory();
             auto step                       = sim_state.checkpoint_index();
             static lint tchunk_order_of_mag = 2;
-            const auto temporal_order_of_mag =
+            const auto timestepping_of_mag =
                 std::floor(std::log10(sim_state.time()));
-            if (temporal_order_of_mag > tchunk_order_of_mag) {
+            if (timestepping_of_mag > tchunk_order_of_mag) {
                 tchunk_order_of_mag += 1;
             }
 
             std::string tnow;
             if (sim_state.dlogt() != 0) {
-                const auto temporal_order_of_mag = std::floor(std::log10(step));
-                if (temporal_order_of_mag > tchunk_order_of_mag) {
+                const auto timestepping_of_mag = std::floor(std::log10(step));
+                if (timestepping_of_mag > tchunk_order_of_mag) {
                     tchunk_order_of_mag += 1;
                 }
                 tnow = format_real(step);
@@ -330,8 +333,8 @@ namespace simbi {
             auto checkpoint_interval =
                 state.time_manager().checkpoint_interval();
             auto gamma_val      = state.adiabatic_index();
-            auto spatial_order  = state.spatial_order();
-            auto temporal_order = state.temporal_order();
+            auto reconstruction = state.reconstruction();
+            auto timestepping   = state.timestepping();
             auto geometry       = state.mesh().geometry_to_c_str();
             auto x1_spacing =
                 cell2str.at(state.mesh().geometry_state().spacing_type(0));
@@ -349,8 +352,8 @@ namespace simbi {
                   {"plm_theta", &plm_theta},
                   {"viscosity", &viscosity},
                   {"shakura_sunyaev_alpha", &shakura_sunyaev_alpha},
-                  {"spatial_order", spatial_order.c_str()},
-                  {"temporal_order", temporal_order.c_str()},
+                  {"reconstruction", reconstruction.c_str()},
+                  {"timestepping", timestepping.c_str()},
                   {"using_gamma_beta", &using_fourvel},
                   {"using_quirk_smoothing", &using_quirk_smoothing},
                   {"mesh_motion", &mesh_moving},
@@ -378,7 +381,7 @@ namespace simbi {
 
             for (const auto& [name, value] : attributes) {
                 H5::DataType type;
-                if (name == "spatial_order" || name == "temporal_order" ||
+                if (name == "reconstruction" || name == "timestepping" ||
                     name == "geometry" || name == "regime" ||
                     name.find("_spacing") != std::string::npos ||
                     name == "solver" || name == "data_directory") {

@@ -51,10 +51,10 @@
 
 #include "adapter/device_adapter_api.hpp"   // for api::set_device
 #include "adapter/device_types.hpp"
-#include "config.hpp"                        // luint, global::col_maj,
-#include "core/types/containers/array.hpp"   // for array
-#include <exception>                         // for exception
-#include <vector>                            // for vector
+#include "config.hpp"                  // luint, global::col_maj,
+#include "core/containers/array.hpp"   // for array
+#include <exception>                   // for exception
+#include <vector>                      // for vector
 
 struct ExecutionException : public std::exception {
     const char* what() const throw() { return "Invalid constructor args"; }

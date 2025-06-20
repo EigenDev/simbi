@@ -51,11 +51,10 @@
 #define CELL_HPP
 
 #include "config.hpp"
-#include "core/types/utility/enums.hpp"
-#include "geometry_manager.hpp"     // for GeometryManager
-#include "geometry_traits.hpp"      // for GeomtryTraits
-#include "grid_manager.hpp"         // for GridManager
-#include "util/tools/helpers.hpp"   // for my_max
+#include "core/utility/enums.hpp"
+#include "geometry_manager.hpp"   // for GeometryManager
+#include "geometry_traits.hpp"    // for GeomtryTraits
+#include "grid_manager.hpp"       // for GridManager
 
 namespace simbi {
     constexpr real
@@ -262,7 +261,7 @@ namespace simbi {
         {
             if (side < 2 * Dims) {
                 const size_type dir = side / 2;
-                const auto nhat     = unit_vectors::get<Dims>(dir + 1);
+                const auto nhat = unit_vectors::canonical_basis<Dims>(dir + 1);
                 // if side is even, then the normal vector
                 // points in the negative direction
                 return nhat;

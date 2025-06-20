@@ -15,21 +15,21 @@ namespace simbi {
     }
 
     // convert python sequence to vector of doubles
-    ConfigValue convert_to_vector_of_doubles(const py::object& sequence)
+    config_value_t convert_to_vector_of_doubles(const py::object& sequence)
     {
         std::vector<real> vec;
         for (size_t i = 0; i < py::len(sequence); ++i) {
             vec.push_back(py::cast<real>(get_item(sequence, i)));
         }
-        return ConfigValue(std::move(vec));
+        return config_value_t(std::move(vec));
     }
 
-    // convert Python collection to appropriate ConfigValue
-    ConfigValue convert_collection(const py::object& collection)
+    // convert Python collection to appropriate config_value_t
+    config_value_t convert_collection(const py::object& collection)
     {
         // empty collection
         if (py::len(collection) == 0) {
-            return ConfigValue(std::vector<real>());
+            return config_value_t(std::vector<real>());
         }
 
         // check first item to determine collection type
@@ -48,7 +48,7 @@ namespace simbi {
                     );
                 }
 
-                return ConfigValue(std::move(str_vec));
+                return config_value_t(std::move(str_vec));
             }
 
             std::vector<std::vector<real>> nested_vec;
@@ -60,18 +60,18 @@ namespace simbi {
                 }
                 nested_vec.push_back(std::move(inner_vec));
             }
-            return ConfigValue(std::move(nested_vec));
+            return config_value_t(std::move(nested_vec));
         }
 
         // sequence of dictionaries (bodies)
         else if (py::isinstance<py::dict>(first_item)) {
-            std::list<ConfigDict> dict_list;
+            std::list<config_dict_t> dict_list;
             for (size_t i = 0; i < py::len(collection); ++i) {
                 dict_list.push_back(
                     dict_to_config(py::cast<py::dict>(get_item(collection, i)))
                 );
             }
-            return ConfigValue(std::move(dict_list));
+            return config_value_t(std::move(dict_list));
         }
 
         // sequence of same type
@@ -82,7 +82,7 @@ namespace simbi {
                 for (size_t i = 0; i < py::len(collection); ++i) {
                     int_vec.push_back(py::cast<int>(get_item(collection, i)));
                 }
-                return ConfigValue(std::move(int_vec));
+                return config_value_t(std::move(int_vec));
             }
 
             // double list
@@ -91,7 +91,7 @@ namespace simbi {
                 for (size_t i = 0; i < py::len(collection); ++i) {
                     real_vec.push_back(py::cast<real>(get_item(collection, i)));
                 }
-                return ConfigValue(std::move(real_vec));
+                return config_value_t(std::move(real_vec));
             }
 
             // enum list
@@ -105,7 +105,7 @@ namespace simbi {
                             py::cast<std::string>(item.attr("value"))
                         );
                     }
-                    return ConfigValue(std::move(str_vec));
+                    return config_value_t(std::move(str_vec));
                 }
                 else if (py::isinstance<py::int_>(enum_value)) {
                     std::vector<int> int_vec;
@@ -113,7 +113,7 @@ namespace simbi {
                         py::object item = get_item(collection, i);
                         int_vec.push_back(py::cast<int>(item.attr("value")));
                     }
-                    return ConfigValue(std::move(int_vec));
+                    return config_value_t(std::move(int_vec));
                 }
             }
 
@@ -125,7 +125,7 @@ namespace simbi {
                         py::cast<std::string>(get_item(collection, i))
                     );
                 }
-                return ConfigValue(std::move(str_vec));
+                return config_value_t(std::move(str_vec));
             }
 
             // fall back to double vector
@@ -142,9 +142,9 @@ namespace simbi {
     }
 
     // Main dictionary conversion function
-    ConfigDict dict_to_config(const py::dict& dict)
+    config_dict_t dict_to_config(const py::dict& dict)
     {
-        ConfigDict result;
+        config_dict_t result;
 
         for (auto item : dict) {
             // Get key as string
@@ -163,33 +163,33 @@ namespace simbi {
             }
             // Basic scalar types
             else if (py::isinstance<py::bool_>(value)) {
-                result[key] = ConfigValue(py::cast<bool>(value));
+                result[key] = config_value_t(py::cast<bool>(value));
             }
             else if (py::isinstance<py::int_>(value)) {
                 if (key == "capability") {
-                    result[key] = ConfigValue(
+                    result[key] = config_value_t(
                         static_cast<BodyCapability>(py::cast<int>(value))
                     );
                 }
                 else {
-                    result[key] = ConfigValue(py::cast<int>(value));
+                    result[key] = config_value_t(py::cast<int>(value));
                 }
             }
             else if (py::isinstance<py::float_>(value)) {
-                result[key] = ConfigValue(py::cast<real>(value));
+                result[key] = config_value_t(py::cast<real>(value));
             }
             else if (py::isinstance<py::str>(value)) {
-                result[key] = ConfigValue(py::cast<std::string>(value));
+                result[key] = config_value_t(py::cast<std::string>(value));
             }
             // Type object with value attribute (enum)
             else if (py::hasattr(value, "value")) {
                 py::object enum_value = value.attr("value");
                 if (py::isinstance<py::str>(enum_value)) {
                     result[key] =
-                        ConfigValue(py::cast<std::string>(enum_value));
+                        config_value_t(py::cast<std::string>(enum_value));
                 }
                 else if (py::isinstance<py::int_>(enum_value)) {
-                    result[key] = ConfigValue(py::cast<int>(enum_value));
+                    result[key] = config_value_t(py::cast<int>(enum_value));
                 }
                 else {
                     throw py::value_error(
@@ -201,7 +201,7 @@ namespace simbi {
             else if (key.find("bounds") != std::string::npos &&
                      py::isinstance<py::sequence>(value) &&
                      py::len(value) == 2) {
-                result[key] = ConfigValue(
+                result[key] = config_value_t(
                     std::pair<real, real>(
                         py::cast<real>(get_item(value, 0)),
                         py::cast<real>(get_item(value, 1))
@@ -215,7 +215,7 @@ namespace simbi {
             // Dictionaries
             else if (py::isinstance<py::dict>(value)) {
                 result[key] =
-                    ConfigValue(dict_to_config(py::cast<py::dict>(value)));
+                    config_value_t(dict_to_config(py::cast<py::dict>(value)));
             }
             // Callable objects
             else if (py::isinstance<py::function>(value)) {

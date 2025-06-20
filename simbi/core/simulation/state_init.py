@@ -214,7 +214,7 @@ def initialize_state(config: SimbiBaseConfig) -> SimulationState:
         active_resolution = list(r for r in resolution if r > 1)
 
     # Determine ghost cell padding
-    pad_width = 1 + (config.spatial_order.value == "plm")
+    pad_width = 1 + (config.reconstruction.value == "plm")
 
     # Number of variables
     nvars = config.nvars

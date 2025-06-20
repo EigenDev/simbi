@@ -52,11 +52,13 @@
 #include "config.hpp"                   // for real, STATIC, luint, lint
 #include "core/traits.hpp"              // for is_1D_primitive, is_2D_primitive
 #include "core/types/alias/alias.hpp"   // for uarray
-#include "core/types/utility/enums.hpp"   // for Geometry, BoundaryCondition, Solver
-#include "io/exceptions.hpp"              // for ErrorCode
-#include <cmath>                          // for sqrt, exp, INFINITY
-#include <cstdlib>                        // for abs, size_t
-#include <string>                         // for string, operator<=>
+#include "core/utility/enums.hpp"   // for Geometry, BoundaryCondition, Solver
+#include "io/exceptions.hpp"        // for ErrorCode
+#include <cmath>                    // for sqrt, exp, INFINITY
+#include <cstdlib>                  // for abs, size_t
+#include <string>                   // for string, operator<=>
+#include <tuple>                    // for tuple, make_tuple, get
+#include <utility>                  // for move, forward
 
 // Some useful global constants
 constexpr real QUIRK_THRESHOLD = 1e-4;
@@ -74,26 +76,6 @@ namespace simbi {
         //==========================================================================
         // TEMPLATES
         //==========================================================================
-
-        template <int dim>
-        struct real_func {
-            using type = int;
-        };
-
-        template <>
-        struct real_func<1> {
-            using type = simbi::function<void(real, real, real[])>;
-        };
-
-        template <>
-        struct real_func<2> {
-            using type = simbi::function<void(real, real, real, real[])>;
-        };
-
-        template <>
-        struct real_func<3> {
-            using type = simbi::function<void(real, real, real, real, real[])>;
-        };
 
         /**
          * @brief Get the column index of an nd-array
@@ -616,6 +598,32 @@ namespace simbi {
         DUAL static auto
         memory_layout_coordinates(auto idx, const uarray<Dims>& shape)
             -> uarray<Dims>;
+
+        template <typename F, std::size_t... Is>
+        void for_each_index(F&& func, std::index_sequence<Is...>)
+        {
+            // this expands the lambda call for each index in the sequence
+            (func(Is), ...);   // fold expression
+        }
+
+        // template function to create the index sequence and call the helper
+        template <std::size_t N, typename F>
+        void compile_time_for(F&& func)
+        {
+            for_each_index(
+                std::forward<F>(func),
+                std::make_index_sequence<N>{}
+            );
+        }
+
+        template <int Start, int End, typename Func>
+        void compile_time_for(Func&& f)
+        {
+            if constexpr (Start < End) {
+                f(std::integral_constant<int, Start>{});
+                compile_time_for<Start + 1, End>(std::forward<Func>(f));
+            }
+        }
 
     }   // namespace helpers
 }   // namespace simbi

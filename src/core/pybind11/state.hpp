@@ -2,38 +2,27 @@
 #define STATE_HPP
 
 #include "config.hpp"
+#include "core/containers/collapsable.hpp"
+#include "core/containers/ndarray.hpp"
+#include "core/state/hydro_state.hpp"
 #include "core/types/alias/alias.hpp"
-#include "core/types/containers/collapsable.hpp"
-#include "core/types/containers/ndarray.hpp"
-#include "core/types/monad/maybe.hpp"
-#include "core/types/utility/init_conditions.hpp"
-#include "physics/hydro/types/generic_structs.hpp"
+#include "core/utility/enums.hpp"
+#include "core/utility/init_conditions.hpp"
+#include "physics/hydro/update.hpp"
 #include <functional>
+#include <pybind11/buffer_info.h>
 #include <pybind11/numpy.h>
+#include <pybind11/pybind11.h>
+#include <pybind11/stl.h>
+#include <string>
 
 namespace py = pybind11;
+
 namespace simbi {
+    using namespace containers;
+
     struct InitialConditions;
     namespace hydrostate {
-
-        // primary template for simulation with ndarray
-        template <size_type Dims, Regime R>
-        void simulate_pure_hydro(
-            ndarray<anyConserved<Dims, R>, Dims>&& cons,
-            ndarray<Maybe<anyPrimitive<Dims, R>>, Dims>&& prim,
-            InitialConditions& init,
-            std::function<real(real)> const& scale_factor,
-            std::function<real(real)> const& scale_factor_derivative
-        );
-        template <size_type Dims, Regime R>
-        void simulate_mhd(
-            ndarray<anyConserved<Dims, R>, Dims>&& cons,
-            ndarray<Maybe<anyPrimitive<Dims, R>>, Dims>&& prim,
-            std::vector<ndarray<real, Dims>>&& staggered_bfields,
-            InitialConditions& init,
-            std::function<real(real)> const& scale_factor,
-            std::function<real(real)> const& scale_factor_derivative
-        );
 
         // primary entry point for simulation with NumPy array
         template <int Dims, Regime R>
@@ -50,71 +39,52 @@ namespace simbi {
             py::buffer_info cons_buffer = cons_array.request();
             py::buffer_info prim_buffer = prim_array.request();
 
-            collapsable<Dims> ushape = {init.nz, init.ny, init.nx};
-
-            // create ndarray view of the data
-            using conserved_t = anyConserved<Dims, R>;
-            using primitive_t = anyPrimitive<Dims, R>;
+            collapsable_t<size_type, Dims> ushape = {init.nz, init.ny, init.nx};
 
             // create the ndarray wrapping the numpy data
-            ndarray<conserved_t, Dims> conserved_array(
-                reinterpret_cast<conserved_t*>(cons_buffer.ptr),
-                ushape,
+            ndarray_t<real> conserved_array(
+                static_cast<real*>(cons_buffer.ptr),
+                cons_array.size(),
                 false   // don't take ownership - numpy owns the memory
             );
-            ndarray<Maybe<primitive_t>, Dims> maybe_primitives(
-                reinterpret_cast<primitive_t*>(prim_buffer.ptr),
-                ushape
+            ndarray_t<real> primitives(
+                static_cast<real*>(prim_buffer.ptr),
+                prim_array.size(),
+                false
             );
 
-            // we now release the primitive array
-            // since we had to make copies of it
-            // to wrap the prims in the maybe monad
-            prim_array = py::array_t<real>();
-
-            if constexpr (R == Regime::RMHD) {
-                std::vector<ndarray<real, Dims>> stag_fields_list;
-                size_type ii            = 0;
-                const auto [xa, ya, za] = init.active_zones();
-                for (const auto& stag_field : staggered_bfields) {
-                    // convert each staggered field to ndarray
-                    py::buffer_info stag_buffer =
-                        stag_field.cast<py::array_t<real, py::array::c_style>>()
-                            .request();
-                    collapsable<Dims> ushape_stag = {
-                      za + 1 * (ii == 2) + 2 * (ii != 2),
-                      ya + 1 * (ii == 1) + 2 * (ii != 1),
-                      xa + 1 * (ii == 0) + 2 * (ii != 0)
-                    };
-                    stag_fields_list.emplace_back(
-                        ndarray<real, Dims>(
-                            reinterpret_cast<real*>(stag_buffer.ptr),
-                            ushape_stag,
-                            false   // don't take ownership
-                        )
+            auto state = [&]() {
+                if constexpr (R == Regime::RMHD) {
+                    // handle staggered B-fields
+                    array_t<ndarray_t<real>, Dims> bfields;
+                    for (size_type ii = 0; ii < Dims; ++ii) {
+                        auto bfield_array =
+                            staggered_bfields[ii].cast<py::array_t<real>>();
+                        py::buffer_info bfield_buffer = bfield_array.request();
+                        bfields[ii]                   = ndarray_t<real>(
+                            static_cast<real*>(bfield_buffer.ptr),
+                            bfield_array.size(),
+                            false
+                        );
+                    }
+                    return state::hydro_state_t<R, Dims>::from_init(
+                        std::move(conserved_array),
+                        std::move(primitives),
+                        std::move(bfields),
+                        std::move(init)
                     );
-                    ii++;
                 }
-                // mhd simulation
-                simulate_mhd<Dims, R>(
-                    std::move(conserved_array),
-                    std::move(maybe_primitives),
-                    std::move(stag_fields_list),
-                    init,
-                    scale_factor,
-                    scale_factor_derivative
-                );
-            }
-            else {
-                // pure hydro simulation
-                simulate_pure_hydro<Dims, R>(
-                    std::move(conserved_array),
-                    std::move(maybe_primitives),
-                    init,
-                    scale_factor,
-                    scale_factor_derivative
-                );
-            }
+                else {
+                    return state::hydro_state_t<R, Dims>::from_init(
+                        std::move(conserved_array),
+                        std::move(primitives),
+                        {},
+                        std::move(init)
+                    );
+                }
+            }();
+
+            hydro::advance_state(state, 0.01);
         }
 
         // convenience dispatcher based on runtime parameters

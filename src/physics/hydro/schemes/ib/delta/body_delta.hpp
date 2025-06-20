@@ -50,7 +50,7 @@
 #define BODY_DELTA_HPP
 
 #include "config.hpp"
-#include "core/types/containers/vector.hpp"   // for spatial_vector_t
+#include "core/containers/vector.hpp"   // for spatial_vector_t
 
 namespace simbi::ibsystem {
     template <typename T, size_type Dims>

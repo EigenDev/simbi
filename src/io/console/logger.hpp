@@ -50,7 +50,9 @@
 #define LOGGER_HPP
 
 #include "adapter/device_adapter_api.hpp"   // for gpuEventCreate, gpuEventDestroy
+#include "adapter/device_types.hpp"
 #include "config.hpp"   // for real, Platform, global::BuildPlatform, luint
+#include "core/types/alias/alias.hpp"
 #include "io/console/printb.hpp"    // for writeln, writefl
 #include "io/exceptions.hpp"        // for SimulationFailureException
 #include "io/hdf5/checkpoint.hpp"   // for write_to_file
@@ -59,9 +61,15 @@
 #include "util/tools/helpers.hpp"   // for catch_signals, Inter...
 #include <chrono>                   // for time_point, high_resolution_clock
 #include <csignal>                  // for signal handling
-#include <iostream>                 // for operator<<, char_traits, basic_ost...
-#include <type_traits>              // for conditional_t
-
+#include <cstdlib>
+#include <iomanip>
+#include <iostream>   // for operator<<, char_traits, basic_ost...
+#include <sstream>
+#include <string>
+#include <sys/signal.h>
+#include <tuple>
+#include <type_traits>   // for conditional_t
+#include <vector>
 using namespace std::chrono;
 
 namespace simbi {

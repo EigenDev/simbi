@@ -50,8 +50,8 @@
 #define EMF_FIELD_HPP
 
 #include "config.hpp"
-#include "core/types/containers/vector_field.hpp"
-#include "core/types/utility/enums.hpp"
+#include "core/containers/vector_field.hpp"
+#include "core/utility/enums.hpp"
 #include "physics/hydro/schemes/ct/ct_calculator.hpp"
 
 namespace simbi {

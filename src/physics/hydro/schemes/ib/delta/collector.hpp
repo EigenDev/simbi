@@ -51,9 +51,10 @@
 
 #include "body_delta.hpp"
 #include "config.hpp"
-#include "core/types/containers/array.hpp"
-#include "core/types/containers/vector.hpp"
-#include "core/types/utility/managed.hpp"   // for Managed
+#include "core/containers/array.hpp"
+#include "core/containers/collapsable.hpp"
+#include "core/containers/vector.hpp"
+#include "core/utility/managed.hpp"   // for Managed
 #include "physics/hydro/schemes/ib/systems/component_body_system.hpp"   // for ComponentBodySystem
 #include "util/parallel/exec_policy.hpp"
 #include "util/parallel/parallel_for.hpp"
@@ -67,16 +68,16 @@ namespace simbi::ibsystem {
     {
       private:
         // one delta per cell in the grid
-        ndarray<BodyDelta<T, Dims>, 4> cell_deltas;
+        ndarray_t<BodyDelta<T, Dims>> cell_deltas;
         // reduced deltas per body (final output)
-        ndarray<BodyDelta<T, Dims>, 1> body_deltas;
+        ndarray_t<BodyDelta<T, Dims>> body_deltas;
 
         size_type max_bodies_;
         array_t<size_type, 3> cell_shape_;
 
       public:
         GridBodyDeltaCollector(
-            const collapsable<Dims>& grid_shape,
+            const collapsable_t<size_type, Dims>& grid_shape,
             size_type max_bodies
         )
             : max_bodies_(max_bodies)
@@ -220,7 +221,7 @@ namespace simbi::ibsystem {
                 (total_cells + BLOCK_SIZE - 1) / BLOCK_SIZE;
 
             // allocate intermediate results buffer
-            ndarray<BodyDelta<T, Dims>, 2> block_results;
+            ndarray_t<BodyDelta<T, Dims>> block_results;
             block_results.resize(num_blocks * max_bodies_);
             block_results.reshape({num_blocks, max_bodies_});
 

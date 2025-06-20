@@ -29,7 +29,7 @@ from ..types.typing import InitialStateType, ExpressionDict
 from ..types.input import (
     CoordSystem,
     Regime,
-    SpatialOrder,
+    Reconstruction,
     TimeStepping,
     CellSpacing,
     Solver,
@@ -80,11 +80,11 @@ class SimbiBaseConfig(CLIConfigurableModel):
 
     solver: Solver = SimbiField(Solver.HLLC, description="Numerical solver")
 
-    spatial_order: SpatialOrder = SimbiField(
-        SpatialOrder.PLM, description="Spatial order of accuracy"
+    reconstruction: Reconstruction = SimbiField(
+        Reconstruction.PLM, description="Spatial order of accuracy"
     )
 
-    temporal_order: TimeStepping = SimbiField(
+    timestepping: TimeStepping = SimbiField(
         TimeStepping.RK2, description="Time stepping method"
     )
 
@@ -359,7 +359,9 @@ class SimbiBaseConfig(CLIConfigurableModel):
     @model_validator(mode="after")
     def validate_plm_theta(self) -> "SimbiBaseConfig":
         """Validate PLM theta parameter."""
-        if self.spatial_order == SpatialOrder.PLM and not (0.0 < self.plm_theta <= 2.0):
+        if self.reconstruction == Reconstruction.PLM and not (
+            0.0 < self.plm_theta <= 2.0
+        ):
             raise ValueError(
                 "PLM theta must be in the range (0, 2] when using PLM spatial order."
             )
@@ -529,8 +531,8 @@ class SimbiBaseConfig(CLIConfigurableModel):
             "solver",
             # "boundary_conditions",
             "plm_theta",
-            "spatial_order",
-            "temporal_order",
+            "reconstruction",
+            "timestepping",
         }
 
         # Build update dict with only the fields that exist in checkpoint
@@ -581,8 +583,8 @@ class SimbiBaseConfig(CLIConfigurableModel):
                 else [BoundaryCondition(metadata["boundary_conditions"])]
             ),
             "plm_theta": float(metadata["plm_theta"]),
-            "spatial_order": SpatialOrder(metadata["spatial_order"]),
-            "temporal_order": TimeStepping(metadata["temporal_order"]),
+            "reconstruction": Reconstruction(metadata["reconstruction"]),
+            "timestepping": TimeStepping(metadata["timestepping"]),
             "checkpoint_index": int(metadata["checkpoint_index"]),
             "checkpoint_interval": float(metadata["checkpoint_interval"]),
             "x1_spacing": CellSpacing(metadata["x1_spacing"]),

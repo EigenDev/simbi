@@ -50,6 +50,7 @@
 #define MESH_HPP
 #include "cell.hpp"
 #include "config.hpp"
+#include "core/index/global_index.hpp"
 #include "geometry_manager.hpp"
 #include "grid_manager.hpp"
 #include "util/tools/helpers.hpp"
@@ -78,6 +79,11 @@ namespace simbi {
         ) const
         {
             return Cell<Dims>(geometry_, grid_, ii, jj, kk);
+        }
+
+        DEV auto from_position(const index::cell_index_t& idx) const
+        {
+            return Cell<Dims>(geometry_, grid_, idx.x1, idx.x2, idx.x3);
         }
 
         DUAL auto get_cell_from_global(const luint global_idx) const
@@ -119,10 +125,78 @@ namespace simbi {
         DUAL auto& geometry_state() { return geometry_; }
 
         // accessors
-        DUAL auto dimensions() const { return grid_.dimensions(); }
+        DUAL auto dimensions() const
+        {
+            if constexpr (Dims == 1) {
+                return array_t<size_type, 1>{grid_.dimensions()[0]};
+            }
+            else if constexpr (Dims == 2) {
+                return array_t<size_type, 2>{
+                  grid_.dimensions()[0],
+                  grid_.dimensions()[1]
+                };
+            }
+            else {
+                return grid_.dimensions();
+            }
+        }
+
+        DUAL auto xstaggered_shape() const
+        {
+            const auto [nia, nja, nka] = grid_.active_dimensions();
+            if constexpr (Dims == 1) {
+                return array_t<size_type, 1>{nia + 1};
+            }
+            else if constexpr (Dims == 2) {
+                return array_t<size_type, 2>{nia + 1, nja};
+            }
+            else {
+                return array_t<size_type, 3>{nia + 1, nja, nka};
+            }
+        }
+
+        DUAL auto ystaggered_shape() const
+        {
+            const auto [nia, nja, nka] = grid_.active_dimensions();
+            if constexpr (Dims == 1) {
+                return array_t<size_type, 1>{nia};
+            }
+            else if constexpr (Dims == 2) {
+                return array_t<size_type, 2>{nia, nja + 1};
+            }
+            else {
+                return array_t<size_type, 3>{nia, nja + 1, nka};
+            }
+        }
+
+        DUAL auto zstaggered_shape() const
+        {
+            const auto [nia, nja, nka] = grid_.active_dimensions();
+            if constexpr (Dims == 1) {
+                return array_t<size_type, 1>{nia};
+            }
+            else if constexpr (Dims == 2) {
+                return array_t<size_type, 2>{nia, nja};
+            }
+            else {
+                return array_t<size_type, 3>{nia, nja, nka + 1};
+            }
+        }
+
         DUAL auto active_dimensions() const
         {
-            return grid_.active_dimensions();
+            if constexpr (Dims == 1) {
+                return array_t<size_type, 1>{grid_.active_dimensions()[0]};
+            }
+            else if constexpr (Dims == 2) {
+                return array_t<size_type, 2>{
+                  grid_.active_dimensions()[0],
+                  grid_.active_dimensions()[1]
+                };
+            }
+            else {
+                return grid_.active_dimensions();
+            }
         }
         DUAL auto halo_radius() const { return grid_.halo_radius(); }
         DUAL auto nhalos() const { return grid_.nhalos(); }

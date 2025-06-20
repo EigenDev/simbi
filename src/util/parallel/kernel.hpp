@@ -49,6 +49,8 @@
 #ifndef KERNEL_HPP
 #define KERNEL_HPP
 
+#include "config.hpp"
+
 namespace simbi {
     template <typename Function, typename... Arguments>
     KERNEL void kernel(Function f, Arguments... args)

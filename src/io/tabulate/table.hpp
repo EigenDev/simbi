@@ -1,12 +1,9 @@
 #ifndef SIMBI_MODERN_TABLE_HPP
 #define SIMBI_MODERN_TABLE_HPP
 
-#include <algorithm>
 #include <chrono>
-#include <iomanip>
+#include <cstddef>
 #include <iostream>
-#include <map>
-#include <sstream>
 #include <string>
 #include <vector>
 

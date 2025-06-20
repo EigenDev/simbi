@@ -49,9 +49,9 @@
 #ifndef STENCIL_HPP
 #define STENCIL_HPP
 
-#include "config.hpp"                     // for platform::is_gpu
-#include "core/types/alias/alias.hpp"     // for uarray
-#include "core/types/utility/enums.hpp"   // for Dir, Plane
+#include "config.hpp"                   // for platform::is_gpu
+#include "core/types/alias/alias.hpp"   // for uarray
+#include "core/utility/enums.hpp"       // for Dir, Plane
 
 namespace simbi {
     // map the corners to strings

@@ -50,28 +50,29 @@
 #define VISCOUS_HPP
 
 #include "config.hpp"
-#include "core/types/containers/array.hpp"
-#include "core/types/containers/vector.hpp"
+#include "core/containers/array.hpp"
+#include "core/containers/vector.hpp"
 #include "geometry/mesh/cell.hpp"
 #include "geometry/vector_calculus.hpp"
 #include "util/tools/helpers.hpp"
 
 namespace simbi::visc {
-    template <size_type Dir, typename PrimType, size_type Dims>
-    DEV std::
-        pair<typename PrimType::counterpart_t, typename PrimType::counterpart_t>
-        viscous_flux(
-            const PrimType& px1L,
-            const PrimType& px1R,
-            const PrimType& px2L,
-            const PrimType& px2R,
-            const PrimType& px3L,
-            const PrimType& px3R,
-            const Cell<Dims>& cell,
-            real nu
-        )
+    template <size_type Dir, typename primitive_type, size_type Dims>
+    DEV std::pair<
+        typename primitive_type::counterpart_t,
+        typename primitive_type::counterpart_t>
+    viscous_flux(
+        const primitive_type& px1L,
+        const primitive_type& px1R,
+        const primitive_type& px2L,
+        const primitive_type& px2R,
+        const primitive_type& px3L,
+        const primitive_type& px3R,
+        const Cell<Dims>& cell,
+        real nu
+    )
     {
-        using conserved_t = typename PrimType::counterpart_t;
+        using conserved_t = typename primitive_type::counterpart_t;
         conserved_t left_viscous_flux{};
         conserved_t right_viscous_flux{};
 

@@ -337,7 +337,7 @@ class LazySimulationReader:
                     for k, v in self._metadata_cache["system_config"].items()
                 }
 
-        nghosts = 1 + (self._metadata_cache["spatial_order"] == "plm")
+        nghosts = 1 + (self._metadata_cache["reconstruction"] == "plm")
         # derived metadata
         self._metadata_cache.update(
             {
@@ -390,7 +390,7 @@ class LazySimulationReader:
                 )
 
                 # Calculate number of active zones
-                nghosts = 1 + (metadata["spatial_order"] == "plm")
+                nghosts = 1 + (metadata["reconstruction"] == "plm")
                 active_zones = max(
                     metadata[f"{grid_length_str(i - 1)}"] - 2 * nghosts, 1
                 )
@@ -446,7 +446,7 @@ class LazySimulationReader:
             bview = data[1:-1, 1:-1] if self.unpad_mode else data
             res = 0.5 * (bview[..., 1:] + bview[..., :-1])
             if not self.unpad_mode:
-                pad = 1 if self.metadata["spatial_order"] == "plm" else 0
+                pad = 1 if self.metadata["reconstruction"] == "plm" else 0
                 npad = ((pad, pad), (pad, pad), (1 + pad, 1 + pad))
                 return np.pad(res, pad_width=npad, mode="constant")
 
@@ -455,7 +455,7 @@ class LazySimulationReader:
             bview = data[1:-1, :, 1:-1] if self.unpad_mode else data
             res = 0.5 * (bview[:, 1:, :] + bview[:, :-1, :])
             if not self.unpad_mode:
-                pad = 1 if self.metadata["spatial_order"] == "plm" else 0
+                pad = 1 if self.metadata["reconstruction"] == "plm" else 0
                 npad = ((pad, pad), (1 + pad, 1 + pad), (pad, pad))
                 return np.pad(res, pad_width=npad, mode="constant")
             return res
@@ -463,7 +463,7 @@ class LazySimulationReader:
             bview = data[:, 1:-1, 1:-1] if self.unpad_mode else data
             res = 0.5 * (bview[1:, :, :] + bview[:-1, :, :])
             if not self.unpad_mode:
-                pad = 1 if self.metadata["spatial_order"] == "plm" else 0
+                pad = 1 if self.metadata["reconstruction"] == "plm" else 0
                 npad = ((1 + pad, 1 + pad), (pad, pad), (pad, pad))
                 return np.pad(res, pad_width=npad, mode="constant")
             return res
@@ -496,7 +496,7 @@ class LazySimulationReader:
         ndim = metadata["dimensions"]
 
         # Load data (fully or partially)
-        padwidth = (metadata["spatial_order"] != "pcm") + 1
+        padwidth = (metadata["reconstruction"] != "pcm") + 1
         if indices is None:
             data: Array = np.asarray(file_obj[field_name][:])
             # Reshape based on dimensions

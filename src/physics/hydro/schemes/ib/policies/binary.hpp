@@ -51,7 +51,7 @@
 #define BINARY_HPP
 
 #include "config.hpp"
-#include "core/types/containers/vector.hpp"
+#include "core/containers/vector.hpp"
 #include "physics/hydro/schemes/ib/systems/body.hpp"
 #include "physics/hydro/schemes/ib/systems/component_body_system.hpp"
 

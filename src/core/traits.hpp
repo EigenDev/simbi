@@ -49,6 +49,7 @@
 #ifndef TRAITS_HPP
 #define TRAITS_HPP
 
+#include <cstddef>
 #include <functional>
 #include <tuple>
 #include <type_traits>

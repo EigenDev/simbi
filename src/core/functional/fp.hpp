@@ -21,8 +21,8 @@
 
 #include "adapter/device_adapter_api.hpp"
 #include "config.hpp"
-#include "core/types/containers/ndarray.hpp"
-#include "core/types/utility/enums.hpp"
+#include "core/containers/ndarray.hpp"
+#include "core/utility/enums.hpp"
 #include "util/parallel/exec_policy.hpp"
 #include <concepts>
 #include <functional>
@@ -32,7 +32,7 @@
 namespace simbi {
     // forward declarations
     template <typename T, size_type Dims, VectorType Type>
-    class Vector;
+    class vector_t;
 }   // namespace simbi
 namespace simbi::detail {
     // Primary template (fallback)
@@ -50,7 +50,7 @@ namespace simbi::detail {
         VectorType Type,
         typename NewValueType>
     struct rebind_container<Vec<T, Dims, Type>, NewValueType> {
-        using type = Vector<NewValueType, Dims, Type>;
+        using type = vector_t<NewValueType, Dims, Type>;
     };
 
     // specialization for Vectors with const T. We make it non-const to allow
@@ -62,7 +62,7 @@ namespace simbi::detail {
         VectorType Type,
         typename NewValueType>
     struct rebind_container<Vec<const T, Dims, Type>, NewValueType> {
-        using type = Vector<NewValueType, Dims, Type>;
+        using type = vector_t<NewValueType, Dims, Type>;
     };
 
     // helper alias for rebind_container
@@ -75,6 +75,7 @@ namespace simbi::detail {
 }   // namespace simbi::detail
 
 namespace simbi::fp {
+    using namespace simbi::containers;
 
     // concepts to constrain function inputs
 
@@ -309,7 +310,7 @@ namespace simbi::fp {
     T reduce(const ExecutionPolicy<>& policy, T init, F&& reduce_op)
     {
         if constexpr (platform::is_gpu) {
-            ndarray<T> result(1, init);
+            ndarray_t<T> result(1, init);
             result.sync_to_device();
             auto result_ptr      = result.data();
             const size_type size = policy.get_full_extent();

@@ -50,7 +50,7 @@
 #define SYSTEM_CONFIG_HPP
 
 #include "config.hpp"
-#include "core/types/utility/managed.hpp"
+#include "core/utility/managed.hpp"
 #include <utility>
 
 namespace H5 {

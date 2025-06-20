@@ -51,17 +51,18 @@
 
 #include "body.hpp"
 #include "config.hpp"
-#include "core/types/containers/ndarray.hpp"
-#include "core/types/containers/vector.hpp"
-#include "core/types/utility/config_dict.hpp"
-#include "core/types/utility/enums.hpp"
-#include "core/types/utility/managed.hpp"
+#include "core/containers/ndarray.hpp"
+#include "core/containers/vector.hpp"
+#include "core/utility/config_dict.hpp"
+#include "core/utility/enums.hpp"
+#include "core/utility/managed.hpp"
 #include "geometry/mesh/mesh.hpp"
 #include "physics/hydro/schemes/ib/serialization/body_serialization.hpp"
 #include "physics/hydro/types/generic_structs.hpp"
 #include "system_config.hpp"
 
 namespace simbi::ibsystem {
+    using namespace containers;
     template <typename T, size_type Dims>
     class ComponentBodySystem : public Managed<global::managed_memory>
     {
@@ -191,7 +192,7 @@ namespace simbi::ibsystem {
         }
 
         // immutable access functions
-        DUAL const ndarray<Body<T, Dims>>& bodies() const { return bodies_; }
+        DUAL const ndarray_t<Body<T, Dims>>& bodies() const { return bodies_; }
         DUAL size_t size() const { return bodies_.size(); }
         DUAL const MeshType& mesh() const { return mesh_; }
 
@@ -307,7 +308,7 @@ namespace simbi::ibsystem {
         std::string reference_frame() const { return reference_frame_; }
 
         // generate serializable properties for a body
-        ndarray<std::variant<
+        ndarray_t<std::variant<
             PropertyDescriptor<T>,
             PropertyDescriptor<bool>,
             PropertyDescriptor<std::string>,
@@ -320,7 +321,7 @@ namespace simbi::ibsystem {
                 PropertyDescriptor<std::string>,
                 PropertyDescriptor<spatial_vector_t<T, Dims>>>;
 
-            ndarray<PropertyVariant> properties;
+            ndarray_t<PropertyVariant> properties;
             if (body_idx >= bodies_.size()) {
                 return properties;
             }
@@ -458,11 +459,11 @@ namespace simbi::ibsystem {
         const MeshType& mesh_;
 
         // primary storage - immutable by default
-        ndarray<Body<T, Dims>> bodies_;
+        ndarray_t<Body<T, Dims>> bodies_;
 
         // GPU-optimized lookup arrays
-        ndarray<size_t> grav_body_indices_;
-        ndarray<size_t> accr_body_indices_;
+        ndarray_t<size_t> grav_body_indices_;
+        ndarray_t<size_t> accr_body_indices_;
 
         // system config - optional
         util::smart_ptr<SystemConfig> system_config_;

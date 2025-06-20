@@ -49,11 +49,9 @@
 #ifndef GRID_MANAGER_HPP
 #define GRID_MANAGER_HPP
 
-#include "config.hpp"                               // for DUAL
-#include "core/types/containers/array.hpp"          // for array
-#include "core/types/utility/enums.hpp"             // for Geometry, Cellspacing
-#include "core/types/utility/init_conditions.hpp"   // for InitialConditions
-#include <cmath>
+#include "config.hpp"                         // for DUAL
+#include "core/containers/array.hpp"          // for array
+#include "core/utility/init_conditions.hpp"   // for InitialConditions
 
 namespace simbi {
     class GridManager
@@ -73,7 +71,7 @@ namespace simbi {
             : nx_(init.nx),
               ny_(init.ny),
               nz_(init.nz),
-              halo_radius_(1 + (init.spatial_order == "plm"))
+              halo_radius_(1 + (init.reconstruct == "plm"))
         {
             calculate_derived_quantities();
         }

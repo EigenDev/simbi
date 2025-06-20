@@ -3,7 +3,7 @@
 
 #include "config.hpp"
 #include "config_converter.hpp"
-#include "core/types/utility/init_conditions.hpp"
+#include "core/utility/init_conditions.hpp"
 #include "state.hpp"
 #include <functional>
 #include <pybind11/functional.h>
@@ -28,8 +28,8 @@ namespace simbi {
             // extract parameters from sim_info
             int dims               = py::cast<int>(sim_info["dimensionality"]);
             std::string regime_str = py::cast<std::string>(sim_info["regime"]);
-            // convert Python dict to ConfigDict
-            ConfigDict config_dict = dict_to_config(sim_info);
+            // convert Python dict to config_dict_t
+            config_dict_t config_dict = dict_to_config(sim_info);
             InitialConditions init_cond =
                 InitialConditions::create(config_dict);
 

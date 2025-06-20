@@ -51,8 +51,8 @@
 
 #include "capability.hpp"
 #include "config.hpp"
-#include "core/types/containers/vector.hpp"
-#include "core/types/monad/maybe.hpp"
+#include "core/containers/vector.hpp"
+#include "core/functional/monad/maybe.hpp"
 
 namespace simbi::ibsystem {
     template <typename T, size_type Dims>

@@ -49,9 +49,9 @@
 #ifndef CT_CALCULATOR_HPP
 #define CT_CALCULATOR_HPP
 
-#include "config.hpp"              // for DUAL
-#include "core/types/utility/enums.hpp"   // for Dir, BlockAx, Plane, Corner
-#include "stencil.hpp"                    // for StencilView
+#include "config.hpp"               // for DUAL
+#include "core/utility/enums.hpp"   // for Dir, BlockAx, Plane, Corner
+#include "stencil.hpp"              // for StencilView
 
 namespace simbi {
     namespace scheme {
@@ -84,7 +84,7 @@ namespace simbi {
                 const auto fe = flux_stencil.vertical_field(Dir::E);
                 const auto fw = flux_stencil.vertical_field(Dir::W);
 
-                if constexpr (comp_ct_type == CTTYPE::MdZ) {
+                if constexpr (comp_ct_type == CTAlgo::MdZ) {
                     using bfield_t = decltype(vertical_bfield);
                     ct::StencilView<B, P, C, bfield_t, prim_t> bfield_stencil(
                         vertical_bfield,

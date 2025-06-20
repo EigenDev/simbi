@@ -48,9 +48,11 @@
  */
 #ifndef EXCEPTIONS_HPP
 #define EXCEPTIONS_HPP
+
 #include "config.hpp"
 #include <cstdint>
 #include <exception>
+#include <type_traits>
 
 namespace simbi {
     enum class ErrorCode : uint32_t {

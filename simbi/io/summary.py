@@ -315,8 +315,8 @@ class SimulationParameterSummary:
                 "ascii": "|123|",
                 "params": [
                     "solver",
-                    "spatial_order",
-                    "temporal_order",
+                    "reconstruction",
+                    "timestepping",
                     "plm_theta",
                     "cfl_number",
                     "use_quirk_smoothing",

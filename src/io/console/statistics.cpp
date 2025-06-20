@@ -1,12 +1,15 @@
 #include "io/console/statistics.hpp"
 #include "config.hpp"
 #include "io/tabulate/table.hpp"
+#include <cstddef>
+#include <cstdint>
 #include <iomanip>
 #include <iostream>
+#include <sstream>
 #include <string>
+#include <sys/sysctl.h>
 #include <thread>
 #include <vector>
-
 // we'll need to check if GPU code is enabled
 #if GPU_ENABLED
 #include "adapter/device_adapter_api.hpp"

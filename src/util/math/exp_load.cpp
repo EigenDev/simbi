@@ -1,11 +1,16 @@
 #include "exp_load.hpp"
-#include "core/types/containers/ndarray.hpp"
-#include "core/types/utility/config_dict.hpp"
+#include "config.hpp"
+#include "core/containers/ndarray.hpp"
+#include "core/utility/config_dict.hpp"
 #include "util/math/expression.hpp"
 #include <iostream>
+#include <list>
+#include <string>
 #include <unordered_map>
+#include <vector>
 
 namespace simbi::expression {
+    using namespace containers;
     // convert a string operation to ExprOp enum
 
     ExprOp string_to_expr_op(const std::string& op_str)
@@ -77,9 +82,9 @@ namespace simbi::expression {
         return ExprOp::CONSTANT;
     }
 
-    ndarray<ExprNode> load_expressions(const ConfigDict& expr_data)
+    ndarray_t<ExprNode> load_expressions(const config_dict_t& expr_data)
     {
-        ndarray<ExprNode> nodes;
+        ndarray_t<ExprNode> nodes;
         std::vector<ExprNode> nodes_vec;
 
         // get the expressions array
@@ -89,9 +94,10 @@ namespace simbi::expression {
         }
 
         const auto& expressions_list =
-            expr_data.at("expressions").template get<std::list<ConfigDict>>();
+            expr_data.at("expressions")
+                .template get<std::list<config_dict_t>>();
         // We need to determine the actual type in the list
-        // Since ConfigDict doesn't store lists of dictionaries directly,
+        // Since config_dict_t doesn't store lists of dictionaries directly,
         // we need to access each dict in the list individually
 
         // Reserve space assuming a reasonable size
@@ -145,47 +151,48 @@ namespace simbi::expression {
         return nodes;
     }
 
-    ndarray<int> get_output_indices(const ConfigDict& expr_data)
+    ndarray_t<int> get_output_indices(const config_dict_t& expr_data)
     {
         if (!(expr_data.contains("output_indices") &&
               expr_data.at("output_indices").is_array_of_ints())) {
-            return ndarray<int>{};
+            return ndarray_t<int>{};
         }
 
-        ndarray res(
+        ndarray_t res(
             expr_data.at("output_indices").template get<std::vector<int>>()
         );
         res.sync_to_device();
         return res;
     }
 
-    ndarray<real> get_parameters(const ConfigDict& expr_data)
+    ndarray_t<real> get_parameters(const config_dict_t& expr_data)
     {
         if (!(expr_data.contains("parameters") &&
               expr_data.at("parameters").is_array_of_floats())) {
-            return ndarray<real>{};
+            return ndarray_t<real>{};
         }
 
-        ndarray res(expr_data.at("parameters").template get<std::vector<real>>()
+        ndarray_t res(
+            expr_data.at("parameters").template get<std::vector<real>>()
         );
         res.sync_to_device();
         return res;
     }
 
-    ndarray<real> get_parameter_range(const ConfigDict& expr_data)
+    ndarray_t<real> get_parameter_range(const config_dict_t& expr_data)
     {
         if (!expr_data.contains("param_count")) {
-            return ndarray<real>{};
+            return ndarray_t<real>{};
         }
 
         auto res =
-            ndarray<real>(expr_data.at("param_count").template get<int>());
+            ndarray_t<real>(expr_data.at("param_count").template get<int>());
         res.sync_to_device();
         return res;
     }
 
-    std::tuple<ndarray<ExprNode>, ndarray<int>, ndarray<real>>
-    load_expression_data(const ConfigDict& data)
+    std::tuple<ndarray_t<ExprNode>, ndarray_t<int>, ndarray_t<real>>
+    load_expression_data(const config_dict_t& data)
     {
         return {
           load_expressions(data),

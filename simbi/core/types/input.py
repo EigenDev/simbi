@@ -42,7 +42,7 @@ class TimeStepping(str, ExtendedEnum):
     RK2 = "rk2"
 
 
-class SpatialOrder(str, ExtendedEnum):
+class Reconstruction(str, ExtendedEnum):
     PCM = "pcm"
     PLM = "plm"
 

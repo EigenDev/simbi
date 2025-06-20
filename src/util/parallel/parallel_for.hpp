@@ -52,10 +52,10 @@
 
 #include "adapter/device_adapter_api.hpp"   // for api::set_device
 #include "config.hpp"   // for global::BuildPlatform, DEV, Platform ...
-#include "core/types/utility/range.hpp"    // for range
+#include "core/utility/range.hpp"          // for range
 #include "util/parallel/exec_policy.hpp"   // for ExecutionPolicy
 #include "util/parallel/launch.hpp"        // for launch
-#include "util/parallel/thread_pool.hpp"   // for (anonymous), ThreadPool, get_nthreads
+#include "util/parallel/thread_pool.hpp"   // for (anonymous), thread_pool_t, get_nthreads
 
 namespace simbi {
     template <

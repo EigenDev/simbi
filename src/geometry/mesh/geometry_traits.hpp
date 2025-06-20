@@ -52,8 +52,8 @@
 #define GEOMETRY_TRAITS_HPP
 
 #include "config.hpp"
-#include "core/types/containers/vector.hpp"   // for spatial_vector_t
-#include "core/types/utility/enums.hpp"       // for Geometry
+#include "core/containers/vector.hpp"   // for spatial_vector_t
+#include "core/utility/enums.hpp"       // for Geometry
 
 namespace simbi {
     enum class GridDirection {

@@ -126,10 +126,10 @@ class SimulationRunner:
             # layout, we transpose the conserved state.
             cons_contig = self.state.conserved_state.reshape(
                 self.state.conserved_state.shape[0], -1
-            ).T
+            )
             prim_contig = self.state.primitive_state.reshape(
                 self.state.primitive_state.shape[0], -1
-            ).T
+            )
 
             # Create scale factor and derivative functions
             a = self.config.scale_factor or (lambda t: 1.0)
