@@ -67,7 +67,7 @@ namespace simbi {
                 const real ese,
                 const real enw,
                 const real ene,
-                const luint nhat
+                const std::uint64_t nhat
             )
             {
                 // south, north, east, west electric fields

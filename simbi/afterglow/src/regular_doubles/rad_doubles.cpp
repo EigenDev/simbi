@@ -162,7 +162,7 @@ namespace sogbo_rad {
     vector_dotproduct(const std::vector<double> a, const std::vector<double> b)
     {
         double mag = 0;
-        for (int ii = 0; ii < a.size(); ii++) {
+        for (std::int64_t ii = 0; ii < a.size(); ii++) {
             mag += a[ii] * b[ii];
         }
         return mag;
@@ -326,8 +326,8 @@ namespace sogbo_rad {
         std::vector<std::vector<double>>& mesh,
         std::vector<double>& tbin_edges,
         std::vector<double>& flux_array,
-        const int checkpoint_index,
-        const int data_dim
+        const std::in64_t checkpoint_index,
+        const std::in64_t data_dim
     )
     {
         // Place observer along chosen axis
@@ -353,10 +353,10 @@ namespace sogbo_rad {
         const auto dx2     = (x2max - x2min) / (nj - 1);
         const bool on_axis = args.theta_obs == 0;
 
-        int nk         = 1;
-        double sin_phi = 0;
-        double cos_phi = 1.0;
-        double dx3     = 2.0 * M_PI;
+        std::int64_t nk = 1;
+        double sin_phi  = 0;
+        double cos_phi  = 1.0;
+        double dx3      = 2.0 * M_PI;
         // Check whether to do 3D (off-axis) or not
         std::vector<double> x3;
         double x3max, x3min;
@@ -368,9 +368,9 @@ namespace sogbo_rad {
             dx3   = (x3max - x3min) / (nk - 1);
         }
 
-        int jreal = 0;
-        int kreal = 0;
-        for (int kk = 0; kk < nk; kk++) {
+        std::int64_t jreal = 0;
+        std::int64_t kreal = 0;
+        for (std::int64_t kk = 0; kk < nk; kk++) {
             if (!on_axis) {
                 const double x3l = (kk > 0) ? x2min + (kk - 0.5) * dx3 : x3min;
                 const double x3r =
@@ -384,7 +384,7 @@ namespace sogbo_rad {
                 kreal = (data_dim > 2) * kk;
             }
 #pragma omp parallel
-            for (int jj = 0; jj < nj; jj++) {
+            for (std::int64_t jj = 0; jj < nj; jj++) {
                 const double x2l = (jj > 0) ? x2min + (jj - 0.5) * dx2 : x2min;
                 const double x2r =
                     (jj < nj - 1) ? x2l + dx2 * (jj == 0 ? 0.5 : 1.0) : x2max;
@@ -399,9 +399,9 @@ namespace sogbo_rad {
 
                 // Data greater than 1D? Cool, there is a j space to pull data
                 // from
-                const int jreal = (data_dim > 1) * jj;
+                const std::in64_t jreal = (data_dim > 1) * jj;
 #pragma omp for nowait
-                for (int ii = 0; ii < ni; ii++) {
+                for (std::in64_t ii = 0; ii < ni; ii++) {
                     const auto central_idx = kreal * ni * nj + jreal * ni + ii;
                     const auto beta        = calc_beta(gb[central_idx]);
                     const auto w       = calc_lorentz_factor(gb[central_idx]);
@@ -416,10 +416,10 @@ namespace sogbo_rad {
                     const double eps_e =
                         0.1;   // shocked electrons fraction of internal energy
 
-                    const auto rho_einternal = pre[central_idx] *
-                                               qscales.pre_scale /
-                                               (args.adiabatic_index - 1.0
-                                               );   // internal energy density
+                    const auto rho_einternal =
+                        pre[central_idx] * qscales.pre_scale /
+                        (args.adiabatic_index -
+                         1.0);   // internal energy density
                     const auto bfield = calc_shock_bfield(
                         rho_einternal,
                         eps_b
@@ -492,7 +492,7 @@ namespace sogbo_rad {
                     const auto t_obs_day = t_obs * constants::sec2day;
                     // loop through the given frequencies and put them in their
                     // respective locations in dictionary
-                    for (int fidx = 0; fidx < nf; fidx++) {
+                    for (std::in64_t fidx = 0; fidx < nf; fidx++) {
                         // The frequency we see is doppler boosted, so account
                         // for that
                         const double nu_source = args.nus[fidx] / delta_doppler;
@@ -508,7 +508,7 @@ namespace sogbo_rad {
                             constants::cgs2mJy;
 
                         // place the fluxes in the appropriate time bins
-                        for (int tidx = 0; tidx < nt - 1; tidx++) {
+                        for (std::in64_t tidx = 0; tidx < nt - 1; tidx++) {
                             const double t1 = tbin_edges[tidx + 0];
                             const double t2 = tbin_edges[tidx + 1];
                             if ((t_obs_day - t1) <= (t2 - t1)) {

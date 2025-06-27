@@ -49,8 +49,8 @@
 #ifndef LAUNCH_HPP
 #define LAUNCH_HPP
 
-#include "adapter/device_types.hpp"
-#include "kernel.hpp"                      // for kernel
+#include "kernel.hpp"   // for kernel
+#include "system/adapter/device_types.hpp"
 #include "util/parallel/exec_policy.hpp"   // for ExecutionPolicy
 
 namespace simbi {
@@ -58,7 +58,7 @@ namespace simbi {
     template <typename Function, typename... Arguments>
     void launch(
         const ExecutionPolicy<>& policy,
-        const int device,
+        const std::int64_t device,
         const adapter::stream_t<> stream,
         Function f,
         Arguments... args

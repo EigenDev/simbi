@@ -49,11 +49,11 @@
 #ifndef MANAGED_HPP
 #define MANAGED_HPP
 
-#include "adapter/device_adapter_api.hpp"   // for deviceSynch, gpuFree, gpuMallocManaged
-#include "adapter/device_types.hpp"
-#include "config.hpp"   // for global::managed_memory
-#include <cstddef>      // for size_t
-#include <new>          // for new, delete
+#include "config.hpp"                              // for global::managed_memory
+#include "system/adapter/device_adapter_api.hpp"   // for deviceSynch, gpuFree, gpuMallocManaged
+#include "system/adapter/device_types.hpp"
+#include <cstddef>   // for size_t
+#include <new>       // for new, delete
 
 namespace simbi {
     template <bool gpu_managed = global::managed_memory>
@@ -147,7 +147,7 @@ namespace simbi {
         }
 
         // memory prefetching methods (TODO: revisit this)
-        void prefetch_to_device(int device = 0) const
+        void prefetch_to_device(std::int64_t device = 0) const
         {
             if constexpr (gpu_managed) {
                 adapter::stream_t<> stream;

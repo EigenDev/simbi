@@ -51,7 +51,7 @@
 #define MEMORY_MANAGER_HPP
 
 #include "core/functional/monad/maybe.hpp"
-#include "core/types/alias/alias.hpp"
+#include "core/types/alias.hpp"
 #include "core/utility/smart_ptr.hpp"
 
 namespace simbi {

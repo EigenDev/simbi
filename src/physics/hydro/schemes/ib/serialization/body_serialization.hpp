@@ -79,7 +79,7 @@ namespace simbi::ibsystem {
         write_to_h5(H5::Group& group, const std::string& name, const T& value);
     };
 
-    // Specialization for floating point values
+    // Specialization for floating postd::int64_t values
     template <>
     struct PropertySerializationTrait<double> {
         static H5::DataType h5_type() { return H5::PredType::NATIVE_DOUBLE; }
@@ -136,7 +136,7 @@ namespace simbi::ibsystem {
 
     // Specialization for vector data (e.g., position, velocity)
     template <typename T, size_t N>
-    struct PropertySerializationTrait<spatial_vector_t<T, N>> {
+    struct PropertySerializationTrait<vector_t<T, N>> {
         static H5::DataType h5_type()
         {
             return PropertySerializationTrait<T>::h5_type();
@@ -145,7 +145,7 @@ namespace simbi::ibsystem {
         static void write_to_h5(
             H5::Group& group,
             const std::string& name,
-            const spatial_vector_t<T, N>& value
+            const vector_t<T, N>& value
         )
         {
             hsize_t dims[1] = {N};

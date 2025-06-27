@@ -50,7 +50,7 @@
 #define GENERIC_STRUCTS_HPP
 
 #include "config.hpp"
-#include "core/containers/vector.hpp"
+#include "containers/vector.hpp"
 #include "core/functional/monad/maybe.hpp"
 #include "core/traits.hpp"
 #include "core/utility/enums.hpp"

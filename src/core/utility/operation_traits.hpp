@@ -52,7 +52,7 @@
 
 #include "config.hpp"
 #include "core/traits.hpp"
-#include "core/types/alias/alias.hpp"
+#include "core/types/alias.hpp"
 #include "device_operations.hpp"
 #include "util/parallel/parallel_for.hpp"
 #include <span>
@@ -78,7 +78,7 @@ namespace simbi {
         template <typename T, typename Policy, typename F, typename... Arrays>
         static void execute(
             T* data,
-            size_type size,
+            std::uint64_t size,
             F op,
             const Policy& policy,
             Arrays*... arrays
@@ -94,12 +94,12 @@ namespace simbi {
         {
             if constexpr (platform::is_gpu) {
                 DeviceOperator<F, T, Arrays...> device_op(op, data, arrays...);
-                parallel_for(policy, [=] DEV(size_type ii) mutable {
+                parallel_for(policy, [=] DEV(std::uint64_t ii) mutable {
                     device_op(ii);
                 });
             }
             else {
-                parallel_for(policy, [&](size_type ii) {
+                parallel_for(policy, [&](std::uint64_t ii) {
                     data[ii] = op(data[ii], arrays[ii]...);
                 });
             }
@@ -115,12 +115,12 @@ namespace simbi {
         {
             if constexpr (platform::is_gpu) {
                 DeviceOperator<F, T, Arrays...> device_op(op, data, arrays...);
-                parallel_for(policy, [=] DEV(size_type ii) mutable {
+                parallel_for(policy, [=] DEV(std::uint64_t ii) mutable {
                     device_op(ii);
                 });
             }
             else {
-                parallel_for(policy, [&](size_type ii) {
+                parallel_for(policy, [&](std::uint64_t ii) {
                     data[ii] = op(data[ii], ii, arrays[ii]...);
                 });
             }
@@ -152,12 +152,12 @@ namespace simbi {
                     &dependent_views...
                 );
 
-                parallel_for(policy, [=] DEV(size_type idx) mutable {
+                parallel_for(policy, [=] DEV(std::uint64_t idx) mutable {
                     device_op(idx);
                 });
             }
             else {
-                parallel_for(policy, [=](size_type idx) {
+                parallel_for(policy, [=](std::uint64_t idx) {
                     // Get local coordinates
                     auto pos = main_view->get_local_coords(idx);
 

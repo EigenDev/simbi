@@ -129,11 +129,6 @@ namespace simbi {
          *   types::size_t size = 42;
          */
         namespace types {
-            using size_type = std::size_t;
-            using uint32    = std::uint32_t;
-            using lint      = std::int64_t;
-            using luint     = std::uint64_t;
-
             // let the compiler figure out the type based on the configuration
             using real =
 #if FLOAT_PRECISION
@@ -147,20 +142,20 @@ namespace simbi {
          * constants - hardware/algorithm constants based on configuration
          *
          * usage:
-         *   for (int i = 0; i < constants::warp_size; ++i) { ... }
+         *   for (std::int64_t i = 0; i < constants::warp_size; ++i) { ... }
          */
         namespace constants {
             // hardware-specific constants
-            inline constexpr std::size_t warp_size = (platform::is_cuda)  ? 32
-                                                     : (platform::is_hip) ? 64
-                                                                          : 1;
+            inline constexpr std::uint64_t warp_size = (platform::is_cuda)  ? 32
+                                                       : (platform::is_hip) ? 64
+                                                                            : 1;
 
             // numerical constants
             inline constexpr types::real epsilon =
                 std::is_same_v<types::real, float> ? 1e-6f : 1e-12;
 
             // algorithm parameters
-            inline constexpr int max_iterations = 1000;
+            inline constexpr std::int64_t max_iterations = 1000;
         }   // namespace constants
     }   // namespace build
 
@@ -173,18 +168,18 @@ namespace simbi {
      */
     namespace global {
         // platform options
-        enum class Platform : int {
+        enum class Platform : std::int64_t {
             CPU = 0,
             GPU = 1
         };
 
-        enum class Runtime : int {
+        enum class Runtime : std::int64_t {
             CUDA = 0,
             ROCM = 1,
             CPU  = 2
         };
 
-        enum class Velocity : int {
+        enum class Velocity : std::int64_t {
             Beta         = 0,
             FourVelocity = 1
         };
@@ -197,7 +192,7 @@ namespace simbi {
             build::platform::is_gpu ? Platform::GPU : Platform::CPU;
 
         // convert from new warp size constant
-        constexpr std::size_t WARP_SIZE = build::constants::warp_size;
+        constexpr std::uint64_t WARP_SIZE = build::constants::warp_size;
 
         // convert from new velocity feature
         constexpr Velocity VelocityType = build::features::four_velocity

@@ -4,9 +4,10 @@ builddir/
 simbi/src/libs/
 src/libs/
 *.egg-info/
-data/
+/data
 science
 movies/
+deprecated/
 scripts/
 simbi/tools/extras/*
 version.py

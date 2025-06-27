@@ -49,9 +49,9 @@
 #ifndef RANGE_HPP
 #define RANGE_HPP
 
-#include "adapter/device_adapter_api.hpp"   // for globalThreadIdx
-#include "config.hpp"                       // for HD, STATIC
-#include <iterator>                         // for input_iterator_tag
+#include "config.hpp"                              // for HD, STATIC
+#include "system/adapter/device_adapter_api.hpp"   // for globalThreadIdx
+#include <iterator>                                // for input_iterator_tag
 
 template <typename T>
 struct range_t {

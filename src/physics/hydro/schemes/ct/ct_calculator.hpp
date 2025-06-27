@@ -66,7 +66,7 @@ namespace simbi {
                 const auto& vertical_bfield,
                 const auto& horizontal_bfield,
                 const auto& prims,
-                const luint nhat
+                const std::uint64_t nhat
             )
             {
                 using flux_t = decltype(vertical_flux);

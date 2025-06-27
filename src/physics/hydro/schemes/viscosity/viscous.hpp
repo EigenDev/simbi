@@ -51,13 +51,13 @@
 
 #include "config.hpp"
 #include "core/containers/array.hpp"
-#include "core/containers/vector.hpp"
+#include "core/utility/helpers.hpp"
+#include "data/containers/vector.hpp"
 #include "geometry/mesh/cell.hpp"
 #include "geometry/vector_calculus.hpp"
-#include "util/tools/helpers.hpp"
 
 namespace simbi::visc {
-    template <size_type Dir, typename primitive_type, size_type Dims>
+    template <std::uint64_t Dir, typename primitive_type, std::uint64_t Dims>
     DEV std::pair<
         typename primitive_type::counterpart_t,
         typename primitive_type::counterpart_t>
@@ -252,7 +252,7 @@ namespace simbi::visc {
         return fp::reduce(
             policy,
             min_viscous_time,
-            [mesh, visc] DEV(real acc, luint idx) -> real {
+            [mesh, visc] DEV(real acc, std::uint64_t idx) -> real {
                 auto cell  = mesh.get_cell_from_global(idx);
                 auto dx1   = cell.width(0);
                 auto dx2   = cell.width(1);

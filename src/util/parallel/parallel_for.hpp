@@ -50,11 +50,11 @@
 #ifndef PARALLEL_FOR_HPP
 #define PARALLEL_FOR_HPP
 
-#include "adapter/device_adapter_api.hpp"   // for api::set_device
 #include "config.hpp"   // for global::BuildPlatform, DEV, Platform ...
-#include "core/utility/range.hpp"          // for range
-#include "util/parallel/exec_policy.hpp"   // for ExecutionPolicy
-#include "util/parallel/launch.hpp"        // for launch
+#include "core/utility/range.hpp"                  // for range
+#include "system/adapter/device_adapter_api.hpp"   // for api::set_device
+#include "util/parallel/exec_policy.hpp"           // for ExecutionPolicy
+#include "util/parallel/launch.hpp"                // for launch
 #include "util/parallel/thread_pool.hpp"   // for (anonymous), thread_pool_t, get_nthreads
 
 namespace simbi {
@@ -75,8 +75,8 @@ namespace simbi {
         if constexpr (platform::is_gpu) {
             // Enable peer access if configured
             if (policy.config.enable_peer_access) {
-                for (size_type i = 0; i < num_devices; i++) {
-                    for (size_type j = 0; j < num_devices; j++) {
+                for (std::uint64_t i = 0; i < num_devices; i++) {
+                    for (std::uint64_t j = 0; j < num_devices; j++) {
                         if (i != j) {
                             gpu::api::enable_peer_access(policy.devices[j]);
                         }
@@ -94,7 +94,7 @@ namespace simbi {
             }
 
             // Launch on each device
-            for (size_type dev_idx = 0; dev_idx < num_devices; ++dev_idx) {
+            for (std::uint64_t dev_idx = 0; dev_idx < num_devices; ++dev_idx) {
                 const auto device_first =
                     first + dev_idx * (total_work / num_devices);
                 const auto device_last =
@@ -120,7 +120,7 @@ namespace simbi {
                 // Optional halo exchange between devices
                 // if (policy.config.halo_radius > 0 &&
                 //     dev_idx < num_devices - 1) {
-                //     const size_type halo_size =
+                //     const std::uint64_t halo_size =
                 //         policy.config.halo_radius *
                 //         sizeof(typename std::invoke_result_t<F, index_type>);
 
@@ -178,8 +178,8 @@ namespace simbi {
     template <typename F, global::Platform P = global::BuildPlatform>
     void parallel_for(const ExecutionPolicy<>& policy, F function)
     {
-        const auto last  = static_cast<luint>(policy.get_full_extent());
-        const auto first = static_cast<luint>(0);
+        const auto last  = static_cast<std::uint64_t>(policy.get_full_extent());
+        const auto first = static_cast<std::uint64_t>(0);
         parallel_for(policy, first, last, function);
     }
 }   // namespace simbi

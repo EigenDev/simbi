@@ -1,14 +1,14 @@
 #ifndef SIMBI_PHYSICS_CONVERSION_HPP
 #define SIMBI_PHYSICS_CONVERSION_HPP
 
-#include "config.hpp"                              // for global::epsilon
-#include "core/functional/monad/maybe.hpp"         // for Maybe, None
-#include "core/memory/values/value_concepts.hpp"   // for is_hydro_conserved_c
-#include "core/types/alias/alias.hpp"              // for real, size_type
-#include "io/exceptions.hpp"                       // for ErrorCode
-#include "physics/eos/ideal.hpp"                   // for ideal_gas_eos_t
-#include "physics/hydro/physics.hpp"   // for pressure_from_conserved
-#include <cmath>                       // for abs, isfinite, sqrt
+#include "compute/functional/monad/maybe.hpp"   // for Maybe, None
+#include "config.hpp"                           // for global::epsilon
+#include "core/base/concepts.hpp"               // for is_hydro_conserved_c
+#include "core/types/alias.hpp"                 // for real, std::uint64_t
+#include "physics/eos/ideal.hpp"                // for ideal_gas_eos_t
+#include "physics/hydro/physics.hpp"            // for pressure_from_conserved
+#include "system/io/exceptions.hpp"             // for ErrorCode
+#include <cmath>                                // for abs, isfinite, sqrt
 
 namespace simbi::hydro::newtonian {
     using namespace simbi::eos;
@@ -55,9 +55,9 @@ namespace simbi::hydro::srhd {
         // https://www.sciencedirect.com/science/article/pii/S0893965913002930
         // so far, the convergence rate is the same, but perhaps I need
         // a slight tweak
-        size_type iter = 0;
-        real peq       = std::abs(smag - d - tau);
-        const real tol = d * global::epsilon;
+        std::uint64_t iter = 0;
+        real peq           = std::abs(smag - d - tau);
+        const real tol     = d * global::epsilon;
         real dp;
         do {
             // compute x_[k+1]
@@ -138,7 +138,7 @@ namespace simbi::hydro::rmhd {
         auto f_upper =
             kkc_fmu44(mu_upper, rmag, rpsq, beesq, rdbsq, q, d, gamma);
 
-        size_type iter = 0.0;
+        std::uint64_t iter = 0.0;
         real mu, ff;
         do {
             mu =
@@ -216,7 +216,7 @@ namespace simbi::hydro::rmhd {
             vel *= w;
         }
 
-        return primitive_t{rhohat, vel, pg, dchi / d, bfield};
+        return primitive_t{rhohat, vel, pg, bfield, dchi / d};
     }
 }   // namespace simbi::hydro::rmhd
 #endif

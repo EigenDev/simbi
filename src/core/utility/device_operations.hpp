@@ -51,8 +51,8 @@
 #define DEVICE_OPERATORS_HPP
 
 #include "config.hpp"
-#include "core/types/alias/alias.hpp"
-#include "util/tools/helpers.hpp"   // for unravel_idx
+#include "core/types/alias.hpp"
+#include "core/utility/helpers.hpp"   // for unravel_idx
 #include <array>
 #include <cstddef>
 #include <initializer_list>
@@ -73,14 +73,14 @@ namespace simbi {
         {
         }
 
-        DEV void operator()(size_type idx)
+        DEV void operator()(std::uint64_t idx)
         {
             apply_tuple(idx, std::make_index_sequence<sizeof...(Arrays)>{});
         }
 
       private:
         template <size_t... Is>
-        DEV void apply_tuple(size_type idx, std::index_sequence<Is...>)
+        DEV void apply_tuple(std::uint64_t idx, std::index_sequence<Is...>)
         {
             target_[idx] = op_(target_[idx], std::get<Is>(arrays_)[idx]...);
         }
@@ -115,7 +115,7 @@ namespace simbi {
             );
         }
 
-        DEV void operator()(size_type idx)
+        DEV void operator()(std::uint64_t idx)
         {
             // Get local coordinates
             const auto pos = unravel_idx<MainView::dim>(idx, main_view_shape_);
@@ -143,7 +143,7 @@ namespace simbi {
         void extract_dependent_data(std::index_sequence<Is...>)
         {
             // Using parameter pack expansion to initialize arrays
-            (void) std::initializer_list<int>{
+            (void) std::initializer_list<std::int64_t>{
               (dependent_data_[Is]   = std::get<Is>(dependent_views_)->data(),
                dependent_shapes_[Is] = std::get<Is>(dependent_views_)->shape(),
                dependent_strides_[Is] =
@@ -157,7 +157,7 @@ namespace simbi {
         DEV void apply_stencil_op(
             typename MainView::template device_stencil_view<main_t>&
                 center_view,
-            size_type idx,
+            std::uint64_t idx,
             std::index_sequence<Is...>
         )
         {
@@ -166,7 +166,7 @@ namespace simbi {
         }
 
         template <size_t I>
-        DEV auto create_dependent_view(size_type idx)
+        DEV auto create_dependent_view(std::uint64_t idx)
         {
             using view_t =
                 std::tuple_element_t<I, std::tuple<DependentViews*...>>;

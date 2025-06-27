@@ -51,7 +51,7 @@
 #define GRAVITATIONAL_HPP
 
 #include "config.hpp"
-#include "core/containers/vector.hpp"
+#include "data/containers/vector.hpp"
 #include "geometry/mesh/cell.hpp"
 #include "physics/hydro/schemes/ib/delta/body_delta.hpp"
 #include "physics/hydro/schemes/ib/systems/body.hpp"
@@ -61,14 +61,14 @@
 namespace simbi::ibsystem::body_functions {
     namespace gravitational {
 
-        template <typename T, size_type Dims, typename Primitive>
+        template <typename T, std::uint64_t Dims, typename Primitive>
         DEV std::pair<typename Primitive::counterpart_t, BodyDelta<T, Dims>>
         apply_gravitational_force(
-            size_type body_idx,
+            std::uint64_t body_idx,
             const Body<T, Dims>& body,
             const Primitive& prim,
-            const Cell<Dims>& mesh_cell,
-            const HydroContext& context,
+            const uarray<Dims>& coords,
+            real gamma,
             T dt
         )
         {

@@ -24,12 +24,12 @@ pybind11_dep = dependency('pybind11')
 pybind11_include = run_command(py3, ['-c', 'import pybind11; print(pybind11.get_include())'], check: true).stdout().strip()
 
 # show maximum of n errors before stopping the build
-cc = meson.get_compiler('cpp')
-if cc.get_id() == 'clang'
-  add_project_arguments('-ferror-limit=1', language: 'cpp')
-elif cc.get_id() == 'gcc'
-  add_project_arguments('-fmax-errors=1', language: 'cpp')
-endif
+# cc = meson.get_compiler('cpp')
+# if cc.get_id() == 'clang'
+#   add_project_arguments('-ferror-limit=1', language: 'cpp')
+# elif cc.get_id() == 'gcc'
+#   add_project_arguments('-fmax-errors=1', language: 'cpp')
+# endif
 #Build configuration
 conf_data = configuration_data()
 foreach opt : ['four_velocity', 'column_major', 'progress_bar', 'shared_memory']
@@ -63,7 +63,7 @@ all_inc = include_directories('src')
 #CPU Extension Module
 py3.extension_module(
   'cpu_ext',
-  ['src/core/pybind11/cpu_binding.cpp'] + sources,
+  ['src/bindings/pybind11/cpu_binding.cpp'] + sources,
   include_directories: all_inc,
   cpp_args: ['-DGPU_ENABLED=0'],
   dependencies: general_dependencies,

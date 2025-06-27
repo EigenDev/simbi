@@ -51,7 +51,7 @@
 #define ARRAY_PROPS_HPP
 
 #include "config.hpp"
-#include "core/types/alias/alias.hpp"
+#include "core/types/alias.hpp"
 #include "util/tools/helpers.hpp"
 
 namespace simbi {

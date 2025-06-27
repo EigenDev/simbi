@@ -55,7 +55,7 @@
 #include "core/managers/array_props.hpp"       // for array_properties
 #include "core/managers/memory_manager.hpp"    // for memory_manager
 #include "core/traits.hpp"                     // for is_maybe
-#include "core/types/alias/alias.hpp"          // for uarray
+#include "core/types/alias.hpp"                // for uarray
 #include "core/utility/operation_traits.hpp"   // for OperationTraits, PoinwiseOp
 #include "util/parallel/exec_policy.hpp"       // for ExecutionPolicy
 #include "util/parallel/parallel_for.hpp"      // for parallel_for

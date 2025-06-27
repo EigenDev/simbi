@@ -51,11 +51,11 @@
 #define ACCRETION_HPP
 
 #include "config.hpp"
+#include "core/utility/helpers.hpp"
 #include "geometry/mesh/cell.hpp"
 #include "physics/hydro/schemes/ib/delta/body_delta.hpp"
 #include "physics/hydro/schemes/ib/systems/body.hpp"
 #include "physics/hydro/types/context.hpp"
-#include "util/tools/helpers.hpp"
 
 namespace simbi::ibsystem::body_functions {
     namespace accretion {
@@ -82,14 +82,14 @@ namespace simbi::ibsystem::body_functions {
         }
 
         // calculate radial accretion profile
-        template <typename T, size_type Dims>
+        template <typename T, std::uint64_t Dims>
         DEV T calculate_radial_accretion_profile(
             const T distance,
             const T r_bondi,
             const T accretion_efficiency,
             const T gamma,
-            const spatial_vector_t<T, Dims>& rel_position,
-            const spatial_vector_t<T, Dims>& rel_velocity,
+            const vector_t<T, Dims>& rel_position,
+            const vector_t<T, Dims>& rel_velocity,
             const T local_cs,
             const T local_j_specific = 0.0,
             const bool isothermal    = true
@@ -254,8 +254,8 @@ namespace simbi::ibsystem::body_functions {
                     j_factor *
                     std::pow(distance / effective_r_bondi, mass_flux_power);
 
-                // Enhance accretion near sonic point by blending with a higher
-                // value
+                // Enhance accretion near sonic postd::int64_t by blending with
+                // a higher value
                 const T min_blend_factor = 0.2;
                 accretion_factor =
                     base_value *
@@ -294,10 +294,10 @@ namespace simbi::ibsystem::body_functions {
         }
 
         // apply accretion effect to fluid
-        template <typename T, size_type Dims, typename Primitive>
+        template <typename T, std::uint64_t Dims, typename Primitive>
         DEV std::pair<typename Primitive::counterpart_t, BodyDelta<T, Dims>>
         apply_accretion_effect(
-            size_type body_idx,
+            std::uint64_t body_idx,
             const Body<T, Dims>& body,
             const Primitive& prim,
             const Cell<Dims>& mesh_cell,
@@ -413,10 +413,10 @@ namespace simbi::ibsystem::body_functions {
             return {conserved_t{}, delta};
         }
 
-        template <typename T, size_type Dims, typename Primitive>
+        template <typename T, std::uint64_t Dims, typename Primitive>
         DEV std::pair<typename Primitive::counterpart_t, BodyDelta<T, Dims>>
         apply_simple_accretion(
-            size_type body_idx,
+            std::uint64_t body_idx,
             const Body<T, Dims>& body,
             const Primitive& prim,
             const Cell<Dims>& mesh_cell,

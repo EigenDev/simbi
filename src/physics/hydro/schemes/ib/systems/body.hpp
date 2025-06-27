@@ -50,17 +50,19 @@
 #define BODY_HPP
 
 #include "capability.hpp"
+#include "compute/functional/monad/maybe.hpp"
 #include "config.hpp"
-#include "core/containers/vector.hpp"
-#include "core/functional/monad/maybe.hpp"
+#include "core/utility/enums.hpp"
+#include "data/containers/vector.hpp"
+#include <cstdint>
 
 namespace simbi::ibsystem {
-    template <typename T, size_type Dims>
+    template <typename T, std::uint64_t Dims>
     struct Body {
         // core properties (always present)
-        spatial_vector_t<T, Dims> position;
-        spatial_vector_t<T, Dims> velocity;
-        spatial_vector_t<T, Dims> force;
+        vector_t<T, Dims> position;
+        vector_t<T, Dims> velocity;
+        vector_t<T, Dims> force;
         T mass;
         T radius;
         bool two_way_coupling;
@@ -74,9 +76,9 @@ namespace simbi::ibsystem {
 
         // ctors
         DUAL Body()
-            : position(spatial_vector_t<T, Dims>()),
-              velocity(spatial_vector_t<T, Dims>()),
-              force(spatial_vector_t<T, Dims>()),
+            : position(vector_t<T, Dims>()),
+              velocity(vector_t<T, Dims>()),
+              force(vector_t<T, Dims>()),
               mass(T(0)),
               radius(T(0)),
               two_way_coupling(false),
@@ -88,15 +90,15 @@ namespace simbi::ibsystem {
         {
         }
         DUAL Body(
-            const spatial_vector_t<T, Dims>& position,
-            const spatial_vector_t<T, Dims>& velocity,
+            const vector_t<T, Dims>& position,
+            const vector_t<T, Dims>& velocity,
             T mass,
             T radius,
             bool two_way_coupling = false
         )
             : position(position),
               velocity(velocity),
-              force(spatial_vector_t<T, Dims>()),
+              force(vector_t<T, Dims>()),
               mass(mass),
               radius(radius),
               two_way_coupling(two_way_coupling),
@@ -206,8 +208,7 @@ namespace simbi::ibsystem {
             return new_body;
         }
 
-        DUAL Body<T, Dims>
-        with_force(const spatial_vector_t<T, Dims>& new_force) const
+        DUAL Body<T, Dims> with_force(const vector_t<T, Dims>& new_force) const
         {
             Body<T, Dims> new_body = *this;
             new_body.force         = new_force;
@@ -215,7 +216,7 @@ namespace simbi::ibsystem {
         }
 
         DUAL Body<T, Dims>
-        update_position(const spatial_vector_t<T, Dims>& new_position) const
+        update_position(const vector_t<T, Dims>& new_position) const
         {
             Body<T, Dims> new_body = *this;
             new_body.position      = new_position;
@@ -223,7 +224,7 @@ namespace simbi::ibsystem {
         }
 
         DUAL Body<T, Dims>
-        update_velocity(const spatial_vector_t<T, Dims>& new_velocity) const
+        update_velocity(const vector_t<T, Dims>& new_velocity) const
         {
             Body<T, Dims> new_body = *this;
             new_body.velocity      = new_velocity;
@@ -280,32 +281,32 @@ namespace simbi::ibsystem {
             BodyCapability caps = BodyCapability::NONE;
             if (gravitational.has_value()) {
                 caps = static_cast<BodyCapability>(
-                    static_cast<int>(caps) |
-                    static_cast<int>(BodyCapability::GRAVITATIONAL)
+                    static_cast<std::int64_t>(caps) |
+                    static_cast<std::int64_t>(BodyCapability::GRAVITATIONAL)
                 );
             }
             if (accretion.has_value()) {
                 caps = static_cast<BodyCapability>(
-                    static_cast<int>(caps) |
-                    static_cast<int>(BodyCapability::ACCRETION)
+                    static_cast<std::int64_t>(caps) |
+                    static_cast<std::int64_t>(BodyCapability::ACCRETION)
                 );
             }
             if (rigid.has_value()) {
                 caps = static_cast<BodyCapability>(
-                    static_cast<int>(caps) |
-                    static_cast<int>(BodyCapability::RIGID)
+                    static_cast<std::int64_t>(caps) |
+                    static_cast<std::int64_t>(BodyCapability::RIGID)
                 );
             }
             if (elastic.has_value()) {
                 caps = static_cast<BodyCapability>(
-                    static_cast<int>(caps) |
-                    static_cast<int>(BodyCapability::ELASTIC)
+                    static_cast<std::int64_t>(caps) |
+                    static_cast<std::int64_t>(BodyCapability::ELASTIC)
                 );
             }
             if (deformable.has_value()) {
                 caps = static_cast<BodyCapability>(
-                    static_cast<int>(caps) |
-                    static_cast<int>(BodyCapability::DEFORMABLE)
+                    static_cast<std::int64_t>(caps) |
+                    static_cast<std::int64_t>(BodyCapability::DEFORMABLE)
                 );
             }
             return caps;

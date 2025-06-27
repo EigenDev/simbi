@@ -130,7 +130,7 @@ namespace simbi {
             const GridManager& grid,
             const InitialConditions& init
         )
-            : gpu_block_dimx_(get_block_dims("GPU_BLOCK_X")),
+            : gpu_block_dimx_(get_block_dims("BLOCK_X")),
               gpu_block_dimy_(get_block_dims("GPU_BLOCK_Y")),
               gpu_block_dimz_(get_block_dims("GPU_BLOCK_Z"))
         {

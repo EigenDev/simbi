@@ -36,15 +36,15 @@ class RegisterGPUBlockDimensions(Action):
         import os
 
         if values is not None and len(values) == 3:
-            os.environ["GPU_BLOCK_X"] = str(values[0])
+            os.environ["BLOCK_X"] = str(values[0])
             os.environ["GPU_BLOCK_Y"] = str(values[1])
             os.environ["GPU_BLOCK_Z"] = str(values[2])
         elif values is not None and len(values) == 2:
-            os.environ["GPU_BLOCK_X"] = str(values[0])
+            os.environ["BLOCK_X"] = str(values[0])
             os.environ["GPU_BLOCK_Y"] = str(values[1])
             os.environ["GPU_BLOCK_Z"] = "1"
         elif values is not None and len(values) == 1:
-            os.environ["GPU_BLOCK_X"] = str(values[0])
+            os.environ["BLOCK_X"] = str(values[0])
             os.environ["GPU_BLOCK_Y"] = "1"
             os.environ["GPU_BLOCK_Z"] = "1"
         else:

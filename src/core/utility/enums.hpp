@@ -85,6 +85,11 @@ namespace simbi {
     enum class Reconstruction {
         PCM,
         PLM,
+        PPM,
+        WENO3,
+        WENO5,
+        WENO7,
+        WENO9,
     };
 
     enum class Timestepping {
@@ -125,7 +130,7 @@ namespace simbi {
         SCHNEIDER_ET_AL_93,
         MIGNONE_AND_BODO_05,
         HUBER_AND_KISSMANN_2021,
-        NAIVE,
+        DAVIDSON,
     };
 
     enum class CONS2PRIMTYPE {
@@ -253,14 +258,6 @@ namespace simbi {
         // TODO: add more capabilities as needed
     };
 
-    enum class VectorType : uint32_t {
-        GENERAL       = 0,
-        SPATIAL       = 1 << 0 | GENERAL,
-        MAGNETIC      = 1 << 1 | GENERAL,
-        MAGNETIC_FOUR = 1 << 2 | GENERAL,
-        SPACETIME     = 1 << 3 | GENERAL,
-    };
-
     constexpr auto comp_wave_speed    = WaveSpeedEstimate::MIGNONE_AND_BODO_05;
     constexpr auto comp_ct_type       = CTAlgo::CONTACT;
     constexpr auto comp_slope_limiter = LIMITER::MINMOD;
@@ -304,7 +301,9 @@ namespace simbi {
     REGISTER_ENUM_BIMAP(
         Reconstruction,
         {Reconstruction::PCM, "pcm"},
-        {Reconstruction::PLM, "plm"}
+        {Reconstruction::PLM, "plm"},
+        {Reconstruction::PPM, "ppm"},
+        {Reconstruction::WENO5, "weno5"}
     );
 
     REGISTER_ENUM_BIMAP(
@@ -329,7 +328,7 @@ namespace simbi {
         {WaveSpeedEstimate::SCHNEIDER_ET_AL_93, "schneider_et_al_93"},
         {WaveSpeedEstimate::MIGNONE_AND_BODO_05, "mignone_and_bodo_05"},
         {WaveSpeedEstimate::HUBER_AND_KISSMANN_2021, "huber_and_kissmann_2021"},
-        {WaveSpeedEstimate::NAIVE, "naive"}
+        {WaveSpeedEstimate::DAVIDSON, "davidson"}
     );
 
     REGISTER_ENUM_BIMAP(

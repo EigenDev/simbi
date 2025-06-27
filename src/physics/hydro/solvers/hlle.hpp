@@ -3,9 +3,9 @@
 
 // HLLE is the same for all regimes, so it can be defined here
 #include "config.hpp"
-#include "core/containers/vector.hpp"
-#include "core/memory/values/value_concepts.hpp"
+#include "core/base/concepts.hpp"
 #include "core/utility/enums.hpp"
+#include "data/containers/vector.hpp"
 #include "physics/em/electromagnetism.hpp"
 #include "physics/hydro/physics.hpp"
 #include "physics/hydro/wave_speeds.hpp"

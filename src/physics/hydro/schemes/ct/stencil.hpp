@@ -50,8 +50,8 @@
 #define STENCIL_HPP
 
 #include "config.hpp"                   // for platform::is_gpu
-#include "core/types/alias/alias.hpp"   // for uarray
 #include "core/utility/enums.hpp"       // for Dir, Plane
+#include "data/containers/vector.hpp"   // for vector_t
 
 namespace simbi {
     // map the corners to strings
@@ -83,11 +83,15 @@ namespace simbi {
 
     namespace ct {
         struct DirectionPattern {
-            int di;
-            int dj;
-            int dk;
+            std::int64_t di;
+            std::int64_t dj;
+            std::int64_t dk;
 
-            constexpr DirectionPattern(int i, int j, int k)
+            constexpr DirectionPattern(
+                std::int64_t i,
+                std::int64_t j,
+                std::int64_t k
+            )
                 : di(i), dj(j), dk(k)
             {
             }
@@ -115,7 +119,8 @@ namespace simbi {
             {
             }
 
-            // Get flux at stencil point based on plane-aware directions
+            // Get flux at stencil postd::int64_t based on plane-aware
+            // directions
             DEV constexpr auto vertical_field(Dir dir) const
             {
                 auto [di, dj, dk] = get_vertical_offsets(dir, coordinates);
@@ -176,11 +181,11 @@ namespace simbi {
             static constexpr auto get_plane_offsets(Dir dir)
             {
                 // Base indices for cell-centers relative to corner
-                constexpr int base_i = (is_east ? 0 : -1);
-                constexpr int base_j =
+                constexpr std::int64_t base_i = (is_east ? 0 : -1);
+                constexpr std::int64_t base_j =
                     ((P == Plane::JK) ? (is_east ? 0 : -1)
                                       : (is_north ? 0 : -1));
-                constexpr int base_k = (is_north ? 0 : -1);
+                constexpr std::int64_t base_k = (is_north ? 0 : -1);
 
                 if constexpr (P == Plane::IJ) {
                     // Handle cell-centered quantities
@@ -223,11 +228,11 @@ namespace simbi {
             static constexpr auto
             get_vertical_offsets(Dir dir, const auto& coordinates)
             {
-                constexpr int ghost_offset = 1;
+                constexpr std::int64_t ghost_offset = 1;
 
                 // Face indices (-1/2 face = 0, +1/2 face = 1)
-                constexpr int face_0 = 0;
-                constexpr int face_1 = 1;
+                constexpr std::int64_t face_0 = 0;
+                constexpr std::int64_t face_1 = 1;
 
                 // for eastern corners, the horizontal shift changes depending
                 // on whether we want to go east of west
@@ -264,11 +269,11 @@ namespace simbi {
             static constexpr auto
             get_horizontal_offsets(Dir dir, const auto& coordinates)
             {
-                constexpr int ghost_offset = 1;
+                constexpr std::int64_t ghost_offset = 1;
 
                 // Face indices (-1/2 face = 0, +1/2 face = 1)
-                constexpr int face_0 = 0;
-                constexpr int face_1 = 1;
+                constexpr std::int64_t face_0 = 0;
+                constexpr std::int64_t face_1 = 1;
 
                 // for a given northern or southern corner, the vertical shift
                 // changes depending on whether we want to go south of north

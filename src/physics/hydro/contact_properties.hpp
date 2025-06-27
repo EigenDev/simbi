@@ -2,9 +2,10 @@
 #define SIMBI_PHYSICS_CONTACT_PROPERTIES
 
 #include "config.hpp"
-#include "core/containers/vector.hpp"
-#include "core/memory/values/value_concepts.hpp"
-#include "core/types/alias/alias.hpp"
+#include "core/base/concepts.hpp"
+#include "core/types/alias.hpp"
+#include "core/utility/helpers.hpp"   // for sgn
+#include "data/containers/vector.hpp"
 #include <tuple>
 #include <type_traits>   // for std::integral_constant, std::is_same_v
 #include <utility>       // for std::tuple_size, std::tuple_element
@@ -17,7 +18,7 @@ namespace simbi::hydro {
 namespace std {
     template <>
     struct tuple_size<simbi::hydro::contact_properties_t>
-        : std::integral_constant<size_type, 2> {
+        : std::integral_constant<std::uint64_t, 2> {
     };
 
     template <>
@@ -33,11 +34,23 @@ namespace std {
 
 namespace simbi::hydro {
     using namespace simbi::concepts;
+    using namespace simbi::helpers;
     struct contact_properties_t {
         real speed, pressure;
         // structured bindings support
-        template <size_type Index>
+        template <std::uint64_t Index>
         DEV std::tuple_element_t<Index, contact_properties_t>& get()
+        {
+            if constexpr (Index == 0) {
+                return speed;
+            }
+            if constexpr (Index == 1) {
+                return pressure;
+            }
+        }
+
+        template <std::uint64_t Index>
+        DEV const std::tuple_element_t<Index, contact_properties_t>& get() const
         {
             if constexpr (Index == 0) {
                 return speed;

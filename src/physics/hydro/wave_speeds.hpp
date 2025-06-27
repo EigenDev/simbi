@@ -1,17 +1,17 @@
 #ifndef SIMBI_PHYSICS_WAVE_SPEEDS_HPP
 #define SIMBI_PHYSICS_WAVE_SPEEDS_HPP
 
-#include "config.hpp"                   // for DEV, real, global
-#include "contact_properties.hpp"       // for wave_speeds_t
-#include "core/containers/vector.hpp"   // for unit_vector_t
-#include "core/memory/values/value_concepts.hpp"
-#include "core/utility/enums.hpp"   // for WaveSpeedEstimate
+#include "config.hpp"               // for DEV, real, global
+#include "contact_properties.hpp"   // for wave_speeds_t
+#include "core/base/concepts.hpp"
+#include "core/utility/enums.hpp"       // for WaveSpeedEstimate
+#include "core/utility/helpers.hpp"     // for solve_quartic,
+#include "data/containers/vector.hpp"   // for unit_vector_t
 #include "physics/hydro/physics.hpp"   // for is_hydro_primitive_c, is_mhd_primitive_c, is_rmhd_c, is_srhd_c
-#include "util/tools/helpers.hpp"   // for solve_quartic,
-#include <algorithm>                // for std::min, std::max
-#include <cmath>                    // for std::sqrt, std::pow
-#include <cstdio>                   // for printf
-#include <tuple>                    // for std::tuple_size, std::tuple_element
+#include <algorithm>     // for std::min, std::max
+#include <cmath>         // for std::sqrt, std::pow
+#include <cstdio>        // for printf
+#include <tuple>         // for std::tuple_size, std::tuple_element
 #include <type_traits>   // for std::integral_constant, std::is_same_v
 
 namespace simbi::hydro {
@@ -315,8 +315,8 @@ namespace simbi::hydro::rmhd {
             return {lambdaL, lambdaR};
         }
         else if (bnsq < global::epsilon) {   // Eq. (58)
-            const real g2      = prim.lorentz_factor_squared();
-            const real vdbperp = prim.vdotb() - vn * bn;
+            const real g2      = w * w;
+            const real vdbperp = vecops::dot(prim.vel, prim.mag) - vn * bn;
             const real q       = bmusq - cssq * vdbperp * vdbperp;
             const real a2      = rho * h * (cssq + g2 * (1.0 - cssq)) + q;
             const real a1      = -2.0 * rho * h * g2 * vn * (1.0 - cssq);
@@ -332,7 +332,6 @@ namespace simbi::hydro::rmhd {
 
             const auto bmu0 = bmu[0];
             const auto bmun = bmu.spatial_dot(nhat);
-            const auto w    = prim.lorentz_factor();
             const auto w2   = w * w;
             const auto vn2  = vn * vn;
 

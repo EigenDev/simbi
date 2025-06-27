@@ -15,8 +15,8 @@ void py_calc_fnu(
     std::map<std::string, py::array_t<double>> mesh,
     std::map<std::string, double> qscales,
     std::map<std::string, py::object> sim_info,
-    int checkpoint_index,
-    int data_dim
+    std::int64_t checkpoint_index,
+    std::int64_t data_dim
 )
 {
     // extract field arrays
@@ -123,7 +123,7 @@ void py_log_events(
     std::map<std::string, py::array_t<double>> mesh,
     std::map<std::string, double> qscales,
     std::map<std::string, py::object> sim_info,
-    int data_dim
+    std::int64_t data_dim
 )
 {
     // extract field arrays

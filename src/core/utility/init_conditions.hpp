@@ -53,7 +53,7 @@
 #include "config.hpp"
 #include "config_dict.hpp"
 #include "config_dict_visitor.hpp"
-#include "core/types/alias/alias.hpp"
+#include "core/types/alias.hpp"
 #include <algorithm>
 #include <sstream>
 #include <stdexcept>
@@ -78,13 +78,13 @@ namespace simbi {
         real sound_speed_squared;
         real shakura_sunyaev_alpha;
 
-        luint nx;
-        luint ny;
-        luint nz;
-        luint checkpoint_index;
-        luint dimensionality;
-        luint nvars;
-        luint halo_radius;
+        std::uint64_t nx;
+        std::uint64_t ny;
+        std::uint64_t nz;
+        std::uint64_t checkpoint_index;
+        std::uint64_t dimensionality;
+        std::uint64_t nvars;
+        std::uint64_t halo_radius;
 
         bool quirk_smoothing;
         bool fleischmann_limiter;
@@ -210,13 +210,14 @@ namespace simbi {
         }
 
         // Existing methods...
-        std::tuple<size_type, size_type, size_type> active_zones() const
+        std::tuple<std::uint64_t, std::uint64_t, std::uint64_t>
+        active_zones() const
         {
             const auto nghosts = 2 * (1 + (reconstruct == "plm"));
             return std::make_tuple(
                 nx - nghosts,
-                std::max<lint>(ny - nghosts, 1),
-                std::max<lint>(nz - nghosts, 1)
+                std::max<std::int64_t>(ny - nghosts, 1),
+                std::max<std::int64_t>(nz - nghosts, 1)
             );
         }
 
@@ -269,7 +270,7 @@ namespace simbi {
             }
 
             const simbi::config_dict_t* current_dict = &config;
-            for (size_type ii = 0; ii < keys.size() - 1; ++ii) {
+            for (std::uint64_t ii = 0; ii < keys.size() - 1; ++ii) {
                 auto it = current_dict->find(keys[ii]);
                 if (it == current_dict->end() || !it->second.is_dict()) {
                     return {};   // Key not found or not a dictionary

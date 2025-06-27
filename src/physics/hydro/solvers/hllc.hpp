@@ -1,17 +1,17 @@
 #ifndef SIMBI_HYDRO_HLLC_HPP
 #define SIMBI_HYDRO_HLLC_HPP
 
-#include "config.hpp"                              // for DEV macro
-#include "core/containers/vector.hpp"              // for VectorLike
-#include "core/memory/values/value_concepts.hpp"   // for is_hydro_primitive_c
-#include "core/utility/enums.hpp"                  // for ShockWaveLimiter
-#include "physics/em/electromagnetism.hpp"         // for shift_electric_field
-#include "physics/hydro/solvers/hlle.hpp"          // for hlle_flux
-#include "physics/hydro/wave_speeds.hpp"           // for extremal_speeds
-#include "util/tools/helpers.hpp"   // for goes_to_zero, sgn, vecops::dot, vecops::norm
-#include <algorithm>                // for std::max, std::min
-#include <cmath>                    // for std::abs, std::log
-#include <numbers>                  // for std::numbers::pi
+#include "config.hpp"               // for DEV macro
+#include "core/base/concepts.hpp"   // for is_hydro_primitive_c
+#include "core/utility/enums.hpp"   // for ShockWaveLimiter
+#include "core/utility/helpers.hpp"   // for goes_to_zero, sgn, vecops::dot, vecops::norm
+#include "data/containers/vector.hpp"        // for VectorLike
+#include "physics/em/electromagnetism.hpp"   // for shift_electric_field
+#include "physics/hydro/solvers/hlle.hpp"    // for hlle_flux
+#include "physics/hydro/wave_speeds.hpp"     // for extremal_speeds
+#include <algorithm>                         // for std::max, std::min
+#include <cmath>                             // for std::abs, std::log
+#include <numbers>                           // for std::numbers::pi
 
 namespace simbi::hydro {
     using namespace simbi::helpers;
@@ -262,7 +262,8 @@ namespace simbi::hydro::newtonian {
         real rhostar = fac * (aL - vnL) * rho;
         auto mstar   = fac * (mom * (aL - vnL) + nhat * (p_star - pre));
         real estar   = fac * (nrg * (aL - vnL) + (p_star * a_star - pre * vnL));
-        const auto starStateL = conserved_t{rhostar, mstar, estar};
+        const auto starStateL =
+            conserved_t{rhostar, mstar, estar, rhostar * primL.chi};
 
         pre = primR.pre;
         rho = uR.den;
@@ -273,7 +274,8 @@ namespace simbi::hydro::newtonian {
         rhostar = fac * (aR - vnR) * rho;
         mstar   = fac * (mom * (aR - vnR) + nhat * (-pre + p_star));
         estar   = fac * (nrg * (aR - vnR) + (p_star * a_star - pre * vnR));
-        const auto starStateR = conserved_t{rhostar, mstar, estar};
+        const auto starStateR =
+            conserved_t{rhostar, mstar, estar, rhostar * primR.chi};
 
         // Apply the low-Mach HLLC fix found in Fleischmann et al 2020:
         // https://www.sciencedirect.com/science/article/pii/S0021999120305362
@@ -351,7 +353,7 @@ namespace simbi::hydro::srhd {
 
             // calculate intermediate state
             const auto [a_star, p_star] =
-                contact_props(uL, uR, fL, fR, aL, aR, nhat);
+                contact_props(uL, uR, fL, fR, nhat, aL, aR);
             const bool on_left = (vface <= a_star);
 
             const auto& prim = on_left ? primL : primR;
@@ -362,11 +364,11 @@ namespace simbi::hydro::srhd {
 
             const auto& pf = on_left ? primR : primL;
             const auto& uf = on_left ? uR : uL;
-            const auto& ff = on_left ? fR : fL;
-            const auto af  = on_left ? aR : aL;
-            const auto un  = star_state(pf, uf, af, a_star, p_star, nhat);
+            // const auto& ff = on_left ? fR : fL;
+            const auto af = on_left ? aR : aL;
+            const auto un = star_state(pf, uf, af, a_star, p_star, nhat);
 
-            return f * (us - u) * a - un * vface;
+            return f + (us - u) * a - un * vface;
         }();
 
         // upwind the scalar concentration
@@ -407,8 +409,8 @@ namespace simbi::hydro::rmhd {
 
         const auto uL = to_conserved(primL, gamma);
         const auto uR = to_conserved(primR, gamma);
-        const auto fL = to_flux(primL, gamma, nhat);
-        const auto fR = to_flux(primR, gamma, nhat);
+        const auto fL = to_flux(primL, nhat, gamma);
+        const auto fR = to_flux(primR, nhat, gamma);
 
         auto [aL, aR] = extremal_speeds(primL, primR, nhat, gamma);
         aL            = std::min(aL, 0.0);
@@ -437,7 +439,7 @@ namespace simbi::hydro::rmhd {
             // get the perpendicular directional unit vectors
             // the normal component of the magnetic field is assumed to
             // be continuous across the interface, so bnL = bnR = bn
-            const auto bn = hll_state.bcomponent(nhat);
+            const auto bn = dot(hll_state.mag, nhat);
             // const auto bn = bface;
             // const real bn  = hll_state.bcomponent(nhat);
             const auto& b_hll = hll_state.mag;

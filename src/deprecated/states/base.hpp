@@ -50,9 +50,9 @@
 #define BASE_HPP
 
 #include "config.hpp"   // for real, luint, global::managed_memory, use...
+#include "containers/vector.hpp"
 #include "core/containers/collapsable.hpp"
 #include "core/containers/ndarray.hpp"
-#include "core/containers/vector.hpp"
 #include "core/functional/fp.hpp"
 #include "core/managers/boundary_manager.hpp"      // for boundary_manager
 #include "core/managers/exec_policy_manager.hpp"   // for ExecutionPolicy
@@ -179,6 +179,7 @@ namespace simbi {
             std::tuple<size_type, size_type, size_type>&& coords
         )
         {
+
             return ibsystem::functions::apply_forces_to_fluid(
                 *body_system_,
                 prim,

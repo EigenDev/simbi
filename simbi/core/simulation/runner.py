@@ -64,21 +64,21 @@ class SimulationRunner:
             block_dims = dims[dim]
 
             # if enviornment variables are not set, set them
-            if dim == 1 and "GPU_BLOCK_X" not in os.environ:
-                os.environ["GPU_BLOCK_X"] = str(block_dims[0])
+            if dim == 1 and "BLOCK_X" not in os.environ:
+                os.environ["BLOCK_X"] = str(block_dims[0])
                 os.environ["GPU_BLOCK_Y"] = "1"
                 os.environ["GPU_BLOCK_Z"] = "1"
-            elif dim == 2 and "GPU_BLOCK_X" not in os.environ:
-                os.environ["GPU_BLOCK_X"] = str(block_dims[0])
+            elif dim == 2 and "BLOCK_X" not in os.environ:
+                os.environ["BLOCK_X"] = str(block_dims[0])
                 os.environ["GPU_BLOCK_Y"] = str(block_dims[1])
                 os.environ["GPU_BLOCK_Z"] = "1"
-            elif dim == 3 and "GPU_BLOCK_X" not in os.environ:
-                os.environ["GPU_BLOCK_X"] = str(block_dims[0])
+            elif dim == 3 and "BLOCK_X" not in os.environ:
+                os.environ["BLOCK_X"] = str(block_dims[0])
                 os.environ["GPU_BLOCK_Y"] = str(block_dims[1])
                 os.environ["GPU_BLOCK_Z"] = str(block_dims[2])
 
             runtime_block_dims = (
-                int(os.environ.get("GPU_BLOCK_X", block_dims[0])),
+                int(os.environ.get("BLOCK_X", block_dims[0])),
                 int(os.environ.get("GPU_BLOCK_Y", block_dims[1])),
                 int(os.environ.get("GPU_BLOCK_Z", block_dims[2])),
             )
@@ -126,10 +126,10 @@ class SimulationRunner:
             # layout, we transpose the conserved state.
             cons_contig = self.state.conserved_state.reshape(
                 self.state.conserved_state.shape[0], -1
-            )
+            ).T
             prim_contig = self.state.primitive_state.reshape(
                 self.state.primitive_state.shape[0], -1
-            )
+            ).T
 
             # Create scale factor and derivative functions
             a = self.config.scale_factor or (lambda t: 1.0)

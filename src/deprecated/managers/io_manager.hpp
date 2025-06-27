@@ -50,7 +50,7 @@
 #define IO_MANAGER_HPP
 
 #include "config.hpp"
-#include "core/containers/vector.hpp"
+#include "containers/vector.hpp"
 #include "core/managers/solver_manager.hpp"   // for SolverManager
 #include "core/utility/init_conditions.hpp"   // for InitialConditions
 #include "core/utility/managed.hpp"
@@ -209,13 +209,13 @@ namespace simbi {
         // call 'em
         template <typename Conserved>
         DEV Conserved call_hydro_source(
-            const spatial_vector_t<real, Dims> coords,
+            const vector_t<real, Dims> coords,
             const real time,
             const Conserved& cons
         ) const
         {
             auto local_cons = cons;
-            spatial_vector_t<real, 3> local_coords{0.0, 0.0, 0.0};
+            vector_t<real, 3> local_coords{0.0, 0.0, 0.0};
             for (size_type ii = 0; ii < Dims; ++ii) {
                 local_coords[ii] = coords[ii];
             }
@@ -248,13 +248,13 @@ namespace simbi {
             return local_cons;
         }
 
-        DEV spatial_vector_t<real, Dims> call_gravity_source(
-            const spatial_vector_t<real, Dims>& coords,
+        DEV vector_t<real, Dims> call_gravity_source(
+            const vector_t<real, Dims>& coords,
             const real time
         ) const
         {
-            spatial_vector_t<real, Dims> local_vec;
-            spatial_vector_t<real, 3> local_coords{0.0, 0.0, 0.0};
+            vector_t<real, Dims> local_vec;
+            vector_t<real, 3> local_coords{0.0, 0.0, 0.0};
             for (size_type ii = 0; ii < Dims; ++ii) {
                 local_coords[ii] = coords[ii];
             }
@@ -292,14 +292,14 @@ namespace simbi {
         template <typename Conserved>
         DEV Conserved call_boundary_source(
             BoundaryFace face,
-            const spatial_vector_t<real, Dims>& coords,
+            const vector_t<real, Dims>& coords,
             real t,
             real dt,
             const Conserved& conserved_data
         ) const
         {
             auto local_results = conserved_data;
-            spatial_vector_t<real, 3> local_coords{0.0, 0.0, 0.0};
+            vector_t<real, 3> local_coords{0.0, 0.0, 0.0};
             for (size_type ii = 0; ii < Dims; ++ii) {
                 local_coords[ii] = coords[ii];
             }
@@ -407,9 +407,9 @@ namespace simbi {
         }
 
         DEV real
-        call_local_sound_speed(const spatial_vector_t<real, Dims>& coords) const
+        call_local_sound_speed(const vector_t<real, Dims>& coords) const
         {
-            spatial_vector_t<real, 3> local_coords{0.0, 0.0, 0.0};
+            vector_t<real, 3> local_coords{0.0, 0.0, 0.0};
             for (size_type ii = 0; ii < Dims; ++ii) {
                 local_coords[ii] = coords[ii];
             }

@@ -1,29 +1,30 @@
 #ifndef SIMBI_HYDRO_HLLD_HPP
 #define SIMBI_HYDRO_HLLD_HPP
 
-#include "config.hpp"                   // for global::epsilon
-#include "core/containers/array.hpp"    // for array_t
-#include "core/containers/vector.hpp"   // for spatial_vector_t
-#include "core/memory/values/value_concepts.hpp"   // for is_hydro_primitive_c, is_mhd_primitive_c
-#include "core/utility/enums.hpp"            // for Regime
+#include "config.hpp"               // for global::epsilon
+#include "core/base/concepts.hpp"   // for is_hydro_primitive_c, is_mhd_primitive_c
+#include "core/utility/enums.hpp"   // for Regime
+#include "core/utility/helpers.hpp"   // for goes_to_zero, sgn, safe_less_than, safe_greater_than
+#include "data/containers/vector.hpp"   // for vector_t
 #include "physics/em/electromagnetism.hpp"   // for to_flux, to_conserved, to_primitive
+#include "physics/hydro/conversion.hpp"
 #include "physics/hydro/physics.hpp"   // for to_flux, to_conserved, to_primitive
 #include "physics/hydro/wave_speeds.hpp"   // for wave_speeds
-#include "util/tools/helpers.hpp"   // for goes_to_zero, sgn, safe_less_than, safe_greater_than
-#include <algorithm>   // for min, max
-#include <cmath>       // for abs, sqrt
-#include <limits>      // for numeric_limits
+#include <algorithm>                       // for min, max
+#include <cmath>                           // for abs, sqrt
+#include <limits>                          // for numeric_limits
 
 namespace simbi::hydro::rmhd {
     using namespace simbi::concepts;
     using namespace simbi::em;
     using namespace simbi::vecops;
+    using namespace simbi::unit_vectors;
 
     template <is_hydro_primitive_c primitive_t>
     DUAL real hlld_vdiff(
         const real p,
-        const array_t<typename primitive_t::counterpart_t, 2> r,
-        const array_t<real, 2> lam,
+        const vector_t<typename primitive_t::counterpart_t, 2> r,
+        const vector_t<real, 2> lam,
         const real bn,
         const unit_vector_t<primitive_t::dimensions>& nhat,
         primitive_t& praL,
@@ -32,16 +33,16 @@ namespace simbi::hydro::rmhd {
     )
 
     {
-        array_t<real, 2> eta, enthalpy;
-        array_t<spatial_vector_t<real, 3>, 2> kv, bv, vv;
+        vector_t<real, 2> eta, enthalpy;
+        vector_t<vector_t<real, 3>, 2> kv, bv, vv;
         const auto sgnBn = sgn(bn) + global::epsilon;
 
         // compute Alfven terms
-        for (int ii = 0; ii < 2; ii++) {
+        for (std::int64_t ii = 0; ii < 2; ii++) {
             const auto aS      = lam[ii];
             const auto rS      = r[ii];
             const auto& rmn    = dot(rS.mom, nhat);
-            const auto rmtrans = rS - rmn * nhat;
+            const auto rmtrans = rS.mom - rmn * nhat;
             const auto rbn     = dot(rS.mag, nhat);
             const auto rbtrans = rS.mag - rbn * nhat;
             const auto ret     = rS.nrg + rS.den;
@@ -92,10 +93,10 @@ namespace simbi::hydro::rmhd {
         const auto& etaR = eta[RF];
 
         // the normal component of the k-vector is the Alfven speed
-        const auto& alfL = kL[nhat.index()];
-        const auto& alfR = kR[nhat.index()];
-        const auto& vnL  = vL[nhat.index()];
-        const auto& vnR  = vR[nhat.index()];
+        const auto& alfL = kL[index(nhat)];
+        const auto& alfR = kR[index(nhat)];
+        const auto& vnL  = vL[index(nhat)];
+        const auto& vnR  = vR[index(nhat)];
 
         // Compute contact terms
         // Equation (45)
@@ -133,15 +134,14 @@ namespace simbi::hydro::rmhd {
         }();
 
         // check if solution is physically consistent, Eq. (54)
-        auto eqn54ok =
-            (vnL[nhat.index()] - kL[nhat.index()]) > -global::epsilon;
-        eqn54ok &= (kR[nhat.index()] - vcR[nhat.index()]) > -global::epsilon;
-        eqn54ok &= (lam[0] - vL[nhat.index()]) < 0.0;
-        eqn54ok &= (lam[1] - vR[nhat.index()]) > 0.0;
+        auto eqn54ok = (vL[index(nhat)] - kL[index(nhat)]) > -global::epsilon;
+        eqn54ok &= (kR[index(nhat)] - vR[index(nhat)]) > -global::epsilon;
+        eqn54ok &= (lam[0] - vL[index(nhat)]) < 0.0;
+        eqn54ok &= (lam[1] - vR[index(nhat)]) > 0.0;
         eqn54ok &= (enthalpy[1] - p) > 0.0;
         eqn54ok &= (enthalpy[0] - p) > 0.0;
-        eqn54ok &= (kL[nhat.index()] - lam[nhat.index()]) > -global::epsilon;
-        eqn54ok &= (lam[1] - kR[nhat.index()]) > -global::epsilon;
+        eqn54ok &= (kL[index(nhat)] - lam[index(nhat)]) > -global::epsilon;
+        eqn54ok &= (lam[1] - kR[index(nhat)]) > -global::epsilon;
 
         if (!eqn54ok) {
             return std::numeric_limits<real>::infinity();
@@ -185,7 +185,7 @@ namespace simbi::hydro::rmhd {
         const auto fL = to_flux(primL, nhat, gamma);
         const auto fR = to_flux(primR, nhat, gamma);
 
-        auto [aL, aR]         = wave_speeds(primL, primR, nhat);
+        auto [aL, aR]         = extremal_speeds(primL, primR, nhat, gamma);
         aL                    = std::min(aL, 0.0);
         aR                    = std::max(aR, 0.0);
         const auto stationary = aL == aR;
@@ -217,14 +217,14 @@ namespace simbi::hydro::rmhd {
             const real& bn = dot(primL.mag, nhat);
 
             // Eq. (12)
-            const array_t<conserved_t, 2> r{uL * aL - fL, uR * aR - fR};
-            const array_t<real, 2> lam{aL, aR};
+            const vector_t<conserved_t, 2> r{uL * aL - fL, uR * aR - fR};
+            const vector_t<real, 2> lam{aL, aR};
 
             //------------------------------------
             // Iteratively solve for the pressure
             //------------------------------------
             //------------ initial pressure guess
-            const auto maybe_prim = cons2prim(hll_state);
+            const auto maybe_prim = to_primitive(hll_state, gamma);
             if (!maybe_prim.has_value()) {
                 return hll_flux - hll_state * vface;
             }
@@ -235,8 +235,9 @@ namespace simbi::hydro::rmhd {
             constexpr real peps          = global::epsilon;
             constexpr real prat_lim      = 0.01;    // pressure ratio limit
             constexpr real pguess_offset = 1.e-6;   // pressure guess offset
-            constexpr int num_tries = 15;   // secant tries before giving up
-            bool hlld_success       = true;
+            constexpr std::int64_t num_tries =
+                15;   // secant tries before giving up
+            bool hlld_success = true;
 
             // L / R Alfven prims and Contact prims
             primitive_t prAL, prAR, prC;

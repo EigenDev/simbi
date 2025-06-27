@@ -52,7 +52,7 @@
 
 #include "config.hpp"
 #include "config_dict.hpp"
-#include "core/types/alias/alias.hpp"
+#include "core/types/alias.hpp"
 #include "core/utility/enums.hpp"
 #include "init_conditions_visitor.hpp"
 #include <cmath>
@@ -101,7 +101,11 @@ namespace simbi {
         }
 
         // Resolution fields
-        void visit_resolution(luint& nx, luint& ny, luint& nz) override
+        void visit_resolution(
+            std::uint64_t& nx,
+            std::uint64_t& ny,
+            std::uint64_t& nz
+        ) override
         {
             const auto nghosts =
                 2 *
@@ -109,13 +113,13 @@ namespace simbi {
             if (dict.contains("resolution")) {
                 const auto& res = dict.at("resolution");
                 if (res.is_array_of_ints()) {
-                    auto res_vec = res.get<std::vector<int>>();
+                    auto res_vec = res.get<std::vector<std::int64_t>>();
                     nx           = res_vec.size() > 0 ? res_vec[0] : 1;
                     ny           = res_vec.size() > 1 ? res_vec[1] : 1;
                     nz           = res_vec.size() > 2 ? res_vec[2] : 1;
                 }
                 else if (res.is_int()) {
-                    nx = res.get<int>();
+                    nx = res.get<std::int64_t>();
                     ny = 1;
                     nz = 1;
                 }
@@ -320,25 +324,25 @@ namespace simbi {
 
         void visit_output_settings(
             std::string& data_directory,
-            luint& checkpoint_index
+            std::uint64_t& checkpoint_index
         ) override
         {
             data_directory   = dict.at("data_directory").get<std::string>();
-            checkpoint_index = dict.at("checkpoint_index").get<luint>();
+            checkpoint_index = dict.at("checkpoint_index").get<std::uint64_t>();
         }
 
         void visit_computed_properties(
-            luint& dimensionality,
+            std::uint64_t& dimensionality,
             bool& is_mhd,
             bool& is_relativistic,
-            luint& nvars,
-            luint& halo_radius
+            std::uint64_t& nvars,
+            std::uint64_t& halo_radius
         ) override
         {
-            dimensionality  = dict.at("dimensionality").get<luint>();
+            dimensionality  = dict.at("dimensionality").get<std::uint64_t>();
             is_mhd          = dict.at("is_mhd").get<bool>();
             is_relativistic = dict.at("is_relativistic").get<bool>();
-            nvars           = dict.at("nvars").get<luint>();
+            nvars           = dict.at("nvars").get<std::uint64_t>();
             halo_radius =
                 1 + (dict.at("reconstruction").get<std::string>() == "plm");
         }
@@ -425,7 +429,11 @@ namespace simbi {
         }
 
         // Resolution fields
-        void visit_resolution(luint& nx, luint& ny, luint& nz) override
+        void visit_resolution(
+            std::uint64_t& nx,
+            std::uint64_t& ny,
+            std::uint64_t& nz
+        ) override
         {
             nx = 100;   // Default resolution
             ny = 1;
@@ -540,7 +548,7 @@ namespace simbi {
 
         void visit_output_settings(
             std::string& data_directory,
-            luint& checkpoint_index
+            std::uint64_t& checkpoint_index
         ) override
         {
             data_directory   = "output";
@@ -548,11 +556,11 @@ namespace simbi {
         }
 
         void visit_computed_properties(
-            luint& dimensionality,
+            std::uint64_t& dimensionality,
             bool& is_mhd,
             bool& is_relativistic,
-            luint& nvars,
-            luint& halo_radius
+            std::uint64_t& nvars,
+            std::uint64_t& halo_radius
         ) override
         {
             dimensionality  = 3;   // Default to 3D
@@ -584,7 +592,7 @@ namespace simbi {
             }
             if (checkpoint_interval <= 0.0) {
                 throw std::runtime_error(
-                    "Checkpoint interval must be positive"
+                    "Checkpostd::int64_t interval must be positive"
                 );
             }
             if (dlogt < 0.0) {
@@ -593,7 +601,11 @@ namespace simbi {
         }
 
         // Resolution fields
-        void visit_resolution(luint& nx, luint& ny, luint& nz) override
+        void visit_resolution(
+            std::uint64_t& nx,
+            std::uint64_t& ny,
+            std::uint64_t& nz
+        ) override
         {
             if (nx == 0 || ny == 0 || nz == 0) {
                 throw std::runtime_error("Resolution cannot be zero");
@@ -733,7 +745,10 @@ namespace simbi {
             // Validate immersed bodies if needed
         }
 
-        void visit_output_settings(std::string& data_directory, luint&) override
+        void visit_output_settings(
+            std::string& data_directory,
+            std::uint64_t&
+        ) override
         {
             if (data_directory.empty()) {
                 throw std::runtime_error("Data directory cannot be empty");
@@ -741,11 +756,11 @@ namespace simbi {
         }
 
         void visit_computed_properties(
-            luint& dimensionality,
+            std::uint64_t& dimensionality,
             bool&,
             bool&,
-            luint& nvars,
-            luint& halo_radius
+            std::uint64_t& nvars,
+            std::uint64_t& halo_radius
         ) override
         {
             if (dimensionality < 1 || dimensionality > 3) {

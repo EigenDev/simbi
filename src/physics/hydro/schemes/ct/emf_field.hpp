@@ -78,7 +78,7 @@ namespace simbi {
 
             ~EMField() = default;
 
-            template <int l_dir, int m_dir>
+            template <std::int64_t l_dir, std::int64_t m_dir>
             DUAL void compute_edge_components(
                 const auto& fri,
                 const auto& gri,

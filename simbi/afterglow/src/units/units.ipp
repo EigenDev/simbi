@@ -7,7 +7,7 @@
 */
 namespace units {
     template <typename T>
-    constexpr int sgn(T val)
+    constexpr std::int64_t sgn(T val)
     {
         return (T(0) < val) - (val < T(0));
     }
@@ -534,7 +534,7 @@ namespace units {
     template <typename T>
     struct yes {
         yes() = default;
-        ~yes(){};
+        ~yes() {};
 
         void foo()
         {
@@ -987,7 +987,8 @@ namespace units {
                             const auto cf = Celcius(Kelvin(1.0)).value;
                             newvalue *= std::pow(cf, powk);
                         }
-                        else if (uTransform.tempType == Temperature_t::Fahrenheit) {
+                        else if (uTransform.tempType ==
+                                 Temperature_t::Fahrenheit) {
                             const auto cf = Fahrenheit(Kelvin(1.0)).value;
                             newvalue *= std::pow(cf, powk);
                         }
@@ -997,7 +998,8 @@ namespace units {
                             const auto cf = Kelvin(Celcius(1.0)).value;
                             newvalue *= std::pow(cf, powk);
                         }
-                        else if (uTransform.tempType == Temperature_t::Fahrenheit) {
+                        else if (uTransform.tempType ==
+                                 Temperature_t::Fahrenheit) {
                             const auto cf = Fahrenheit(Celcius(1.0)).value;
                             newvalue *= std::pow(cf, powk);
                         }
@@ -1108,7 +1110,7 @@ namespace units {
     {
         std::string outstr;
         std::string padding = "";
-        int terms           = 0;
+        std::int64_t terms  = 0;
         if constexpr (m::num != 0) {
             const std::string unit_str = mass_dict[ell.mType];
             if (ell.powm != 1) {
@@ -1942,22 +1944,23 @@ namespace units {
             Temperature_t K,   // Temperature unit type
             Irradiance_t I,    // Luminous Intensity unit type
             Angle_t A>         // Angle unit type
-        constexpr auto pow(const quantity<
-                           P,
-                           m,
-                           l,
-                           t,
-                           q,
-                           temp,
-                           intensity,
-                           angle,
-                           M,
-                           L,
-                           T,
-                           Q,
-                           K,
-                           I,
-                           A>& quant)
+        constexpr auto
+        pow(const quantity<
+            P,
+            m,
+            l,
+            t,
+            q,
+            temp,
+            intensity,
+            angle,
+            M,
+            L,
+            T,
+            Q,
+            K,
+            I,
+            A>& quant)
         {
             const P vpower = P(power::num) / power::den;
             return quantity<
@@ -1994,22 +1997,24 @@ namespace units {
             Temperature_t K,   // Temperature unit type
             Irradiance_t I,    // Luminous Intensity unit type
             Angle_t A>         // Angle unit type
-        constexpr auto sqrt(const quantity<
-                            P,
-                            m,
-                            l,
-                            t,
-                            q,
-                            temp,
-                            intensity,
-                            angle,
-                            M,
-                            L,
-                            T,
-                            Q,
-                            K,
-                            I,
-                            A>& val)
+        constexpr auto sqrt(
+            const quantity<
+                P,
+                m,
+                l,
+                t,
+                q,
+                temp,
+                intensity,
+                angle,
+                M,
+                L,
+                T,
+                Q,
+                K,
+                I,
+                A>& val
+        )
         {
             return quantity<
                 P,
@@ -2262,8 +2267,8 @@ namespace units {
     constexpr power erg_per_s(1);         // erg per second
     constexpr ndens n_per_cm3(1);   // number of particles per centimer cubed
     constexpr spec_power power_per_hz(1);   // erg per second squared
-    constexpr emissivity power_per_hz_per_cm3(1
-    );   // erg per second squared per centimer cubed
+    constexpr emissivity
+        power_per_hz_per_cm3(1);   // erg per second squared per centimer cubed
 
     // // define derived conversion types
     constexpr auto kg = quantity<

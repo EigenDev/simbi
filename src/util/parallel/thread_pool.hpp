@@ -62,6 +62,14 @@
 #include <utility>   // for move, swap
 #include <vector>
 
+#if __cplusplus >= 202002L && !defined(__clang__)
+constexpr bool need_join = false;
+using std_thread         = std::jthread;
+#else
+constexpr bool need_join = true;
+using std_thread         = std::thread;
+#endif
+
 namespace simbi::pooling {
     /**
      * @brief A custom thread pool implementation.
@@ -75,7 +83,7 @@ namespace simbi::pooling {
     class thread_pool_t
     {
       public:
-        static thread_pool_t& instance(const unsigned int nthreads)
+        static thread_pool_t& instance(const std::uint64_t nthreads)
         {
             static thread_pool_t singleton(nthreads);
             return singleton;
@@ -188,7 +196,7 @@ namespace simbi::pooling {
         thread_pool_t(const thread_pool_t&)            = delete;
         thread_pool_t& operator=(const thread_pool_t&) = delete;
 
-        thread_pool_t(const unsigned int nthreads)
+        thread_pool_t(const std::uint64_t nthreads)
             : nthreads(nthreads), should_terminate(false), busy(0)
         {
             if (nthreads == 0) {
@@ -197,9 +205,9 @@ namespace simbi::pooling {
                 );
             }
             threads.reserve(nthreads);
-            for (unsigned int i = 0; i < nthreads; i++) {
+            for (std::uint64_t i = 0; i < nthreads; i++) {
                 threads.emplace_back(
-                    std::jthread(&thread_pool_t::spawn_thread_proc, this)
+                    std_thread(&thread_pool_t::spawn_thread_proc, this)
                 );
             }
         }
@@ -211,6 +219,11 @@ namespace simbi::pooling {
                 should_terminate = true;
             }
             cv_task.notify_all();
+            if constexpr (need_join) {
+                for (std_thread& active_thread : threads) {
+                    active_thread.join();
+                }
+            }
             threads.clear();
         }
 
@@ -253,31 +266,31 @@ namespace simbi::pooling {
             });
         }
 
-        unsigned int nthreads;
+        std::uint64_t nthreads;
         bool should_terminate;
         std::mutex queue_mutex;
         std::condition_variable cv_task;
         std::condition_variable cv_finished;
-        std::vector<std::jthread> threads;
+        std::vector<std_thread> threads;
         std::queue<std::function<void()>> jobs;
-        std::atomic<unsigned int> busy;
+        std::atomic<std::uint64_t> busy;
     };
 
-    inline auto get_nthreads() -> unsigned int
+    inline auto get_nthreads() -> std::uint64_t
     {
         if (const char* thread_env = std::getenv("NTHREADS")) {
-            return static_cast<unsigned int>(
+            return static_cast<std::uint64_t>(
                 std::stoul(std::string(thread_env))
             );
         }
 
         if (const char* thread_env = std::getenv("OMP_NUM_THREADS")) {
-            return static_cast<unsigned int>(
+            return static_cast<std::uint64_t>(
                 std::stoul(std::string(thread_env))
             );
         }
 
-        return std::jthread::hardware_concurrency();
+        return std_thread::hardware_concurrency();
     };
 
     // Global accessor function

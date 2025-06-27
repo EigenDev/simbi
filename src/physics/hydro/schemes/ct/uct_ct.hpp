@@ -67,7 +67,7 @@ namespace simbi {
                 const real be,
                 const real bs,
                 const real bn,
-                const luint nhat
+                const std::uint64_t nhat
             )
             {
                 // MdZ coefficients calculation
@@ -137,7 +137,7 @@ namespace simbi {
                 const Flux& fe,
                 const Flux& fs,
                 const Flux& fn,
-                const luint nhat
+                const std::uint64_t nhat
             ) -> std::tuple<real, real, real, real>
             {
                 // transverse velocities from MdZ (2021), Eqns. (34 & 35)c

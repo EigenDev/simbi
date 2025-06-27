@@ -65,7 +65,7 @@ namespace simbi {
                 const real be,
                 const real bs,
                 const real bn,
-                const luint nhat
+                const std::uint64_t nhat
             )
             {
                 constexpr real alpha = 0.1;

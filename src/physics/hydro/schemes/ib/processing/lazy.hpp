@@ -55,7 +55,7 @@
 
 namespace simbi::ibsystem {
 
-    template <typename T, size_type Dims>
+    template <typename T, std::uint64_t Dims>
     class LazyCapabilityView
     {
       public:

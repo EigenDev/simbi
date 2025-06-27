@@ -50,7 +50,7 @@
 #define BODY_SYSTEM_OPERATIONS_HPP
 
 #include "component_body_system.hpp"   // for ComponentBodySystem
-#include "config.hpp"                  // for real, size_type, Dims
+#include "config.hpp"                  // for real, std::uint64_t, Dims
 #include "physics/hydro/schemes/ib/delta/collector.hpp"
 #include "physics/hydro/schemes/ib/policies/interaction_functions.hpp"   // for apply_gravitational_force, apply_accretion_effect
 #include "physics/hydro/schemes/ib/processing/lazy.hpp"   // for LazyCapabilityView
@@ -61,7 +61,7 @@ using namespace simbi::ibsystem::body_functions::accretion;
 using namespace simbi::ibsystem::body_functions::rigid;
 
 namespace simbi::ibsystem::functions {
-    template <typename T, size_type Dims>
+    template <typename T, std::uint64_t Dims>
     T get_system_timestep(
         const ibsystem::ComponentBodySystem<T, Dims>& system,
         T cfl
@@ -73,7 +73,7 @@ namespace simbi::ibsystem::functions {
             return orbital_dt;
         }
 
-        for (size_type idx = 0; idx < system.size(); ++idx) {
+        for (std::uint64_t idx = 0; idx < system.size(); ++idx) {
             auto maybe_body = system.get_body(idx);
             if (!maybe_body.has_value()) {
                 continue;
@@ -118,7 +118,7 @@ namespace simbi::ibsystem::functions {
         return orbital_dt * cfl;
     }
 
-    template <typename T, size_type Dims>
+    template <typename T, std::uint64_t Dims>
     ComponentBodySystem<T, Dims>
     update_body_system(ComponentBodySystem<T, Dims>&& system, const T dt)
     {
@@ -144,12 +144,12 @@ namespace simbi::ibsystem::functions {
         return std::move(system);
     }
 
-    template <typename T, size_type Dims, typename Primitive>
+    template <typename T, std::uint64_t Dims, typename Primitive>
     DEV Primitive::counterpart_t apply_forces_to_fluid(
         const ibsystem::ComponentBodySystem<T, Dims>& system,
         const Primitive& prim,
         const auto& mesh_cell,
-        std::tuple<size_type, size_type, size_type> coords,
+        const uarray<Dims>& coords,
         const HydroContext& context,
         const T dt,
         GridBodyDeltaCollector<T, Dims>& collector

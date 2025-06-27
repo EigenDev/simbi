@@ -27,10 +27,10 @@
 namespace simbi::ibsystem::body_functions {
     namespace rigid {
 
-        template <typename T, size_type Dims, typename Primitive>
+        template <typename T, std::uint64_t Dims, typename Primitive>
         DEV std::pair<typename Primitive::counterpart_t, BodyDelta<T, Dims>>
         apply_sharp_interface_ibm(
-            const size_type body_idx,
+            const std::uint64_t body_idx,
             const Body<T, Dims>& body,
             const Primitive& prim,
             const auto& mesh_cell,
@@ -109,7 +109,7 @@ namespace simbi::ibsystem::body_functions {
                 rel_velocity - normal_rel_velocity;
 
             // initialize force components
-            spatial_vector_t<T, Dims> total_force{};
+            vector_t<T, Dims> total_force{};
 
             // scale strength based on flow characteristics
             // stronger forcing for supersonic flows
@@ -181,8 +181,9 @@ namespace simbi::ibsystem::body_functions {
                      signed_distance < 2.0 * boundary_thickness) {
                 // pre-emptive zone for supersonic flows only
                 // gradually slow down incoming flow before it hits the boundary
-                const T pre_factor = 1.0 - (signed_distance - boundary_thickness
-                                           ) / boundary_thickness;
+                const T pre_factor =
+                    1.0 -
+                    (signed_distance - boundary_thickness) / boundary_thickness;
                 const T pre_strength =
                     0.5 * base_strength * std::pow(pre_factor, 2);
 
@@ -239,10 +240,10 @@ namespace simbi::ibsystem::body_functions {
          * a rigid body to each fluid cell, creating a sharp representation
          * of the boundary
          */
-        // template <typename T, size_type Dims, typename Primitive>
+        // template <typename T, std::uint64_t Dims, typename Primitive>
         // DEV std::pair<typename Primitive::counterpart_t, BodyDelta<T,
         // Dims>> apply_sharp_interface_ibm(
-        //     const size_type body_idx,
+        //     const std::uint64_t body_idx,
         //     const Body<T, Dims>& body,
         //     const Primitive& prim,
         //     const auto& mesh_cell,
@@ -302,7 +303,7 @@ namespace simbi::ibsystem::body_functions {
         //     const auto rel_velocity = fluid_velocity - body_velocity;
 
         //     // initialize force components
-        //     spatial_vector_t<T, Dims> total_force{};
+        //     vector_t<T, Dims> total_force{};
 
         //     // determine cell type based on signed distance
         //     if (signed_distance < 0) {
@@ -324,9 +325,9 @@ namespace simbi::ibsystem::body_functions {
         //         // narrow band around interface - precise boundary
         //         imposition
 
-        //         // calculate exact boundary intercept point along r_hat
-        //         const auto boundary_point = body.position + r_hat *
-        //         body.radius;
+        //         // calculate exact boundary intercept postd::int64_t along
+        //         r_hat const auto boundary_postd::int64_t = body.position +
+        //         r_hat * body.radius;
 
         //         // for cells very close to boundary, use targeted forcing
         //         const T boundary_factor =
@@ -419,15 +420,15 @@ namespace simbi::ibsystem::body_functions {
         // }
 
         /**
-         * @brief main entry point for rigid body ibm using sharp interface
-         * approach
+         * @brief main entry postd::int64_t for rigid body ibm using sharp
+         * interface approach
          *
          * wrapper that calls the sharp interface implementation
          */
-        template <typename T, size_type Dims, typename Primitive>
+        template <typename T, std::uint64_t Dims, typename Primitive>
         DEV std::pair<typename Primitive::counterpart_t, BodyDelta<T, Dims>>
         apply_rigid_body_ibm(
-            size_type body_idx,
+            std::uint64_t body_idx,
             const Body<T, Dims>& body,
             const Primitive& prim,
             const Cell<Dims>& mesh_cell,

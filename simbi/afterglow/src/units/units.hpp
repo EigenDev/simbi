@@ -31,7 +31,7 @@ temp = temperature, intensity = intesoty, angle = angle
 */
 namespace units {
     template <typename T>
-    constexpr int sgn(T val);
+    constexpr std::int64_t sgn(T val);
 
     //=======================================
     // Mass type specializations
@@ -883,22 +883,23 @@ namespace units {
             Irradiance_t I  = Irradiance_t::ErgCM2P2,   // Luminous Intensity
                                                         // unit type
             Angle_t A = Angle_t::Radian>                // Angle unit type
-        constexpr auto pow(const quantity<
-                           P,
-                           m,
-                           l,
-                           t,
-                           q,
-                           temp,
-                           intensity,
-                           angle,
-                           M,
-                           L,
-                           T,
-                           Q,
-                           K,
-                           I,
-                           A>& quant);
+        constexpr auto
+        pow(const quantity<
+            P,
+            m,
+            l,
+            t,
+            q,
+            temp,
+            intensity,
+            angle,
+            M,
+            L,
+            T,
+            Q,
+            K,
+            I,
+            A>& quant);
 
         template <
             typename P,
@@ -917,22 +918,24 @@ namespace units {
             Irradiance_t I  = Irradiance_t::ErgCM2P2,   // Luminous Intensity
                                                         // unit type
             Angle_t A = Angle_t::Radian>                // Angle unit type
-        constexpr auto sqrt(const quantity<
-                            P,
-                            m,
-                            l,
-                            t,
-                            q,
-                            temp,
-                            intensity,
-                            angle,
-                            M,
-                            L,
-                            T,
-                            Q,
-                            K,
-                            I,
-                            A>& val);
+        constexpr auto sqrt(
+            const quantity<
+                P,
+                m,
+                l,
+                t,
+                q,
+                temp,
+                intensity,
+                angle,
+                M,
+                L,
+                T,
+                Q,
+                K,
+                I,
+                A>& val
+        );
     }   // namespace math
 
 }   // namespace units

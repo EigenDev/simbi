@@ -50,9 +50,9 @@
 #ifndef INIT_CONDITIONS_VISITOR_HPP
 #define INIT_CONDITIONS_VISITOR_HPP
 
-#include "config.hpp"        // for real, luint types
+#include "config.hpp"        // for real, std::uint64_t types
 #include "config_dict.hpp"   // for config_dict_t
-#include "core/types/alias/alias.hpp"
+#include "core/types/alias.hpp"
 #include <string>
 #include <utility>
 #include <vector>
@@ -78,7 +78,11 @@ namespace simbi {
         ) = 0;
 
         // Resolution fields
-        virtual void visit_resolution(luint& nx, luint& ny, luint& nz) = 0;
+        virtual void visit_resolution(
+            std::uint64_t& nx,
+            std::uint64_t& ny,
+            std::uint64_t& nz
+        ) = 0;
 
         // Physics parameters
         virtual void visit_physics_parameters(
@@ -147,16 +151,16 @@ namespace simbi {
         // Output settings
         virtual void visit_output_settings(
             std::string& data_directory,
-            luint& checkpoint_index
+            std::uint64_t& checkpoint_index
         ) = 0;
 
         // Other computed properties
         virtual void visit_computed_properties(
-            luint& dimensionality,
+            std::uint64_t& dimensionality,
             bool& is_mhd,
             bool& is_relativistic,
-            luint& nvars,
-            luint& halo_radius
+            std::uint64_t& nvars,
+            std::uint64_t& halo_radius
         ) = 0;
 
         // Allow for proper polymorphic destruction

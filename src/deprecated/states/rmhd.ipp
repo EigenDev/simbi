@@ -1,5 +1,5 @@
 #include "config.hpp"
-#include "core/containers/vector.hpp"
+#include "containers/vector.hpp"
 #include "core/utility/atomic_bool.hpp"   // for shared_atomic_bool
 #include "core/utility/enums.hpp"
 #include "geometry/vector_calculus.hpp"   // for curl_component

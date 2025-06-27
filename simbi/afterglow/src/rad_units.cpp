@@ -7,6 +7,7 @@
 */
 #include "rad_units.hpp"
 #include <algorithm>
+#include <cstdint>
 #include <functional>
 #include <random>
 
@@ -387,7 +388,7 @@ namespace sogbo_rad {
         std::vector<std::vector<double>>& mesh,
         std::vector<double>& photon_distribution,
         std::vector<double>& four_position,
-        const int data_dim
+        const std::int64_t data_dim
     )
     {
         std::random_device
@@ -397,10 +398,10 @@ namespace sogbo_rad {
         );   // Standard mersenne_twister_engine seeded with rd()
         std::uniform_real_distribution<> dis(0.0, 1.0);
 
-        int ng         = 100;
-        const auto rho = fields[0];   // fluid frame density
-        const auto gb  = fields[1];   // four-velocity
-        const auto pre = fields[2];   // pressure
+        std::int64_t ng = 100;
+        const auto rho  = fields[0];   // fluid frame density
+        const auto gb   = fields[1];   // four-velocity
+        const auto pre  = fields[2];   // pressure
 
         // Extract the geomtry of the mesh
         const auto x1     = mesh[0];
@@ -437,7 +438,7 @@ namespace sogbo_rad {
             const double dx3     = x3r - x3l;
 
             // If the data is 3D, then there is a real k-space to pull data from
-            const int kreal = (data_dim > 2) * kk;
+            const std::int64_t kreal = (data_dim > 2) * kk;
 #pragma omp parallel
             for (size_t jj = 0; jj < x2.size(); jj++) {
                 const double x2l = (jj > 0) ? x2min + (jj - 0.5) * dx2 : x2min;
@@ -451,7 +452,7 @@ namespace sogbo_rad {
                   std::sin(x2[jj]) * sin_phi,
                   std::cos(x2[jj])
                 };
-                const int jreal = (data_dim > 1) * jj;
+                const std::int64_t jreal = (data_dim > 1) * jj;
 #pragma omp for nowait
                 for (size_t ii = 0; ii < x1.size(); ii++) {
                     const auto central_idx = kreal * ni * nj + jreal * ni +
@@ -549,7 +550,7 @@ namespace sogbo_rad {
                     // gamma bin
                     const auto n_e = n_e_proper * w;
                     const auto ub  = bfield * bfield / 8.0 / M_PI;
-                    for (int qq = 0; qq < ng; qq++) {
+                    for (std::int64_t qq = 0; qq < ng; qq++) {
                         const auto gamma_e      = gamma_min + qq * dg;
                         const auto gamma_sample = gen_random_from_powerlaw(
                             gamma_e,
@@ -576,7 +577,7 @@ namespace sogbo_rad {
                     }
 
                     // log the four-position
-                    for (int qq = 0; qq < 4; qq++) {
+                    for (std::int64_t qq = 0; qq < 4; qq++) {
                         four_position
                             [kk * ni * nj * 4 + jj * ni * 4 + ii * 4 + qq] =
                                 x_mu[qq];
@@ -614,8 +615,8 @@ namespace sogbo_rad {
         const std::vector<std::vector<double>>& mesh,
         const std::vector<double>& tbin_edges,
         std::vector<double>& flux_array,
-        const int checkpoint_index,
-        const int data_dim
+        const std::int64_t checkpoint_index,
+        const std::int64_t data_dim
     )
     {
         // Place observer along chosen axis
@@ -678,9 +679,9 @@ namespace sogbo_rad {
             }
 
             // If the data is 3D, then there is a real k-space to pull data from
-            const int kreal = (data_dim > 2) * kk;
+            const std::int64_t kreal = (data_dim > 2) * kk;
 #pragma omp parallel
-            for (size_t jj = 0; jj < nj; jj++) {
+            for (std::uint64_t jj = 0; jj < nj; jj++) {
                 const double x2l = (jj > 0) ? x2min + (jj - 0.5) * dx2 : x2min;
                 const double x2r =
                     (jj < nj - 1) ? x2l + dx2 * (jj == 0 ? 0.5 : 1.0) : x2max;
@@ -695,9 +696,9 @@ namespace sogbo_rad {
 
                 // Data greater than 1D? Cool, there is a j space to pull data
                 // from
-                const int jreal = (data_dim > 1) * jj;
+                const std::uint64_t jreal = (data_dim > 1) * jj;
 #pragma omp for nowait
-                for (size_t ii = 0; ii < ni; ii++) {
+                for (std::uint64_t ii = 0; ii < ni; ii++) {
                     const auto central_idx = kreal * ni * nj + jreal * ni +
                                              ii;   // index for current zone
                     const auto beta =

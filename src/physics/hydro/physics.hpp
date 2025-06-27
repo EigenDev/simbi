@@ -1,18 +1,19 @@
 #ifndef SIMBI_PHYSICS_HPP
 #define SIMBI_PHYSICS_HPP
 
-#include "config.hpp"                   // for global::using_four_velocity
-#include "core/containers/vector.hpp"   // for spatial_vector_t
-#include "core/memory/values/state_value.hpp"      // for conserved_value
-#include "core/memory/values/value_concepts.hpp"   // for is_hydro_primitive_c, is_mhd_primitive_c, is_rmhd_c, is_srhd_c, is_hydro_conserved_c
-#include "physics/eos/ideal.hpp"                   // for ideal_gas_eos_t
-#include "physics/eos/isothermal.hpp"              // for isothermal_gas_eos_t
-#include <concepts>                                // for std::same_as
+#include "config.hpp"               // for global::using_four_velocity
+#include "core/base/concepts.hpp"   // for is_hydro_primitive_c, is_mhd_primitive_c, is_rmhd_c, is_srhd_c, is_hydro_conserved_c
+#include "core/utility/enums.hpp"
+#include "data/containers/state_struct.hpp"   // for conserved_value
+#include "data/containers/vector.hpp"         // for vector_t
+#include "physics/eos/ideal.hpp"              // for ideal_gas_eos_t
+#include "physics/eos/isothermal.hpp"         // for isothermal_gas_eos_t
+#include <concepts>                           // for std::same_as
 
 namespace simbi::hydro {
     using namespace simbi::concepts;
     using namespace simbi::eos;
-    using namespace simbi::values;
+    using namespace simbi::structs;
 
     template <is_hydro_primitive_c primitive_t>
     DEV constexpr auto lorentz_factor(const primitive_t& prim)
@@ -93,11 +94,11 @@ namespace simbi::hydro {
     DEV constexpr magnetic_four_vector_t<real>
     magnetic_four_vector(const primitive_t& prim)
     {
-        const auto vel = prim.vel;
-        const auto mag = prim.mag;
-        const auto vdb = vecops::dot(vel, mag);
-        const auto w   = lorentz_factor(prim);
-        return {
+        const auto& vel = prim.vel;
+        const auto& mag = prim.mag;
+        const auto vdb  = vecops::dot(vel, mag);
+        const auto w    = lorentz_factor(prim);
+        return magnetic_four_vector_t<real>{
           w * vdb,
           mag[0] / w + w * vel[0] * vdb,
           mag[1] / w + w * vel[1] * vdb,
@@ -111,7 +112,7 @@ namespace simbi::hydro {
     DEV constexpr auto enthalpy_density(const primitive_t& prim, real gamma)
     {
         const auto eos = EoS{gamma};
-        if constexpr (!is_relativistic_c<primitive_t>) {
+        if constexpr (is_newtonian_c<primitive_t>) {
             return prim.rho;
         }
         else if constexpr (is_srhd_c<primitive_t>) {
@@ -129,7 +130,7 @@ namespace simbi::hydro {
     DEV constexpr auto energy_density(const primitive_t& prim, real gamma)
     {
         const auto eos = EoS{gamma};
-        if constexpr (!is_relativistic_c<primitive_t>) {
+        if constexpr (is_newtonian_c<primitive_t>) {
             const auto gas_part = prim.pre / (gamma - 1.0) +
                                   0.5 * vecops::dot(prim.vel, prim.vel);
             if constexpr (is_mhd_primitive_c<primitive_t>) {
@@ -161,14 +162,14 @@ namespace simbi::hydro {
         typename EoS = ideal_gas_eos_t<primitive_t::regime>>
     DEV constexpr auto spatial_momentum(const primitive_t& prim, real gamma)
     {
-        if constexpr (!is_relativistic_c<primitive_t>) {
+        if constexpr (is_newtonian_c<primitive_t>) {
             return prim.rho * prim.vel;
         }
         else if constexpr (is_srhd_c<primitive_t>) {
             const auto eos = EoS{gamma};
             const auto h   = eos.enthalpy(prim.rho, prim.pre);
             const auto wsq = lorentz_factor_squared(prim);
-            return prim.rho * h * wsq + prim.vel;
+            return prim.rho * h * wsq * prim.vel;
         }
         else {   // RMHD case
             const auto eos = EoS{gamma};
@@ -188,6 +189,17 @@ namespace simbi::hydro {
     }
 
     template <is_hydro_primitive_c primitive_t>
+    DEV constexpr auto proper_velocity(const primitive_t& prim, std::size_t dir)
+    {
+        if constexpr (global::using_four_velocity) {
+            return prim.vel[dir] / lorentz_factor(prim);
+        }
+        else {
+            return prim.vel[dir];
+        }
+    }
+
+    template <is_hydro_primitive_c primitive_t>
     DEV constexpr auto total_pressure(const primitive_t& prim)
     {
         if constexpr (is_mhd_primitive_c<primitive_t>) {
@@ -202,7 +214,7 @@ namespace simbi::hydro {
     DEV constexpr auto to_conserved(const primitive_t& prim, real gamma)
     {
         if constexpr (is_mhd_primitive_c<primitive_t>) {
-            return conserved_value_t<
+            return mhd_conserved_t<
                 primitive_t::regime,
                 primitive_t::dimensions>{
               .den = prim.rho,
@@ -213,9 +225,7 @@ namespace simbi::hydro {
             };
         }
         else {
-            return conserved_value_t<
-                primitive_t::regime,
-                primitive_t::dimensions>{
+            return conserved_t<primitive_t::regime, primitive_t::dimensions>{
               .den = prim.rho,
               .mom = spatial_momentum(prim, gamma),
               .nrg = energy_density(prim, gamma),
@@ -237,11 +247,8 @@ namespace simbi::hydro {
         const auto mn  = vecops::dot(mom, nhat);
         const auto ed  = energy_density(prim, gamma);
         const auto vn  = vecops::dot(prim.vel, nhat);
-        if constexpr (!is_relativistic_c<primitive_t> &&
-                      !is_hydro_primitive_c<primitive_t>) {
-            return conserved_value_t<
-                primitive_t::regime,
-                primitive_t::dimensions>{
+        if constexpr (is_newtonian_c<primitive_t>) {
+            return conserved_t<primitive_t::regime, primitive_t::dimensions>{
               .den = den * vn,
               .mom = mom * vn + pre * nhat,
               .nrg = (ed + pre) * vn,
@@ -249,9 +256,7 @@ namespace simbi::hydro {
             };
         }
         else if constexpr (is_srhd_c<primitive_t>) {
-            return conserved_value_t<
-                primitive_t::regime,
-                primitive_t::dimensions>{
+            return conserved_t<primitive_t::regime, primitive_t::dimensions>{
               .den = den * vn,
               .mom = mom * vn + pre * nhat,
               .nrg = mn - den * vn,
@@ -263,7 +268,7 @@ namespace simbi::hydro {
             const auto vdb = vecops::dot(prim.vel, prim.mag);
             const auto w   = lorentz_factor(prim);
             const auto bmu = prim.mag / w + prim.vel * w * vdb;
-            return conserved_value_t<
+            return mhd_conserved_t<
                 primitive_t::regime,
                 primitive_t::dimensions>{
               .den = den * vn,
@@ -277,7 +282,7 @@ namespace simbi::hydro {
             const auto bn   = vecops::dot(prim.mag, nhat);
             const auto vdb  = vecops::dot(prim.vel, prim.mag);
             const auto bvec = prim.mag;
-            return conserved_value_t<
+            return mhd_conserved_t<
                 primitive_t::regime,
                 primitive_t::dimensions>{
               .den = den * vn,
@@ -288,9 +293,8 @@ namespace simbi::hydro {
             };
         }
         else {   // non-MHD (should not happen)
-            return conserved_value_t<
-                primitive_t::regime,
-                primitive_t::dimensions>{
+            std::cout << "Warning: Non-MHD primitive to flux conversion.\n";
+            return conserved_t<primitive_t::regime, primitive_t::dimensions>{
               .den = den * vn,
               .mom = mom * vn + pre * nhat,
               .nrg = mn,

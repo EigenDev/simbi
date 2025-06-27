@@ -211,7 +211,7 @@ namespace sogbo_rad {
         std::vector<std::vector<double>>& mesh,
         std::vector<double>& photon_distribution,
         std::vector<double>& four_position,
-        const int data_dim
+        const std::int64_t data_dim
     );
 
     /*
@@ -236,8 +236,8 @@ namespace sogbo_rad {
         const std::vector<std::vector<double>>& mesh,
         const std::vector<double>& tbin_edges,
         std::vector<double>& flux_array,
-        const int checkpoint_index,
-        const int data_dim
+        const std::int64_t checkpoint_index,
+        const std::int64_t data_dim
     );
 
 }   // namespace sogbo_rad
