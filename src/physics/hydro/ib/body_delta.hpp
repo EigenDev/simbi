@@ -51,11 +51,13 @@
 
 #include "config.hpp"
 #include "data/containers/vector.hpp"   // for vector_t
+#include <cassert>
+#include <cstdint>
 
 namespace simbi::ibsystem {
     template <typename T, std::uint64_t Dims>
     struct BodyDelta {
-        size_t body_idx;
+        std::uint64_t body_idx;
         vector_t<T, Dims> force_delta;
         vector_t<T, Dims> torque_delta;
         T mass_delta;
@@ -74,7 +76,7 @@ namespace simbi::ibsystem {
         }
 
         // ctor from just body index
-        DUAL BodyDelta(size_t body_idx)
+        DUAL BodyDelta(std::uint64_t body_idx)
             : body_idx(body_idx),
               force_delta{},
               torque_delta{},

@@ -5,7 +5,8 @@
 #include "core/types/alias.hpp"
 #include "system/adapter/device_adapter_api.hpp"
 #include <algorithm>
-#include <cstddef>
+#include <cstdint>
+#include <iostream>
 #include <memory>
 
 namespace simbi::base {
@@ -36,8 +37,8 @@ namespace simbi::base {
       private:
         std::unique_ptr<T[], configurable_deleter<T>> cpu_ptr_;
         std::unique_ptr<T[], gpuDeleter<T>> gpu_ptr_;
-        size_t size_                     = 0;
-        size_t capacity_                 = 0;
+        std::uint64_t size_              = 0;
+        std::uint64_t capacity_          = 0;
         memory_location active_location_ = memory_location::cpu;
         bool cpu_valid_                  = false;   // cpu data current?
         bool gpu_valid_                  = false;   // gpu data current?
@@ -47,7 +48,7 @@ namespace simbi::base {
         using value_type   = T;
         unified_memory_t() = default;
 
-        unified_memory_t(size_t size)
+        unified_memory_t(std::uint64_t size)
             : size_(size),
               capacity_(size),
               active_location_(memory_location::cpu),
@@ -201,7 +202,7 @@ namespace simbi::base {
             return *this;
         }
 
-        void resize(size_t new_size)
+        void resize(std::uint64_t new_size)
         {
             if (new_size > capacity_) {
                 // allocate new memory
@@ -213,7 +214,7 @@ namespace simbi::base {
                 capacity_ = new_size;
 
                 if (gpu_ptr_) {
-                    gpu_ptr_.reset(new T);
+                    gpu_ptr_.reset(new T[new_size]);
                     to_gpu();
                 }
 
@@ -224,7 +225,7 @@ namespace simbi::base {
             size_ = new_size;
         }
 
-        void wrap_external_memory(T* external_ptr, size_t size)
+        void wrap_external_memory(T* external_ptr, std::uint64_t size)
         {
             cpu_ptr_.reset();
             if (gpu_ptr_) {
@@ -245,16 +246,15 @@ namespace simbi::base {
             active_location_ = memory_location::cpu;
         }
 
-        void reserve(size_t new_capacity)
+        void reserve(std::uint64_t new_capacity)
         {
             if (new_capacity > capacity_) {
                 // allocate new memory
-                cpu_ptr_  = std::unique_ptr<T[]>(new_capacity);
+                cpu_ptr_.reset(new T[new_capacity]);
                 capacity_ = new_capacity;
 
                 if (gpu_ptr_) {
-                    gpu_ptr_ =
-                        std::unique_ptr<T[], gpuDeleter<T>>(new_capacity);
+                    gpu_ptr_.reset(new T[new_capacity]);
                 }
 
                 gpu_valid_       = false;
@@ -293,23 +293,27 @@ namespace simbi::base {
 
         void to_gpu()
         {
-            if (!gpu_ptr_) {
-                // lazy GPU allocation
-                gpu::api::malloc(
-                    reinterpret_cast<void**>(&gpu_ptr_),
-                    size_ * sizeof(T)
-                );
-            }
+            if constexpr (platform::is_gpu) {
+                if (!gpu_ptr_) {
+                    T* device_ptr;
+                    // lazy GPU allocation
+                    gpu::api::malloc(
+                        reinterpret_cast<void**>(&device_ptr),
+                        size_ * sizeof(T)
+                    );
+                    gpu_ptr_ = std::unique_ptr<T[], gpuDeleter<T>>(device_ptr);
+                }
 
-            if (!gpu_valid_ && cpu_valid_) {
-                gpu::api::copy_host_to_device(
-                    gpu_ptr_.get(),
-                    cpu_ptr_.get(),
-                    size_ * sizeof(T)
-                );
-                gpu_valid_ = true;
+                if (!gpu_valid_ && cpu_valid_) {
+                    gpu::api::copy_host_to_device(
+                        gpu_ptr_.get(),
+                        cpu_ptr_.get(),
+                        size_ * sizeof(T)
+                    );
+                    gpu_valid_ = true;
+                }
+                active_location_ = memory_location::gpu;
             }
-            active_location_ = memory_location::gpu;
         }
 
         // marking methods for external modifications
@@ -326,7 +330,7 @@ namespace simbi::base {
         }
 
         // external data management
-        void set_data(T* data, size_t count, bool take_ownership = false)
+        void set_data(T* data, std::uint64_t count, bool take_ownership = false)
         {
             if (data == nullptr || count == 0) {
                 size_     = 0;
@@ -365,7 +369,7 @@ namespace simbi::base {
                     reinterpret_cast<void**>(&device_ptr),
                     this->size_ * sizeof(T)
                 );
-                gpu_ptr_   = unique_ptr<T, gpuDeleter<T>>(device_ptr);
+                gpu_ptr_   = std::unique_ptr<T[], gpuDeleter<T>>(device_ptr);
                 gpu_valid_ = false;
             }
         }
@@ -402,8 +406,8 @@ namespace simbi::base {
             return gpu_ptr_.get();
         }
 
-        size_t size() const { return size_; }
-        size_t capacity() const { return capacity_; }
+        std::uint64_t size() const { return size_; }
+        std::uint64_t capacity() const { return capacity_; }
         bool empty() const { return size_ == 0; }
 
         memory_location location() const { return active_location_; }

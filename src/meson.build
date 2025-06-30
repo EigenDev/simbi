@@ -1,7 +1,9 @@
 # Include core sources and headers
 sources = files(
   'bindings/pybind11/config_converter.cpp',
+  'bindings/pybind11/driver.cpp',
   'bindings/pybind11/state.cpp',
+  'compute/functional/monad/serializer.cpp',
   'compute/math/evaluator.cpp',
   'compute/math/exp_load.cpp',
   'compute/math/linearize.cpp',

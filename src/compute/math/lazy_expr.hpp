@@ -1,7 +1,6 @@
 #ifndef SIMBI_LAZY_EXPR_HPP
 #define SIMBI_LAZY_EXPR_HPP
 
-// #include "data/containers/vector.hpp"
 #include "config.hpp"
 #include "core/base/concepts.hpp"
 #include "core/base/memory.hpp"
@@ -102,7 +101,7 @@ namespace simbi::expr {
         using type = typename decltype(std::declval<E>().realize())::value_type;
     };
 
-    // Specializations for your existing types
+    // pecializations
     template <typename T, std::uint64_t Dims>
     struct expression_element<zero_expr_t<T, Dims>> {
         using type = T;
@@ -258,24 +257,24 @@ namespace simbi::expr {
         // properly
         auto realize() const
         {
-            auto get_result = [](const auto& operand) {
-                if constexpr (requires { operand.realize(); }) {
-                    return operand
-                        .realize();   // It's an expression, realize it
-                }
-                else {
-                    return operand;   // It's already realized
-                }
-            };
-            auto left_result  = get_result(left_);
-            auto right_result = get_result(right_);
+            // auto get_result = [](const auto& operand) {
+            //     if constexpr (requires { operand.realize(); }) {
+            //         // it's an expression, realize it
+            //         return operand.realize();
+            //     }
+            //     else {
+            //         return operand;   // it's already realized
+            //     }
+            // };
+            auto left_result  = left_.realize();    // get_result(left_);
+            auto right_result = right_.realize();   // get_result(right_);
 
             constexpr auto Dims = decltype(left_result)::value_type::dimensions;
 
             // create result field with same domain as left
             auto result =
                 field_t<typename decltype(left_result)::value_type, Dims>{
-                  left_result.domain_,
+                  left_result.domain(),
                   std::make_shared<unified_memory_t<
                       typename decltype(left_result)::value_type>>(
                       left_result.size()
@@ -323,21 +322,20 @@ namespace simbi::expr {
         auto realize() const
         {
             auto expr_result = expr_.realize();
+            using value_type = typename decltype(expr_result)::value_type;
 
             // create result field with same domain
-            auto result = field_t<
-                typename decltype(expr_result)::value_type,
-                decltype(expr_result)::dimensions>{
-              expr_result.domain_,
-              std::make_shared<
-                  unified_memory_t<typename decltype(expr_result)::value_type>>(
-                  expr_result.size()
-              )
-            };
+            auto result =
+                field_t<value_type, decltype(expr_result)::dimensions>{
+                  expr_result.domain_,
+                  std::make_shared<unified_memory_t<value_type>>(
+                      expr_result.size()
+                  )
+                };
 
             // wlement-wise scaling
-            for (std::uint64_t i = 0; i < result.size(); ++i) {
-                result.data()[i] = expr_result.data()[i] * factor_;
+            for (std::uint64_t ii = 0; ii < result.size(); ++ii) {
+                result.data()[ii] = expr_result.data()[ii] * factor_;
             }
 
             return result;
@@ -378,36 +376,36 @@ namespace simbi::expr {
             using result_t = transform_result_t<Transform, source_element_t>;
 
             // for field sources, preserve domain structure
-            if constexpr (requires { source_.domain_; }) {
-                auto result = field_t<
-                    result_t,
-                    std::decay_t<decltype(source_.domain_)>::Dims>{
-                  source_.domain_,
-                  std::make_shared<unified_memory_t<result_t>>(source_.size())
-                };
+            // if constexpr (requires { source_.domain(); }) {
+            auto result = field_t<
+                result_t,
+                std::decay_t<decltype(source_.domain())>::Dims>{
+              source_.domain(),
+              std::make_shared<unified_memory_t<result_t>>(source_.size())
+            };
 
-                // apply transformation to each element
-                auto* input_ptr  = source_.data();
-                auto* output_ptr = result.data();
+            // apply transformation to each element
+            auto* input_ptr  = source_.data();
+            auto* output_ptr = result.data();
 
-                for (std::uint64_t i = 0; i < source_.size(); ++i) {
-                    output_ptr[i] = apply_transform(input_ptr[i]);
-                }
-
-                return result;
+            for (std::uint64_t ii = 0; ii < source_.size(); ++ii) {
+                output_ptr[ii] = apply_transform(input_ptr[ii]);
             }
-            else {
-                // fallback for non-field sources
-                unified_memory_t<result_t> result(source_.size());
-                auto* input_ptr  = source_.data();
-                auto* output_ptr = result.data();
 
-                for (std::uint64_t i = 0; i < source_.size(); ++i) {
-                    output_ptr[i] = apply_transform(input_ptr[i]);
-                }
+            return result;
+            // }
+            // else {
+            //     // fallback for non-field sources
+            //     unified_memory_t<result_t> result(source_.size());
+            //     auto* input_ptr  = source_.data();
+            //     auto* output_ptr = result.data();
 
-                return result;
-            }
+            //     for (std::uint64_t ii = 0; ii < source_.size(); ++ii) {
+            //         output_ptr[ii] = apply_transform(input_ptr[ii]);
+            //     }
+
+            //     return result;
+            // }
         }
 
         std::uint64_t size() const { return source_.size(); }
@@ -743,7 +741,7 @@ namespace simbi::expr {
         constexpr iterator end() const { return iterator{end_, step_}; }
     };
 
-    template <std::uint64_t Dims, typename HydroState, typename T>
+    template <std::uint64_t Dims, typename HydroState, typename Tag>
     class source_expr_t
     {
         const expression_t<Dims>& expr_;
@@ -780,7 +778,7 @@ namespace simbi::expr {
                 // convert to spatial coordinates
                 auto spatial_coord = state_.geom_solver.the_centroid(coord);
 
-                if constexpr (std::same_as<T, hydro_source_tag>) {
+                if constexpr (std::same_as<Tag, hydro_source_tag>) {
                     // get conserved state at this point
                     const auto& cons = state_.cons[coord];
                     // compute source term
@@ -820,47 +818,27 @@ namespace simbi::expr {
         std::uint64_t size() const { return domain_.size(); }
     };
 
-    // lightweight ib source expression - fits your existing pattern
-    template <std::uint64_t Dims, Geometry G>
+    // lightweight ib source expression
+    template <typename HydroState>
     class ib_source_expr_t
     {
+        static constexpr auto Dims = HydroState::dimensions;
         index_space_t<Dims> domain_;
-        real dt_;
-        const mesh::geometry_solver_t<Dims, G>& geo_;
-        const ComponentBodySystem<real, Dims>& bodies_;
-        GridBodyDeltaCollector<real, Dims>& collector_;
+        const HydroState& state_;
 
       public:
-        ib_source_expr_t(
-            index_space_t<Dims> domain,
-            real dt,
-            const mesh::geometry_solver_t<Dims, G>& geo,
-            const ComponentBodySystem<real, Dims>& bodies,
-            GridBodyDeltaCollector<real, Dims>& collector
-        )
-            : domain_{domain},
-              dt_{dt},
-              geo_{geo},
-              bodies_{bodies},
-              collector_{collector}
+        ib_source_expr_t(index_space_t<Dims> domain, const HydroState& state)
+            : domain_{domain}, state_{state}
         {
         }
 
         // single pass: compute fluid effects + accumulate deltas
         auto realize() const
         {
-            return domain_.map([           =,
-                                &geo       = geo_,
-                                &collector = collector_,
-                                &bodies    = bodies_,
-                                &dt        = dt_] DEV(auto coord) {
-                return compute_ib_at_coordinate(
-                    coord,
-                    geo,
-                    bodies,
-                    collector,
-                    dt
-                );
+            return domain_.map([&state = state_] DEV(auto coord) {
+                std::cout << "Computing IB at coordinate: " << coord
+                          << std::endl;
+                return compute_ib_at_coordinate(coord, state);
             });
         }
 
@@ -1057,19 +1035,32 @@ namespace simbi::expr {
         }
         else if constexpr (std::is_same_v<Tag, ib_source_tag>) {
             // new ib source case
-            return ib_source_expr_t<
-                HydroState::dimensions,
-                HydroState::geometry_t>{
+            return ib_source_expr_t<HydroState>{
               domain,
-              state.metadata.dt,
-              state.geom_solver,
-              *state.body_system,   // dependency injection
-              *state.collector      // side-effect collector
+              state,
             };
         }
         else {
             return make_zero_source<HydroState::dimensions>(domain);
         }
+    }
+
+    template <typename HydroState>
+    auto with_gravity(const HydroState& state)
+    {
+        return make_source<gravity_source_tag>(state);
+    }
+
+    template <typename HydroState>
+    auto with_hydro(const HydroState& state)
+    {
+        return make_source<hydro_source_tag>(state);
+    }
+
+    template <typename HydroState>
+    auto with_ib(const HydroState& state)
+    {
+        return make_source<ib_source_tag>(state);
     }
 
 }   // namespace simbi::expr

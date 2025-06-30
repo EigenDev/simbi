@@ -43,7 +43,7 @@ namespace simbi::base {
     template <std::uint64_t Dims, Reconstruction Rec>
     struct stencil_t {
         static constexpr std::uint64_t size = stencil_size<Rec>();
-        using coord_array_t                 = vector_t<uarray<Dims>, size>;
+        using coord_array_t                 = vector_t<iarray<Dims>, size>;
 
         // generate left reconstruction pattern
         static constexpr coord_array_t left_pattern(std::uint64_t direction)

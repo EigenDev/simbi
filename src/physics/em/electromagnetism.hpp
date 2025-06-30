@@ -20,5 +20,13 @@ namespace simbi::em {
         return flux;
     }
 
+    template <
+        is_mhd_primitive_c prim_t,
+        std::uint64_t Dims = prim_t::dimensions>
+    DEV auto electric_field(const prim_t& prim)
+    {
+        return -vecops::cross(prim.vel, prim.mag);
+    }
+
 }   // namespace simbi::em
 #endif

@@ -93,7 +93,7 @@ struct has_index_param {
 };
 
 template <typename T>
-class Maybe;
+class maybe_t;
 
 template <typename T>
 struct is_maybe {
@@ -101,7 +101,7 @@ struct is_maybe {
 };
 
 template <typename T>
-struct is_maybe<Maybe<T>> {
+struct is_maybe<maybe_t<T>> {
     static const bool value = true;
 };
 

@@ -53,8 +53,8 @@
 #include "config.hpp"
 #include "config_dict.hpp"
 #include "config_dict_visitor.hpp"
-#include "core/types/alias.hpp"
 #include <algorithm>
+#include <cstdint>
 #include <sstream>
 #include <stdexcept>
 #include <string>

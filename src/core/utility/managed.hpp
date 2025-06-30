@@ -57,11 +57,11 @@
 
 namespace simbi {
     template <bool gpu_managed = global::managed_memory>
-    class Managed
+    class managed_t
     {
       public:
         // virt destructor for polymorphic use
-        virtual ~Managed() = default;
+        virtual ~managed_t() = default;
 
         // bare bones new and delete
         static constexpr void* operator new(std::size_t len)

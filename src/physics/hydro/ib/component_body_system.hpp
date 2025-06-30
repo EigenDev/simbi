@@ -50,6 +50,7 @@
 #define COMPONENT_BODY_SYSTEM_HPP
 
 #include "body.hpp"
+#include "body_serialization.hpp"
 #include "compute/functional/monad/maybe.hpp"
 #include "compute/math/field.hpp"
 #include "config.hpp"
@@ -57,7 +58,7 @@
 #include "core/utility/managed.hpp"
 #include "data/containers/state_struct.hpp"
 #include "data/containers/vector.hpp"
-#include "physics/hydro/schemes/ib/serialization/body_serialization.hpp"
+#include "physics/eos/isothermal.hpp"
 #include "system/mesh/mesh_config.hpp"
 #include "system_config.hpp"
 #include <cassert>
@@ -72,11 +73,12 @@ namespace simbi::ibsystem {
     using namespace mesh;
     using namespace nd;
     template <typename T, std::uint64_t Dims>
-    class ComponentBodySystem : public Managed<global::managed_memory>
+    class ComponentBodySystem : public managed_t<global::managed_memory>
     {
       public:
         using mesh_t      = mesh_config_t<Dims>;
-        using conserved_t = structs::conserved_t<Regime::NEWTONIAN, Dims>;
+        using conserved_t = structs::
+            conserved_t<Regime::NEWTONIAN, Dims, eos::isothermal_gas_eos_t>;
 
         // ctor
         ComponentBodySystem(
@@ -207,7 +209,7 @@ namespace simbi::ibsystem {
         DUAL const mesh_t& mesh() const { return mesh_; }
 
         // query functions
-        DUAL Maybe<Body<T, Dims>> get_body(size_t index) const
+        DUAL maybe_t<Body<T, Dims>> get_body(size_t index) const
         {
             if (index >= bodies_.size()) {
                 return Nothing;

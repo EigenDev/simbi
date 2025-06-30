@@ -10,7 +10,7 @@ namespace simbi {
     template <std::uint64_t Dims>
     struct physics_context_t {
         real gamma;
-        real epsilon;   // softening length
+        real dt;
         vector_t<real, Dims> cell_pos;
         real cell_volume;
         real min_cell_width;

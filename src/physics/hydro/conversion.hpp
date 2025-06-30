@@ -1,10 +1,10 @@
 #ifndef SIMBI_PHYSICS_CONVERSION_HPP
 #define SIMBI_PHYSICS_CONVERSION_HPP
 
-#include "compute/functional/monad/maybe.hpp"   // for Maybe, None
+#include "compute/functional/monad/maybe.hpp"   // for maybe_t, None
 #include "config.hpp"                           // for global::epsilon
 #include "core/base/concepts.hpp"               // for is_hydro_conserved_c
-#include "core/types/alias.hpp"                 // for real, std::uint64_t
+#include "core/utility/enums.hpp"               // for Regime
 #include "physics/eos/ideal.hpp"                // for ideal_gas_eos_t
 #include "physics/hydro/physics.hpp"            // for pressure_from_conserved
 #include "system/io/exceptions.hpp"             // for ErrorCode
@@ -17,13 +17,13 @@ namespace simbi::hydro::newtonian {
         concepts::is_hydro_conserved_c conserved_t,
         typename EoS = ideal_gas_eos_t<conserved_t::regime>>
     DEV auto to_primitive(const conserved_t& cons, real gamma)
-        -> Maybe<typename conserved_t::counterpart_t>
+        -> maybe_t<typename conserved_t::counterpart_t>
     {
         using primitive_t = typename conserved_t::counterpart_t;
         primitive_t prim;
         prim.rho = cons.den;
         prim.vel = cons.mom / cons.den;
-        prim.pre = pressure_from_conserved<EoS>(cons, gamma);
+        prim.pre = pressure_from_conserved(cons, gamma);
 
         if (prim.pre < 0.0 || !std::isfinite(prim.pre)) {
             return None(
@@ -42,7 +42,7 @@ namespace simbi::hydro::srhd {
         concepts::is_hydro_conserved_c conserved_t,
         typename EoS = ideal_gas_eos_t<conserved_t::regime>>
     DEV constexpr auto to_primitive(const conserved_t& cons, real gamma)
-        -> Maybe<typename conserved_t::counterpart_t>
+        -> maybe_t<typename conserved_t::counterpart_t>
     {
         using primitive_t = typename conserved_t::counterpart_t;
         const auto& d     = cons.den;
@@ -100,7 +100,7 @@ namespace simbi::hydro::rmhd {
         is_mhd_conserved_c conserved_t,
         typename EoS = ideal_gas_eos_t<conserved_t::regime>>
     DEV constexpr auto to_primitive(const conserved_t& cons, real gamma)
-        -> Maybe<typename conserved_t::counterpart_t>
+        -> maybe_t<typename conserved_t::counterpart_t>
     {
         using primitive_t = typename conserved_t::counterpart_t;
         const auto d      = cons.den;
@@ -219,4 +219,27 @@ namespace simbi::hydro::rmhd {
         return primitive_t{rhohat, vel, pg, bfield, dchi / d};
     }
 }   // namespace simbi::hydro::rmhd
+
+namespace simbi::hydro {
+    template <is_hydro_conserved_c conserved_t>
+    DEV auto to_primitive(const conserved_t& cons, real gamma)
+    {
+        if constexpr (conserved_t::regime == Regime::NEWTONIAN) {
+            return newtonian::to_primitive(cons, gamma);
+        }
+        else if constexpr (conserved_t::regime == Regime::SRHD) {
+            return srhd::to_primitive(cons, gamma);
+        }
+        else if constexpr (conserved_t::regime == Regime::RMHD) {
+            return rmhd::to_primitive(cons, gamma);
+        }
+        else {
+            static_assert(
+                false,
+                "Unsupported regime for primitive conversion in hydro namespace"
+            );
+        }
+    }
+
+}   // namespace simbi::hydro
 #endif

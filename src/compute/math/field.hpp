@@ -1,6 +1,7 @@
 #ifndef SIMBI_FIELD_HPP
 #define SIMBI_FIELD_HPP
 
+#include "compute/math/cfd_expressions.hpp"
 #include "core/base/concepts.hpp"
 #include "core/base/memory.hpp"         // for unified_memory_t
 #include "data/containers/vector.hpp"   // for vector_t
@@ -10,23 +11,12 @@
 #include <initializer_list>             // for std::initializer_list
 #include <iterator>                     // for std::rbegin
 #include <memory>                       // for std::shared_ptr
+#include <stdexcept>
 
 namespace simbi {
     using namespace simbi::base;
 
     using ulist = std::initializer_list<std::uint64_t>;
-
-    // forward declarations for expressions
-    namespace expr {
-        template <typename Source, typename Transform>
-        class lazy_expr_t;
-
-        template <typename Left, typename Right>
-        class add_expr_t;
-
-        template <typename Expr>
-        class scale_expr_t;
-    }   // namespace expr
 
     // pure functional field - immutable spatial function
     template <typename T, std::uint64_t Dims = 1>
@@ -51,6 +41,19 @@ namespace simbi {
         const T& operator[](const uarray<Dims>& coord) const
         {
             return at(coord);
+        }
+
+        T& operator[](const uarray<Dims>& coord)
+        {
+            auto linear_idx = domain_to_memory_index(coord);
+            return data_->data()[linear_idx];
+        }
+
+        T& operator[](std::uint64_t ii) { return data_->data()[ii]; }
+
+        const T& operator[](std::uint64_t ii) const
+        {
+            return data_->data()[ii];
         }
 
         // spatial transformations - return new fields with shared memory
@@ -79,24 +82,6 @@ namespace simbi {
         field_t expand(const uarray<Dims>& radii) const
         {
             return field_t{domain_.expand(radii), data_};
-        }
-
-        // value transformations - return lazy expressions
-        template <typename F>
-        auto map(F&& func) const -> expr::lazy_expr_t<field_t, F>
-        {
-            return expr::lazy_expr_t<field_t, F>{*this, std::forward<F>(func)};
-        }
-
-        template <typename Other>
-        auto add(const Other& other) const -> expr::add_expr_t<field_t, Other>
-        {
-            return expr::add_expr_t<field_t, Other>{*this, other};
-        }
-
-        auto scale(double factor) const -> expr::scale_expr_t<field_t>
-        {
-            return expr::scale_expr_t<field_t>{*this, factor};
         }
 
         // explicit copying when needed
@@ -247,12 +232,10 @@ namespace simbi {
             return std::make_move_iterator(data_->data() + data_->size());
         }
 
-        // operator overloading that allows for adding expressions
-        template <typename Other>
-        auto operator+(const Other& other) const
-            -> expr::add_expr_t<field_t, Other>
+        template <typename Op>
+        auto operator|(Op&& op) const
         {
-            return expr::add_expr_t<field_t, Other>{*this, other};
+            return cfd::make_field_expr(*this) | std::forward<Op>(op);
         }
 
       private:

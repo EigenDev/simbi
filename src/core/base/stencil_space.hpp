@@ -3,6 +3,7 @@
 
 #include "compute/math/field.hpp"
 #include "compute/math/index_space.hpp"
+#include "config.hpp"
 #include "core/base/concepts.hpp"
 #include "core/base/stencil.hpp"
 #include "core/utility/enums.hpp"

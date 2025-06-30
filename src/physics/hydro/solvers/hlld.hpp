@@ -12,6 +12,7 @@
 #include "physics/hydro/wave_speeds.hpp"   // for wave_speeds
 #include <algorithm>                       // for min, max
 #include <cmath>                           // for abs, sqrt
+#include <cstdint>                         // for int64_t
 #include <limits>                          // for numeric_limits
 
 namespace simbi::hydro::rmhd {

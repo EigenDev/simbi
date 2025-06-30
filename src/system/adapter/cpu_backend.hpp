@@ -47,9 +47,13 @@ namespace simbi::adapter {
 
       public:
         // Memory operations
-        void copy_host_to_device(void* to, const void* from, std::size_t bytes)
+        void copy_host_to_device(
+            void* /*to*/,
+            const void* /*from*/,
+            std::size_t /*bytes*/
+        )
         {
-            std::memcpy(to, from, bytes);
+            // no-op
         }
 
         void copy_device_to_host(void* to, const void* from, std::size_t bytes)
@@ -63,15 +67,9 @@ namespace simbi::adapter {
             std::memcpy(to, from, bytes);
         }
 
-        void malloc(void** obj, std::size_t bytes)
+        void malloc(void** /*obj*/, std::size_t /*bytes*/)
         {
-            *obj = std::malloc(bytes);
-            if (*obj == nullptr) {
-                throw error::runtime_error(
-                    error::status_t::error,
-                    "CPU malloc failed"
-                );
-            }
+            // no-op on CPU
         }
 
         void malloc_managed(void** obj, std::size_t bytes)

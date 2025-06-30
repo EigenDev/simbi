@@ -1,7 +1,10 @@
 #ifndef RESULT_HPP
 #define RESULT_HPP
 
+#include <optional>
 #include <string>
+#include <type_traits>
+#include <utility>
 #include <variant>
 
 namespace simbi {
@@ -10,7 +13,7 @@ namespace simbi {
         explicit Error(std::string msg) : message(std::move(msg)) {}
     };
     template <typename T>
-    class Result
+    class result_t
     {
         bool success_;
         // succes value or error message
@@ -18,26 +21,26 @@ namespace simbi {
 
       public:
         // ctor
-        Result(bool success, std::variant<T, Error> data)
+        result_t(bool success, std::variant<T, Error> data)
             : success_(success), data_(std::move(data))
         {
         }
 
         // move ctor
-        Result(Result&& other) noexcept
+        result_t(result_t&& other) noexcept
             : success_(other.success_), data_(std::move(other.data_))
         {
             other.success_ = false;
         }
 
         // copy ctor
-        Result(const Result& other)
+        result_t(const result_t& other)
             : success_(other.success_), data_(other.data_)
         {
         }
 
         // move assignment
-        Result& operator=(Result&& other) noexcept
+        result_t& operator=(result_t&& other) noexcept
         {
             if (this != &other) {
                 success_       = other.success_;
@@ -47,27 +50,27 @@ namespace simbi {
             return *this;
         }
 
-        static Result<T> ok(T value)
+        static result_t<T> ok(T value)
         {
-            return Result<T>(true, std::move(value));
+            return result_t<T>(true, std::move(value));
         }
 
-        static Result<T> error(std::string msg)
+        static result_t<T> error(std::string msg)
         {
-            return Result<T>(false, Error(std::move(msg)));
+            return result_t<T>(false, Error(std::move(msg)));
         }
 
         // function application (map)
         template <typename Func>
-        auto map(Func f) const -> Result<std::invoke_result_t<Func, T>>
+        auto map(Func f) const -> result_t<std::invoke_result_t<Func, T>>
         {
             if (success_) {
-                return Result<std::invoke_result_t<Func, T>>::ok(
+                return result_t<std::invoke_result_t<Func, T>>::ok(
                     f(std::get<T>(data_))
                 );
             }
             else {
-                return Result<std::invoke_result_t<Func, T>>::error(
+                return result_t<std::invoke_result_t<Func, T>>::error(
                     std::get<Error>(data_).message
                 );
             }
@@ -93,6 +96,46 @@ namespace simbi {
         const std::string& error() const
         {
             return std::get<Error>(data_).message;
+        }
+    };
+
+    // add this specialization to your result.hpp
+    template <>
+    class result_t<void>
+    {
+        bool success_;
+        std::optional<Error> error_;
+
+      public:
+        result_t(bool success, std::optional<Error> error = std::nullopt)
+            : success_(success), error_(std::move(error))
+        {
+        }
+
+        static result_t<void> ok()
+        {
+            return result_t<void>(true, std::nullopt);
+        }
+
+        static result_t<void> error(std::string msg)
+        {
+            return result_t<void>(false, Error(std::move(msg)));
+        }
+
+        bool is_ok() const { return success_; }
+        const std::string& error() const { return error_->message; }
+
+        // and_then for void results
+        template <typename Func>
+        auto and_then(Func f) const
+        {
+            if (success_) {
+                return f();
+            }
+            else {
+                using result_type = std::invoke_result_t<Func>;
+                return result_type::error(error_->message);
+            }
         }
     };
 }   // namespace simbi

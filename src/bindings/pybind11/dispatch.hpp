@@ -1,13 +1,16 @@
 #ifndef SIMBI_HYDRO_DISPATCH_HPP
 #define SIMBI_HYDRO_DISPATCH_HPP
 
+#include "config.hpp"
 #include "core/utility/bimap.hpp"
 #include "core/utility/enums.hpp"
 #include "core/utility/init_conditions.hpp"
 #include "data/containers/vector.hpp"
 #include "data/state/hydro_state.hpp"
+#include "physics/eos/ideal.hpp"
+#include "physics/eos/isothermal.hpp"
 #include <cstdint>
-#include <exception>
+#include <functional>
 #include <stdexcept>
 #include <string>
 #include <type_traits>
@@ -34,13 +37,12 @@ namespace simbi::dispatch {
 
         // geometry constraints
         (G == Geometry::CARTESIAN || G == Geometry::CYLINDRICAL ||
-         G == Geometry::AXIS_CYLINDRICAL ||
-         G == Geometry::PLANAR_CYLINDRICAL) &&
+         G == Geometry::AXIS_CYLINDRICAL || G == Geometry::PLANAR_CYLINDRICAL ||
+         G == Geometry::SPHERICAL) &&
 
         // regime-specific constraints
-        (R != Regime::RMHD || D == 3) &&   // rmhd requires at least 2d
-        (R != Regime::MHD ||
-         D == 3) &&   // mhd requires at least 2d (when implemented)
+        (R != Regime::RMHD || D == 3) &&   // (r)mhd requires 3D
+        (R != Regime::MHD || D == 3) &&
 
         // solver-regime compatibility
         (
@@ -56,12 +58,26 @@ namespace simbi::dispatch {
     //==============================================================================
     // ERROR HANDLING
     //==============================================================================
+    class configuration_error : public std::runtime_error
+    {
+      public:
+        configuration_error(const std::string& msg) : std::runtime_error(msg) {}
+    };
 
-    class unsupported_configuration : public std::runtime_error
+    class unsupported_configuration : public configuration_error
     {
       public:
         unsupported_configuration(const std::string& msg)
-            : std::runtime_error("unsupported hydro configuration: " + msg)
+            : configuration_error("unsupported hydro configuration: " + msg)
+        {
+        }
+    };
+
+    class invalid_parameter_combination : public configuration_error
+    {
+      public:
+        invalid_parameter_combination(const std::string& msg)
+            : configuration_error("invalid parameter combination: " + msg)
         {
         }
     };
@@ -79,23 +95,28 @@ namespace simbi::dispatch {
             Geometry G,
             Solver S,
             Reconstruction Rec,
+            typename EoS,
             typename Visitor>
         auto call_visitor_with_state(
             Visitor&& visitor,
             void* cons_data,
             void* prim_data,
             vector_t<void*, 3> bfield_data,
+            std::function<real(real)> const& scale_factor,
+            std::function<real(real)> const& scale_factor_derivative,
             const InitialConditions& init
         ) -> std::enable_if_t<valid_combination<R, D, G, S, Rec>, void>
         {
-            auto state = state::hydro_state_t<R, D, G, S, Rec>::from_init(
+            auto state = state::hydro_state_t<R, D, G, S, Rec, EoS>::from_init(
                 cons_data,
                 prim_data,
                 bfield_data,
+                scale_factor,
+                scale_factor_derivative,
                 init
             );
 
-            // Call visitor with the raw template type!
+            // call visitor
             visitor(state);
         }
 
@@ -106,18 +127,75 @@ namespace simbi::dispatch {
             Geometry G,
             Solver S,
             Reconstruction Rec,
+            typename EoS,
             typename Visitor>
         auto call_visitor_with_state(
             Visitor&&,
             void*,
             void*,
             vector_t<void*, 3>,
+            std::function<real(real)> const&,
+            std::function<real(real)> const&,
             const InitialConditions&
         ) -> std::enable_if_t<!valid_combination<R, D, G, S, Rec>, void>
         {
             throw unsupported_configuration(
                 "invalid combination detected at compile time"
             );
+        }
+
+        // EoS dispatch
+        template <
+            Regime R,
+            std::uint64_t D,
+            Geometry G,
+            Solver S,
+            Reconstruction Rec,
+            typename Visitor>
+        void dispatch_eos(
+            Visitor&& visitor,
+            void* cons_data,
+            void* prim_data,
+            vector_t<void*, 3> bfield_data,
+            std::function<real(real)> const& scale_factor,
+            std::function<real(real)> const& scale_factor_derivative,
+            const InitialConditions& init
+        )
+        {
+            if (init.gamma - 1.0 < 1e-6) {
+                call_visitor_with_state<
+                    R,
+                    D,
+                    G,
+                    S,
+                    Rec,
+                    eos::isothermal_gas_eos_t>(
+                    std::forward<Visitor>(visitor),
+                    cons_data,
+                    prim_data,
+                    bfield_data,
+                    scale_factor,
+                    scale_factor_derivative,
+                    init
+                );
+            }
+            else {
+                call_visitor_with_state<
+                    R,
+                    D,
+                    G,
+                    S,
+                    Rec,
+                    eos::ideal_gas_eos_t<R>>(
+                    std::forward<Visitor>(visitor),
+                    cons_data,
+                    prim_data,
+                    bfield_data,
+                    scale_factor,
+                    scale_factor_derivative,
+                    init
+                );
+            }
         }
 
         // reconstruction dispatch
@@ -133,34 +211,34 @@ namespace simbi::dispatch {
             void* cons_data,
             void* prim_data,
             vector_t<void*, 3> bfield_data,
+            std::function<real(real)> const& scale_factor,
+            std::function<real(real)> const& scale_factor_derivative,
             const InitialConditions& init
         )
         {
             switch (rec) {
                 case Reconstruction::PCM:
-                    call_visitor_with_state<R, D, G, S, Reconstruction::PCM>(
+                    dispatch_eos<R, D, G, S, Reconstruction::PCM>(
                         std::forward<Visitor>(visitor),
                         cons_data,
                         prim_data,
                         bfield_data,
+                        scale_factor,
+                        scale_factor_derivative,
                         init
                     );
                     break;
                 case Reconstruction::PLM:
-                    call_visitor_with_state<R, D, G, S, Reconstruction::PLM>(
+                    dispatch_eos<R, D, G, S, Reconstruction::PLM>(
                         std::forward<Visitor>(visitor),
                         cons_data,
                         prim_data,
                         bfield_data,
+                        scale_factor,
+                        scale_factor_derivative,
                         init
                     );
                     break;
-                // add more as you implement them:
-                // case Reconstruction::PPM:
-                //     call_visitor_with_state<R, D, G, S, Reconstruction::PPM>(
-                //         std::forward<Visitor>(visitor), cons_data, prim_data,
-                //         bfield_data, init);
-                //     break;
                 default:
                     throw unsupported_configuration(
                         "unsupported reconstruction: " +
@@ -178,6 +256,8 @@ namespace simbi::dispatch {
             void* cons_data,
             void* prim_data,
             vector_t<void*, 3> bfield_data,
+            std::function<real(real)> const& scale_factor,
+            std::function<real(real)> const& scale_factor_derivative,
             const InitialConditions& init
         )
         {
@@ -189,6 +269,8 @@ namespace simbi::dispatch {
                         cons_data,
                         prim_data,
                         bfield_data,
+                        scale_factor,
+                        scale_factor_derivative,
                         init
                     );
                     break;
@@ -199,6 +281,8 @@ namespace simbi::dispatch {
                         cons_data,
                         prim_data,
                         bfield_data,
+                        scale_factor,
+                        scale_factor_derivative,
                         init
                     );
                     break;
@@ -209,6 +293,8 @@ namespace simbi::dispatch {
                         cons_data,
                         prim_data,
                         bfield_data,
+                        scale_factor,
+                        scale_factor_derivative,
                         init
                     );
                     break;
@@ -230,6 +316,8 @@ namespace simbi::dispatch {
             void* cons_data,
             void* prim_data,
             vector_t<void*, 3> bfield_data,
+            std::function<real(real)> const& scale_factor,
+            std::function<real(real)> const& scale_factor_derivative,
             const InitialConditions& init
         )
         {
@@ -242,6 +330,8 @@ namespace simbi::dispatch {
                         cons_data,
                         prim_data,
                         bfield_data,
+                        scale_factor,
+                        scale_factor_derivative,
                         init
                     );
                     break;
@@ -253,6 +343,8 @@ namespace simbi::dispatch {
                         cons_data,
                         prim_data,
                         bfield_data,
+                        scale_factor,
+                        scale_factor_derivative,
                         init
                     );
                     break;
@@ -264,6 +356,8 @@ namespace simbi::dispatch {
                         cons_data,
                         prim_data,
                         bfield_data,
+                        scale_factor,
+                        scale_factor_derivative,
                         init
                     );
                     break;
@@ -275,6 +369,21 @@ namespace simbi::dispatch {
                         cons_data,
                         prim_data,
                         bfield_data,
+                        scale_factor,
+                        scale_factor_derivative,
+                        init
+                    );
+                    break;
+                case Geometry::SPHERICAL:
+                    dispatch_solver<R, D, Geometry::SPHERICAL>(
+                        solver,
+                        rec,
+                        std::forward<Visitor>(visitor),
+                        cons_data,
+                        prim_data,
+                        bfield_data,
+                        scale_factor,
+                        scale_factor_derivative,
                         init
                     );
                     break;
@@ -297,6 +406,8 @@ namespace simbi::dispatch {
             void* cons_data,
             void* prim_data,
             vector_t<void*, 3> bfield_data,
+            std::function<real(real)> const& scale_factor,
+            std::function<real(real)> const& scale_factor_derivative,
             const InitialConditions& init
         )
         {
@@ -310,6 +421,8 @@ namespace simbi::dispatch {
                         cons_data,
                         prim_data,
                         bfield_data,
+                        scale_factor,
+                        scale_factor_derivative,
                         init
                     );
                     break;
@@ -322,6 +435,8 @@ namespace simbi::dispatch {
                         cons_data,
                         prim_data,
                         bfield_data,
+                        scale_factor,
+                        scale_factor_derivative,
                         init
                     );
                     break;
@@ -334,6 +449,8 @@ namespace simbi::dispatch {
                         cons_data,
                         prim_data,
                         bfield_data,
+                        scale_factor,
+                        scale_factor_derivative,
                         init
                     );
                     break;
@@ -356,6 +473,8 @@ namespace simbi::dispatch {
             void* cons_data,
             void* prim_data,
             vector_t<void*, 3> bfield_data,
+            std::function<real(real)> const& scale_factor,
+            std::function<real(real)> const& scale_factor_derivative,
             const InitialConditions& init
         )
         {
@@ -370,6 +489,8 @@ namespace simbi::dispatch {
                         cons_data,
                         prim_data,
                         bfield_data,
+                        scale_factor,
+                        scale_factor_derivative,
                         init
                     );
                     break;
@@ -383,6 +504,8 @@ namespace simbi::dispatch {
                         cons_data,
                         prim_data,
                         bfield_data,
+                        scale_factor,
+                        scale_factor_derivative,
                         init
                     );
                     break;
@@ -396,6 +519,8 @@ namespace simbi::dispatch {
                         cons_data,
                         prim_data,
                         bfield_data,
+                        scale_factor,
+                        scale_factor_derivative,
                         init
                     );
                     break;
@@ -424,6 +549,8 @@ namespace simbi::dispatch {
         void* cons_data,
         void* prim_data,
         vector_t<void*, 3> bfield_data,
+        std::function<real(real)> const& scale_factor,
+        std::function<real(real)> const& scale_factor_derivative,
         const InitialConditions& init,
         Visitor&& visitor
     )
@@ -451,10 +578,12 @@ namespace simbi::dispatch {
                 cons_data,
                 prim_data,
                 bfield_data,
+                scale_factor,
+                scale_factor_derivative,
                 init
             );
         }
-        catch (const std::exception&) {
+        catch (const configuration_error&) {
             // generate helpful error message
             std::string msg =
                 "regime=" + regime_str + ", dims=" + std::to_string(dims) +
@@ -463,30 +592,6 @@ namespace simbi::dispatch {
             throw unsupported_configuration(msg);
         }
     }
-
-    //==============================================================================
-    // USAGE EXAMPLE
-    //==============================================================================
-
-    /*
-    // your simulation function
-    auto my_simulation = [](auto& state) {
-        // state is the raw hydro_state_t<R,D,G,S,Rec> type!
-
-        for (int step = 0; step < nsteps; ++step) {
-            apply_boundary_conditions(state);  // Your template function
-            compute_fluxes(state);              // Your template function
-            update_state(state);                // Your template function
-            cons2prim(state);                   // Your template function
-            auto dt = compute_minimum_timestep(state);
-        }
-    };
-
-    // call with visitor pattern
-    with_hydro_state("srhd", 3, "cartesian", "hllc", "plm",
-                     cons_data, prim_data, bfield_data, init,
-                     my_simulation);  // <-- visitor gets raw state!
-    */
 
 }   // namespace simbi::dispatch
 

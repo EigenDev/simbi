@@ -6,10 +6,17 @@
     @version 0.1 05/20/22
 */
 #include "rad_units.hpp"
+#include "units/constants.hpp"
+#include "units/units.hpp"
 #include <algorithm>
+#include <cmath>
+#include <cstddef>
 #include <cstdint>
 #include <functional>
+#include <numbers>
 #include <random>
+#include <ratio>
+#include <vector>
 
 namespace sogbo_rad {
 
@@ -48,7 +55,7 @@ namespace sogbo_rad {
     units::mag_field
     calc_shock_bfield(const units::edens rho_e, const double eps_b)
     {
-        return units::math::sqrt(8.0 * M_PI * eps_b * rho_e);
+        return units::math::sqrt(8.0 * std::numbers::pi * eps_b * rho_e);
     }
 
     /*
@@ -56,7 +63,7 @@ namespace sogbo_rad {
     */
     units::frequency calc_gyration_frequency(const units::mag_field bfield)
     {
-        auto frequency_for_unit_field = (3.0 / 4.0 / M_PI) *
+        auto frequency_for_unit_field = (3.0 / 4.0 / std::numbers::pi) *
                                         (constants::e_charge) /
                                         (constants::m_e * constants::c_light);
         return frequency_for_unit_field * bfield;
@@ -114,7 +121,8 @@ namespace sogbo_rad {
     )
     {
         const auto a =
-            (8.0 * M_PI * volume / (3.0 * constants::h_planck * nu_g));
+            (8.0 * std::numbers::pi * volume /
+             (3.0 * constants::h_planck * nu_g));
         const auto b =
             constants::sigmaT * constants::c_light * beta * beta * ub * n_e;
         const auto c = std::pow(gamma_e, -(p + 1.0));
@@ -211,7 +219,7 @@ namespace sogbo_rad {
         const units::mytime time_emitter
     )
     {
-        return (6.0 * M_PI * constants::m_e * constants::c_light) /
+        return (6.0 * std::numbers::pi * constants::m_e * constants::c_light) /
                (constants::sigmaT * bfield * bfield * time_emitter);
     }
 
@@ -235,7 +243,7 @@ namespace sogbo_rad {
     )
     {
         return (
-            (9.6323 / 8.0 / M_PI) * (p - 1.0) / (3.0 * p - 1.0) *
+            (9.6323 / 8.0 / std::numbers::pi) * (p - 1.0) / (3.0 * p - 1.0) *
             std::sqrt(3.0) *
             units::math::pow<std::ratio<3>>(constants::e_charge) /
             (constants::m_e * constants::c_light * constants::c_light) * n *
@@ -398,10 +406,10 @@ namespace sogbo_rad {
         );   // Standard mersenne_twister_engine seeded with rd()
         std::uniform_real_distribution<> dis(0.0, 1.0);
 
-        std::int64_t ng = 100;
-        const auto rho  = fields[0];   // fluid frame density
-        const auto gb   = fields[1];   // four-velocity
-        const auto pre  = fields[2];   // pressure
+        std::uint64_t ng = 100;
+        const auto rho   = fields[0];   // fluid frame density
+        const auto gb    = fields[1];   // four-velocity
+        const auto pre   = fields[2];   // pressure
 
         // Extract the geomtry of the mesh
         const auto x1     = mesh[0];
@@ -470,7 +478,7 @@ namespace sogbo_rad {
 
                     // ============================================================
                     // Source Trajectory
-                    const double phi_prime = 2.0 * M_PI * dis(gen);
+                    const double phi_prime = 2.0 * std::numbers::pi * dis(gen);
                     const double mu_prime  = 2.0 * dis(gen) - 1.0;
                     const std::vector<double> nhat_prime = {
                       std::sin(std::acos(mu_prime)) * std::cos(phi_prime),
@@ -549,8 +557,8 @@ namespace sogbo_rad {
                     // and bin the photons in each cell with respect to the
                     // gamma bin
                     const auto n_e = n_e_proper * w;
-                    const auto ub  = bfield * bfield / 8.0 / M_PI;
-                    for (std::int64_t qq = 0; qq < ng; qq++) {
+                    const auto ub  = bfield * bfield / 8.0 / std::numbers::pi;
+                    for (std::uint64_t qq = 0; qq < ng; qq++) {
                         const auto gamma_e      = gamma_min + qq * dg;
                         const auto gamma_sample = gen_random_from_powerlaw(
                             gamma_e,
@@ -577,7 +585,7 @@ namespace sogbo_rad {
                     }
 
                     // log the four-position
-                    for (std::int64_t qq = 0; qq < 4; qq++) {
+                    for (std::uint64_t qq = 0; qq < 4; qq++) {
                         four_position
                             [kk * ni * nj * 4 + jj * ni * 4 + ii * 4 + qq] =
                                 x_mu[qq];
@@ -642,7 +650,7 @@ namespace sogbo_rad {
         size_t nk      = 1;
         double sin_phi = 0;
         double cos_phi = 1.0;
-        double dx3     = 2.0 * M_PI;
+        double dx3     = 2.0 * std::numbers::pi;
         // Check whether to do 3D (off-axis) or not
         std::vector<double> x3;
         double x3max = 0.0;
@@ -667,7 +675,7 @@ namespace sogbo_rad {
         // step size between checkpoints
         const auto dt = args.dt * qscales.time_scale * units::s;
         const auto flux_denom =
-            units::math::pow<std::ratio<-1>>(4.0 * M_PI * d * d);
+            units::math::pow<std::ratio<-1>>(4.0 * std::numbers::pi * d * d);
         for (size_t kk = 0; kk < nk; kk++) {
             if (!at_pole) {
                 const double x3l = (kk > 0) ? x2min + (kk - 0.5) * dx3 : x3min;

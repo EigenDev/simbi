@@ -1,186 +1,303 @@
-#ifndef SIMBI_PHYSICS_UPDATE_HPP
-#define SIMBI_PHYSICS_UPDATE_HPP
+#ifndef SIMBI_UPDATE_HPP
+#define SIMBI_UPDATE_HPP
 
-#include "compute/functional/fp.hpp"
-#include "compute/math/field.hpp"
-#include "compute/math/index_space.hpp"
-#include "compute/math/lazy_expr.hpp"
-#include "config.hpp"
-#include "core/base/concepts.hpp"
-#include "core/base/coordinate.hpp"
-#include "core/base/stencil.hpp"
-#include "core/base/stencil_view.hpp"
-#include "core/utility/enums.hpp"
-#include "core/utility/helpers.hpp"
-#include "data/containers/state_struct.hpp"
+#include "bcs.hpp"
+#include "compute/functional/monad/serializer.hpp"
+#include "compute/math/cfd_expressions.hpp"
+#include "compute/math/cfd_operations.hpp"
 #include "data/containers/vector.hpp"
-#include "data/state/hydro_state.hpp"
-#include "data/state/hydro_state_types.hpp"
-#include "physics/hydro/solvers/hllc.hpp"
-#include "physics/hydro/solvers/hlld.hpp"
-#include "system/mesh/solver.hpp"
-#include <cstddef>
+#include "physics/hydro/conversion.hpp"
+#include "physics/hydro/wave_speeds.hpp"
+#include "system/io/exceptions.hpp"
+#include <algorithm>
 #include <cstdint>
+#include <iostream>
+#include <limits>
 
 namespace simbi::hydro {
-    using namespace simbi::base;
-    using namespace simbi::concepts;
-    using namespace simbi::stencils;
+    using namespace simbi::cfd;
+    using namespace simbi::unit_vectors;
 
-    template <Regime R, Solver S, is_hydro_primitive_c prim_t>
-    constexpr auto get_solver()
+    // forward declarations
+    template <typename HydroState>
+    void recover_primitives(HydroState& state);
+
+    template <typename HydroState>
+    void update_timestep(HydroState& state);
+
+    template <typename HydroState>
+    double compute_local_timestep(
+        const uarray<HydroState::dimensions>& coord,
+        const HydroState& state
+    );
+
+    template <typename HydroState>
+    void compute_all_fluxes(HydroState& state);
+
+    template <typename HydroState>
+    void update_conservatives(HydroState& state);
+
+    template <typename HydroState>
+    void timestep(HydroState& state);
+
+    template <typename HydroState>
+    void print_failure_diagnostics(const HydroState& state);
+
+    // ============================================================================
+    // CONSERVATIVE TO PRIMITIVE CONVERSION
+    // ============================================================================
+
+    template <typename HydroState>
+    void recover_primitives(HydroState& state)
     {
-        if constexpr (R == Regime::NEWTONIAN) {
-            if constexpr (S == Solver::HLLC) {
-                return newtonian::hllc_flux<prim_t>;
+        error_budget_t error_budget{};
+        error_budget.reset();
+        for (std::uint64_t ii = 0; ii < state.domain().size(); ++ii) {
+            const auto coord      = state.domain().index_to_coord(ii);
+            const auto& cons      = state.cons[coord];
+            const auto maybe_prim = to_primitive(cons, state.metadata.gamma);
+
+            // early exit if budget exhausted (other thread found error)
+            if (error_budget.is_exhausted()) {
+                continue;
             }
-            else if constexpr (S == Solver::HLLE) {
-                return hlle_flux<prim_t>;
-            }
-            else {
-                static_assert(
-                    false,
-                    "Unsupported solver for the specified regime and primitive "
-                    "type"
-                );
-            }
+
+            state.prim[coord] = maybe_prim.unwrap_or_else([&]() {
+                if (error_budget.try_consume()) {
+                    // this thread wins - capture detailed error info
+                    error_budget.first_error_code.store(
+                        maybe_prim.error_code()
+                    );
+                    error_budget.first_error_index.store(ii);
+                    error_budget.error_captured.store(true);
+                }
+                // all other threads: continue until they see budget exhausted
+                return typename HydroState::primitive_t{};
+            });
         }
-        else if constexpr (R == Regime::SRHD) {
-            if constexpr (S == Solver::HLLC) {
-                return srhd::hllc_flux<prim_t>;
-            }
-            else if constexpr (S == Solver::HLLE) {
-                return hlle_flux<prim_t>;
-            }
-            else {
-                static_assert(
-                    false,
-                    "Unsupported solver for the specified regime and primitive "
-                    "type"
-                );
-            }
+
+        if (error_budget.error_captured.load()) {
+            // construct rich error context and throw
+            auto error_index = error_budget.first_error_index.load();
+            auto error_coord = state.domain().index_to_coord(error_index);
+            auto error_code  = error_budget.first_error_code.load();
+            const auto& geo  = state.geom_solver;
+
+            throw primitive_conversion_error_t{error_info_t{
+              .coord_str        = format_coord(error_coord),
+              .position_str     = format_position(geo.centroid(error_coord)),
+              .error_code       = error_code,
+              .time             = state.metadata.time,
+              .iteration        = state.metadata.iteration,
+              .conservative_str = format_conserved(state.cons[error_coord]),
+              .message          = "Primitives in non-physical state."
+            }};
         }
-        else if constexpr (R == Regime::RMHD) {
-            if constexpr (S == Solver::HLLC) {
-                return rmhd::hllc_flux<prim_t>;
-            }
-            else if constexpr (S == Solver::HLLE) {
-                return hlle_flux<prim_t>;
-            }
-            else if constexpr (S == Solver::HLLD) {
-                return rmhd::hlld_flux<prim_t>;
-            }
-            else {
-                static_assert(
-                    false,
-                    "Unsupported solver for the specified regime and primitive "
-                    "type"
-                );
-            }
+    }
+    // ============================================================================
+    // ADAPTIVE TIMESTEP CALCULATION
+    // ============================================================================
+
+    template <typename HydroState>
+    void update_timestep(HydroState& state)
+    {
+
+        double min_dt = std::numeric_limits<double>::max();
+
+        for (std::uint64_t ii = 0; ii < state.domain().size(); ++ii) {
+            auto coord = state.domain().index_to_coord(ii);
+
+            // compute local timestep at this coordinate
+            auto local_dt = compute_local_timestep(coord, state);
+
+            // track minimum across all cells
+            min_dt = std::min(min_dt, local_dt);
         }
-        else {
-            static_assert(false, "Unsupported regime for hydro solver");
-        }
+
+        // update state metadata
+        state.metadata.dt = min_dt;
     }
 
     template <typename HydroState>
-    void compute_fluxes(HydroState& state)
-    {
-        constexpr auto rec_order = HydroState::reconstruct_t;
-        constexpr auto dims      = HydroState::dimensions;
-        constexpr auto nghosts   = reconstruction_to_ghosts(rec_order);
-
-        const auto& mesh_config = state.geom_solver.config;
-        const auto plm_theta    = state.metadata.plm_theta;
-        const auto& prims       = state.prim;
-        const auto domain       = make_space<dims>(mesh_config.shape);
-
-        constexpr auto riemann_solver = get_solver<
-            HydroState::regime_t,
-            HydroState::solver_t,
-            typename HydroState::primitive_t>();
-
-        compile_time_for<0, dims>([&](auto dim) {
-            constexpr auto dir     = decltype(dim)::value;
-            const auto flux_domain = [&]() {
-                uarray<dims> expansion{};
-                expansion[dir] = 1;
-                return domain.expand_end(expansion);
-            }();
-            const auto p        = prims.contract(nghosts);
-            const auto gamma    = state.metadata.gamma;
-            const auto nhat     = unit_vectors::canonical_basis<dims>(dir + 1);
-            const auto smoother = state.metadata.shock_smoother;
-
-            flux_domain
-                .map([=] DEV(auto coord) {
-                    const auto stencil = make_stencil<rec_order>(p, coord, dir);
-                    const auto [left, right] = stencil.neighbor_values();
-                    const auto pl =
-                        reconstruct_left<rec_order>(left, plm_theta);
-                    const auto pr =
-                        reconstruct_right<rec_order>(right, plm_theta);
-                    const auto vface =
-                        mesh::face_velocity(coord, dir, mesh_config);
-
-                    return riemann_solver(pl, pr, nhat, vface, gamma, smoother);
-                })
-                .realize_into(state.flux[dir]);
-        });
-    }
-
-    template <typename HydroState>
-    auto compute_flux_difference_for_dimension(
-        const HydroState& state,
-        std::uint64_t dim
+    double compute_local_timestep(
+        const uarray<HydroState::dimensions>& coord,
+        const HydroState& state
     )
     {
-        constexpr auto dims     = HydroState::dimensions;
-        const auto& mesh_config = state.geom_solver.config;
-        const auto domain       = make_space<dims>(mesh_config.shape);
-        const auto dt           = 0.01;   // Get from somewhere appropriate
 
-        return domain.map([=, &state] DEV(auto coord) {
-            const auto dv  = state.geom_solver.volume(coord);
-            const auto al  = state.geom_solver.face_area(coord, dim, Dir::W);
-            const auto ar  = state.geom_solver.face_area(coord, dim, Dir::E);
-            const auto off = unit_vectors::canonical_basis<dims>(dim + 1);
-            const auto& fl = state.flux[dim][coord /***/];
-            const auto& fr = state.flux[dim][coord + off];
-            return -dt * (fr * ar - fl * al) / dv;
-        });
+        const auto& prim = state.prim[coord];
+        auto cell_widths = state.geom_solver.cell_widths(coord);
+
+        double min_dt = std::numeric_limits<double>::max();
+
+        // Check wave speeds in each spatial dimension
+        for (std::uint64_t dim = 0; dim < HydroState::dimensions; ++dim) {
+
+            // Unit vector in this dimension
+            auto nhat = canonical_basis<HydroState::dimensions>(dim + 1);
+
+            // Compute characteristic wave speeds
+            auto speeds = wave_speeds(prim, nhat, state.metadata.gamma);
+
+            // Maximum wave speed in this direction
+            auto max_speed =
+                std::max(std::abs(speeds.left), std::abs(speeds.right));
+
+            // CFL timestep constraint for this dimension
+            if (max_speed > 0.0) {
+                double dt_dim =
+                    state.metadata.cfl * cell_widths[dim] / max_speed;
+                min_dt = std::min(min_dt, dt_dim);
+            }
+        }
+
+        return min_dt;
+    }
+
+    // ============================================================================
+    // FLUX COMPUTATION AND CONSERVATIVE UPDATE (using your expression system)
+    // ============================================================================
+
+    template <typename HydroState>
+    void compute_all_fluxes(HydroState& state)
+    {
+
+        // Compute fluxes for each dimension using lazy expressions
+        for (std::uint64_t dim = 0; dim < HydroState::dimensions; ++dim) {
+
+            // Get flux domain (extends one cell in this dimension)
+            uarray<HydroState::dimensions> expansion{};
+            expansion[dim]   = 1;
+            auto flux_domain = state.domain().expand_end(expansion);
+
+            // Compute fluxes lazily and store in state.flux[dim]
+            flux_domain |
+                compute_fluxes<HydroState::reconstruct_t, HydroState::solver_t>(
+                    state.prim[state.domain()],
+                    state.geom_solver,
+                    dim,
+                    state.metadata.plm_theta,
+                    state.metadata.gamma,
+                    state.metadata.shock_smoother
+                ) |
+                realize_to(state.flux[dim]);
+        }
     }
 
     template <typename HydroState>
-    void update_state(HydroState& state)
+    void update_conservatives(HydroState& state)
     {
-        constexpr auto dims     = HydroState::dimensions;
-        const auto& geo         = state.geom_solver;
-        const auto& mesh_config = geo.config;
-        const auto domain       = make_space<dims>(mesh_config.shape);
-        // const auto& srcs        = state.sources;
-        auto u = state.cons[domain];
-        // const auto& p           = state.prim[domain];
+        auto u = state.cons[state.domain()];
+        state.domain() | flux_divergence(state, state.metadata.dt) |
+            add(gravity_sources(state, state.metadata.dt)) |
+            add(hydro_sources(state, state.metadata.dt)) |
+            add(geometric_sources(state, state.metadata.dt)) |
+            add_to(u);   // u^{n+1} = u^n + L(u^n)
+    }
 
-        const auto du =
-            expr::make_flux_accumulator(domain, [&](std::uint64_t dim) {
-                return compute_flux_difference_for_dimension(state, dim);
-            });
+    // ============================================================================
+    // COMPLETE LAZY TIMESTEP IMPLEMENTATION
+    // ============================================================================
+    template <typename HydroState>
+    void timestep(HydroState& state)
+    {
+        compute_all_fluxes(state);
+        update_conservatives(state);
+        apply_boundary_conditions(state);
+        recover_primitives(state);
+        update_timestep(state);
+        state.metadata.time += state.metadata.dt;
+        state.metadata.iteration++;
+    }
 
-        const auto dt = state.metadata.dt;
-        // source contributions
-        du += expr::make_source<gravity_source_tag>(state) * dt;
-        du += expr::make_source<hydro_source_tag>(state) * dt;
-        du += expr::make_source<ib_source_tag>(state);
+    // ============================================================================
+    // SIMULATION LOOP
+    // ============================================================================
 
-        const auto unext = u + du;
+    template <typename HydroState>
+    void run_simulation(HydroState& state)
+    {
+        const auto t_final = state.metadata.tend;
+        std::cout << "Starting simulation...\n";
+        std::cout << "Initial time: " << state.metadata.time << "\n";
+        std::cout << "Final time: " << t_final << "\n";
 
-        for (const auto& x : unext.realize()) {
-            std::cout << x << std::endl;
+        // initialize timestep
+        update_timestep(state);
+        apply_boundary_conditions(state);
+        recover_primitives(state);
+
+        // now we can start the simulation loop :D
+        while (state.metadata.time < t_final && !state.in_failure_state) {
+
+            timestep(state);
+            state.geom_solver.expand_mesh(
+                state.metadata.time,
+                state.metadata.dt
+            );
+
+            if (state.metadata.iteration % 100 == 0) {
+                static int idx = 0;
+                std::cout << "Iteration " << state.metadata.iteration
+                          << ", time = " << state.metadata.time
+                          << ", dt = " << state.metadata.dt << "\n";
+                io::serialize_hydro_state(
+                    state,
+                    std::string("sod" + std::to_string(idx) + ".h5")
+                );
+                idx++;
+            }
         }
 
-        // u = u + du + source;
-        // u.realize();
+        std::cout << "Simulation completed!\n";
+        std::cout << "Final time: " << state.metadata.time << "\n";
+        std::cout << "Total iterations: " << state.metadata.iteration << "\n";
     }
+
+    // ============================================================================
+    // UTILITY FUNCTIONS
+    // ============================================================================
+
+    template <typename HydroState>
+    bool is_simulation_stable(const HydroState& state)
+    {
+        // Check for NaN/inf values, negative densities, etc.
+        for (std::uint64_t i = 0; i < state.domain().size(); ++i) {
+            auto coord       = state.domain().index_to_coord(i);
+            const auto& prim = state.prim[coord];
+
+            if (prim.rho <= 0.0 || !std::isfinite(prim.rho)) {
+                return false;
+            }
+            if (prim.pre <= 0.0 || !std::isfinite(prim.pre)) {
+                return false;
+            }
+            // Could add more checks for velocity, magnetic field, etc.
+        }
+        return true;
+    }
+
+    template <typename HydroState>
+    void print_simulation_summary(const HydroState& state)
+    {
+        std::cout << "\n=== Simulation Summary ===\n";
+        std::cout << "Regime: " << static_cast<int>(HydroState::regime_t)
+                  << "\n";
+        std::cout << "Dimensions: " << HydroState::dimensions << "\n";
+        std::cout << "Geometry: " << static_cast<int>(HydroState::geometry_t)
+                  << "\n";
+        std::cout << "Solver: " << static_cast<int>(HydroState::solver_t)
+                  << "\n";
+        std::cout << "Reconstruction: "
+                  << static_cast<int>(HydroState::reconstruct_t) << "\n";
+        std::cout << "Final time: " << state.metadata.time << "\n";
+        std::cout << "Iterations: " << state.metadata.iteration << "\n";
+        std::cout << "Final dt: " << state.metadata.dt << "\n";
+        std::cout << "Stable: " << (is_simulation_stable(state) ? "Yes" : "No")
+                  << "\n";
+        std::cout << "========================\n\n";
+    }
+
 }   // namespace simbi::hydro
-#endif
+
+#endif   // SIMBI_UPDATE_HPP

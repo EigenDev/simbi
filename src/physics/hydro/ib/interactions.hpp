@@ -18,7 +18,7 @@
 #include <utility>
 
 namespace simbi::ibsystem {
-    // coordinate-natieve gravitational interaction
+    // coordinate-native gravitational interaction
     template <
         is_hydro_primitive_c prim_t,
         std::uint64_t Dims = prim_t::dimensions>
@@ -31,10 +31,11 @@ namespace simbi::ibsystem {
         using conserved_t = typename prim_t::counterpart_t;
 
         // clean cartesian physics - no coordinate system complexity
-        const auto r_vec        = ctx.cell_pos - body.position;
-        const auto r_mag        = r_vec.norm();
-        const auto softening_sq = body.ctx.epsilon * body.ctx.epsilon;
-        const auto r_eff        = std::sqrt(r_mag * r_mag + softening_sq);
+        const auto r_vec = ctx.cell_pos - body.position;
+        const auto r_mag = r_vec.norm();
+        const auto softening_sq =
+            body.softening_length() * body.softening_length();
+        const auto r_eff = std::sqrt(r_mag * r_mag + softening_sq);
 
         // gravitational acceleration (G = 1)
         const auto g_accel = -body.mass * r_vec / (r_eff * r_eff * r_eff);
@@ -82,7 +83,7 @@ namespace simbi::ibsystem {
             );
         }
 
-        // Accrete fixed fraction of available mass per timestep
+        // accrete fixed fraction of available mass per timestep
         const auto cell_size           = ctx.max_cell_width;
         const auto local_cs            = sound_speed(prim, ctx.gamma);
         const auto sound_crossing_time = cell_size / local_cs;
@@ -92,12 +93,12 @@ namespace simbi::ibsystem {
             std::min(0.5, stability_limit)
         );
 
-        // Calculate accreted quantities
+        // calculate accreted quantities
         const auto accreted_density  = eps * labframe_density(prim, ctx.gamma);
-        const auto accreted_momentum = eps * spatial_momentum(prim, ctx.gamma);
+        const auto accreted_momentum = eps * linear_momentum(prim, ctx.gamma);
         const auto accreted_energy   = eps * energy_density(prim, ctx.gamma);
 
-        // Create conserved state with removed material
+        // create conserved state with removed material
         conserved_t result(
             -accreted_density,
             -accreted_momentum,
@@ -106,7 +107,7 @@ namespace simbi::ibsystem {
 
         auto delta = BodyDelta<real, Dims>{body.index};
         // update body statistics
-        const auto& dV             = ctx.cell_volume;
+        const auto dV              = ctx.cell_volume;
         delta.accreted_mass_delta  = dV * accreted_density;
         delta.accretion_rate_delta = dV * accreted_density / ctx.dt;
 
@@ -288,7 +289,7 @@ namespace simbi::ibsystem {
         // calculate energy change (work done on fluid)
         const auto& v_old = fluid_velocity;
         const auto invd   = 1.0 / density;
-        const auto v_new  = (prim.spatial_momentum(ctx.gamma) + dp) * invd;
+        const auto v_new  = (prim.linear_momentum(ctx.gamma) + dp) * invd;
         const auto v_avg  = 0.5 * (v_old + v_new);
         const auto dE     = vecops::dot(v_avg, dp);
 
@@ -354,27 +355,28 @@ namespace simbi::ibsystem {
     }
 
     // coordinate-native computation - no cell objects needed
-    template <std::uint64_t Dims, Geometry G, typename Primitive>
-    DEV auto compute_ib_at_coordinate(
-        const uarray<Dims>& coord,
-        const mesh::geometry_solver_t<Dims, G>& geo,
-        const ComponentBodySystem<real, Dims>& bodies,
-        GridBodyDeltaCollector<real, Dims>& collector,
-        const physics_context_t<Dims>& ctx
-    )
+    template <std::uint64_t Dims, typename HydroState>
+    DEV auto
+    compute_ib_at_coordinate(const uarray<Dims>& coord, const HydroState& state)
     {
-        using conserved_t = typename Primitive::counterpart_t;
+        using conserved_t = typename HydroState::primitive_t::counterpart_t;
 
-        // geometry solver gives us everything we need
-        const auto cartesian_pos = geo.cartesian_centroid(coord);
-        const auto cell_volume   = geo.volume(coord);
-        const auto prim_state =
-            get_primitive_at(coord);   // from your existing infrastructure
+        const auto prim_state = state.prim[coord];
+        const auto& collector = state.collector;
+        const auto& bodies    = state.body_system->bodies();
+        physics_context_t<Dims> ctx{
+          .gamma          = state.metadata.gamma,
+          .dt             = state.metadata.dt,
+          .cell_pos       = state.geom_solver.cartesian_centroid(coord),
+          .cell_volume    = state.geom_solver.volume(coord),
+          .min_cell_width = state.geom_solver.min_cell_width(coord),
+          .max_cell_width = state.geom_solver.max_cell_width(coord),
+        };
 
         conserved_t total_effect{};
 
         // loop through all bodies - accumulate effects and deltas in one pass
-        for (const auto& [body_idx, body] : bodies.bodies()) {
+        for (const auto& [body_idx, body] : bodies) {
             auto [fluid_change, body_delta] =
                 compute_body_interaction(body, prim_state, ctx);
 

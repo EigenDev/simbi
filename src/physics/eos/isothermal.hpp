@@ -2,11 +2,9 @@
 #define ISOTHERMAL_HPP
 
 #include "config.hpp"
-#include "core/utility/enums.hpp"
 #include <cmath>   // for std::sqrt
 
 namespace simbi::eos {
-    template <Regime R>
     struct isothermal_gas_eos_t {
         double cs_squared;
 
@@ -17,7 +15,7 @@ namespace simbi::eos {
 
         DEV auto enthalpy(double /*rho*/, double /*pressure*/) const
         {
-            1.0 + cs_squared;
+            return 1.0 + cs_squared;
         }
     };
 }   // namespace simbi::eos

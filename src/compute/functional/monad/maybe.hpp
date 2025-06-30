@@ -95,41 +95,41 @@ namespace simbi {
     using None = nothing_t;
 
     template <typename T>
-    class Maybe
+    class maybe_t
     {
       public:
         using value_type = T;
 
-        DUAL constexpr Maybe()
+        DUAL constexpr maybe_t()
             : valid{false}, this_value{}, error_code_(ErrorCode::NONE)
         {
         }
 
-        DUAL constexpr Maybe(nothing_t nothing)
+        DUAL constexpr maybe_t(nothing_t nothing)
             : valid{false}, this_value{}, error_code_(nothing.error_code)
         {
         }
 
-        DUAL constexpr Maybe(const T& value)
+        DUAL constexpr maybe_t(const T& value)
             : valid{true}, this_value{value}, error_code_(ErrorCode::NONE)
         {
         }
 
-        DUAL constexpr Maybe(T&& value)
+        DUAL constexpr maybe_t(T&& value)
             : valid{true},
               this_value{std::move(value)},
               error_code_(ErrorCode::NONE)
         {
         }
 
-        DUAL constexpr Maybe(const Maybe& other)
+        DUAL constexpr maybe_t(const maybe_t& other)
             : valid{other.valid},
               this_value{other.this_value},
               error_code_(other.error_code_)
         {
         }
         // ctor deduced from the value type
-        DUAL constexpr Maybe(Maybe&& other) noexcept
+        DUAL constexpr maybe_t(maybe_t&& other) noexcept
             : valid{other.valid},
               this_value{std::move(other.this_value)},
               error_code_(other.error_code_)
@@ -140,7 +140,7 @@ namespace simbi {
         }
 
         // Copy assignment operator
-        DUAL constexpr Maybe& operator=(const Maybe& other)
+        DUAL constexpr maybe_t& operator=(const maybe_t& other)
         {
             if (this != &other) {
                 valid = other.valid;
@@ -159,7 +159,7 @@ namespace simbi {
         }
 
         // Move assignment operator
-        DUAL constexpr Maybe& operator=(Maybe&& other) noexcept
+        DUAL constexpr maybe_t& operator=(maybe_t&& other) noexcept
         {
             if (this != &other) {
                 valid = other.valid;
@@ -182,7 +182,7 @@ namespace simbi {
         }
 
         // Value assignment operator
-        DUAL constexpr Maybe& operator=(const T& value)
+        DUAL constexpr maybe_t& operator=(const T& value)
         {
             valid       = true;
             this_value  = value;
@@ -191,7 +191,7 @@ namespace simbi {
         }
 
         // Move value assignment operator
-        DUAL constexpr Maybe& operator=(T&& value)
+        DUAL constexpr maybe_t& operator=(T&& value)
         {
             valid       = true;
             this_value  = std::move(value);
@@ -235,10 +235,10 @@ namespace simbi {
         {
             using result_type = std::invoke_result_t<F, const T&>;
             if (valid) {
-                return Maybe<result_type>{f(this_value)};
+                return maybe_t<result_type>{f(this_value)};
             }
             else {
-                return Maybe<result_type>{Nothing};
+                return maybe_t<result_type>{Nothing};
             }
         }
 
@@ -247,10 +247,10 @@ namespace simbi {
         {
             using result_type = std::invoke_result_t<F, T&&>;
             if (valid) {
-                return Maybe<result_type>{f(std::move(this_value))};
+                return maybe_t<result_type>{f(std::move(this_value))};
             }
             else {
-                return Maybe<result_type>{Nothing};
+                return maybe_t<result_type>{Nothing};
             }
         }
 
@@ -262,7 +262,7 @@ namespace simbi {
                 return f(this_value);
             }
             else {
-                return Maybe<result_type>{Nothing};
+                return maybe_t<result_type>{Nothing};
             }
         }
 
@@ -274,7 +274,7 @@ namespace simbi {
                 return f(std::move(this_value));
             }
             else {
-                return Maybe<result_type>{Nothing};
+                return maybe_t<result_type>{Nothing};
             }
         }
 
@@ -283,10 +283,10 @@ namespace simbi {
         {
             using result_type = std::invoke_result_t<F>;
             if (valid) {
-                return Maybe<T>{this_value};
+                return maybe_t<T>{this_value};
             }
             else {
-                return Maybe<result_type>{f()};
+                return maybe_t<result_type>{f()};
             }
         }
 
@@ -295,10 +295,10 @@ namespace simbi {
         {
             using result_type = std::invoke_result_t<F>;
             if (valid) {
-                return Maybe<T>{std::move(this_value)};
+                return maybe_t<T>{std::move(this_value)};
             }
             else {
-                return Maybe<result_type>{f()};
+                return maybe_t<result_type>{f()};
             }
         }
 
@@ -347,7 +347,7 @@ namespace simbi {
         }
 
         template <typename U>
-        DUAL constexpr bool operator==(const Maybe<U>& other) const
+        DUAL constexpr bool operator==(const maybe_t<U>& other) const
         {
             if (valid != other.valid) {
                 return false;
@@ -359,13 +359,13 @@ namespace simbi {
         }
 
         template <typename U>
-        DUAL constexpr bool operator!=(const Maybe<U>& other) const
+        DUAL constexpr bool operator!=(const maybe_t<U>& other) const
         {
             return !(*this == other);
         }
 
         template <typename U>
-        DUAL constexpr bool operator<(const Maybe<U>& other) const
+        DUAL constexpr bool operator<(const maybe_t<U>& other) const
         {
             if (valid != other.valid) {
                 return valid < other.valid;
@@ -377,19 +377,19 @@ namespace simbi {
         }
 
         template <typename U>
-        DUAL constexpr bool operator>(const Maybe<U>& other) const
+        DUAL constexpr bool operator>(const maybe_t<U>& other) const
         {
             return other < *this;
         }
 
         template <typename U>
-        DUAL constexpr bool operator<=(const Maybe<U>& other) const
+        DUAL constexpr bool operator<=(const maybe_t<U>& other) const
         {
             return !(other < *this);
         }
 
         template <typename U>
-        DUAL constexpr bool operator>=(const Maybe<U>& other) const
+        DUAL constexpr bool operator>=(const maybe_t<U>& other) const
         {
             return !(*this < other);
         }
@@ -417,39 +417,39 @@ namespace simbi {
 
         // Math overloads with scalar types
         template <typename U>
-        DUAL constexpr Maybe<T> operator+(const U& rhs) const
+        DUAL constexpr maybe_t<T> operator+(const U& rhs) const
         {
             if (valid) {
-                return Maybe<T>{this_value + rhs};
+                return maybe_t<T>{this_value + rhs};
             }
-            return Maybe<T>{Nothing};
+            return maybe_t<T>{Nothing};
         }
 
         template <typename U>
-        DUAL constexpr Maybe<T> operator-(const U& rhs) const
+        DUAL constexpr maybe_t<T> operator-(const U& rhs) const
         {
             if (valid) {
-                return Maybe<T>{this_value - rhs};
+                return maybe_t<T>{this_value - rhs};
             }
-            return Maybe<T>{Nothing};
+            return maybe_t<T>{Nothing};
         }
 
         template <typename U>
-        DUAL constexpr Maybe<T> operator*(const U& rhs) const
+        DUAL constexpr maybe_t<T> operator*(const U& rhs) const
         {
             if (valid) {
-                return Maybe<T>{this_value * rhs};
+                return maybe_t<T>{this_value * rhs};
             }
-            return Maybe<T>{Nothing};
+            return maybe_t<T>{Nothing};
         }
 
         template <typename U>
-        DUAL constexpr Maybe<T> operator/(const U& rhs) const
+        DUAL constexpr maybe_t<T> operator/(const U& rhs) const
         {
             if (valid) {
-                return Maybe<T>{this_value / rhs};
+                return maybe_t<T>{this_value / rhs};
             }
-            return Maybe<T>{Nothing};
+            return maybe_t<T>{Nothing};
         }
 
         // implicit conversion to bool
@@ -469,12 +469,12 @@ namespace simbi {
 
     // Deduction guide
     template <typename T>
-    Maybe(T) -> Maybe<std::decay_t<T>>;
+    maybe_t(T) -> maybe_t<std::decay_t<T>>;
 
     template <typename T>
-    DUAL inline Maybe<T> make_maybe(const T& value)
+    DUAL inline maybe_t<T> make_maybe(const T& value)
     {
-        return Maybe<T>(value);
+        return maybe_t<T>(value);
     }
 }   // namespace simbi
 

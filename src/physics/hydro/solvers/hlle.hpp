@@ -22,8 +22,8 @@ namespace simbi::hydro {
         ShockWaveLimiter = ShockWaveLimiter::NONE
     )
     {
-        const auto uR       = to_conserved(primL, gamma);
-        const auto uL       = to_conserved(primR, gamma);
+        const auto uL       = to_conserved(primL, gamma);
+        const auto uR       = to_conserved(primR, gamma);
         const auto fL       = to_flux(primL, nhat, gamma);
         const auto fR       = to_flux(primR, nhat, gamma);
         const auto [sL, sR] = extremal_speeds(primL, primR, nhat, gamma);
@@ -31,11 +31,11 @@ namespace simbi::hydro {
         auto net_flux = [&]() {
             if (sL >= vface) {
                 // left state is supersonic
-                return fL - uL * vface;
+                return fL - uR * vface;
             }
             else if (sR <= vface) {
                 // right state is supersonic
-                return fR - uR * vface;
+                return fR - uL * vface;
             }
             else {
                 // intermediate state

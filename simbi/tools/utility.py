@@ -220,7 +220,6 @@ def get_dimensionality(files: Union[list[str], dict[int, list[str]]]) -> int:
     for file in files:
         with h5py.File(file, "r") as hf:
             ds = dict(hf["sim_info"].attrs)
-            effective_dim = sum(q > 1 for q in [ds["nx"], ds["ny"], ds["nz"]])
             ndim = ds["dimensions"]
             dims += [ndim]
             if not all_equal(dims):

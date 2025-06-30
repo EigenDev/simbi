@@ -1,7 +1,7 @@
 #ifndef SIMBI_INDEX_SPACE_HPP
 #define SIMBI_INDEX_SPACE_HPP
 
-// #include "data/containers/vector.hpp"
+#include "compute/math/cfd_expressions.hpp"
 #include "index_types.hpp"
 #include <algorithm>
 #include <cstdint>
@@ -9,7 +9,6 @@
 #include <iterator>
 
 namespace simbi {
-    using namespace simbi::base;
 
     template <typename T, std::uint64_t Dims>
     struct vector_t;
@@ -19,14 +18,10 @@ namespace simbi {
 
     using ulist = std::initializer_list<std::uint64_t>;
 
-    // forward declaration for expressions
-    namespace expr {
-        template <typename Source, typename Transform>
-        class lazy_expr_t;
-    }
-
     template <std::uint64_t Dims>
     struct index_space_t {
+        static constexpr std::uint64_t dimensions = Dims;
+        using value_type                          = std::uint64_t;
         uarray<Dims> start_, end_;
 
         // calculate total number of coordinates in this space
@@ -97,10 +92,40 @@ namespace simbi {
         // subdomain access operator
         index_space_t operator[](const index_space_t& coord) const
         {
+            uarray<Dims> new_start, new_end, radii;
+            // compute the radii for each dimensions. this is the
+            // difference between the length of the original
+            // coordinate space and the new coordinate space.
+            // If my original coordinate space is [0, 104] (1D) and
+            // the new coordinate space is [0, 100], then the
+            // radii is 4/2 = 2. This allows us to shift the
+            // index space and perform affine transformations
+            // correctly between active and global dims.
+            for (std::uint64_t ii = 0; ii < Dims; ++ii) {
+                const auto new_length = coord.end_[ii] - coord.start_[ii];
+                const auto old_length = end_[ii] - start_[ii];
+                if (old_length > new_length) {
+                    radii[ii] = (old_length - new_length) / 2;
+                }
+                else {
+                    radii[ii] = 0;
+                }
+            }
+
+            for (std::uint64_t ii = 0; ii < Dims; ++ii) {
+                new_start[ii] =
+                    std::max(start_[ii], coord.start_[ii]) + radii[ii];
+                new_end[ii] = std::min(end_[ii], coord.end_[ii]) + radii[ii];
+            }
+            return index_space_t{new_start, new_end};
+        }
+
+        index_space_t intersection(const index_space_t& other) const
+        {
             uarray<Dims> new_start, new_end;
             for (std::uint64_t ii = 0; ii < Dims; ++ii) {
-                new_start[ii] = std::max(start_[ii], coord.start_[ii]);
-                new_end[ii]   = std::min(end_[ii], coord.end_[ii]);
+                new_start[ii] = std::max(start_[ii], other.start_[ii]);
+                new_end[ii]   = std::min(end_[ii], other.end_[ii]);
             }
             return index_space_t{new_start, new_end};
         }
@@ -294,19 +319,15 @@ namespace simbi {
             return semantic_space_t<Dims, Semantic>{start_, end_};
         }
 
-        // EXPRESSION SYSTEM INTEGRATION
-        template <typename F>
-        auto map(F&& func) const -> expr::lazy_expr_t<index_space_t<Dims>, F>
+        // enable pipeline syntax from domain
+        template <typename Op>
+        auto operator|(Op&& op) const
         {
-            return expr::lazy_expr_t<index_space_t<Dims>, F>{
-              *this,
-              std::forward<F>(func)
-            };
+            return cfd::make_domain_expr(*this) | std::forward<Op>(op);
         }
     };
 
     // FACTORY FUNCTIONS
-
     template <std::uint64_t Dims>
     auto make_space(const uarray<Dims>& start, const uarray<Dims>& end)
     {

@@ -305,18 +305,18 @@ namespace simbi {
         }
 
         // safe access with bounds checking
-        DUAL constexpr Maybe<reference> at(std::uint64_t idx)
+        DUAL constexpr maybe_t<reference> at(std::uint64_t idx)
         {
             if (idx < Dims) {
-                return Maybe<reference>(storage[idx]);
+                return maybe_t<reference>(storage[idx]);
             }
             return Nothing;
         }
 
-        DUAL constexpr Maybe<const_reference> at(std::uint64_t idx) const
+        DUAL constexpr maybe_t<const_reference> at(std::uint64_t idx) const
         {
             if (idx < Dims) {
-                return Maybe<const_reference>(storage[idx]);
+                return maybe_t<const_reference>(storage[idx]);
             }
             return Nothing;
         }

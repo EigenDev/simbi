@@ -50,10 +50,10 @@
 #ifndef BINARY_HPP
 #define BINARY_HPP
 
+#include "body.hpp"
+#include "component_body_system.hpp"
 #include "config.hpp"
 #include "data/containers/vector.hpp"
-#include "physics/hydro/schemes/ib/systems/body.hpp"
-#include "physics/hydro/schemes/ib/systems/component_body_system.hpp"
 
 namespace simbi::ibsystem::body_functions {
     namespace binary {

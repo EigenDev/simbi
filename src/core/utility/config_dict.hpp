@@ -272,14 +272,14 @@ namespace simbi {
     // helper functions for property extraction
     namespace config {
         template <typename T>
-        Maybe<T> try_read(const config_dict_t& dict, const std::string& key)
+        maybe_t<T> try_read(const config_dict_t& dict, const std::string& key)
         {
             if (!dict.contains(key)) {
                 return Nothing;
             }
 
             try {
-                return Maybe<T>(dict.at(key).template get<T>());
+                return maybe_t<T>(dict.at(key).template get<T>());
             }
             catch (const std::exception&) {
                 return Nothing;
@@ -287,7 +287,7 @@ namespace simbi {
         }
 
         template <typename T, std::uint64_t Dims>
-        Maybe<vector_t<T, Dims>>
+        maybe_t<vector_t<T, Dims>>
         try_read_vec(const config_dict_t& dict, const std::string& key)
         {
             if (!dict.contains(key)) {
@@ -295,7 +295,7 @@ namespace simbi {
             }
 
             try {
-                return Maybe<vector_t<T, Dims>>(
+                return maybe_t<vector_t<T, Dims>>(
                     dict.at(key).template to_spatial_vector<T, Dims>()
                 );
             }

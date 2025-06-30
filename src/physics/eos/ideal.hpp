@@ -4,6 +4,7 @@
 #include "config.hpp"
 #include "core/utility/enums.hpp"
 #include <cmath>   // for std::sqrt
+#include <iostream>
 
 namespace simbi::eos {
     template <Regime R>

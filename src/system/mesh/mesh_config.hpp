@@ -10,15 +10,14 @@
 #include <cstddef>                            // for std::size_t
 #include <cstdint>                            // for std::int64_t
 #include <functional>                         // for std::function
-#include <string>                             // for std::string
 
 namespace simbi::mesh {
     using namespace base;
 
     template <std::uint64_t Dims>
     struct mesh_config_t {
-        uarray<Dims> shape;         // nk, nj, ni
-        std::size_t ghost_radius;   // halo radius
+        uarray<Dims> shape;        // nk, nj, ni
+        std::size_t halo_radius;   // halo radius
 
         vector_t<real, Dims> bounds_min;   // x1min, x2min, x3min
         vector_t<real, Dims> bounds_max;   // x1max, x2max, x3max
@@ -31,12 +30,14 @@ namespace simbi::mesh {
         // current expansion (updated each timestep)
         real expansion_factor{1.0};
         real expansion_rate{0.0};
+        std::function<real(real)> sf{nullptr};
+        std::function<real(real)> sf_derivative{nullptr};
 
         DUAL constexpr uarray<Dims> full_shape() const
         {
             uarray<Dims> result;
             for (std::uint64_t ii = 0; ii < Dims; ++ii) {
-                result[ii] = shape[ii] + 2 * ghost_radius;
+                result[ii] = shape[ii] + 2 * halo_radius;
             }
             return result;
         }
@@ -85,22 +86,27 @@ namespace simbi::mesh {
         }
 
         // update expansion state (called once per timestep)
-        void update_expansion(
-            real time,
-            real dt,
+        // here, we return a new mesh_config_t with updated expansion
+        // this allows us to chain updates
+        mesh_config_t update_expansion(real time, real dt)
+        {
+            mesh_config_t new_c = *this;
+            if (!mesh_motion) {
+                return new_c;
+            }
+
+            new_c.expansion_rate = new_c.sf_derivative(time) / new_c.sf(time);
+            new_c.expansion_factor += dt * expansion_rate;
+            new_c.bounds_min = new_c.current_bounds_min();
+            new_c.bounds_max = new_c.current_bounds_max();
+            return new_c;
+        }
+
+        static mesh_config_t from_init_conditions(
+            const InitialConditions& init,
             std::function<real(real)> const& a,
             std::function<real(real)> const& adot
         )
-        {
-            if (!mesh_motion) {
-                return;
-            }
-
-            expansion_rate = adot(time) / a(time);
-            expansion_factor += dt * expansion_rate;
-        }
-
-        static mesh_config_t from_init_conditions(const InitialConditions& init)
         {
             mesh_config_t config;
             const auto [nia, nja, nka] = init.active_zones();
@@ -115,7 +121,7 @@ namespace simbi::mesh {
             else if constexpr (Dims == 3) {
                 config.shape = uarray<Dims>{nia, nja, nka};
             }
-            config.ghost_radius = 1 + (init.reconstruct == "plm");
+            config.halo_radius = init.halo_radius;
 
             // geometry setup
             if constexpr (Dims == 1) {
@@ -167,6 +173,8 @@ namespace simbi::mesh {
             config.homologous       = init.homologous;
             config.mesh_motion      = init.mesh_motion;
             config.expansion_factor = 1.0;
+            config.sf               = init.mesh_motion ? a : nullptr;
+            config.sf_derivative    = init.mesh_motion ? adot : nullptr;
 
             return config;
         }

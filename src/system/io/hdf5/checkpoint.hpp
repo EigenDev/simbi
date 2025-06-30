@@ -50,10 +50,9 @@
 #define CHECKPOINT_HPP
 
 #include "config.hpp"
-#include "core/types/alias.hpp"
 #include "core/utility/enums.hpp"
-#include "physics/hydro/schemes/ib/serialization/body_serialization.hpp"
-#include "physics/hydro/schemes/ib/serialization/system_serialization.hpp"
+#include "physics/hydro/ib/body_serialization.hpp"
+#include "physics/hydro/ib/system_serialization.hpp"
 #include <H5Cpp.h>
 #include <string>
 #include <unordered_map>
@@ -86,7 +85,7 @@ namespace simbi {
             }
             auto data_directory = sim_state.data_directory();
             auto step           = sim_state.checkpoint_index();
-            static sstd::int64_t tchunk_order_of_mag = 2;
+            static std::int64_t tchunk_order_of_mag = 2;
             const auto timestepping_of_mag =
                 std::floor(std::log10(sim_state.time()));
             if (timestepping_of_mag > tchunk_order_of_mag) {
@@ -215,7 +214,7 @@ namespace simbi {
                     hsize_t count[1]  = {1};
                     H5::DataSpace memspace(1, count);
                     dataspace.selectHyperslab(H5S_SELECT_SET, count, offset);
-                    // unwrap the Maybe<primitive> type
+                    // unwrap the maybe_t<primitive> type
                     dataset.write(
                         &state.primitives()[i].value()[member],
                         real_type,

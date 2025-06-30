@@ -1,5 +1,5 @@
-#ifndef SIMBI_CLEAN_STENCIL_GATHER_HPP
-#define SIMBI_CLEAN_STENCIL_GATHER_HPP
+#ifndef SIMBI_STENCIL_VIEW_HPP
+#define SIMBI_STENCIL_VIEW_HPP
 
 #include "compute/math/field.hpp"
 #include "compute/math/index_space.hpp"
@@ -11,8 +11,7 @@
 #include <stdexcept>
 #include <utility>
 
-namespace simbi::stencils {
-
+namespace simbi::base::stencils {
     // === CLEAN STENCIL VIEW ===
     // first-class stencil object that knows how to gather efficiently
 
@@ -25,7 +24,7 @@ namespace simbi::stencils {
         static constexpr auto stencil_size = base::stencil_size<Rec>();
         using stencil_values_t             = vector_t<T, stencil_size>;
 
-        // Direct stencil gathering - no intermediate fields!
+        // direct stencil gathering - no intermediate fields!
         stencil_values_t left_values() const
         {
             auto pattern = base::stencil_t<Dims, Rec>::left_pattern(direction_);
@@ -60,7 +59,7 @@ namespace simbi::stencils {
         }
     };
 
-    // Factory function for clean stencil creation
+    // factory function for clean stencil creation
     template <Reconstruction Rec, typename T, std::uint64_t Dims>
     auto make_stencil(
         const field_t<T, Dims>& field,
@@ -68,12 +67,11 @@ namespace simbi::stencils {
         std::uint64_t dir
     )
     {
-        // const auto offsets = field.domain().start();
         return stencil_view_t<T, Dims, Rec>{field, coord, dir};
     }
 
     // === RECONSTRUCTION INTERFACE ===
-    // Clean reconstruction that works directly with stencil values
+    // clean reconstruction that works directly with stencil values
 
     template <Reconstruction Rec, typename T>
     T reconstruct_left(
@@ -153,7 +151,7 @@ namespace simbi::stencils {
         {
         }
 
-        // Extract stencils for an entire domain at once
+        // extract stencils for an entire domain at once
         auto extract_all(const index_space_t<Dims>& domain) const
         {
             using stencil_t = vector_t<T, base::stencil_size<Rec>()>;
@@ -175,7 +173,7 @@ namespace simbi::stencils {
     };
 
     // === COMPILE-TIME STENCIL VALIDATION ===
-    // Ensure stencil fits within field bounds
+    // ensure stencil fits within field bounds
 
     template <Reconstruction Rec, std::uint64_t Dims>
     constexpr bool stencil_fits(
@@ -206,7 +204,7 @@ namespace simbi::stencils {
     }
 
     // === SAFE STENCIL ACCESS ===
-    // With automatic bounds checking
+    // wWith automatic bounds checking
 
     template <Reconstruction Rec, typename T, std::uint64_t Dims>
     auto make_safe_stencil(
@@ -222,30 +220,6 @@ namespace simbi::stencils {
         return make_stencil<Rec>(field, coord, dir);
     }
 
-    // === EXAMPLE USAGE ===
-    // void demonstrate_clean_stencils()
-    // {
-    //     auto primitives = zeros<primitive_t, 2>({100, 100});
+}   // namespace simbi::base::stencils
 
-    //     // Ultra-clean stencil operations
-    //     auto coord   = uarray<2>{50, 50};
-    //     auto stencil = make_stencil<Reconstruction::PLM>(primitives, coord,
-    //     0); auto [left_vals, right_vals] = stencil.neighbor_values();
-
-    //     // One-liner reconstruction
-    //     auto pl = reconstruct_left<Reconstruction::PLM>(left_vals, 1.5);
-    //     auto pr = reconstruct_right<Reconstruction::PLM>(right_vals, 1.5);
-
-    //     // Batch operations
-    //     auto interior = primitives.domain().contract(2);
-    //     auto extractor =
-    //         batch_stencil_extractor_t<Reconstruction::PLM, primitive_t, 2>(
-    //             primitives,
-    //             0
-    //         );
-    //     auto [all_left, all_right] = extractor.extract_all(interior);
-    // }
-
-}   // namespace simbi::stencils
-
-#endif   // SIMBI_CLEAN_STENCIL_GATHER_HPP
+#endif   // SIMBI_STENCIL_VIEW_HPP

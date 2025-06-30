@@ -161,7 +161,7 @@ namespace simbi::expression {
 
         ndarray_t res(expr_data.at("output_indices")
                           .template get<std::vector<std::int64_t>>());
-        res.sync_to_device();
+        res.to_gpu();
         return res;
     }
 
@@ -175,7 +175,7 @@ namespace simbi::expression {
         ndarray_t res(
             expr_data.at("parameters").template get<std::vector<real>>()
         );
-        res.sync_to_device();
+        res.to_gpu();
         return res;
     }
 
@@ -188,7 +188,7 @@ namespace simbi::expression {
         auto res = ndarray_t<real>(
             expr_data.at("param_count").template get<std::int64_t>()
         );
-        res.sync_to_device();
+        res.to_gpu();
         return res;
     }
 

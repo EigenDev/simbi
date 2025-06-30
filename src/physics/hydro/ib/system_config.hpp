@@ -55,7 +55,7 @@
 #include <utility>
 
 namespace simbi::ibsystem {
-    struct SystemConfig : public Managed<global::managed_memory> {
+    struct SystemConfig : public managed_t<global::managed_memory> {
         virtual ~SystemConfig() = default;
 
         // Serialization method that each derived class must implement

@@ -543,4 +543,49 @@ namespace simbi::hydro::rmhd {
     }
 }   // namespace simbi::hydro::rmhd
 
+namespace simbi::hydro {
+    // HLLC flux function
+    template <is_hydro_primitive_c primitive_t>
+    DUAL auto hllc_flux(
+        const primitive_t& primL,
+        const primitive_t& primR,
+        const unit_vector_t<primitive_t::dimensions>& nhat,
+        real vface,
+        real gamma,
+        ShockWaveLimiter shock_smoother
+    )
+    {
+        if constexpr (primitive_t::regime == Regime::NEWTONIAN) {
+            return newtonian::hllc_flux(
+                primL,
+                primR,
+                nhat,
+                vface,
+                gamma,
+                shock_smoother
+            );
+        }
+        else if constexpr (primitive_t::regime == Regime::SRHD) {
+            return srhd::hllc_flux(
+                primL,
+                primR,
+                nhat,
+                vface,
+                gamma,
+                shock_smoother
+            );
+        }
+        else if constexpr (primitive_t::regime == Regime::RMHD) {
+            return rmhd::hllc_flux(
+                primL,
+                primR,
+                nhat,
+                vface,
+                gamma,
+                shock_smoother
+            );
+        }
+    }
+}   // namespace simbi::hydro
+
 #endif

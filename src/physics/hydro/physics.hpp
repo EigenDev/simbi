@@ -3,17 +3,15 @@
 
 #include "config.hpp"               // for global::using_four_velocity
 #include "core/base/concepts.hpp"   // for is_hydro_primitive_c, is_mhd_primitive_c, is_rmhd_c, is_srhd_c, is_hydro_conserved_c
-#include "core/utility/enums.hpp"
-#include "data/containers/state_struct.hpp"   // for conserved_value
-#include "data/containers/vector.hpp"         // for vector_t
-#include "physics/eos/ideal.hpp"              // for ideal_gas_eos_t
-#include "physics/eos/isothermal.hpp"         // for isothermal_gas_eos_t
-#include <concepts>                           // for std::same_as
+#include "data/containers/vector.hpp"   // for vector_t
+#include "physics/eos/isothermal.hpp"   // for isothermal_gas_eos_t
+#include <concepts>                     // for std::same_as
+#include <cstddef>
+#include <iostream>
 
 namespace simbi::hydro {
     using namespace simbi::concepts;
     using namespace simbi::eos;
-    using namespace simbi::structs;
 
     template <is_hydro_primitive_c primitive_t>
     DEV constexpr auto lorentz_factor(const primitive_t& prim)
@@ -43,31 +41,28 @@ namespace simbi::hydro {
         }
     }
 
-    template <
-        is_hydro_primitive_c primitive_t,
-        typename EoS = ideal_gas_eos_t<primitive_t::regime>>
+    template <is_hydro_primitive_c primitive_t>
     DEV constexpr auto sound_speed(const primitive_t& prim, real gamma)
     {
-        const auto eos = EoS{gamma};
+        using eos_t    = typename primitive_t::eos_t;
+        const auto eos = eos_t{gamma};
         return eos.sound_speed(prim.rho, prim.pre);
     }
 
-    template <
-        is_hydro_primitive_c primitive_t,
-        typename EoS = ideal_gas_eos_t<primitive_t::regime>>
+    template <is_hydro_primitive_c primitive_t>
     DEV constexpr auto sound_speed_squared(const primitive_t& prim, real gamma)
     {
-        const auto eos = EoS{gamma};
+        using eos_t    = typename primitive_t::eos_t;
+        const auto eos = eos_t{gamma};
         const auto cs  = eos.sound_speed(prim.rho, prim.pre);
         return cs * cs;
     }
 
-    template <
-        is_hydro_primitive_c primitive_t,
-        typename EoS = ideal_gas_eos_t<primitive_t::regime>>
+    template <is_hydro_primitive_c primitive_t>
     DEV constexpr auto enthalpy(const primitive_t& prim, real gamma)
     {
-        const auto eos = EoS{gamma};
+        using eos_t    = typename primitive_t::eos_t;
+        const auto eos = eos_t{gamma};
         return eos.enthalpy(prim.rho, prim.pre);
     }
 
@@ -90,28 +85,33 @@ namespace simbi::hydro {
         }
     }
 
-    template <is_rmhd_c primitive_t>
+    template <is_hydro_primitive_c primitive_t>
     DEV constexpr magnetic_four_vector_t<real>
     magnetic_four_vector(const primitive_t& prim)
     {
-        const auto& vel = prim.vel;
-        const auto& mag = prim.mag;
-        const auto vdb  = vecops::dot(vel, mag);
-        const auto w    = lorentz_factor(prim);
-        return magnetic_four_vector_t<real>{
-          w * vdb,
-          mag[0] / w + w * vel[0] * vdb,
-          mag[1] / w + w * vel[1] * vdb,
-          mag[2] / w + w * vel[2] * vdb
-        };
+        if constexpr (!is_mhd_primitive_c<primitive_t>) {
+            return magnetic_four_vector_t<real>{0.0, 0.0, 0.0, 0.0};
+        }
+        else {
+            const auto& vel = prim.vel;
+            const auto& mag = prim.mag;
+            const auto vdb =
+                (is_rmhd_c<primitive_t>) ? vecops::dot(vel, mag) : 0.0;
+            const auto w = lorentz_factor(prim);
+            return magnetic_four_vector_t<real>{
+              w * vdb,
+              mag[0] / w + w * vel[0] * vdb,
+              mag[1] / w + w * vel[1] * vdb,
+              mag[2] / w + w * vel[2] * vdb
+            };
+        }
     }
 
-    template <
-        is_hydro_primitive_c primitive_t,
-        typename EoS = ideal_gas_eos_t<primitive_t::regime>>
+    template <is_hydro_primitive_c primitive_t>
     DEV constexpr auto enthalpy_density(const primitive_t& prim, real gamma)
     {
-        const auto eos = EoS{gamma};
+        using eos_t    = typename primitive_t::eos_t;
+        const auto eos = eos_t{gamma};
         if constexpr (is_newtonian_c<primitive_t>) {
             return prim.rho;
         }
@@ -124,15 +124,18 @@ namespace simbi::hydro {
         }
     }
 
-    template <
-        is_hydro_primitive_c primitive_t,
-        typename EoS = ideal_gas_eos_t<primitive_t::regime>>
+    template <is_hydro_primitive_c primitive_t>
     DEV constexpr auto energy_density(const primitive_t& prim, real gamma)
     {
-        const auto eos = EoS{gamma};
+        using eos_t = typename primitive_t::eos_t;
+        if constexpr (std::same_as<eos_t, isothermal_gas_eos_t>) {
+            return 0.0;
+        }
+        const auto eos = eos_t{gamma};
         if constexpr (is_newtonian_c<primitive_t>) {
-            const auto gas_part = prim.pre / (gamma - 1.0) +
-                                  0.5 * vecops::dot(prim.vel, prim.vel);
+            const auto gas_part =
+                prim.pre / (gamma - 1.0) +
+                0.5 * prim.rho * vecops::dot(prim.vel, prim.vel);
             if constexpr (is_mhd_primitive_c<primitive_t>) {
                 return gas_part + 0.5 * vecops::dot(prim.mag, prim.mag);
             }
@@ -157,22 +160,21 @@ namespace simbi::hydro {
         }
     }
 
-    template <
-        is_hydro_primitive_c primitive_t,
-        typename EoS = ideal_gas_eos_t<primitive_t::regime>>
-    DEV constexpr auto spatial_momentum(const primitive_t& prim, real gamma)
+    template <is_hydro_primitive_c primitive_t>
+    DEV constexpr auto linear_momentum(const primitive_t& prim, real gamma)
     {
+        using eos_t = typename primitive_t::eos_t;
         if constexpr (is_newtonian_c<primitive_t>) {
             return prim.rho * prim.vel;
         }
         else if constexpr (is_srhd_c<primitive_t>) {
-            const auto eos = EoS{gamma};
+            const auto eos = eos_t{gamma};
             const auto h   = eos.enthalpy(prim.rho, prim.pre);
             const auto wsq = lorentz_factor_squared(prim);
             return prim.rho * h * wsq * prim.vel;
         }
         else {   // RMHD case
-            const auto eos = EoS{gamma};
+            const auto eos = eos_t{gamma};
             const auto h   = eos.enthalpy(prim.rho, prim.pre);
             const auto wsq = lorentz_factor_squared(prim);
             const auto bsq = vecops::dot(prim.mag, prim.mag);
@@ -213,21 +215,20 @@ namespace simbi::hydro {
     template <is_hydro_primitive_c primitive_t>
     DEV constexpr auto to_conserved(const primitive_t& prim, real gamma)
     {
+        using conserved_t = typename primitive_t::counterpart_t;
         if constexpr (is_mhd_primitive_c<primitive_t>) {
-            return mhd_conserved_t<
-                primitive_t::regime,
-                primitive_t::dimensions>{
-              .den = prim.rho,
-              .mom = spatial_momentum(prim, gamma),
+            return conserved_t{
+              .den = labframe_density(prim),
+              .mom = linear_momentum(prim, gamma),
               .nrg = energy_density(prim, gamma),
               .mag = prim.mag,
               .chi = prim.chi
             };
         }
         else {
-            return conserved_t<primitive_t::regime, primitive_t::dimensions>{
-              .den = prim.rho,
-              .mom = spatial_momentum(prim, gamma),
+            return conserved_t{
+              .den = labframe_density(prim),
+              .mom = linear_momentum(prim, gamma),
               .nrg = energy_density(prim, gamma),
               .chi = prim.chi
             };
@@ -241,14 +242,15 @@ namespace simbi::hydro {
         real gamma
     )
     {
-        const auto den = labframe_density(prim);
-        const auto pre = prim.pre;
-        const auto mom = spatial_momentum(prim, gamma);
-        const auto mn  = vecops::dot(mom, nhat);
-        const auto ed  = energy_density(prim, gamma);
-        const auto vn  = vecops::dot(prim.vel, nhat);
+        using conserved_t = typename primitive_t::counterpart_t;
+        const auto den    = labframe_density(prim);
+        const auto pre    = prim.pre;
+        const auto mom    = linear_momentum(prim, gamma);
+        const auto mn     = vecops::dot(mom, nhat);
+        const auto ed     = energy_density(prim, gamma);
+        const auto vn     = vecops::dot(prim.vel, nhat);
         if constexpr (is_newtonian_c<primitive_t>) {
-            return conserved_t<primitive_t::regime, primitive_t::dimensions>{
+            return conserved_t{
               .den = den * vn,
               .mom = mom * vn + pre * nhat,
               .nrg = (ed + pre) * vn,
@@ -256,7 +258,7 @@ namespace simbi::hydro {
             };
         }
         else if constexpr (is_srhd_c<primitive_t>) {
-            return conserved_t<primitive_t::regime, primitive_t::dimensions>{
+            return conserved_t{
               .den = den * vn,
               .mom = mom * vn + pre * nhat,
               .nrg = mn - den * vn,
@@ -268,9 +270,7 @@ namespace simbi::hydro {
             const auto vdb = vecops::dot(prim.vel, prim.mag);
             const auto w   = lorentz_factor(prim);
             const auto bmu = prim.mag / w + prim.vel * w * vdb;
-            return mhd_conserved_t<
-                primitive_t::regime,
-                primitive_t::dimensions>{
+            return conserved_t{
               .den = den * vn,
               .mom = mom * vn + total_pressure(prim) * nhat - bmu * bn / w,
               .nrg = mn - vn * den,
@@ -282,9 +282,7 @@ namespace simbi::hydro {
             const auto bn   = vecops::dot(prim.mag, nhat);
             const auto vdb  = vecops::dot(prim.vel, prim.mag);
             const auto bvec = prim.mag;
-            return mhd_conserved_t<
-                primitive_t::regime,
-                primitive_t::dimensions>{
+            return conserved_t{
               .den = den * vn,
               .mom = mom * vn + total_pressure(prim) * nhat - bvec * bn,
               .nrg = mn,
@@ -294,7 +292,7 @@ namespace simbi::hydro {
         }
         else {   // non-MHD (should not happen)
             std::cout << "Warning: Non-MHD primitive to flux conversion.\n";
-            return conserved_t<primitive_t::regime, primitive_t::dimensions>{
+            return conserved_t{
               .den = den * vn,
               .mom = mom * vn + pre * nhat,
               .nrg = mn,
@@ -304,17 +302,13 @@ namespace simbi::hydro {
     }
 
     // a few conserved operations
-    template <
-        is_hydro_conserved_c conserved_t,
-        typename EoS = ideal_gas_eos_t<conserved_t::regime>>
+    template <is_hydro_conserved_c conserved_t>
+        requires(is_newtonian_c<conserved_t>)
     DEV constexpr auto
     pressure_from_conserved(const conserved_t& cons, real gamma)
     {
-        // for now, we simply check if gamma = 1 for isothermal
-        // [TODO]: include
-        if constexpr (std::same_as<
-                          EoS,
-                          isothermal_gas_eos_t<conserved_t::regime>>) {
+        using eos_t = conserved_t::eos_t;
+        if constexpr (std::same_as<eos_t, isothermal_gas_eos_t>) {
             // I store the sound speed squared in the energy density
             // for isothermal runs since we don't use the energy density
             // anyway

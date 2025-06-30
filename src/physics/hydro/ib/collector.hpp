@@ -70,7 +70,7 @@ using namespace simbi::helpers;
 
 namespace simbi::ibsystem {
     template <typename T, std::uint64_t Dims>
-    class GridBodyDeltaCollector : public Managed<global::managed_memory>
+    class GridBodyDeltaCollector : public managed_t<global::managed_memory>
     {
       private:
         // one delta per cell in the grid

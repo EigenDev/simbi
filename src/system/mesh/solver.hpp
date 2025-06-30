@@ -75,7 +75,6 @@ namespace simbi::mesh {
             Dir dir,
             const mesh_config_t<Dims>& config
         )
-            requires(dir == Dir::W || dir == Dir::E)
         {
             if (face_dir == 0) {
                 // radial face
@@ -174,7 +173,7 @@ namespace simbi::mesh {
             // geometric source terms in momentum
             using cons_t = typename prim_t::counterpart_t;
             cons_t cons;
-            for (std::int64_t qq = 0; qq < Dims; qq++) {
+            for (std::uint64_t qq = 0; qq < Dims; qq++) {
                 const auto r = cent[0];
                 if (qq == 0) {
                     const auto aL    = face_area(coords, 0, Dir::W, config);
@@ -196,6 +195,7 @@ namespace simbi::mesh {
                                        bmu[3] * (bmu[0] + cot * bmu[1]) / r;
                 }
             }
+            return cons;
         }
     };
 
@@ -374,7 +374,7 @@ namespace simbi::mesh {
 
             using cons_t = typename prim_t::counterpart_t;
             cons_t cons;
-            for (std::int64_t qq = 0; qq < Dims; qq++) {
+            for (std::uint64_t qq = 0; qq < Dims; qq++) {
                 if (qq == 0) {
                     cons.mom[qq + 1] =
                         (wgam2 * v2 * v2 - bmu[1] * bmu[1] + pt) / cent[0];
@@ -384,6 +384,7 @@ namespace simbi::mesh {
                         -(wgam2 * v1 * v2 - bmu[0] * bmu[1]) / cent[0];
                 }
             }
+            return cons;
         }
     };
 
@@ -465,7 +466,7 @@ namespace simbi::mesh {
 
             using cons_t = typename prim_t::counterpart_t;
             cons_t cons;
-            for (std::int64_t qq = 0; qq < Dims; qq++) {
+            for (std::uint64_t qq = 0; qq < Dims; qq++) {
                 if (qq == 0) {
                     cons.mom[qq + 1] =
                         (wgam2 * v2 * v2 - bmu[1] * bmu[1] + pt) / cent[0];
@@ -475,6 +476,7 @@ namespace simbi::mesh {
                         -(wgam2 * v1 * v2 - bmu[0] * bmu[1]) / cent[0];
                 }
             }
+            return cons;   // No v3 component in axisymmetric case
         }
     };
 
@@ -544,7 +546,7 @@ namespace simbi::mesh {
 
             using cons_t = typename prim_t::counterpart_t;
             cons_t cons;
-            for (std::int64_t qq = 0; qq < Dims; qq++) {
+            for (std::uint64_t qq = 0; qq < Dims; qq++) {
                 if (qq == 0) {
                     cons.mom[qq + 1] =
                         (wgam2 * v2 * v2 - bmu[1] * bmu[1] + pt) / cent[0];
@@ -554,6 +556,7 @@ namespace simbi::mesh {
                         -(wgam2 * v1 * v2 - bmu[0] * bmu[1]) / cent[0];
                 }
             }
+            return cons;   // No v3 component in planar cylindrical case
         }
     };
 
@@ -620,17 +623,18 @@ namespace simbi::mesh {
         return widths;
     }
 
-    template <Dir dir = Dir::W, std::uint64_t Dims>
+    template <std::uint64_t Dims>
     DEV constexpr real face_velocity(
         const uarray<Dims>& coord,
         std::uint64_t direction,
+        Dir side,
         const mesh_config_t<Dims>& config
     )
     {
         if (!config.mesh_motion) {
             return 0.0;
         }
-        const real face_pos = face_position(coord, direction, dir, config);
+        const real face_pos = face_position(coord, direction, side, config);
 
         if (config.homologous) {
             // homologous velocity: v = H * r
@@ -675,15 +679,14 @@ namespace simbi::mesh {
             return geom::at_pole(coord, config);
         }
 
-        DEV vector_t<real, Dims> the_centroid(const uarray<Dims>& coord) const
+        DEV vector_t<real, Dims> centroid(const uarray<Dims>& coord) const
         {
-            return centroid(coord, config);
+            return simbi::mesh::centroid(coord, config);
         }
 
-        DEV vector_t<real, Dims>
-        the_cell_widths(const uarray<Dims>& coord) const
+        DEV vector_t<real, Dims> cell_widths(const uarray<Dims>& coord) const
         {
-            return cell_widths(coord, config);
+            return simbi::mesh::cell_widths(coord, config);
         }
 
         // update mesh state
@@ -694,6 +697,36 @@ namespace simbi::mesh {
             }
         }
 
+        DEV real min_cell_width(const vector_t<real, Dims>& coords) const
+        {
+            const auto widths = cell_widths(coords, config);
+            real min_width    = widths[0];
+            for (std::uint64_t ii = 1; ii < Dims; ++ii) {
+                if (widths[ii] < min_width) {
+                    min_width = widths[ii];
+                }
+            }
+            return min_width;
+        }
+
+        DEV real max_cell_width(const vector_t<real, Dims>& coords) const
+        {
+            const auto widths = cell_widths(coords, config);
+            real max_width    = widths[0];
+            for (std::uint64_t ii = 1; ii < Dims; ++ii) {
+                if (widths[ii] > max_width) {
+                    max_width = widths[ii];
+                }
+            }
+            return max_width;
+        }
+
+        DEV vector_t<real, Dims>
+        cartesian_centroid(const uarray<Dims>& coord) const
+        {
+            return geom::to_cartesian(coord, config);
+        }
+
         template <is_hydro_primitive_c prim_t>
         DEV auto geometric_sources(
             const uarray<Dims>& coords,
@@ -702,6 +735,25 @@ namespace simbi::mesh {
         ) const
         {
             return geom::geometric_source_terms(prim, coords, config, gamma);
+        }
+
+        DEV real face_velocity(
+            const uarray<Dims>& coord,
+            std::uint64_t direction,
+            Dir side = Dir::W
+        ) const
+        {
+            return simbi::mesh::face_velocity(coord, direction, side, config);
+        }
+
+        auto expand_mesh(real time, real dt)
+        {
+            if (!config.mesh_motion) {
+                return;
+            }
+
+            // update expansion factor based on time and dt
+            config = config.update_expansion(time, dt);
         }
 
         // accessors

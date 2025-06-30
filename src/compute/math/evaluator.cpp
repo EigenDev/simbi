@@ -2,7 +2,11 @@
 #include "compute/math/expression.hpp"
 #include "config.hpp"
 #include "core/utility/helpers.hpp"
+#include "data/containers/ndarray.hpp"
+#include <algorithm>
 #include <cmath>
+#include <cstdint>
+#include <cstdio>
 
 // Error handling macro - customize behavior based on compile flags
 #ifdef EXPR_STRICT_ERROR_CHECKING
@@ -31,8 +35,8 @@ namespace simbi::expression {
     {
         std::int64_t max_reg = 4;   // Start with input registers
 
-        for (size_t i = 0; i < instructions.size(); i++) {
-            const auto& instr = instructions[i];
+        for (size_t ii = 0; ii < instructions.size(); ii++) {
+            const auto& instr = instructions[ii];
             max_reg           = std::max(max_reg, instr.result_register);
 
             // Also check operands for completeness

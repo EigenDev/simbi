@@ -3,39 +3,40 @@
 
 #include "core/utility/enums.hpp"
 #include "data/containers/state_struct.hpp"
+#include "physics/eos/ideal.hpp"
 #include <cstdint>
 
 namespace simbi::state {
     // Type traits to select the correct primitive/conserved type based on
     // regime
-    template <Regime R, std::uint64_t Dims>
-    struct hs_value_traits;
+    template <Regime R, std::uint64_t Dims, typename EoS>
+    struct vtraits;
 
     // Specialization for NEWTONIAN regime
-    template <std::uint64_t Dims>
-    struct hs_value_traits<Regime::NEWTONIAN, Dims> {
+    template <std::uint64_t Dims, typename EoS>
+    struct vtraits<Regime::NEWTONIAN, Dims, EoS> {
         using conserved_type =
-            typename structs::conserved_t<Regime::NEWTONIAN, Dims>;
+            typename structs::conserved_t<Regime::NEWTONIAN, Dims, EoS>;
         using primitive_type =
-            typename structs::primitive_t<Regime::NEWTONIAN, Dims>;
+            typename structs::primitive_t<Regime::NEWTONIAN, Dims, EoS>;
     };
 
     // Specialization for SRHD regime
-    template <std::uint64_t Dims>
-    struct hs_value_traits<Regime::SRHD, Dims> {
+    template <std::uint64_t Dims, typename EoS>
+    struct vtraits<Regime::SRHD, Dims, EoS> {
         using conserved_type =
-            typename structs::conserved_t<Regime::SRHD, Dims>;
+            typename structs::conserved_t<Regime::SRHD, Dims, EoS>;
         using primitive_type =
-            typename structs::primitive_t<Regime::SRHD, Dims>;
+            typename structs::primitive_t<Regime::SRHD, Dims, EoS>;
     };
 
     // Specialization for RMHD regime
-    template <std::uint64_t Dims>
-    struct hs_value_traits<Regime::RMHD, Dims> {
+    template <std::uint64_t Dims, typename EoS>
+    struct vtraits<Regime::RMHD, Dims, EoS> {
         using conserved_type =
-            typename structs::mhd_conserved_t<Regime::RMHD, Dims>;
+            typename structs::mhd_conserved_t<Regime::RMHD, Dims, EoS>;
         using primitive_type =
-            typename structs::mhd_primitive_t<Regime::RMHD, Dims>;
+            typename structs::mhd_primitive_t<Regime::RMHD, Dims, EoS>;
     };
 }   // namespace simbi::state
 

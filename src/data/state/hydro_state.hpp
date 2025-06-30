@@ -6,18 +6,21 @@
 #include "core/utility/bimap.hpp"
 #include "core/utility/enums.hpp"
 #include "core/utility/init_conditions.hpp"
+#include "core/utility/managed.hpp"
 #include "data/containers/vector.hpp"
 #include "data/state/express_t.hpp"
 #include "hydro_state_types.hpp"
-#include "physics/eos/ideal.hpp"
+#include "physics/eos/isothermal.hpp"
 #include "physics/hydro/ib/collector.hpp"
 #include "physics/hydro/ib/component_body_system.hpp"
 #include "physics/hydro/ib/component_generator.hpp"
+#include "system/io/exceptions.hpp"
 #include "system/mesh/mesh_config.hpp"
 #include "system/mesh/solver.hpp"
 #include <bit>
 #include <cstddef>
 #include <cstdint>
+#include <functional>
 #include <memory>
 
 namespace simbi::state {
@@ -35,11 +38,11 @@ namespace simbi::state {
         Geometry G,
         Solver S,
         Reconstruction Rec,
-        typename EoS = eos::ideal_gas_eos_t<R>>
-    struct hydro_state_t {
+        typename EoS = eos::isothermal_gas_eos_t>
+    struct hydro_state_t : public managed_t<global::managed_memory> {
         // type definitions
-        using conserved_t = typename hs_value_traits<R, Dims>::conserved_type;
-        using primitive_t = typename hs_value_traits<R, Dims>::primitive_type;
+        using conserved_t = typename vtraits<R, Dims, EoS>::conserved_type;
+        using primitive_t = typename vtraits<R, Dims, EoS>::primitive_type;
         using geo_t       = geometry_solver_t<Dims, G>;
         using eos_t       = EoS;
 
@@ -65,6 +68,8 @@ namespace simbi::state {
         geo_t geom_solver;
 
         bool has_sources{false};
+
+        // immersed body stuff
         std::unique_ptr<ComponentBodySystem<real, Dims>> body_system;
         std::unique_ptr<GridBodyDeltaCollector<real, Dims>> collector;
 
@@ -75,11 +80,13 @@ namespace simbi::state {
             real plm_theta;
             real cfl;
             real time;
+            real tend;
             real dt;
 
-            // iteration tracking
+            // int tracking
             std::uint64_t iteration;
             std::uint64_t halo_radius;
+            std::uint64_t dimensions{Dims};
 
             // simulation configuration
             Regime regime;
@@ -92,6 +99,7 @@ namespace simbi::state {
             Reconstruction reconstruction;
             Timestepping timestepping;
             vector_t<BoundaryCondition, 2 * Dims> boundary_conditions;
+            uarray<3> resolution;
 
             // flags
             bool is_mhd;
@@ -106,6 +114,9 @@ namespace simbi::state {
 
         // error handling
         bool in_failure_state{false};
+        // std::atomic<bool> is_invalid{false};
+        // std::atomic<ErrorCode> first_error_code{ErrorCode::NONE};
+        // std::atomic<std::uint64_t> first_error_linear_index{0};
 
         // default constructor
         hydro_state_t() = default;
@@ -118,6 +129,8 @@ namespace simbi::state {
             void* cons_data,
             void* prim_data,
             vector_t<void*, 3> bfield_data,
+            std::function<real(real)> const& scale_factor,
+            std::function<real(real)> const& scale_factor_derivative,
             const InitialConditions& init
         )
         {
@@ -125,7 +138,11 @@ namespace simbi::state {
 
             // setup geometric config
             state.geom_solver = {
-              .config = mesh_config_t<Dims>::from_init_conditions(init)
+              .config = mesh_config_t<Dims>::from_init_conditions(
+                  init,
+                  scale_factor,
+                  scale_factor_derivative
+              )
             };
 
             setup_hydro_state(cons_data, prim_data, bfield_data, state, init);
@@ -175,6 +192,15 @@ namespace simbi::state {
                     bstaggs[dir].to_cpu();
                 }
             }
+        }
+
+        /*
+         * get domain
+         */
+        auto domain() const
+        {
+            const auto& mesh_config = geom_solver.config;
+            return make_space<dimensions>(mesh_config.shape);
         }
 
       private:
@@ -227,6 +253,7 @@ namespace simbi::state {
               .plm_theta      = init.plm_theta,
               .cfl            = init.cfl,
               .time           = init.time,
+              .tend           = init.tend,
               .dt             = 0.0,
               .iteration      = 0,
               .halo_radius    = init.halo_radius,
@@ -240,6 +267,7 @@ namespace simbi::state {
               .reconstruction = deserialize<Reconstruction>(init.reconstruct),
               .timestepping   = deserialize<Timestepping>(init.timestepping),
               .boundary_conditions = vector_t<BoundaryCondition, 2 * Dims>{},
+              .resolution          = {init.nz, init.ny, init.nx},
               .is_mhd              = init.is_mhd,
               .is_relativistic     = init.is_relativistic
             };

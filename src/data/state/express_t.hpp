@@ -22,7 +22,7 @@ namespace simbi::state {
     struct gravity_source_tag;
 
     template <std::uint64_t Dims>
-    struct expression_t : public Managed<platform::is_gpu> {
+    struct expression_t : public managed_t<platform::is_gpu> {
         bool enabled;
         std::int64_t register_count;
         ndarray_t<expression::ExprNode> nodes;
@@ -104,7 +104,7 @@ namespace simbi::state {
             const auto dp_dt = den * local_vector;
             const auto v_old = prim.vel;
             const auto v_new =
-                (hydro::spatial_momentum(prim, gamma) + dp_dt) / den;
+                (hydro::linear_momentum(prim, gamma) + dp_dt) / den;
             const auto v_avg = 0.5 * (v_old + v_new);
             const auto dE_dt = vecops::dot(dp_dt, v_avg);
 
@@ -150,11 +150,11 @@ namespace simbi::state {
             expr.register_count = expression::get_max_register(linear_instrs);
 
             if constexpr (platform::is_gpu) {
-                expr.nodes.sync_to_device();
-                expr.output_indices.sync_to_device();
-                expr.parameters.sync_to_device();
-                expr.linear_instructions.sync_to_device();
-                expr.output_indices_mapped.sync_to_device();
+                expr.nodes.to_gpu();
+                expr.output_indices.to_gpu();
+                expr.parameters.to_gpu();
+                expr.linear_instructions.to_gpu();
+                expr.output_indices_mapped.to_gpu();
             }
 
             return expr;

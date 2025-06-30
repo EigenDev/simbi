@@ -50,11 +50,9 @@
 #ifndef SYSTEM_CONFIG_SERIALIZATION_HPP
 #define SYSTEM_CONFIG_SERIALIZATION_HPP
 
-#include "physics/hydro/schemes/ib/systems/system_config.hpp"
+#include "system_config.hpp"
 #include <H5Cpp.h>
 #include <string>
-#include <unordered_map>
-#include <vector>
 
 namespace simbi::ibsystem {
 

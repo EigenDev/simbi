@@ -392,7 +392,7 @@ namespace simbi::ibsystem::body_functions {
                 const T accreted_density =
                     max_accretion * prim.labframe_density();
                 const auto accreted_momentum =
-                    max_accretion * prim.spatial_momentum(context.gamma);
+                    max_accretion * prim.linear_momentum(context.gamma);
                 const T accreted_energy =
                     max_accretion * prim.energy(context.gamma);
 
@@ -448,7 +448,7 @@ namespace simbi::ibsystem::body_functions {
                 const T accreted_density =
                     max_accretion * prim.labframe_density();
                 const auto accreted_momentum =
-                    max_accretion * prim.spatial_momentum(context.gamma);
+                    max_accretion * prim.linear_momentum(context.gamma);
                 const T accreted_energy =
                     max_accretion * prim.energy(context.gamma);
 

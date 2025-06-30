@@ -206,7 +206,7 @@ namespace simbi::ibsystem::body_functions {
             const auto& v_old = fluid_velocity;
             const auto invd   = 1.0 / density;
             const auto v_new =
-                (prim.spatial_momentum(context.gamma) + dp) * invd;
+                (prim.linear_momentum(context.gamma) + dp) * invd;
             const auto v_avg = 0.5 * (v_old + v_new);
             const auto dE    = vecops::dot(v_avg, dp);
 
@@ -390,7 +390,7 @@ namespace simbi::ibsystem::body_functions {
         //     const auto& v_old = fluid_velocity;
         //     const auto invd   = 1.0 / density;
         //     const auto v_new =
-        //         (prim.spatial_momentum(context.gamma) + dp) * invd;
+        //         (prim.linear_momentum(context.gamma) + dp) * invd;
         //     const auto v_avg = 0.5 * (v_old + v_new);
         //     const auto dE    = vecops::dot(v_avg, dp);
 

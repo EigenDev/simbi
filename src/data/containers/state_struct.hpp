@@ -5,6 +5,7 @@
 #include "core/utility/bimap.hpp"
 #include "core/utility/enums.hpp"
 #include "data/containers/vector.hpp"
+#include "physics/eos/ideal.hpp"
 #include "state_ops.hpp"
 #include <cstdint>
 #include <ostream>
@@ -12,29 +13,30 @@
 namespace simbi::structs {
     // forward declarations
     // these are used to define the counterpart_t type
-    template <Regime R, std::uint64_t Dims>
+    template <Regime R, std::uint64_t Dims, typename EoS>
         requires(R == Regime::NEWTONIAN || R == Regime::SRHD)
     struct primitive_t;
 
-    template <Regime R, std::uint64_t Dims>
+    template <Regime R, std::uint64_t Dims, typename EoS>
         requires(R == Regime::NEWTONIAN || R == Regime::SRHD)
     struct conserved_t;
 
-    template <Regime R, std::uint64_t Dims>
+    template <Regime R, std::uint64_t Dims, typename EoS>
         requires(R == Regime::MHD || R == Regime::RMHD)
     struct mhd_primitive_t;
 
-    template <Regime R, std::uint64_t Dims>
+    template <Regime R, std::uint64_t Dims, typename EoS>
         requires(R == Regime::MHD || R == Regime::RMHD)
     struct mhd_conserved_t;
 
-    template <Regime R, std::uint64_t Dims>
+    template <Regime R, std::uint64_t Dims, typename EoS>
         requires(R == Regime::NEWTONIAN || R == Regime::SRHD)
     struct primitive_t {
         static constexpr std::uint64_t dimensions = Dims;
         static constexpr Regime regime            = R;
         static constexpr std::uint64_t nmem = Dims + 3;   // rho, vel, pre, chi
-        using counterpart_t                 = conserved_t<R, Dims>;
+        using counterpart_t                 = conserved_t<R, Dims, EoS>;
+        using eos_t                         = EoS;
         real rho{0.0};
         vector_t<real, Dims> vel{0.0};
         real pre{0.0};
@@ -76,13 +78,14 @@ namespace simbi::structs {
         }
     };
 
-    template <Regime R, std::uint64_t Dims>
+    template <Regime R, std::uint64_t Dims, typename EoS>
         requires(R == Regime::NEWTONIAN || R == Regime::SRHD)
     struct conserved_t {
         static constexpr std::uint64_t dimensions = Dims;
         static constexpr Regime regime            = R;
         static constexpr std::uint64_t nmem = Dims + 3;   // den, mom, nrg, chi
-        using counterpart_t                 = primitive_t<R, Dims>;
+        using counterpart_t                 = primitive_t<R, Dims, EoS>;
+        using eos_t                         = EoS;
         real den{0.0};
         vector_t<real, Dims> mom{0.0};
         real nrg{0.0};
@@ -134,14 +137,15 @@ namespace simbi::structs {
         }
     };
 
-    template <Regime R, std::uint64_t Dims>
+    template <Regime R, std::uint64_t Dims, typename EoS>
         requires(R == Regime::MHD || R == Regime::RMHD)
     struct mhd_primitive_t {
         static constexpr std::uint64_t dimensions = Dims;
         static constexpr Regime regime            = R;
         // rho, vel, pre, mag, chi
         static constexpr std::uint64_t nmem = 2 * Dims + 3;
-        using counterpart_t                 = mhd_conserved_t<R, Dims>;
+        using counterpart_t                 = mhd_conserved_t<R, Dims, EoS>;
+        using eos_t                         = EoS;
         real rho{0.0};
         vector_t<real, Dims> vel{0.0};
         real pre{0.0};
@@ -194,14 +198,16 @@ namespace simbi::structs {
         DEV constexpr const real& alfven() const noexcept { return chi; }
     };
 
-    template <Regime R, std::uint64_t Dims>
+    template <Regime R, std::uint64_t Dims, typename EoS>
         requires(R == Regime::MHD || R == Regime::RMHD)
     struct mhd_conserved_t {
         static constexpr std::uint64_t dimensions = Dims;
         static constexpr Regime regime            = R;
         // den, mom, nrg, mag, chi
         static constexpr std::uint64_t nmem = 2 * Dims + 3;
-        using counterpart_t                 = mhd_primitive_t<R, Dims>;
+        using counterpart_t                 = mhd_primitive_t<R, Dims, EoS>;
+        using eos_t                         = EoS;
+
         real den{0.0};
         vector_t<real, Dims> mom{0.0};
         real nrg{0.0};
@@ -262,9 +268,10 @@ namespace simbi::structs {
 
     // ostream operator overloads for primitive and conserved states
     // for future debugging and logging
-    template <Regime R, std::uint64_t Dims>
+    template <Regime R, std::uint64_t Dims, typename EoS>
         requires(R == Regime::NEWTONIAN || R == Regime::SRHD)
-    std::ostream& operator<<(std::ostream& os, const primitive_t<R, Dims>& p)
+    std::ostream&
+    operator<<(std::ostream& os, const primitive_t<R, Dims, EoS>& p)
     {
         os << "Primitive State (Regime: " << serialize(R) << ", Dims: " << Dims
            << "):\n";
@@ -274,9 +281,10 @@ namespace simbi::structs {
         return os;
     }
 
-    template <Regime R, std::uint64_t Dims>
+    template <Regime R, std::uint64_t Dims, typename EoS>
         requires(R == Regime::NEWTONIAN || R == Regime::SRHD)
-    std::ostream& operator<<(std::ostream& os, const conserved_t<R, Dims>& c)
+    std::ostream&
+    operator<<(std::ostream& os, const conserved_t<R, Dims, EoS>& c)
     {
         os << "Conserved State (Regime: " << serialize(R) << ", Dims: " << Dims
            << "):\n";
@@ -285,10 +293,10 @@ namespace simbi::structs {
         return os;
     }
 
-    template <Regime R, std::uint64_t Dims>
+    template <Regime R, std::uint64_t Dims, typename EoS>
         requires(R == Regime::MHD || R == Regime::RMHD)
     std::ostream&
-    operator<<(std::ostream& os, const mhd_primitive_t<R, Dims>& p)
+    operator<<(std::ostream& os, const mhd_primitive_t<R, Dims, EoS>& p)
     {
         os << "MHD Primitive State (Regime: " << serialize(R)
            << ", Dims: " << Dims << "):\n";
@@ -298,10 +306,10 @@ namespace simbi::structs {
         return os;
     }
 
-    template <Regime R, std::uint64_t Dims>
+    template <Regime R, std::uint64_t Dims, typename EoS>
         requires(R == Regime::MHD || R == Regime::RMHD)
     std::ostream&
-    operator<<(std::ostream& os, const mhd_conserved_t<R, Dims>& c)
+    operator<<(std::ostream& os, const mhd_conserved_t<R, Dims, EoS>& c)
     {
         os << "MHD Primitive State (Regime: " << serialize(R)
            << ", Dims: " << Dims << "):\n";

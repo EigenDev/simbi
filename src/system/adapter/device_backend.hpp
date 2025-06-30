@@ -58,7 +58,7 @@
 
 namespace simbi::adapter {
 
-    // error handling utilities (reusing from existing code)
+    // error handling utilities
     namespace error {
         enum class status_t {
             success = 0,

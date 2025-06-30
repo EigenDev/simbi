@@ -197,6 +197,21 @@ class LazySimulationReader:
         return self._metadata_cache
 
     @property
+    def mesh_data(self) -> dict[str, Any]:
+        """
+        Get mesh data - cached after first access.
+        Mesh data is typically small, so caching it is efficient.
+        """
+        if not self._mesh_cache:
+            if not self.file:
+                with h5py.File(self.filename, "r") as f:
+                    self._load_mesh_data(f)
+            else:
+                self._load_mesh_data(self.file)
+
+        return self._mesh_cache
+
+    @property
     def immersed_bodies(self) -> dict[str, Any]:
         """Get immersed bodies data - cached after first access."""
         if not self._immersed_bodies_cache:
@@ -288,9 +303,6 @@ class LazySimulationReader:
         """Load and process metadata from file."""
 
         raw_metadata = dict(file_obj["sim_info"].attrs)
-        boundary_conditions = [
-            b.decode("utf-8") for b in file_obj["boundary_conditions"][:]
-        ]
         # decode byte strings if present
         self._metadata_cache = {
             k: v.decode("utf-8") if isinstance(v, bytes) else v
@@ -336,20 +348,61 @@ class LazySimulationReader:
                     k: float(v) if isinstance(v, np.float64) else v
                     for k, v in self._metadata_cache["system_config"].items()
                 }
-
-        nghosts = 1 + (self._metadata_cache["reconstruction"] == "plm")
+        boundary_conditions = (
+            raw_metadata["boundary_conditions"].decode("utf-8").split(",")
+        )
         # derived metadata
         self._metadata_cache.update(
             {
-                "is_cartesian": self._metadata_cache["geometry"]
+                "is_cartesian": self._metadata_cache["coord_system"]
                 in ["cartesian", "axis_cylindrical", "cylindrical"],
                 "is_mhd": "mhd" in self._metadata_cache["regime"],
-                "coord_system": self._metadata_cache.pop("geometry"),
                 "time": self._metadata_cache.pop("current_time", 0.0),
-                "active_x": self._metadata_cache["nx"] - 2 * nghosts,
-                "active_y": max(self._metadata_cache["ny"] - 2 * nghosts, 1),
-                "active_z": max(self._metadata_cache["nz"] - 2 * nghosts, 1),
                 "boundary_conditions": boundary_conditions,
+            }
+        )
+
+    def _load_mesh_data(self, file_obj: h5py.File) -> None:
+        """Load mesh data from file."""
+        if "mesh_config" not in file_obj:
+            return None
+
+        # Load mesh data from the file
+        raw_mesh_data = dict(file_obj["mesh_config"].attrs)
+        # Decode byte strings if present
+        self._mesh_cache = {
+            k: (v.decode("utf-8"),) if isinstance(v, bytes) else v
+            for k, v in raw_mesh_data.items()
+        }
+        # Convert numpy arrays to lists
+        self._mesh_cache = {
+            k: np.asarray(v) if isinstance(v, np.ndarray) else v
+            for k, v in self._mesh_cache.items()
+        }
+        # Convert numpy uint8 to Python boolean
+        self._mesh_cache = {
+            k: bool(v) if isinstance(v, np.uint8) else v
+            for k, v in self._mesh_cache.items()
+        }
+        # Convert numpy integer to python int
+        self._mesh_cache = {
+            k: int(v) if isinstance(v, np.integer) else v
+            for k, v in self._mesh_cache.items()
+        }
+
+        # pad the shape with ones for whiever
+        # dim is unoccupied
+        diff = 3 - len(self._mesh_cache["shape"])
+        if diff > 0:
+            self._mesh_cache["shape"] = (
+                tuple(int(x) for x in self._mesh_cache["shape"]) + (1,) * diff
+            )[::-1]
+        self._mesh_cache.update(
+            {
+                "full_resolution": tuple(
+                    int(x) + 2 * self._mesh_cache["halo_radius"] if x > 1 else 1
+                    for x in self._mesh_cache["shape"]
+                ),
             }
         )
 
@@ -366,8 +419,8 @@ class LazySimulationReader:
         """
         if not self._mesh_cache or force_reload:
             # Ensure metadata is loaded
-            metadata = self.metadata
-            ndim = metadata["dimensions"]
+            meshdata = self.mesh_data
+            ndim = self.metadata["dimensions"]
 
             # Create mesh data based on metadata
             mesh: dict[str, Any] = {}
@@ -381,23 +434,22 @@ class LazySimulationReader:
                     return "nz"
 
             effective_dimensions = 0
-            for i in range(1, ndim + 1):
+            for i in range(0, ndim):
                 # Determine spacing function based on metadata
                 spacing_func = (
                     np.linspace
-                    if metadata[f"x{i}_spacing"] == "linear"
+                    if meshdata["spacing_types"][i] == "linear"
                     else np.geomspace
                 )
 
                 # Calculate number of active zones
-                nghosts = 1 + (metadata["reconstruction"] == "plm")
-                active_zones = max(
-                    metadata[f"{grid_length_str(i - 1)}"] - 2 * nghosts, 1
-                )
+                active_zones = meshdata["shape"][i - 1]
+                bound_min = meshdata["bounds_min"][i]
+                bound_max = meshdata["bounds_max"][i]
 
                 # Generate mesh points
-                mesh[f"x{i}v"] = spacing_func(
-                    metadata[f"x{i}min"], metadata[f"x{i}max"], active_zones + 1
+                mesh[f"x{i + 1}v"] = spacing_func(
+                    bound_min, bound_max, active_zones + 1
                 )
                 effective_dimensions += active_zones != 1
 
@@ -405,9 +457,9 @@ class LazySimulationReader:
             if self._metadata_cache is not None:
                 self._metadata_cache["effective_dimensions"] = effective_dimensions
 
-            self._mesh_cache = mesh
+            self.mesh = mesh
 
-        return self._mesh_cache
+        return self.mesh
 
     def get_field(self, field_name: str) -> Any:
         """
@@ -493,19 +545,21 @@ class LazySimulationReader:
 
         # Get metadata for processing
         metadata = self.metadata
+        meshdata = self.mesh_data
         ndim = metadata["dimensions"]
 
         # Load data (fully or partially)
-        padwidth = (metadata["reconstruction"] != "pcm") + 1
+        padwidth = meshdata["halo_radius"]
         if indices is None:
             data: Array = np.asarray(file_obj[field_name][:])
+            res = meshdata["full_resolution"]
             # Reshape based on dimensions
             if self._is_gas_variable(field_name):
-                data = data.reshape(metadata["nz"], metadata["ny"], metadata["nx"])
+                data = data.reshape(res)
             else:
-                xactive_zones = metadata["nx"] - 2 * padwidth
-                yactive_zones = metadata["ny"] - 2 * padwidth
-                zactive_zones = metadata["nz"] - 2 * padwidth
+                xactive_zones = res[2] - 2 * padwidth
+                yactive_zones = res[1] - 2 * padwidth
+                zactive_zones = res[0] - 2 * padwidth
                 if field_name == "b1":
                     bshape = (zactive_zones + 2, yactive_zones + 2, xactive_zones + 1)
                 elif field_name == "b2":

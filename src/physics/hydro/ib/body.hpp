@@ -68,12 +68,12 @@ namespace simbi::ibsystem {
         bool two_way_coupling;
         std::uint64_t index;
 
-        // optional components using Maybe monad
-        Maybe<GravitationalComponent<T>> gravitational;
-        Maybe<AccretionComponent<T>> accretion;
-        Maybe<ElasticComponent<T>> elastic;
-        Maybe<RigidComponent<T>> rigid;
-        Maybe<DeformableComponent<T>> deformable;
+        // optional components using maybe_t monad
+        maybe_t<GravitationalComponent<T>> gravitational;
+        maybe_t<AccretionComponent<T>> accretion;
+        maybe_t<ElasticComponent<T>> elastic;
+        maybe_t<RigidComponent<T>> rigid;
+        maybe_t<DeformableComponent<T>> deformable;
 
         // ctors
         DUAL Body()

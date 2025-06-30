@@ -44,7 +44,7 @@ namespace simbi::parallel {
             // create CPU-optimized tiles
             auto tiles = tiling->create_tiles(topology, config_.ghost_zones);
 
-            // use your thread pool for tile-level parallelism
+            // use thread pool for tile-level parallelism
             pooling::get_thread_pool().parallel_for(
                 tiles.size(),
                 [&](std::uint64_t tile_idx) {
@@ -104,7 +104,7 @@ namespace simbi::parallel {
                 );
                 auto block_dim = config_.threads_per_block;
 
-                // Launch using your adapter
+                // ;aunch using adapter
                 auto launch_config = grid::config(
                     grid_dim,
                     block_dim,

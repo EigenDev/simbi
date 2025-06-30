@@ -164,7 +164,7 @@ namespace simbi {
      *
      * These definitions maintain compatibility with existing code
      * but should be considered deprecated. New code should use the
-     * simbi::build namespace directly.
+     * simbi::build namespace directly. [TODO: remove in future versions]
      */
     namespace global {
         // platform options

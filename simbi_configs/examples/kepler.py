@@ -48,7 +48,7 @@ class KeplerianRingTest(SimbiBaseConfig):
     adiabatic_index: float = SimbiField(1.0, description="Adiabatic index (isothermal)")
 
     # Optional fields with non-default values
-    solver: Solver = SimbiField(Solver.AUSM_PLUS, description="Numerical solver")
+    solver: Solver = SimbiField(Solver.HLLE, description="Numerical solver")
 
     data_directory: Path = SimbiField(
         Path("data/kepler/"), description="Output data directory"

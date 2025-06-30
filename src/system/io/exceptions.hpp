@@ -50,11 +50,21 @@
 #define EXCEPTIONS_HPP
 
 #include "config.hpp"
+#include "core/base/concepts.hpp"
+#include <atomic>
 #include <cstdint>
 #include <exception>
+#include <string>
 #include <type_traits>
 
 namespace simbi {
+    // forward declarations
+    template <typename T, std::uint64_t Dims>
+    struct vector_t;
+
+    template <std::uint64_t Dims>
+    using uarray = vector_t<std::uint64_t, Dims>;
+
     enum class ErrorCode : uint32_t {
         NONE                  = 0,
         NEGATIVE_PRESSURE     = 1 << 0,
@@ -68,6 +78,10 @@ namespace simbi {
         MAX_ITER              = 1 << 8,
         UNDEFINED             = 1 << 9,
     };
+
+    namespace helpers {
+        std::string error_code_to_string(ErrorCode code);
+    }
 
     namespace exception {
         class InterruptException : public std::exception
@@ -108,6 +122,136 @@ namespace simbi {
         return (static_cast<uint32_t>(code) & static_cast<uint32_t>(error)) !=
                0;
     }
+
+    struct error_budget_t {
+        std::atomic<int> remaining{1};   // start with budget of 1 error
+        std::atomic<bool> error_captured{false};
+
+        // error details (only filled by the winning thread)
+        std::atomic<ErrorCode> first_error_code{ErrorCode::NONE};
+        std::atomic<std::uint64_t> first_error_index{0};
+
+        // try to consume budget - returns true if this thread "wins"
+        bool try_consume()
+        {
+            int expected = 1;
+            return remaining.compare_exchange_strong(expected, 0);
+        }
+
+        // check if budget is exhausted
+        bool is_exhausted() const { return remaining.load() <= 0; }
+
+        void reset()
+        {
+            remaining.store(1);
+            error_captured.store(false);
+            first_error_code.store(ErrorCode::NONE);
+            first_error_index.store(0);
+        }
+    };
+
+    template <std::uint64_t Dims>
+    std::string format_coord(const uarray<Dims>& coord)
+    {
+        std::string result = "(";
+        for (std::uint64_t i = 0; i < Dims; ++i) {
+            result += std::to_string(coord[i]);
+            if (i < Dims - 1) {
+                result += ", ";
+            }
+        }
+        result += ")";
+        return result;
+    }
+
+    template <std::uint64_t Dims, typename T>
+    std::string format_position(const vector_t<T, Dims>& position)
+    {
+        std::string result = "(";
+        for (std::uint64_t i = 0; i < Dims; ++i) {
+            result += std::to_string(position[i]);
+            if (i < Dims - 1) {
+                result += ", ";
+            }
+        }
+        result += ")";
+        return result;
+    }
+
+    template <typename conserved_t>
+    std::string format_conserved(const conserved_t& cons)
+    {
+        std::string result = "Conservative State: ";
+        result += "den=" + std::to_string(cons.den) + ", ";
+        result += "mom=(";
+        for (std::uint64_t i = 0; i < cons.mom.size(); ++i) {
+            result += std::to_string(cons.mom[i]);
+            if (i < cons.mom.size() - 1) {
+                result += ", ";
+            }
+        }
+
+        if constexpr (concepts::is_mhd_conserved_c<conserved_t>) {
+            result += "), nrg=" + std::to_string(cons.nrg) + ", mag=(";
+            for (std::uint64_t i = 0; i < cons.mag.size(); ++i) {
+                result += std::to_string(cons.mag[i]);
+                if (i < cons.mag.size() - 1) {
+                    result += ", ";
+                }
+            }
+            result += "), chi=" + std::to_string(cons.chi);
+        }
+        else {
+            result += "), nrg=" + std::to_string(cons.nrg) +
+                      ", chi=" + std::to_string(cons.chi);
+        }
+
+        return result;
+    }
+
+    struct error_info_t {
+        std::string coord_str;
+        std::string position_str;
+        ErrorCode error_code;
+        double time;
+        std::uint64_t iteration;
+        std::string conservative_str;
+        std::string message;   // additional message for context
+    };
+
+    class primitive_conversion_error_t : public std::exception
+    {
+      public:
+        primitive_conversion_error_t(const error_info_t& error_info)
+            : info_(error_info)
+        {
+        }
+
+        const char* what() const noexcept override
+        {
+            if (what_message_.empty()) {
+                what_message_ = format_error_message();
+            }
+            return what_message_.c_str();
+        }
+
+      private:
+        error_info_t info_;
+        mutable std::string what_message_;
+
+        std::string format_error_message() const
+        {
+            return std::string("Primitive conversion failed:\n") + "  " +
+                   info_.coord_str + "\n" + "  " + info_.position_str + "\n" +
+                   "  Error: " +
+                   helpers::error_code_to_string(info_.error_code) + "\n" +
+                   "  Time: " + std::to_string(info_.time) + "\n" +
+                   "  Iteration: " + std::to_string(info_.iteration) + "\n" +
+                   "  " + info_.conservative_str + "\n" +
+                   (info_.message.empty() ? "" : "  Message: " + info_.message);
+        }
+    };
+
 }   // namespace simbi
 
 #endif

@@ -49,6 +49,10 @@
 #ifndef COMPONENT_GENERATOR_HPP
 #define COMPONENT_GENERATOR_HPP
 
+#include "binary.hpp"
+#include "body.hpp"
+#include "capability.hpp"
+#include "component_body_system.hpp"
 #include "compute/functional/fp.hpp"
 #include "config.hpp"
 #include "core/utility/config_dict.hpp"
@@ -56,12 +60,8 @@
 #include "core/utility/init_conditions.hpp"
 #include "core/utility/smart_ptr.hpp"
 #include "data/containers/vector.hpp"
-#include "physics/hydro/ib/binary.hpp"
-#include "physics/hydro/ibbody.hpp"
-#include "physics/hydro/ibcapability.hpp"
-#include "physics/hydro/ibcomponent_body_system.hpp"
-#include "physics/hydro/ibsystem_config.hpp"
 #include "system/mesh/mesh_config.hpp"
+#include "system_config.hpp"
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
