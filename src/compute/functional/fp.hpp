@@ -373,8 +373,7 @@ namespace simbi::fp {
             }
             constexpr bool operator==(const iterator_t& other) const
             {
-                return first_it_ ==
-                       other.first_it_ &&
+                return first_it_ == other.first_it_ &&
                        second_it_ == other.second_it_;
             }
             constexpr bool operator!=(const iterator_t& other) const
@@ -542,8 +541,7 @@ namespace simbi::fp {
                                        result[0] = source_value_type{};
                                        result.size();
                                    }) {
-                    // fixed-size indexable containers (your vector_t,
-                    // std::array)
+                    // fixed-size indexable containers
                     std::size_t idx = 0;
                     for (auto&& item : source) {
                         if (idx >= result.size()) {

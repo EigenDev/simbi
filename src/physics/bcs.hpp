@@ -449,7 +449,7 @@ namespace simbi::hydro {
     {
         auto directions = ghost_direction(corner_region, active_domain);
 
-        // find all touching dimensions using your range utilities
+        // find all touching dimensions
         auto dim_range = fp::range(HydroState::dimensions);
 
         // collect touching dimensions into a compile-time container
@@ -500,7 +500,7 @@ namespace simbi::hydro {
         });
     }
 
-    // thin dimensions using your range infrastructure
+    // thin dimensions
     template <typename Field>
     void apply_thin_dimension_bc(
         Field& field,

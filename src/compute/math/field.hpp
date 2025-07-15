@@ -406,7 +406,7 @@ namespace simbi {
             auto global_coord =
                 local_coord + (global_domain_.start - local_domain_.start);
 
-            // use strides to get memory offset using your FP toolkit
+            // use strides to get memory offset
             return fp::zip(global_coord, strides_) | fp::map([](auto pair) {
                        auto [c, s] = pair;
                        return c * s;

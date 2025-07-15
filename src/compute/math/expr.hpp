@@ -362,7 +362,7 @@ namespace simbi::expr {
     }
 
     // =================================================================
-    // cfd operation definitions - your existing physics
+    // cfd operation definitions
     // =================================================================
 
     // flux divergence operation

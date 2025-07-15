@@ -1,7 +1,6 @@
 #ifndef SIMBI_STATE_HYDRO_STATE_HPP
 #define SIMBI_STATE_HYDRO_STATE_HPP
 
-#include "compute/math/domain.hpp"
 #include "compute/math/field.hpp"
 #include "config.hpp"
 #include "core/utility/bimap.hpp"
@@ -12,16 +11,14 @@
 #include "data/state/express_t.hpp"
 #include "hydro_state_types.hpp"
 #include "physics/eos/isothermal.hpp"
-// #include "physics/hydro/ib/collector.hpp"
-// #include "physics/hydro/ib/component_body_system.hpp"
-// #include "physics/hydro/ib/component_generator.hpp"
+#include "physics/hydro/body/body_factory.hpp"
 #include "system/io/exceptions.hpp"
 #include "system/mesh/mesh_config.hpp"
 #include <bit>
 #include <cstddef>
 #include <cstdint>
 #include <functional>
-// #include <memory>
+#include <optional>
 #include <string>
 
 namespace simbi::state {
@@ -69,8 +66,7 @@ namespace simbi::state {
         mesh_t mesh;
 
         // immersed body stuff
-        // std::unique_ptr<ComponentBodySystem<real, Dims>> body_system;
-        // std::unique_ptr<GridBodyDeltaCollector<real, Dims>> collector;
+        std::optional<ibsystem::body_collection_t<real, Dims>> bodies;
 
         // simulation metadata
         struct meta_data_t {
@@ -299,28 +295,6 @@ namespace simbi::state {
               .bc_sources     = std::move(bc_sources)
             };
         }
-
-        /*
-         * Setup the body and collector system if provided
-         */
-        // static void
-        // init_body_system(hydro_state_t& state, const InitialConditions& init)
-        // {
-        //     state.body_system =
-        //         ibsystem::create_body_system_from_config<real, Dims>(
-        //             state.mesh,
-        //             init
-        //         );
-
-        //     if (state.body_system) {
-        //         const auto [nax, nay, naz] = init.active_zones();
-        //         state.collector            = util::make_unique<
-        //                        ibsystem::GridBodyDeltaCollector<real, Dims>>(
-        //             {naz, nay, nax},
-        //             2   // max bodies
-        //         );
-        //     }
-        // }
 
         /**
          * get shock smoother type from init conditions

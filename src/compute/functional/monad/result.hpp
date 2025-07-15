@@ -99,7 +99,6 @@ namespace simbi {
         }
     };
 
-    // add this specialization to your result.hpp
     template <>
     class result_t<void>
     {
