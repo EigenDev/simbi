@@ -119,6 +119,7 @@ class SedovTaylor(SimbiBaseConfig):
                     # Pressure inside vs. outside the explosion region
                     if r <= explosion_radius:
                         # Energy deposition inside explosion radius
+                        # pre = T_AMB * rho
                         pre = (self.adiabatic_index - 1.0) * (
                             3.0 * self.e0 / (NU + 1) / math.pi / explosion_radius**NU
                         )

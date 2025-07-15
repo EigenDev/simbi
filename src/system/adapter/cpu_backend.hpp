@@ -36,7 +36,7 @@
 namespace simbi::adapter {
     // Helper function to handle unused parameters
     template <typename T>
-    inline void unused_param(const T& /*param*/)
+    void unused_param(const T& /*param*/)
     {
     }
 

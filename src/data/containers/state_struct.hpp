@@ -2,10 +2,8 @@
 #define STATE_STRUCTS_HPP
 
 #include "config.hpp"
-#include "core/utility/bimap.hpp"
 #include "core/utility/enums.hpp"
 #include "data/containers/vector.hpp"
-#include "physics/eos/ideal.hpp"
 #include "state_ops.hpp"
 #include <cstdint>
 #include <ostream>
@@ -273,8 +271,9 @@ namespace simbi::structs {
     std::ostream&
     operator<<(std::ostream& os, const primitive_t<R, Dims, EoS>& p)
     {
-        os << "Primitive State (Regime: " << serialize(R) << ", Dims: " << Dims
-           << "):\n";
+        // os << "Primitive State (Regime: " << serialize(R) << ", Dims: " <<
+        // Dims
+        //    << "):\n";
         os << "( " << p.rho << ", ";
         os << p.vel << ", " << p.pre << ", " << p.chi << " )\n";
 
@@ -286,8 +285,9 @@ namespace simbi::structs {
     std::ostream&
     operator<<(std::ostream& os, const conserved_t<R, Dims, EoS>& c)
     {
-        os << "Conserved State (Regime: " << serialize(R) << ", Dims: " << Dims
-           << "):\n";
+        // os << "Conserved State (Regime: " << serialize(R) << ", Dims: " <<
+        // Dims
+        //    << "):\n";
         os << "( " << c.den << ", ";
         os << c.mom << ", " << c.nrg << ", " << c.chi << " )\n";
         return os;
@@ -298,8 +298,8 @@ namespace simbi::structs {
     std::ostream&
     operator<<(std::ostream& os, const mhd_primitive_t<R, Dims, EoS>& p)
     {
-        os << "MHD Primitive State (Regime: " << serialize(R)
-           << ", Dims: " << Dims << "):\n";
+        // os << "MHD Primitive State (Regime: " << serialize(R)
+        //    << ", Dims: " << Dims << "):\n";
         os << "( " << p.rho << ", ";
         os << p.vel << ", " << p.pre << ", " << p.mag << ", " << p.chi
            << " )\n";
@@ -311,8 +311,8 @@ namespace simbi::structs {
     std::ostream&
     operator<<(std::ostream& os, const mhd_conserved_t<R, Dims, EoS>& c)
     {
-        os << "MHD Primitive State (Regime: " << serialize(R)
-           << ", Dims: " << Dims << "):\n";
+        // os << "MHD Primitive State (Regime: " << serialize(R)
+        //    << ", Dims: " << Dims << "):\n";
         os << "( " << c.den << ", ";
         os << c.mom << ", " << c.nrg << ", " << c.mag << ", " << c.chi
            << " )\n";

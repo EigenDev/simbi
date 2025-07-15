@@ -1,277 +1,842 @@
-/**
- *  *=============================================================================
- *  *           SIMBI - Special Relativistic Magnetohydrodynamics Code
- *  *=============================================================================
- *  *
- *  * @file            functional.hpp
- *  * @brief           functional programming primitives for iterable types
- *  * @details
- *  *
- *  * @version         0.8.0
- *  * @date            2025-03-01
- *  * @author          Marcus DuPont
- *  * @email           marcus.dupont@princeton.edu
- *  *
- *  *==============================================================================
- *  */
+#ifndef SIMBI_FP_MINIMAL_HPP
+#define SIMBI_FP_MINIMAL_HPP
 
-#ifndef FUNCTIONAL_PROGRAMMING_HPP
-#define FUNCTIONAL_PROGRAMMING_HPP
-
-#include "compute/math/lazy_expr.hpp"
-#include "config.hpp"
-#include "core/base/concepts.hpp"
-#include "data/containers/ndarray.hpp"
 #include <algorithm>
-#include <array>
 #include <cstddef>
 #include <cstdint>
 #include <functional>
+#include <iterator>
 #include <type_traits>
 #include <utility>
-
-namespace simbi::helpers {
-    template <std::size_t N, typename F>
-    void compile_time_for(F&& func);
-
-    template <std::int64_t Start, std::int64_t End, typename Func>
-    void compile_time_for(Func&& f);
-}   // namespace simbi::helpers
+#include <vector>
 
 namespace simbi::fp {
-    using namespace simbi::nd;
-    using namespace simbi::concepts;
-    using namespace simbi::expr;
-
-    template <typename Container, typename NewType>
-    struct rebind {
-        static_assert(
-            sizeof(Container) == 0,
-            "rebind not specialized for this type"
-        );
-    };
-
-    // specialize for your specific containers
-    template <typename T, std::uint64_t Dims, typename NewType>
-    struct rebind<ndarray_t<T, Dims>, NewType> {
-        using type = ndarray_t<NewType, Dims>;
-    };
-
-    template <typename T, typename NewType>
-    struct rebind<std::vector<T>, NewType> {
-        using type = std::vector<NewType>;
-    };
-
-    template <typename T, size_t N, typename NewType>
-    struct rebind<std::array<T, N>, NewType> {
-        using type = std::array<NewType, N>;
-    };
-
-    template <VectorLike V, typename NewType>
-    struct rebind<V, NewType> {
-        using type = vector_t<NewType, V::dimensions>;
-    };
+    // ========================================================================
+    // core concepts
+    // ========================================================================
 
     template <typename T>
-    struct rebind<integer_range_t<T>, T> {
-        using type = integer_range_t<T>;
+    concept iterable = requires(T& t) {
+        { std::begin(t) } -> std::input_iterator;
+        { std::end(t) } -> std::sentinel_for<decltype(std::begin(t))>;
     };
 
-    // helper alias
-    template <typename Container, typename NewType>
-    using rebind_t = typename rebind<Container, NewType>::type;
+    // ========================================================================
+    // integer range generator
+    // ========================================================================
 
-    // -------------------------------------------------------------
-    // core functional operations
-    // -------------------------------------------------------------
+    template <typename T = std::uint64_t>
+    struct integer_range_t {
+        T start_, end_, step_;
 
-    // map: transform each element with a function, returning a new
-    // container of the same type
-    template <Container C, typename F>
-    DUAL constexpr auto map(const C& container, F&& f)
-    {
-        using T                  = typename C::value_type;
-        using result_t           = std::invoke_result_t<F, T>;
-        using result_container_t = rebind_t<C, result_t>;
-        result_container_t result{};
+        class iterator
+        {
+            T current_, end_, step_;
 
-        for (std::uint64_t ii = 0; ii < container.size(); ++ii) {
-            result[ii] = std::invoke(std::forward<F>(f), container[ii]);
-        }
+          public:
+            using iterator_category = std::forward_iterator_tag;
+            using value_type        = T;
+            using difference_type   = std::ptrdiff_t;
+            using pointer           = T*;
+            using reference         = T;
 
-        return result;
-    }
+            constexpr iterator() : current_(0), end_(0), step_(1) {}
+            constexpr iterator(T current, T end, T step)
+                : current_(current), end_(end), step_(step)
+            {
+            }
 
-    // reduce: combine elements using a binary function, with optional
-    // initial value
-    template <Container C, typename F>
-    DUAL constexpr auto
-    reduce(const C& container, F&& f, typename C::value_type init = {})
-    {
-        using value_t  = typename C::value_type;
-        value_t result = init;
+            constexpr T operator*() const { return current_; }
 
-        for (std::uint64_t ii = 0; ii < container.size(); ++ii) {
-            result = std::invoke(std::forward<F>(f), result, container[ii]);
-        }
+            constexpr iterator& operator++()
+            {
+                current_ += step_;
+                return *this;
+            }
 
-        return result;
-    }
+            constexpr iterator operator++(int)
+            {
+                auto temp = *this;
+                ++(*this);
+                return temp;
+            }
 
-    // fold: like reduce but with explicit initial value of possibly
-    // different type
-    template <Container C, typename F, typename U>
-    DUAL constexpr auto fold(const C& container, F&& f, U init)
-    {
-        U result = init;
+            constexpr bool operator==(const iterator& other) const
+            {
+                return current_ >= end_ || current_ == other.current_;
+            }
 
-        for (std::uint64_t ii = 0; ii < container.size(); ++ii) {
-            result = std::invoke(std::forward<F>(f), result, container[ii]);
-        }
-
-        return result;
-    }
-
-    // zip: combine two containers element-wise with a binary function
-    template <Container C1, Container C2, typename F>
-    DUAL constexpr auto zip(const C1& container1, const C2& container2, F&& f)
-    {
-        using T1                 = typename C1::value_type;
-        using T2                 = typename C2::value_type;
-        using result_t           = std::invoke_result_t<F, T1, T2>;
-        using result_container_t = rebind_t<C1, result_t>;
-
-        result_container_t result{};
-        const std::uint64_t min_size =
-            std::min(container1.size(), container2.size());
-
-        for (std::uint64_t ii = 0; ii < min_size; ++ii) {
-            result[ii] =
-                std::invoke(std::forward<F>(f), container1[ii], container2[ii]);
-        }
-
-        return result;
-    }
-
-    // -------------------------------------------------------------
-    // higher-order functions
-    // -------------------------------------------------------------
-
-    // compose: create a function that applies g after f
-    template <typename F, typename G>
-    DUAL constexpr auto compose(F&& f, G&& g)
-    {
-        return [f = std::forward<F>(f),
-                g = std::forward<G>(g)]<typename... Args>(Args&&... args) {
-            return g(f(std::forward<Args>(args)...));
+            constexpr bool operator!=(const iterator& other) const
+            {
+                return !(*this == other);
+            }
         };
-    }
 
-    // curry: transform a function that takes multiple arguments into a
-    // sequence of functions that each take a single argument
+        constexpr iterator begin() const
+        {
+            return iterator{start_, end_, step_};
+        }
+        constexpr iterator end() const { return iterator{end_, end_, step_}; }
+
+        template <typename Op>
+        constexpr auto operator|(Op&& op) const
+        {
+            return std::forward<Op>(op)(*this);
+        }
+    };
+
+    // ========================================================================
+    // generator for infinite sequences
+    // ========================================================================
+
+    template <typename Generator>
+    struct generator_view_t {
+        Generator gen_;
+
+        constexpr generator_view_t(Generator gen) : gen_(std::move(gen)) {}
+
+        class iterator
+        {
+            const Generator* gen_;
+            std::uint64_t index_;
+
+          public:
+            using iterator_category = std::forward_iterator_tag;
+            using value_type = std::invoke_result_t<Generator, std::uint64_t>;
+            using difference_type = std::ptrdiff_t;
+            using pointer         = void;
+            using reference       = value_type;
+
+            constexpr iterator() : gen_(nullptr), index_(0) {}
+            constexpr iterator(const Generator* gen, std::uint64_t index)
+                : gen_(gen), index_(index)
+            {
+            }
+
+            constexpr value_type operator*() const { return (*gen_)(index_); }
+
+            constexpr iterator& operator++()
+            {
+                ++index_;
+                return *this;
+            }
+
+            constexpr iterator operator++(int)
+            {
+                auto temp = *this;
+                ++(*this);
+                return temp;
+            }
+
+            // infinite sequence - never equal to end
+            constexpr bool operator==(const iterator&) const { return false; }
+            constexpr bool operator!=(const iterator&) const { return true; }
+        };
+
+        constexpr iterator begin() const { return iterator{&gen_, 0}; }
+        constexpr iterator end() const { return iterator{&gen_, ~0ULL}; }
+
+        template <typename Op>
+        constexpr auto operator|(Op&& op) const
+        {
+            return std::forward<Op>(op)(*this);
+        }
+    };
+
+    // ========================================================================
+    // view implementations
+    // ========================================================================
+
+    template <iterable Source, typename Func>
+    class map_view_t
+    {
+        Source source_;
+        Func func_;
+
+      public:
+        constexpr map_view_t(Source source, Func func)
+            : source_(std::move(source)), func_(std::move(func))
+        {
+        }
+
+        template <typename SourceIter>
+        class iterator_t
+        {
+            SourceIter it_;
+            const Func* func_;
+
+          public:
+            using iterator_category =
+                typename std::iterator_traits<SourceIter>::iterator_category;
+            using difference_type =
+                typename std::iterator_traits<SourceIter>::difference_type;
+            using value_type = std::invoke_result_t<
+                Func,
+                typename std::iterator_traits<SourceIter>::reference>;
+            using reference = value_type;
+
+            constexpr iterator_t() : it_{}, func_{nullptr} {}
+            constexpr iterator_t(SourceIter it, const Func* func)
+                : it_(std::move(it)), func_(func)
+            {
+            }
+
+            constexpr reference operator*() const
+            {
+                return std::invoke(*func_, *it_);
+            }
+            constexpr iterator_t& operator++()
+            {
+                ++it_;
+                return *this;
+            }
+            constexpr iterator_t operator++(int)
+            {
+                auto tmp = *this;
+                ++(*this);
+                return tmp;
+            }
+            constexpr bool operator==(const iterator_t& other) const
+            {
+                return it_ == other.it_;
+            }
+            constexpr bool operator!=(const iterator_t& other) const
+            {
+                return !(*this == other);
+            }
+        };
+
+        constexpr auto begin() const
+        {
+            return iterator_t<decltype(std::begin(source_))>(
+                std::begin(source_),
+                &func_
+            );
+        }
+        constexpr auto end() const
+        {
+            return iterator_t<decltype(std::end(source_))>(
+                std::end(source_),
+                &func_
+            );
+        }
+
+        template <typename Op>
+        constexpr auto operator|(Op&& op) const
+        {
+            return std::forward<Op>(op)(*this);
+        }
+    };
+
+    template <iterable Source, typename Pred>
+    class filter_view_t
+    {
+        Source source_;
+        Pred pred_;
+
+      public:
+        constexpr filter_view_t(Source source, Pred pred)
+            : source_(std::move(source)), pred_(std::move(pred))
+        {
+        }
+
+        template <typename SourceIter>
+        class iterator_t
+        {
+            SourceIter it_, end_;
+            const Pred* pred_;
+
+            constexpr void skip()
+            {
+                while (it_ != end_ && !std::invoke(*pred_, *it_)) {
+                    ++it_;
+                }
+            }
+
+          public:
+            using iterator_category = std::input_iterator_tag;
+            using difference_type =
+                typename std::iterator_traits<SourceIter>::difference_type;
+            using value_type =
+                typename std::iterator_traits<SourceIter>::value_type;
+            using reference =
+                typename std::iterator_traits<SourceIter>::reference;
+
+            constexpr iterator_t() : it_{}, end_{}, pred_{nullptr} {}
+            constexpr iterator_t(
+                SourceIter it,
+                SourceIter end,
+                const Pred* pred
+            )
+                : it_(std::move(it)), end_(std::move(end)), pred_(pred)
+            {
+                if (pred_) {
+                    skip();
+                }
+            }
+
+            constexpr reference operator*() const { return *it_; }
+            constexpr iterator_t& operator++()
+            {
+                ++it_;
+                skip();
+                return *this;
+            }
+            constexpr iterator_t operator++(int)
+            {
+                auto tmp = *this;
+                ++(*this);
+                return tmp;
+            }
+            constexpr bool operator==(const iterator_t& other) const
+            {
+                return it_ == other.it_;
+            }
+            constexpr bool operator!=(const iterator_t& other) const
+            {
+                return !(*this == other);
+            }
+        };
+
+        constexpr auto begin() const
+        {
+            return iterator_t<decltype(std::begin(source_))>(
+                std::begin(source_),
+                std::end(source_),
+                &pred_
+            );
+        }
+        constexpr auto end() const
+        {
+            return iterator_t<decltype(std::end(source_))>(
+                std::end(source_),
+                std::end(source_),
+                &pred_
+            );
+        }
+
+        template <typename Op>
+        constexpr auto operator|(Op&& op) const
+        {
+            return std::forward<Op>(op)(*this);
+        }
+    };
+
+    template <iterable First, iterable Second>
+    class zip_view_t
+    {
+        First first_;
+        Second second_;
+
+      public:
+        constexpr zip_view_t(First first, Second second)
+            : first_(std::move(first)), second_(std::move(second))
+        {
+        }
+
+        template <typename FirstIter, typename SecondIter>
+        class iterator_t
+        {
+            FirstIter first_it_;
+            SecondIter second_it_;
+
+          public:
+            using iterator_category = std::input_iterator_tag;
+            using difference_type   = std::ptrdiff_t;
+            using value_type        = std::pair<
+                       typename std::iterator_traits<FirstIter>::reference,
+                       typename std::iterator_traits<SecondIter>::reference>;
+            using reference = value_type;
+
+            constexpr iterator_t() : first_it_{}, second_it_{} {}
+            constexpr iterator_t(FirstIter first_it, SecondIter second_it)
+                : first_it_(std::move(first_it)),
+                  second_it_(std::move(second_it))
+            {
+            }
+
+            constexpr reference operator*() const
+            {
+                return {*first_it_, *second_it_};
+            }
+            constexpr iterator_t& operator++()
+            {
+                ++first_it_;
+                ++second_it_;
+                return *this;
+            }
+            constexpr iterator_t operator++(int)
+            {
+                auto tmp = *this;
+                ++(*this);
+                return tmp;
+            }
+            constexpr bool operator==(const iterator_t& other) const
+            {
+                return first_it_ ==
+                       other.first_it_ &&
+                       second_it_ == other.second_it_;
+            }
+            constexpr bool operator!=(const iterator_t& other) const
+            {
+                return !(*this == other);
+            }
+        };
+
+        constexpr auto begin() const
+        {
+            return iterator_t<
+                decltype(std::begin(first_)),
+                decltype(std::begin(second_))>(
+                std::begin(first_),
+                std::begin(second_)
+            );
+        }
+        constexpr auto end() const
+        {
+            return iterator_t<
+                decltype(std::end(first_)),
+                decltype(std::end(second_))>(
+                std::end(first_),
+                std::end(second_)
+            );
+        }
+
+        template <typename Op>
+        constexpr auto operator|(Op&& op) const
+        {
+            return std::forward<Op>(op)(*this);
+        }
+    };
+
+    template <iterable Source>
+    class take_view_t
+    {
+        Source source_;
+        std::size_t count_;
+
+      public:
+        constexpr take_view_t(Source source, std::size_t count)
+            : source_(std::move(source)), count_(count)
+        {
+        }
+
+        template <typename SourceIter>
+        class iterator_t
+        {
+            SourceIter it_;
+            std::size_t remaining_;
+
+          public:
+            using iterator_category =
+                typename std::iterator_traits<SourceIter>::iterator_category;
+            using difference_type =
+                typename std::iterator_traits<SourceIter>::difference_type;
+            using value_type =
+                typename std::iterator_traits<SourceIter>::value_type;
+            using reference =
+                typename std::iterator_traits<SourceIter>::reference;
+
+            constexpr iterator_t() : it_{}, remaining_{0} {}
+            constexpr iterator_t(SourceIter it, std::size_t remaining)
+                : it_(std::move(it)), remaining_(remaining)
+            {
+            }
+
+            constexpr reference operator*() const { return *it_; }
+            constexpr iterator_t& operator++()
+            {
+                if (remaining_ > 0) {
+                    ++it_;
+                    --remaining_;
+                }
+                return *this;
+            }
+            constexpr iterator_t operator++(int)
+            {
+                auto tmp = *this;
+                ++(*this);
+                return tmp;
+            }
+            constexpr bool operator==(const iterator_t& other) const
+            {
+                return remaining_ == 0 || it_ == other.it_;
+            }
+            constexpr bool operator!=(const iterator_t& other) const
+            {
+                return !(*this == other);
+            }
+        };
+
+        constexpr auto begin() const
+        {
+            return iterator_t<decltype(std::begin(source_))>(
+                std::begin(source_),
+                count_
+            );
+        }
+        constexpr auto end() const
+        {
+            return iterator_t<decltype(std::end(source_))>(
+                std::end(source_),
+                0
+            );
+        }
+
+        template <typename Op>
+        constexpr auto operator|(Op&& op) const
+        {
+            return std::forward<Op>(op)(*this);
+        }
+    };
+
+    // ========================================================================
+    // collection terminal
+    // ========================================================================
+
+    template <typename Container>
+    struct collect_t {
+        template <iterable Source>
+        constexpr auto operator()(Source&& source) const
+        {
+            using source_value_type =
+                std::decay_t<decltype(*std::begin(source))>;
+
+            if constexpr (std::is_same_v<Container, void>) {
+                // auto-deduce container type
+                std::vector<source_value_type> result;
+                for (auto&& item : source) {
+                    result.push_back(item);
+                }
+                return result;
+            }
+            else {
+                Container result{};
+
+                if constexpr (requires {
+                                  result.push_back(source_value_type{});
+                              }) {
+                    // dynamic containers (std::vector, std::deque, etc.)
+                    if constexpr (requires { result.reserve(1); }) {
+                        // reserve space if possible
+                        if constexpr (requires { std::size(source); }) {
+                            result.reserve(std::size(source));
+                        }
+                    }
+                    for (auto&& item : source) {
+                        result.push_back(item);
+                    }
+                }
+                else if constexpr (requires {
+                                       result.insert(
+                                           result.end(),
+                                           source_value_type{}
+                                       );
+                                   }) {
+                    // associative containers
+                    for (auto&& item : source) {
+                        result.insert(result.end(), item);
+                    }
+                }
+                else if constexpr (requires {
+                                       result[0] = source_value_type{};
+                                       result.size();
+                                   }) {
+                    // fixed-size indexable containers (your vector_t,
+                    // std::array)
+                    std::size_t idx = 0;
+                    for (auto&& item : source) {
+                        if (idx >= result.size()) {
+                            break;   // prevent overflow
+                        }
+                        result[idx++] = item;
+                    }
+                }
+                else {
+                    static_assert(
+                        false,
+                        "Container must support push_back, insert, or indexing "
+                        "with size()"
+                    );
+                }
+                return result;
+            }
+        }
+    };
+
+    // ========================================================================
+    // function adapters
+    // ========================================================================
+
     template <typename F>
-    DUAL constexpr auto curry(F&& f)
+    struct map_fn_t {
+        F func_;
+        constexpr explicit map_fn_t(F func) : func_(std::move(func)) {}
+
+        template <iterable Source>
+        constexpr auto operator()(Source&& source) const
+        {
+            return map_view_t<std::decay_t<Source>, F>(
+                std::forward<Source>(source),
+                func_
+            );
+        }
+    };
+
+    template <typename Pred>
+    struct filter_fn_t {
+        Pred pred_;
+        constexpr explicit filter_fn_t(Pred pred) : pred_(std::move(pred)) {}
+
+        template <iterable Source>
+        constexpr auto operator()(Source&& source) const
+        {
+            return filter_view_t<std::decay_t<Source>, Pred>(
+                std::forward<Source>(source),
+                pred_
+            );
+        }
+    };
+
+    template <iterable Second>
+    struct zip_fn_t {
+        Second second_;
+        constexpr explicit zip_fn_t(Second second) : second_(std::move(second))
+        {
+        }
+
+        template <iterable First>
+        constexpr auto operator()(First&& first) const
+        {
+            return zip_view_t<std::decay_t<First>, Second>(
+                std::forward<First>(first),
+                second_
+            );
+        }
+    };
+
+    struct take_fn_t {
+        std::size_t count_;
+        constexpr explicit take_fn_t(std::size_t count) : count_(count) {}
+
+        template <iterable Source>
+        constexpr auto operator()(Source&& source) const
+        {
+            return take_view_t<std::decay_t<Source>>(
+                std::forward<Source>(source),
+                count_
+            );
+        }
+    };
+
+    template <typename F>
+    struct for_each_fn_t {
+        F func_;
+        constexpr explicit for_each_fn_t(F func) : func_(std::move(func)) {}
+
+        template <iterable Source>
+        constexpr void operator()(Source&& source) const
+        {
+            for (auto&& item : source) {
+                std::invoke(func_, item);
+            }
+        }
+    };
+
+    template <typename Domain, typename Func>
+    struct transform_domain_view_t {
+        Domain domain_;
+        Func func_;
+
+        class iterator
+        {
+            typename Domain::iterator domain_it_;
+            const Domain* domain_;
+            const Func* func_;
+
+          public:
+            using iterator_category = std::forward_iterator_tag;
+            using value_type        = std::pair<
+                       typename Domain::iterator::value_type,
+                       std::invoke_result_t<
+                           Func,
+                           typename Domain::iterator::value_type,
+                           Domain>>;
+            using difference_type = std::ptrdiff_t;
+            using reference       = value_type;
+
+            iterator() : domain_it_{}, domain_{nullptr}, func_{nullptr} {}
+            iterator(
+                typename Domain::iterator it,
+                const Domain* dom,
+                const Func* f
+            )
+                : domain_it_(it), domain_{dom}, func_(f)
+            {
+            }
+
+            value_type operator*() const
+            {
+                auto coord = *domain_it_;
+                return {coord, func_->apply(coord, *domain_)};
+            }
+
+            constexpr iterator& operator++()
+            {
+                ++domain_it_;
+                return *this;
+            }
+            constexpr iterator operator++(int)
+            {
+                auto tmp = *this;
+                ++(*this);
+                return tmp;
+            }
+            constexpr bool operator==(const iterator& other) const
+            {
+                return domain_it_ == other.domain_it_;
+            }
+            constexpr bool operator!=(const iterator& other) const
+            {
+                return !(*this == other);
+            }
+        };
+
+        auto begin() const
+        {
+            return iterator{domain_.begin(), &domain_, &func_};
+        }
+        auto end() const { return iterator{domain_.end(), &domain_, &func_}; }
+
+        template <typename Op>
+        auto operator|(Op&& op) const
+        {
+            return std::forward<Op>(op)(*this);
+        }
+    };
+
+    // any_of, all_of, none_of
+    template <typename Pred>
+    struct any_of_fn_t {
+        Pred pred_;
+        constexpr explicit any_of_fn_t(Pred pred) : pred_(std::move(pred)) {}
+
+        template <iterable Source>
+        constexpr bool operator()(Source&& source) const
+        {
+            for (auto&& item : source) {
+                if (std::invoke(pred_, item)) {
+                    return true;
+                }
+            }
+            return false;
+        }
+    };
+
+    template <typename Pred>
+    struct all_of_fn_t {
+        Pred pred_;
+        constexpr explicit all_of_fn_t(Pred pred) : pred_(std::move(pred)) {}
+
+        template <iterable Source>
+        constexpr bool operator()(Source&& source) const
+        {
+            for (auto&& item : source) {
+                if (!std::invoke(pred_, item)) {
+                    return false;
+                }
+            }
+            return true;
+        }
+    };
+
+    template <typename Pred>
+    struct none_of_fn_t {
+        Pred pred_;
+        constexpr explicit none_of_fn_t(Pred pred) : pred_(std::move(pred)) {}
+
+        template <iterable Source>
+        constexpr bool operator()(Source&& source) const
+        {
+            for (auto&& item : source) {
+                if (std::invoke(pred_, item)) {
+                    return false;
+                }
+            }
+            return true;
+        }
+    };
+
+    // ========================================================================
+    // terminals
+    // ========================================================================
+
+    struct sum_fn_t {
+        template <iterable Range>
+        constexpr auto operator()(Range&& range) const
+        {
+            auto begin = std::begin(std::forward<Range>(range));
+            auto end   = std::end(std::forward<Range>(range));
+
+            if (begin == end) {
+                using value_type =
+                    typename std::iterator_traits<decltype(begin)>::value_type;
+                return value_type{0};
+            }
+
+            auto result = *begin;
+            ++begin;
+            for (; begin != end; ++begin) {
+                result = result + *begin;
+            }
+            return result;
+        }
+    };
+
+    struct product_fn_t {
+        template <iterable Range>
+        constexpr auto operator()(Range&& range) const
+        {
+            auto begin = std::begin(std::forward<Range>(range));
+            auto end   = std::end(std::forward<Range>(range));
+
+            if (begin == end) {
+                using value_type =
+                    typename std::iterator_traits<decltype(begin)>::value_type;
+                return value_type{1};
+            }
+
+            auto result = *begin;
+            ++begin;
+            for (; begin != end; ++begin) {
+                result = result * *begin;
+            }
+            return result;
+        }
+    };
+
+    // ========================================================================
+    // factory functions
+    // ========================================================================
+
+    template <typename Func>
+    auto transform_domain(Func&& func)
     {
-        return [f = std::forward<F>(f)]<typename T>(T&& t) {
-            return [f = std::forward<F>(f),
-                    t = std::forward<T>(t)]<typename... Args>(Args&&... args) {
-                return f(t, std::forward<Args>(args)...);
-            };
+        return [func = std::forward<Func>(func)](auto&& domain) {
+            return transform_domain_view_t<
+                std::decay_t<decltype(domain)>,
+                Func>(std::forward<decltype(domain)>(domain), func);
         };
     }
 
-    // -------------------------------------------------------------
-    // common functional operations
-    // -------------------------------------------------------------
-
-    // sum: add all elements in a container
-    template <Container C>
-    DUAL constexpr auto sum(const C& container)
-    {
-        return reduce(container, std::plus<>{});
-    }
-
-    // product: multiply all elements in a container
-    template <Container C>
-    DUAL constexpr auto product(const C& container)
-    {
-        using value_t = typename C::value_type;
-        return reduce(container, std::multiplies<>{}, value_t{1});
-    }
-
-    // any: check if any element satisfies a predicate
-    template <Container C, typename F>
-    DUAL constexpr bool any_of(const C& container, F&& pred)
-    {
-        for (std::uint64_t i = 0; i < container.size(); ++i) {
-            if (std::invoke(std::forward<F>(pred), container[i])) {
-                return true;
-            }
-        }
-        return false;
-    }
-
-    // general any_of predicate combinator
-    template <typename T, typename... Predicates>
-    DUAL constexpr bool any_of(const T& value, Predicates&&... preds)
-    {
-        return (... || (std::invoke(std::forward<Predicates>(preds), value)));
-    }
-
-    // all: check if all elements satisfy a predicate
-    template <Container C, typename F>
-    DUAL constexpr bool all_of(const C& container, F&& pred)
-    {
-        for (std::uint64_t i = 0; i < container.size(); ++i) {
-            if (!std::invoke(std::forward<F>(pred), container[i])) {
-                return false;
-            }
-        }
-        return true;
-    }
-
-    // all: general predicate combinator
-    template <typename T, typename... Predicates>
-    DUAL constexpr bool all_of(const T& value, Predicates&&... preds)
-    {
-        return (... && (std::invoke(std::forward<Predicates>(preds), value)));
-    }
-
-    // filter: create a new container with elements that satisfy a predicate
-    template <Container C, typename F>
-    DUAL auto filter(const C& container, F&& pred)
-    {
-        C result{};
-        std::uint64_t result_idx = 0;
-
-        for (std::uint64_t i = 0; i < container.size(); ++i) {
-            if (std::invoke(std::forward<F>(pred), container[i])) {
-                result[result_idx++] = container[i];
-            }
-        }
-
-        // Note: For fixed-size containers like Vector, this assumes
-        // we're only using the first result_idx elements
-        return result;
-    }
-
-    // pipeline operator for functional composition
-    template <typename T, typename F>
-    DUAL constexpr auto operator|(T&& value, F&& f)
-        -> decltype(std::invoke(std::forward<F>(f), std::forward<T>(value)))
-    {
-        return std::invoke(std::forward<F>(f), std::forward<T>(value));
-    }
-
-    // create integer ranges
     constexpr auto range(std::uint64_t end)
     {
-        return integer_range_t<std::uint64_t>{end};
+        return integer_range_t<std::uint64_t>{0, end, 1};
     }
 
     constexpr auto range(std::uint64_t start, std::uint64_t end)
     {
-        return integer_range_t<std::uint64_t>{start, end};
+        return integer_range_t<std::uint64_t>{start, end, 1};
     }
 
     constexpr auto
@@ -280,56 +845,84 @@ namespace simbi::fp {
         return integer_range_t<std::uint64_t>{start, end, step};
     }
 
-    // infinite sequences with custom generators
     template <typename Generator>
     constexpr auto generate(Generator&& gen)
     {
-        return generator_range_t<Generator>{std::forward<Generator>(gen)};
+        return generator_view_t<Generator>{std::forward<Generator>(gen)};
     }
 
-    template <std::uint64_t Current, std::uint64_t End, typename F>
-    constexpr auto build_expression_impl(F&& f)
+    template <typename F>
+    constexpr auto map(F&& func)
     {
-        if constexpr (Current >= End) {
-            static_assert(Current < End, "Empty range not supported");
-        }
-        else if constexpr (Current == End - 1) {
-            // last element - just return f(Current)
-            return f(std::integral_constant<std::uint64_t, Current>{});
-        }
-        else {
-            // recursive case - f(Current) + rest
-            return f(std::integral_constant<std::uint64_t, Current>{}) +
-                   build_expression_impl<Current + 1, End>(std::forward<F>(f));
-        }
+        return map_fn_t<std::decay_t<F>>(std::forward<F>(func));
     }
 
-    template <std::uint64_t N, typename F>
-    constexpr auto build_expression_ct(F&& f)
+    template <typename Pred>
+    constexpr auto filter(Pred&& pred)
     {
-        return build_expression_impl<0, N>(std::forward<F>(f));
+        return filter_fn_t<std::decay_t<Pred>>(std::forward<Pred>(pred));
     }
 
-    // template <std::uint64_t N, typename F>
-    // constexpr auto accumulate_expression_ct(F&& f)
-    // {
-    //     // start with the first expression to determine the result type
-    //     auto result = f(std::integral_constant<std::uint64_t, 0>{});
+    template <iterable Second>
+    constexpr auto zip(Second&& second)
+    {
+        return zip_fn_t<std::decay_t<Second>>(std::forward<Second>(second));
+    }
 
-    //     helpers::compile_time_for<1, N>([&](auto idx_constant) {
-    //         result = result + f(idx_constant);
-    //     });
+    constexpr auto take(std::size_t count) { return take_fn_t{count}; }
 
-    //     return result;
-    // }
+    template <typename F>
+    constexpr auto for_each(F&& func)
+    {
+        return for_each_fn_t<std::decay_t<F>>(std::forward<F>(func));
+    }
 
-    // take first N from any range
-    // template <LazyRange R>
-    // constexpr auto take(const R& range, std::uint64_t n)
-    // {
-    //     return take_range_t<R>{range, n};
-    // }
+    template <typename Container = void>
+    constexpr auto collect = collect_t<Container>{};
 
+    constexpr auto sum     = sum_fn_t{};
+    constexpr auto product = product_fn_t{};
+
+    template <typename Pred>
+    constexpr auto any_of(Pred&& pred)
+    {
+        return any_of_fn_t<std::decay_t<Pred>>(std::forward<Pred>(pred));
+    }
+
+    template <typename Pred>
+    constexpr auto all_of(Pred&& pred)
+    {
+        return all_of_fn_t<std::decay_t<Pred>>(std::forward<Pred>(pred));
+    }
+
+    template <typename Pred>
+    constexpr auto none_of(Pred&& pred)
+    {
+        return none_of_fn_t<std::decay_t<Pred>>(std::forward<Pred>(pred));
+    }
+
+    // ========================================================================
+    // convenience helpers
+    // ========================================================================
+
+    // unpack_map for tuples/pairs
+    template <typename F>
+    constexpr auto unpack_map(F&& func)
+    {
+        return map([func = std::forward<F>(func)](const auto& tuple) {
+            return std::apply(func, tuple);
+        });
+    }
+
+    // binary zip for convenience
+    template <iterable First, iterable Second>
+    constexpr auto zip(First&& first, Second&& second)
+    {
+        return zip_view_t<std::decay_t<First>, std::decay_t<Second>>(
+            std::forward<First>(first),
+            std::forward<Second>(second)
+        );
+    }
 }   // namespace simbi::fp
 
-#endif
+#endif   // SIMBI_FP_MINIMAL_HPP

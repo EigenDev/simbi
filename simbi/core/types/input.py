@@ -51,5 +51,3 @@ class Solver(str, ExtendedEnum):
     HLLE = "hlle"
     HLLC = "hllc"
     HLLD = "hlld"
-    AUSM_PLUS = "ausm_plus"
-    SLAU = "slau"

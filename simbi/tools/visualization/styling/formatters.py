@@ -8,9 +8,9 @@ from numpy.typing import NDArray
 class AxisFormatter:
     """Formats plot axes based on data and configuration"""
 
-    def format_polar_axis(self, ax, setup, config, field_info):
+    def format_polar_axis(self, ax, mesh, config, field_info):
         """Format a polar axis based on plot type"""
-        half_sphere = setup["x2max"] <= np.pi / 2
+        half_sphere = mesh["x2max"] <= np.pi / 2
         nfields = len(config["plot"]["fields"])
         if half_sphere and nfields <= 2:
             theta_min = -90
@@ -25,8 +25,8 @@ class AxisFormatter:
         ax.set_thetamax(theta_max)
         ax.set_yticklabels([])  # Remove radial labels
         ax.set_xticklabels([])  # Remove angular labels
-        ax.set_rmin(setup["x1min"])
-        ax.set_rmax(config["style"]["xmax"] or setup["x1max"])
+        ax.set_rmin(mesh["x1min"])
+        ax.set_rmax(config["style"]["xmax"] or mesh["x1max"])
         if half_sphere:
             ax.set_position([0.1, -0.45, 0.8, 2])
 

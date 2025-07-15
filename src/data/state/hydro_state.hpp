@@ -1,6 +1,7 @@
 #ifndef SIMBI_STATE_HYDRO_STATE_HPP
 #define SIMBI_STATE_HYDRO_STATE_HPP
 
+#include "compute/math/domain.hpp"
 #include "compute/math/field.hpp"
 #include "config.hpp"
 #include "core/utility/bimap.hpp"
@@ -11,22 +12,22 @@
 #include "data/state/express_t.hpp"
 #include "hydro_state_types.hpp"
 #include "physics/eos/isothermal.hpp"
-#include "physics/hydro/ib/collector.hpp"
-#include "physics/hydro/ib/component_body_system.hpp"
-#include "physics/hydro/ib/component_generator.hpp"
+// #include "physics/hydro/ib/collector.hpp"
+// #include "physics/hydro/ib/component_body_system.hpp"
+// #include "physics/hydro/ib/component_generator.hpp"
 #include "system/io/exceptions.hpp"
 #include "system/mesh/mesh_config.hpp"
-#include "system/mesh/solver.hpp"
 #include <bit>
 #include <cstddef>
 #include <cstdint>
 #include <functional>
-#include <memory>
+// #include <memory>
+#include <string>
 
 namespace simbi::state {
     using namespace base;
     using namespace mesh;
-    using namespace ibsystem;
+    // using namespace ibsystem;
 
     /**
      * modern implementation of hydro_state_t using mesh abstractions
@@ -43,7 +44,7 @@ namespace simbi::state {
         // type definitions
         using conserved_t = typename vtraits<R, Dims, EoS>::conserved_type;
         using primitive_t = typename vtraits<R, Dims, EoS>::primitive_type;
-        using geo_t       = geometry_solver_t<Dims, G>;
+        using mesh_t      = mesh_config_t<Dims, G>;
         using eos_t       = EoS;
 
         static constexpr std::uint64_t dimensions     = Dims;
@@ -65,13 +66,11 @@ namespace simbi::state {
         vector_t<field_t<real, Dims>, Dims> bstaggs;
 
         // geometric mesh config
-        geo_t geom_solver;
-
-        bool has_sources{false};
+        mesh_t mesh;
 
         // immersed body stuff
-        std::unique_ptr<ComponentBodySystem<real, Dims>> body_system;
-        std::unique_ptr<GridBodyDeltaCollector<real, Dims>> collector;
+        // std::unique_ptr<ComponentBodySystem<real, Dims>> body_system;
+        // std::unique_ptr<GridBodyDeltaCollector<real, Dims>> collector;
 
         // simulation metadata
         struct meta_data_t {
@@ -99,11 +98,14 @@ namespace simbi::state {
             Reconstruction reconstruction;
             Timestepping timestepping;
             vector_t<BoundaryCondition, 2 * Dims> boundary_conditions;
-            uarray<3> resolution;
+            iarray<3> resolution;
 
             // flags
             bool is_mhd;
             bool is_relativistic;
+
+            // strings
+            std::string data_dir;
         } metadata;
 
         struct sources_t {
@@ -113,13 +115,7 @@ namespace simbi::state {
         } sources;
 
         // error handling
-        bool in_failure_state{false};
-        // std::atomic<bool> is_invalid{false};
-        // std::atomic<ErrorCode> first_error_code{ErrorCode::NONE};
-        // std::atomic<std::uint64_t> first_error_linear_index{0};
-
-        // default constructor
-        hydro_state_t() = default;
+        bool in_failure_state;
 
         /**
          * create hydro_state from init conditions and numpy arrays with
@@ -134,121 +130,94 @@ namespace simbi::state {
             const InitialConditions& init
         )
         {
-            hydro_state_t state;
 
             // setup geometric config
-            state.geom_solver = {
-              .config = mesh_config_t<Dims>::from_init_conditions(
-                  init,
-                  scale_factor,
-                  scale_factor_derivative
-              )
+            auto mesh = mesh_config_t<Dims, G>::from_init_conditions(
+                init,
+                scale_factor,
+                scale_factor_derivative
+            );
+
+            auto [cons, prims, flux_vec, bstaggs] =
+                setup_hydro_state(cons_data, prim_data, bfield_data, init);
+
+            return hydro_state_t{
+              .cons             = std::move(cons),
+              .prim             = std::move(prims),
+              .flux             = {std::move(flux_vec)},
+              .bstaggs          = {std::move(bstaggs)},
+              .mesh             = std::move(mesh),
+              .metadata         = setup_metadata(init),
+              .sources          = setup_sources(init),
+              .in_failure_state = false
             };
-
-            setup_hydro_state(cons_data, prim_data, bfield_data, state, init);
-
-            // set up metadata from init
-            setup_metadata(state, init);
-
-            // set up sources from init
-            setup_sources(state, init);
-
-            return state;
-        }
-
-        /**
-         * sync all memory to device for gpu execution
-         */
-        void to_gpu()
-        {
-            cons.to_gpu();
-            prim.to_gpu();
-
-            for (std::uint64_t dir = 0; dir < Dims; ++dir) {
-                flux[dir].to_gpu();
-            }
-
-            if constexpr (is_mhd) {
-                for (std::uint64_t dir = 0; dir < Dims; ++dir) {
-                    bstaggs[dir].to_gpu();
-                }
-            }
-        }
-
-        /**
-         * sync all memory back to host
-         */
-        void to_cpu()
-        {
-            cons.to_cpu();
-            prim.to_cpu();
-
-            for (std::uint64_t dir = 0; dir < Dims; ++dir) {
-                flux[dir].to_cpu();
-            }
-
-            if constexpr (is_mhd) {
-                for (std::uint64_t dir = 0; dir < Dims; ++dir) {
-                    bstaggs[dir].to_cpu();
-                }
-            }
-        }
-
-        /*
-         * get domain
-         */
-        auto domain() const
-        {
-            const auto& mesh_config = geom_solver.config;
-            return make_space<dimensions>(mesh_config.shape);
         }
 
       private:
-        static void setup_hydro_state(
+        static auto setup_hydro_state(
             void* cons_data,
             void* prim_data,
             vector_t<void*, 3> bstaggs,
-            hydro_state_t& state,
             const InitialConditions& init
         )
         {
-            state.cons = field_t<conserved_t, Dims>::wrap_external(
+            const auto full_shape = init.get_full_shape<dimensions>();
+
+            auto cons = field_t<conserved_t, Dims>::wrap_numpy(
                 std::bit_cast<conserved_t*>(cons_data),
-                {init.nz, init.ny, init.nx},
-                false   // don't own memory
+                full_shape
             );
 
-            state.prim = field_t<primitive_t, Dims>::wrap_external(
+            auto prims = field_t<primitive_t, Dims>::wrap_numpy(
                 std::bit_cast<primitive_t*>(prim_data),
-                {init.nz, init.ny, init.nx},
-                false   // don't own memory
+                full_shape
             );
+
+            vector_t<field_t<real, Dims>, Dims> bstaggs_vec;
+            vector_t<field_t<conserved_t, Dims>, Dims> flux_vec;
 
             // staggered fluxes and fields
-            const auto [nia, nja, nka] = init.active_zones();
+            const auto active_sizes = init.get_active_shape<dimensions>();
             for (std::uint64_t dir = 0; dir < Dims; ++dir) {
                 const auto mhd_b = 2 * init.is_mhd;
-                const auto nivc  = nia + (dir == 0) + mhd_b * (dir != 0);
-                const auto njvc  = nja + (dir == 1) + mhd_b * (dir != 1);
-                const auto nkvc  = nka + (dir == 2) + mhd_b * (dir != 2);
-                state.flux[dir] =
-                    field_t<conserved_t, Dims>::zeros({nkvc, njvc, nivc});
+
+                // create staggered shape: add 1 to the direction we're
+                // staggering in
+                iarray<Dims> staggered_shape = active_sizes;
+                staggered_shape[dir] += 1;
+
+                // add MHD offset to other dimensions
+                for (std::uint64_t d = 0; d < Dims; ++d) {
+                    if (d != dir) {
+                        staggered_shape[d] += mhd_b;
+                    }
+                }
+
+                auto flux_field =
+                    field_t<conserved_t, Dims>::zeros(staggered_shape);
+                flux_vec[dir] = std::move(flux_field);
+
                 if constexpr (is_mhd) {
-                    state.bstaggs[dir] = field_t<real, Dims>::wrap_external(
+                    bstaggs_vec[dir] = field_t<real, Dims>::wrap_numpy(
                         std::bit_cast<real*>(bstaggs[dir]),
-                        {nkvc, njvc, nivc},
-                        false   // don't own memory
+                        staggered_shape
                     );
                 }
             }
+
+            return std::make_tuple(
+                std::move(cons),
+                std::move(prims),
+                std::move(flux_vec),
+                std::move(bstaggs_vec)
+            );
         }
         /**
          * set up metadata from init conditions
          */
-        static void
-        setup_metadata(hydro_state_t& state, const InitialConditions& init)
+        static auto setup_metadata(const InitialConditions& init)
         {
-            state.metadata = {
+            meta_data_t metadata = {
               .gamma          = init.gamma,
               .plm_theta      = init.plm_theta,
               .cfl            = init.cfl,
@@ -269,78 +238,89 @@ namespace simbi::state {
               .boundary_conditions = vector_t<BoundaryCondition, 2 * Dims>{},
               .resolution          = {init.nz, init.ny, init.nx},
               .is_mhd              = init.is_mhd,
-              .is_relativistic     = init.is_relativistic
+              .is_relativistic     = init.is_relativistic,
+              .data_dir            = init.data_directory
             };
 
             // set boundary conditions from init
             for (std::uint64_t ii = 0; ii < 2 * Dims; ++ii) {
-                state.metadata.boundary_conditions[ii] =
+                auto logical_dim = ii / 2;   // which dimension (x=0, y=1, z=2)
+                auto side        = ii % 2;   // which side (inner=0, outer=1)
+                // map to array order
+                auto array_dim = (Dims - 1) - logical_dim;
+                // convert back to flat index
+                auto array_index = array_dim * 2 + side;
+                metadata.boundary_conditions[array_index] =
                     deserialize<BoundaryCondition>(
                         init.boundary_conditions[ii]
                     );
             }
+
+            return metadata;
         }
 
         /**
          * set up sources from init conditions
          */
-        static void
-        setup_sources(hydro_state_t& state, const InitialConditions& init)
+        static auto setup_sources(const InitialConditions& init)
         {
-            state.sources.hydro_source =
+            auto hydro =
                 expression_t<Dims>::from_config(init.hydro_source_expressions);
 
-            state.sources.gravity_source = expression_t<Dims>::from_config(
+            auto grav = expression_t<Dims>::from_config(
                 init.gravity_source_expressions
             );
 
+            vector_t<expression_t<Dims>, 2 * Dims> bc_sources;
+
             // set up boundary condition sources
-            state.sources.bc_sources[0] =
+            bc_sources[0] =
                 expression_t<Dims>::from_config(init.bx1_inner_expressions);
-            state.sources.bc_sources[1] =
+            bc_sources[1] =
                 expression_t<Dims>::from_config(init.bx1_outer_expressions);
 
             if constexpr (Dims >= 2) {
-                state.sources.bc_sources[2] =
+                bc_sources[2] =
                     expression_t<Dims>::from_config(init.bx2_inner_expressions);
-                state.sources.bc_sources[3] =
+                bc_sources[3] =
                     expression_t<Dims>::from_config(init.bx2_outer_expressions);
             }
 
             if constexpr (Dims >= 3) {
-                state.sources.bc_sources[4] =
+                bc_sources[4] =
                     expression_t<Dims>::from_config(init.bx3_inner_expressions);
-                state.sources.bc_sources[5] =
+                bc_sources[5] =
                     expression_t<Dims>::from_config(init.bx3_outer_expressions);
             }
 
-            // if any hydro source or gravity source is enabled,
-            // set has_sources to true
-            state.has_sources = state.sources.hydro_source.enabled ||
-                                state.sources.gravity_source.enabled;
+            return sources_t{
+              .hydro_source   = std::move(hydro),
+              .gravity_source = std::move(grav),
+              .bc_sources     = std::move(bc_sources)
+            };
         }
 
         /*
          * Setup the body and collector system if provided
          */
-        static void
-        init_body_system(hydro_state_t& state, const InitialConditions& init)
-        {
-            state.body_system =
-                ibsystem::create_body_system_from_config<real, Dims>(
-                    state.geom_solver.config,
-                    init
-                );
+        // static void
+        // init_body_system(hydro_state_t& state, const InitialConditions& init)
+        // {
+        //     state.body_system =
+        //         ibsystem::create_body_system_from_config<real, Dims>(
+        //             state.mesh,
+        //             init
+        //         );
 
-            if (state.body_system) {
-                const auto [nax, nay, naz] = init.active_zones();
-                state.collector            = util::make_unique<
-                               ibsystem::GridBodyDeltaCollector<real, Dims>>(
-                    {naz, nay, nax},
-                    2   // max bodies
-                );
-            }
-        }
+        //     if (state.body_system) {
+        //         const auto [nax, nay, naz] = init.active_zones();
+        //         state.collector            = util::make_unique<
+        //                        ibsystem::GridBodyDeltaCollector<real, Dims>>(
+        //             {naz, nay, nax},
+        //             2   // max bodies
+        //         );
+        //     }
+        // }
 
         /**
          * get shock smoother type from init conditions

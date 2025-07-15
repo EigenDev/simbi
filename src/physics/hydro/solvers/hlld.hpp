@@ -110,14 +110,14 @@ namespace simbi::hydro::rmhd {
         // Left side Eq.(49)
         real ksq      = dot(kL, kL);
         real kdb      = dot(kL, bc);
-        const auto yL = (1.0 - ksq) / (etaL * dkn - kdb);
+        const auto yL = (1.0 - ksq) / (etaL * dkn - kdb * dkn);
         // Left side Eq.(47)
         const auto vcL = kL - ((bc * (1.0 - ksq) / (etaL - kdb)));
 
         // Right side Eq. (49)
         ksq           = dot(kR, kR);
         kdb           = dot(kR, bc);
-        const auto yR = (1.0 - ksq) / (etaR * dkn - kdb);
+        const auto yR = (1.0 - ksq) / (etaR * dkn - kdb * dkn);
         // Right side Eq.(47)
         const auto vcR = kR - ((bc * (1.0 - ksq) / (etaR - kdb)));
 
@@ -141,7 +141,7 @@ namespace simbi::hydro::rmhd {
         eqn54ok &= (lam[1] - vR[index(nhat)]) > 0.0;
         eqn54ok &= (enthalpy[1] - p) > 0.0;
         eqn54ok &= (enthalpy[0] - p) > 0.0;
-        eqn54ok &= (kL[index(nhat)] - lam[index(nhat)]) > -global::epsilon;
+        eqn54ok &= (kL[index(nhat)] - lam[0]) > -global::epsilon;
         eqn54ok &= (lam[1] - kR[index(nhat)]) > -global::epsilon;
 
         if (!eqn54ok) {
@@ -151,11 +151,11 @@ namespace simbi::hydro::rmhd {
         // Fill in the Alfven (L / R) and Contact Prims
         praL.vel      = vL;
         praL.mag      = bL;
-        praL.alfven() = kL[0];
+        praL.alfven() = alfL;
 
         praR.vel      = vR;
         praR.mag      = bR;
-        praR.alfven() = kR[0];
+        praR.alfven() = alfR;
 
         prC.vel = 0.5 * (vcL + vcR);
         prC.mag = bc;
@@ -215,7 +215,7 @@ namespace simbi::hydro::rmhd {
             // the normal component of the magnetic field is assumed to
             // be continuous across the interface, so bnL = bnR = bn
             // const auto bn = bface;
-            const real& bn = dot(primL.mag, nhat);
+            const real& bn = dot(hll_state.mag, nhat);
 
             // Eq. (12)
             const vector_t<conserved_t, 2> r{uL * aL - fL, uR * aR - fR};

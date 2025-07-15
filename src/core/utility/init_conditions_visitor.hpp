@@ -50,9 +50,9 @@
 #ifndef INIT_CONDITIONS_VISITOR_HPP
 #define INIT_CONDITIONS_VISITOR_HPP
 
-#include "config.hpp"        // for real, std::uint64_t types
+#include "config.hpp"        // for real, std::int64_t types
 #include "config_dict.hpp"   // for config_dict_t
-#include "core/types/alias.hpp"
+#include <cstdint>
 #include <string>
 #include <utility>
 #include <vector>
@@ -79,9 +79,9 @@ namespace simbi {
 
         // Resolution fields
         virtual void visit_resolution(
-            std::uint64_t& nx,
-            std::uint64_t& ny,
-            std::uint64_t& nz
+            std::int64_t& nx,
+            std::int64_t& ny,
+            std::int64_t& nz
         ) = 0;
 
         // Physics parameters
@@ -151,7 +151,7 @@ namespace simbi {
         // Output settings
         virtual void visit_output_settings(
             std::string& data_directory,
-            std::uint64_t& checkpoint_index
+            std::int64_t& checkpoint_index
         ) = 0;
 
         // Other computed properties

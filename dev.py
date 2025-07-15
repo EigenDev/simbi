@@ -1080,22 +1080,22 @@ def build_simbi(args: argparse.Namespace, install: bool = False) -> tuple[str, s
     simbi_env = os.environ.copy()
 
     # Set up C compiler
-    if "CC" not in simbi_env:
-        simbi_env["CC"] = get_tool("cc") or ""
-        if simbi_env["CC"]:
-            logger.warning(f"C compiler not set, using {simbi_env['CC']}")
-        else:
-            logger.error("C compiler not found")
-            sys.exit(1)
+    # if "CC" not in simbi_env:
+    #     simbi_env["CC"] = get_tool("cc") or ""
+    #     if simbi_env["CC"]:
+    #         logger.warning(f"C compiler not set, using {simbi_env['CC']}")
+    #     else:
+    #         logger.error("C compiler not found")
+    #         sys.exit(1)
 
-    # Set up C++ compiler
-    if "CXX" not in simbi_env:
-        simbi_env["CXX"] = get_tool("c++") or ""
-        if simbi_env["CXX"]:
-            logger.warning(f"C++ compiler not set, using {simbi_env['CXX']}")
-        else:
-            logger.error("C++ compiler not found")
-            sys.exit(1)
+    # # Set up C++ compiler
+    # if "CXX" not in simbi_env:
+    #     simbi_env["CXX"] = get_tool("c++") or ""
+    #     if simbi_env["CXX"]:
+    #         logger.warning(f"C++ compiler not set, using {simbi_env['CXX']}")
+    #     else:
+    #         logger.error("C++ compiler not found")
+    #         sys.exit(1)
 
     # Find GPU runtime and HDF5 include paths
     hdf5_include = find_hdf5_include()

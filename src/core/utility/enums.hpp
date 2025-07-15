@@ -101,8 +101,6 @@ namespace simbi {
         HLLD,
         HLLC,
         HLLE,
-        AUSM_PLUS,
-        SLAU,
     };
 
     enum class TIMESTEP_TYPE {
@@ -258,6 +256,13 @@ namespace simbi {
         // TODO: add more capabilities as needed
     };
 
+    // component identifiers for magnetic field directions
+    enum class magnetic_comp_t : std::uint64_t {
+        I = 2,   // B1 component
+        J = 1,   // B2 component
+        K = 0    // B3 component
+    };
+
     constexpr auto comp_wave_speed    = WaveSpeedEstimate::MIGNONE_AND_BODO_05;
     constexpr auto comp_ct_type       = CTAlgo::CONTACT;
     constexpr auto comp_slope_limiter = LIMITER::MINMOD;
@@ -311,8 +316,6 @@ namespace simbi {
         {Solver::HLLD, "hlld"},
         {Solver::HLLC, "hllc"},
         {Solver::HLLE, "hlle"},
-        {Solver::AUSM_PLUS, "ausm_plus"},
-        {Solver::SLAU, "slau"}
     );
 
     REGISTER_ENUM_BIMAP(

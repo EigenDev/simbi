@@ -4,6 +4,7 @@
 #include "config.hpp"               // for global::using_four_velocity
 #include "core/base/concepts.hpp"   // for is_hydro_primitive_c, is_mhd_primitive_c, is_rmhd_c, is_srhd_c, is_hydro_conserved_c
 #include "data/containers/vector.hpp"   // for vector_t
+#include "physics/em/electromagnetism.hpp"
 #include "physics/eos/isothermal.hpp"   // for isothermal_gas_eos_t
 #include <concepts>                     // for std::same_as
 #include <cstddef>
@@ -129,7 +130,12 @@ namespace simbi::hydro {
     {
         using eos_t = typename primitive_t::eos_t;
         if constexpr (std::same_as<eos_t, isothermal_gas_eos_t>) {
-            return 0.0;
+            if constexpr (!is_mhd_primitive_c<primitive_t>) {
+                return 0.0;
+            }
+            else {
+                return 0.5 * vecops::dot(prim.mag, prim.mag);
+            }
         }
         const auto eos = eos_t{gamma};
         if constexpr (is_newtonian_c<primitive_t>) {
@@ -191,13 +197,24 @@ namespace simbi::hydro {
     }
 
     template <is_hydro_primitive_c primitive_t>
-    DEV constexpr auto proper_velocity(const primitive_t& prim, std::size_t dir)
+    DEV constexpr auto
+    proper_velocity(const primitive_t& prim, std::size_t comp)
     {
+        if (comp == 2) {
+            if constexpr (primitive_t::dimensions < 2) {
+                return 0.0;   // no y-velocity in 1D
+            }
+        }
+        if (comp == 3) {
+            if constexpr (primitive_t::dimensions < 3) {
+                return 0.0;   // no z-velocity in 2D or 1D
+            }
+        }
         if constexpr (global::using_four_velocity) {
-            return prim.vel[dir] / lorentz_factor(prim);
+            return prim.vel[comp - 1] / lorentz_factor(prim);
         }
         else {
-            return prim.vel[dir];
+            return prim.vel[comp - 1];
         }
     }
 
@@ -215,22 +232,23 @@ namespace simbi::hydro {
     template <is_hydro_primitive_c primitive_t>
     DEV constexpr auto to_conserved(const primitive_t& prim, real gamma)
     {
+        const auto den    = labframe_density(prim);
         using conserved_t = typename primitive_t::counterpart_t;
         if constexpr (is_mhd_primitive_c<primitive_t>) {
             return conserved_t{
-              .den = labframe_density(prim),
+              .den = den,
               .mom = linear_momentum(prim, gamma),
               .nrg = energy_density(prim, gamma),
               .mag = prim.mag,
-              .chi = prim.chi
+              .chi = den * prim.chi
             };
         }
         else {
             return conserved_t{
-              .den = labframe_density(prim),
+              .den = den,
               .mom = linear_momentum(prim, gamma),
               .nrg = energy_density(prim, gamma),
-              .chi = prim.chi
+              .chi = den * prim.chi
             };
         }
     }
@@ -266,27 +284,31 @@ namespace simbi::hydro {
             };
         }
         else if constexpr (is_rmhd_c<primitive_t>) {
-            const auto bn  = vecops::dot(prim.mag, nhat);
-            const auto vdb = vecops::dot(prim.vel, prim.mag);
-            const auto w   = lorentz_factor(prim);
-            const auto bmu = prim.mag / w + prim.vel * w * vdb;
+            const auto bn        = vecops::dot(prim.mag, nhat);
+            const auto vdb       = vecops::dot(prim.vel, prim.mag);
+            const auto w         = lorentz_factor(prim);
+            const auto bmu       = prim.mag / w + prim.vel * w * vdb;
+            const auto efield    = em::electric_field(prim);
+            const auto induction = vecops::cross(nhat, efield);
             return conserved_t{
               .den = den * vn,
               .mom = mom * vn + total_pressure(prim) * nhat - bmu * bn / w,
-              .nrg = mn - vn * den,
-              .mag = prim.mag,
+              .nrg = mn - den * vn,
+              .mag = induction,
               .chi = den * vn * prim.chi
             };
         }
         else if constexpr (is_mhd_primitive_c<primitive_t>) {   // MHD
-            const auto bn   = vecops::dot(prim.mag, nhat);
-            const auto vdb  = vecops::dot(prim.vel, prim.mag);
-            const auto bvec = prim.mag;
+            const auto bn        = vecops::dot(prim.mag, nhat);
+            const auto vdb       = vecops::dot(prim.vel, prim.mag);
+            const auto bvec      = prim.mag;
+            const auto efield    = em::electric_field(prim);
+            const auto induction = vecops::cross(nhat, efield);
             return conserved_t{
               .den = den * vn,
               .mom = mom * vn + total_pressure(prim) * nhat - bvec * bn,
-              .nrg = mn,
-              .mag = prim.mag,
+              .nrg = (ed + total_pressure(prim)) * vn,
+              .mag = induction,
               .chi = den * vn * prim.chi
             };
         }

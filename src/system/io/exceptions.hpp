@@ -65,6 +65,9 @@ namespace simbi {
     template <std::uint64_t Dims>
     using uarray = vector_t<std::uint64_t, Dims>;
 
+    template <std::uint64_t Dims>
+    using iarray = vector_t<std::int64_t, Dims>;
+
     enum class ErrorCode : uint32_t {
         NONE                  = 0,
         NEGATIVE_PRESSURE     = 1 << 0,
@@ -151,7 +154,7 @@ namespace simbi {
     };
 
     template <std::uint64_t Dims>
-    std::string format_coord(const uarray<Dims>& coord)
+    std::string format_coord(const iarray<Dims>& coord)
     {
         std::string result = "(";
         for (std::uint64_t i = 0; i < Dims; ++i) {

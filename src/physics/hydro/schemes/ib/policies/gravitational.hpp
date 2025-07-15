@@ -67,7 +67,7 @@ namespace simbi::ibsystem::body_functions {
             std::uint64_t body_idx,
             const Body<T, Dims>& body,
             const Primitive& prim,
-            const uarray<Dims>& coords,
+            const iarray<Dims>& coords,
             real gamma,
             T dt
         )

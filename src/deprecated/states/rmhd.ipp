@@ -282,7 +282,7 @@ RMHD<dim>::cons2prim_single(const auto& cons) const
     const real eps = w * (qbar - mu * rbar_sq) + gbsq / (1.0 + w);
     // zero-temperature limit for gamma-law EoS
     constexpr auto pfloor = 1.0e-3;
-    const real epshat     = my_max(eps, pfloor / (rhohat * (gamma - 1.0)));
+    const real epshat     = std::max(eps, pfloor / (rhohat * (gamma - 1.0)));
 
     // Equation (43)
     const real pg = (gamma - 1.0) * rhohat * epshat;

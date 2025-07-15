@@ -8,6 +8,7 @@
 #include "core/utility/enums.hpp"
 #include <array>
 #include <cmath>
+#include <concepts>
 #include <cstddef>
 #include <cstdint>
 #include <functional>
@@ -34,10 +35,14 @@ namespace simbi {
         template <VectorLike Vec1, VectorLike Vec2>
         DUAL constexpr auto dot(const Vec1& a, const Vec2& b)
         {
-            const auto mult = fp::zip(a, b, [](const auto& x, const auto& y) {
-                return x * y;
-            });
-            return fp::sum(mult);
+            using T        = typename Vec1::value_type;
+            using U        = typename Vec2::value_type;
+            using result_t = detail::promote_t<T, U>;
+            return fp::zip(a, b) |
+                   fp::unpack_map([](auto l, auto m) -> result_t {
+                       return m * l;
+                   }) |
+                   fp::sum;
         }
 
         // norm
@@ -53,10 +58,9 @@ namespace simbi {
         {
             using result_t = detail::promote_t<typename Vec::value_type, real>;
             const auto n   = norm(vec);
-            return n > 0 ? fp::map(
-                               vec,
-                               [n](const auto& x) -> result_t { return x / n; }
-                           )
+            return n > 0 ? vec | fp::map([n](const auto& x) -> result_t {
+                               return x / n;
+                           }) | fp::collect<vector_t<result_t, Vec::dimensions>>
                          : vec;
         }
 
@@ -321,20 +325,33 @@ namespace simbi {
             return Nothing;
         }
 
+        DUAL auto reverse() const
+        {
+            // traditional for loop version
+            // vector_t<T, Dims> result;
+            // for (std::uint64_t ii = 0; ii < Dims; ++ii) {
+            //     result[ii] = storage[Dims - ii - 1];
+            // }
+            // return result;
+            return *this | fp::map([this](const auto& x) -> T {
+                return storage[Dims - 1 - (&x - &storage[0])];
+            }) | fp::collect<vector_t<T, Dims>>;
+        }
+
         // data access for algorithms
-        DUAL constexpr T* data() { return storage; }
-        DUAL constexpr const T* data() const { return storage; }
+        DUAL constexpr T* data() { return &storage[0]; }
+        DUAL constexpr const T* data() const { return &storage[0]; }
 
         // size and capacity
         DUAL constexpr std::uint64_t size() const { return Dims; }
 
         // iterators for standard algorithms (forward)
-        DUAL constexpr T* begin() { return storage; }
-        DUAL constexpr T* end() { return storage + Dims; }
-        DUAL constexpr T* begin() const { return storage; }
-        DUAL constexpr T* end() const { return storage + Dims; }
-        DUAL constexpr T* cbegin() const { return storage; }
-        DUAL constexpr T* cend() const { return storage + Dims; }
+        DUAL constexpr T* begin() { return &storage[0]; }
+        DUAL constexpr T* end() { return &storage[0] + Dims; }
+        DUAL constexpr const T* begin() const { return &storage[0]; }
+        DUAL constexpr const T* end() const { return &storage[0] + Dims; }
+        DUAL constexpr const T* cbegin() const { return &storage[0]; }
+        DUAL constexpr const T* cend() const { return &storage[0] + Dims; }
 
         // reverse iterators
         DUAL constexpr std::reverse_iterator<T*> rbegin()
@@ -383,9 +400,9 @@ namespace simbi {
             const auto n   = norm();
             using result_t = detail::promote_t<T, decltype(n)>;
             if (n > T{0}) {
-                return fp::map(*this, [n](const auto& x) -> result_t {
+                return *this | fp::map([n](const auto& x) -> result_t {
                     return x / n;
-                });
+                }) | fp::collect<vector_t<result_t, Dims>>;
             }
             return *this;
         }
@@ -400,7 +417,25 @@ namespace simbi {
             // }
             // return result;
 
-            return fp::map(*this, [](const T& x) { return -x; });
+            return *this |
+                   fp::map([](const auto& x) { return -x; }) |
+                   fp::collect<vector_t<T, Dims>>;
+        }
+
+        // comparison operators
+        DUAL constexpr bool operator==(const vector_t& other) const
+        {
+            for (std::uint64_t ii = 0; ii < Dims; ++ii) {
+                if (storage[ii] != other[ii]) {
+                    return false;
+                }
+            }
+            return true;
+        }
+
+        DUAL constexpr bool operator!=(const vector_t& other) const
+        {
+            return !(*this == other);
         }
 
         // compound assignment (+=, -=, *=, /=)
@@ -441,8 +476,14 @@ namespace simbi {
         {
             if constexpr (Dims == 4) {
                 // special case for 4-vectors (spacetime vectors)
-                return -storage[0] * other[0] + storage[1] * other[1] +
-                       storage[2] * other[2] + storage[3] * other[3];
+                return -storage[0] *
+                       other[0] +
+                       storage[1] *
+                       other[1] +
+                       storage[2] *
+                       other[2] +
+                       storage[3] *
+                       other[3];
             }
             else {
                 // general case for lower dimensions
@@ -456,8 +497,12 @@ namespace simbi {
 
         DUAL constexpr auto spatial_dot(const auto& other) const
         {
-            return storage[1] * other[0] + storage[2] * other[1] +
-                   storage[3] * other[2];
+            return storage[1] *
+                   other[0] +
+                   storage[2] *
+                   other[1] +
+                   storage[3] *
+                   other[2];
         }
 
         // structured binding support
@@ -513,15 +558,21 @@ namespace simbi {
         }
     };
 
+    template <typename... Args>
+    vector_t(Args...) -> vector_t<std::common_type_t<Args...>, sizeof...(Args)>;
+
     // vector-like scalar multiplication
     template <VectorLike Vec, typename U>
     DUAL constexpr auto operator*(const Vec& vec, U scalar)
         requires(std::is_arithmetic_v<U>)
     {
         using result_t = detail::promote_t<typename Vec::value_type, U>;
-        return fp::map(vec, [scalar](const auto& x) -> result_t {
-            return static_cast<result_t>(scalar) * x;
-        });
+        return vec |
+               fp::map([scalar](const auto& x) -> result_t {
+                   return static_cast<result_t>(x) *
+                          static_cast<result_t>(scalar);
+               }) |
+               fp::collect<vector_t<result_t, Vec::dimensions>>;
     }
 
     template <VectorLike Vec, typename U>
@@ -529,9 +580,12 @@ namespace simbi {
         requires(std::is_arithmetic_v<U>)
     {
         using result_t = detail::promote_t<typename Vec::value_type, U>;
-        return fp::map(vec, [scalar](const auto& x) -> result_t {
-            return static_cast<result_t>(scalar) * x;
-        });
+        return vec |
+               fp::map([scalar](const auto& x) -> result_t {
+                   return static_cast<result_t>(x) *
+                          static_cast<result_t>(scalar);
+               }) |
+               fp::collect<vector_t<result_t, Vec::dimensions>>;
     }
 
     // vector-like scalar division
@@ -540,9 +594,12 @@ namespace simbi {
         requires(std::is_arithmetic_v<U>)
     {
         using result_t = detail::promote_t<typename Vec::value_type, U>;
-        return fp::map(vec, [scalar](const auto& x) -> result_t {
-            return static_cast<result_t>(x) / static_cast<result_t>(scalar);
-        });
+        return vec |
+               fp::map([scalar](const auto& x) -> result_t {
+                   return static_cast<result_t>(x) /
+                          static_cast<result_t>(scalar);
+               }) |
+               fp::collect<vector_t<result_t, Vec::dimensions>>;
     }
 
     // vector-like scalar multiply assignment
@@ -612,52 +669,52 @@ namespace simbi {
     }
 
     namespace unit_vectors {
+
         template <std::uint64_t Dims>
         DEV constexpr auto canonical_basis(std::uint64_t i)
         {
-            if constexpr (Dims == 1) {
-                // Return a vector directly instead of referencing static data
-                return (i == 1) ? vector_t<std::uint64_t, 1>{1}
-                                : vector_t<std::uint64_t, 1>{0};
+            vector_t<std::uint64_t, Dims> basis{0};
+            if (i > 0 && i <= Dims) {
+                basis[i - 1] = 1;   // 1-indexed to 0-indexed
             }
-            else if constexpr (Dims == 2) {
-                if (i == 1) {
-                    return vector_t<std::uint64_t, 2>{1, 0};
-                }
-                else if (i == 2) {
-                    return vector_t<std::uint64_t, 2>{0, 1};
-                }
-                else {
-                    return vector_t<std::uint64_t, 2>{0, 0};
-                }
-            }
-            else {
-                if (i == 1) {
-                    return vector_t<std::uint64_t, 3>{1, 0, 0};
-                }
-                else if (i == 2) {
-                    return vector_t<std::uint64_t, 3>{0, 1, 0};
-                }
-                else if (i == 3) {
-                    return vector_t<std::uint64_t, 3>{0, 0, 1};
-                }
-                else {
-                    return vector_t<std::uint64_t, 3>{0, 0, 0};
-                }
-            }
+            return basis;
         }
 
         template <std::uint64_t Dims>
         DEV constexpr std::uint64_t
-        index(const vector_t<std::uint64_t, Dims>& nhat)
+        index(const vector_t<std::uint64_t, Dims>& comp)
         {
             // return the index of the first non-zero element
             for (std::uint64_t ii = 0; ii < Dims; ++ii) {
-                if (nhat[ii] != 0) {
+                if (comp[ii] != 0) {
                     return ii;
                 }
             }
             return 0;
+        }
+
+        // generate offset vector for array dimension (0=z, 1=y, 2=x)
+        template <std::uint64_t Dims>
+        DEV constexpr auto array_offset(std::uint64_t array_dim)
+        {
+            vector_t<std::int64_t, Dims> offset{};
+            if (array_dim < Dims) {
+                offset[array_dim] = 1;
+            }
+            return offset;
+        }
+
+        // generate offset vector for logical dimension (0=x, 1=y, 2=z)
+        template <std::uint64_t Dims>
+        DEV constexpr auto logical_offset(std::uint64_t logical_dim)
+        {
+            return array_offset<Dims>(logical_dim);
+        }
+
+        template <std::uint64_t Dims>
+        DEV constexpr auto ehat(std::uint64_t array_dim)
+        {
+            return canonical_basis<Dims>(Dims - array_dim);
         }
     }   // namespace unit_vectors
 
@@ -687,12 +744,27 @@ namespace simbi {
     template <std::uint64_t Dims>
     using unit_vector_t = vector_t<std::uint64_t, Dims>;
 
-    template <std::uint64_t N>
-    using uarray = vector_t<std::uint64_t, N>;
+    template <std::integral T, std::uint64_t Dims>
+    using ivec = vector_t<T, Dims>;
 
-    template <std::uint64_t N>
-    using iarray = vector_t<std::int64_t, N>;
+    // domain-specific aliases
+    template <std::uint64_t Dims>
+    using coordinate_t = ivec<std::int64_t, Dims>;
 
+    template <std::uint64_t Dims>
+    using shape_t = ivec<std::uint64_t, Dims>;
+
+    template <std::uint64_t Dims>
+    using compact_coord_t = ivec<std::int32_t, Dims>;
+
+    template <std::uint64_t Dims>
+    using iarray = ivec<std::int64_t, Dims>;
+
+    template <std::uint64_t Dims>
+    using uarray = ivec<std::uint64_t, Dims>;
+
+    template <std::uint64_t Dims>
+    using iarray32 = ivec<std::int32_t, Dims>;
 }   // namespace simbi
 
 // structured binding support

@@ -9,6 +9,7 @@
 #include "physics/hydro/physics.hpp"            // for pressure_from_conserved
 #include "system/io/exceptions.hpp"             // for ErrorCode
 #include <cmath>                                // for abs, isfinite, sqrt
+#include <cstdint>                              // for std::uint64_t
 
 namespace simbi::hydro::newtonian {
     using namespace simbi::eos;
@@ -61,8 +62,8 @@ namespace simbi::hydro::srhd {
         real dp;
         do {
             // compute x_[k+1]
-            auto [f, g] = newton_fg(gamma, tau, d, smag, peq);
-            dp          = f / g;
+            const auto [f, g] = newton_fg(gamma, tau, d, smag, peq);
+            dp                = f / g;
             peq -= dp;
 
             if (iter >= constants::max_iterations || !std::isfinite(peq)) {
@@ -74,7 +75,7 @@ namespace simbi::hydro::srhd {
 
         } while (std::abs(dp) >= tol);
 
-        if (peq < 0) {
+        if (peq < 0.0) {
             return simbi::None(ErrorCode::NEGATIVE_PRESSURE);
         }
 

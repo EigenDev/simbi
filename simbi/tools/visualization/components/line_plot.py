@@ -94,7 +94,7 @@ class LinePlotComponent(Component):
             var = sliced_vars[0].flatten() if sliced_vars else var
         else:
             x, _ = self.bridge.transform_coordinates(mesh, setup)
-            if var.ndim > 1:
+            if setup["effective_dimensions"] > 1:
                 var = var[:, 0]  # Just take first column for line plot
 
         # Update line data
@@ -217,7 +217,7 @@ class LinePlotComponent(Component):
             x, _ = self.bridge.transform_coordinates(mesh, setup)
 
             # Handle dimensionality for regular line plots
-            if var.ndim > 1:
+            if setup["effective_dimensions"] > 1:
                 var = var[:, 0]  # Just take first column for line plot
 
             # Update line data

@@ -149,7 +149,7 @@ namespace simbi::ibsystem::functions {
         const ibsystem::ComponentBodySystem<T, Dims>& system,
         const Primitive& prim,
         const auto& mesh_cell,
-        const uarray<Dims>& coords,
+        const iarray<Dims>& coords,
         const HydroContext& context,
         const T dt,
         GridBodyDeltaCollector<T, Dims>& collector

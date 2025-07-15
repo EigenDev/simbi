@@ -72,11 +72,11 @@
 namespace simbi::ibsystem {
     using namespace mesh;
     using namespace nd;
-    template <typename T, std::uint64_t Dims>
+    template <typename T, std::uint64_t Dims, Geometry G = Geometry::CARTESIAN>
     class ComponentBodySystem : public managed_t<global::managed_memory>
     {
       public:
-        using mesh_t      = mesh_config_t<Dims>;
+        using mesh_t      = mesh_config_t<Dims, G>;
         using conserved_t = structs::
             conserved_t<Regime::NEWTONIAN, Dims, eos::isothermal_gas_eos_t>;
 

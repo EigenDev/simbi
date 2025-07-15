@@ -118,7 +118,7 @@ namespace simbi {
             sim_state.update_next_checkpoint_location();
             write_hdf5(data_directory, filename, sim_state);
             table.post_info(
-                "Checkpostd::int64_t written to: " + data_directory + filename
+                "Checkpooint written to: " + data_directory + filename
             );
             table.refresh();
         }

@@ -357,7 +357,7 @@ namespace simbi::ibsystem {
     // coordinate-native computation - no cell objects needed
     template <std::uint64_t Dims, typename HydroState>
     DEV auto
-    compute_ib_at_coordinate(const uarray<Dims>& coord, const HydroState& state)
+    compute_ib_at_coordinate(const iarray<Dims>& coord, const HydroState& state)
     {
         using conserved_t = typename HydroState::primitive_t::counterpart_t;
 
@@ -367,10 +367,10 @@ namespace simbi::ibsystem {
         physics_context_t<Dims> ctx{
           .gamma          = state.metadata.gamma,
           .dt             = state.metadata.dt,
-          .cell_pos       = state.geom_solver.cartesian_centroid(coord),
-          .cell_volume    = state.geom_solver.volume(coord),
-          .min_cell_width = state.geom_solver.min_cell_width(coord),
-          .max_cell_width = state.geom_solver.max_cell_width(coord),
+          .cell_pos       = mesh::cartesian_centroid(coord),
+          .cell_volume    = mesh::volume(coord),
+          .min_cell_width = mesh::min_cell_width(coord),
+          .max_cell_width = mesh::max_cell_width(coord),
         };
 
         conserved_t total_effect{};

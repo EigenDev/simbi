@@ -82,10 +82,11 @@ namespace simbi::ibsystem {
         vector_t<std::uint64_t, 3> cell_shape_;
 
         using ulist = std::initializer_list<std::uint64_t>;
+        using ilist = std::initializer_list<std::int64_t>;
 
       public:
         GridBodyDeltaCollector(
-            const ulist& grid_shape,
+            const ilist& grid_shape,
             std::uint64_t max_bodies
         )
             : max_bodies_(max_bodies)
@@ -94,9 +95,11 @@ namespace simbi::ibsystem {
             std::uint64_t size                    = 1;
             vector_t<std::uint64_t, 3> cell_shape = {1, 1, 1};
             for (std::uint64_t dim = 0; dim < Dims; ++dim) {
-                const auto s = *(std::rbegin(grid_shape) + dim);
-                size *= s;
-                cell_shape[dim] = s;
+                if (auto dim = *(std::begin(grid_shape) + 1) > 1) {
+                    const auto s = dim;
+                    size *= s;
+                    cell_shape[dim] = s;
+                }
             }
             cell_shape_ = cell_shape;
 

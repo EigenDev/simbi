@@ -28,6 +28,11 @@ namespace simbi::hydro {
         const auto fR       = to_flux(primR, nhat, gamma);
         const auto [sL, sR] = extremal_speeds(primL, primR, nhat, gamma);
 
+        if (std::abs(sL) >= 1.0 || std::abs(sR) >= 1.0) {
+            std::cout << "Warning: HLLE speeds are too large! sL = " << sL
+                      << ", sR = " << sR << "\n";
+        }
+
         auto net_flux = [&]() {
             if (sL >= vface) {
                 // left state is supersonic
@@ -58,7 +63,7 @@ namespace simbi::hydro {
             // move the electric fields in the flux variable
             // this is a hack to avoid changing the flux type.
             // the electric field is just -nhat x F_B
-            net_flux = shift_electric_field(std::move(net_flux), nhat);
+            net_flux = shift_electric_field(net_flux, nhat);
         }
 
         return net_flux;

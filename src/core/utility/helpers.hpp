@@ -307,7 +307,7 @@ namespace simbi::helpers {
      * @return float
      */
     template <typename T, typename U>
-    inline real get_flops(
+    real get_flops(
         const std::uint64_t dim,
         const std::uint64_t radius,
         const std::uint64_t total_zones,
@@ -392,7 +392,7 @@ namespace simbi::helpers {
     template <std::uint64_t Dims>
     DUAL constexpr auto unravel_idx(const std::uint64_t idx, const auto& shape)
     {
-        uarray<Dims> coords;
+        iarray<Dims> coords;
         auto stride = 1;
         if constexpr (global::col_major) {
             // Column major: shape=(nk,nj,ni)
@@ -556,7 +556,6 @@ namespace simbi::helpers {
 
     DEV real find_mu_plus(const real beesq, const real beedrsq, const real r);
 
-    //-------------------Inline for Speed -------------------------
     /**
      * @brief compute the minmod slope limiter
      *
@@ -611,8 +610,8 @@ namespace simbi::helpers {
 
     template <std::uint64_t Dims>
     DUAL static auto
-    memory_layout_coordinates(auto idx, const uarray<Dims>& shape)
-        -> uarray<Dims>;
+    memory_layout_coordinates(auto idx, const iarray<Dims>& shape)
+        -> iarray<Dims>;
 
     template <typename F, std::size_t... Is>
     void for_each_index(F&& func, std::index_sequence<Is...>)
@@ -849,7 +848,7 @@ namespace simbi::helpers {
     }
 
     template <typename T, typename U>
-    inline real get_flops(
+    real get_flops(
         const std::uint64_t dim,
         const std::uint64_t radius,
         const std::uint64_t total_zones,
@@ -868,10 +867,10 @@ namespace simbi::helpers {
 
     template <std::uint64_t Dims>
     DEV static auto
-    memory_layout_coordinates(auto idx, const uarray<Dims>& shape)
-        -> uarray<Dims>
+    memory_layout_coordinates(auto idx, const iarray<Dims>& shape)
+        -> iarray<Dims>
     {
-        uarray<Dims> coords;
+        iarray<Dims> coords;
         auto stride = 1;
         if constexpr (global::col_major) {
             // Column major: shape=(nk,nj,ni)

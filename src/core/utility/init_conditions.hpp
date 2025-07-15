@@ -53,6 +53,7 @@
 #include "config.hpp"
 #include "config_dict.hpp"
 #include "config_dict_visitor.hpp"
+#include "system/io/exceptions.hpp"
 #include <algorithm>
 #include <cstdint>
 #include <sstream>
@@ -78,10 +79,10 @@ namespace simbi {
         real sound_speed_squared;
         real shakura_sunyaev_alpha;
 
-        std::uint64_t nx;
-        std::uint64_t ny;
-        std::uint64_t nz;
-        std::uint64_t checkpoint_index;
+        std::int64_t nx;
+        std::int64_t ny;
+        std::int64_t nz;
+        std::int64_t checkpoint_index;
         std::uint64_t dimensionality;
         std::uint64_t nvars;
         std::uint64_t halo_radius;
@@ -209,16 +210,85 @@ namespace simbi {
             return result;
         }
 
-        // Existing methods...
-        std::tuple<std::uint64_t, std::uint64_t, std::uint64_t>
+        std::tuple<std::int64_t, std::int64_t, std::int64_t>
         active_zones() const
         {
-            const auto nghosts = 2 * (1 + (reconstruct == "plm"));
+            const auto nghosts = 2 * halo_radius;
             return std::make_tuple(
                 nx - nghosts,
                 std::max<std::int64_t>(ny - nghosts, 1),
                 std::max<std::int64_t>(nz - nghosts, 1)
             );
+        }
+
+        template <std::uint64_t Dims>
+        iarray<Dims> get_active_shape() const
+        {
+            if constexpr (Dims == 1) {
+                return {static_cast<std::int64_t>(nx - 2 * halo_radius)};
+            }
+            else if constexpr (Dims == 2) {
+                return {
+                  std::max<std::int64_t>(ny - 2 * halo_radius, 1),
+                  static_cast<std::int64_t>(nx - 2 * halo_radius)
+                };
+            }
+            else if constexpr (Dims == 3) {
+                return {
+                  std::max<std::int64_t>(nz - 2 * halo_radius, 1),
+                  std::max<std::int64_t>(ny - 2 * halo_radius, 1),
+                  static_cast<std::int64_t>(nx - 2 * halo_radius)
+                };
+            }
+            else {
+                static_assert(Dims <= 3, "Unsupported dimension");
+            }
+        };
+
+        template <std::uint64_t Dims>
+        iarray<Dims> get_full_shape() const
+        {
+            if constexpr (Dims == 1) {
+                return {nx};
+            }
+            else if constexpr (Dims == 2) {
+                return {ny, nx};
+            }
+            else if constexpr (Dims == 3) {
+                return {nz, ny, nx};
+            }
+            else {
+                static_assert(Dims <= 3, "Unsupported dimension");
+            }
+        }
+
+        template <std::uint64_t Dims>
+        vector_t<real, Dims> get_bounds() const
+        {
+            if constexpr (Dims == 1) {
+                return {x1bounds.first, x1bounds.second};
+            }
+            else if constexpr (Dims == 2) {
+                return {
+                  x2bounds.first,
+                  x1bounds.first,
+                  x2bounds.second,
+                  x1bounds.second
+                };
+            }
+            else if constexpr (Dims == 3) {
+                return {
+                  x3bounds.first,
+                  x2bounds.first,
+                  x1bounds.first,
+                  x3bounds.second,
+                  x2bounds.second,
+                  x1bounds.second
+                };
+            }
+            else {
+                static_assert(Dims <= 3, "Unsupported dimension");
+            }
         }
 
         bool contains(const std::string& key) const

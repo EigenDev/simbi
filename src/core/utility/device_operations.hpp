@@ -186,21 +186,7 @@ namespace simbi {
         }
 
         F op_;
-        MainView* main_view_;
-        main_t* main_view_data_;
-        uarray<MainView::dim> main_view_shape_;
-        uarray<MainView::dim> main_view_strides_;
-        uarray<MainView::dim> main_view_offsets_;
-        std::tuple<DependentViews*...> dependent_views_;
 
-        std::array<void*, sizeof...(DependentViews)> dependent_data_;
-        std::array<uarray<MainView::dim>, sizeof...(DependentViews)>
-            dependent_shapes_;
-        std::array<uarray<MainView::dim>, sizeof...(DependentViews)>
-            dependent_strides_;
-        std::array<uarray<MainView::dim>, sizeof...(DependentViews)>
-            dependent_offsets_;
-    };
-}   // namespace simbi
+    }   // namespace simbi
 
 #endif

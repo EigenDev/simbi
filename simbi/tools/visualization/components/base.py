@@ -59,7 +59,7 @@ class Component(ABC):
         # Apply formatting based on axis type
         if hasattr(self.ax, "name") and self.ax.name == "polar":
             axis_formatter.format_polar_axis(
-                self.ax, self.state.data.setup, self.state.config, field_info
+                self.ax, self.state.data.mesh, self.state.config, field_info
             )
         else:
             # Use formatter for Cartesian axes

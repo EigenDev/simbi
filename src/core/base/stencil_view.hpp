@@ -1,8 +1,8 @@
 #ifndef SIMBI_STENCIL_VIEW_HPP
 #define SIMBI_STENCIL_VIEW_HPP
 
+#include "compute/math/domain.hpp"
 #include "compute/math/field.hpp"
-#include "compute/math/index_space.hpp"
 #include "core/base/stencil.hpp"
 #include "core/utility/enums.hpp"
 #include "core/utility/helpers.hpp"
@@ -12,17 +12,18 @@
 #include <utility>
 
 namespace simbi::base::stencils {
-    // === CLEAN STENCIL VIEW ===
-    // first-class stencil object that knows how to gather efficiently
-
-    template <typename T, std::uint64_t Dims, Reconstruction Rec>
+    template <
+        Reconstruction Rec,
+        typename field_type,
+        std::uint64_t Dims = field_type::dimensions>
     struct stencil_view_t {
-        const field_t<T, Dims>& field_;
-        uarray<Dims> base_coord_;
-        std::uint64_t direction_;
-
+        using value_type                   = typename field_type::value_type;
         static constexpr auto stencil_size = base::stencil_size<Rec>();
-        using stencil_values_t             = vector_t<T, stencil_size>;
+        using stencil_values_t             = vector_t<value_type, stencil_size>;
+
+        field_type field_;
+        iarray<Dims> base_coord_;
+        std::uint64_t direction_;
 
         // direct stencil gathering - no intermediate fields!
         stencil_values_t left_values() const
@@ -48,26 +49,29 @@ namespace simbi::base::stencils {
         stencil_values_t gather_pattern(const auto& pattern) const
         {
             stencil_values_t values;
-            for (std::uint64_t i = 0; i < stencil_size; ++i) {
-                uarray<Dims> coord = base_coord_;
+            for (std::uint64_t ii = 0; ii < stencil_size; ++ii) {
+                iarray<Dims> coord = base_coord_;
                 for (std::uint64_t d = 0; d < Dims; ++d) {
-                    coord[d] += pattern[i][d];
+                    coord[d] += pattern[ii][d];
                 }
-                values[i] = field_(coord);
+                values[ii] = field_[coord];
             }
             return values;
         }
     };
 
     // factory function for clean stencil creation
-    template <Reconstruction Rec, typename T, std::uint64_t Dims>
+    template <
+        Reconstruction Rec,
+        typename field_type,
+        std::uint64_t Dims = field_type::dimensions>
     auto make_stencil(
-        const field_t<T, Dims>& field,
-        const uarray<Dims>& coord,
+        const field_type& field,
+        const iarray<Dims>& coord,
         std::uint64_t dir
     )
     {
-        return stencil_view_t<T, Dims, Rec>{field, coord, dir};
+        return stencil_view_t<Rec, field_type, Dims>{field, coord, dir};
     }
 
     // === RECONSTRUCTION INTERFACE ===
@@ -134,17 +138,17 @@ namespace simbi::base::stencils {
     }
 
     // === BONUS: VECTORIZED STENCIL OPERATIONS ===
-    // for when you need many stencils at once
+    // for when we need many stencils at once
 
     template <Reconstruction Rec, typename T, std::uint64_t Dims>
     class batch_stencil_extractor_t
     {
-        const field_t<T, Dims>& field_;
+        const field_view_t<T, Dims>& field_;
         std::uint64_t direction_;
 
       public:
         batch_stencil_extractor_t(
-            const field_t<T, Dims>& field,
+            const field_view_t<T, Dims>& field,
             std::uint64_t dir
         )
             : field_(field), direction_(dir)
@@ -152,7 +156,7 @@ namespace simbi::base::stencils {
         }
 
         // extract stencils for an entire domain at once
-        auto extract_all(const index_space_t<Dims>& domain) const
+        auto extract_all(const domain_t<Dims>& domain) const
         {
             using stencil_t = vector_t<T, base::stencil_size<Rec>()>;
 
@@ -177,8 +181,8 @@ namespace simbi::base::stencils {
 
     template <Reconstruction Rec, std::uint64_t Dims>
     constexpr bool stencil_fits(
-        const index_space_t<Dims>& field_domain,
-        const uarray<Dims>& coord,
+        const domain_t<Dims>& field_domain,
+        const iarray<Dims>& coord,
         std::uint64_t direction
     )
     {
@@ -189,7 +193,7 @@ namespace simbi::base::stencils {
 
         // Check if all stencil points are within bounds
         for (std::uint64_t i = 0; i < base::stencil_size<Rec>(); ++i) {
-            uarray<Dims> left_coord = coord, right_coord = coord;
+            iarray<Dims> left_coord = coord, right_coord = coord;
             for (std::uint64_t d = 0; d < Dims; ++d) {
                 left_coord[d] += left_pattern[i][d];
                 right_coord[d] += right_pattern[i][d];
@@ -208,8 +212,8 @@ namespace simbi::base::stencils {
 
     template <Reconstruction Rec, typename T, std::uint64_t Dims>
     auto make_safe_stencil(
-        const field_t<T, Dims>& field,
-        const uarray<Dims>& coord,
+        const field_view_t<T, Dims>& field,
+        const iarray<Dims>& coord,
         std::uint64_t dir
     )
     {

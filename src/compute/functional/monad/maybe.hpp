@@ -91,7 +91,7 @@ namespace simbi {
         ErrorCode error_code;
     };
 
-    inline constexpr nothing_t Nothing{};
+    constexpr nothing_t Nothing{};
     using None = nothing_t;
 
     template <typename T>
@@ -472,7 +472,7 @@ namespace simbi {
     maybe_t(T) -> maybe_t<std::decay_t<T>>;
 
     template <typename T>
-    DUAL inline maybe_t<T> make_maybe(const T& value)
+    DUAL maybe_t<T> make_maybe(const T& value)
     {
         return maybe_t<T>(value);
     }

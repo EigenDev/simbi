@@ -333,14 +333,11 @@ namespace simbi::hydro::srhd {
             }
         }
 
-        const auto uL = to_conserved(primL, gamma);
-        const auto uR = to_conserved(primR, gamma);
-        const auto fL = to_flux(primL, nhat, gamma);
-        const auto fR = to_flux(primR, nhat, gamma);
-        const auto ws = extremal_speeds(primL, primR, nhat, gamma);
-
-        const auto aL = std::min(ws.min(), 0.0);
-        const auto aR = std::max(ws.max(), 0.0);
+        const auto uL       = to_conserved(primL, gamma);
+        const auto uR       = to_conserved(primR, gamma);
+        const auto fL       = to_flux(primL, nhat, gamma);
+        const auto fR       = to_flux(primR, nhat, gamma);
+        const auto [aL, aR] = extremal_speeds(primL, primR, nhat, gamma);
 
         auto net_flux = [&]() {
             // quick returns for supersonic states
@@ -407,14 +404,11 @@ namespace simbi::hydro::rmhd {
             }
         }
 
-        const auto uL = to_conserved(primL, gamma);
-        const auto uR = to_conserved(primR, gamma);
-        const auto fL = to_flux(primL, nhat, gamma);
-        const auto fR = to_flux(primR, nhat, gamma);
-
-        auto [aL, aR] = extremal_speeds(primL, primR, nhat, gamma);
-        aL            = std::min(aL, 0.0);
-        aR            = std::max(aR, 0.0);
+        const auto uL       = to_conserved(primL, gamma);
+        const auto uR       = to_conserved(primR, gamma);
+        const auto fL       = to_flux(primL, nhat, gamma);
+        const auto fR       = to_flux(primR, nhat, gamma);
+        const auto [aL, aR] = extremal_speeds(primL, primR, nhat, gamma);
 
         const auto stationary = aL == aR;
         auto net_flux         = [&]() {
@@ -538,7 +532,7 @@ namespace simbi::hydro::rmhd {
             net_flux.chi = primL.chi * net_flux.den;
         }
 
-        net_flux = shift_electric_field(std::move(net_flux), nhat);
+        net_flux = shift_electric_field(net_flux, nhat);
         return net_flux;
     }
 }   // namespace simbi::hydro::rmhd

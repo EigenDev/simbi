@@ -1,23 +1,25 @@
 #ifndef SIMBI_SERIALIZATION_HPP
 #define SIMBI_SERIALIZATION_HPP
 
-#include "compute/math/field.hpp"        // for field_t<T, Dims>
-#include "config.hpp"                    // for real, DEV, etc
+#include "compute/math/field.hpp"   // for field_t<T, Dims>
+#include "config.hpp"               // for real, DEV, etc
+#include "core/utility/enums.hpp"
+#include "core/utility/helpers.hpp"
 #include "result.hpp"                    // for result_t<T> monad
 #include "system/mesh/mesh_config.hpp"   // for mesh::mesh_config_t
 #include <H5Cpp.h>                       // for HDF5 C++ API
-#include <concepts>                      // for concepts
-#include <cstdint>                       // for std::uint64_t
-#include <functional>                    // for std::function
-#include <iostream>                      // for std::cout, std::cerr
-#include <string>                        // for std::string
+#include <algorithm>
+#include <concepts>        // for concepts
+#include <cstdint>         // for std::uint64_t
+#include <functional>      // for std::function
+#include <iostream>        // for std::cout, std::cerr
+#include <string>          // for std::string
 #include <type_traits>     // for std::is_arithmetic_v, std::same_as
 #include <unordered_map>   // for std::unordered_map
 #include <utility>         // for std::move
 #include <vector>          // for std::vector
-
 namespace simbi::io {
-
+    using namespace simbi::helpers;
     // serialization context - accumulates state through pipeline
     struct serialization_context_t {
         H5::H5File file;
@@ -80,13 +82,13 @@ namespace simbi::io {
         )
         {
             // ensure data is on cpu for serialization
-            field.memory()->ensure_cpu_synced();
+            // field.memory()->ensure_cpu_synced();
 
             // create dataspace from field domain
             auto shape = field.shape();
             std::vector<hsize_t> dims(Dims);
-            for (std::uint64_t i = 0; i < Dims; ++i) {
-                dims[i] = shape[Dims - 1 - i];   // reverse for hdf5 convention
+            for (std::uint64_t ii = 0; ii < Dims; ++ii) {
+                dims[ii] = shape[ii];
             }
 
             H5::DataSpace dataspace(Dims, dims.data());
@@ -140,7 +142,7 @@ namespace simbi::io {
         )
         {
             // ensure data is on cpu for serialization
-            field.memory()->ensure_cpu_synced();
+            // field.memory()->ensure_cpu_synced();
 
             // create temporary array for this component
             auto total_size = field.size();
@@ -152,10 +154,10 @@ namespace simbi::io {
             }
 
             // create dataspace from field domain
-            auto shape = field.shape();
+            const auto shape = field.shape();
             std::vector<hsize_t> dims(Dims);
-            for (std::uint64_t i = 0; i < Dims; ++i) {
-                dims[i] = shape[Dims - 1 - i];   // reverse for hdf5 convention
+            for (std::uint64_t ii = 0; ii < Dims; ++ii) {
+                dims[ii] = shape[ii];
             }
 
             H5::DataSpace dataspace(Dims, dims.data());
@@ -198,7 +200,9 @@ namespace simbi::io {
             // mhd components: mag
             if constexpr (StateType::nmem == 2 * StateType::dimensions + 3) {
                 for (std::uint64_t d = 0; d < StateType::dimensions; ++d) {
-                    component_names.push_back("b" + std::to_string(d + 1));
+                    component_names.push_back(
+                        "b" + std::to_string(d + 1) + "_mean"
+                    );
                 }
             }
 
@@ -593,10 +597,10 @@ namespace simbi::io {
     };
 
     // specialization for mesh_config_t
-    template <std::uint64_t Dims>
-    struct metadata_serialization_trait_t<mesh::mesh_config_t<Dims>> {
+    template <std::uint64_t Dims, Geometry G>
+    struct metadata_serialization_trait_t<mesh::mesh_config_t<Dims, G>> {
         static result_t<serialization_context_t> serialize_attributes(
-            const mesh::mesh_config_t<Dims>& mesh_config,
+            const mesh::mesh_config_t<Dims, G>& mesh_config,
             const std::string& group_name,
             serialization_context_t ctx
         )
@@ -905,13 +909,9 @@ namespace simbi::io {
                    serialization_context_t ctx
                ) -> result_t<serialization_context_t> {
             if constexpr (HydroState::is_mhd) {
-                return serialize_scalar_field(state.bstaggs[0], "b1_face")(ctx)
-                    .and_then(
-                        serialize_scalar_field(state.bstaggs[1], "b2_face")
-                    )
-                    .and_then(
-                        serialize_scalar_field(state.bstaggs[2], "b3_face")
-                    );
+                return serialize_scalar_field(state.bstaggs[2], "b1")(ctx)
+                    .and_then(serialize_scalar_field(state.bstaggs[1], "b2"))
+                    .and_then(serialize_scalar_field(state.bstaggs[0], "b3"));
             }
             else {
                 (void) state;   // suppress unused warning
@@ -925,20 +925,24 @@ namespace simbi::io {
 
     // main serialization function for hydro_state_t
     template <hydro_state_serializable_c HydroState>
-    result_t<std::string>
-    serialize_hydro_state(const HydroState& state, const std::string& filename)
+    result_t<std::string> serialize_hydro_state(HydroState& state)
     {
         // ensure all data is synced to cpu
-        auto& mutable_state = const_cast<HydroState&>(state);
-        mutable_state.to_cpu();
+        // state.to_cpu();
+
+        auto& geo     = state.mesh;
+        auto max_iter = std::max_element(geo.shape.begin(), geo.shape.end());
+        auto chkpt    = *max_iter;
+        auto tnow     = format_real(state.metadata.time);
+        auto filename = state.metadata.data_dir +
+                        string_format("%d.chkpt." + tnow + ".h5", chkpt);
+        std::cout << "Serializing hydro state to: " << filename << std::endl;
 
         //  monadic pipeline
         return create_file(filename)
             .and_then(serialize_field_components(state.prim, "primitives"))
             .and_then(serialize_magnetic_fields(state))
-            .and_then(
-                serialize_attributes(state.geom_solver.config, "mesh_config")
-            )
+            .and_then(serialize_attributes(state.mesh, "mesh_config"))
             .and_then(serialize_attributes(state.metadata))
             .and_then(close_file());
     }

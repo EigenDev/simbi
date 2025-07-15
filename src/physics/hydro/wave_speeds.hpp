@@ -107,8 +107,8 @@ namespace simbi::hydro::newtonian {
         const auto left_waves  = wave_speeds(primL, nhat, gamma);
         const auto right_waves = wave_speeds(primR, nhat, gamma);
         return {
-          std::min(left_waves.min(), right_waves.min()),
-          std::max(left_waves.max(), right_waves.max())
+          std::min({left_waves.min(), right_waves.min(), 0.0}),
+          std::max({left_waves.max(), right_waves.max(), 0.0})
         };
     }
 
@@ -207,16 +207,14 @@ namespace simbi::hydro::srhd {
         real gamma
     )
     {
-        const auto rhoL = prim.rho;
-        const auto vn   = vecops::dot(prim.vel, nhat);
-        const auto pre  = prim.pre;
-        const auto cs   = std::sqrt(gamma * pre / rhoL);
+        const auto vn = vecops::dot(prim.vel, nhat);
+        const auto cs = sound_speed(prim, gamma);
         switch (comp_wave_speed) {
             case WaveSpeedEstimate::MIGNONE_AND_BODO_05: {
-                // Get Wave Speeds based on Mignone & Bodo Eqs. (21.0 - 23)
+                // get wave speeds based on Mignone & Bodo Eqs. (21.0 - 23)
                 const auto w = 1.0 / std::sqrt(1.0 - (vn * vn));
                 const auto s = cs * cs / (w * w * (1.0 - cs * cs));
-                // Define temporaries to save computational cycles
+                // define temporaries to save computational cycles
                 const real qf  = 1.0 / (1.0 + s);
                 const real fac = std::sqrt(s * (1.0 - vn * vn + s));
                 return {(vn - fac) * qf, (vn + fac) * qf};
@@ -242,8 +240,8 @@ namespace simbi::hydro::srhd {
         const auto left_waves  = wave_speeds(primL, nhat, gamma);
         const auto right_waves = wave_speeds(primR, nhat, gamma);
         return {
-          std::min(left_waves.min(), right_waves.min()),
-          std::max(left_waves.max(), right_waves.max())
+          std::min({left_waves.min(), right_waves.min(), 0.0}),
+          std::max({left_waves.max(), right_waves.max(), 0.0})
         };
     }
 
@@ -365,12 +363,6 @@ namespace simbi::hydro::rmhd {
 
             const auto nroots = solve_quartic(a3, a2, a1, a0, speeds);
 
-            // if there are no roots, return null
-            if (nroots == 0) {
-                return {0.0, 0.0};
-            }
-            return {speeds[0], speeds[nroots - 1]};
-
             if constexpr (global::debug_mode) {
                 if (nroots != 4) {
                     printf(
@@ -391,6 +383,12 @@ namespace simbi::hydro::rmhd {
                     );
                 }
             }
+
+            // if there are no roots, return null
+            if (nroots == 0) {
+                return {0.0, 0.0};
+            }
+            return {speeds[0], speeds[nroots - 1]};
         }
     }
 
@@ -405,8 +403,8 @@ namespace simbi::hydro::rmhd {
         const auto left_waves  = wave_speeds(primL, nhat, gamma);
         const auto right_waves = wave_speeds(primR, nhat, gamma);
         return {
-          std::min(left_waves.min(), right_waves.min()),
-          std::max(left_waves.max(), right_waves.max())
+          std::min({left_waves.min(), right_waves.min(), 0.0}),
+          std::max({left_waves.max(), right_waves.max(), 0.0})
         };
     }
 }   // namespace simbi::hydro::rmhd

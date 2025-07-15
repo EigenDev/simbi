@@ -53,6 +53,7 @@
 #include "system/adapter/device_adapter_api.hpp"   // for deviceSynch, gpuFree, gpuMallocManaged
 #include "system/adapter/device_types.hpp"
 #include <cstddef>   // for size_t
+#include <cstdint>   // for int64_t, uint64_t
 #include <new>       // for new, delete
 
 namespace simbi {
@@ -61,7 +62,7 @@ namespace simbi {
     {
       public:
         // virt destructor for polymorphic use
-        virtual ~managed_t() = default;
+        ~managed_t() = default;
 
         // bare bones new and delete
         static constexpr void* operator new(std::size_t len)

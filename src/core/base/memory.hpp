@@ -44,6 +44,11 @@ namespace simbi::base {
         bool gpu_valid_                  = false;   // gpu data current?
         bool owns_cpu_memory_            = true;    // do we own the CPU memory?
 
+        std::shared_ptr<unified_memory_t<T>> parent_;   // keeps parent alive
+        T* view_cpu_ptr_ = nullptr;   // offset pointer for views
+        T* view_gpu_ptr_ = nullptr;   // offset GPU pointer for views
+        bool is_view_    = false;     // is this an offset view?
+
       public:
         using value_type   = T;
         unified_memory_t() = default;
@@ -202,6 +207,29 @@ namespace simbi::base {
             return *this;
         }
 
+        static std::shared_ptr<unified_memory_t<T>> create_offset_view(
+            std::shared_ptr<unified_memory_t<T>> parent,
+            std::int64_t offset,
+            std::uint64_t new_size
+        )
+        {
+            auto view       = std::make_shared<unified_memory_t<T>>();
+            view->parent_   = parent;   // keep parent alive
+            view->is_view_  = true;
+            view->size_     = new_size;
+            view->capacity_ = new_size;
+
+            // offset pointers point into parent's memory
+            view->view_cpu_ptr_ = parent->cpu_data() + offset;
+            if constexpr (platform::is_gpu) {
+                view->view_gpu_ptr_ = parent->gpu_data() + offset;
+            }
+
+            view->cpu_valid_ = parent->cpu_valid_;
+            view->gpu_valid_ = parent->gpu_valid_;
+            return view;
+        }
+
         void resize(std::uint64_t new_size)
         {
             if (new_size > capacity_) {
@@ -266,29 +294,35 @@ namespace simbi::base {
         // smart synchronization methods
         void ensure_cpu_synced()
         {
-            if (!cpu_valid_ && gpu_valid_) {
-                to_cpu();
+            if constexpr (platform::is_gpu) {
+                if (!cpu_valid_ && gpu_valid_) {
+                    to_cpu();
+                }
             }
         }
 
         void ensure_gpu_synced()
         {
-            if (!gpu_valid_ && cpu_valid_) {
-                to_gpu();
+            if constexpr (platform::is_gpu) {
+                if (!gpu_valid_ && cpu_valid_) {
+                    to_gpu();
+                }
             }
         }
 
         void to_cpu()
         {
-            if (!cpu_valid_ && gpu_valid_) {
-                gpu::api::copy_device_to_host(
-                    cpu_ptr_.get(),
-                    gpu_ptr_.get(),
-                    size_ * sizeof(T)
-                );
-                cpu_valid_ = true;
+            if constexpr (platform::is_gpu) {
+                if (!cpu_valid_ && gpu_valid_) {
+                    gpu::api::copy_device_to_host(
+                        cpu_ptr_.get(),
+                        gpu_ptr_.get(),
+                        size_ * sizeof(T)
+                    );
+                    cpu_valid_ = true;
+                }
+                active_location_ = memory_location::cpu;
             }
-            active_location_ = memory_location::cpu;
         }
 
         void to_gpu()
@@ -376,6 +410,13 @@ namespace simbi::base {
 
         T* data()
         {
+            if (is_view_) {
+                if constexpr (platform::is_gpu) {
+                    return view_gpu_ptr_;
+                }
+                return view_cpu_ptr_;
+            }
+
             if constexpr (platform::is_gpu) {
                 if (!gpu_valid_) {
                     to_gpu();
@@ -387,6 +428,13 @@ namespace simbi::base {
 
         DUAL const T* data() const
         {
+            if (is_view_) {
+                if constexpr (platform::is_gpu) {
+                    return view_gpu_ptr_;
+                }
+                return view_cpu_ptr_;
+            }
+
             if constexpr (platform::is_gpu) {
                 return gpu_ptr_.get();
             }
@@ -396,12 +444,28 @@ namespace simbi::base {
         // explicit accessors that ensure synchronization
         T* cpu_data()
         {
+            if (is_view_) {
+                if (parent_) {
+                    parent_->ensure_cpu_synced();
+                }
+                return view_cpu_ptr_;
+            }
+
             ensure_cpu_synced();
             return cpu_ptr_.get();
         }
 
-        DUAL T* gpu_data()
+        T* gpu_data()
         {
+            if (is_view_) {
+                if constexpr (platform::is_gpu) {
+                    if (parent_) {
+                        parent_->ensure_gpu_synced();
+                    }
+                    return view_gpu_ptr_;
+                }
+            }
+
             ensure_gpu_synced();
             return gpu_ptr_.get();
         }

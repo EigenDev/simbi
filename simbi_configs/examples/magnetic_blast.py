@@ -8,6 +8,7 @@ from simbi.core.types.input import (
     BoundaryCondition,
     Regime,
     CellSpacing,
+    Solver,
 )
 from simbi.core.types.typing import (
     InitialStateType,

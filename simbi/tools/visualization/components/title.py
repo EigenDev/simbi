@@ -23,7 +23,7 @@ class TitleComponent(Component):
 
         # Get setup info
         setup = self.state.data.setup
-        time = setup.get("time", 0.0)
+        time = setup["time"]
 
         # Apply time scaling if using orbital parameters
         time_unit = ""

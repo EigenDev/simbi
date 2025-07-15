@@ -302,9 +302,13 @@ namespace simbi::structs {
         }
         traits_t::passive_scalar(lhs) += traits_t::passive_scalar(rhs);
 
-        if constexpr (traits_t::has_magnetic_field) {
-            traits_t::magnetic_field(lhs) += traits_t::magnetic_field(rhs);
-        }
+        // if we are using the increment operator on a struct, it is likely
+        // during the hydro update step, and since the cell-centered magnetic
+        // fields are moreso second-class citizens in the CT algorithm,
+        // we do not modify them here.
+        // if constexpr (traits_t::has_magnetic_field) {
+        //     traits_t::magnetic_field(lhs) += traits_t::magnetic_field(rhs);
+        // }
 
         return lhs;
     }
@@ -323,11 +327,42 @@ namespace simbi::structs {
         }
         traits_t::passive_scalar(lhs) -= traits_t::passive_scalar(rhs);
 
-        if constexpr (traits_t::has_magnetic_field) {
-            traits_t::magnetic_field(lhs) -= traits_t::magnetic_field(rhs);
-        }
+        // if we are using the decremen operator on a struct, it is likely
+        // during the hydro update step, and since the cell-centered magnetic
+        // fields are moreso second-class citizens in the CT algorithm,
+        // we do not modify them here.
+        // if constexpr (traits_t::has_magnetic_field) {
+        //     traits_t::magnetic_field(lhs) -= traits_t::magnetic_field(rhs);
+        // }
 
         return lhs;
+    }
+
+    // increment only the gas variables
+    template <is_any_state_variable_c StateT>
+    constexpr auto
+    increment_gas_variables(const StateT& from, const StateT& operand)
+    {
+        using traits_t = state_traits<StateT>;
+        StateT result;
+        traits_t::density(result) =
+            traits_t::density(from) + traits_t::density(operand);
+        traits_t::momentum_or_velocity(result) =
+            traits_t::momentum_or_velocity(from) +
+            traits_t::momentum_or_velocity(operand);
+        if constexpr (!traits_t::is_isothermal) {
+            traits_t::energy_or_pressure(result) =
+                traits_t::energy_or_pressure(from) +
+                traits_t::energy_or_pressure(operand);
+        }
+        else {
+            traits_t::energy_or_pressure(result) =
+                traits_t::energy_or_pressure(from);
+        }
+        traits_t::passive_scalar(result) =
+            traits_t::passive_scalar(from) + traits_t::passive_scalar(operand);
+
+        return result;
     }
 
 }   // namespace simbi::structs

@@ -52,10 +52,10 @@
 
 #include "config.hpp"
 #include "config_dict.hpp"
-#include "core/types/alias.hpp"
 #include "core/utility/enums.hpp"
 #include "init_conditions_visitor.hpp"
 #include <cmath>
+#include <cstdint>
 #include <list>
 #include <stdexcept>
 #include <string>
@@ -102,9 +102,9 @@ namespace simbi {
 
         // Resolution fields
         void visit_resolution(
-            std::uint64_t& nx,
-            std::uint64_t& ny,
-            std::uint64_t& nz
+            std::int64_t& nx,
+            std::int64_t& ny,
+            std::int64_t& nz
         ) override
         {
             const auto nghosts =
@@ -324,11 +324,11 @@ namespace simbi {
 
         void visit_output_settings(
             std::string& data_directory,
-            std::uint64_t& checkpoint_index
+            std::int64_t& checkpoint_index
         ) override
         {
             data_directory   = dict.at("data_directory").get<std::string>();
-            checkpoint_index = dict.at("checkpoint_index").get<std::uint64_t>();
+            checkpoint_index = dict.at("checkpoint_index").get<std::int64_t>();
         }
 
         void visit_computed_properties(
@@ -339,10 +339,10 @@ namespace simbi {
             std::uint64_t& halo_radius
         ) override
         {
-            dimensionality  = dict.at("dimensionality").get<std::uint64_t>();
+            dimensionality  = dict.at("dimensionality").get<std::int64_t>();
             is_mhd          = dict.at("is_mhd").get<bool>();
             is_relativistic = dict.at("is_relativistic").get<bool>();
-            nvars           = dict.at("nvars").get<std::uint64_t>();
+            nvars           = dict.at("nvars").get<std::int64_t>();
             halo_radius =
                 1 + (dict.at("reconstruction").get<std::string>() == "plm");
         }
@@ -430,9 +430,9 @@ namespace simbi {
 
         // Resolution fields
         void visit_resolution(
-            std::uint64_t& nx,
-            std::uint64_t& ny,
-            std::uint64_t& nz
+            std::int64_t& nx,
+            std::int64_t& ny,
+            std::int64_t& nz
         ) override
         {
             nx = 100;   // Default resolution
@@ -548,7 +548,7 @@ namespace simbi {
 
         void visit_output_settings(
             std::string& data_directory,
-            std::uint64_t& checkpoint_index
+            std::int64_t& checkpoint_index
         ) override
         {
             data_directory   = "output";
@@ -602,9 +602,9 @@ namespace simbi {
 
         // Resolution fields
         void visit_resolution(
-            std::uint64_t& nx,
-            std::uint64_t& ny,
-            std::uint64_t& nz
+            std::int64_t& nx,
+            std::int64_t& ny,
+            std::int64_t& nz
         ) override
         {
             if (nx == 0 || ny == 0 || nz == 0) {
@@ -747,7 +747,7 @@ namespace simbi {
 
         void visit_output_settings(
             std::string& data_directory,
-            std::uint64_t&
+            std::int64_t&
         ) override
         {
             if (data_directory.empty()) {

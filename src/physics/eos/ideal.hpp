@@ -4,29 +4,28 @@
 #include "config.hpp"
 #include "core/utility/enums.hpp"
 #include <cmath>   // for std::sqrt
-#include <iostream>
 
 namespace simbi::eos {
     template <Regime R>
     struct ideal_gas_eos_t {
-        double gamma;
+        real gamma;
 
-        DEV auto sound_speed(double rho, double pressure) const
+        DEV auto sound_speed(real rho, real pressure) const
         {
             return std::sqrt(
                 gamma * pressure / (rho * enthalpy(rho, pressure))
             );
         }
 
-        DEV auto enthalpy(double rho, double pressure) const
+        DEV auto enthalpy(real rho, real pressure) const
         {
-            if constexpr (!(R == Regime::SRHD && R == Regime::RMHD)) {
+            if constexpr (!(R == Regime::SRHD || R == Regime::RMHD)) {
                 return 1.0;
             }
             return 1.0 + gamma * pressure / (rho * (gamma - 1.0));
         }
 
-        DEV auto internal_energy(double rho, double pressure) const
+        DEV auto internal_energy(real rho, real pressure) const
         {
             return pressure / (rho * (gamma - 1.0));
         }

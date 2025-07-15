@@ -3,7 +3,6 @@
 
 #include "core/utility/enums.hpp"
 #include "data/containers/state_struct.hpp"
-#include "physics/eos/ideal.hpp"
 #include <cstdint>
 
 namespace simbi::state {

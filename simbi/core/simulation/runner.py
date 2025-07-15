@@ -135,7 +135,7 @@ class SimulationRunner:
             a = self.config.scale_factor or (lambda t: 1.0)
             adot = self.config.scale_factor_derivative or (lambda t: 0.0)
             if self.state.staggered_bfields:
-                staggered_fields = [b.flat for b in self.state.staggered_bfields]
+                staggered_fields = [b.flat for b in self.state.staggered_bfields[::-1]]
             else:
                 staggered_fields = []
 

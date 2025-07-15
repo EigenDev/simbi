@@ -40,6 +40,12 @@ namespace simbi::dispatch {
          G == Geometry::AXIS_CYLINDRICAL || G == Geometry::PLANAR_CYLINDRICAL ||
          G == Geometry::SPHERICAL) &&
 
+        // geometry-dimension constraints
+        ((G != Geometry::AXIS_CYLINDRICAL &&
+          G != Geometry::PLANAR_CYLINDRICAL) ||
+         D == 2) &&   // AXIS and PLANAR only in 2D
+        ((G != Geometry::CYLINDRICAL) || D == 3) &&   // CYLINDRICAL only in 3D
+
         // regime-specific constraints
         (R != Regime::RMHD || D == 3) &&   // (r)mhd requires 3D
         (R != Regime::MHD || D == 3) &&
