@@ -123,7 +123,7 @@ namespace simbi::ibsystem {
         );
     }
 
-    inline std::string extract_reference_frame(const InitialConditions& init)
+    inline std::string extract_reference_frame(const initial_conditions_t& init)
     {
         std::string reference_frame = "inertial";
         if (init.contains("body_system")) {
@@ -248,7 +248,7 @@ namespace simbi::ibsystem {
     template <typename T, std::uint64_t Dims>
     void configure_from_individual_bodies(
         ComponentBodySystem<T, Dims>& system,
-        const InitialConditions& init
+        const initial_conditions_t& init
     )
     {
         for (const auto& props : init.immersed_bodies) {
@@ -445,7 +445,7 @@ namespace simbi::ibsystem {
     template <typename T, std::uint64_t Dims>
     void configure_from_system_definition(
         ComponentBodySystem<T, Dims>& system,
-        const InitialConditions& init
+        const initial_conditions_t& init
     )
     {
         const auto& sys_props = init.get_dict("body_system");
@@ -472,7 +472,7 @@ namespace simbi::ibsystem {
     util::smart_ptr<ComponentBodySystem<T, Dims>>
     create_body_system_from_config(
         const mesh_config_t<Dims>& mesh,
-        const InitialConditions& init
+        const initial_conditions_t& init
     )
     {
         if (!init.contains("body_system") && init.immersed_bodies.empty()) {

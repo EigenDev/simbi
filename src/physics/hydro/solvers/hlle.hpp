@@ -28,11 +28,6 @@ namespace simbi::hydro {
         const auto fR       = to_flux(primR, nhat, gamma);
         const auto [sL, sR] = extremal_speeds(primL, primR, nhat, gamma);
 
-        if (std::abs(sL) >= 1.0 || std::abs(sR) >= 1.0) {
-            std::cout << "Warning: HLLE speeds are too large! sL = " << sL
-                      << ", sR = " << sR << "\n";
-        }
-
         auto net_flux = [&]() {
             if (sL >= vface) {
                 // left state is supersonic

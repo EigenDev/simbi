@@ -74,34 +74,29 @@ namespace simbi::ibsystem {
                0;
     }
 
-    template <typename T>
-    struct GravitationalComponent {
-        T softening_length;
+    struct grav_component_t {
+        real softening_length;
     };
 
-    template <typename T>
-    struct AccretionComponent {
-        T accretion_efficiency;
-        T accretion_radius;
-        T total_accreted_mass;
-        T accretion_rate;
+    struct accretion_component_t {
+        real accretion_efficiency;
+        real accretion_radius;
+        real total_accreted_mass;
+        real accretion_rate;
     };
 
-    template <typename T>
-    struct ElasticComponent {
-        T elastic_modulus;
-        T poisson_ratio;
+    struct elastic_component_t {
+        real elastic_modulus;
+        real poisson_ratio;
     };
 
-    template <typename T>
-    struct DeformableComponent {
-        T yield_stress;
-        T plastic_strain;
+    struct deformable_component_t {
+        real yield_stress;
+        real plastic_strain;
     };
 
-    template <typename T>
-    struct RigidComponent {
-        T inertia;
+    struct rigid_component_t {
+        real inertia;
         bool apply_no_slip;
     };
 }   // namespace simbi::ibsystem

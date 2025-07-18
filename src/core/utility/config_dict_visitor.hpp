@@ -64,9 +64,9 @@
 
 namespace simbi {
     /**
-     * @brief Visitor that populates InitialConditions from a config_dict_t
+     * @brief Visitor that populates initial_conditions_t from a config_dict_t
      */
-    class config_dict_tVisitor : public InitialConditionsVisitor
+    class config_dict_tVisitor : public initial_conditions_tVisitor
     {
       private:
         const config_dict_t& dict;
@@ -409,9 +409,9 @@ namespace simbi {
     };
 
     /**
-     * @brief Visitor that applies default values to InitialConditions
+     * @brief Visitor that applies default values to initial_conditions_t
      */
-    class DefaultsVisitor : public InitialConditionsVisitor
+    class DefaultsVisitor : public initial_conditions_tVisitor
     {
       public:
         // Time-related fields
@@ -572,9 +572,9 @@ namespace simbi {
     };
 
     /**
-     * @brief Visitor that validates InitialConditions values
+     * @brief Visitor that validates initial_conditions_t values
      */
-    class ValidationVisitor : public InitialConditionsVisitor
+    class ValidationVisitor : public initial_conditions_tVisitor
     {
       public:
         // Time-related fields

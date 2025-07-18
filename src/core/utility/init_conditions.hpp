@@ -66,7 +66,7 @@
 
 namespace simbi {
 
-    struct InitialConditions {
+    struct initial_conditions_t {
         // existing fields
         real time;
         real checkpoint_interval;
@@ -188,9 +188,9 @@ namespace simbi {
         }
 
         // Factory method using visitor pattern
-        static InitialConditions create(const config_dict_t& config)
+        static initial_conditions_t create(const config_dict_t& config)
         {
-            InitialConditions result{};
+            initial_conditions_t result{};
 
             // First apply defaults
             DefaultsVisitor defaults_visitor;

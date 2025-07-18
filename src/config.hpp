@@ -119,6 +119,13 @@ namespace simbi {
 #else
                 false;
 #endif
+
+            inline constexpr bool bounds_checking =
+#if BOUNDS_CHECKING
+                true;
+#else
+                false;
+#endif
         }   // namespace features
 
         /**
@@ -202,6 +209,7 @@ namespace simbi {
         // other feature flag conversions
         constexpr bool progress_bar_enabled = build::features::progress_bar;
         constexpr bool debug_mode           = build::features::debug;
+        constexpr bool bounds_checking      = build::features::bounds_checking;
         constexpr bool col_major            = build::features::column_major;
         constexpr bool on_sm                = build::features::shared_memory;
 

@@ -24,8 +24,9 @@ namespace simbi::driver {
     )
     {
         // convert Python dict to config_dict_t
-        config_dict_t config_dict   = dict_to_config(sim_info);
-        InitialConditions init_cond = InitialConditions::create(config_dict);
+        config_dict_t config_dict = dict_to_config(sim_info);
+        initial_conditions_t init_cond =
+            initial_conditions_t::create(config_dict);
 
         // create C++ function wrappers for callbacks
         auto scale_factor = [a_func](real t) -> real {

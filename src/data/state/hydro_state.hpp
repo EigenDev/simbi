@@ -11,7 +11,8 @@
 #include "data/state/express_t.hpp"
 #include "hydro_state_types.hpp"
 #include "physics/eos/isothermal.hpp"
-#include "physics/hydro/body/body_factory.hpp"
+#include "physics/hydro/ib/collection.hpp"
+#include "physics/hydro/ib/factory.hpp"
 #include "system/io/exceptions.hpp"
 #include "system/mesh/mesh_config.hpp"
 #include <bit>
@@ -24,6 +25,7 @@
 namespace simbi::state {
     using namespace base;
     using namespace mesh;
+    using namespace body::factory;
     // using namespace ibsystem;
 
     /**
@@ -64,9 +66,6 @@ namespace simbi::state {
 
         // geometric mesh config
         mesh_t mesh;
-
-        // immersed body stuff
-        std::optional<ibsystem::body_collection_t<real, Dims>> bodies;
 
         // simulation metadata
         struct meta_data_t {
@@ -110,6 +109,9 @@ namespace simbi::state {
             vector_t<expression_t<Dims>, 2 * Dims> bc_sources;
         } sources;
 
+        // immersed body stuff
+        std::optional<body::body_collection_t<Dims>> bodies;
+
         // error handling
         bool in_failure_state;
 
@@ -123,7 +125,7 @@ namespace simbi::state {
             vector_t<void*, 3> bfield_data,
             std::function<real(real)> const& scale_factor,
             std::function<real(real)> const& scale_factor_derivative,
-            const InitialConditions& init
+            const initial_conditions_t& init
         )
         {
 
@@ -137,6 +139,8 @@ namespace simbi::state {
             auto [cons, prims, flux_vec, bstaggs] =
                 setup_hydro_state(cons_data, prim_data, bfield_data, init);
 
+            auto bodies = create_body_collection_from_init<Dims>(init);
+
             return hydro_state_t{
               .cons             = std::move(cons),
               .prim             = std::move(prims),
@@ -145,7 +149,8 @@ namespace simbi::state {
               .mesh             = std::move(mesh),
               .metadata         = setup_metadata(init),
               .sources          = setup_sources(init),
-              .in_failure_state = false
+              .bodies           = std::move(bodies),
+              .in_failure_state = false,
             };
         }
 
@@ -154,7 +159,7 @@ namespace simbi::state {
             void* cons_data,
             void* prim_data,
             vector_t<void*, 3> bstaggs,
-            const InitialConditions& init
+            const initial_conditions_t& init
         )
         {
             const auto full_shape = init.get_full_shape<dimensions>();
@@ -211,7 +216,7 @@ namespace simbi::state {
         /**
          * set up metadata from init conditions
          */
-        static auto setup_metadata(const InitialConditions& init)
+        static auto setup_metadata(const initial_conditions_t& init)
         {
             meta_data_t metadata = {
               .gamma          = init.gamma,
@@ -258,7 +263,7 @@ namespace simbi::state {
         /**
          * set up sources from init conditions
          */
-        static auto setup_sources(const InitialConditions& init)
+        static auto setup_sources(const initial_conditions_t& init)
         {
             auto hydro =
                 expression_t<Dims>::from_config(init.hydro_source_expressions);
@@ -300,7 +305,7 @@ namespace simbi::state {
          * get shock smoother type from init conditions
          */
         static ShockWaveLimiter
-        get_shock_smoother(const InitialConditions& init)
+        get_shock_smoother(const initial_conditions_t& init)
         {
             return init.fleischmann_limiter
                        ? ShockWaveLimiter::FLEISCHMANN

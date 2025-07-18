@@ -1,407 +1,439 @@
-/**
- *=============================================================================
- *           SIMBI - Special Relativistic Magnetohydrodynamics Code
- *=============================================================================
- *
- * @file            body.hpp
- * @brief           Body class for representing bodies in the IB scheme
- * @details
- *
- * @version         0.8.0
- * @date            2025-05-11
- * @author          Marcus DuPont
- * @email           marcus.dupont@princeton.edu
- *
- *==============================================================================
- * @build           Requirements & Dependencies
- *==============================================================================
- * @requires        C++20
- * @depends         CUDA >= 11.0, HDF5 >= 1.12, OpenMP >= 4.5
- * @platform        Linux, MacOS
- * @parallel        GPU (CUDA, HIP), CPU (OpenMP)
- *
- *==============================================================================
- * @documentation   Reference & Notes
- *==============================================================================
- * @usage
- * @note
- * @warning
- * @todo
- * @bug
- * @performance
- *
- *==============================================================================
- * @testing        Quality Assurance
- *==============================================================================
- * @test
- * @benchmark
- * @validation
- *
- *==============================================================================
- * @history        Version History
- *==============================================================================
- * 2025-05-11      v0.8.0      Initial implementation
- *
- *==============================================================================
- * @copyright (C) 2025 Marcus DuPont. All rights reserved.
- *==============================================================================
- */
-#ifndef BODY_HPP
-#define BODY_HPP
+#ifndef SIMBI_BODY_HPP
+#define SIMBI_BODY_HPP
 
-#include "capability.hpp"
-#include "compute/functional/monad/maybe.hpp"
 #include "config.hpp"
-#include "core/utility/enums.hpp"
 #include "data/containers/vector.hpp"
+#include <cstddef>
 #include <cstdint>
+#include <limits>
+#include <string>
+#include <tuple>
+#include <unordered_map>
 
-namespace simbi::ibsystem {
-    template <typename T, std::uint64_t Dims>
-    struct Body {
+namespace simbi::body::capabilities {
+    struct gravitational_tag {
+    };
+    struct accretion_tag {
+    };
+    struct elastic_tag {
+    };
+    struct rigid_tag {
+    };
+    struct deformable_tag {
+    };
+}   // namespace simbi::body::capabilities
+
+namespace simbi::body {
+    // primary template - not found case (will cause compile error if used)
+    template <typename Tag, typename... Caps>
+    struct find_capability_index {
+        static constexpr std::size_t value =
+            std::numeric_limits<std::size_t>::max();
+    };
+
+    // specialized template for when the first type has matching tag
+    template <typename Tag, typename First, typename... Rest>
+    struct find_capability_index<Tag, First, Rest...> {
+      private:
+        // check if the current capability has the tag we're looking for
+        static constexpr bool is_match =
+            std::is_same_v<Tag, typename First::tag_type>;
+
+        // recursively search the rest if not a match
+        static constexpr std::size_t next_index =
+            find_capability_index<Tag, Rest...>::value;
+
+      public:
+        // if current is a match, index is 0, otherwise add 1 to next match
+        // index
+        static constexpr std::size_t value =
+            is_match ? 0
+                     : (next_index == std::numeric_limits<std::size_t>::max()
+                            ? next_index
+                            : 1 + next_index);
+    };
+
+    // base case for recursion
+    template <typename Tag>
+    struct find_capability_index<Tag> {
+        static constexpr std::size_t value =
+            std::numeric_limits<std::size_t>::max();
+    };
+
+    template <typename T>
+    struct body_properties_t {
+        std::unordered_map<std::string, T> scalars;
+        std::unordered_map<std::string, bool> flags;
+
+        // helper to check if body has a capability
+        bool has_capability(const std::string& cap) const
+        {
+            auto it = flags.find(cap);
+            return it != flags.end() && it->second;
+        }
+
+        // helper to get scalar property with default
+        T get_scalar(const std::string& key, T default_val = T{0}) const
+        {
+            auto it = scalars.find(key);
+            return it != scalars.end() ? it->second : default_val;
+        }
+    };
+
+}   // namespace simbi::body
+
+namespace simbi::body {
+    template <std::uint64_t Dims, typename... Caps>
+    struct body_t;
+
+    struct grav_component_t {
+        using tag_type = capabilities::gravitational_tag;
+        real softening_length;
+    };
+
+    struct accretion_component_t {
+        using tag_type = capabilities::accretion_tag;
+        real accretion_efficiency;
+        real accretion_radius;
+        real total_accreted_mass;
+        real accretion_rate;
+    };
+
+    struct elastic_component_t {
+        using tag_type = capabilities::elastic_tag;
+        real elastic_modulus;
+        real poisson_ratio;
+    };
+
+    struct rigid_component_t {
+        using tag_type = capabilities::rigid_tag;
+        real inertia;
+        bool apply_no_slip;
+    };
+
+    struct deformable_component_t {
+        using tag_type = capabilities::deformable_tag;
+        real yield_stress;
+        real plastic_strain;
+    };
+
+    // type aliases for common body types
+    template <std::uint64_t Dims>
+    using rigid_sphere_t = body_t<Dims, rigid_component_t>;
+
+    template <std::uint64_t Dims>
+    using gravitational_body_t = body_t<Dims, grav_component_t>;
+
+    template <std::uint64_t Dims>
+    using black_hole_t = body_t<Dims, grav_component_t, accretion_component_t>;
+
+    template <std::uint64_t Dims>
+    using planet_t = body_t<Dims, grav_component_t, rigid_component_t>;
+
+    template <std::uint64_t Dims, typename... Caps>
+    struct body_t {
+        // expose the types for easier access
+        using caps_tuple                     = std::tuple<Caps...>;
+        static constexpr std::uint64_t ncaps = sizeof...(Caps);
+
         // core properties (always present)
-        vector_t<T, Dims> position;
-        vector_t<T, Dims> velocity;
-        vector_t<T, Dims> force;
-        T mass;
-        T radius;
+        vector_t<real, Dims> position;
+        vector_t<real, Dims> velocity;
+        vector_t<real, Dims> force;
+        vector_t<real, Dims> torque;
+        real mass;
+        real radius;
         bool two_way_coupling;
         std::uint64_t index;
 
-        // optional components using maybe_t monad
-        maybe_t<GravitationalComponent<T>> gravitational;
-        maybe_t<AccretionComponent<T>> accretion;
-        maybe_t<ElasticComponent<T>> elastic;
-        maybe_t<RigidComponent<T>> rigid;
-        maybe_t<DeformableComponent<T>> deformable;
+        // capabilities stored as tuple
+        std::tuple<Caps...> capabilities;
 
-        // ctors
-        DUAL Body()
-            : position(vector_t<T, Dims>()),
-              velocity(vector_t<T, Dims>()),
-              force(vector_t<T, Dims>()),
-              mass(T(0)),
-              radius(T(0)),
-              two_way_coupling(false),
-              gravitational(Nothing),
-              accretion(Nothing),
-              elastic(Nothing),
-              rigid(Nothing),
-              deformable(Nothing),
-              index(0)
-        {
-        }
-        DUAL Body(
-            const vector_t<T, Dims>& position,
-            const vector_t<T, Dims>& velocity,
-            T mass,
-            T radius,
-            bool two_way_coupling = false
-        )
-            : position(position),
-              velocity(velocity),
-              force(vector_t<T, Dims>()),
-              mass(mass),
-              radius(radius),
-              two_way_coupling(two_way_coupling),
-              gravitational(Nothing),
-              accretion(Nothing),
-              elastic(Nothing),
-              rigid(Nothing),
-              deformable(Nothing),
-              index(0)
-        {
-        }
-
-        // copy ctor
-        DUAL constexpr Body(const Body& other)
-            : position(other.position),
-              velocity(other.velocity),
-              force(other.force),
-              mass(other.mass),
-              radius(other.radius),
-              two_way_coupling(other.two_way_coupling),
-              gravitational(other.gravitational),
-              accretion(other.accretion),
-              elastic(other.elastic),
-              rigid(other.rigid),
-              deformable(other.deformable),
-              index(other.index)
-        {
-        }
-        // move ctor
-        DUAL constexpr Body(Body&& other) noexcept
-            : position(std::move(other.position)),
-              velocity(std::move(other.velocity)),
-              force(std::move(other.force)),
-              mass(other.mass),
-              radius(other.radius),
-              two_way_coupling(other.two_way_coupling),
-              gravitational(std::move(other.gravitational)),
-              accretion(std::move(other.accretion)),
-              elastic(std::move(other.elastic)),
-              rigid(std::move(other.rigid)),
-              deformable(std::move(other.deformable)),
-              index(other.index)
-        {
-        }
-        // copy assignment
-        DUAL constexpr Body& operator=(const Body& other)
-        {
-            if (this != &other) {
-                position         = other.position;
-                velocity         = other.velocity;
-                force            = other.force;
-                mass             = other.mass;
-                radius           = other.radius;
-                two_way_coupling = other.two_way_coupling;
-                gravitational    = other.gravitational;
-                accretion        = other.accretion;
-                elastic          = other.elastic;
-                rigid            = other.rigid;
-                deformable       = other.deformable;
-                index            = other.index;
-            }
-            return *this;
-        }
-        // move assignment
-        DUAL constexpr Body& operator=(Body&& other) noexcept
-        {
-            if (this != &other) {
-                position         = std::move(other.position);
-                velocity         = std::move(other.velocity);
-                force            = std::move(other.force);
-                mass             = other.mass;
-                radius           = other.radius;
-                two_way_coupling = other.two_way_coupling;
-                gravitational    = std::move(other.gravitational);
-                accretion        = std::move(other.accretion);
-                elastic          = std::move(other.elastic);
-                rigid            = std::move(other.rigid);
-                deformable       = std::move(other.deformable);
-                index            = other.index;
-            }
-            return *this;
-        }
-
-        DUAL Body<T, Dims> with_gravitational(T softening) const
-        {
-            Body<T, Dims> new_body = *this;
-            new_body.gravitational = GravitationalComponent<T>{softening};
-            return new_body;
-        }
-
-        DUAL Body<T, Dims> with_rigid(T inertia, bool apply_no_slip) const
-        {
-            Body<T, Dims> new_body = *this;
-            new_body.rigid         = RigidComponent<T>{inertia, apply_no_slip};
-            return new_body;
-        }
-
-        DUAL Body<T, Dims> with_accretion(
-            T efficiency,
-            T accr_radius         = 0,
-            T total_accreted_mass = 0,
-            T accr_rate           = 0
-        ) const
-        {
-            Body<T, Dims> new_body = *this;
-            new_body.accretion     = AccretionComponent<T>{
-              efficiency,
-              accr_radius <= 0 ? radius : accr_radius,
-              total_accreted_mass,
-              accr_rate
-            };
-            return new_body;
-        }
-
-        DUAL Body<T, Dims> with_force(const vector_t<T, Dims>& new_force) const
-        {
-            Body<T, Dims> new_body = *this;
-            new_body.force         = new_force;
-            return new_body;
-        }
-
-        DUAL Body<T, Dims>
-        update_position(const vector_t<T, Dims>& new_position) const
-        {
-            Body<T, Dims> new_body = *this;
-            new_body.position      = new_position;
-            return new_body;
-        }
-
-        DUAL Body<T, Dims>
-        update_velocity(const vector_t<T, Dims>& new_velocity) const
-        {
-            Body<T, Dims> new_body = *this;
-            new_body.velocity      = new_velocity;
-            return new_body;
-        }
-
-        DUAL Body<T, Dims> add_mass(T added_mass) const
-        {
-            Body<T, Dims> new_body = *this;
-            new_body.mass          = mass + added_mass;
-            return new_body;
-        }
-
-        DUAL Body<T, Dims> add_accreted_mass(T added_mass) const
-        {
-            Body<T, Dims> new_body = *this;
-            if (new_body.accretion.has_value()) {
-                auto component = new_body.accretion.value();
-                component.total_accreted_mass += added_mass;
-                new_body.accretion = component;
-            }
-            return new_body;
-        }
-
-        DUAL Body<T, Dims> with_accretion_rate(T accr_rate) const
-        {
-            Body<T, Dims> new_body = *this;
-            if (new_body.accretion.has_value()) {
-                auto component           = new_body.accretion.value();
-                component.accretion_rate = accr_rate;
-                new_body.accretion       = component;
-            }
-            return new_body;
-        }
-
-        // query functions
-        DUAL bool has_capability(BodyCapability cap) const
-        {
-            switch (cap) {
-                case BodyCapability::GRAVITATIONAL:
-                    return gravitational.has_value();
-                case BodyCapability::ACCRETION: return accretion.has_value();
-                case BodyCapability::RIGID: return rigid.has_value();
-                case BodyCapability::ELASTIC: return elastic.has_value();
-                case BodyCapability::DEFORMABLE: return deformable.has_value();
-                // add more capabilities as needed
-                default: return false;
-            }
-        }
-
-        // get the capabilities of the body
-        DUAL BodyCapability capabilities() const
-        {
-            BodyCapability caps = BodyCapability::NONE;
-            if (gravitational.has_value()) {
-                caps = static_cast<BodyCapability>(
-                    static_cast<std::int64_t>(caps) |
-                    static_cast<std::int64_t>(BodyCapability::GRAVITATIONAL)
-                );
-            }
-            if (accretion.has_value()) {
-                caps = static_cast<BodyCapability>(
-                    static_cast<std::int64_t>(caps) |
-                    static_cast<std::int64_t>(BodyCapability::ACCRETION)
-                );
-            }
-            if (rigid.has_value()) {
-                caps = static_cast<BodyCapability>(
-                    static_cast<std::int64_t>(caps) |
-                    static_cast<std::int64_t>(BodyCapability::RIGID)
-                );
-            }
-            if (elastic.has_value()) {
-                caps = static_cast<BodyCapability>(
-                    static_cast<std::int64_t>(caps) |
-                    static_cast<std::int64_t>(BodyCapability::ELASTIC)
-                );
-            }
-            if (deformable.has_value()) {
-                caps = static_cast<BodyCapability>(
-                    static_cast<std::int64_t>(caps) |
-                    static_cast<std::int64_t>(BodyCapability::DEFORMABLE)
-                );
-            }
-            return caps;
-        }
-
-        // access helper functions
-        // gravitational
-        DUAL T softening_length() const
-        {
-            return gravitational
-                .map([](const auto& g) { return g.softening_length; })
-                .unwrap_or(T(0));
-        }
-
-        // accretion
-        DUAL T accretion_efficiency() const
-        {
-            return accretion
-                .map([](const auto& a) { return a.accretion_efficiency; })
-                .unwrap_or(T(0));
-        }
-
-        DUAL T accretion_radius() const
-        {
-            return accretion
-                .map([](const auto& a) { return a.accretion_radius; })
-                .unwrap_or(radius);
-        }
-
-        DUAL T total_accreted_mass() const
-        {
-            return accretion
-                .map([](const auto& a) { return a.total_accreted_mass; })
-                .unwrap_or(T(0));
-        }
-
-        DUAL T accretion_rate() const
-        {
-            return accretion.map(
-                                [](const auto& a) { return a.accretion_rate; }
-            ).unwrap_or(T(0));
-        }
-
-        // elastic
-        DUAL T elastic_modulus() const
-        {
-            return elastic.map(
-                              [](const auto& e) { return e.elastic_modulus; }
-            ).unwrap_or(T(0));
-        }
-
-        DUAL T poisson_ratio() const
-        {
-            return elastic.map(
-                              [](const auto& e) { return e.poisson_ratio; }
-            ).unwrap_or(T(0));
-        }
-
-        // deformable
-        DUAL T yield_stress() const
-        {
-            return deformable.map(
-                                 [](const auto& d) { return d.yield_stress; }
-            ).unwrap_or(T(0));
-        }
-
-        DUAL T plastic_strain() const
-        {
-            return deformable
-                .map([](const auto& d) { return d.plastic_strain; })
-                .unwrap_or(T(0));
-        }
-
-        // rigid
-        DUAL T inertia() const
-        {
-            return rigid.map(
-                            [](const auto& r) { return r.inertia; }
-            ).unwrap_or(T(0));
-        }
-
-        DUAL bool apply_no_slip() const
-        {
-            return rigid.map(
-                            [](const auto& r) { return r.apply_no_slip; }
-            ).unwrap_or(false);
-        }
+        template <typename Tag>
+        static constexpr bool has_capability_v =
+            (std::is_same_v<Tag, typename Caps::tag_type> || ...);
     };
-}   // namespace simbi::ibsystem
+
+    // concepts for capabilities b/c c++20 is amazing :D
+    template <typename T>
+    concept has_gravitational_capability_c = requires {
+        requires T::template has_capability_v<
+                     capabilities::gravitational_tag> == true;
+    };
+
+    template <typename T>
+    concept has_accretion_capability_c = requires {
+        requires T::template has_capability_v<capabilities::accretion_tag> ==
+                     true;
+    };
+
+    template <typename T>
+    concept has_elastic_capability_c = requires {
+        requires T::template has_capability_v<capabilities::elastic_tag> ==
+                     true;
+    };
+
+    template <typename T>
+    concept has_rigid_capability_c = requires {
+        requires T::template has_capability_v<capabilities::rigid_tag> == true;
+    };
+
+    template <typename T>
+    concept has_deformable_capability_c = requires {
+        requires T::template has_capability_v<capabilities::deformable_tag> ==
+                     true;
+    };
+
+    // immutable update functions
+    template <typename Tag, std::uint64_t Dims, typename... Caps>
+    DUAL constexpr auto get_capabilities(const body_t<Dims, Caps...>& body)
+    {
+        constexpr auto index = find_capability_index<Tag, Caps...>::value;
+        return std::get<index>(body.capabilities);
+    }
+
+    template <std::uint64_t Dims, typename... Caps>
+    DUAL constexpr auto with_force(
+        const body_t<Dims, Caps...>& body,
+        const vector_t<real, Dims>& new_force
+    )
+    {
+        auto result  = body;
+        result.force = new_force;
+        return result;
+    }
+
+    template <std::uint64_t Dims, typename... Caps>
+    DUAL constexpr auto with_torque(
+        const body_t<Dims, Caps...>& body,
+        const vector_t<real, Dims>& new_torque
+    )
+    {
+        auto result   = body;
+        result.torque = new_torque;
+        return result;
+    }
+
+    template <std::uint64_t Dims, typename... Caps>
+    DUAL constexpr auto with_velocity(
+        const body_t<Dims, Caps...>& body,
+        const vector_t<real, Dims>& new_velocity
+    )
+    {
+        auto result     = body;
+        result.velocity = new_velocity;
+        return result;
+    }
+
+    template <std::uint64_t Dims, typename... Caps>
+    DUAL constexpr auto
+    with_mass(const body_t<Dims, Caps...>& body, real new_mass)
+    {
+        auto result = body;
+        result.mass = new_mass;
+        return result;
+    }
+
+    template <std::uint64_t Dims, typename... Caps>
+    DUAL constexpr auto
+    with_radius(const body_t<Dims, Caps...>& body, real new_radius)
+    {
+        auto result   = body;
+        result.radius = new_radius;
+        return result;
+    }
+
+    template <std::uint64_t Dims, typename... Caps>
+    DUAL constexpr auto at_position(
+        const body_t<Dims, Caps...>& body,
+        const vector_t<real, Dims>& new_position
+    )
+    {
+        auto result     = body;
+        result.position = new_position;
+        return result;
+    }
+
+    // factory functions for common body types
+    template <std::uint64_t Dims>
+    DUAL constexpr auto make_basic_body(
+        const vector_t<real, Dims>& position,
+        const vector_t<real, Dims>& velocity,
+        real mass,
+        real radius,
+        bool two_way_coupling = false
+    )
+    {
+        return body_t<Dims>{
+          position,
+          velocity,
+          vector_t<real, Dims>{},
+          vector_t<real, Dims>{},
+          mass,
+          radius,
+          two_way_coupling,
+          0,               // index will be set later
+          std::tuple<>()   // no capabilities
+        };
+    }
+
+    template <std::uint64_t Dims>
+    DUAL constexpr auto make_gravitational_body(
+        const vector_t<real, Dims>& position,
+        const vector_t<real, Dims>& velocity,
+        real mass,
+        real radius,
+        real softening_length,
+        bool two_way_coupling = false
+    )
+    {
+        return body_t<Dims, grav_component_t>{
+          position,
+          velocity,
+          vector_t<real, Dims>{},
+          vector_t<real, Dims>{},
+          mass,
+          radius,
+          two_way_coupling,
+          0,   // index will be set later
+          std::make_tuple(grav_component_t{softening_length})
+        };
+    }
+
+    template <std::uint64_t Dims>
+    DUAL constexpr auto make_black_hole(
+        const vector_t<real, Dims>& position,
+        const vector_t<real, Dims>& velocity,
+        real mass,
+        real radius,
+        real softening_length,
+        real accretion_efficiency,
+        real accretion_radius,
+        real accretion_rate      = 0.0,
+        real total_accreted_mass = 0.0,
+        bool two_way_coupling    = false
+    )
+    {
+        return body_t<Dims, grav_component_t, accretion_component_t>{
+          position,
+          velocity,
+          vector_t<real, Dims>{},
+          vector_t<real, Dims>{},
+          mass,
+          radius,
+          two_way_coupling,
+          0,   // index will be set later
+          std::make_tuple(
+              grav_component_t{softening_length},
+              accretion_component_t{
+                accretion_efficiency,
+                accretion_radius,
+                total_accreted_mass,
+                accretion_rate
+              }
+          )
+        };
+    }
+
+    template <std::uint64_t Dims>
+    DUAL constexpr auto make_planet(
+        const vector_t<real, Dims>& position,
+        const vector_t<real, Dims>& velocity,
+        real mass,
+        real radius,
+        real inertia,
+        bool apply_no_slip    = true,
+        bool two_way_coupling = false
+    )
+    {
+        return body_t<Dims, grav_component_t, rigid_component_t>{
+          position,
+          velocity,
+          vector_t<real, Dims>{},
+          vector_t<real, Dims>{},
+          mass,
+          radius,
+          two_way_coupling,
+          0,   // index will be set later
+          std::make_tuple(
+              grav_component_t{0.0},   // no softening for planets
+              rigid_component_t{inertia, apply_no_slip}
+          )
+        };
+    }
+
+    template <std::uint64_t Dims>
+    DUAL constexpr auto make_rigid_sphere(
+        const vector_t<real, Dims>& position,
+        const vector_t<real, Dims>& velocity,
+        real mass,
+        real radius,
+        real inertia,
+        bool apply_no_slip    = true,
+        bool two_way_coupling = false
+    )
+    {
+        return body_t<Dims, rigid_component_t>{
+          position,
+          velocity,
+          vector_t<real, Dims>{},
+          vector_t<real, Dims>{},
+          mass,
+          radius,
+          two_way_coupling,
+          0,   // index will be set later
+          std::make_tuple(rigid_component_t{inertia, apply_no_slip})
+        };
+    }
+
+    // convenient property accessors
+    // gravitational properties
+    template <has_gravitational_capability_c Body>
+    DUAL constexpr auto softening_length(const Body& body) -> real
+    {
+        auto grav_cap = get_capabilities<capabilities::gravitational_tag>(body);
+        return grav_cap.softening_length;
+    }
+
+    // accretion properties
+    template <has_accretion_capability_c Body>
+    DUAL constexpr auto accretion_efficiency(const Body& body) -> real
+    {
+        auto accr_cap = get_capabilities<capabilities::accretion_tag>(body);
+        return accr_cap.accretion_efficiency;
+    }
+
+    template <has_accretion_capability_c Body>
+    DUAL constexpr auto accretion_radius(const Body& body) -> real
+    {
+        auto accr_cap = get_capabilities<capabilities::accretion_tag>(body);
+        return accr_cap.accretion_radius;
+    }
+
+    template <has_accretion_capability_c Body>
+    DUAL constexpr auto total_accreted_mass(const Body& body) -> real
+    {
+        auto accr_cap = get_capabilities<capabilities::accretion_tag>(body);
+        return accr_cap.total_accreted_mass;
+    }
+
+    template <has_accretion_capability_c Body>
+    DUAL constexpr auto accretion_rate(const Body& body) -> real
+    {
+        auto accr_cap = get_capabilities<capabilities::accretion_tag>(body);
+        return accr_cap.accretion_rate;
+    }
+
+    // rigid body properties
+    template <has_rigid_capability_c Body>
+    DUAL constexpr auto inertia(const Body& body) -> real
+    {
+        auto rigid_cap = get_capabilities<capabilities::rigid_tag>(body);
+        return rigid_cap.inertia;
+    }
+
+    // [TODO] add more properties as needed
+
+}   // namespace simbi::body
 
 #endif

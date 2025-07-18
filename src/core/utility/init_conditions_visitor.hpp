@@ -60,13 +60,13 @@
 namespace simbi {
 
     /**
-     * @brief Visitor interface for InitialConditions
+     * @brief Visitor interface for initial_conditions_t
      *
-     * This visitor defines the interface for processing InitialConditions
+     * This visitor defines the interface for processing initial_conditions_t
      * fields. Concrete visitors implement this interface to populate, validate,
-     * or process the InitialConditions in different ways.
+     * or process the initial_conditions_t in different ways.
      */
-    class InitialConditionsVisitor
+    class initial_conditions_tVisitor
     {
       public:
         // Time-related fields
@@ -164,7 +164,7 @@ namespace simbi {
         ) = 0;
 
         // Allow for proper polymorphic destruction
-        virtual ~InitialConditionsVisitor() = default;
+        virtual ~initial_conditions_tVisitor() = default;
     };
 
 }   // namespace simbi

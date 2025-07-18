@@ -184,10 +184,8 @@ namespace simbi::hydro {
         const auto& mesh         = state.mesh;
         const auto active_domain = mesh.domain;
         auto u                   = state.cons[active_domain];
-        const real dt            = state.metadata.dt;
         // u^{n+1} = u^n + L(u^n)
-        u += flux_divergence(state, dt) + gravity_sources(state, dt) +
-             hydro_sources(state, dt) + geometric_sources(state, dt);
+        u += delta_u(state);
 
         if constexpr (HydroState::is_mhd) {
             // correct the energy density for MHD

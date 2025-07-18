@@ -3,27 +3,25 @@
 
 #include "body.hpp"
 #include "body_delta.hpp"
-#include "collector.hpp"
-#include "component_body_system.hpp"
+#include "collection.hpp"
 #include "config.hpp"
 #include "core/base/concepts.hpp"
 #include "core/utility/enums.hpp"
 #include "data/containers/ctx.hpp"
 #include "data/containers/vector.hpp"
 #include "physics/hydro/physics.hpp"
-#include "system/mesh/solver.hpp"
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
 #include <utility>
 
-namespace simbi::ibsystem {
+namespace simbi::body {
     // coordinate-native gravitational interaction
     template <
         is_hydro_primitive_c prim_t,
         std::uint64_t Dims = prim_t::dimensions>
     DEV auto apply_gravitational_interaction(
-        const Body<real, Dims>& body,
+        const body_t<Dims>& body,
         const prim_t& prim,
         const physics_context_t<Dims>& ctx
     )
@@ -388,6 +386,6 @@ namespace simbi::ibsystem {
         return total_effect;
     }
 
-}   // namespace simbi::ibsystem
+}   // namespace simbi::body
 
 #endif

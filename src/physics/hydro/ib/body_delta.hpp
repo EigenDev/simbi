@@ -54,7 +54,7 @@
 #include <cassert>
 #include <cstdint>
 
-namespace simbi::ibsystem {
+namespace simbi::body {
     template <typename T, std::uint64_t Dims>
     struct BodyDelta {
         std::uint64_t body_idx;
@@ -99,6 +99,6 @@ namespace simbi::ibsystem {
             };
         }
     };
-}   // namespace simbi::ibsystem
+}   // namespace simbi::body
 
 #endif

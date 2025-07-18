@@ -146,7 +146,7 @@ namespace simbi::ibsystem {
 
         // extract reference frame from init conditions
         inline std::string
-        extract_reference_frame(const InitialConditions& init)
+        extract_reference_frame(const initial_conditions_t& init)
         {
             if (init.contains("body_system")) {
                 const auto& sys_props = init.get_dict("body_system");
@@ -223,7 +223,6 @@ namespace simbi::ibsystem {
         auto calculate_binary_positions(T semi_major, T mass_ratio)
             -> std::pair<vector_t<T, Dims>, vector_t<T, Dims>>
         {
-
             T a1 = semi_major / (T{1} + mass_ratio);
             T a2 = semi_major - a1;
 
@@ -327,10 +326,14 @@ namespace simbi::ibsystem {
                 sys_props.at("binary_config").template get<config_dict_t>();
 
             // extract binary parameters
-            auto semi_major   = config::read<T>(binary_props, "semi_major");
-            auto mass_ratio   = config::read<T>(binary_props, "mass_ratio");
-            auto eccentricity = config::read<T>(binary_props, "eccentricity");
-            auto total_mass   = config::read<T>(binary_props, "total_mass");
+            auto semi_major =
+                config::try_read<real>(binary_props, "semi_major");
+            auto mass_ratio =
+                config::try_read<real>(binary_props, "mass_ratio");
+            auto eccentricity =
+                config::try_read<real>(binary_props, "eccentricity");
+            auto total_mass =
+                config::try_read<real>(binary_props, "total_mass");
             auto prescribed_motion =
                 config::try_read<bool>(sys_props, "prescribed_motion")
                     .value_or(true);
@@ -397,7 +400,7 @@ namespace simbi::ibsystem {
     // ========================================================================
 
     template <typename T, std::uint64_t Dims>
-    auto create_body_collection_from_init(const InitialConditions& init)
+    auto create_body_collection_from_init(const initial_conditions_t& init)
         -> std::optional<body_collection_t<T, Dims>>
     {
 

@@ -110,7 +110,7 @@ namespace simbi::dispatch {
             vector_t<void*, 3> bfield_data,
             std::function<real(real)> const& scale_factor,
             std::function<real(real)> const& scale_factor_derivative,
-            const InitialConditions& init
+            const initial_conditions_t& init
         ) -> std::enable_if_t<valid_combination<R, D, G, S, Rec>, void>
         {
             auto state = state::hydro_state_t<R, D, G, S, Rec, EoS>::from_init(
@@ -142,7 +142,7 @@ namespace simbi::dispatch {
             vector_t<void*, 3>,
             std::function<real(real)> const&,
             std::function<real(real)> const&,
-            const InitialConditions&
+            const initial_conditions_t&
         ) -> std::enable_if_t<!valid_combination<R, D, G, S, Rec>, void>
         {
             throw unsupported_configuration(
@@ -165,7 +165,7 @@ namespace simbi::dispatch {
             vector_t<void*, 3> bfield_data,
             std::function<real(real)> const& scale_factor,
             std::function<real(real)> const& scale_factor_derivative,
-            const InitialConditions& init
+            const initial_conditions_t& init
         )
         {
             if (init.gamma - 1.0 < 1e-6) {
@@ -219,7 +219,7 @@ namespace simbi::dispatch {
             vector_t<void*, 3> bfield_data,
             std::function<real(real)> const& scale_factor,
             std::function<real(real)> const& scale_factor_derivative,
-            const InitialConditions& init
+            const initial_conditions_t& init
         )
         {
             switch (rec) {
@@ -264,7 +264,7 @@ namespace simbi::dispatch {
             vector_t<void*, 3> bfield_data,
             std::function<real(real)> const& scale_factor,
             std::function<real(real)> const& scale_factor_derivative,
-            const InitialConditions& init
+            const initial_conditions_t& init
         )
         {
             switch (solver) {
@@ -324,7 +324,7 @@ namespace simbi::dispatch {
             vector_t<void*, 3> bfield_data,
             std::function<real(real)> const& scale_factor,
             std::function<real(real)> const& scale_factor_derivative,
-            const InitialConditions& init
+            const initial_conditions_t& init
         )
         {
             switch (geometry) {
@@ -414,7 +414,7 @@ namespace simbi::dispatch {
             vector_t<void*, 3> bfield_data,
             std::function<real(real)> const& scale_factor,
             std::function<real(real)> const& scale_factor_derivative,
-            const InitialConditions& init
+            const initial_conditions_t& init
         )
         {
             switch (dims) {
@@ -481,7 +481,7 @@ namespace simbi::dispatch {
             vector_t<void*, 3> bfield_data,
             std::function<real(real)> const& scale_factor,
             std::function<real(real)> const& scale_factor_derivative,
-            const InitialConditions& init
+            const initial_conditions_t& init
         )
         {
             switch (regime) {
@@ -557,7 +557,7 @@ namespace simbi::dispatch {
         vector_t<void*, 3> bfield_data,
         std::function<real(real)> const& scale_factor,
         std::function<real(real)> const& scale_factor_derivative,
-        const InitialConditions& init,
+        const initial_conditions_t& init,
         Visitor&& visitor
     )
     {

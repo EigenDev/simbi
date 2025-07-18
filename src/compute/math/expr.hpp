@@ -7,6 +7,7 @@
 #include "core/base/stencil_view.hpp"
 #include "core/utility/enums.hpp"
 #include "data/containers/vector.hpp"
+#include "physics/hydro/ib/effects.hpp"
 #include "physics/hydro/solvers/hllc.hpp"
 #include "physics/hydro/solvers/hlld.hpp"
 #include "physics/hydro/solvers/hlle.hpp"
@@ -29,6 +30,7 @@ namespace simbi {
 namespace simbi::expr {
     using namespace base::stencils;
     using namespace simbi::set_ops;
+    using namespace simbi::body::expr;
 
     template <typename T>
     concept expression_operation =
@@ -369,7 +371,6 @@ namespace simbi::expr {
     template <typename HydroState>
     struct flux_divergence_op_t {
         const HydroState& state_;
-        real dt_;
 
         template <typename Coord>
         auto operator()(Coord coord) const
@@ -398,7 +399,7 @@ namespace simbi::expr {
                 divergence = divergence + (fr * ar - fl * al) / dv;
             }
 
-            return divergence * (-dt_);
+            return divergence * (-state_.metadata.dt);
         }
     };
 
@@ -406,7 +407,6 @@ namespace simbi::expr {
     template <typename HydroState>
     struct gravity_sources_op_t {
         const HydroState& state_;
-        real dt_;
 
         template <typename Coord>
         auto operator()(Coord coord) const
@@ -415,11 +415,15 @@ namespace simbi::expr {
                 return typename HydroState::conserved_t{};
             }
 
-            const auto position     = mesh::centroid(coord, state_.mesh);
-            const auto conservative = state_.cons[coord];
+            const auto position  = mesh::centroid(coord, state_.mesh);
+            const auto primitive = state_.prim[coord];
 
-            return state_.sources.gravity_source
-                .apply(position, conservative, state_.metadata.time, dt_);
+            return state_.sources.gravity_source.apply(
+                position,
+                primitive,
+                state_.metadata.time,
+                state_.metadata.dt
+            );
         }
     };
 
@@ -427,7 +431,6 @@ namespace simbi::expr {
     template <typename HydroState>
     struct hydro_sources_op_t {
         const HydroState& state_;
-        real dt_;
 
         template <typename Coord>
         auto operator()(Coord coord) const
@@ -437,11 +440,11 @@ namespace simbi::expr {
             }
 
             const auto position  = mesh::centroid(coord, state_.mesh);
-            const auto primitive = state_.prim[coord];
+            const auto conserved = state_.cons[coord];
 
             return state_.sources.hydro_source.apply(
                 position,
-                primitive,
+                conserved,
                 state_.metadata.time,
                 state_.metadata.gamma
             );
@@ -452,7 +455,6 @@ namespace simbi::expr {
     template <typename HydroState>
     struct geometric_sources_op_t {
         const HydroState& state_;
-        real dt_;
 
         template <typename Coord>
         auto operator()(Coord coord) const
@@ -469,7 +471,7 @@ namespace simbi::expr {
                            state_.mesh,
                            state_.metadata.gamma
                        ) *
-                       dt_;
+                       state_.metadata.dt;
             }
         }
     };
@@ -541,46 +543,57 @@ namespace simbi::expr {
 
     // create domain operation expressions
     template <typename HydroState>
-    constexpr auto flux_divergence(const HydroState& state, real dt)
+    constexpr auto flux_divergence(const HydroState& state)
     {
         return domain_operation_expr_t<
             decltype(state.mesh.domain),
             flux_divergence_op_t<HydroState>>(
             state.mesh.domain,
-            flux_divergence_op_t<HydroState>{state, dt}
+            flux_divergence_op_t<HydroState>{state}
         );
     }
 
     template <typename HydroState>
-    constexpr auto gravity_sources(const HydroState& state, real dt)
+    constexpr auto gravity_sources(const HydroState& state)
     {
         return domain_operation_expr_t<
             decltype(state.mesh.domain),
             gravity_sources_op_t<HydroState>>(
             state.mesh.domain,
-            gravity_sources_op_t<HydroState>{state, dt}
+            gravity_sources_op_t<HydroState>{state}
         );
     }
 
     template <typename HydroState>
-    constexpr auto hydro_sources(const HydroState& state, real dt)
+    constexpr auto hydro_sources(const HydroState& state)
     {
         return domain_operation_expr_t<
             decltype(state.mesh.domain),
             hydro_sources_op_t<HydroState>>(
             state.mesh.domain,
-            hydro_sources_op_t<HydroState>{state, dt}
+            hydro_sources_op_t<HydroState>{state}
         );
     }
 
     template <typename HydroState>
-    constexpr auto geometric_sources(const HydroState& state, real dt)
+    constexpr auto geometric_sources(const HydroState& state)
     {
         return domain_operation_expr_t<
             decltype(state.mesh.domain),
             geometric_sources_op_t<HydroState>>(
             state.mesh.domain,
-            geometric_sources_op_t<HydroState>{state, dt}
+            geometric_sources_op_t<HydroState>{state}
+        );
+    }
+
+    template <typename HydroState>
+    constexpr auto body_effects(const HydroState& state)
+    {
+        return domain_operation_expr_t<
+            decltype(state.mesh.domain),
+            body_effects_op_t<HydroState>>(
+            state.mesh.domain,
+            body_effects_op_t<HydroState>{state}
         );
     }
 
@@ -718,6 +731,15 @@ namespace simbi::expr {
         requires std::is_arithmetic_v<Scalar>
     {
         return std::forward<Expr>(expr) * scalar;
+    }
+
+    // generalized update function
+    template <typename HydroState>
+    auto delta_u(HydroState& state)
+    {
+        return flux_divergence(state) + gravity_sources(state) +
+               hydro_sources(state) + geometric_sources(state) +
+               body_effects(state);
     }
 
 }   // namespace simbi::expr

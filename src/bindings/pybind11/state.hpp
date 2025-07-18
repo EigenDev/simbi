@@ -13,7 +13,7 @@
 namespace py = pybind11;
 
 namespace simbi {
-    struct InitialConditions;
+    struct initial_conditions_t;
 };
 
 namespace simbi::hydrostate {
@@ -22,7 +22,7 @@ namespace simbi::hydrostate {
         py::array_t<real, py::array::c_style> cons_array,
         py::array_t<real, py::array::c_style> prim_array,
         py::list staggered_bfields,
-        InitialConditions& init,
+        initial_conditions_t& init,
         std::function<real(real)> const& scale_factor,
         std::function<real(real)> const& scale_factor_derivative
     );

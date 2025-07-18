@@ -9,6 +9,7 @@ sources = files(
   'compute/math/linearize.cpp',
   'core/utility/helpers.cpp',
   'physics/em/contact.cpp',
+  'physics/hydro/ib/factory.cpp',
   'physics/hydro/ib/system_serialization.cpp',
   'system/io/console/statistics.cpp',
   'system/io/exceptions.cpp',

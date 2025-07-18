@@ -6,7 +6,7 @@
 #include "config.hpp"   // for real, DUAL, DEV, global::using_four_velocity
 #include "core/utility/bimap.hpp"             // for deserialize
 #include "core/utility/enums.hpp"             // for Cellspacing enum
-#include "core/utility/init_conditions.hpp"   // for InitialConditions
+#include "core/utility/init_conditions.hpp"   // for initial_conditions_t
 #include "data/containers/vector.hpp"         // for vector_t
 #include <cstddef>                            // for std::size_t
 #include <cstdint>                            // for std::int64_t
@@ -81,7 +81,7 @@ namespace simbi::mesh {
         }
 
         static mesh_config_t from_init_conditions(
-            const InitialConditions& init,
+            const initial_conditions_t& init,
             std::function<real(real)> const& a,
             std::function<real(real)> const& adot
         )
