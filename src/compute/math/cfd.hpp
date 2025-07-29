@@ -229,8 +229,7 @@ namespace simbi::cfd {
         std::uint64_t dir
     )
     {
-        constexpr auto dims = HydroState::dimensions;
-        // constexpr auto stencil_gather = make_stencil<CfdOps::rec_t>;
+        constexpr auto dims       = HydroState::dimensions;
         const auto face_domain    = mesh.face_domain[dir];
         const auto gamma          = state.metadata.gamma;
         const auto shock_smoother = state.metadata.shock_smoother;
@@ -247,12 +246,11 @@ namespace simbi::cfd {
               // face velocity (for moving meshes)
               const auto vface = mesh::face_velocity(coord, dir, mesh);
 
-              if (dir == 2) {
+              if (dir == 1) {
                   auto f = ops.flux(pl, pr, nhat, vface, gamma, shock_smoother);
                   std::cout << "coord: " << coord << std::endl;
                   std::cout << "pl: " << pl << std::endl;
                   std::cout << "pr: " << pr << std::endl;
-                  std::cout << "nhat: " << nhat << std::endl;
                   std::cout << "f: " << f << std::endl;
               }
 

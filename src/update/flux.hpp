@@ -30,9 +30,6 @@ namespace simbi {
         std::vector<async::future_t<void>> flux_futures;
 
         for (std::uint64_t dir = 0; dir < HydroState::dimensions; ++dir) {
-            if (dir < 2) {
-                continue;
-            }
             const auto interface_f = cfd::compute_fluxes(state, mesh, ops, dir);
 
             auto future = executor.async([&state, interface_f, dir]() {
