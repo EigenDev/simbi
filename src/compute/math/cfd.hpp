@@ -257,7 +257,7 @@ namespace simbi::cfd {
               // solve Riemann problem
               return ops.flux(pl, pr, nhat, vface, gamma, shock_smoother);
           },
-          face_domain
+          make_domain(face_domain.shape())
         };
     }
     // =================================================================

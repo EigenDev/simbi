@@ -33,7 +33,10 @@ namespace simbi {
             const auto interface_f = cfd::compute_fluxes(state, mesh, ops, dir);
 
             auto future = executor.async([&state, interface_f, dir]() {
-                state.flux[dir] = state.flux[dir].insert(interface_f);
+                state.flux[dir] =
+                    state.flux[dir].map([interface_f](auto coord, auto) {
+                        return interface_f(coord);
+                    });
             });
 
             flux_futures.push_back(std::move(future));
