@@ -350,15 +350,6 @@ namespace simbi::boundary {
                 }
             }
 
-            if (flux_dim == 2) {
-                if (contact_dim == 1) {
-                    std::cout << "coord: " << coord << std::endl;
-                    std::cout << "source_coord: " << source_coord << std::endl;
-                    std::cout << "final_coord: " << final_coord << std::endl;
-                    std::cout << "contact dim: " << contact_dim << std::endl;
-                }
-            }
-
             return source_value;
         };
         return field(ghost.domain, bc_func);
