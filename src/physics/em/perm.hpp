@@ -263,6 +263,11 @@ namespace simbi::em {
                              fp::collect<vector_t<real, 2>>;
                   });
 
+              if (face_coord[2] == 48) {
+                  std::cout << "Face coord: " << face_coord
+                            << ", EMFs: " << emfs << std::endl;
+              }
+
               real curl = discrete_curl<MagComp>(emfs, face_coord, mesh);
               return -dt * curl;   // Faraday's law
           },
@@ -362,7 +367,7 @@ namespace simbi::em {
         update_magnetic_component<magnetic_comp_t::J>(state, mesh);
         // update_magnetic_component<magnetic_comp_t::K>(state, mesh);
         interpolate_magnetic_fields(state, mesh);
-        // std::cin.get();
+        std::cin.get();
     }
 
 }   // namespace simbi::em
