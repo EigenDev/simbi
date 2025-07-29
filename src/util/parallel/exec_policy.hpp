@@ -49,8 +49,8 @@
 #ifndef EXEC_POLICY_HPP
 #define EXEC_POLICY_HPP
 
-#include "config.hpp"                   // std::uint64_t, global::col_maj,
-#include "data/containers/vector.hpp"   // for array
+#include "config.hpp"              // std::uint64_t, global::col_maj,
+#include "containers/vector.hpp"   // for array
 #include "system/adapter/device_adapter_api.hpp"   // for api::set_device
 #include "system/adapter/device_types.hpp"
 #include <exception>   // for exception

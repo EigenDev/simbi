@@ -151,7 +151,7 @@ namespace simbi::adapter {
             );
         }
 
-        void event_record(event_t event)
+        void event_record(event_t event, stream_t stream = 0)
         {
             cudaError_t status = cudaEventRecord(event);
             error::check_err(
@@ -599,7 +599,7 @@ namespace simbi::adapter {
             not_supported("event_destroy");
         }
 
-        void event_record(event_t<> /*event*/)
+        void event_record(event_t<> /*event*/, stream_t<> /*stream*/)
         {
             not_supported("event_record");
         }

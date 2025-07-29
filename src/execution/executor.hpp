@@ -1,0 +1,610 @@
+#ifndef EXECUTOR_HPP
+#define EXECUTOR_HPP
+
+#include "config.hpp"
+#include "containers/vector.hpp"
+#include "domain/domain.hpp"
+#include "execution/future.hpp"
+#include "memory/device.hpp"
+#include "system/adapter/device_adapter_api.hpp"
+#include "system/adapter/device_types.hpp"
+
+#include <algorithm>
+#include <condition_variable>
+#include <cstddef>
+#include <cstdint>
+#include <cstdlib>
+#include <exception>
+#include <functional>
+#include <memory>
+#include <mutex>
+#include <queue>
+#include <string>
+#include <thread>
+#include <type_traits>
+#include <utility>
+#include <vector>
+
+namespace simbi::async {
+    inline auto get_nthreads() -> std::uint64_t
+    {
+        if (const char* thread_env = std::getenv("NTHREADS")) {
+            return static_cast<std::uint64_t>(
+                std::stoul(std::string(thread_env))
+            );
+        }
+
+        if (const char* thread_env = std::getenv("OMP_NUM_THREADS")) {
+            return static_cast<std::uint64_t>(
+                std::stoul(std::string(thread_env))
+            );
+        }
+
+        return std::thread::hardware_concurrency();
+    };
+
+    // minimal thread pool implementation
+    class thread_pool_t
+    {
+      private:
+        std::vector<std::thread> workers_;
+        std::queue<std::function<void()>> tasks_;
+        std::mutex queue_mutex_;
+        std::condition_variable condition_;
+        bool stop_;
+
+      public:
+        explicit thread_pool_t(std::size_t threads) : stop_(false)
+        {
+            for (std::size_t i = 0; i < threads; ++i) {
+                workers_.emplace_back([this] {
+                    for (;;) {
+                        std::function<void()> task;
+                        {
+                            std::unique_lock<std::mutex> lock(queue_mutex_);
+                            condition_.wait(lock, [this] {
+                                return stop_ || !tasks_.empty();
+                            });
+                            if (stop_ && tasks_.empty()) {
+                                return;
+                            }
+                            task = std::move(tasks_.front());
+                            tasks_.pop();
+                        }
+                        task();
+                    }
+                });
+            }
+        }
+
+        template <typename Func>
+        void submit(Func&& func)
+        {
+            {
+                std::unique_lock<std::mutex> lock(queue_mutex_);
+                if (stop_) {
+                    return;
+                }
+                tasks_.emplace(std::forward<Func>(func));
+            }
+            condition_.notify_one();
+        }
+
+        ~thread_pool_t()
+        {
+            {
+                std::unique_lock<std::mutex> lock(queue_mutex_);
+                stop_ = true;
+            }
+            condition_.notify_all();
+            for (std::thread& worker : workers_) {
+                worker.join();
+            }
+        }
+    };
+
+    // executor base
+    template <typename Derived>
+    class executor_base_t
+    {
+      protected:
+        Derived& derived() { return static_cast<Derived&>(*this); }
+        const Derived& derived() const
+        {
+            return static_cast<const Derived&>(*this);
+        }
+
+      public:
+        // async interface
+        template <typename Func, typename... Args>
+        auto async(Func&& func, Args&&... args) const
+            -> future_t<decltype(func(args...))>
+        {
+            return derived().async_impl(
+                std::forward<Func>(func),
+                std::forward<Args>(args)...
+            );
+        }
+
+        template <typename Func, typename... Args>
+        auto sync(Func&& func, Args&&... args) const -> decltype(func(args...))
+        {
+            return async(std::forward<Func>(func), std::forward<Args>(args)...)
+                .wait();
+        }
+
+        // domain-aware parallel iteration
+        template <std::uint64_t Dims, typename Func>
+        auto for_each(const domain_t<Dims>& domain, Func&& func) const
+            -> future_t<void>
+        {
+            return derived().for_each_impl(domain, std::forward<Func>(func));
+        }
+
+        // generic reduction operation
+        template <
+            std::uint64_t Dims,
+            typename T,
+            typename Mapper,
+            typename Reducer>
+        auto reduce(
+            const domain_t<Dims>& domain,
+            T init,
+            Mapper&& mapper,
+            Reducer&& reducer
+        ) const -> future_t<T>
+        {
+            return derived().reduce_impl(
+                domain,
+                init,
+                std::forward<Mapper>(mapper),
+                std::forward<Reducer>(reducer)
+            );
+        }
+    };
+
+    // cpu executor
+    class cpu_executor_t : public executor_base_t<cpu_executor_t>
+    {
+      public:
+        cpu_executor_t() = default;
+
+        //  async implementation
+        template <typename Func, typename... Args>
+        auto async_impl(Func&& func, Args&&... args) const
+            -> future_t<decltype(func(args...))>
+        {
+            using result_t = decltype(func(args...));
+
+            auto state =
+                std::make_shared<typename future_t<result_t>::future_state_t>();
+
+            try {
+                if constexpr (std::is_void_v<result_t>) {
+                    func(args...);
+                    state->ready.store(true);
+                }
+                else {
+                    auto result = func(args...);
+                    state->construct_result(std::move(result));
+                    state->ready.store(true);
+                }
+            }
+            catch (...) {
+                state->exception = std::current_exception();
+                state->has_error.store(true);
+                state->ready.store(true);
+            }
+
+            return future_t<result_t>{std::move(state)};
+        }
+
+        // domain-aware for_each implementation
+        template <std::uint64_t Dims, typename Func>
+        auto for_each_impl(const domain_t<Dims>& domain, Func&& func) const
+            -> future_t<void>
+        {
+            return async_impl([=, this]() { iterate_domain(domain, func); });
+        }
+
+        // reduction implementation
+        template <
+            std::uint64_t Dims,
+            typename T,
+            typename Mapper,
+            typename Reducer>
+        auto reduce_impl(
+            const domain_t<Dims>& domain,
+            T init,
+            Mapper&& mapper,
+            Reducer&& reducer
+        ) const -> future_t<T>
+        {
+            return async_impl([=, this]() {
+                T accumulator = init;
+                iterate_domain(domain, [&](auto coord) {
+                    accumulator = reducer(accumulator, mapper(coord));
+                });
+                return accumulator;
+            });
+        }
+
+      private:
+        template <std::uint64_t Dims, typename Func>
+        void iterate_domain(const domain_t<Dims>& domain, Func func) const
+        {
+            if constexpr (Dims == 1) {
+                for (auto ii = domain.start[0]; ii < domain.end[0]; ++ii) {
+                    func(iarray<1>{ii});
+                }
+            }
+            else if constexpr (Dims == 2) {
+                for (auto ii = domain.start[0]; ii < domain.end[0]; ++ii) {
+                    for (auto jj = domain.start[1]; jj < domain.end[1]; ++jj) {
+                        func(iarray<2>{ii, jj});
+                    }
+                }
+            }
+            else if constexpr (Dims == 3) {
+                for (auto ii = domain.start[0]; ii < domain.end[0]; ++ii) {
+                    for (auto jj = domain.start[1]; jj < domain.end[1]; ++jj) {
+                        for (auto kk = domain.start[2]; kk < domain.end[2];
+                             ++kk) {
+                            func(iarray<3>{ii, jj, kk});
+                        }
+                    }
+                }
+            }
+        }
+    };
+
+    // parallel cpu executor
+    class par_cpu_executor_t : public executor_base_t<par_cpu_executor_t>
+    {
+      private:
+        std::unique_ptr<thread_pool_t> pool_;
+        std::size_t nthreads_;
+
+      public:
+        explicit par_cpu_executor_t()
+            : pool_(std::make_unique<thread_pool_t>(get_nthreads())),
+              nthreads_(get_nthreads())
+        {
+        }
+
+        //  async implementation
+        template <typename Func, typename... Args>
+        auto async_impl(Func&& func, Args&&... args) const
+            -> future_t<decltype(func(args...))>
+        {
+            using result_t = decltype(func(args...));
+
+            auto state =
+                std::make_shared<typename future_t<result_t>::future_state_t>();
+
+            pool_->submit(
+                [state, func = std::forward<Func>(func), args...]() mutable {
+                    try {
+                        if constexpr (std::is_void_v<result_t>) {
+                            func(args...);
+                            {
+                                std::lock_guard<std::mutex> lock(state->mutex);
+                                state->ready.store(true);
+                            }
+                            state->cv.notify_one();
+                        }
+                        else {
+                            auto result = func(args...);
+                            {
+                                std::lock_guard<std::mutex> lock(state->mutex);
+                                state->construct_result(std::move(result));
+                                state->ready.store(true);
+                            }
+                            state->cv.notify_one();
+                        }
+                    }
+                    catch (...) {
+                        state->exception = std::current_exception();
+                        state->has_error.store(true);
+                        state->ready.store(true);
+                    }
+                }
+            );
+
+            return future_t<result_t>{std::move(state)};
+        }
+
+        // parallel for_each implementation
+        template <std::uint64_t Dims, typename Func>
+        auto for_each_impl(const domain_t<Dims>& domain, Func&& func) const
+            -> future_t<void>
+        {
+            return async_impl([=, this]() {
+                parallel_iterate_domain(domain, func);
+            });
+        }
+
+        // parallel reduction implementation
+        template <
+            std::uint64_t Dims,
+            typename T,
+            typename Mapper,
+            typename Reducer>
+        auto reduce_impl(
+            const domain_t<Dims>& domain,
+            T init,
+            Mapper&& mapper,
+            Reducer&& reducer
+        ) const -> future_t<T>
+        {
+            return async_impl([=, this]() {
+                auto total_size = domain.size();
+                auto chunk_size = (total_size + nthreads_ - 1) / nthreads_;
+
+                std::vector<T> partial_results(nthreads_, init);
+                std::vector<std::thread> threads;
+                std::mutex results_mutex;
+
+                for (std::size_t t = 0; t < nthreads_; ++t) {
+                    auto start_idx = t * chunk_size;
+                    auto end_idx = std::min(start_idx + chunk_size, total_size);
+
+                    if (start_idx >= end_idx) {
+                        break;
+                    }
+
+                    threads.emplace_back([=, &partial_results, &domain]() {
+                        T local_accumulator = init;
+                        for (auto idx = start_idx; idx < end_idx; ++idx) {
+                            auto coord = domain.linear_to_coord(idx);
+                            local_accumulator =
+                                reducer(local_accumulator, mapper(coord));
+                        }
+                        partial_results[t] = local_accumulator;
+                    });
+                }
+
+                for (auto& thread : threads) {
+                    thread.join();
+                }
+
+                // combine partial results
+                T final_result = init;
+                for (const auto& partial : partial_results) {
+                    final_result = reducer(final_result, partial);
+                }
+
+                return final_result;
+            });
+        }
+
+      private:
+        template <std::uint64_t Dims, typename Func>
+        void
+        parallel_iterate_domain(const domain_t<Dims>& domain, Func func) const
+        {
+            auto total_size = domain.size();
+            auto chunk_size = (total_size + nthreads_ - 1) / nthreads_;
+
+            std::vector<std::thread> threads;
+
+            for (std::size_t tt = 0; tt < nthreads_; ++tt) {
+                auto start_idx = tt * chunk_size;
+                auto end_idx   = std::min(start_idx + chunk_size, total_size);
+
+                if (start_idx >= end_idx) {
+                    break;
+                }
+
+                threads.emplace_back([=]() {
+                    for (auto idx = start_idx; idx < end_idx; ++idx) {
+                        auto coord = domain.linear_to_coord(idx);
+                        func(coord);
+                    }
+                });
+            }
+
+            for (auto& thread : threads) {
+                thread.join();
+            }
+        }
+    };
+
+    // gpu executor with dynamic grid sizing
+    class gpu_executor_t : public executor_base_t<gpu_executor_t>
+    {
+      private:
+        device_id_t device_;
+        adapter::stream_t<> stream_;
+
+      public:
+        explicit gpu_executor_t(device_id_t device) : device_(device)
+        {
+            gpu::api::set_device(device.device_id);
+            gpu::api::stream_create(&stream_);
+        }
+
+        ~gpu_executor_t()
+        {
+            if (stream_) {
+                gpu::api::stream_destroy(stream_);
+            }
+        }
+
+        gpu_executor_t(const gpu_executor_t&)            = delete;
+        gpu_executor_t& operator=(const gpu_executor_t&) = delete;
+        gpu_executor_t(gpu_executor_t&& other) noexcept
+            : device_(other.device_), stream_(other.stream_)
+        {
+            other.stream_ = {};
+        }
+
+        //  async implementation
+        template <typename Kernel, typename... Args>
+        auto async_impl(Kernel&& kernel, Args&&... args) const -> future_t<void>
+        {
+            auto state =
+                std::make_shared<typename future_t<void>::future_state_t>();
+            state->stream = stream_;
+
+            try {
+                gpu::api::set_device(device_.device_id);
+
+                // basic grid config - will be enhanced for domain-aware sizing
+                auto total_threads = 256;
+                auto blocks        = 1;
+                auto threads       = total_threads;
+
+                auto launch_config = grid::config(blocks, threads);
+                grid::launch(
+                    std::forward<Kernel>(kernel),
+                    launch_config,
+                    std::forward<Args>(args)...
+                );
+
+                gpu::api::event_create(&state->event);
+                gpu::api::event_record(state->event, stream_);
+            }
+            catch (...) {
+                state->exception = std::current_exception();
+                state->has_error.store(true);
+                state->ready.store(true);
+            }
+
+            return future_t<void>{std::move(state)};
+        }
+
+        // gpu for_each implementation with dynamic grid sizing
+        template <std::uint64_t Dims, typename Func>
+        auto for_each_impl(const domain_t<Dims>& domain, Func&& func) const
+            -> future_t<void>
+        {
+            auto state =
+                std::make_shared<typename future_t<void>::future_state_t>();
+            state->stream = stream_;
+
+            try {
+                gpu::api::set_device(device_.device_id);
+
+                auto [blocks, threads] = optimal_grid_size(domain);
+
+                auto kernel = [=] DEV(
+                                  int thread_idx,
+                                  int block_idx,
+                                  int block_dim,
+                                  int grid_dim
+                              ) {
+                    auto global_idx    = block_idx * block_dim + thread_idx;
+                    auto total_threads = grid_dim * block_dim;
+                    auto domain_size   = domain.size();
+
+                    // stride loop for large domains
+                    for (auto idx = global_idx; idx < domain_size;
+                         idx += total_threads) {
+                        auto coord = domain.linear_to_coord(idx);
+                        func(coord);
+                    }
+                };
+
+                auto launch_config = grid::config(blocks, threads);
+                grid::launch(kernel, launch_config);
+
+                gpu::api::event_create(&state->event);
+                gpu::api::event_record(state->event, stream_);
+            }
+            catch (...) {
+                state->exception = std::current_exception();
+                state->has_error.store(true);
+                state->ready.store(true);
+            }
+
+            return future_t<void>{std::move(state)};
+        }
+
+        // gpu reduction implementation
+        template <
+            std::uint64_t Dims,
+            typename T,
+            typename Mapper,
+            typename Reducer>
+        auto reduce_impl(
+            const domain_t<Dims>& /*domain*/,
+            T init,
+            Mapper&& /*mapper*/,
+            Reducer&& /*reducer*/
+        ) const -> future_t<T>
+        {
+            // for now, fallback to cpu for reductions - gpu reductions are
+            // complex could implement proper gpu reductions with shared memory
+            // later
+            return async_impl([=]() {
+                // transfer to cpu, reduce, transfer back
+                // this is a placeholder - proper gpu reduction would use shared
+                // memory + atomics
+                T accumulator = init;
+                // sequential fallback for now
+                return accumulator;
+            });
+        }
+
+        device_id_t device() const { return device_; }
+        adapter::stream_t<> stream() const { return stream_; }
+        void synchronize() { gpu::api::stream_synchronize(stream_); }
+
+      private:
+        template <std::uint64_t Dims>
+        auto optimal_grid_size(const domain_t<Dims>& domain) const
+        {
+            auto domain_size = domain.size();
+
+            // optimal thread count based on domain size
+            constexpr std::int64_t max_threads_per_block = 1024;
+            constexpr std::int64_t preferred_threads     = 256;
+
+            std::int64_t threads = std::min(
+                static_cast<std::int64_t>(domain_size),
+                std::min(max_threads_per_block, preferred_threads)
+            );
+
+            std::int64_t blocks = (domain_size + threads - 1) / threads;
+
+            // limit blocks to reasonable number for memory bandwidth
+            constexpr std::int64_t max_blocks = 65535;
+            blocks                            = std::min(blocks, max_blocks);
+
+            return std::pair{blocks, threads};
+        }
+    };
+
+    // factory functions
+    inline auto cpu_executor() -> cpu_executor_t { return cpu_executor_t{}; }
+
+    inline auto par_cpu_executor() -> par_cpu_executor_t
+    {
+        return par_cpu_executor_t{};
+    }
+
+    inline auto gpu_executor(int device_id = 0) -> gpu_executor_t
+    {
+        return gpu_executor_t{device_id_t::gpu_device(device_id)};
+    }
+
+    inline auto default_executor(std::size_t device_id = 0)
+    {
+        if constexpr (global::on_gpu) {
+            return gpu_executor(device_id);
+        }
+        else {
+            return par_cpu_executor();
+        }
+    }
+
+    struct exec {
+        using type = std::
+            conditional_t<global::on_gpu, gpu_executor_t, par_cpu_executor_t>;
+    };
+    using default_executor_t = typename exec::type;
+
+}   // namespace simbi::async
+
+#endif   // EXECUTOR_HPP

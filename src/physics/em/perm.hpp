@@ -1,19 +1,17 @@
 #ifndef SIMBI_CT_PERMUTATION_HPP
 #define SIMBI_CT_PERMUTATION_HPP
 
-#include "compute/math/domain.hpp"
-#include "compute/math/expr.hpp"
-
+#include "compute/field.hpp"
 #include "compute/functional/fp.hpp"
 #include "config.hpp"
 #include "contact.hpp"
+#include "containers/vector.hpp"
 #include "core/utility/enums.hpp"
 #include "ct_geom.hpp"
-#include "data/containers/vector.hpp"
+#include "domain/domain.hpp"
 #include "physics/em/electromagnetism.hpp"
-#include "physics/em/interp.hpp"
+
 #include <cstdint>
-#include <utility>
 
 namespace simbi::em {
     using namespace simbi::unit_vectors;
@@ -27,68 +25,36 @@ namespace simbi::em {
         // L = horizontal axis index in array coordinates [K,J,I]
         // M = vertical axis index in array coordinates
         // N = normal axis index in array coordinates
+        static constexpr std::uint8_t horizontal_axis = L;
+        static constexpr std::uint8_t vertical_axis   = M;
+        static constexpr std::uint8_t normal_axis     = N;
 
-        static constexpr auto horizontal_axis = L;
-        static constexpr auto vertical_axis   = M;
-        static constexpr auto normal_axis     = N;
-
-        // get flux component indices for this permutation
         static constexpr auto flux_indices()
         {
-            return vector_t<std::uint64_t, 2>{
-              L,
-              M
-            };   // horizontal and vertical flux components
+            return vector_t<std::uint64_t, 2>{L, M};
         }
 
         static constexpr auto vary_index(magnetic_comp_t mag_comp)
         {
-            // return the varying index based on magnetic component
             if (mag_comp == magnetic_comp_t::I) {
-                // if permutation is IK, vary k,
-                // if permutation is IJ, vary j
                 return M;
             }
             else if (mag_comp == magnetic_comp_t::J) {
-                if constexpr (L == 2) {
-                    return L;   // I varies in horizontal direction
-                }
-                else {
-                    return M;   // K varies in vertical direction
-                }
+                return (L == 2) ? L : M;
             }
             else {
-                return L;   // I,J vary in horizontal direction
+                return L;
             }
         }
 
-        // get E-field component this permutation computes
-        static constexpr auto e_field_component()
-        {
-            return N;   // normal direction determines E-field component
-        }
-
-        // apply coordinate transformation through this permutation
-        template <typename Func>
-        static constexpr auto
-        apply_transform(Func&& func, const iarray<3>& base_coord)
-        {
-            return std::forward<Func>(func)(base_coord, L, M, N);
-        }
+        static constexpr auto e_field_component() { return N; }
     };
 
-    // ========================================================================
-    // THE THREE FUNDAMENTAL PERMUTATIONS (Array indexing: [K,J,I])
-    // ========================================================================
-
-    // I=horiz, J=vert, K=normal
+    // the three fundamental permutations
     using IJ_permutation = coord_permutation_t<2, 1, 0>;
-    // J=horiz, K=vert, I=normal
     using JK_permutation = coord_permutation_t<1, 0, 2>;
-    // I=horiz, K=vert, J=normal
     using IK_permutation = coord_permutation_t<2, 0, 1>;
 
-    // type-level permutation list b/c I'm feeling fancy
     template <typename... Perms>
     struct permutation_list_t {
     };
@@ -107,19 +73,6 @@ namespace simbi::em {
         }
     }
 
-    // compile-time fold over permutation types
-    template <typename PermList, typename Func>
-    constexpr auto fold_permutations(Func&& func);
-
-    template <typename... Perms, typename Func>
-    constexpr auto fold_permutations(permutation_list_t<Perms...>, Func&& func)
-    {
-        return vector_t{func(Perms{})...};
-    }
-
-    template <typename PermList, typename Func>
-    constexpr auto map_permutations(Func&& func);
-
     template <typename... Perms, typename Func>
     constexpr auto map_permutations(permutation_list_t<Perms...>, Func&& func)
     {
@@ -130,19 +83,16 @@ namespace simbi::em {
     // COORDINATE UTILITIES
     // ========================================================================
 
-    // convert doubled coordinate to array index
     constexpr std::int64_t to_array_index(int doubled_coord)
     {
         return doubled_coord / 2;
     }
 
-    // convert array indices to doubled coordinate for face centers
     constexpr auto to_doubled_coord(const iarray<3>& coord)
     {
         return iarray<3>{2 * coord[0], 2 * coord[1], 2 * coord[2]};
     }
 
-    // convert doubled coords to array indices
     constexpr auto to_array_index_coord(const iarray<3>& doubled_coord)
     {
         return iarray<3>{
@@ -153,8 +103,9 @@ namespace simbi::em {
     }
 
     // ========================================================================
-    // GENERIC COORDINATE GENERATION USING PERMUTATIONS
+    // COORDINATE GENERATION
     // ========================================================================
+
     template <magnetic_comp_t MagComp, typename Permutation>
     constexpr auto gen_edge_coords(const iarray<3>& face_coord)
     {
@@ -193,18 +144,6 @@ namespace simbi::em {
             return to_array_index_coord(coord);
         };
         constexpr auto half = 1;   // conceptual half-step for fluxes
-        // if constexpr (MagComp == magnetic_comp_t::J) {
-        //     if constexpr (std::same_as<Permutation, IJ_permutation>) {
-        //         // special case for J component, where the fluxes live
-        //         // on the j faces, which would be the vertical direction
-        //         return vector_t{
-        //           make_flux_coord(+1, half),   // North (positive vertical)
-        //           make_flux_coord(-1, half),   // South (negative vertical)
-        //           make_flux_coord(half, +1),   // East (positive horizontal)
-        //           make_flux_coord(half, -1)    // West (negative horizontal)
-        //         };
-        //     }
-        // }
         // standard N/S/E/W pattern in permuted coordinates
         return vector_t{
           make_flux_coord(half, +1),   // North (positive vertical)
@@ -217,8 +156,6 @@ namespace simbi::em {
     template <typename Permutation>
     constexpr auto prim_stencil(const iarray<3>& edge_doubled_coord)
     {
-        // primitive stencil is \pm 1 in both directions (cell diagonals)
-
         auto make_prim_coord = [&](std::int64_t h_offset,
                                    std::int64_t v_offset) {
             auto coord = edge_doubled_coord;
@@ -228,50 +165,42 @@ namespace simbi::em {
         };
 
         return vector_t{
-          make_prim_coord(+1, +1),   // NE corner
-          make_prim_coord(-1, +1),   // NW corner
-          make_prim_coord(+1, -1),   // SE corner
-          make_prim_coord(-1, -1)    // SW corner
+          make_prim_coord(+1, +1),   // ne
+          make_prim_coord(-1, +1),   // nw
+          make_prim_coord(+1, -1),   // se
+          make_prim_coord(-1, -1)    // sw
         };
     }
 
     // ========================================================================
-    // PERMUTATION-AWARE FIELD ACCESS
+    // FIELD ACCESS
     // ========================================================================
 
     template <typename Permutation, typename FluxField>
     auto
     face_efields(const FluxField& flux, const vector_t<iarray<3>, 4>& coords)
     {
-        // when computing the Riemann solver, we store the electric field
-        // in the magnetic field portion of the flux field for convenience.
         auto [h_flux_idx, v_flux_idx] = Permutation::flux_indices();
         constexpr auto dims           = FluxField::dimensions;
         constexpr auto nhat = ehat<dims>(Permutation::e_field_component());
 
         return vector_t{
-          // North - horizontal flux
-          flux[h_flux_idx][coords[0]].mag[index(nhat)],
-          // South - horizontal flux
-          flux[h_flux_idx][coords[1]].mag[index(nhat)],
-          // East - vertical flux
-          flux[v_flux_idx][coords[2]].mag[index(nhat)],
-          // West - vertical flux
-          flux[v_flux_idx][coords[3]].mag[index(nhat)]
+          flux[h_flux_idx][coords[0]].mag[index(nhat)],   // north
+          flux[h_flux_idx][coords[1]].mag[index(nhat)],   // south
+          flux[v_flux_idx][coords[2]].mag[index(nhat)],   // east
+          flux[v_flux_idx][coords[3]].mag[index(nhat)]    // west
         };
     }
 
     template <typename Permutation, typename FluxField>
     auto den_fluxes(const FluxField& flux, const vector_t<iarray<3>, 4>& coords)
     {
-        // useful for computing CT contact EMF b/c of upwinding
         auto [h_flux_idx, v_flux_idx] = Permutation::flux_indices();
-
         return vector_t<real, 4>{
-          flux[h_flux_idx][coords[0]].den,   // North density flux
-          flux[h_flux_idx][coords[1]].den,   // South density flux
-          flux[v_flux_idx][coords[2]].den,   // East density flux
-          flux[v_flux_idx][coords[3]].den    // West density flux
+          flux[h_flux_idx][coords[0]].den,   // north
+          flux[h_flux_idx][coords[1]].den,   // south
+          flux[v_flux_idx][coords[2]].den,   // east
+          flux[v_flux_idx][coords[3]].den    // west
         };
     }
 
@@ -283,169 +212,157 @@ namespace simbi::em {
         constexpr auto nhat = ehat<dims>(Permutation::e_field_component());
 
         return vector_t{
-          em::electric_field(prim[coords[0]])[index(nhat)],   // NE
-          em::electric_field(prim[coords[1]])[index(nhat)],   // NW
-          em::electric_field(prim[coords[2]])[index(nhat)],   // SE
-          em::electric_field(prim[coords[3]])[index(nhat)]    // SW
+          em::electric_field(prim[coords[0]])[index(nhat)],   // ne
+          em::electric_field(prim[coords[1]])[index(nhat)],   // nw
+          em::electric_field(prim[coords[2]])[index(nhat)],   // se
+          em::electric_field(prim[coords[3]])[index(nhat)]    // sw
         };
     }
 
     // ========================================================================
-    // MAGNETIC COMPONENT TO PERMUTATION MAPPING
+    // CT MAGNETIC UPDATE
     // ========================================================================
-    template <magnetic_comp_t MagComp, typename Func>
-    constexpr auto apply_to_permutations(Func&& func)
+
+    template <magnetic_comp_t MagComp, typename HydroState, typename MeshConfig>
+    auto ct_magnetic_update(const HydroState& state, const MeshConfig& mesh)
     {
-        if constexpr (MagComp == magnetic_comp_t::K) {
-            return vector_t{func(JK_permutation{}), func(IK_permutation{})};
-        }
-        else if constexpr (MagComp == magnetic_comp_t::J) {
-            return vector_t{func(JK_permutation{}), func(IJ_permutation{})};
-        }
-        else {
-            return vector_t{func(IJ_permutation{}), func(IK_permutation{})};
-        }
+        constexpr auto comp = static_cast<std::uint64_t>(MagComp);
+        const auto dt       = state.metadata.dt;
+
+        return compute_field_t{
+          [dt,
+           mesh,
+           prim  = state.prim[mesh.domain],
+           flux0 = state.flux[0][mesh.face_domain[0]],
+           flux1 = state.flux[1][mesh.face_domain[1]],
+           flux2 = state.flux[2][mesh.face_domain[2]]](auto face_coord) {
+              const auto fluxes        = vector_t{flux0, flux1, flux2};
+              constexpr auto perm_list = permutation_list<MagComp>();
+
+              const auto emf_computer = [&]<typename Perm>(Perm) {
+                  return [&](const iarray<3>& edge_coord) {
+                      auto flux_coords = flux_stencil<Perm>(edge_coord);
+                      auto prim_coords = prim_stencil<Perm>(edge_coord);
+
+                      auto ef    = face_efields<Perm>(fluxes, flux_coords);
+                      auto ec    = center_efields<Perm>(prim, prim_coords);
+                      auto densf = den_fluxes<Perm>(fluxes, flux_coords);
+
+                      return ct_contact_formula(ef, ec, densf);
+                  };
+              };
+
+              const auto edge_generator =
+                  [&]<typename Permutation>(Permutation) {
+                      return gen_edge_coords<MagComp, Permutation>(face_coord);
+                  };
+
+              auto emfs =
+                  map_permutations(perm_list, [&]<typename Perm>(Perm p) {
+                      return edge_generator(p) | fp::map(emf_computer(p)) |
+                             fp::collect<vector_t<real, 2>>;
+                  });
+
+              real curl = discrete_curl<MagComp>(emfs, face_coord, mesh);
+              return -dt * curl;   // Faraday's law
+          },
+          make_domain(mesh.face_domain[comp].shape())
+        };
     }
 
     // ========================================================================
-    // UNIFIED EDGE EMF COMPUTATION
+    // INTERPOLATION FIELDS
     // ========================================================================
 
-    template <typename Permutation, typename HydroState>
-    auto compute_edge_emf(
-        const iarray<3>& edge_doubled_coord,
-        const HydroState& state
+    template <typename HydroState, typename MeshConfig>
+    auto interpolate_face_to_cell_magnetic(
+        const HydroState& state,
+        const MeshConfig& mesh
     )
     {
-        const auto fluxes = vector_t{
-          state.flux[0].contract(iarray<3>{0, 1, 1}),
-          state.flux[1].contract(iarray<3>{1, 0, 1}),
-          state.flux[2].contract(iarray<3>{1, 1, 0})
+        const auto bz = state.bstaggs[0][mesh.face_domain[0]];
+        const auto by = state.bstaggs[1][mesh.face_domain[1]];
+        const auto bx = state.bstaggs[2][mesh.face_domain[2]];
+        return compute_field_t{
+          [bx, by, bz, mesh](auto coord) {
+              auto get_face_avg = [mesh](const auto& bface, auto cm, int dir) {
+                  const auto cp = cm + array_offset<3>(dir);
+                  if constexpr (MeshConfig::geometry == Geometry::CARTESIAN) {
+                      (void) mesh;   // unused in Cartesian case
+                      return 0.5 * (bface[cm] + bface[cp]);
+                  }
+                  else {
+                      // volume-average for non-Cartesian geometries
+                      auto al = mesh::face_area(cm, dir, Dir::E, mesh);
+                      auto ar = mesh::face_area(cp, dir, Dir::W, mesh);
+                      return (bface[cm] * al + bface[cp] * ar) / (al + ar);
+                  }
+              };
+
+              return vector_t<real, 3>{
+                get_face_avg(bx, coord, 2),   // x1-component
+                get_face_avg(by, coord, 1),   // x2-component
+                get_face_avg(bz, coord, 0)    // x3-component
+              };
+          },
+          make_domain(mesh.domain.shape())
         };
-        const auto p = state.prim[state.mesh.domain];
-        // generate all stencil coordinates using permutation
-        auto flux_coords = flux_stencil<Permutation>(edge_doubled_coord);
-        auto prim_coords = prim_stencil<Permutation>(edge_doubled_coord);
-
-        // extract field values using permutation-aware accessors
-        auto flux_e_fields  = face_efields<Permutation>(fluxes, flux_coords);
-        auto cell_e_fields  = center_efields<Permutation>(p, prim_coords);
-        auto density_fluxes = den_fluxes<Permutation>(fluxes, flux_coords);
-
-        // compute EMF using CT Contact algorithm
-        return ct_contact_formula(flux_e_fields, cell_e_fields, density_fluxes);
-    }
-
-    //========================================================================
-    // MAGNETIC FIELD UPDATE EXPRESSION
-    // ========================================================================
-    template <magnetic_comp_t MagComp, typename HydroState>
-    struct ct_magnetic_update_t
-        : expr::expression_t<ct_magnetic_update_t<MagComp, HydroState>> {
-        HydroState& state;
-
-        auto domain() const
-        {
-            if constexpr (MagComp == magnetic_comp_t::I) {
-                return state.flux[2].domain();
-            }
-            else if constexpr (MagComp == magnetic_comp_t::J) {
-                return state.flux[1].domain();
-            }
-            else {
-                return state.flux[0].domain();
-            }
-        }
-
-        template <typename Coord>
-        real eval(Coord face_coord) const
-        {
-            constexpr auto perm_list = permutation_list<MagComp>();
-
-            const auto emf_computer = [&]<typename Permutation>(Permutation) {
-                return [&](const iarray<3>& edge_coord) {
-                    return compute_edge_emf<Permutation>(edge_coord, state);
-                };
-            };
-
-            const auto edge_generator = [&]<typename Permutation>(Permutation) {
-                return gen_edge_coords<MagComp, Permutation>(face_coord);
-            };
-            auto emfs = map_permutations(perm_list, [&]<typename Perm>(Perm p) {
-                return edge_generator(p) | fp::map(emf_computer(p)) |
-                       fp::collect<vector_t<real, 2>>;
-            });
-
-            // apply discrete curl
-            real curl = discrete_curl<MagComp>(emfs, face_coord, state.mesh);
-
-            // Faraday's law: ∂B/∂t = -∇ × E
-            return -state.metadata.dt * curl;
-        }
-    };
-
-    template <magnetic_comp_t MagComp, typename HydroState>
-    auto field_update(HydroState& state)
-    {
-        return ct_magnetic_update_t<MagComp, HydroState>{.state = state};
     }
 
     // ========================================================================
     // HIGH-LEVEL INTERFACE
     // ========================================================================
-    template <typename HydroState>
-    void update_energy_density(HydroState& state)
-    {
-        const auto active_domain = state.mesh.domain;
-        auto u                   = state.cons[active_domain];
-        active_domain |
-            fp::transform_domain(interpolate_face_to_cell_magnetic(state)) |
-            fp::for_each([&u](const auto& pair) {
-                const auto [coord, b_interp] = pair;
-                // update energy to maintain consistency as discussed in
-                // Mignone and Bodo 2006,  (Eqn. 76)
-                // and Balsara & Spicer 1999,
-                // and Toth 2000,
-                const auto bmean    = u[coord].mag;
-                const auto old_emag = 0.5 * vecops::dot(bmean, bmean);
-                const auto new_emag = 0.5 * vecops::dot(b_interp, b_interp);
 
-                // update conversed magnetic field
-                u[coord].nrg += (new_emag - old_emag);
-            });
+    template <typename HydroState, typename MeshConfig>
+    void update_energy_density(HydroState& state, const MeshConfig& mesh)
+    {
+        auto bavg = interpolate_face_to_cell_magnetic(state, mesh);
+        auto u_p  = state.cons[mesh.domain];
+
+        u_p = u_p.map([bavg](auto coord, auto u) {
+            const auto b_interp = bavg(coord);
+            const auto bmean    = u.mag;
+            const auto old_emag = 0.5 * vecops::dot(bmean, bmean);
+            const auto new_emag = 0.5 * vecops::dot(b_interp, b_interp);
+            u.nrg += (new_emag - old_emag);
+            return u;
+        });
     }
 
-    template <typename HydroState>
-    void interpolate_magnetic_fields(HydroState& state)
+    template <typename HydroState, typename MeshConfig>
+    void interpolate_magnetic_fields(HydroState& state, const MeshConfig& mesh)
     {
-        const auto active_domain = state.mesh.domain;
-        auto u                   = state.cons[active_domain];
-        active_domain |
-            fp::transform_domain(interpolate_face_to_cell_magnetic(state)) |
-            fp::for_each([&u](const auto& pair) {
-                const auto [coord, b_interp] = pair;
-                // update conversed magnetic field
-                u[coord].mag = b_interp;
-            });
+        auto bavg = interpolate_face_to_cell_magnetic(state, mesh);
+        auto u_p  = state.cons[mesh.domain];
+
+        u_p = u_p.map([bavg](auto coord, auto u) {
+            // update magnetic field in the conservative state
+            u.mag = bavg(coord);
+            return u;
+        });
     }
 
-    template <typename HydroState, magnetic_comp_t MagComp>
-    void update_magnetic_component(HydroState& state)
+    template <magnetic_comp_t MagComp, typename HydroState, typename MeshConfig>
+    void update_magnetic_component(HydroState& state, const MeshConfig& mesh)
     {
         constexpr auto comp    = static_cast<std::uint64_t>(MagComp);
-        constexpr auto ct_algo = field_update<MagComp, HydroState>;
-        const auto& mesh       = state.mesh;
-        const auto face_domain = active_staggered_domain(mesh.domain, comp);
-        state.bstaggs[comp][face_domain] += ct_algo(state);
+        const auto face_domain = mesh.face_domain[comp];
+
+        auto db     = ct_magnetic_update<MagComp>(state, mesh);
+        auto bfield = state.bstaggs[comp][face_domain];
+        bfield      = bfield.map([db](auto coord, auto b_old) {
+            return b_old + db(coord);
+        });
     }
 
-    template <typename HydroState>
-    void update_magnetic_fields(HydroState& state)
+    template <typename HydroState, typename MeshConfig>
+    void update_magnetic_fields(HydroState& state, const MeshConfig& mesh)
     {
-        update_magnetic_component<HydroState, magnetic_comp_t::I>(state);
-        update_magnetic_component<HydroState, magnetic_comp_t::J>(state);
-        update_magnetic_component<HydroState, magnetic_comp_t::K>(state);
-        interpolate_magnetic_fields(state);
+        // update_magnetic_component<magnetic_comp_t::I>(state, mesh);
+        update_magnetic_component<magnetic_comp_t::J>(state, mesh);
+        // update_magnetic_component<magnetic_comp_t::K>(state, mesh);
+        interpolate_magnetic_fields(state, mesh);
+        // std::cin.get();
     }
 
 }   // namespace simbi::em

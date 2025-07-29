@@ -30,8 +30,11 @@
 #include "device_types.hpp"
 #include <algorithm>   // for std::min
 #include <chrono>      // for timing
-#include <cstring>     // for memcpy, memset
-#include <thread>      // for std::thread::hardware_concurrency
+#include <cstdint>     // for std::int64_t, std::uint64_t
+#include <cstdlib>
+#include <cstring>   // for memcpy, memset
+#include <string>    // for to_string
+#include <thread>    // for std::thread::hardware_concurrency
 
 namespace simbi::adapter {
     // Helper function to handle unused parameters
@@ -89,7 +92,7 @@ namespace simbi::adapter {
         void event_create(adapter::event_t<cpu_backend_tag>* event)
         {
             // Create a new event and initialize it
-            *event = std::chrono::high_resolution_clock::time_point();
+            (*event).value = std::chrono::high_resolution_clock::time_point();
         }
 
         void event_destroy(adapter::event_t<cpu_backend_tag> /*event*/)
@@ -97,10 +100,13 @@ namespace simbi::adapter {
             // no-op on CPU, events are just time points
         }
 
-        void event_record(adapter::event_t<cpu_backend_tag>& event)
+        void event_record(
+            adapter::event_t<cpu_backend_tag>& event,
+            adapter::stream_t<cpu_backend_tag> /*stream*/
+        )
         {
-            // Record the current time
-            event = std::chrono::high_resolution_clock::now();
+            // record the current time
+            event.value = std::chrono::high_resolution_clock::now();
         }
 
         void event_synchronize(adapter::event_t<cpu_backend_tag> /*event*/)
@@ -117,7 +123,7 @@ namespace simbi::adapter {
             // Calculate elapsed time between two events
             auto duration =
                 std::chrono::duration_cast<std::chrono::microseconds>(
-                    end - start
+                    end.value - start.value
                 )
                     .count();
 
@@ -345,6 +351,9 @@ namespace simbi::adapter {
         {
             // Simple implementation for CPU: just call the function directly
             // This assumes function is a standard function pointer
+            // [TODO]: this should be a std::function to hold any callable
+            // type, not just a function pointer. also, we should parallelize
+            // this piece
             if (function) {
                 function();
             }

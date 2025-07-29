@@ -85,11 +85,6 @@ namespace simbi {
     enum class Reconstruction {
         PCM,
         PLM,
-        PPM,
-        WENO3,
-        WENO5,
-        WENO7,
-        WENO9,
     };
 
     enum class Timestepping {
@@ -282,7 +277,7 @@ namespace simbi {
 
     REGISTER_ENUM_BIMAP(
         Regime,
-        {Regime::NEWTONIAN, "classical"},
+        {Regime::NEWTONIAN, "newtonian"},
         {Regime::SRHD, "srhd"},
         {Regime::RMHD, "srmhd"},
         {Regime::MHD, "mhd"}
@@ -307,8 +302,6 @@ namespace simbi {
         Reconstruction,
         {Reconstruction::PCM, "pcm"},
         {Reconstruction::PLM, "plm"},
-        {Reconstruction::PPM, "ppm"},
-        {Reconstruction::WENO5, "weno5"}
     );
 
     REGISTER_ENUM_BIMAP(

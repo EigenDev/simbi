@@ -3,7 +3,7 @@
 
 #include "body.hpp"
 #include "config.hpp"
-#include "data/containers/vector.hpp"
+#include "containers/vector.hpp"
 #include <cassert>
 #include <cstddef>
 #include <cstdint>

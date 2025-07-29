@@ -150,9 +150,9 @@ namespace simbi::adapter {
             );
         }
 
-        void event_record(event_t event)
+        void event_record(event_t event, stream_t stream = 0)
         {
-            hipError_t status = hipEventRecord(event);
+            hipError_t status = hipEventRecord(event, stream);
             error::check_err(
                 hip_error::check_hip_error(status),
                 "cuda event recording failed"
@@ -589,7 +589,7 @@ namespace simbi::adapter {
             not_supported("event_destroy");
         }
 
-        void event_record(event_t<> /*event*/)
+        void event_record(event_t<> /*event*/, stream_t<> /*stream*/)
         {
             not_supported("event_record");
         }

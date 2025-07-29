@@ -2,8 +2,8 @@
 #define SIMBI_PHYSICS_HPP
 
 #include "config.hpp"               // for global::using_four_velocity
+#include "containers/vector.hpp"    // for vector_t
 #include "core/base/concepts.hpp"   // for is_hydro_primitive_c, is_mhd_primitive_c, is_rmhd_c, is_srhd_c, is_hydro_conserved_c
-#include "data/containers/vector.hpp"   // for vector_t
 #include "physics/em/electromagnetism.hpp"
 #include "physics/eos/isothermal.hpp"   // for isothermal_gas_eos_t
 #include <concepts>                     // for std::same_as

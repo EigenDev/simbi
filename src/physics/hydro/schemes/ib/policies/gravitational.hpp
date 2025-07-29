@@ -51,7 +51,7 @@
 #define GRAVITATIONAL_HPP
 
 #include "config.hpp"
-#include "data/containers/vector.hpp"
+#include "containers/vector.hpp"
 #include "geometry/mesh/cell.hpp"
 #include "physics/hydro/schemes/ib/delta/body_delta.hpp"
 #include "physics/hydro/schemes/ib/systems/body.hpp"

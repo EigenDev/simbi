@@ -2,7 +2,7 @@
 #define SIMBI_BODY_HPP
 
 #include "config.hpp"
-#include "data/containers/vector.hpp"
+#include "containers/vector.hpp"
 #include <cstddef>
 #include <cstdint>
 #include <limits>

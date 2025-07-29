@@ -5,11 +5,13 @@
 #include "config.hpp"                           // for global::epsilon
 #include "core/base/concepts.hpp"               // for is_hydro_conserved_c
 #include "core/utility/enums.hpp"               // for Regime
+#include "core/utility/helpers.hpp"             // for find_mu_plus, etc
 #include "physics/eos/ideal.hpp"                // for ideal_gas_eos_t
 #include "physics/hydro/physics.hpp"            // for pressure_from_conserved
 #include "system/io/exceptions.hpp"             // for ErrorCode
-#include <cmath>                                // for abs, isfinite, sqrt
-#include <cstdint>                              // for std::uint64_t
+
+#include <cmath>     // for abs, isfinite, sqrt
+#include <cstdint>   // for std::uint64_t
 
 namespace simbi::hydro::newtonian {
     using namespace simbi::eos;
@@ -96,6 +98,7 @@ namespace simbi::hydro::srhd {
 namespace simbi::hydro::rmhd {
     using namespace simbi::eos;
     using namespace simbi::concepts;
+    using namespace simbi::helpers;
 
     template <
         is_mhd_conserved_c conserved_t,
@@ -112,6 +115,8 @@ namespace simbi::hydro::rmhd {
 
         //==================================================================
         // ATTEMPT TO RECOVER PRIMITIVES USING KASTAUN ET AL. 2021
+        // Jim Stone of the Institute for Advanced Study references this
+        // paper to me. I'm thankful for that.
         //==================================================================
 
         //======= rescale the variables Eqs. (22) - (25)

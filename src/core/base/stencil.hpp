@@ -1,9 +1,9 @@
 #ifndef SIMBI_CORE_GRAPH_STENCIL_HPP
 #define SIMBI_CORE_GRAPH_STENCIL_HPP
 
+#include "containers/vector.hpp"
 #include "core/base/concepts.hpp"
 #include "core/utility/enums.hpp"
-#include "data/containers/vector.hpp"
 #include <cassert>
 #include <cstddef>
 #include <cstdint>
@@ -18,21 +18,6 @@ namespace simbi::base {
         }
         else if constexpr (Rec == Reconstruction::PLM) {
             return 3;
-        }
-        else if constexpr (Rec == Reconstruction::PPM) {
-            return 4;
-        }
-        else if constexpr (Rec == Reconstruction::WENO3) {
-            return 3;
-        }
-        else if constexpr (Rec == Reconstruction::WENO5) {
-            return 5;
-        }
-        else if constexpr (Rec == Reconstruction::WENO7) {
-            return 7;
-        }
-        else if constexpr (Rec == Reconstruction::WENO9) {
-            return 9;
         }
         else {
             static_assert(false, "Unsupported reconstruction order");
@@ -59,13 +44,6 @@ namespace simbi::base {
                 pattern[1][direction] = -1;
                 pattern[2][direction] = 0;
             }
-            else if constexpr (Rec == Reconstruction::PPM) {
-                // PPM: i-2, i-1, i, i+1
-                pattern[0][direction] = -3;
-                pattern[1][direction] = -2;
-                pattern[2][direction] = -1;
-                pattern[3][direction] = 0;
-            }
 
             return pattern;
         }
@@ -83,13 +61,6 @@ namespace simbi::base {
                 pattern[0][direction] = -1;
                 pattern[1][direction] = 0;
                 pattern[2][direction] = 1;
-            }
-            else if constexpr (Rec == Reconstruction::PPM) {
-                // PPM: i-1, i, i+1, i+2
-                pattern[0][direction] = -2;
-                pattern[1][direction] = -1;
-                pattern[2][direction] = 0;
-                pattern[3][direction] = 1;
             }
 
             return pattern;

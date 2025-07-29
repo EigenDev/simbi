@@ -1,5 +1,7 @@
-#ifndef SIMBI_FP_MINIMAL_HPP
-#define SIMBI_FP_MINIMAL_HPP
+#ifndef FP_TOOKKIT_HPP
+#define FP_TOOKKIT_HPP
+
+#include "execution/future.hpp"
 
 #include <algorithm>
 #include <cstddef>
@@ -897,6 +899,197 @@ namespace simbi::fp {
     constexpr auto none_of(Pred&& pred)
     {
         return none_of_fn_t<std::decay_t<Pred>>(std::forward<Pred>(pred));
+    }
+
+    // ========================================================================
+    // reduction operations
+    // ========================================================================
+
+    template <typename BinaryOp>
+    struct reduce_fn_t {
+        BinaryOp op_;
+        constexpr explicit reduce_fn_t(BinaryOp op) : op_(std::move(op)) {}
+
+        template <iterable Source>
+        constexpr auto operator()(Source&& source) const
+        {
+            auto begin = std::begin(std::forward<Source>(source));
+            auto end   = std::end(std::forward<Source>(source));
+
+            if (begin == end) {
+                using value_type =
+                    typename std::iterator_traits<decltype(begin)>::value_type;
+                // For empty range, return default-constructed value
+                // This might need adjustment based on your needs
+                return value_type{};
+            }
+
+            auto result = *begin;
+            ++begin;
+            for (; begin != end; ++begin) {
+                result = op_(result, *begin);
+            }
+            return result;
+        }
+    };
+
+    // ========================================================================
+    // async reduction - combines reduce + execute_async
+    // ========================================================================
+    template <typename Executor, typename BinaryOp>
+    struct async_reduce_fn_t {
+        Executor executor_;
+        BinaryOp op_;
+
+        constexpr async_reduce_fn_t(Executor executor, BinaryOp op)
+            : executor_(std::move(executor)), op_(std::move(op))
+        {
+        }
+
+        template <iterable Source>
+        constexpr auto operator()(Source&& source) const
+        {
+            return executor_.async([source = std::forward<Source>(source),
+                                    op     = op_]() {
+                auto begin = std::begin(source);
+                auto end   = std::end(source);
+
+                if (begin == end) {
+                    using value_type = typename std::iterator_traits<
+                        decltype(begin)>::value_type;
+                    return value_type{};
+                }
+
+                auto result = *begin;
+                ++begin;
+                for (; begin != end; ++begin) {
+                    result = op(result, *begin);
+                }
+                return result;
+            });
+        }
+    };
+
+    template <typename Executor, typename BinaryOp>
+    constexpr auto async_reduce(Executor&& executor, BinaryOp&& op)
+    {
+        return async_reduce_fn_t<
+            std::decay_t<Executor>,
+            std::decay_t<BinaryOp>>(
+            std::forward<Executor>(executor),
+            std::forward<BinaryOp>(op)
+        );
+    }
+
+    // ========================================================================
+    // factory functions
+    // ========================================================================
+
+    template <typename BinaryOp>
+    constexpr auto reduce(BinaryOp&& op)
+    {
+        return reduce_fn_t<std::decay_t<BinaryOp>>(std::forward<BinaryOp>(op));
+    }
+
+    template <typename Executor>
+    constexpr auto execute_async(Executor&& executor)
+    {
+        return execute_async_fn_t<std::decay_t<Executor>>(
+            std::forward<Executor>(executor)
+        );
+    }
+
+    // ========================================================================
+    // common binary operations
+    // ========================================================================
+
+    struct min_op_t {
+        template <typename T>
+        constexpr T operator()(const T& a, const T& b) const
+        {
+            return (a < b) ? a : b;
+        }
+    };
+
+    struct max_op_t {
+        template <typename T>
+        constexpr T operator()(const T& a, const T& b) const
+        {
+            return (a > b) ? a : b;
+        }
+    };
+
+    struct add_op_t {
+        template <typename T>
+        constexpr T operator()(const T& a, const T& b) const
+        {
+            return a + b;
+        }
+    };
+
+    struct multiply_op_t {
+        template <typename T>
+        constexpr T operator()(const T& a, const T& b) const
+        {
+            return a * b;
+        }
+    };
+
+    constexpr auto min_op      = min_op_t{};
+    constexpr auto max_op      = max_op_t{};
+    constexpr auto add_op      = add_op_t{};
+    constexpr auto multiply_op = multiply_op_t{};
+
+    // ========================================================================
+    // execute all async - parallel task execution
+    // ========================================================================
+
+    template <typename Executor>
+    struct execute_all_async_fn_t {
+        mutable Executor executor_;
+
+        constexpr explicit execute_all_async_fn_t(Executor executor)
+            : executor_(std::move(executor))
+        {
+        }
+
+        template <iterable Source>
+        auto operator()(Source&& source) const -> async::future_t<void>
+        {
+            // collect all individual futures
+            std::vector<async::future_t<void>> futures;
+
+            // spawn each callable as separate async task
+            for (auto&& callable : source) {
+                auto future = executor_.async(
+                    [callable = std::forward<decltype(callable)>(callable)]() {
+                        callable();   // execute the void-returning callable
+                    }
+                );
+                futures.push_back(std::move(future));
+            }
+
+            // return single future that waits for all tasks
+            return executor_.async([&futures]() mutable {
+                // wait for all individual futures to complete
+                for (auto& future : futures) {
+                    future.wait();
+                }
+                // all tasks complete - void return
+            });
+        }
+    };
+
+    // ========================================================================
+    // factory function
+    // ========================================================================
+
+    template <typename Executor>
+    constexpr auto execute_all_async(Executor&& executor)
+    {
+        return execute_all_async_fn_t<std::decay_t<Executor>>(
+            std::forward<Executor>(executor)
+        );
     }
 
     // ========================================================================

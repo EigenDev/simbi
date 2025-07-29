@@ -6,7 +6,12 @@ project(
   'cpp',
   version: run_command('git', 'describe', '--tag', '--abbrev=0', check: true).stdout().strip(),
   license: 'MIT',
-  default_options: {'cpp_std': 'c++20', 'cpp_args': ['-march=native'], 'warning_level': '3'},
+  default_options: {
+    'cpp_std': 'c++20',
+    'cpp_args': ['-march=native'],
+    'warning_level': '3',
+    'b_lto': true,
+  },
 )
 
 # Add common project arguments
@@ -63,8 +68,8 @@ all_inc = include_directories('src')
 #CPU Extension Module
 py3.extension_module(
   'cpu_ext',
-  ['src/bindings/pybind11/cpu_binding.cpp'] + sources,
-  include_directories: all_inc,
+  ['src/bindings/cpu_binding.cpp'] + sources,
+  include_directories: [all_inc],
   cpp_args: ['-DGPU_ENABLED=0'],
   dependencies: general_dependencies,
   install: true,

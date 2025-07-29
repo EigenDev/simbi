@@ -49,11 +49,11 @@
 #ifndef HELPERS_HIP_HPP
 #define HELPERS_HIP_HPP
 
-#include "config.hpp"   // for real, STATIC, std::uint64_t, sint
+#include "config.hpp"              // for real, STATIC, std::uint64_t, sint
+#include "containers/vector.hpp"   // for vector_t
 #include "core/base/concepts.hpp"
-#include "core/utility/enums.hpp"   // for Geometry, BoundaryCondition, Solver
-#include "data/containers/vector.hpp"   // for vector_t
-#include "system/io/exceptions.hpp"     // for ErrorCode
+#include "core/utility/enums.hpp"     // for Geometry, BoundaryCondition, Solver
+#include "system/io/exceptions.hpp"   // for ErrorCode
 #include <H5Cpp.h>       // for H5::Exception, H5::DataSpace, H5::DataType, etc
 #include <cmath>         // for sqrt, exp, INFINITY
 #include <concepts>      // for std::integral, std::floating_point
@@ -895,21 +895,6 @@ namespace simbi::helpers {
     {
         if (rec == Reconstruction::PLM) {
             return 2;
-        }
-        else if (rec == Reconstruction::PPM) {
-            return 3;
-        }
-        else if (rec == Reconstruction::WENO3) {
-            return 2;
-        }
-        else if (rec == Reconstruction::WENO5) {
-            return 3;
-        }
-        else if (rec == Reconstruction::WENO7) {
-            return 4;
-        }
-        else if (rec == Reconstruction::WENO9) {
-            return 5;
         }
         else {
             return 1;   // we're 1st order

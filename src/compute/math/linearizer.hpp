@@ -1,7 +1,7 @@
 #ifndef LINEARIZER_HPP
 #define LINEARIZER_HPP
 
-#include "data/containers/ndarray.hpp"
+#include "containers/ndarray.hpp"
 #include "expression.hpp"
 #include <utility>
 #include <vector>

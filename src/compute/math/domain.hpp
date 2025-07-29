@@ -2,7 +2,7 @@
 #define DOMAIN_HPP
 
 #include "compute/functional/fp.hpp"
-#include "data/containers/vector.hpp"
+#include "containers/vector.hpp"
 #include <cstddef>
 #include <cstdint>
 #include <iostream>
@@ -174,104 +174,6 @@ namespace simbi {
                    fp::collect<vector_t<direction_t, Dims>>;
         }
 
-        // template <std::uint64_t Dims>
-        // constexpr auto
-        // difference(domain_t<Dims> full_domain, domain_t<Dims> active_domain)
-        // {
-        //     auto overlap = intersection(full_domain, active_domain);
-        //     set_t<Dims> result;
-
-        //     // no overlap - return original space
-        //     if (overlap.empty()) {
-        //         result.regions[0] = full_domain;
-        //         result.count      = 1;
-        //         return result;
-        //     }
-
-        //     // completely contained - return empty
-        //     if (overlap.start == full_domain.start &&
-        //         overlap.fin == full_domain.fin) {
-        //         result.count = 0;
-        //         return result;
-        //     }
-
-        //     // we'll generate 3^dims combinations (before/inside/after for
-        //     each
-        //     // dimension) and filter out invalid ones
-        //     constexpr std::uint64_t total_combinations = []() {
-        //         std::uint64_t total = 1;
-        //         for (std::uint64_t i = 0; i < Dims; ++i) {
-        //             total *= 3;
-        //         }
-        //         return total;
-        //     }();
-
-        //     // generate all combinations of before/inside/after for each
-        //     // dimension
-        //     fp::range(
-        //         total_combinations
-        //     ) | fp::filter([&](std::uint64_t combo) {
-        //         // filter out the "all inside" case (active domain)
-        //         std::uint64_t temp = combo;
-        //         for (std::uint64_t dim = 0; dim < Dims; ++dim) {
-        //             if (temp % 3 != 1) {   // not "inside" for this dimension
-        //                 return true;
-        //             }
-        //             temp /= 3;
-        //         }
-        //         return false;   // all dimensions were "inside"
-        //     }) | fp::for_each([&](std::uint64_t combo) {
-        //         // for each valid combination, create a ghost region
-        //         auto ghost_start  = full_domain.start;
-        //         auto ghost_end    = full_domain.fin;
-        //         bool valid_region = true;
-
-        //         // decode the combination into positions
-        //         std::uint64_t temp = combo;
-        //         for (std::uint64_t dim = 0; dim < Dims && valid_region;
-        //         ++dim) {
-        //             const uint8_t pos =
-        //                 temp % 3;   // 0=before, 1=inside, 2=after
-        //             temp /= 3;
-
-        //             switch (pos) {
-        //                 case 0:   // before
-        //                     if (full_domain.start[dim] >= overlap.start[dim])
-        //                     {
-        //                         valid_region = false;
-        //                         break;
-        //                     }
-        //                     ghost_start[dim] = full_domain.start[dim];
-        //                     ghost_end[dim]   = overlap.start[dim];
-        //                     break;
-
-        //                 case 1:   // inside
-        //                     ghost_start[dim] = overlap.start[dim];
-        //                     ghost_end[dim]   = overlap.fin[dim];
-        //                     break;
-
-        //                 case 2:   // after
-        //                     if (overlap.fin[dim] >= full_domain.fin[dim]) {
-        //                         valid_region = false;
-        //                         break;
-        //                     }
-        //                     ghost_start[dim] = overlap.fin[dim];
-        //                     ghost_end[dim]   = full_domain.fin[dim];
-        //                     break;
-        //             }
-        //         }
-
-        //         // add valid ghost region to the result
-        //         if (valid_region && result.count < set_t<Dims>::max_regions)
-        //         {
-        //             result.regions[result.count++] =
-        //                 domain_t<Dims>{ghost_start, ghost_end};
-        //         }
-        //     });
-
-        //     return result;
-        // }
-
         template <std::uint64_t Dims>
         constexpr auto
         difference(domain_t<Dims> full_domain, domain_t<Dims> active_domain)
@@ -351,6 +253,7 @@ namespace simbi {
 
     template <std::uint64_t Dims>
     struct domain_t {
+        static constexpr std::uint64_t dimensions = Dims;
         iarray<Dims> start, fin;
 
         // iterator for coordinate traversal with memory-order optimization

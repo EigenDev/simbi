@@ -55,12 +55,12 @@
 #include "component_body_system.hpp"
 #include "compute/functional/fp.hpp"
 #include "config.hpp"
+#include "containers/vector.hpp"
 #include "core/utility/config_dict.hpp"
 #include "core/utility/enums.hpp"
 #include "core/utility/init_conditions.hpp"
 #include "core/utility/smart_ptr.hpp"
-#include "data/containers/vector.hpp"
-#include "system/mesh/mesh_config.hpp"
+#include "mesh/mesh_config.hpp"
 #include "system_config.hpp"
 #include <cmath>
 #include <cstddef>

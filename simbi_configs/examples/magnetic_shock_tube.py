@@ -100,7 +100,7 @@ class MagneticShockTube(SimbiBaseConfig):
         # Store problem states as a private attribute
         self._problem_states = {
             1: MHDProblemState.create_state(
-                (1.0, 0.0, 0.0, 0.0, 1.0, 0.5, +1.0, 0.0),
+                (1.000, 0.0, 0.0, 0.0, 1.0, 0.5, +1.0, 0.0),
                 (0.125, 0.0, 0.0, 0.0, 0.1, 0.5, -1.0, 0.0),
             ),
             2: MHDProblemState.create_state(

@@ -1,4 +1,4 @@
-#include "data/containers/ndarray.hpp"
+#include "containers/ndarray.hpp"
 #include "expression.hpp"
 #include "linearizer.hpp"
 #include <algorithm>

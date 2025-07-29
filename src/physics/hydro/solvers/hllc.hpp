@@ -2,16 +2,17 @@
 #define SIMBI_HYDRO_HLLC_HPP
 
 #include "config.hpp"               // for DEV macro
+#include "containers/vector.hpp"    // for VectorLike
 #include "core/base/concepts.hpp"   // for is_hydro_primitive_c
 #include "core/utility/enums.hpp"   // for ShockWaveLimiter
 #include "core/utility/helpers.hpp"   // for goes_to_zero, sgn, vecops::dot, vecops::norm
-#include "data/containers/vector.hpp"        // for VectorLike
 #include "physics/em/electromagnetism.hpp"   // for shift_electric_field
 #include "physics/hydro/solvers/hlle.hpp"    // for hlle_flux
 #include "physics/hydro/wave_speeds.hpp"     // for extremal_speeds
 #include <algorithm>                         // for std::max, std::min
 #include <cmath>                             // for std::abs, std::log
-#include <numbers>                           // for std::numbers::pi
+#include <iomanip>
+#include <numbers>   // for std::numbers::pi
 
 namespace simbi::hydro {
     using namespace simbi::helpers;
@@ -472,7 +473,7 @@ namespace simbi::hydro::rmhd {
             const auto quad   = -0.5 * (b + helpers::sgn(b) * std::sqrt(disc));
             const auto a_star = c / quad;
 
-            const auto on_left = vface < a_star;
+            const auto on_left = safe_less_than(vface, a_star);
             const auto u       = on_left ? uL : uR;
             const auto f       = on_left ? fL : fR;
             const auto pr      = on_left ? primL : primR;
@@ -494,7 +495,7 @@ namespace simbi::hydro::rmhd {
                 const auto p_star = -a_star * fhlle + fhllm;
                 const auto es     = cfac * (ws * etot - mn + p_star * a_star);
                 const auto mn     = (es + p_star) * a_star;
-                auto btrans       = pr.mag - nhat * dot(pr.mag, nhat);
+                const auto btrans = pr.mag - nhat * dot(pr.mag, nhat);
                 us.den            = ds;
                 us.mom            = mn * nhat + vs * umtrans;
                 us.nrg            = es - ds;

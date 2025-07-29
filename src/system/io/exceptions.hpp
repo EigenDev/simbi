@@ -214,11 +214,8 @@ namespace simbi {
 
     struct error_info_t {
         std::string coord_str;
-        std::string position_str;
+        // std::string position_str;
         ErrorCode error_code;
-        double time;
-        std::uint64_t iteration;
-        std::string conservative_str;
         std::string message;   // additional message for context
     };
 
@@ -245,12 +242,10 @@ namespace simbi {
         std::string format_error_message() const
         {
             return std::string("Primitive conversion failed:\n") + "  " +
-                   info_.coord_str + "\n" + "  " + info_.position_str + "\n" +
+                   info_.coord_str + "\n" +
+                   "  "
                    "  Error: " +
                    helpers::error_code_to_string(info_.error_code) + "\n" +
-                   "  Time: " + std::to_string(info_.time) + "\n" +
-                   "  Iteration: " + std::to_string(info_.iteration) + "\n" +
-                   "  " + info_.conservative_str + "\n" +
                    (info_.message.empty() ? "" : "  Message: " + info_.message);
         }
     };

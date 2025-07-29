@@ -1,11 +1,11 @@
 #ifndef SIMBI_HYDRO_HLLD_HPP
 #define SIMBI_HYDRO_HLLD_HPP
 
-#include "config.hpp"               // for global::epsilon
+#include "config.hpp"              // for global::epsilon
+#include "containers/vector.hpp"   // for vector_t
 #include "core/base/concepts.hpp"   // for is_hydro_primitive_c, is_mhd_primitive_c
 #include "core/utility/enums.hpp"   // for Regime
 #include "core/utility/helpers.hpp"   // for goes_to_zero, sgn, safe_less_than, safe_greater_than
-#include "data/containers/vector.hpp"   // for vector_t
 #include "physics/em/electromagnetism.hpp"   // for to_flux, to_conserved, to_primitive
 #include "physics/hydro/conversion.hpp"
 #include "physics/hydro/physics.hpp"   // for to_flux, to_conserved, to_primitive
@@ -317,10 +317,10 @@ namespace simbi::hydro::rmhd {
             const auto vdba = dot(va, ba);
             const auto vna  = dot(va, nhat);
 
-            const auto fac = 1.0 / (lc - vna);
-            const auto da  = rc.den * fac;
-            const auto ea  = (rc.total_energy() + p * vna - vdba * bn) * fac;
-            const auto ma  = (ea + p) * va - vdba * ba;
+            const auto da = rc.den / (lc - vna);
+            const auto ea =
+                (rc.total_energy() + p * vna - vdba * bn) / (lc - vna);
+            const auto ma = (ea + p) * va - vdba * ba;
 
             conserved_t ua;
             ua.den = da;
@@ -339,11 +339,10 @@ namespace simbi::hydro::rmhd {
             const auto vdbC = dot(prC.vel, prC.mag);
             const auto& bc  = prC.mag;
             const auto& vc  = prC.vel;
-            const auto fac2 = 1.0 / (la - vnc);
-            const auto dc   = da * (la - vna) * fac2;
+            const auto dc   = da * (la - vna) / (la - vnc);
             const auto man  = dot(ua.mom, nhat);
-            const auto ec   = (ea * la - man + p * vnc - vdbC * bn) * fac2;
-            const auto mc   = (ec + p) * vc - vdbC * bc;
+            const auto ec = (ea * la - man + p * vnc - vdbC * bn) / (la - vnc);
+            const auto mc = (ec + p) * vc - vdbC * bc;
 
             conserved_t ut;
             ut.den = dc;

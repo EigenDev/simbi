@@ -51,11 +51,11 @@
 
 #include "body_delta.hpp"
 #include "component_body_system.hpp"   // for ComponentBodySystem
-#include "compute/math/field.hpp"
+#include "compute/field.hpp"
 #include "config.hpp"
+#include "containers/vector.hpp"
 #include "core/utility/helpers.hpp"   // for unravel_idx
 #include "core/utility/managed.hpp"   // for Managed
-#include "data/containers/vector.hpp"
 #include "system/adapter/device_adapter_api.hpp"
 #include "util/parallel/exec_policy.hpp"
 #include "util/parallel/parallel_for.hpp"

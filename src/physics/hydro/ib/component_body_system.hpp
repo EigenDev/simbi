@@ -51,15 +51,15 @@
 
 #include "body.hpp"
 #include "body_serialization.hpp"
+#include "compute/field.hpp"
 #include "compute/functional/monad/maybe.hpp"
-#include "compute/math/field.hpp"
 #include "config.hpp"
+#include "containers/state_struct.hpp"
+#include "containers/vector.hpp"
 #include "core/utility/enums.hpp"
 #include "core/utility/managed.hpp"
-#include "data/containers/state_struct.hpp"
-#include "data/containers/vector.hpp"
+#include "mesh/mesh_config.hpp"
 #include "physics/eos/isothermal.hpp"
-#include "system/mesh/mesh_config.hpp"
 #include "system_config.hpp"
 #include <cassert>
 #include <cstddef>

@@ -53,7 +53,7 @@
 #include "body.hpp"
 #include "component_body_system.hpp"
 #include "config.hpp"
-#include "data/containers/vector.hpp"
+#include "containers/vector.hpp"
 
 namespace simbi::ibsystem::body_functions {
     namespace binary {

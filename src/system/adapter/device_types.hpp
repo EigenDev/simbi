@@ -29,6 +29,7 @@
 #include <atomic>
 #include <chrono>
 #include <cstddef>
+#include <cstdint>
 
 // Include backend-specific headers conditionally
 #if defined(CUDA_ENABLED) || (defined(GPU_ENABLED) && CUDA_ENABLED)
@@ -105,8 +106,11 @@ namespace simbi::adapter {
     namespace cpu {
         // Simple stubs for CPU emulation
         struct event_t {
+            std::chrono::high_resolution_clock::time_point value;
+            operator bool() const { return false; }
         };
         struct stream_t {
+            operator bool() const { return false; }
         };
         struct device_properties_t {
             char name[256];
@@ -131,8 +135,8 @@ namespace simbi::adapter {
     // CPU backend specialization
     template <>
     struct backend_types<cpu_backend_tag> {
-        using event_t  = std::chrono::high_resolution_clock::time_point;
-        using stream_t = cpu::stream_t;
+        using event_t             = cpu::event_t;
+        using stream_t            = cpu::stream_t;
         using device_properties_t = cpu::device_properties_t;
         using function_t          = cpu::function_t;
         using memcpy_kind_t       = types::memcpy_kind;

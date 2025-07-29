@@ -2,7 +2,7 @@
 #define SIMBI_CT_CONTACT_HPP
 
 #include "config.hpp"
-#include "data/containers/vector.hpp"
+#include "containers/vector.hpp"
 
 namespace simbi::em {
     // Constrained transport contact algorithm developed by Gardiner & Stone

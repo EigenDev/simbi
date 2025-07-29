@@ -50,9 +50,9 @@
 #define VISCOUS_HPP
 
 #include "config.hpp"
+#include "containers/vector.hpp"
 #include "core/containers/array.hpp"
 #include "core/utility/helpers.hpp"
-#include "data/containers/vector.hpp"
 #include "geometry/mesh/cell.hpp"
 #include "geometry/vector_calculus.hpp"
 

@@ -3,7 +3,7 @@
 
 #include "compute/math/expression.hpp"
 #include "config.hpp"
-#include "data/containers/ndarray.hpp"
+#include "containers/ndarray.hpp"
 
 namespace simbi::expression {
     using namespace nd;

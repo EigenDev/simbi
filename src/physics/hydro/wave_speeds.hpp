@@ -3,10 +3,10 @@
 
 #include "config.hpp"               // for DEV, real, global
 #include "contact_properties.hpp"   // for wave_speeds_t
+#include "containers/vector.hpp"    // for unit_vector_t
 #include "core/base/concepts.hpp"
-#include "core/utility/enums.hpp"       // for WaveSpeedEstimate
-#include "core/utility/helpers.hpp"     // for solve_quartic,
-#include "data/containers/vector.hpp"   // for unit_vector_t
+#include "core/utility/enums.hpp"     // for WaveSpeedEstimate
+#include "core/utility/helpers.hpp"   // for solve_quartic,
 #include "physics/hydro/physics.hpp"   // for is_hydro_primitive_c, is_mhd_primitive_c, is_rmhd_c, is_srhd_c
 #include <algorithm>     // for std::min, std::max
 #include <cmath>         // for std::sqrt, std::pow
@@ -27,12 +27,12 @@ namespace std {
 
     template <>
     struct tuple_element<0, simbi::hydro::wave_speeds_t> {
-        using type = real;
+        using type = simbi::real;
     };
 
     template <>
     struct tuple_element<1, simbi::hydro::wave_speeds_t> {
-        using type = real;
+        using type = simbi::real;
     };
 }   // namespace std
 
@@ -384,7 +384,7 @@ namespace simbi::hydro::rmhd {
                 }
             }
 
-            // if there are no roots, return null
+            // if there are no roots, return null vector
             if (nroots == 0) {
                 return {0.0, 0.0};
             }

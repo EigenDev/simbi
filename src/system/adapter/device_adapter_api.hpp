@@ -22,16 +22,17 @@
  *
  *==============================================================================
  */
-
 #ifndef DEVICE_ADAPTER_API_HPP
 #define DEVICE_ADAPTER_API_HPP
 
+#include "config.hpp"
 #include "cpu_backend.hpp"
 #include "cuda_backend.hpp"
 #include "device_backend.hpp"
 #include "device_types.hpp"
 #include "hip_backend.hpp"
 #include <cstddef>
+#include <cstdint>
 #include <thread>
 
 namespace simbi {
@@ -42,264 +43,132 @@ namespace simbi {
         // main API that delegates to the appropriate backend
         namespace api {
             // memory operations
-            inline void
-            copy_host_to_device(void* to, const void* from, size_t bytes)
-            {
-                adapter::get_device_backend()
-                    .copy_host_to_device(to, from, bytes);
-            }
+            void copy_host_to_device(void* to, const void* from, size_t bytes);
 
-            inline void
-            copy_device_to_host(void* to, const void* from, size_t bytes)
-            {
-                adapter::get_device_backend()
-                    .copy_device_to_host(to, from, bytes);
-            }
+            void copy_device_to_host(void* to, const void* from, size_t bytes);
 
-            inline void
-            copy_device_to_device(void* to, const void* from, size_t bytes)
-            {
-                adapter::get_device_backend()
-                    .copy_device_to_device(to, from, bytes);
-            }
+            void
+            copy_device_to_device(void* to, const void* from, size_t bytes);
 
-            inline void malloc(void** obj, size_t bytes)
-            {
-                adapter::get_device_backend().malloc(obj, bytes);
-            }
+            void malloc(void** obj, size_t bytes);
 
-            inline void malloc_managed(void** obj, size_t bytes)
-            {
-                adapter::get_device_backend().malloc_managed(obj, bytes);
-            }
+            void malloc_managed(void** obj, size_t bytes);
 
-            inline void free(void* obj)
-            {
-                adapter::get_device_backend().free(obj);
-            }
+            void free(void* obj);
 
-            inline void memset(void* obj, std::int64_t val, size_t bytes)
-            {
-                adapter::get_device_backend().memset(obj, val, bytes);
-            }
+            void memset(void* obj, std::int64_t val, size_t bytes);
 
             // event handling
-            inline void event_create(adapter::event_t<>* event)
-            {
-                adapter::get_device_backend().event_create(event);
-            }
+            void event_create(adapter::event_t<>* event);
 
-            inline void event_destroy(adapter::event_t<> event)
-            {
-                adapter::get_device_backend().event_destroy(event);
-            }
+            void event_destroy(adapter::event_t<> event);
 
-            inline void event_record(adapter::event_t<> event)
-            {
-                adapter::get_device_backend().event_record(event);
-            }
+            void
+            event_record(adapter::event_t<> event, adapter::stream_t<> stream);
 
-            inline void event_synchronize(adapter::event_t<> event)
-            {
-                adapter::get_device_backend().event_synchronize(event);
-            }
+            void event_synchronize(adapter::event_t<> event);
 
-            inline void event_elapsed_time(
+            void event_elapsed_time(
                 float* time,
                 adapter::event_t<> start,
                 adapter::event_t<> end
-            )
-            {
-                adapter::get_device_backend()
-                    .event_elapsed_time(time, start, end);
-            }
+            );
 
             // device management
-            inline void get_device_count(int* count)
-            {
-                adapter::get_device_backend().get_device_count(count);
-            }
+            void get_device_count(int* count);
 
-            inline void get_device_properties(
+            void get_device_properties(
                 adapter::device_properties_t<>* props,
                 std::int64_t device
-            )
-            {
-                adapter::get_device_backend().get_device_properties(
-                    props,
-                    device
-                );
-            }
+            );
 
-            inline void set_device(std::int64_t device)
-            {
-                adapter::get_device_backend().set_device(device);
-            }
+            void set_device(std::int64_t device);
 
-            inline void device_synch()
-            {
-                adapter::get_device_backend().device_synchronize();
-            }
+            void device_synch();
 
             // stream operations
-            inline void stream_create(adapter::stream_t<>* stream)
-            {
-                adapter::get_device_backend().stream_create(stream);
-            }
+            void stream_create(adapter::stream_t<>* stream);
 
-            inline void stream_destroy(adapter::stream_t<> stream)
-            {
-                adapter::get_device_backend().stream_destroy(stream);
-            }
+            void stream_destroy(adapter::stream_t<> stream);
 
-            inline void stream_synchronize(adapter::stream_t<> stream)
-            {
-                adapter::get_device_backend().stream_synchronize(stream);
-            }
+            void stream_synchronize(adapter::stream_t<> stream);
 
-            inline void stream_wait_event(
+            void stream_wait_event(
                 adapter::stream_t<> stream,
                 adapter::event_t<> event,
                 std::uint64_t flags = 0
-            )
-            {
-                adapter::get_device_backend()
-                    .stream_wait_event(stream, event, flags);
-            }
+            );
 
-            inline void stream_query(adapter::stream_t<> stream, int* status)
-            {
-                adapter::get_device_backend().stream_query(stream, status);
-            }
+            void stream_query(adapter::stream_t<> stream, int* status);
 
             // asynchronous operations
-            inline void async_copy_host_to_device(
+            void async_copy_host_to_device(
                 void* dst,
                 const void* src,
                 size_t bytes,
                 adapter::stream_t<> stream
-            )
-            {
-                adapter::get_device_backend()
-                    .async_copy_host_to_device(dst, src, bytes, stream);
-            }
+            );
 
-            inline void async_copy_device_to_host(
+            void async_copy_device_to_host(
                 void* dst,
                 const void* src,
                 size_t bytes,
                 adapter::stream_t<> stream
-            )
-            {
-                adapter::get_device_backend()
-                    .async_copy_device_to_host(dst, src, bytes, stream);
-            }
+            );
 
-            inline void async_copy_device_to_device(
+            void async_copy_device_to_device(
                 void* dst,
                 const void* src,
                 size_t bytes,
                 adapter::stream_t<> stream
-            )
-            {
-                adapter::get_device_backend()
-                    .async_copy_device_to_device(dst, src, bytes, stream);
-            }
+            );
 
-            inline void memcpy_async(
+            void memcpy_async(
                 void* dst,
                 const void* src,
                 size_t bytes,
                 adapter::memcpy_kind_t<> kind,
                 adapter::stream_t<> stream
-            )
-            {
-                adapter::get_device_backend()
-                    .memcpy_async(dst, src, bytes, kind, stream);
-            }
+            );
 
             // peer operations
-            inline void
-            enable_peer_access(std::int64_t device, std::uint64_t flags = 0)
-            {
-                adapter::get_device_backend().enable_peer_access(device, flags);
-            }
+            void
+            enable_peer_access(std::int64_t device, std::uint64_t flags = 0);
 
-            inline void peer_copy_async(
+            void peer_copy_async(
                 void* dst,
                 std::int64_t dst_device,
                 const void* src,
                 std::int64_t src_device,
                 size_t bytes,
                 adapter::stream_t<> stream
-            )
-            {
-                adapter::get_device_backend().peer_copy_async(
-                    dst,
-                    dst_device,
-                    src,
-                    src_device,
-                    bytes,
-                    stream
-                );
-            }
+            );
 
             // host memory management
-            inline void
-            host_register(void* ptr, size_t size, std::uint64_t flags)
-            {
-                adapter::get_device_backend().host_register(ptr, size, flags);
-            }
+            void host_register(void* ptr, size_t size, std::uint64_t flags);
 
-            inline void host_unregister(void* ptr)
-            {
-                adapter::get_device_backend().host_unregister(ptr);
-            }
+            void host_unregister(void* ptr);
 
-            inline void aligned_malloc(void** ptr, size_t size)
-            {
-                adapter::get_device_backend().aligned_malloc(ptr, size);
-            }
+            void aligned_malloc(void** ptr, size_t size);
 
             // specialized operations
-            inline void
-            memcpy_from_symbol(void* dst, const void* symbol, size_t count)
-            {
-                adapter::get_device_backend()
-                    .memcpy_from_symbol(dst, symbol, count);
-            }
+            void
+            memcpy_from_symbol(void* dst, const void* symbol, size_t count);
 
-            inline void prefetch_to_device(
+            void prefetch_to_device(
                 const void* obj,
                 size_t bytes,
                 std::int64_t device = 0
-            )
-            {
-                adapter::get_device_backend()
-                    .prefetch_to_device(obj, bytes, device);
-            }
+            );
 
-            inline void launch_kernel(
+            void launch_kernel(
                 adapter::function_t<> function,
                 adapter::types::dim3 grid,
                 adapter::types::dim3 block,
                 void** args,
                 size_t shared_mem,
                 adapter::stream_t<> stream
-            )
-            {
-                adapter::types::dim3 adapter_grid(grid.x, grid.y, grid.z);
-                adapter::types::dim3 adapter_block(block.x, block.y, block.z);
-
-                adapter::get_device_backend().launch_kernel(
-                    function,
-                    adapter_grid,
-                    adapter_block,
-                    args,
-                    shared_mem,
-                    stream
-                );
-            }
+            );
 
             // atomic operations
             template <typename T>
@@ -315,24 +184,18 @@ namespace simbi {
             }
 
             // thread synchronization
-            DEV inline void synchronize()
-            {
-                adapter::get_device_backend().synchronize_threads();
-            }
+            DEV void synchronize();
 
         }   // namespace api
     }   // namespace gpu
 
     namespace grid {
         // return current execution index
-        DUAL inline adapter::grid_index idx()
-        {
-            return adapter::grid_index::current<>();
-        }
+        DUAL adapter::grid_index idx();
 
         // launch kernels with configuration
         template <typename Func, typename... Args>
-        inline void launch(
+        void launch(
             Func kernel,
             const adapter::grid::launch_config& config,
             Args&&... args
@@ -343,69 +206,38 @@ namespace simbi {
 
         // launch single thread
         template <typename Func, typename... Args>
-        inline void launch_single(Func kernel, Args&&... args)
+        void launch_single(Func kernel, Args&&... args)
         {
             adapter::launch_single_thread(kernel, std::forward<Args>(args)...);
         }
 
         // create configuration from block/thread counts
-        inline adapter::grid::launch_config
-        config(std::uint64_t blocks, std::uint64_t threads)
-        {
-            return adapter::grid::launch_config(
-                adapter::types::dim3(blocks),
-                adapter::types::dim3(threads)
-            );
-        }
+        adapter::grid::launch_config
+        config(std::uint64_t blocks, std::uint64_t threads);
 
         // create configuration from dimensions
-        inline adapter::grid::launch_config config(
+        adapter::grid::launch_config config(
             adapter::types::dim3 grid,
             adapter::types::dim3 block,
             size_t shared_memory = 0
-        )
-        {
-            return adapter::grid::launch_config(grid, block, shared_memory);
-        }
+        );
 
         // calculate grid size from total elements
-        inline adapter::types::dim3 calculate_grid(
+        adapter::types::dim3 calculate_grid(
             size_t elements,
             adapter::types::dim3 threads_per_block = {256, 1, 1}
-        )
-        {
-            return adapter::grid::calculate_grid(elements, threads_per_block);
-        }
+        );
     }   // namespace grid
 
     // Thread and block utilities
-    STATIC std::uint64_t global_thread_idx()
-    {
-        return adapter::grid_index::current<>().global_thread_id();
-    }
+    DEV auto global_thread_idx();
 
-    STATIC std::uint64_t global_thread_count()
-    {
-        return adapter::grid_index::current<>().total_threads();
-    }
+    DEV auto global_thread_count();
 
-    STATIC std::uint64_t get_thread_id()
-    {
-#if GPU_ENABLED
-        return adapter::grid_index::current<>().thread_id();
-#else
-        return std::hash<std::thread::id>{}(std::this_thread::get_id());
-#endif
-    }
+    DEV auto get_thread_id();
 
-    STATIC std::uint64_t get_block_id()
-    {
-        return adapter::grid_index::current<>().block_id();
-    }
+    DEV auto get_block_id();
 
-    STATIC std::uint64_t get_threads_per_block()
-    {
-        return adapter::grid_index::current<>().threads_per_block();
-    }
+    DEV auto get_threads_per_block();
 }   // namespace simbi
 #endif   // DEVICE_ADAPTER_API_HPP

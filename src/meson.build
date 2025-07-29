@@ -1,8 +1,8 @@
 # Include core sources and headers
 sources = files(
-  'bindings/pybind11/config_converter.cpp',
-  'bindings/pybind11/driver.cpp',
-  'bindings/pybind11/state.cpp',
+  'bindings/config_converter.cpp',
+  'bindings/driver.cpp',
+  'bindings/evolver.cpp',
   'compute/functional/monad/serializer.cpp',
   'compute/math/evaluator.cpp',
   'compute/math/exp_load.cpp',
@@ -11,22 +11,8 @@ sources = files(
   'physics/em/contact.cpp',
   'physics/hydro/ib/factory.cpp',
   'physics/hydro/ib/system_serialization.cpp',
+  'system/adapter/device_adapter_api.cpp',
   'system/io/console/statistics.cpp',
   'system/io/exceptions.cpp',
   'system/io/tabulate/table.cpp',
-)
-
-headers = files(
-  'compute/math/field.hpp',
-  'core/traits/traits.hpp',
-  'core/utility/enums.hpp',
-  'core/utility/helpers.hpp',
-  'core/utility/managed.hpp',
-  'core/utility/range.hpp',
-  # 'system/parallel/exec_policy.hpp',
-  # 'system/parallel/kernel.hpp',
-  # 'system/parallel/launch.hpp',
-  # 'system/parallel/parallel_for.hpp',
-  'system/io/console/logger.hpp',
-  'system/io/console/printb.hpp',
 )

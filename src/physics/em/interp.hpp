@@ -1,15 +1,15 @@
 #ifndef SIMBI_MHD_INTERP_HPP
 #define SIMBI_MHD_INTERP_HPP
 
-#include "compute/math/domain.hpp"
 #include "config.hpp"
+#include "containers/vector.hpp"
 #include "core/utility/enums.hpp"
-#include "data/containers/vector.hpp"
-#include "system/mesh/mesh_ops.hpp"
+#include "domain/algebra.hpp"
+#include "mesh/mesh_ops.hpp"
 #include <cstdint>
 
 namespace simbi::em {
-    using namespace simbi::set_ops;
+    using namespace simbi::domain_algebra;
     template <typename HydroState>
     struct interpolate_face_to_cell_magnetic_t {
         const HydroState& state;

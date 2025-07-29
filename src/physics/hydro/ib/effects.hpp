@@ -3,10 +3,10 @@
 
 #include "body.hpp"
 #include "config.hpp"
+#include "containers/vector.hpp"
 #include "core/base/concepts.hpp"
-#include "data/containers/vector.hpp"
+#include "mesh/mesh_ops.hpp"
 #include "physics/hydro/physics.hpp"
-#include "system/mesh/mesh_ops.hpp"
 #include <cmath>
 #include <cstdint>
 #include <type_traits>
@@ -33,9 +33,10 @@ namespace simbi::body::expr {
     // ========================================================================
 
     // gravitational effect operation
-    template <typename HydroState, std::uint64_t Dims>
+    template <typename HydroState, typename MeshConfig, std::uint64_t Dims>
     struct gravitational_effect_op_t {
         const HydroState& state_;
+        const MeshConfig& mesh_;
 
         template <typename Body, typename Coord>
         auto apply_to_body(const Body& body, Coord coord) const
@@ -47,10 +48,10 @@ namespace simbi::body::expr {
             auto ctx = physics_context_t<Dims>{
               .gamma          = state_.metadata.gamma,
               .dt             = state_.metadata.dt,
-              .cell_pos       = mesh::centroid(coord, state_.mesh),
-              .cell_volume    = mesh::volume(coord, state_.mesh),
-              .min_cell_width = mesh::min_cell_width(coord, state_.mesh),
-              .max_cell_width = mesh::max_cell_width(coord, state_.mesh)
+              .cell_pos       = mesh::centroid(coord, mesh_),
+              .cell_volume    = mesh::volume(coord, mesh_),
+              .min_cell_width = mesh::min_cell_width(coord, mesh_),
+              .max_cell_width = mesh::max_cell_width(coord, mesh_)
             };
 
             const auto prim = state_.prim[coord];
@@ -77,9 +78,10 @@ namespace simbi::body::expr {
     };
 
     // accretion effect operation
-    template <typename HydroState, std::uint64_t Dims>
+    template <typename HydroState, typename MeshConfig, std::uint64_t Dims>
     struct accretion_effect_op_t {
         const HydroState& state_;
+        const MeshConfig& mesh_;
 
         template <typename Body, typename Coord>
         auto apply_to_body(const Body& body, Coord coord) const
@@ -90,10 +92,10 @@ namespace simbi::body::expr {
             auto ctx = physics_context_t<Dims>{
               .gamma          = state_.metadata.gamma,
               .dt             = state_.metadata.dt,
-              .cell_pos       = mesh::centroid(coord, state_.mesh),
-              .cell_volume    = mesh::volume(coord, state_.mesh),
-              .min_cell_width = mesh::min_cell_width(coord, state_.mesh),
-              .max_cell_width = mesh::max_cell_width(coord, state_.mesh)
+              .cell_pos       = mesh::centroid(coord, mesh_),
+              .cell_volume    = mesh::volume(coord, mesh_),
+              .min_cell_width = mesh::min_cell_width(coord, mesh_),
+              .max_cell_width = mesh::max_cell_width(coord, mesh_)
             };
 
             const auto prim  = state_.prim[coord];
@@ -132,9 +134,10 @@ namespace simbi::body::expr {
     };
 
     // rigid body effect operation
-    template <typename HydroState, std::uint64_t Dims>
+    template <typename HydroState, typename MeshConfig, std::uint64_t Dims>
     struct rigid_effect_op_t {
         const HydroState& state_;
+        const MeshConfig& mesh_;
 
         template <typename Body, typename Coord>
         auto apply_to_body(const Body& body, Coord coord) const
@@ -145,10 +148,10 @@ namespace simbi::body::expr {
             auto ctx = physics_context_t<Dims>{
               .gamma          = state_.metadata.gamma,
               .dt             = state_.metadata.dt,
-              .cell_pos       = mesh::centroid(coord, state_.mesh),
-              .cell_volume    = mesh::volume(coord, state_.mesh),
-              .min_cell_width = mesh::min_cell_width(coord, state_.mesh),
-              .max_cell_width = mesh::max_cell_width(coord, state_.mesh)
+              .cell_pos       = mesh::centroid(coord, mesh_),
+              .cell_volume    = mesh::volume(coord, mesh_),
+              .min_cell_width = mesh::min_cell_width(coord, mesh_),
+              .max_cell_width = mesh::max_cell_width(coord, mesh_)
             };
 
             const auto prim     = state_.prim[coord];
@@ -247,9 +250,10 @@ namespace simbi::body::expr {
     // unified body effects operation
     // ========================================================================
 
-    template <typename HydroState>
+    template <typename HydroState, typename MeshConfig>
     struct body_effects_op_t {
         const HydroState& state_;
+        const MeshConfig& mesh_;
 
         template <typename Coord>
         auto operator()(Coord coord) const
@@ -265,9 +269,17 @@ namespace simbi::body::expr {
             conserved_t total_effect{};
 
             // create effect operators
-            auto grav_op  = gravitational_effect_op_t<HydroState, dims>{state_};
-            auto accr_op  = accretion_effect_op_t<HydroState, dims>{state_};
-            auto rigid_op = rigid_effect_op_t<HydroState, dims>{state_};
+            auto grav_op =
+                gravitational_effect_op_t<HydroState, MeshConfig, dims>{
+                  state_,
+                  mesh_
+                };
+            auto accr_op = accretion_effect_op_t<HydroState, MeshConfig, dims>{
+              state_,
+              mesh_
+            };
+            auto rigid_op =
+                rigid_effect_op_t<HydroState, MeshConfig, dims>{state_, mesh_};
 
             // visit all bodies and accumulate effects
             state_.bodies->visit_all([&](const auto& body) {

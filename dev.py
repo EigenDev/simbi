@@ -683,7 +683,7 @@ def find_gpu_runtime_dir() -> str:
                 for cuda_path in ["/usr/local/cuda", "/opt/cuda"]:
                     if Path(cuda_path).exists():
                         return cuda_path
-        except:
+        except subprocess.CalledProcessError:
             pass
         return None
 
@@ -1065,16 +1065,17 @@ def build_simbi(args: argparse.Namespace, install: bool = False) -> tuple[str, s
     generate_home_locator(simbi_dir)
 
     # Check if build is already configured
-    build_configured = (
-        run_subprocess(
-            ["meson", "introspect", f"{config.build_dir}", "-i", "--targets"],
-            capture=True,
-            check=False,
-        ).returncode
-        == 0
-    )
+    def needs_reconfigure(config: BuildConfig) -> bool:
+        """Check if we actually need to reconfigure."""
+        build_ninja = Path(config.build_dir) / "build.ninja"
+        meson_info = Path(config.build_dir) / "meson-info"
 
-    reconfigure_flag = "--reconfigure" if build_configured else ""
+        # Only reconfigure if build files don't exist
+        return not (build_ninja.exists() and meson_info.exists())
+
+    reconfigure_flag = (
+        "--reconfigure" if (needs_reconfigure(config) or args.force_reconfigure) else ""
+    )
 
     # Set up environment
     simbi_env = os.environ.copy()
@@ -1100,9 +1101,10 @@ def build_simbi(args: argparse.Namespace, install: bool = False) -> tuple[str, s
     # Find GPU runtime and HDF5 include paths
     hdf5_include = find_hdf5_include()
 
-    # Configure the build
-    config_command = configure_build(config, reconfigure_flag, hdf5_include)
-    run_subprocess(config_command, env=simbi_env)
+    # Configure the build (if needed)
+    if not Path(config.build_dir).exists() or reconfigure_flag == "--reconfigure":
+        config_command = configure_build(config, reconfigure_flag, hdf5_include)
+        run_subprocess(config_command, env=simbi_env)
 
     # Create required directories
     build_dir = f"{simbi_dir}/{config.build_dir}"
@@ -1408,6 +1410,12 @@ def _add_build_arguments(parser: argparse.ArgumentParser) -> None:
         choices=["yes", "no", "ask"],
         default="ask",
         help="Create a dedicated virtual environment for simbi (yes/no/ask)",
+    )
+    parser.add_argument(
+        "--force-reconfigure",
+        action="store_true",
+        default=False,
+        help="Force reconfiguration of build system",
     )
 
     # Mutually exclusive options

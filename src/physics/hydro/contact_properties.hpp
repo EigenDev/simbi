@@ -1,12 +1,12 @@
 #ifndef SIMBI_PHYSICS_CONTACT_PROPERTIES
 #define SIMBI_PHYSICS_CONTACT_PROPERTIES
 
-#include "config.hpp"   // for real, DEV
+#include "config.hpp"              // for real, DEV
+#include "containers/vector.hpp"   // for vector_t
 #include "core/base/concepts.hpp"   // for is_hydro_primitive_c, is_hydro_conserved_c, is_srhd_c, is_relativistic_c
-#include "core/utility/helpers.hpp"     // for sgn
-#include "data/containers/vector.hpp"   // for vector_t
-#include <cstdint>                      // for std::uint64_t
-#include <tuple>         // for std::tuple_size, std::tuple_element
+#include "core/utility/helpers.hpp"   // for sgn
+#include <cstdint>                    // for std::uint64_t
+#include <tuple>                      // for std::tuple_size, std::tuple_element
 #include <type_traits>   // for std::integral_constant, std::is_same_v
 #include <utility>       // for std::tuple_size, std::tuple_element
 #include <utility>
@@ -24,12 +24,12 @@ namespace std {
 
     template <>
     struct tuple_element<0, simbi::hydro::contact_properties_t> {
-        using type = real;
+        using type = simbi::real;
     };
 
     template <>
     struct tuple_element<1, simbi::hydro::contact_properties_t> {
-        using type = real;
+        using type = simbi::real;
     };
 }   // namespace std
 

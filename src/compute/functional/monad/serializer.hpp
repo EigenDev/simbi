@@ -1,13 +1,13 @@
 #ifndef SIMBI_SERIALIZATION_HPP
 #define SIMBI_SERIALIZATION_HPP
 
-#include "compute/math/field.hpp"   // for field_t<T, Dims>
-#include "config.hpp"               // for real, DEV, etc
+#include "compute/field.hpp"   // for field_t<T, Dims>
+#include "config.hpp"          // for real, DEV, etc
 #include "core/utility/enums.hpp"
 #include "core/utility/helpers.hpp"
-#include "result.hpp"                    // for result_t<T> monad
-#include "system/mesh/mesh_config.hpp"   // for mesh::mesh_config_t
-#include <H5Cpp.h>                       // for HDF5 C++ API
+#include "mesh/mesh_config.hpp"   // for mesh::mesh_config_t
+#include "result.hpp"             // for result_t<T> monad
+#include <H5Cpp.h>                // for HDF5 C++ API
 #include <algorithm>
 #include <concepts>        // for concepts
 #include <cstdint>         // for std::uint64_t
@@ -85,7 +85,7 @@ namespace simbi::io {
             // field.memory()->ensure_cpu_synced();
 
             // create dataspace from field domain
-            auto shape = field.shape();
+            auto shape = field.domain().shape();
             std::vector<hsize_t> dims(Dims);
             for (std::uint64_t ii = 0; ii < Dims; ++ii) {
                 dims[ii] = shape[ii];
@@ -95,7 +95,7 @@ namespace simbi::io {
 
             // determine hdf5 data type
             H5::DataType h5_type;
-            if constexpr (std::same_as<T, real>) {
+            if constexpr (std::same_as<T, double>) {
                 h5_type = H5::PredType::NATIVE_DOUBLE;
             }
             else if constexpr (std::same_as<T, int>) {
@@ -145,7 +145,7 @@ namespace simbi::io {
             // field.memory()->ensure_cpu_synced();
 
             // create temporary array for this component
-            auto total_size = field.size();
+            auto total_size = field.domain().size();
             std::vector<real> component_data(total_size);
 
             // extract component from aos layout
@@ -154,7 +154,7 @@ namespace simbi::io {
             }
 
             // create dataspace from field domain
-            const auto shape = field.shape();
+            const auto shape = field.domain().shape();
             std::vector<hsize_t> dims(Dims);
             for (std::uint64_t ii = 0; ii < Dims; ++ii) {
                 dims[ii] = shape[ii];
@@ -924,13 +924,14 @@ namespace simbi::io {
         -> std::function<result_t<std::string>(serialization_context_t)>;
 
     // main serialization function for hydro_state_t
-    template <hydro_state_serializable_c HydroState>
-    result_t<std::string> serialize_hydro_state(HydroState& state)
+    template <hydro_state_serializable_c HydroState, typename MeshConfig>
+    result_t<std::string>
+    serialize_hydro_state(HydroState& state, const MeshConfig& mesh)
     {
         // ensure all data is synced to cpu
         // state.to_cpu();
 
-        auto& geo     = state.mesh;
+        auto& geo     = mesh;
         auto max_iter = std::max_element(geo.shape.begin(), geo.shape.end());
         auto chkpt    = *max_iter;
         auto tnow     = format_real(state.metadata.time);
@@ -942,7 +943,7 @@ namespace simbi::io {
         return create_file(filename)
             .and_then(serialize_field_components(state.prim, "primitives"))
             .and_then(serialize_magnetic_fields(state))
-            .and_then(serialize_attributes(state.mesh, "mesh_config"))
+            .and_then(serialize_attributes(mesh, "mesh_config"))
             .and_then(serialize_attributes(state.metadata))
             .and_then(close_file());
     }

@@ -52,8 +52,8 @@
 #include "capability.hpp"
 #include "compute/functional/monad/maybe.hpp"
 #include "config.hpp"
+#include "containers/vector.hpp"
 #include "core/utility/enums.hpp"
-#include "data/containers/vector.hpp"
 #include <cstdint>
 #include <type_traits>
 #include <utility>

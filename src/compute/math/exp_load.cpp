@@ -1,8 +1,8 @@
 #include "exp_load.hpp"
 #include "compute/math/expression.hpp"
 #include "config.hpp"
+#include "containers/ndarray.hpp"
 #include "core/utility/config_dict.hpp"
-#include "data/containers/ndarray.hpp"
 #include <iostream>
 #include <list>
 #include <string>

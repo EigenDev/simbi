@@ -1,8 +1,8 @@
 #include "evaluator.hpp"
 #include "compute/math/expression.hpp"
 #include "config.hpp"
+#include "containers/ndarray.hpp"
 #include "core/utility/helpers.hpp"
-#include "data/containers/ndarray.hpp"
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
