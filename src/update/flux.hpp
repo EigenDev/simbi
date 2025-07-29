@@ -33,7 +33,7 @@ namespace simbi {
             if (dir < 2) {
                 continue;
             }
-            const auto interface_f = compute_fluxes(state, mesh, ops, dir);
+            const auto interface_f = cfd::compute_fluxes(state, mesh, ops, dir);
 
             auto future = executor.async([&state, interface_f, dir]() {
                 state.flux[dir] = state.flux[dir].insert(interface_f);
@@ -54,7 +54,6 @@ namespace simbi {
             // electric fields but rather compute them
             // on-the-fly,
             boundary::apply_flux_bcs(state, mesh);
-            std::cin.get();
             em::update_magnetic_fields(state, mesh);
         }
     }

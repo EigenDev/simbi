@@ -247,12 +247,14 @@ namespace simbi::cfd {
               // face velocity (for moving meshes)
               const auto vface = mesh::face_velocity(coord, dir, mesh);
 
-              // if (dir == 2) {
-              //     auto f = ops.flux(pl, pr, nhat, vface, gamma,
-              //     shock_smoother); std::cout << "Flux computed for face at
-              //     coord: " << coord
-              //               << " with value: " << f;
-              // }
+              if (dir == 2) {
+                  auto f = ops.flux(pl, pr, nhat, vface, gamma, shock_smoother);
+                  std::cout << "coord: " << coord << std::endl;
+                  std::cout << "pl: " << pl << std::endl;
+                  std::cout << "pr: " << pr << std::endl;
+                  std::cout << "nhat: " << nhat << std::endl;
+                  std::cout << "f: " << f << std::endl;
+              }
 
               // solve Riemann problem
               return ops.flux(pl, pr, nhat, vface, gamma, shock_smoother);
