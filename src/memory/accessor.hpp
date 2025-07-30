@@ -5,13 +5,13 @@
 #include "config.hpp"
 #include "containers/vector.hpp"
 #include "domain/domain.hpp"
+#include "io/exceptions.hpp"
 #include "traits/traits.hpp"
 
 #include <cstddef>
 #include <cstdint>
 #include <functional>
 #include <memory>
-#include <stdexcept>
 #include <utility>
 
 namespace simbi::mem {
@@ -119,12 +119,9 @@ namespace simbi::mem {
                             std::plus{}
                         )
                         .wait();
-                // check if any errors occurred
+
                 if (error_count > 0) {
-                    throw std::runtime_error(
-                        "materialization failed at " +
-                        std::to_string(error_count) + " coordinates"
-                    );
+                    throw exception::SimulationFailureException();
                 }
             }
             else {
