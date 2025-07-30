@@ -2,7 +2,7 @@
 #include "compute/math/expression.hpp"
 #include "config.hpp"
 #include "containers/ndarray.hpp"
-#include "core/utility/helpers.hpp"
+#include "utility/helpers.hpp"
 #include <algorithm>
 #include <cmath>
 #include <cstdint>

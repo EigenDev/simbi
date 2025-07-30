@@ -2,12 +2,9 @@
 #define FLUX_HPP
 
 #include "bcs.hpp"
-#include "execution/executor.hpp"
-#include "execution/future.hpp"
 #include "physics/em/perm.hpp"
 
 #include <cstdint>
-#include <vector>
 
 namespace simbi::cfd {
     template <typename HydroState, typename CfdOps, typename MeshConfig>
@@ -26,24 +23,12 @@ namespace simbi {
         const MeshConfig& mesh
     )
     {
-        const auto executor = async::default_executor();
-        std::vector<async::future_t<void>> flux_futures;
-
         for (std::uint64_t dir = 0; dir < HydroState::dimensions; ++dir) {
             const auto interface_f = cfd::compute_fluxes(state, mesh, ops, dir);
-
-            auto future = executor.async([&state, interface_f, dir, mesh]() {
-                auto flux = state.flux[dir][mesh.face_domain[dir]];
-                flux      = flux.map([interface_f](auto coord, auto) {
-                    return interface_f(coord);
-                });
+            auto flux              = state.flux[dir][mesh.face_domain[dir]];
+            flux                   = flux.map([interface_f](auto coord, auto) {
+                return interface_f(coord);
             });
-
-            flux_futures.push_back(std::move(future));
-        }
-
-        for (auto& future : flux_futures) {
-            future.wait();
         }
 
         if constexpr (HydroState::is_mhd) {

@@ -49,11 +49,11 @@
 #ifndef HELPERS_HIP_HPP
 #define HELPERS_HIP_HPP
 
+#include "base/concepts.hpp"
 #include "config.hpp"              // for real, STATIC, std::uint64_t, sint
 #include "containers/vector.hpp"   // for vector_t
-#include "core/base/concepts.hpp"
-#include "core/utility/enums.hpp"     // for Geometry, BoundaryCondition, Solver
-#include "system/io/exceptions.hpp"   // for ErrorCode
+#include "io/exceptions.hpp"       // for ErrorCode
+#include "utility/enums.hpp"       // for Geometry, BoundaryCondition, Solver
 #include <H5Cpp.h>       // for H5::Exception, H5::DataSpace, H5::DataType, etc
 #include <cmath>         // for sqrt, exp, INFINITY
 #include <concepts>      // for std::integral, std::floating_point

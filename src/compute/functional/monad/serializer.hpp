@@ -3,11 +3,11 @@
 
 #include "compute/field.hpp"   // for field_t<T, Dims>
 #include "config.hpp"          // for real, DEV, etc
-#include "core/utility/enums.hpp"
-#include "core/utility/helpers.hpp"
+#include "io/tabulate/table.hpp"
 #include "mesh/mesh_config.hpp"   // for mesh::mesh_config_t
 #include "result.hpp"             // for result_t<T> monad
-#include "system/io/tabulate/table.hpp"
+#include "utility/enums.hpp"
+#include "utility/helpers.hpp"
 #include <H5Cpp.h>   // for HDF5 C++ API
 #include <algorithm>
 #include <concepts>        // for concepts

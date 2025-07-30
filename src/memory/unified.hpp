@@ -1,9 +1,9 @@
 #ifndef SIMBI_MEMORY_HPP
 #define SIMBI_MEMORY_HPP
 
+#include "adapter/device_adapter_api.hpp"
 #include "config.hpp"
-#include "core/types/alias.hpp"
-#include "system/adapter/device_adapter_api.hpp"
+#include "types/alias.hpp"
 #include <algorithm>
 #include <cstdint>
 #include <memory>

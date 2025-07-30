@@ -1,7 +1,7 @@
 #ifndef CONFIG_CONVERTER_HPP
 #define CONFIG_CONVERTER_HPP
 
-#include "core/utility/config_dict.hpp"
+#include "utility/config_dict.hpp"
 #include <pybind11/pybind11.h>
 
 namespace simbi {

@@ -1,8 +1,8 @@
 #ifndef SIMBI_TASK_COMPUTATION_HPP
 #define SIMBI_TASK_COMPUTATION_HPP
 
+#include "base/buffer.hpp"
 #include "containers/vector.hpp"
-#include "core/base/buffer.hpp"
 #include "domain/domain.hpp"
 #include <cstddef>
 #include <cstdint>

@@ -3,12 +3,12 @@
 
 #include "compute/functional/fp.hpp"
 #include "config.hpp"   // for real, DUAL, DEV, global::using_four_velocity
-#include "containers/vector.hpp"              // for vector_t
-#include "core/utility/bimap.hpp"             // for deserialize
-#include "core/utility/enums.hpp"             // for Cellspacing enum
-#include "core/utility/init_conditions.hpp"   // for initial_conditions_t
+#include "containers/vector.hpp"   // for vector_t
 #include "domain/algebra.hpp"
 #include "domain/domain.hpp"
+#include "utility/bimap.hpp"             // for deserialize
+#include "utility/enums.hpp"             // for Cellspacing enum
+#include "utility/init_conditions.hpp"   // for initial_conditions_t
 
 #include <cstddef>      // for std::size_t
 #include <cstdint>      // for std::int64_t

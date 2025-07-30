@@ -7,9 +7,9 @@
 #define SIMBI_CORE_PARALLEL_ADAPTIVE_TILING_HPP
 
 #include "config.hpp"
-#include "core/types/alias.hpp"
 #include "system/parallel/par_config.hpp"
 #include "system/parallel/tiling/block_tiling.hpp"
+#include "types/alias.hpp"
 #include <array>
 #include <memory>
 #include <type_traits>

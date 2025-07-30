@@ -52,8 +52,8 @@
 
 #include "config.hpp"
 #include "config_dict.hpp"
-#include "core/utility/enums.hpp"
 #include "init_conditions_visitor.hpp"
+#include "utility/enums.hpp"
 #include <cmath>
 #include <cstdint>
 #include <list>

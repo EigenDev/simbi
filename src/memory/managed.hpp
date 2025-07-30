@@ -49,12 +49,12 @@
 #ifndef MANAGED_HPP
 #define MANAGED_HPP
 
-#include "config.hpp"                              // for global::managed_memory
-#include "system/adapter/device_adapter_api.hpp"   // for deviceSynch, gpuFree, gpuMallocManaged
-#include "system/adapter/device_types.hpp"
-#include <cstddef>   // for size_t
-#include <cstdint>   // for int64_t, uint64_t
-#include <new>       // for new, delete
+#include "adapter/device_adapter_api.hpp"   // for deviceSynch, gpuFree, gpuMallocManaged
+#include "adapter/device_types.hpp"
+#include "config.hpp"   // for global::managed_memory
+#include <cstddef>      // for size_t
+#include <cstdint>      // for int64_t, uint64_t
+#include <new>          // for new, delete
 
 namespace simbi {
     template <bool gpu_managed = global::managed_memory>

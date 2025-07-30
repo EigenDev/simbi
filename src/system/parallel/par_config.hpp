@@ -6,10 +6,10 @@
 #ifndef SIMBI_CORE_PARALLEL_CONFIG_HPP
 #define SIMBI_CORE_PARALLEL_CONFIG_HPP
 
+#include "adapter/device_adapter_api.hpp"
+#include "adapter/device_types.hpp"
 #include "config.hpp"
-#include "core/types/alias.hpp"
-#include "system/adapter/device_adapter_api.hpp"
-#include "system/adapter/device_types.hpp"
+#include "types/alias.hpp"
 #include <cstddef>
 #include <cstdlib>
 #include <stdexcept>

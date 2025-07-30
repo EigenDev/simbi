@@ -1,13 +1,12 @@
 #ifndef SIMBI_CFD_OPS_HPP
 #define SIMBI_CFD_OPS_HPP
 
+#include "base/stencil_view.hpp"
 #include "compute/field.hpp"
 #include "compute/math/domain.hpp"
 #include "config.hpp"
 #include "containers/state_ops.hpp"
 #include "containers/vector.hpp"
-#include "core/base/stencil_view.hpp"
-#include "core/utility/enums.hpp"
 #include "mesh/mesh_ops.hpp"
 #include "physics/em/perm.hpp"
 #include "physics/hydro/ib/body.hpp"
@@ -17,6 +16,7 @@
 #include "update/flux.hpp"
 #include "update/prim_recovery.hpp"
 #include "update/rk.hpp"
+#include "utility/enums.hpp"
 
 #include <cstdint>
 #include <type_traits>

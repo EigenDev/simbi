@@ -1,6 +1,7 @@
 #ifndef SIMBI_STATE_EXPRESSION_HPP
 #define SIMBI_STATE_EXPRESSION_HPP
 
+#include "base/concepts.hpp"
 #include "compute/math/evaluator.hpp"
 #include "compute/math/exp_load.hpp"
 #include "compute/math/expression.hpp"
@@ -8,10 +9,9 @@
 #include "config.hpp"
 #include "containers/ndarray.hpp"
 #include "containers/vector.hpp"
-#include "core/base/concepts.hpp"
-#include "core/utility/config_dict.hpp"
 #include "memory/managed.hpp"
 #include "physics/hydro/physics.hpp"
+#include "utility/config_dict.hpp"
 #include <cstdint>
 #include <utility>
 

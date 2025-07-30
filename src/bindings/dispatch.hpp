@@ -3,14 +3,14 @@
 
 #include "config.hpp"
 #include "containers/vector.hpp"
-#include "core/utility/bimap.hpp"
-#include "core/utility/enums.hpp"
-#include "core/utility/init_conditions.hpp"
 #include "mesh/mesh_config.hpp"
 #include "physics/eos/ideal.hpp"
 #include "physics/eos/isothermal.hpp"
 #include "state/cfd_ops.hpp"
 #include "state/hydro_state.hpp"
+#include "utility/bimap.hpp"
+#include "utility/enums.hpp"
+#include "utility/init_conditions.hpp"
 
 #include <cstdint>
 #include <functional>

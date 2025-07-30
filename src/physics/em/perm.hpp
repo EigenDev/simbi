@@ -6,10 +6,10 @@
 #include "config.hpp"
 #include "contact.hpp"
 #include "containers/vector.hpp"
-#include "core/utility/enums.hpp"
 #include "ct_geom.hpp"
 #include "domain/domain.hpp"
 #include "physics/em/electromagnetism.hpp"
+#include "utility/enums.hpp"
 
 #include <cstdint>
 

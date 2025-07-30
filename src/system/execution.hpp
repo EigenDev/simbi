@@ -1,9 +1,9 @@
 #ifndef EXECUTION_HPP
 #define EXECUTION_HPP
 
-#include "core/base/buffer.hpp"
-#include "system/adapter/device_adapter_api.hpp"
-#include "system/adapter/device_types.hpp"
+#include "adapter/device_adapter_api.hpp"
+#include "adapter/device_types.hpp"
+#include "base/buffer.hpp"
 #include <cstdlib>
 #include <cstring>
 #include <vector>

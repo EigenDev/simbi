@@ -1,8 +1,8 @@
 #ifndef STATE_OPS_HPP
 #define STATE_OPS_HPP
 
+#include "base/concepts.hpp"
 #include "config.hpp"
-#include "core/base/concepts.hpp"
 #include "physics/eos/isothermal.hpp"
 #include <concepts>
 #include <type_traits>

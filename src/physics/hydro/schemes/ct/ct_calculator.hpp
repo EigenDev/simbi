@@ -49,9 +49,9 @@
 #ifndef CT_CALCULATOR_HPP
 #define CT_CALCULATOR_HPP
 
-#include "config.hpp"               // for DUAL
-#include "core/utility/enums.hpp"   // for Dir, BlockAx, Plane, Corner
-#include "stencil.hpp"              // for StencilView
+#include "config.hpp"          // for DUAL
+#include "stencil.hpp"         // for StencilView
+#include "utility/enums.hpp"   // for Dir, BlockAx, Plane, Corner
 
 namespace simbi {
     namespace scheme {

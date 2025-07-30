@@ -6,7 +6,7 @@
 #ifndef SIMBI_CORE_PARALLEL_TILING_STRATEGY_HPP
 #define SIMBI_CORE_PARALLEL_TILING_STRATEGY_HPP
 
-#include "core/base/coordinate.hpp"   // for coordinate_t
+#include "base/coordinate.hpp"   // for coordinate_t
 #include "mesh/grid_topology.hpp"
 // #include "system/parallel/par_config.hpp"
 #include <cstddef>

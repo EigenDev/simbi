@@ -50,7 +50,7 @@
 #ifndef BODY_SERIALIZATION_HPP
 #define BODY_SERIALIZATION_HPP
 
-#include "core/utility/config_dict.hpp"
+#include "utility/config_dict.hpp"
 #include <H5Cpp.h>
 #include <functional>
 #include <string>

@@ -1,16 +1,16 @@
 #ifndef SIMBI_HYDRO_HLLC_HPP
 #define SIMBI_HYDRO_HLLC_HPP
 
-#include "config.hpp"               // for DEV macro
-#include "containers/vector.hpp"    // for VectorLike
-#include "core/base/concepts.hpp"   // for is_hydro_primitive_c
-#include "core/utility/enums.hpp"   // for ShockWaveLimiter
-#include "core/utility/helpers.hpp"   // for goes_to_zero, sgn, vecops::dot, vecops::norm
+#include "base/concepts.hpp"                 // for is_hydro_primitive_c
+#include "config.hpp"                        // for DEV macro
+#include "containers/vector.hpp"             // for VectorLike
 #include "physics/em/electromagnetism.hpp"   // for shift_electric_field
 #include "physics/hydro/solvers/hlle.hpp"    // for hlle_flux
 #include "physics/hydro/wave_speeds.hpp"     // for extremal_speeds
-#include <algorithm>                         // for std::max, std::min
-#include <cmath>                             // for std::abs, std::log
+#include "utility/enums.hpp"                 // for ShockWaveLimiter
+#include "utility/helpers.hpp"   // for goes_to_zero, sgn, vecops::dot, vecops::norm
+#include <algorithm>             // for std::max, std::min
+#include <cmath>                 // for std::abs, std::log
 #include <iomanip>
 #include <numbers>   // for std::numbers::pi
 

@@ -49,8 +49,8 @@
 #ifndef LAUNCH_HPP
 #define LAUNCH_HPP
 
-#include "kernel.hpp"   // for kernel
-#include "system/adapter/device_types.hpp"
+#include "adapter/device_types.hpp"
+#include "kernel.hpp"                      // for kernel
 #include "util/parallel/exec_policy.hpp"   // for ExecutionPolicy
 
 namespace simbi {

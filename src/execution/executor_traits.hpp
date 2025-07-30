@@ -7,8 +7,6 @@
 #include "executor.hpp"
 
 namespace simbi::execution {
-
-    // just three simple strategy types
     enum class strategy_type {
         sequential,   // single-threaded execution
         parallel,     // multi-threaded execution

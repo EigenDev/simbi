@@ -3,9 +3,9 @@
 
 #include "config.hpp"
 #include "containers/vector.hpp"
-#include "core/utility/enums.hpp"
 #include "mesh/mesh_config.hpp"
 #include "mesh/mesh_ops.hpp"
+#include "utility/enums.hpp"
 #include <cmath>
 #include <cstdint>
 

@@ -4,8 +4,8 @@
 #ifndef SIMBI_NDARRAY_SYSTEM_HPP
 #define SIMBI_NDARRAY_SYSTEM_HPP
 
+#include "base/concepts.hpp"
 #include "config.hpp"
-#include "core/base/concepts.hpp"
 #include "memory/unified.hpp"
 
 #include <cstddef>

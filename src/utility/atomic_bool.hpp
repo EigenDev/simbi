@@ -1,9 +1,9 @@
 #ifndef ATOMIC_BOOL_HPP
 #define ATOMIC_BOOL_HPP
 
+#include "adapter/device_types.hpp"
 #include "memory/managed.hpp"
 #include "smart_ptr.hpp"
-#include "system/adapter/device_types.hpp"
 
 namespace simbi::atomic {
     using shared_atomic_bool_t = adapter::types::atomic_bool<>;

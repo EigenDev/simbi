@@ -2,13 +2,13 @@
 #define SIMBI_HYDRO_HLLE_HPP
 
 // HLLE is the same for all regimes, so it can be defined here
+#include "base/concepts.hpp"
 #include "config.hpp"
 #include "containers/vector.hpp"
-#include "core/base/concepts.hpp"
-#include "core/utility/enums.hpp"
 #include "physics/em/electromagnetism.hpp"
 #include "physics/hydro/physics.hpp"
 #include "physics/hydro/wave_speeds.hpp"
+#include "utility/enums.hpp"
 
 namespace simbi::hydro {
     using namespace simbi::em;

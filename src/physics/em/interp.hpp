@@ -3,9 +3,9 @@
 
 #include "config.hpp"
 #include "containers/vector.hpp"
-#include "core/utility/enums.hpp"
 #include "domain/algebra.hpp"
 #include "mesh/mesh_ops.hpp"
+#include "utility/enums.hpp"
 #include <cstdint>
 
 namespace simbi::em {

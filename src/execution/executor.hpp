@@ -1,13 +1,13 @@
 #ifndef EXECUTOR_HPP
 #define EXECUTOR_HPP
 
+#include "adapter/device_adapter_api.hpp"
+#include "adapter/device_types.hpp"
 #include "config.hpp"
 #include "containers/vector.hpp"
 #include "domain/domain.hpp"
 #include "execution/future.hpp"
 #include "memory/device.hpp"
-#include "system/adapter/device_adapter_api.hpp"
-#include "system/adapter/device_types.hpp"
 
 #include <algorithm>
 #include <condition_variable>
@@ -16,6 +16,7 @@
 #include <cstdlib>
 #include <exception>
 #include <functional>
+#include <iostream>
 #include <memory>
 #include <mutex>
 #include <queue>
@@ -100,6 +101,22 @@ namespace simbi::async {
             for (std::thread& worker : workers_) {
                 worker.join();
             }
+        }
+    };
+
+    // singleton thread pool manager - lazy initialization
+    class thread_pool_manager_t
+    {
+      public:
+        static thread_pool_t& get_pool()
+        {
+            static thread_pool_t singleton(get_nthreads());
+            return singleton;
+        }
+
+        static std::size_t get_nthreads()
+        {
+            return ::simbi::async::get_nthreads();
         }
     };
 
@@ -262,12 +279,13 @@ namespace simbi::async {
     class par_cpu_executor_t : public executor_base_t<par_cpu_executor_t>
     {
       private:
-        std::unique_ptr<thread_pool_t> pool_;
+        // std::unique_ptr<thread_pool_t> pool_;
+        thread_pool_t* pool_;
         std::size_t nthreads_;
 
       public:
         explicit par_cpu_executor_t()
-            : pool_(std::make_unique<thread_pool_t>(get_nthreads())),
+            : pool_(&thread_pool_manager_t::get_pool()),
               nthreads_(get_nthreads())
         {
         }
@@ -704,15 +722,15 @@ namespace simbi::async {
         }
         else {
             // if (global::use_omp) {
-            // return omp_executor();
+            //     return omp_executor();
             // }
             return par_cpu_executor();
         }
     }
 
     struct exec {
-        using type =
-            std::conditional_t<global::on_gpu, gpu_executor_t, omp_executor_t>;
+        using type = std::
+            conditional_t<global::on_gpu, gpu_executor_t, par_cpu_executor_t>;
     };
     using default_executor_t = typename exec::type;
 

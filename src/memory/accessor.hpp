@@ -4,8 +4,8 @@
 #include "buffer_pool.hpp"
 #include "config.hpp"
 #include "containers/vector.hpp"
-#include "core/traits/traits.hpp"
 #include "domain/domain.hpp"
+#include "traits/traits.hpp"
 
 #include <cstddef>
 #include <cstdint>

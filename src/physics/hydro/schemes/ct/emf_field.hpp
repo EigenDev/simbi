@@ -51,8 +51,8 @@
 
 #include "config.hpp"
 #include "core/containers/vector_field.hpp"
-#include "core/utility/enums.hpp"
 #include "physics/hydro/schemes/ct/ct_calculator.hpp"
+#include "utility/enums.hpp"
 
 namespace simbi {
     namespace ct {

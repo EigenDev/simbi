@@ -2,7 +2,7 @@
 #include "compute/math/expression.hpp"
 #include "config.hpp"
 #include "containers/ndarray.hpp"
-#include "core/utility/config_dict.hpp"
+#include "utility/config_dict.hpp"
 #include <iostream>
 #include <list>
 #include <string>

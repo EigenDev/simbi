@@ -49,8 +49,8 @@
 #ifndef EXCEPTIONS_HPP
 #define EXCEPTIONS_HPP
 
+#include "base/concepts.hpp"
 #include "config.hpp"
-#include "core/base/concepts.hpp"
 #include <atomic>
 #include <cstdint>
 #include <exception>

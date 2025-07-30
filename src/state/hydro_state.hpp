@@ -4,16 +4,16 @@
 #include "compute/field.hpp"
 #include "config.hpp"
 #include "containers/vector.hpp"
-#include "core/utility/bimap.hpp"
-#include "core/utility/enums.hpp"
-#include "core/utility/init_conditions.hpp"
 #include "hydro_state_types.hpp"
+#include "io/exceptions.hpp"
 #include "memory/managed.hpp"
 #include "physics/eos/isothermal.hpp"
 #include "physics/hydro/ib/collection.hpp"
 #include "physics/hydro/ib/factory.hpp"
 #include "state/express_t.hpp"
-#include "system/io/exceptions.hpp"
+#include "utility/bimap.hpp"
+#include "utility/enums.hpp"
+#include "utility/init_conditions.hpp"
 
 #include <bit>
 #include <cmath>

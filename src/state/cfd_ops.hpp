@@ -1,14 +1,14 @@
 #ifndef SIMBI_CFD_OPERATIONS_HPP
 #define SIMBI_CFD_OPERATIONS_HPP
 
+#include "base/stencil_view.hpp"
 #include "config.hpp"
 #include "containers/vector.hpp"
-#include "core/base/stencil_view.hpp"
-#include "core/utility/enums.hpp"
 #include "physics/hydro/solvers/hllc.hpp"
 #include "physics/hydro/solvers/hlld.hpp"
 #include "physics/hydro/solvers/hlle.hpp"
 #include "state/hydro_state_types.hpp"
+#include "utility/enums.hpp"
 
 #include <cstdint>
 #include <utility>

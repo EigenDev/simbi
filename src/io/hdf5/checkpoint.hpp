@@ -50,9 +50,9 @@
 #define CHECKPOINT_HPP
 
 #include "config.hpp"
-#include "core/utility/enums.hpp"
 #include "physics/hydro/ib/body_serialization.hpp"
 #include "physics/hydro/ib/system_serialization.hpp"
+#include "utility/enums.hpp"
 #include <H5Cpp.h>
 #include <string>
 #include <unordered_map>

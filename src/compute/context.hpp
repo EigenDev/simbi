@@ -1,15 +1,15 @@
 #ifndef CONTEXT_HPP
 #define CONTEXT_HPP
 
+#include "adapter/device_adapter_api.hpp"
+#include "adapter/device_types.hpp"
 #include "compute/functional/monad/serializer.hpp"
 #include "config.hpp"
-#include "core/utility/helpers.hpp"
-#include "system/adapter/device_adapter_api.hpp"
-#include "system/adapter/device_types.hpp"
-#include "system/io/console/printb.hpp"
-#include "system/io/console/statistics.hpp"
-#include "system/io/exceptions.hpp"
-#include "system/io/tabulate/table.hpp"
+#include "io/console/printb.hpp"
+#include "io/console/statistics.hpp"
+#include "io/exceptions.hpp"
+#include "io/tabulate/table.hpp"
+#include "utility/helpers.hpp"
 
 #include <chrono>
 #include <cstdint>

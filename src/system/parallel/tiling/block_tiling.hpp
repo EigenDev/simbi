@@ -6,8 +6,8 @@
 #ifndef SIMBI_CORE_PARALLEL_BLOCK_TILING_HPP
 #define SIMBI_CORE_PARALLEL_BLOCK_TILING_HPP
 
-#include "core/base/concepts.hpp"
-#include "core/base/coordinate.hpp"
+#include "base/concepts.hpp"
+#include "base/coordinate.hpp"
 #include "core/mesh/grid_topology.hpp"
 #include "system/parallel/tiling/tiling_strategy.hpp"
 #include <cstddef>

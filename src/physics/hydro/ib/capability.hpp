@@ -50,7 +50,7 @@
 #define CAPABILITY_HPP
 
 #include "config.hpp"
-#include "core/utility/enums.hpp"
+#include "utility/enums.hpp"
 #include <cstdint>
 
 namespace simbi::ibsystem {

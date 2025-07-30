@@ -1,11 +1,11 @@
 #ifndef VECTOR_HPP
 #define VECTOR_HPP
 
+#include "base/concepts.hpp"
 #include "compute/functional/fp.hpp"
 #include "compute/functional/monad/maybe.hpp"
 #include "config.hpp"
-#include "core/base/concepts.hpp"
-#include "core/utility/enums.hpp"
+#include "utility/enums.hpp"
 #include <array>
 #include <cmath>
 #include <concepts>

@@ -1,6 +1,6 @@
-#include "system/io/console/statistics.hpp"
+#include "io/console/statistics.hpp"
 #include "config.hpp"
-#include "system/io/tabulate/table.hpp"
+#include "io/tabulate/table.hpp"
 #include <cstddef>
 #include <cstdint>
 #include <iomanip>
@@ -12,7 +12,7 @@
 #include <vector>
 // we'll need to check if GPU code is enabled
 #if GPU_ENABLED
-#include "system/adapter/device_adapter_api.hpp"
+#include "adapter/device_adapter_api.hpp"
 real gpu_theoretical_bw = 1.0;
 #endif
 

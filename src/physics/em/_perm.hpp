@@ -7,10 +7,10 @@
 #include "config.hpp"
 #include "contact.hpp"
 #include "containers/vector.hpp"
-#include "core/utility/enums.hpp"
 #include "ct_geom.hpp"
 #include "physics/em/electromagnetism.hpp"
 #include "physics/em/interp.hpp"
+#include "utility/enums.hpp"
 #include <cstdint>
 #include <utility>
 

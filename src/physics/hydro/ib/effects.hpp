@@ -1,10 +1,10 @@
 #ifndef SIMBI_BODY_EXPR_EFFECTS_HPP
 #define SIMBI_BODY_EXPR_EFFECTS_HPP
 
+#include "base/concepts.hpp"
 #include "body.hpp"
 #include "config.hpp"
 #include "containers/vector.hpp"
-#include "core/base/concepts.hpp"
 #include "mesh/mesh_ops.hpp"
 #include "physics/hydro/physics.hpp"
 #include <cmath>

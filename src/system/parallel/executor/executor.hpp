@@ -8,8 +8,8 @@
 
 #include "core/graph/graph_concept.hpp"
 #include "core/mesh/grid_topology.hpp"
-#include "core/types/alias.hpp"
 #include "system/parallel/par_config.hpp"
+#include "types/alias.hpp"
 #include <cstddef>
 #include <functional>
 #include <memory>

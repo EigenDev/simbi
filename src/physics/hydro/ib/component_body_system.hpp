@@ -56,11 +56,11 @@
 #include "config.hpp"
 #include "containers/state_struct.hpp"
 #include "containers/vector.hpp"
-#include "core/utility/enums.hpp"
 #include "memory/managed.hpp"
 #include "mesh/mesh_config.hpp"
 #include "physics/eos/isothermal.hpp"
 #include "system_config.hpp"
+#include "utility/enums.hpp"
 #include <cassert>
 #include <cstddef>
 #include <cstdint>

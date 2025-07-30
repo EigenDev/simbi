@@ -6,9 +6,9 @@
 #ifndef SIMBI_CORE_PARALLEL_CPU_EXECUTOR_HPP
 #define SIMBI_CORE_PARALLEL_CPU_EXECUTOR_HPP
 
-#include "core/types/alias.hpp"
 #include "system/parallel/executor/executor.hpp"
 #include "system/parallel/par_config.hpp"
+#include "types/alias.hpp"
 #include <functional>
 
 namespace simbi::parallel {

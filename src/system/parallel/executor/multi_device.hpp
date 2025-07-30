@@ -6,8 +6,8 @@
 #ifndef SIMBI_CORE_PARALLEL_MULTI_DEVICE_HPP
 #define SIMBI_CORE_PARALLEL_MULTI_DEVICE_HPP
 
-#include "core/types/alias.hpp"
 #include "system/parallel/executor/executor.hpp"
+#include "types/alias.hpp"
 #include <functional>
 #include <memory>
 #include <vector>

@@ -50,12 +50,12 @@
 #ifndef PARALLEL_FOR_HPP
 #define PARALLEL_FOR_HPP
 
+#include "adapter/device_adapter_api.hpp"   // for api::set_device
 #include "config.hpp"   // for global::BuildPlatform, DEV, Platform ...
-#include "core/utility/range.hpp"                  // for range
-#include "system/adapter/device_adapter_api.hpp"   // for api::set_device
-#include "util/parallel/exec_policy.hpp"           // for ExecutionPolicy
-#include "util/parallel/launch.hpp"                // for launch
+#include "util/parallel/exec_policy.hpp"   // for ExecutionPolicy
+#include "util/parallel/launch.hpp"        // for launch
 #include "util/parallel/thread_pool.hpp"   // for (anonymous), thread_pool_t, get_nthreads
+#include "utility/range.hpp"               // for range
 
 namespace simbi {
     template <

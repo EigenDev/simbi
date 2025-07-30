@@ -1,10 +1,10 @@
 #ifndef SIMBI_STENCIL_VIEW_HPP
 #define SIMBI_STENCIL_VIEW_HPP
 
+#include "base/stencil.hpp"
 #include "containers/vector.hpp"
-#include "core/base/stencil.hpp"
-#include "core/utility/enums.hpp"
-#include "core/utility/helpers.hpp"
+#include "utility/enums.hpp"
+#include "utility/helpers.hpp"
 
 #include <cstdint>
 #include <iostream>

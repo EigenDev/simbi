@@ -1,9 +1,9 @@
 #ifndef SIMBI_CORE_GRAPH_STENCIL_HPP
 #define SIMBI_CORE_GRAPH_STENCIL_HPP
 
+#include "base/concepts.hpp"
 #include "containers/vector.hpp"
-#include "core/base/concepts.hpp"
-#include "core/utility/enums.hpp"
+#include "utility/enums.hpp"
 #include <cassert>
 #include <cstddef>
 #include <cstdint>

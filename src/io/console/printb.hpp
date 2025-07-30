@@ -50,8 +50,8 @@
 #ifndef PRINTB_HPP
 #define PRINTB_HPP
 
-#include "core/utility/enums.hpp"   // for Color
-#include "core/utility/helpers.hpp"
+#include "utility/enums.hpp"   // for Color
+#include "utility/helpers.hpp"
 
 #include <cstdint>
 #include <ctype.h>

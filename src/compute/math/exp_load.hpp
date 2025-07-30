@@ -4,7 +4,7 @@
 #include "compute/math/expression.hpp"
 #include "config.hpp"
 #include "containers/ndarray.hpp"
-#include "core/utility/config_dict.hpp"
+#include "utility/config_dict.hpp"
 #include <string>
 #include <tuple>
 

@@ -50,10 +50,10 @@
 #ifndef ALIASES_HPP
 #define ALIASES_HPP
 
-#include "core/utility/smart_ptr.hpp"
-#include "system/adapter/device_adapter_api.hpp"
+#include "adapter/device_adapter_api.hpp"
+
 #include <cstddef>
-#include <cstdint>
+#include <memory>
 
 namespace simbi {
     // namespace types {
@@ -64,7 +64,7 @@ namespace simbi {
     };
 
     template <typename T, typename Deleter>
-    using unique_ptr = util::smart_ptr<T[], Deleter>;
+    using unique_ptr = std::unique_ptr<T[], Deleter>;
     // }   // namespace types
 
 }   // namespace simbi

@@ -1,15 +1,15 @@
 #ifndef SIMBI_IB_INTERACTIONS_HPP
 #define SIMBI_IB_INTERACTIONS_HPP
 
+#include "base/concepts.hpp"
 #include "body.hpp"
 #include "body_delta.hpp"
 #include "collection.hpp"
 #include "config.hpp"
 #include "containers/ctx.hpp"
 #include "containers/vector.hpp"
-#include "core/base/concepts.hpp"
-#include "core/utility/enums.hpp"
 #include "physics/hydro/physics.hpp"
+#include "utility/enums.hpp"
 #include <algorithm>
 #include <cmath>
 #include <cstdint>

@@ -3,11 +3,11 @@
 
 #include "config.hpp"
 #include "containers/vector.hpp"
-#include "core/utility/enums.hpp"
-#include "core/utility/helpers.hpp"
 #include "domain/domain.hpp"
 #include "domain/ghost.hpp"
 #include "mesh/mesh_ops.hpp"
+#include "utility/enums.hpp"
+#include "utility/helpers.hpp"
 
 #include <cstdint>
 #include <numbers>

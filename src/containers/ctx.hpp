@@ -1,9 +1,9 @@
 #ifndef SIMBI_DATA_CTX_HPP
 #define SIMBI_DATA_CTX_HPP
 
+#include "base/concepts.hpp"
 #include "config.hpp"
 #include "containers/vector.hpp"
-#include "core/base/concepts.hpp"
 #include <cstdint>
 
 namespace simbi {

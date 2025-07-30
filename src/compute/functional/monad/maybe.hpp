@@ -50,7 +50,7 @@
 #define MAYBE_HPP
 
 #include "config.hpp"
-#include "system/io/exceptions.hpp"
+#include "io/exceptions.hpp"
 #include <type_traits>
 
 namespace simbi {

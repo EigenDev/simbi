@@ -1,9 +1,9 @@
 #ifndef DEVICE_HPP
 #define DEVICE_HPP
 
+#include "adapter/device_adapter_api.hpp"
 #include "config.hpp"
 #include "span.hpp"
-#include "system/adapter/device_adapter_api.hpp"
 
 #include <algorithm>
 #include <cstddef>

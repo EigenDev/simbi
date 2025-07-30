@@ -6,15 +6,15 @@
 #ifndef SIMBI_CORE_PARALLEL_HARDWARE_POLICY_HPP
 #define SIMBI_CORE_PARALLEL_HARDWARE_POLICY_HPP
 
+#include "adapter/device_adapter_api.hpp"
+#include "adapter/device_types.hpp"
+#include "base/coordinate.hpp"
 #include "config.hpp"
-#include "core/base/coordinate.hpp"
 #include "core/mesh/grid_topology.hpp"
-#include "core/types/alias.hpp"
-#include "system/adapter/device_adapter_api.hpp"
-#include "system/adapter/device_types.hpp"
 #include "system/parallel/par_config.hpp"
 #include "system/parallel/policy/policy.hpp"
 #include "system/parallel/tiling/tiling_strategy.hpp"
+#include "types/alias.hpp"
 #include "util/parallel/thread_pool.hpp"
 #include <cstddef>
 #include <functional>

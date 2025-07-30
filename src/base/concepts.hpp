@@ -2,7 +2,7 @@
 #define SIMBI_CONCEPTS_HPP
 
 #include "config.hpp"
-#include "core/utility/enums.hpp"
+#include "utility/enums.hpp"
 #include <array>
 #include <concepts>
 #include <cstddef>

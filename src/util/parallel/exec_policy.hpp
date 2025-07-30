@@ -49,12 +49,12 @@
 #ifndef EXEC_POLICY_HPP
 #define EXEC_POLICY_HPP
 
+#include "adapter/device_adapter_api.hpp"   // for api::set_device
+#include "adapter/device_types.hpp"
 #include "config.hpp"              // std::uint64_t, global::col_maj,
 #include "containers/vector.hpp"   // for array
-#include "system/adapter/device_adapter_api.hpp"   // for api::set_device
-#include "system/adapter/device_types.hpp"
-#include <exception>   // for exception
-#include <vector>      // for vector
+#include <exception>               // for exception
+#include <vector>                  // for vector
 
 struct ExecutionException : public std::exception {
     const char* what() const throw() { return "Invalid constructor args"; }

@@ -1,8 +1,8 @@
 #ifndef FUTURE_HPP
 #define FUTURE_HPP
 
-#include "system/adapter/device_adapter_api.hpp"
-#include "system/adapter/device_types.hpp"
+#include "adapter/device_adapter_api.hpp"
+#include "adapter/device_types.hpp"
 
 #include <atomic>
 #include <condition_variable>

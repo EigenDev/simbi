@@ -52,9 +52,9 @@
 #include "config.hpp"
 #include "containers/vector.hpp"
 #include "core/containers/array.hpp"
-#include "core/utility/helpers.hpp"
 #include "geometry/mesh/cell.hpp"
 #include "geometry/vector_calculus.hpp"
+#include "utility/helpers.hpp"
 
 namespace simbi::visc {
     template <std::uint64_t Dir, typename primitive_type, std::uint64_t Dims>

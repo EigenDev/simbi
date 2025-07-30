@@ -2,7 +2,7 @@
 #define SIMBI_STATE_HYDRO_STATE_TYPES_HPP
 
 #include "containers/state_struct.hpp"
-#include "core/utility/enums.hpp"
+#include "utility/enums.hpp"
 #include <cstdint>
 
 namespace simbi::state {

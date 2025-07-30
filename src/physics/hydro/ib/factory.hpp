@@ -5,8 +5,8 @@
 #include "collection.hpp"
 #include "config.hpp"
 #include "containers/vector.hpp"
-#include "core/utility/config_dict.hpp"
-#include "core/utility/init_conditions.hpp"
+#include "utility/config_dict.hpp"
+#include "utility/init_conditions.hpp"
 #include <cmath>
 #include <cstdint>
 #include <iostream>

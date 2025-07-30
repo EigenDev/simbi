@@ -53,7 +53,7 @@
 #include "config.hpp"
 #include "config_dict.hpp"
 #include "config_dict_visitor.hpp"
-#include "system/io/exceptions.hpp"
+#include "io/exceptions.hpp"
 #include <algorithm>
 #include <cstdint>
 #include <sstream>

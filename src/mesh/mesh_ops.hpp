@@ -1,12 +1,12 @@
 #ifndef SIMBI_MESH_OPS_HPP
 #define SIMBI_MESH_OPS_HPP
 
+#include "base/concepts.hpp"
 #include "config.hpp"
 #include "containers/vector.hpp"
-#include "core/base/concepts.hpp"
-#include "core/utility/enums.hpp"
 #include "mesh_config.hpp"
 #include "physics/hydro/physics.hpp"
+#include "utility/enums.hpp"
 #include <cmath>
 #include <cstddef>
 #include <cstdint>

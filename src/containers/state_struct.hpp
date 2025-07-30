@@ -3,8 +3,8 @@
 
 #include "config.hpp"
 #include "containers/vector.hpp"
-#include "core/utility/enums.hpp"
 #include "state_ops.hpp"
+#include "utility/enums.hpp"
 #include <cstdint>
 #include <ostream>
 

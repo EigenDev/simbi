@@ -49,9 +49,9 @@
 #ifndef STENCIL_HPP
 #define STENCIL_HPP
 
-#include "config.hpp"               // for platform::is_gpu
-#include "containers/vector.hpp"    // for vector_t
-#include "core/utility/enums.hpp"   // for Dir, Plane
+#include "config.hpp"              // for platform::is_gpu
+#include "containers/vector.hpp"   // for vector_t
+#include "utility/enums.hpp"       // for Dir, Plane
 
 namespace simbi {
     // map the corners to strings

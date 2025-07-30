@@ -2,7 +2,7 @@
 #define SIMBI_EOS_IDEAL_HPP
 
 #include "config.hpp"
-#include "core/utility/enums.hpp"
+#include "utility/enums.hpp"
 #include <cmath>   // for std::sqrt
 
 namespace simbi::eos {

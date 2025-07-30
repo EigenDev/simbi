@@ -1,8 +1,8 @@
 #include "config.hpp"
 #include "config_converter.hpp"
-#include "core/utility/config_dict.hpp"
-#include "core/utility/init_conditions.hpp"
 #include "evolver.hpp"
+#include "utility/config_dict.hpp"
+#include "utility/init_conditions.hpp"
 #include <functional>
 #include <pybind11/cast.h>
 #include <pybind11/functional.h>

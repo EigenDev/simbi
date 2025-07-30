@@ -56,12 +56,12 @@
 #include "compute/functional/fp.hpp"
 #include "config.hpp"
 #include "containers/vector.hpp"
-#include "core/utility/config_dict.hpp"
-#include "core/utility/enums.hpp"
-#include "core/utility/init_conditions.hpp"
-#include "core/utility/smart_ptr.hpp"
 #include "mesh/mesh_config.hpp"
 #include "system_config.hpp"
+#include "utility/config_dict.hpp"
+#include "utility/enums.hpp"
+#include "utility/init_conditions.hpp"
+#include "utility/smart_ptr.hpp"
 #include <cmath>
 #include <cstddef>
 #include <cstdint>

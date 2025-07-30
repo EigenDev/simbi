@@ -6,9 +6,9 @@
 #ifndef SIMBI_CORE_PARALLEL_TILE_MANAGER_HPP
 #define SIMBI_CORE_PARALLEL_TILE_MANAGER_HPP
 
-#include "core/types/alias.hpp"
 #include "system/parallel/par_config.hpp"
 #include "system/parallel/tiling/tiling_strategy.hpp"
+#include "types/alias.hpp"
 #include <array>
 #include <functional>
 #include <memory>

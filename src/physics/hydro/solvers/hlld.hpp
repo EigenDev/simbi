@@ -1,19 +1,19 @@
 #ifndef SIMBI_HYDRO_HLLD_HPP
 #define SIMBI_HYDRO_HLLD_HPP
 
-#include "config.hpp"              // for global::epsilon
-#include "containers/vector.hpp"   // for vector_t
-#include "core/base/concepts.hpp"   // for is_hydro_primitive_c, is_mhd_primitive_c
-#include "core/utility/enums.hpp"   // for Regime
-#include "core/utility/helpers.hpp"   // for goes_to_zero, sgn, safe_less_than, safe_greater_than
+#include "base/concepts.hpp"   // for is_hydro_primitive_c, is_mhd_primitive_c
+#include "config.hpp"          // for global::epsilon
+#include "containers/vector.hpp"             // for vector_t
 #include "physics/em/electromagnetism.hpp"   // for to_flux, to_conserved, to_primitive
 #include "physics/hydro/conversion.hpp"
 #include "physics/hydro/physics.hpp"   // for to_flux, to_conserved, to_primitive
 #include "physics/hydro/wave_speeds.hpp"   // for wave_speeds
-#include <algorithm>                       // for min, max
-#include <cmath>                           // for abs, sqrt
-#include <cstdint>                         // for int64_t
-#include <limits>                          // for numeric_limits
+#include "utility/enums.hpp"               // for Regime
+#include "utility/helpers.hpp"   // for goes_to_zero, sgn, safe_less_than, safe_greater_than
+#include <algorithm>   // for min, max
+#include <cmath>       // for abs, sqrt
+#include <cstdint>     // for int64_t
+#include <limits>      // for numeric_limits
 
 namespace simbi::hydro::rmhd {
     using namespace simbi::concepts;

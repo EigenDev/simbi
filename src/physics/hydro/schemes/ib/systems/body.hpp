@@ -53,7 +53,7 @@
 #include "compute/functional/monad/maybe.hpp"
 #include "config.hpp"
 #include "containers/vector.hpp"
-#include "core/utility/enums.hpp"
+#include "utility/enums.hpp"
 #include <cstdint>
 
 namespace simbi::ibsystem {

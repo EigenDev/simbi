@@ -49,18 +49,18 @@
 #ifndef LOGGER_HPP
 #define LOGGER_HPP
 
+#include "adapter/device_adapter_api.hpp"   // for gpuEventCreate, gpuEventDestroy
+#include "adapter/device_types.hpp"
 #include "config.hpp"   // for real, Platform, global::BuildPlatform, std::uint64_t
-#include "core/types/alias.hpp"
-#include "core/utility/helpers.hpp"   // for catch_signals, Inter...
-#include "statistics.hpp"             // for display_system_info
-#include "system/adapter/device_adapter_api.hpp"   // for gpuEventCreate, gpuEventDestroy
-#include "system/adapter/device_types.hpp"
-#include "system/io/console/printb.hpp"    // for writeln, writefl
-#include "system/io/exceptions.hpp"        // for SimulationFailureException
-#include "system/io/hdf5/checkpoint.hpp"   // for write_to_file
-#include "system/io/tabulate/table.hpp"    // for Table, etc
-#include <chrono>    // for time_point, high_resolution_clock
-#include <csignal>   // for signal handling
+#include "io/console/printb.hpp"    // for writeln, writefl
+#include "io/exceptions.hpp"        // for SimulationFailureException
+#include "io/hdf5/checkpoint.hpp"   // for write_to_file
+#include "io/tabulate/table.hpp"    // for Table, etc
+#include "statistics.hpp"           // for display_system_info
+#include "types/alias.hpp"
+#include "utility/helpers.hpp"   // for catch_signals, Inter...
+#include <chrono>                // for time_point, high_resolution_clock
+#include <csignal>               // for signal handling
 #include <cstdlib>
 #include <iomanip>
 #include <iostream>   // for operator<<, char_traits, basic_ost...

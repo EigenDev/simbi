@@ -6,12 +6,12 @@
 #ifndef SIMBI_CORE_PARALLEL_GPU_EXECUTOR_HPP
 #define SIMBI_CORE_PARALLEL_GPU_EXECUTOR_HPP
 
+#include "adapter/device_adapter_api.hpp"
+#include "adapter/device_types.hpp"
 #include "config.hpp"
-#include "core/types/alias.hpp"
-#include "system/adapter/device_adapter_api.hpp"
-#include "system/adapter/device_types.hpp"
 #include "system/parallel/executor/executor.hpp"
 #include "system/parallel/par_config.hpp"
+#include "types/alias.hpp"
 #include <functional>
 #include <vector>
 
