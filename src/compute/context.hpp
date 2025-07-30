@@ -4,11 +4,14 @@
 #include "adapter/device_adapter_api.hpp"
 #include "adapter/device_types.hpp"
 #include "config.hpp"
+#include "containers/vector.hpp"
 #include "functional/monad/serializer.hpp"
 #include "io/console/printb.hpp"
 #include "io/console/statistics.hpp"
 #include "io/exceptions.hpp"
 #include "io/tabulate/table.hpp"
+#include "mesh/mesh_ops.hpp"
+#include "physics/hydro/conversion.hpp"
 #include "utility/helpers.hpp"
 
 #include <chrono>
@@ -18,6 +21,8 @@
 #include <sstream>
 #include <string>
 #include <type_traits>
+#include <utility>
+#include <vector>
 
 using namespace std::chrono;
 
@@ -263,7 +268,86 @@ namespace simbi {
             // state_.sync_to_host();
             state_.in_failure_state = true;
             io::serialize_hydro_state(state_, mesh_, table_);
-            // emit_troubled_cells(sim_state, table);
+            emit_troubled_cells();
+        }
+
+        void emit_troubled_cells()
+        {
+
+            std::vector<std::pair<coordinate_t<State::dimensions>, ErrorCode>>
+                crash_regions;
+
+            // we simply try to recover primitives again, but this time
+            // we capture the coordinate and the error code
+            const auto domain = state_.prim.domain();
+            const auto gamma  = state_.metadata.gamma;
+            for (std::uint64_t ii = 0; ii < domain.size(); ii++) {
+                const auto coord      = domain.linear_to_coord(ii);
+                const auto& cons      = state_.cons(coord);
+                const auto maybe_prim = hydro::to_primitive(cons, gamma);
+                if (!maybe_prim.has_value()) {
+                    crash_regions.emplace_back(coord, maybe_prim.error_code());
+                }
+            }
+
+            for (const auto& v : crash_regions) {
+                const auto& coord     = v.first;
+                const auto error_code = v.second;
+                if (error_code != ErrorCode::NONE) {
+                    error_at(coord, error_code);
+                }
+            }
+        }
+
+        void
+        error_at(coordinate_t<State::dimensions> coord, ErrorCode error_code)
+        {
+            constexpr auto Dims = State::dimensions;
+            std::ostringstream oss;
+            oss << "Primitives in non-physical state.\n";
+            if (error_code != ErrorCode::NONE) {
+                oss << "reason: " << helpers::error_code_to_string(error_code)
+                    << "\n";
+            }
+            if constexpr (Dims == 1) {
+                auto x1 = mesh::centroid(coord, mesh_)[0];
+                oss << "location: (" << x1 << "): \n";
+            }
+            else if constexpr (Dims == 2) {
+                if (mesh_.domain.shape()[0] == 1) {   // an effective  1D run
+                    auto x1 = mesh::centroid(coord, mesh_)[1];
+                    oss << "location: (" << x1 << "): \n";
+                    oss << "index: [" << coord[0] << "]\n";
+                }
+                else {
+                    auto [x2, x1] = mesh::centroid(coord, mesh_);
+                    oss << "location: (" << x1 << ", " << x2 << "): \n";
+                    oss << "indices: [" << coord[1] << ", " << coord[0]
+                        << "]\n";
+                }
+            }
+            else {
+                if (mesh_.domain.shape()[1] == 1) {   // an effective  1D run
+                    auto x1 = mesh::centroid(coord, mesh_)[2];
+                    oss << "location: (" << x1 << "): \n";
+                    oss << "indicies: [" << coord[2] << "]\n";
+                }
+                else if (mesh_.domain.shape()[0] ==
+                         1) {   // an effective 2D run
+                    auto [x3, x2, x1] = mesh::centroid(coord, mesh_);
+                    oss << "location: (" << x1 << ", " << x2 << "): \n";
+                    oss << "indices: [" << coord[2] << ", " << coord[1]
+                        << "]\n";
+                }
+                else {
+                    auto [x3, x2, x1] = mesh::centroid(coord, mesh_);
+                    oss << "location: (" << x1 << ", " << x2 << ", " << x3
+                        << "): \n";
+                    oss << "indices: [" << coord[2] << ", " << coord[1] << ", "
+                        << coord[0] << "]\n";
+                }
+            }
+            table_.post_error(oss.str());
         }
 
         void print_avg_speed()
