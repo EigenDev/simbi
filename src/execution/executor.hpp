@@ -16,7 +16,6 @@
 #include <cstdlib>
 #include <exception>
 #include <functional>
-#include <iostream>
 #include <memory>
 #include <mutex>
 #include <queue>
