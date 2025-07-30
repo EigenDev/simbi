@@ -303,6 +303,7 @@ namespace simbi {
         error_at(coordinate_t<State::dimensions> coord, ErrorCode error_code)
         {
             constexpr auto Dims = State::dimensions;
+            const auto domain   = mesh_.domain;
             std::ostringstream oss;
             oss << "Primitives in non-physical state.\n";
             if (error_code != ErrorCode::NONE) {
@@ -314,7 +315,7 @@ namespace simbi {
                 oss << "location: (" << x1 << "): \n";
             }
             else if constexpr (Dims == 2) {
-                if (mesh_.domain.shape()[0] == 1) {   // an effective  1D run
+                if (domain.shape()[0] == 1) {   // an effective  1D run
                     auto x1 = mesh::centroid(coord, mesh_)[1];
                     oss << "location: (" << x1 << "): \n";
                     oss << "index: [" << coord[0] << "]\n";
@@ -327,13 +328,12 @@ namespace simbi {
                 }
             }
             else {
-                if (mesh_.domain.shape()[1] == 1) {   // an effective  1D run
+                if (domain.shape()[1] == 1) {   // an effective  1D run
                     auto x1 = mesh::centroid(coord, mesh_)[2];
                     oss << "location: (" << x1 << "): \n";
                     oss << "indicies: [" << coord[2] << "]\n";
                 }
-                else if (mesh_.domain.shape()[0] ==
-                         1) {   // an effective 2D run
+                else if (domain.shape()[0] == 1) {   // an effective 2D run
                     auto [x3, x2, x1] = mesh::centroid(coord, mesh_);
                     oss << "location: (" << x1 << ", " << x2 << "): \n";
                     oss << "indices: [" << coord[2] << ", " << coord[1]
