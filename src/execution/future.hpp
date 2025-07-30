@@ -17,6 +17,7 @@ namespace simbi::async {
     class cpu_executor_t;
     class par_cpu_executor_t;
     class gpu_executor_t;
+    class omp_executor_t;
 
     template <typename T>
     struct future_t {
@@ -71,6 +72,7 @@ namespace simbi::async {
         // grant access to the specific executor classes
         friend class cpu_executor_t;
         friend class par_cpu_executor_t;
+        friend class omp_executor_t;
         friend class gpu_executor_t;
 
         future_t(const future_t&)            = delete;
@@ -160,6 +162,7 @@ namespace simbi::async {
 
         friend class cpu_executor_t;
         friend class par_cpu_executor_t;
+        friend class omp_executor_t;
         friend class gpu_executor_t;
 
         future_t(const future_t&)            = delete;

@@ -82,7 +82,7 @@ namespace simbi {
         std::int64_t nx;
         std::int64_t ny;
         std::int64_t nz;
-        std::int64_t checkpoint_index;
+        std::uint64_t checkpoint_index;
         std::uint64_t dimensionality;
         std::uint64_t nvars;
         std::uint64_t halo_radius;
@@ -289,6 +289,18 @@ namespace simbi {
             else {
                 static_assert(Dims <= 3, "Unsupported dimension");
             }
+        }
+
+        auto checkpoint_zones() const
+        {
+            auto [active_nx, active_ny, active_nz] = active_zones();
+            if (active_nz > 1) {
+                return static_cast<std::uint64_t>(active_nz);
+            }
+            else if (active_ny > 1) {
+                return static_cast<std::uint64_t>(active_ny);
+            }
+            return static_cast<std::uint64_t>(active_nx);
         }
 
         bool contains(const std::string& key) const

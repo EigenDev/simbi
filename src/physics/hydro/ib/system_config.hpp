@@ -50,7 +50,7 @@
 #define SYSTEM_CONFIG_HPP
 
 #include "config.hpp"
-#include "core/utility/managed.hpp"
+#include "memory/managed.hpp"
 #include <H5Cpp.h>
 #include <utility>
 

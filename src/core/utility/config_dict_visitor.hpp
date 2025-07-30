@@ -324,11 +324,11 @@ namespace simbi {
 
         void visit_output_settings(
             std::string& data_directory,
-            std::int64_t& checkpoint_index
+            std::uint64_t& checkpoint_index
         ) override
         {
             data_directory   = dict.at("data_directory").get<std::string>();
-            checkpoint_index = dict.at("checkpoint_index").get<std::int64_t>();
+            checkpoint_index = dict.at("checkpoint_index").get<std::uint64_t>();
         }
 
         void visit_computed_properties(
@@ -548,7 +548,7 @@ namespace simbi {
 
         void visit_output_settings(
             std::string& data_directory,
-            std::int64_t& checkpoint_index
+            std::uint64_t& checkpoint_index
         ) override
         {
             data_directory   = "output";
@@ -747,7 +747,7 @@ namespace simbi {
 
         void visit_output_settings(
             std::string& data_directory,
-            std::int64_t&
+            std::uint64_t&
         ) override
         {
             if (data_directory.empty()) {

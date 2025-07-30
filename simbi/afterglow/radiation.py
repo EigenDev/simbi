@@ -127,7 +127,7 @@ def parse_args(parser: argparse.ArgumentParser, args: argparse.Namespace):
     )
     afterglow_parser.add_argument(
         "--times",
-        help="discrtete times for spectra calculation",
+        help="discrete times for spectra calculation",
         default=[1],
         nargs="+",
         type=float,

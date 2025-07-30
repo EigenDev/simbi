@@ -1,8 +1,6 @@
 #ifndef FP_TOOKKIT_HPP
 #define FP_TOOKKIT_HPP
 
-#include "execution/future.hpp"
-
 #include <algorithm>
 #include <cstddef>
 #include <cstdint>
@@ -1039,58 +1037,6 @@ namespace simbi::fp {
     constexpr auto max_op      = max_op_t{};
     constexpr auto add_op      = add_op_t{};
     constexpr auto multiply_op = multiply_op_t{};
-
-    // ========================================================================
-    // execute all async - parallel task execution
-    // ========================================================================
-
-    template <typename Executor>
-    struct execute_all_async_fn_t {
-        mutable Executor executor_;
-
-        constexpr explicit execute_all_async_fn_t(Executor executor)
-            : executor_(std::move(executor))
-        {
-        }
-
-        template <iterable Source>
-        auto operator()(Source&& source) const -> async::future_t<void>
-        {
-            // collect all individual futures
-            std::vector<async::future_t<void>> futures;
-
-            // spawn each callable as separate async task
-            for (auto&& callable : source) {
-                auto future = executor_.async(
-                    [callable = std::forward<decltype(callable)>(callable)]() {
-                        callable();   // execute the void-returning callable
-                    }
-                );
-                futures.push_back(std::move(future));
-            }
-
-            // return single future that waits for all tasks
-            return executor_.async([&futures]() mutable {
-                // wait for all individual futures to complete
-                for (auto& future : futures) {
-                    future.wait();
-                }
-                // all tasks complete - void return
-            });
-        }
-    };
-
-    // ========================================================================
-    // factory function
-    // ========================================================================
-
-    template <typename Executor>
-    constexpr auto execute_all_async(Executor&& executor)
-    {
-        return execute_all_async_fn_t<std::decay_t<Executor>>(
-            std::forward<Executor>(executor)
-        );
-    }
 
     // ========================================================================
     // convenience helpers

@@ -6,16 +6,16 @@
 
 #include "config.hpp"
 #include "core/base/concepts.hpp"
-#include "core/base/memory.hpp"
+#include "memory/unified.hpp"
+
 #include <cstddef>
 #include <cstdint>
 #include <memory>
 #include <stdexcept>
-#include <vector>
 
 namespace simbi::nd {
     using namespace simbi::concepts;
-    using namespace simbi::base;
+    using namespace simbi::mem;
     // =============================================================================
     // Memory-Backed ndarray_t
     // =============================================================================

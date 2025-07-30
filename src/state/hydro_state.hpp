@@ -2,14 +2,13 @@
 #define SIMBI_STATE_HYDRO_STATE_HPP
 
 #include "compute/field.hpp"
-#include "compute/functional/fp.hpp"
 #include "config.hpp"
 #include "containers/vector.hpp"
 #include "core/utility/bimap.hpp"
 #include "core/utility/enums.hpp"
 #include "core/utility/init_conditions.hpp"
-#include "core/utility/managed.hpp"
 #include "hydro_state_types.hpp"
+#include "memory/managed.hpp"
 #include "physics/eos/isothermal.hpp"
 #include "physics/hydro/ib/collection.hpp"
 #include "physics/hydro/ib/factory.hpp"
@@ -17,6 +16,7 @@
 #include "system/io/exceptions.hpp"
 
 #include <bit>
+#include <cmath>
 #include <cstddef>
 #include <cstdint>
 #include <optional>
@@ -24,7 +24,6 @@
 #include <vector>
 
 namespace simbi::state {
-    using namespace base;
     using namespace body::factory;
     // using namespace ibsystem;
 
@@ -66,10 +65,15 @@ namespace simbi::state {
             real time;
             real tend;
             real dt;
+            real dlogt;
+            real checkpoint_interval;
+            real checkpoint_time;
 
             // int tracking
             std::uint64_t iteration;
             std::uint64_t halo_radius;
+            std::uint64_t checkpoint_index;
+            std::uint64_t checkpoint_zones;
             std::uint64_t dimensions{Dims};
 
             // simulation configuration
@@ -91,6 +95,35 @@ namespace simbi::state {
 
             // strings
             std::string data_dir;
+
+            // queries
+            auto checkpoint_identifier() const
+            {
+                return dlogt != 0.0 ? checkpoint_index : checkpoint_time;
+            }
+
+            void update_checkpoint_time()
+            {
+                // Set the initial time interval
+                // based on the current time, advanced
+                // by the checkpoint interval to the nearest
+                // place in the log10 scale. If dlogt is 0
+                // then the interval is set to the current time
+                // shifted towards the nearest checkpoint interval
+                // if the checkpoint interval is 0 then the interval
+                // is set to the current time
+                if (dlogt != 0) {
+                    checkpoint_time =
+                        time *
+                        std::pow(10.0, std::floor(std::log10(time) + dlogt));
+                }
+                else {
+                    static auto round_place = 1.0 / checkpoint_interval;
+                    checkpoint_time =
+                        checkpoint_interval +
+                        std::floor(time * round_place + 0.5) / round_place;
+                }
+            }
         } metadata;
 
         struct sources_t {
@@ -103,7 +136,8 @@ namespace simbi::state {
         std::optional<body::body_collection_t<Dims>> bodies;
 
         // error handling
-        bool in_failure_state;
+        bool in_failure_state{false};
+        bool was_interrupted{false};
 
         /**
          * create hydro_state from init conditions and numpy arrays with
@@ -123,14 +157,13 @@ namespace simbi::state {
             auto bodies = create_body_collection_from_init<Dims>(init);
 
             return hydro_state_t{
-              .cons             = std::move(cons),
-              .prim             = std::move(prims),
-              .flux             = {std::move(flux_vec)},
-              .bstaggs          = {std::move(bstaggs)},
-              .metadata         = setup_metadata(init),
-              .sources          = setup_sources(init),
-              .bodies           = std::move(bodies),
-              .in_failure_state = false,
+              .cons     = std::move(cons),
+              .prim     = std::move(prims),
+              .flux     = {std::move(flux_vec)},
+              .bstaggs  = {std::move(bstaggs)},
+              .metadata = setup_metadata(init),
+              .sources  = setup_sources(init),
+              .bodies   = std::move(bodies),
             };
         }
 
@@ -199,21 +232,26 @@ namespace simbi::state {
         static auto setup_metadata(const initial_conditions_t& init)
         {
             meta_data_t metadata = {
-              .gamma          = init.gamma,
-              .plm_theta      = init.plm_theta,
-              .cfl            = init.cfl,
-              .time           = init.time,
-              .tend           = init.tend,
-              .dt             = 0.0,
-              .iteration      = 0,
-              .halo_radius    = init.halo_radius,
-              .regime         = deserialize<Regime>(init.regime),
-              .shock_smoother = get_shock_smoother(init),
-              .solver         = deserialize<Solver>(init.solver),
-              .x1_spacing     = deserialize<Cellspacing>(init.x1_spacing),
-              .x2_spacing     = deserialize<Cellspacing>(init.x2_spacing),
-              .x3_spacing     = deserialize<Cellspacing>(init.x3_spacing),
-              .coord_system   = deserialize<Geometry>(init.coord_system),
+              .gamma               = init.gamma,
+              .plm_theta           = init.plm_theta,
+              .cfl                 = init.cfl,
+              .time                = init.time,
+              .tend                = init.tend,
+              .dt                  = 0.0,
+              .dlogt               = init.dlogt,
+              .checkpoint_interval = init.checkpoint_interval,
+              .checkpoint_time     = init.time,
+              .iteration           = 0,
+              .halo_radius         = init.halo_radius,
+              .checkpoint_index    = init.checkpoint_index,
+              .checkpoint_zones    = init.checkpoint_zones(),
+              .regime              = deserialize<Regime>(init.regime),
+              .shock_smoother      = get_shock_smoother(init),
+              .solver              = deserialize<Solver>(init.solver),
+              .x1_spacing          = deserialize<Cellspacing>(init.x1_spacing),
+              .x2_spacing          = deserialize<Cellspacing>(init.x2_spacing),
+              .x3_spacing          = deserialize<Cellspacing>(init.x3_spacing),
+              .coord_system        = deserialize<Geometry>(init.coord_system),
               .reconstruction = deserialize<Reconstruction>(init.reconstruct),
               .timestepping   = deserialize<Timestepping>(init.timestepping),
               .boundary_conditions = vector_t<BoundaryCondition, 2 * Dims>{},

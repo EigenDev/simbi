@@ -1,63 +1,73 @@
 #ifndef COMPUTATION_HPP
 #define COMPUTATION_HPP
 
-#include "core/base/buffer.hpp"
-#include "system/execution.hpp"
 #include <cstddef>
-#include <cstdint>
-#include <optional>
-#include <type_traits>
-#include <utility>
 
 namespace simbi {
     template <typename T>
     struct computation_t {
-        T value_;
-        execution_context_t context_;
+        T& state_;
 
-        // monadic interface
-        static computation_t pure(T value, execution_context_t ctx = {})
-        {
-            return {std::move(value), std::move(ctx)};
-        }
+        // explicit computation_t(T state) : state_(std::move(state)) {}
+        // static computation_t from_value(T state) { return {std::move(state)};
+        // }
+        static computation_t from_ref(T& state) { return {state}; }
 
         template <typename F>
-        auto then(F&& operation) &&
+        auto then(F&& f) &&
         {
-            auto result = operation(std::move(value_));
-            return computation_t<decltype(result)>::pure(
-                std::move(result),
-                std::move(context_)
-            );
+            f(state_);
+            return computation_t{state_};
         }
 
-        T unwrap() && { return std::move(value_); }
-
-        // pipeline syntax
-        template <typename Op>
-        auto operator|(Op&& op) &&
+        template <typename Pred, typename F>
+        auto when(Pred&& pred, F&& f) &&
         {
-            return std::forward<Op>(op)(std::move(*this));
+            if (pred(state_)) {
+                f(state_);
+            }
+            return computation_t{state_};
         }
+
+        void run() && { /* */ }
     };
 
-    // free functions that work with the pipeline
-    auto on_device(device_id_t target)
+    template <typename T>
+    struct io_computation_t {
+        const T& state_;   // observe only, never mutate
+
+        static io_computation_t from_ref(const T& state) { return {state}; }
+
+        template <typename F>
+        auto then(F&& f) &&
+        {
+            f(state_);
+            return io_computation_t{state_};
+        }
+
+        template <typename Pred, typename F>
+        auto when(Pred&& pred, F&& f) &&
+        {
+            if (pred(state_)) {
+                f(state_);
+            }
+            return io_computation_t{state_};
+        }
+
+        void run() && { /* nothing to return - pure side effects */ }
+    };
+
+    template <typename T>
+    auto compute(T& state)
     {
-        return [target](auto&& comp) {
-            comp.context_.device_ = target;
-            return std::move(comp);
-        };
+        return computation_t<T>::from_ref(state);
     }
 
-    auto with_error_handling()
+    template <typename T>
+    auto observe(const T& state)
     {
-        return [](auto&& comp) {
-            return comp.then([](auto value) -> maybe_t<decltype(value)> {
-                // error handling logic
-                return maybe_t<decltype(value)>::some(std::move(value));
-            });
-        };
+        return io_computation_t<T>::from_ref(state);
     }
 }   // namespace simbi
+
 #endif

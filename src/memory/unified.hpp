@@ -6,10 +6,9 @@
 #include "system/adapter/device_adapter_api.hpp"
 #include <algorithm>
 #include <cstdint>
-#include <iostream>
 #include <memory>
 
-namespace simbi::base {
+namespace simbi::mem {
     // =============================================================================
     // Memory Management
     // =============================================================================
@@ -485,6 +484,6 @@ namespace simbi::base {
         auto begin() const { return cpu_ptr_.get(); }
         auto end() const { return cpu_ptr_.get() + size_; }
     };
-}   // namespace simbi::base
+}   // namespace simbi::mem
 
 #endif   // SIMBI_MEMORY_HPP

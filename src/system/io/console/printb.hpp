@@ -52,17 +52,35 @@
 
 #include "core/utility/enums.hpp"   // for Color
 #include "core/utility/helpers.hpp"
+
+#include <cstdint>
 #include <ctype.h>
 #include <iomanip>
-#include <iostream>   // for operator <<
+#include <iostream>
 #include <mutex>
-#include <sstream>   // for operator>>, ws, basic_istream, basic_istringstream
+#include <sstream>
 #include <stdexcept>
-#include <string>   // for string
+#include <string>
+
 namespace simbi::util {
+
+    inline bool is_number(const std::string& s)
+    {
+        long double ld;
+        return ((std::istringstream(s) >> ld >> std::ws).eof());
+    }
+
     template <Color C, typename... ARGS>
     void write(std::string const& fmt, ARGS... args)
     {
+
+        if constexpr (sizeof...(args) == 0) {
+            // no arguments - just print the format string directly
+            std::cout << helpers::get_color_code(C) << fmt
+                      << helpers::get_color_code(Color::RESET);
+            return;
+        }
+
         const std::string argss[] = {[](const auto& x) {
             std::stringstream ss;
             ss << x;
@@ -189,7 +207,7 @@ namespace simbi::util {
         }
     }
 
-    template <Color C, typename... ARGS>
+    template <Color C = Color::DEFAULT, typename... ARGS>
     void writeln(std::string const& fmt, ARGS... args)
     {
         std::cout << "\n";
@@ -197,7 +215,7 @@ namespace simbi::util {
         std::cout << '\n';
     }
 
-    template <Color C, typename... ARGS>
+    template <Color C = Color::DEFAULT, typename... ARGS>
     void writefl(std::string const& fmt, ARGS... args)
     {
         write<C>(fmt, args...);

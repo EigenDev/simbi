@@ -390,6 +390,12 @@ namespace simbi::boundary {
                 analyze_ghost_regions(staggered_domain, active_staggered);
 
             for (auto ghost : ghost_info) {
+                // ignore corners and edges for flux BCs
+                if (ghost.type == ghost_type_t::edge ||
+                    ghost.type == ghost_type_t::corner) {
+                    continue;
+                }
+
                 auto flux_bc_transform = create_flux_bc_transform(
                     ghost,
                     active_staggered,

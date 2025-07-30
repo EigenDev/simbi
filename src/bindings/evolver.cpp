@@ -1,5 +1,6 @@
 #include "evolver.hpp"
-#include "compute/functional/monad/serializer.hpp"
+#include "compute/context.hpp"
+#include "compute/functional/monad/computation.hpp"
 #include "compute/math/cfd.hpp"
 #include "config.hpp"
 #include "containers/vector.hpp"
@@ -8,7 +9,6 @@
 
 #include <cstdint>
 #include <functional>
-#include <iostream>
 #include <pybind11/buffer_info.h>
 #include <pybind11/numpy.h>
 #include <pybind11/pybind11.h>
@@ -28,13 +28,13 @@ namespace simbi::hydrostate {
         std::function<real(real)> const& scale_factor_derivative
     )
     {
-        // Get buffer info for conserved and primitive arrays
+        // get buffer info for conserved and primitive arrays
         py::buffer_info cons_buffer = cons_array.request();
         py::buffer_info prim_buffer = prim_array.request();
 
         const auto dims = init.dimensionality;
 
-        // Prepare bfield pointers
+        // prepare bfield pointers
         vector_t<void*, 3> bfield_ptrs = {};
         if (init.is_mhd) {
             for (std::uint64_t dir = 0; dir < dims; ++dir) {
@@ -58,37 +58,19 @@ namespace simbi::hydrostate {
             scale_factor_derivative,
             init,
             [](auto& state, auto& ops, auto& mesh) {
-                const auto t_final = state.metadata.tend;
-                auto& metadata     = state.metadata;
-                std::cout << "Starting simulation...\n";
-                std::cout << "Initial time: " << metadata.time << "\n";
-                std::cout << "Final time: " << t_final << "\n";
-
                 // initialize timestep
                 boundary::apply_boundary_conditions(state, mesh);
                 hydro::recover_primitives(state);
                 update_timestep(state, mesh);
 
-                real tinterval = 0.0;
-                // now we can start the simulation loop :D
-                while (metadata.time < t_final && !state.in_failure_state) {
-                    cfd::step(state, mesh, ops);
-                    metadata.iteration++;
-                    mesh = mesh::update_mesh(mesh, metadata.time, metadata.dt);
-
-                    if (metadata.time >= tinterval) {
-                        tinterval += 0.01;
-                        std::cout << "Iteration " << metadata.iteration
-                                  << ", time = " << metadata.time
-                                  << ", dt = " << metadata.dt << "\n";
-                        io::serialize_hydro_state(state, mesh);
-                    }
-                }
-
-                std::cout << "Simulation completed!\n";
-                std::cout << "Final time: " << state.metadata.time << "\n";
-                std::cout << "Total iterations: " << state.metadata.iteration
-                          << "\n";
+                // rev up those engines
+                with_simulation(state, mesh, [&](auto& sim) {
+                    sim.evolve([&](auto& ctx) {
+                        compute(ctx)
+                            .then([&](auto& s) { cfd::step(s, mesh, ops); })
+                            .run();
+                    });
+                });
             }
         );
     }

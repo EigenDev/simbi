@@ -55,7 +55,7 @@
 #include "config.hpp"
 #include "containers/vector.hpp"
 #include "core/utility/helpers.hpp"   // for unravel_idx
-#include "core/utility/managed.hpp"   // for Managed
+#include "memory/managed.hpp"         // for Managed
 #include "system/adapter/device_adapter_api.hpp"
 #include "util/parallel/exec_policy.hpp"
 #include "util/parallel/parallel_for.hpp"

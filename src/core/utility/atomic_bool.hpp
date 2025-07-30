@@ -1,8 +1,7 @@
 #ifndef ATOMIC_BOOL_HPP
 #define ATOMIC_BOOL_HPP
 
-#include "core/utility/managed.hpp"
-#include "managed.hpp"
+#include "memory/managed.hpp"
 #include "smart_ptr.hpp"
 #include "system/adapter/device_types.hpp"
 

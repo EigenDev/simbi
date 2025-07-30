@@ -181,7 +181,6 @@ namespace simbi::body {
         return body_collection_t<Dims, MaxBodies>{};
     }
 
-    // integration with your existing factory functions
     template <std::uint64_t Dims, std::uint64_t MaxBodies = 8>
     constexpr auto create_binary_system(
         const vector_t<real, Dims>& pos1,

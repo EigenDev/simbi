@@ -10,7 +10,7 @@
 #include "containers/vector.hpp"
 #include "core/base/concepts.hpp"
 #include "core/utility/config_dict.hpp"
-#include "core/utility/managed.hpp"
+#include "memory/managed.hpp"
 #include "physics/hydro/physics.hpp"
 #include <cstdint>
 #include <utility>

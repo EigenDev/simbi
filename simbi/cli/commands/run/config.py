@@ -2,11 +2,10 @@ import ast
 import sys
 import importlib
 from pathlib import Path
-from typing import Sequence, Any, Optional, Set
+from typing import Sequence, Optional, Set
 from argparse import ArgumentParser, Namespace
 from ....simulator import Hydro
 from ....detail import bcolors
-from ....core.config.base_config import SimbiBaseConfig
 from ...utils.type_checker import type_check_input
 
 

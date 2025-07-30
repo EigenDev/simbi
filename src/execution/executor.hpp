@@ -410,6 +410,111 @@ namespace simbi::async {
         }
     };
 
+    // openMP executor
+    class omp_executor_t : public executor_base_t<omp_executor_t>
+    {
+      public:
+        omp_executor_t() = default;
+
+        //  async implementation
+        template <typename Func, typename... Args>
+        auto async_impl(Func&& func, Args&&... args) const
+            -> future_t<decltype(func(args...))>
+        {
+            using result_t = decltype(func(args...));
+
+            auto state =
+                std::make_shared<typename future_t<result_t>::future_state_t>();
+
+            try {
+                if constexpr (std::is_void_v<result_t>) {
+#pragma omp parallel
+                    {
+                        func(args...);
+                    }
+                    state->ready.store(true);
+                }
+                else {
+                    result_t result;
+#pragma omp parallel
+                    {
+                        result = func(args...);
+                    }
+                    state->construct_result(std::move(result));
+                    state->ready.store(true);
+                }
+            }
+            catch (...) {
+                state->exception = std::current_exception();
+                state->has_error.store(true);
+                state->ready.store(true);
+            }
+
+            return future_t<result_t>{std::move(state)};
+        }
+
+        // domain-aware for_each implementation
+        template <std::uint64_t Dims, typename Func>
+        auto for_each_impl(const domain_t<Dims>& domain, Func&& func) const
+            -> future_t<void>
+        {
+            return async_impl([=, this]() { iterate_domain(domain, func); });
+        }
+
+        // reduction implementation
+        template <
+            std::uint64_t Dims,
+            typename T,
+            typename Mapper,
+            typename Reducer>
+        auto reduce_impl(
+            const domain_t<Dims>& domain,
+            T init,
+            Mapper&& mapper,
+            Reducer&& reducer
+        ) const -> future_t<T>
+        {
+            return async_impl([=, this]() {
+                T accumulator = init;
+                iterate_domain(domain, [&](auto coord) {
+                    accumulator = reducer(accumulator, mapper(coord));
+                });
+                return accumulator;
+            });
+        }
+
+      private:
+        template <std::uint64_t Dims, typename Func>
+        void iterate_domain(const domain_t<Dims>& domain, Func func) const
+        {
+            if constexpr (Dims == 1) {
+#pragma omp parallel for
+                for (auto ii = domain.start[0]; ii < domain.end[0]; ++ii) {
+                    func(iarray<1>{ii});
+                }
+            }
+            else if constexpr (Dims == 2) {
+#pragma omp parallel for collapse(2)
+                for (auto ii = domain.start[0]; ii < domain.end[0]; ++ii) {
+                    for (auto jj = domain.start[1]; jj < domain.end[1]; ++jj) {
+                        func(iarray<2>{ii, jj});
+                    }
+                }
+            }
+            else if constexpr (Dims == 3) {
+#pragma omp parallel for collapse(3)
+                for (auto ii = domain.start[0]; ii < domain.end[0]; ++ii) {
+                    for (auto jj = domain.start[1]; jj < domain.end[1]; ++jj) {
+                        for (auto kk = domain.start[2]; kk < domain.end[2];
+                             ++kk) {
+                            func(iarray<3>{ii, jj, kk});
+                        }
+                    }
+                }
+            }
+        }
+    };
+
     // gpu executor with dynamic grid sizing
     class gpu_executor_t : public executor_base_t<gpu_executor_t>
     {
@@ -450,7 +555,8 @@ namespace simbi::async {
             try {
                 gpu::api::set_device(device_.device_id);
 
-                // basic grid config - will be enhanced for domain-aware sizing
+                // basic grid config - will be enhanced for domain-aware
+                // sizing
                 auto total_threads = 256;
                 auto blocks        = 1;
                 auto threads       = total_threads;
@@ -534,13 +640,13 @@ namespace simbi::async {
             Reducer&& /*reducer*/
         ) const -> future_t<T>
         {
-            // for now, fallback to cpu for reductions - gpu reductions are
-            // complex could implement proper gpu reductions with shared memory
-            // later
+            // for now, fallback to cpu for reductions - gpu reductions
+            // are complex could implement proper gpu reductions with
+            // shared memory later
             return async_impl([=]() {
                 // transfer to cpu, reduce, transfer back
-                // this is a placeholder - proper gpu reduction would use shared
-                // memory + atomics
+                // this is a placeholder - proper gpu reduction would
+                // use shared memory + atomics
                 T accumulator = init;
                 // sequential fallback for now
                 return accumulator;
@@ -584,6 +690,8 @@ namespace simbi::async {
         return par_cpu_executor_t{};
     }
 
+    inline auto omp_executor() -> omp_executor_t { return omp_executor_t{}; }
+
     inline auto gpu_executor(int device_id = 0) -> gpu_executor_t
     {
         return gpu_executor_t{device_id_t::gpu_device(device_id)};
@@ -595,13 +703,16 @@ namespace simbi::async {
             return gpu_executor(device_id);
         }
         else {
+            // if (global::use_omp) {
+            // return omp_executor();
+            // }
             return par_cpu_executor();
         }
     }
 
     struct exec {
-        using type = std::
-            conditional_t<global::on_gpu, gpu_executor_t, par_cpu_executor_t>;
+        using type =
+            std::conditional_t<global::on_gpu, gpu_executor_t, omp_executor_t>;
     };
     using default_executor_t = typename exec::type;
 

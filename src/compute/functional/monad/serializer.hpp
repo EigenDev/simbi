@@ -7,7 +7,8 @@
 #include "core/utility/helpers.hpp"
 #include "mesh/mesh_config.hpp"   // for mesh::mesh_config_t
 #include "result.hpp"             // for result_t<T> monad
-#include <H5Cpp.h>                // for HDF5 C++ API
+#include "system/io/tabulate/table.hpp"
+#include <H5Cpp.h>   // for HDF5 C++ API
 #include <algorithm>
 #include <concepts>        // for concepts
 #include <cstdint>         // for std::uint64_t
@@ -923,21 +924,55 @@ namespace simbi::io {
     auto close_file()
         -> std::function<result_t<std::string>(serialization_context_t)>;
 
+    template <typename HydroState>
+    auto compute_filename(const HydroState& state)
+    {
+        static std::int64_t tchunk_order_of_mag = 2;
+
+        const auto meta                = state.metadata;
+        const auto data_directory      = meta.data_dir;
+        const auto step                = meta.checkpoint_index;
+        const auto timestepping_of_mag = std::floor(std::log10(meta.time));
+
+        if (timestepping_of_mag > tchunk_order_of_mag) {
+            tchunk_order_of_mag += 1;
+        }
+
+        std::string tnow;
+        if (meta.dlogt != 0) {
+            const auto timestepping_of_mag = std::floor(std::log10(step));
+            if (timestepping_of_mag > tchunk_order_of_mag) {
+                tchunk_order_of_mag += 1;
+            }
+            tnow = format_real(step);
+        }
+        else if (!state.in_failure_state) {
+            tnow = format_real(meta.checkpoint_identifier());
+        }
+        else {
+            if (state.was_interrupted) {
+                tnow = "interrupted";
+            }
+            else {
+                tnow = "crashed";
+            }
+        }
+
+        return data_directory +
+               string_format("%d.chkpt." + tnow + ".h5", meta.checkpoint_zones);
+    }
+
     // main serialization function for hydro_state_t
     template <hydro_state_serializable_c HydroState, typename MeshConfig>
-    result_t<std::string>
-    serialize_hydro_state(HydroState& state, const MeshConfig& mesh)
+    result_t<std::string> serialize_hydro_state(
+        HydroState& state,
+        const MeshConfig& mesh,
+        Table& table
+    )
     {
-        // ensure all data is synced to cpu
-        // state.to_cpu();
-
-        auto& geo     = mesh;
-        auto max_iter = std::max_element(geo.shape.begin(), geo.shape.end());
-        auto chkpt    = *max_iter;
-        auto tnow     = format_real(state.metadata.time);
-        auto filename = state.metadata.data_dir +
-                        string_format("%d.chkpt." + tnow + ".h5", chkpt);
-        std::cout << "Serializing hydro state to: " << filename << std::endl;
+        const auto filename = compute_filename(state);
+        table.post_info("[Writing checkpoint to path: " + filename + "]");
+        state.metadata.update_checkpoint_time();
 
         //  monadic pipeline
         return create_file(filename)
