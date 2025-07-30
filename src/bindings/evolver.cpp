@@ -1,10 +1,10 @@
 #include "evolver.hpp"
 #include "compute/context.hpp"
-#include "compute/functional/monad/computation.hpp"
-#include "compute/math/cfd.hpp"
 #include "config.hpp"
 #include "containers/vector.hpp"
 #include "dispatch.hpp"
+#include "functional/monad/computation.hpp"
+#include "math/cfd.hpp"
 #include "update/adaptive_timestep.hpp"
 
 #include <cstdint>

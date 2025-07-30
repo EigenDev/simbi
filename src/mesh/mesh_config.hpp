@@ -1,11 +1,11 @@
 #ifndef SIMIB_MESH_MESH_CONFIG_HPP
 #define SIMIB_MESH_MESH_CONFIG_HPP
 
-#include "compute/functional/fp.hpp"
 #include "config.hpp"   // for real, DUAL, DEV, global::using_four_velocity
 #include "containers/vector.hpp"   // for vector_t
 #include "domain/algebra.hpp"
 #include "domain/domain.hpp"
+#include "functional/fp.hpp"
 #include "utility/bimap.hpp"             // for deserialize
 #include "utility/enums.hpp"             // for Cellspacing enum
 #include "utility/init_conditions.hpp"   // for initial_conditions_t

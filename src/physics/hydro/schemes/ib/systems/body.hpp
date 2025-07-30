@@ -50,9 +50,9 @@
 #define BODY_HPP
 
 #include "capability.hpp"
-#include "compute/functional/monad/maybe.hpp"
 #include "config.hpp"
 #include "containers/vector.hpp"
+#include "functional/monad/maybe.hpp"
 #include "utility/enums.hpp"
 #include <cstdint>
 

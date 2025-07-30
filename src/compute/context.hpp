@@ -3,8 +3,8 @@
 
 #include "adapter/device_adapter_api.hpp"
 #include "adapter/device_types.hpp"
-#include "compute/functional/monad/serializer.hpp"
 #include "config.hpp"
+#include "functional/monad/serializer.hpp"
 #include "io/console/printb.hpp"
 #include "io/console/statistics.hpp"
 #include "io/exceptions.hpp"

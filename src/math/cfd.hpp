@@ -3,10 +3,10 @@
 
 #include "base/stencil_view.hpp"
 #include "compute/field.hpp"
-#include "compute/math/domain.hpp"
 #include "config.hpp"
 #include "containers/state_ops.hpp"
 #include "containers/vector.hpp"
+#include "math/domain.hpp"
 #include "mesh/mesh_ops.hpp"
 #include "physics/em/perm.hpp"
 #include "physics/hydro/ib/body.hpp"

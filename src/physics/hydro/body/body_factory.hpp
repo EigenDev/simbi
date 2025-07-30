@@ -27,7 +27,7 @@
 #define SIMBI_BODY_FACTORY_HPP
 
 // #include "body_delta.hpp"
-// #include "compute/functional/fp.hpp"
+// #include "functional/fp.hpp"
 #include "config.hpp"
 #include "containers/vector.hpp"
 #include "utility/config_dict.hpp"

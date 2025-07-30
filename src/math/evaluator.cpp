@@ -1,7 +1,7 @@
 #include "evaluator.hpp"
-#include "compute/math/expression.hpp"
 #include "config.hpp"
 #include "containers/ndarray.hpp"
+#include "math/expression.hpp"
 #include "utility/helpers.hpp"
 #include <algorithm>
 #include <cmath>

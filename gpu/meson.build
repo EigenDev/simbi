@@ -93,7 +93,6 @@ if hip.found() or cuda.found()
           '-o', '@OUTPUT@',
           gpu_flags,
         ],
-        depend_files: [headers],
         build_by_default: true,
       ),
     ]

@@ -1,9 +1,9 @@
 #ifndef EVALUATOR_HPP
 #define EVALUATOR_HPP
 
-#include "compute/math/expression.hpp"
 #include "config.hpp"
 #include "containers/ndarray.hpp"
+#include "math/expression.hpp"
 
 namespace simbi::expression {
     using namespace nd;

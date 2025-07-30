@@ -2,13 +2,13 @@
 #define SIMBI_STATE_EXPRESSION_HPP
 
 #include "base/concepts.hpp"
-#include "compute/math/evaluator.hpp"
-#include "compute/math/exp_load.hpp"
-#include "compute/math/expression.hpp"
-#include "compute/math/linearizer.hpp"
 #include "config.hpp"
 #include "containers/ndarray.hpp"
 #include "containers/vector.hpp"
+#include "math/evaluator.hpp"
+#include "math/exp_load.hpp"
+#include "math/expression.hpp"
+#include "math/linearizer.hpp"
 #include "memory/managed.hpp"
 #include "physics/hydro/physics.hpp"
 #include "utility/config_dict.hpp"

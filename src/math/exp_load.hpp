@@ -1,9 +1,9 @@
 #ifndef EXP_LOAD_HPP
 #define EXP_LOAD_HPP
 
-#include "compute/math/expression.hpp"
 #include "config.hpp"
 #include "containers/ndarray.hpp"
+#include "math/expression.hpp"
 #include "utility/config_dict.hpp"
 #include <string>
 #include <tuple>

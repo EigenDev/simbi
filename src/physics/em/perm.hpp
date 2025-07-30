@@ -2,12 +2,12 @@
 #define MHD_LOGIC_HPP
 
 #include "compute/field.hpp"
-#include "compute/functional/fp.hpp"
 #include "config.hpp"
 #include "contact.hpp"
 #include "containers/vector.hpp"
 #include "ct_geom.hpp"
 #include "domain/domain.hpp"
+#include "functional/fp.hpp"
 #include "physics/em/electromagnetism.hpp"
 #include "utility/enums.hpp"
 

@@ -1,7 +1,7 @@
 #include "exp_load.hpp"
-#include "compute/math/expression.hpp"
 #include "config.hpp"
 #include "containers/ndarray.hpp"
+#include "math/expression.hpp"
 #include "utility/config_dict.hpp"
 #include <iostream>
 #include <list>

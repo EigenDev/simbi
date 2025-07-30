@@ -1,10 +1,10 @@
 #ifndef CONFIG_DICT_HPP
 #define CONFIG_DICT_HPP
 
-#include "compute/functional/monad/maybe.hpp"
 #include "config.hpp"   // for real, std::uint64_t, global::managed_memory, use
 #include "containers/vector.hpp"   // for vector_t
 #include "enums.hpp"
+#include "functional/monad/maybe.hpp"
 #include "types/alias.hpp"
 #include <cstdint>
 #include <exception>

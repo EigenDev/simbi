@@ -1,8 +1,8 @@
 #ifndef DOMAIN_HPP
 #define DOMAIN_HPP
 
-#include "compute/functional/fp.hpp"
 #include "containers/vector.hpp"
+#include "functional/fp.hpp"
 #include <cstddef>
 #include <cstdint>
 #include <iostream>
