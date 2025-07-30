@@ -2,6 +2,7 @@
 #define SIMBI_STATE_HYDRO_STATE_HPP
 
 #include "compute/field.hpp"
+#include "compute/functional/fp.hpp"
 #include "config.hpp"
 #include "containers/vector.hpp"
 #include "core/utility/bimap.hpp"

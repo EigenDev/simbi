@@ -487,7 +487,7 @@ namespace simbi::hydro::rmhd {
             const auto cfac    = 1.0 / (ws - a_star);
 
             const auto v  = dot(pr.vel, nhat);
-            const auto vs = cfac * (ws - v);
+            const auto vs = (ws - v) / (ws - a_star);
             const auto ds = vs * den;
             // star state
             conserved_t us;

@@ -4,6 +4,7 @@
 #include "compute/field.hpp"
 #include "compute/math/domain.hpp"
 #include "config.hpp"
+#include "containers/state_ops.hpp"
 #include "containers/vector.hpp"
 #include "core/base/stencil_view.hpp"
 #include "core/utility/enums.hpp"
@@ -15,6 +16,7 @@
 #include "update/bcs.hpp"
 #include "update/flux.hpp"
 #include "update/prim_recovery.hpp"
+#include "update/rk.hpp"
 
 #include <cstdint>
 #include <type_traits>
@@ -246,14 +248,6 @@ namespace simbi::cfd {
               // face velocity (for moving meshes)
               const auto vface = mesh::face_velocity(coord, dir, mesh);
 
-              if (dir == 1) {
-                  auto f = ops.flux(pl, pr, nhat, vface, gamma, shock_smoother);
-                  std::cout << "coord: " << coord << std::endl;
-                  std::cout << "pl: " << pl << std::endl;
-                  std::cout << "pr: " << pr << std::endl;
-                  std::cout << "f: " << f << std::endl;
-              }
-
               // solve Riemann problem
               return ops.flux(pl, pr, nhat, vface, gamma, shock_smoother);
           },
@@ -281,49 +275,32 @@ namespace simbi::cfd {
      * returns: new conservative state
      */
     template <typename HydroState, typename MeshConfig, typename CfdOps>
-    auto rk_step(HydroState& state, const MeshConfig& mesh, const CfdOps& ops)
+    auto step(HydroState& state, const MeshConfig& mesh, const CfdOps& ops)
     {
-        const auto dt = state.metadata.dt;
-        auto u_p      = state.cons[mesh.domain];
-
         // u' = u + L(u)
         // where L(u) is the godunov operator
         if (state.metadata.timestepping == Timestepping::EULER) {
+            const auto dt = state.metadata.dt;
             update_staggered_fields(state, ops, mesh);
 
+            auto u_p       = state.cons[mesh.domain];
             const auto ell = godunov_op(state, mesh) * dt;
-            u_p = u_p.map([=](auto coord, auto u) { return u += ell(coord); });
+            u_p            = u_p.map([=](const auto coord, const auto u) {
+                return u | structs::add_gas(ell(coord));
+            });
+
+            if constexpr (HydroState::is_mhd) {
+                // correct energy density from CT algorithm
+                em::update_energy_density(state, mesh);
+            }
 
             boundary::apply_boundary_conditions(state, mesh);
             hydro::recover_primitives(state);
             update_timestep(state, mesh);
+            state.metadata.time += dt;
         }
         else if (state.metadata.timestepping == Timestepping::RK2) {
-            update_staggered_fields(state, ops, mesh);
-
-            //  k1 = L(u^n)
-            const auto k1 = godunov_op(state, mesh);
-
-            // u* = u^n + dt*k1
-            u_p = u_p.map([k1, dt](auto coord, auto u) {
-                return u += k1(coord) * dt;
-            });
-            boundary::apply_boundary_conditions(state, mesh);
-            hydro::recover_primitives(state);
-            update_timestep(state, mesh);
-
-            update_staggered_fields(state, ops, mesh);
-
-            // k2 = L(u*)
-            auto k2 = godunov_op(state, mesh);
-
-            // u^{n+1} = u* - 0.5*dt*k1 + 0.5*dt*k2 = u* + 0.5*dt*(k2 - k1)
-            u_p = u_p.map([k1, k2, dt](auto coord, auto u) {
-                return u += 0.5 * dt * (k2(coord) - k1(coord));
-            });
-            boundary::apply_boundary_conditions(state, mesh);
-            hydro::recover_primitives(state);
-            update_timestep(state, mesh);
+            rk::rk2_step(state, mesh, ops);
         }
         else {
             throw std::runtime_error(
@@ -332,10 +309,6 @@ namespace simbi::cfd {
                     static_cast<std::uint64_t>(state.metadata.timestepping)
                 )
             );
-        }
-        if constexpr (HydroState::is_mhd) {
-            // correct energy density from CT algorithm
-            em::update_energy_density(state, mesh);
         }
     }
 

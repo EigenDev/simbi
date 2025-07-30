@@ -72,8 +72,7 @@ namespace simbi::hydrostate {
                 real tinterval = 0.0;
                 // now we can start the simulation loop :D
                 while (metadata.time < t_final && !state.in_failure_state) {
-                    cfd::rk_step(state, mesh, ops);
-                    metadata.time += metadata.dt;
+                    cfd::step(state, mesh, ops);
                     metadata.iteration++;
                     mesh = mesh::update_mesh(mesh, metadata.time, metadata.dt);
 

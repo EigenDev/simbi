@@ -32,11 +32,11 @@ namespace simbi {
         for (std::uint64_t dir = 0; dir < HydroState::dimensions; ++dir) {
             const auto interface_f = cfd::compute_fluxes(state, mesh, ops, dir);
 
-            auto future = executor.async([&state, interface_f, dir]() {
-                state.flux[dir] =
-                    state.flux[dir].map([interface_f](auto coord, auto) {
-                        return interface_f(coord);
-                    });
+            auto future = executor.async([&state, interface_f, dir, mesh]() {
+                auto flux = state.flux[dir][mesh.face_domain[dir]];
+                flux      = flux.map([interface_f](auto coord, auto) {
+                    return interface_f(coord);
+                });
             });
 
             flux_futures.push_back(std::move(future));

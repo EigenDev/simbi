@@ -38,16 +38,6 @@ namespace simbi::em {
                 const real dxi = widths[2];   // i-direction (x)
                 const real dxj = widths[1];   // j-direction (y)
 
-                auto dei = (ei_r - ei_l) / dxj;   // Ex gradient in j-direction
-                auto dej = (ej_r - ej_l) / dxi;   // Ey gradient in i-direction
-                if (dei != 0.0 || dej != 0.0) {
-                    std::cout << "face coord: " << face_coord << "\n";
-                    std::cout << "dei: " << dei << ", dej: " << dej << "\n";
-                    std::cout << "ei_l: " << ei_l << ", ei_r: " << ei_r << "\n";
-                    std::cout << "ej_l: " << ej_l << ", ej_r: " << ej_r << "\n";
-                    std::cout << "dxi: " << dxi << ", dxj: " << dxj << "\n";
-                    std::cin.get();   // pause for debugging
-                }
                 return ((ej_r - ej_l) / dxi) - ((ei_r - ei_l) / dxj);
             }
             else if constexpr (MagComp == magnetic_comp_t::J) {   // By
@@ -62,17 +52,6 @@ namespace simbi::em {
                 const real dxk = widths[0];   // k-direction (z)
                 const real dxi = widths[2];   // i-direction (x)
 
-                auto dei = (ei_r - ei_l) / dxk;   // Ex gradient in k-direction
-                auto dek = (ek_r - ek_l) / dxi;   // Ez gradient in i-direction
-                if (dei != 0.0) {
-                    std::cout << "face coord: " << face_coord << "\n";
-                    std::cout << "dei: " << dei << ", dek: " << dek << "\n";
-                    std::cout << "ei_l: " << ei_l << ", ei_r: " << ei_r << "\n";
-                    std::cout << "ek_l: " << ek_l << ", ek_r: " << ek_r << "\n";
-                    std::cout << "dxk: " << dxk << ", dxi: " << dxi << "\n";
-                    std::cin.get();   // pause for debugging
-                }
-
                 return ((ei_r - ei_l) / dxk) - ((ek_r - ek_l) / dxi);
             }
             else {   // Bx
@@ -86,17 +65,6 @@ namespace simbi::em {
 
                 const real dxj = widths[1];   // j-direction (y)
                 const real dxk = widths[0];   // k-direction (z)
-
-                auto dek = (ek_r - ek_l) / dxj;   // Ez gradient in j-direction
-                auto dej = (ej_r - ej_l) / dxk;   // Ey gradient in k-direction
-                if (dek != 0.0 || dej != 0.0) {
-                    std::cout << "face coord: " << face_coord << "\n";
-                    std::cout << "dek: " << dek << ", dej: " << dej << "\n";
-                    std::cout << "ek_l: " << ek_l << ", ek_r: " << ek_r << "\n";
-                    std::cout << "ej_l: " << ej_l << ", ej_r: " << ej_r << "\n";
-                    std::cout << "dxj: " << dxj << ", dxk: " << dxk << "\n";
-                    std::cin.get();   // pause for debugging
-                }
 
                 return ((ek_r - ek_l) / dxj) - ((ej_r - ej_l) / dxk);
             }

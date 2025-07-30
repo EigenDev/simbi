@@ -1,5 +1,5 @@
-#ifndef SIMBI_CT_PERMUTATION_HPP
-#define SIMBI_CT_PERMUTATION_HPP
+#ifndef MHD_LOGIC_HPP
+#define MHD_LOGIC_HPP
 
 #include "compute/field.hpp"
 #include "compute/functional/fp.hpp"
@@ -239,10 +239,6 @@ namespace simbi::em {
               const auto fluxes        = vector_t{flux0, flux1, flux2};
               constexpr auto perm_list = permutation_list<MagComp>();
 
-              bool area_of_interest = face_coord[2] == 48 ||
-                                      face_coord[2] == 49 ||
-                                      face_coord[2] == 50;
-
               const auto emf_computer = [&]<typename Perm>(Perm) {
                   return [&](const iarray<3>& edge_coord) {
                       auto flux_coords = flux_stencil<Perm>(edge_coord);
@@ -251,16 +247,6 @@ namespace simbi::em {
                       auto ef    = face_efields<Perm>(fluxes, flux_coords);
                       auto ec    = center_efields<Perm>(prim, prim_coords);
                       auto densf = den_fluxes<Perm>(fluxes, flux_coords);
-
-                      if (area_of_interest) {
-                          std::cout << "flux coords: " << flux_coords
-                                    << std::endl;
-                          std::cout << "prim coords: " << prim_coords
-                                    << std::endl;
-                          std::cout << "flux e-fields: " << ef << std::endl;
-                          std::cout << "cell e-fields: " << ec << std::endl;
-                          std::cout << "density fluxes: " << densf << std::endl;
-                      }
 
                       return ct_contact_formula(ef, ec, densf);
                   };
@@ -276,13 +262,6 @@ namespace simbi::em {
                       return edge_generator(p) | fp::map(emf_computer(p)) |
                              fp::collect<vector_t<real, 2>>;
                   });
-
-              if (face_coord[2] == 48 ||
-                  face_coord[2] == 49 | face_coord[2] == 50) {
-                  std::cout << "Face coord: " << face_coord
-                            << ", EMFs: " << emfs << std::endl;
-                  std::cout << "\n";
-              }
 
               real curl = discrete_curl<MagComp>(emfs, face_coord, mesh);
               return -dt * curl;   // Faraday's law
@@ -379,13 +358,12 @@ namespace simbi::em {
     template <typename HydroState, typename MeshConfig>
     void update_magnetic_fields(HydroState& state, const MeshConfig& mesh)
     {
-        // update_magnetic_component<magnetic_comp_t::I>(state, mesh);
+        update_magnetic_component<magnetic_comp_t::I>(state, mesh);
         update_magnetic_component<magnetic_comp_t::J>(state, mesh);
-        // update_magnetic_component<magnetic_comp_t::K>(state, mesh);
+        update_magnetic_component<magnetic_comp_t::K>(state, mesh);
         interpolate_magnetic_fields(state, mesh);
-        std::cin.get();
     }
 
 }   // namespace simbi::em
 
-#endif   // SIMBI_CT_PERMUTATION_HPP
+#endif   // MHD_LOGIC_HPP

@@ -113,6 +113,17 @@ namespace simbi {
             return *this;
         }
 
+        auto clone() const
+            requires detail::is_accessor_v<Func>
+        {
+            // clone accessor
+            auto new_accessor = function.clone();
+            return compute_field_t<Dims, decltype(new_accessor)>{
+              std::move(new_accessor),
+              domain_
+            };
+        }
+
         // mathematical function evaluation
         value_type operator()(const coordinate_t<Dims>& coord) const
         {

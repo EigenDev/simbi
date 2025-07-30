@@ -434,8 +434,6 @@ namespace simbi::em {
         update_magnetic_component<magnetic_comp_t::J>(state, mesh);
         update_magnetic_component<magnetic_comp_t::K>(state, mesh);
         interpolate_magnetic_fields(state, mesh.domain);
-        std::cout << "Magnetic fields updated successfully.\n";
-        std::cin.get();
     }
 
 }   // namespace simbi::em

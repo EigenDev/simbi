@@ -10,7 +10,6 @@
 #include <cstddef>
 #include <cstdint>
 #include <functional>
-#include <iostream>
 #include <memory>
 #include <stdexcept>
 #include <utility>
@@ -139,6 +138,13 @@ namespace simbi::mem {
                     )
                     .wait();
             }
+        }
+
+        auto clone() const
+        {
+            auto new_accessor = accessor_t{domain_, pool_};
+            std::copy_n(this->data(), size(), new_accessor.data());
+            return new_accessor;
         }
 
         // factory methods

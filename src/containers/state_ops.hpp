@@ -5,14 +5,13 @@
 #include "core/base/concepts.hpp"
 #include "physics/eos/isothermal.hpp"
 #include <concepts>
-#include <iostream>
+#include <type_traits>
+#include <utility>
 
 namespace simbi::structs {
     using namespace simbi::concepts;
-    // ---- primary template for trait-based field access ----
-    // this handles the different member names between primitive and
-    // conserved types
 
+    // ---- primary template for trait-based field access ----
     template <typename T>
     struct state_traits;
 
@@ -108,9 +107,120 @@ namespace simbi::structs {
             std::same_as<typename T::eos_t, eos::isothermal_gas_eos_t>;
     };
 
-    // ---- generic operator implementations using traits ----
+    // ---- Gas-only operation pipeline components ----
 
-    // addition operator
+    // gas variable transformation functors
+    struct scale_gas_t {
+        real factor;
+        constexpr explicit scale_gas_t(real f) : factor(f) {}
+    };
+
+    template <typename T>
+    struct add_gas_t {
+        T other;
+        constexpr explicit add_gas_t(T&& o) : other(std::move(o)) {}
+        constexpr explicit add_gas_t(const T& o) : other(o) {}
+    };
+
+    template <typename BinaryOp>
+    struct combine_gas_t {
+        BinaryOp op;
+        constexpr explicit combine_gas_t(BinaryOp&& o) : op(std::move(o)) {}
+    };
+
+    // pipeline factory functions
+    constexpr auto scale_gas(real factor) { return scale_gas_t{factor}; }
+
+    template <typename T>
+    constexpr auto add_gas(T&& other)
+    {
+        return add_gas_t<std::decay_t<T>>{std::forward<T>(other)};
+    }
+
+    template <typename BinaryOp>
+    constexpr auto combine_gas(BinaryOp&& op)
+    {
+        return combine_gas_t<std::decay_t<BinaryOp>>{
+          std::forward<BinaryOp>(op)
+        };
+    }
+
+    // ---- helper functions for gas variable manipulation ----
+
+    template <typename StateT, typename F>
+    constexpr auto map_gas_vars(const StateT& state, F&& func)
+    {
+        using traits_t = state_traits<StateT>;
+        StateT result  = state;   // copy preserves magnetic fields
+
+        // apply function only to gas variables
+        if constexpr (!traits_t::is_isothermal) {
+            func(
+                traits_t::density(result),
+                traits_t::momentum_or_velocity(result),
+                traits_t::energy_or_pressure(result),
+                traits_t::passive_scalar(result)
+            );
+        }
+        else {
+            func(
+                traits_t::density(result),
+                traits_t::momentum_or_velocity(result),
+                traits_t::passive_scalar(result)
+            );
+        }
+
+        return result;
+    }
+
+    // ---- pipeline operator overloads ----
+
+    // scale gas variables
+    template <is_any_state_variable_c StateT>
+    constexpr auto operator|(const StateT& state, scale_gas_t op)
+    {
+        return map_gas_vars(state, [factor = op.factor](auto&... vars) {
+            ((vars *= factor), ...);   // fold expression
+        });
+    }
+
+    // add to gas variables
+    template <is_any_state_variable_c StateT>
+    constexpr auto operator|(const StateT& state, add_gas_t<StateT> op)
+    {
+        using traits_t = state_traits<StateT>;
+        return map_gas_vars(state, [&op](auto&... vars) {
+            if constexpr (!traits_t::is_isothermal) {
+                // for non-isothermal: density, momentum, energy, passive scalar
+                auto var_tuple = std::tie(vars...);
+                std::get<0>(var_tuple) += traits_t::density(op.other);
+                std::get<1>(var_tuple) +=
+                    traits_t::momentum_or_velocity(op.other);
+                std::get<2>(var_tuple) +=
+                    traits_t::energy_or_pressure(op.other);
+                std::get<3>(var_tuple) += traits_t::passive_scalar(op.other);
+            }
+            else {
+                // for isothermal: density, momentum, passive scalar (skip
+                // energy)
+                auto var_tuple = std::tie(vars...);
+                std::get<0>(var_tuple) += traits_t::density(op.other);
+                std::get<1>(var_tuple) +=
+                    traits_t::momentum_or_velocity(op.other);
+                std::get<2>(var_tuple) += traits_t::passive_scalar(op.other);
+            }
+        });
+    }
+
+    // combine gas variables with binary operation
+    template <is_any_state_variable_c StateT, typename BinaryOp>
+    constexpr auto operator|(const StateT& state, combine_gas_t<BinaryOp> op)
+    {
+        return map_gas_vars(state, [&op](auto&... vars) {
+            ((vars = op.op(vars)), ...);
+        });
+    }
+
     template <is_any_state_variable_c StateT>
     constexpr auto operator+(const StateT& lhs, const StateT& rhs)
     {
@@ -122,8 +232,7 @@ namespace simbi::structs {
         traits_t::momentum_or_velocity(result) =
             traits_t::momentum_or_velocity(lhs) +
             traits_t::momentum_or_velocity(rhs);
-        // isothermal gas doesn't have energy, so we ingnore this
-        // for isothermal gas states
+
         if constexpr (!traits_t::is_isothermal) {
             traits_t::energy_or_pressure(result) =
                 traits_t::energy_or_pressure(lhs) +
@@ -133,6 +242,7 @@ namespace simbi::structs {
             traits_t::energy_or_pressure(result) =
                 traits_t::energy_or_pressure(lhs);
         }
+
         traits_t::passive_scalar(result) =
             traits_t::passive_scalar(lhs) + traits_t::passive_scalar(rhs);
 
@@ -144,7 +254,6 @@ namespace simbi::structs {
         return result;
     }
 
-    // subtraction operator
     template <is_any_state_variable_c StateT>
     constexpr auto operator-(const StateT& lhs, const StateT& rhs)
     {
@@ -156,6 +265,7 @@ namespace simbi::structs {
         traits_t::momentum_or_velocity(result) =
             traits_t::momentum_or_velocity(lhs) -
             traits_t::momentum_or_velocity(rhs);
+
         if constexpr (!traits_t::is_isothermal) {
             traits_t::energy_or_pressure(result) =
                 traits_t::energy_or_pressure(lhs) -
@@ -165,6 +275,7 @@ namespace simbi::structs {
             traits_t::energy_or_pressure(result) =
                 traits_t::energy_or_pressure(lhs);
         }
+
         traits_t::passive_scalar(result) =
             traits_t::passive_scalar(lhs) - traits_t::passive_scalar(rhs);
 
@@ -176,7 +287,6 @@ namespace simbi::structs {
         return result;
     }
 
-    // multiplication by scalar
     template <is_any_state_variable_c StateT>
     constexpr auto operator*(const StateT& lhs, const real rhs)
     {
@@ -186,9 +296,8 @@ namespace simbi::structs {
         traits_t::density(result) = traits_t::density(lhs) * rhs;
         traits_t::momentum_or_velocity(result) =
             traits_t::momentum_or_velocity(lhs) * rhs;
+
         if constexpr (!traits_t::is_isothermal) {
-            // isothermal gas doesn't have energy, so we ignore this
-            // for isothermal gas states
             traits_t::energy_or_pressure(result) =
                 traits_t::energy_or_pressure(lhs) * rhs;
         }
@@ -196,6 +305,7 @@ namespace simbi::structs {
             traits_t::energy_or_pressure(result) =
                 traits_t::energy_or_pressure(lhs);
         }
+
         traits_t::passive_scalar(result) = traits_t::passive_scalar(lhs) * rhs;
 
         if constexpr (traits_t::has_magnetic_field) {
@@ -206,42 +316,56 @@ namespace simbi::structs {
         return result;
     }
 
-    // scalar multiplication (commutative)
     template <is_any_state_variable_c StateT>
     constexpr auto operator*(const real lhs, const StateT& rhs)
     {
-        return rhs * lhs;   // leverage the previous overload
+        return rhs * lhs;
     }
 
-    // division by scalar
     template <is_any_state_variable_c StateT>
     constexpr auto operator/(const StateT& lhs, const real rhs)
     {
-        using traits_t = state_traits<StateT>;
-        StateT result;
-
-        traits_t::density(result) = traits_t::density(lhs) / rhs;
-        traits_t::momentum_or_velocity(result) =
-            traits_t::momentum_or_velocity(lhs) / rhs;
-        if constexpr (!traits_t::is_isothermal) {
-            traits_t::energy_or_pressure(result) =
-                traits_t::energy_or_pressure(lhs) / rhs;
-        }
-        else {
-            traits_t::energy_or_pressure(result) =
-                traits_t::energy_or_pressure(lhs);
-        }
-        traits_t::passive_scalar(result) = traits_t::passive_scalar(lhs) / rhs;
-
-        if constexpr (traits_t::has_magnetic_field) {
-            traits_t::magnetic_field(result) =
-                traits_t::magnetic_field(lhs) / rhs;
-        }
-
-        return result;
+        return lhs * (1.0 / rhs);
     }
 
-    // equality comparison
+    template <is_any_state_variable_c StateT>
+    constexpr auto& operator+=(StateT& lhs, const StateT& rhs)
+    {
+        using traits_t = state_traits<StateT>;
+
+        traits_t::density(lhs) += traits_t::density(rhs);
+        traits_t::momentum_or_velocity(lhs) +=
+            traits_t::momentum_or_velocity(rhs);
+
+        if constexpr (!traits_t::is_isothermal) {
+            traits_t::energy_or_pressure(lhs) +=
+                traits_t::energy_or_pressure(rhs);
+        }
+
+        traits_t::passive_scalar(lhs) += traits_t::passive_scalar(rhs);
+
+        return lhs;
+    }
+
+    template <is_any_state_variable_c StateT>
+    constexpr auto& operator-=(StateT& lhs, const StateT& rhs)
+    {
+        using traits_t = state_traits<StateT>;
+
+        traits_t::density(lhs) -= traits_t::density(rhs);
+        traits_t::momentum_or_velocity(lhs) -=
+            traits_t::momentum_or_velocity(rhs);
+
+        if constexpr (!traits_t::is_isothermal) {
+            traits_t::energy_or_pressure(lhs) -=
+                traits_t::energy_or_pressure(rhs);
+        }
+
+        traits_t::passive_scalar(lhs) -= traits_t::passive_scalar(rhs);
+
+        return lhs;
+    }
+
     template <is_any_state_variable_c StateT>
     constexpr auto operator==(const StateT& lhs, const StateT& rhs)
     {
@@ -262,14 +386,12 @@ namespace simbi::structs {
         return result;
     }
 
-    // inequality comparison
     template <is_any_state_variable_c StateT>
     constexpr auto operator!=(const StateT& lhs, const StateT& rhs)
     {
         return !(lhs == rhs);
     }
 
-    // unary minus operator
     template <is_any_state_variable_c StateT>
     constexpr auto operator-(const StateT& v)
     {
@@ -289,77 +411,6 @@ namespace simbi::structs {
         return result;
     }
 
-    // increment operator
-    template <is_any_state_variable_c StateT>
-    constexpr auto& operator+=(StateT& lhs, const StateT& rhs)
-    {
-        using traits_t = state_traits<StateT>;
-        traits_t::density(lhs) += traits_t::density(rhs);
-        traits_t::momentum_or_velocity(lhs) +=
-            traits_t::momentum_or_velocity(rhs);
-        if constexpr (!traits_t::is_isothermal) {
-            traits_t::energy_or_pressure(lhs) +=
-                traits_t::energy_or_pressure(rhs);
-        }
-        traits_t::passive_scalar(lhs) += traits_t::passive_scalar(rhs);
-
-        // if we are using the increment operator on a struct, it is likely
-        // during the hydro update step, and since the cell-centered magnetic
-        // fields are moreso second-class citizens in the CT algorithm,
-        // we do not modify them here.
-        return lhs;
-    }
-
-    // decrement operator
-    template <is_any_state_variable_c StateT>
-    constexpr auto& operator-=(StateT& lhs, const StateT& rhs)
-    {
-        using traits_t = state_traits<StateT>;
-        traits_t::density(lhs) -= traits_t::density(rhs);
-        traits_t::momentum_or_velocity(lhs) -=
-            traits_t::momentum_or_velocity(rhs);
-        if constexpr (!traits_t::is_isothermal) {
-            traits_t::energy_or_pressure(lhs) -=
-                traits_t::energy_or_pressure(rhs);
-        }
-        traits_t::passive_scalar(lhs) -= traits_t::passive_scalar(rhs);
-
-        // if we are using the decrement operator on a struct, it is likely
-        // during the hydro update step, and since the cell-centered magnetic
-        // fields are moreso second-class citizens in the CT algorithm,
-        // we do not modify them here.
-
-        return lhs;
-    }
-
-    // increment only the gas variables
-    template <is_any_state_variable_c StateT>
-    constexpr auto add_gas_terms(const StateT& from, const StateT& operand)
-    {
-        using traits_t = state_traits<StateT>;
-        StateT result;
-        traits_t::density(result) =
-            traits_t::density(from) + traits_t::density(operand);
-        traits_t::momentum_or_velocity(result) =
-            traits_t::momentum_or_velocity(from) +
-            traits_t::momentum_or_velocity(operand);
-        if constexpr (!traits_t::is_isothermal) {
-            traits_t::energy_or_pressure(result) =
-                traits_t::energy_or_pressure(from) +
-                traits_t::energy_or_pressure(operand);
-        }
-        else {
-            traits_t::energy_or_pressure(result) =
-                traits_t::energy_or_pressure(from);
-        }
-        traits_t::passive_scalar(result) =
-            traits_t::passive_scalar(from) + traits_t::passive_scalar(operand);
-
-        traits_t::magnetic_field(result) =
-            traits_t::magnetic_field(from);   // do not modify magnetic field
-
-        return result;
-    }
-
 }   // namespace simbi::structs
+
 #endif   // STATE_OPS_HPP

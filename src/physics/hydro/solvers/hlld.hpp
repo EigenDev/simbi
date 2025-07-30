@@ -236,9 +236,10 @@ namespace simbi::hydro::rmhd {
             constexpr real peps          = global::epsilon;
             constexpr real prat_lim      = 0.01;    // pressure ratio limit
             constexpr real pguess_offset = 1.e-6;   // pressure guess offset
-            constexpr std::int64_t num_tries =
-                15;   // secant tries before giving up
-            bool hlld_success = true;
+
+            // secant tries before giving up
+            constexpr std::int64_t num_tries = 15;
+            bool hlld_success                = true;
 
             // L / R Alfven prims and Contact prims
             primitive_t prAL, prAR, prC;
