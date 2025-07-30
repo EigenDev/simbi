@@ -5,6 +5,8 @@
 #include "containers/ndarray.hpp"
 #include "math/expression.hpp"
 
+#include <cstdint>
+
 namespace simbi::expression {
     using namespace nd;
     // main evaluation function with parameter support

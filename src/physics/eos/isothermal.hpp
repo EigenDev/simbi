@@ -2,6 +2,7 @@
 #define ISOTHERMAL_HPP
 
 #include "config.hpp"
+
 #include <cmath>   // for std::sqrt
 
 namespace simbi::eos {

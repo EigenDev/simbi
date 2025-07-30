@@ -8,9 +8,6 @@ namespace simbi {
     struct computation_t {
         T& state_;
 
-        // explicit computation_t(T state) : state_(std::move(state)) {}
-        // static computation_t from_value(T state) { return {std::move(state)};
-        // }
         static computation_t from_ref(T& state) { return {state}; }
 
         template <typename F>

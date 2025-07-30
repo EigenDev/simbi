@@ -8,7 +8,7 @@ namespace simbi::em {
     // https://ui.adsabs.harvard.edu/abs/2005JCoPh.205..509G/abstract
 
     // CT Contact formula (Gardiner & Stone Eq. 51) - unchanged
-    real ct_contact_formula(
+    DEV real ct_contact_formula(
         const vector_t<real, 4>& face_e_fields,
         const vector_t<real, 4>& cell_e_fields,
         const vector_t<real, 4>& density_fluxes

@@ -3,9 +3,9 @@
 
 #include "base/concepts.hpp"
 #include "config.hpp"
+
 #include "containers/vector.hpp"
 #include <cstdint>
-#include <iostream>
 
 namespace simbi::em {
     using namespace simbi::concepts;

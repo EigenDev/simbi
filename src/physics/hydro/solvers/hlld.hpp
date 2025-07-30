@@ -10,6 +10,7 @@
 #include "physics/hydro/wave_speeds.hpp"   // for wave_speeds
 #include "utility/enums.hpp"               // for Regime
 #include "utility/helpers.hpp"   // for goes_to_zero, sgn, safe_less_than, safe_greater_than
+
 #include <algorithm>   // for min, max
 #include <cmath>       // for abs, sqrt
 #include <cstdint>     // for int64_t

@@ -8,8 +8,8 @@
 #include "result.hpp"             // for result_t<T> monad
 #include "utility/enums.hpp"
 #include "utility/helpers.hpp"
-#include <H5Cpp.h>   // for HDF5 C++ API
-#include <algorithm>
+
+#include <H5Cpp.h>         // for HDF5 C++ API
 #include <concepts>        // for concepts
 #include <cstdint>         // for std::uint64_t
 #include <functional>      // for std::function
@@ -19,6 +19,7 @@
 #include <unordered_map>   // for std::unordered_map
 #include <utility>         // for std::move
 #include <vector>          // for std::vector
+
 namespace simbi::io {
     using namespace simbi::helpers;
     // serialization context - accumulates state through pipeline
@@ -972,6 +973,7 @@ namespace simbi::io {
     {
         const auto filename = compute_filename(state);
         table.post_info("[Writing checkpoint to path: " + filename + "]");
+        table.refresh();
         state.metadata.update_checkpoint_time();
 
         //  monadic pipeline

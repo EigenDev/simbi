@@ -1,6 +1,3 @@
-// =============================================================================
-// Complete ndarray_t System
-// =============================================================================
 #ifndef SIMBI_NDARRAY_SYSTEM_HPP
 #define SIMBI_NDARRAY_SYSTEM_HPP
 
@@ -12,6 +9,7 @@
 #include <cstdint>
 #include <memory>
 #include <stdexcept>
+#include <vector>
 
 namespace simbi::nd {
     using namespace simbi::concepts;

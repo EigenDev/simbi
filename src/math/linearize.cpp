@@ -1,8 +1,10 @@
 #include "containers/ndarray.hpp"
 #include "expression.hpp"
 #include "linearizer.hpp"
+
 #include <algorithm>
 #include <cstddef>
+#include <cstdint>
 #include <functional>
 #include <stack>
 #include <stdexcept>

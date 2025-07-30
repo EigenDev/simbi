@@ -1,5 +1,5 @@
-#ifndef SIMBI_MODERN_TABLE_HPP
-#define SIMBI_MODERN_TABLE_HPP
+#ifndef SIMBI_TABLE_HPP
+#define SIMBI_TABLE_HPP
 
 #include <chrono>
 #include <cstddef>

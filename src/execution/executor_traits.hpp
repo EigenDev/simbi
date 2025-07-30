@@ -1,6 +1,3 @@
-/**
- * executor_traits.hpp - simplified executor traits
- */
 #ifndef EXECUTOR_TRAITS_HPP
 #define EXECUTOR_TRAITS_HPP
 

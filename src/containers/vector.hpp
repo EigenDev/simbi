@@ -6,6 +6,7 @@
 #include "functional/fp.hpp"
 #include "functional/monad/maybe.hpp"
 #include "utility/enums.hpp"
+
 #include <array>
 #include <cmath>
 #include <concepts>

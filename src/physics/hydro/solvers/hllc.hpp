@@ -9,10 +9,10 @@
 #include "physics/hydro/wave_speeds.hpp"     // for extremal_speeds
 #include "utility/enums.hpp"                 // for ShockWaveLimiter
 #include "utility/helpers.hpp"   // for goes_to_zero, sgn, vecops::dot, vecops::norm
-#include <algorithm>             // for std::max, std::min
-#include <cmath>                 // for std::abs, std::log
-#include <iomanip>
-#include <numbers>   // for std::numbers::pi
+
+#include <algorithm>   // for std::max, std::min
+#include <cmath>       // for std::abs, std::log
+#include <numbers>     // for std::numbers::pi
 
 namespace simbi::hydro {
     using namespace simbi::helpers;

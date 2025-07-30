@@ -4,6 +4,7 @@
 #include "base/concepts.hpp"
 #include "config.hpp"
 #include "physics/eos/isothermal.hpp"
+
 #include <concepts>
 #include <type_traits>
 #include <utility>
@@ -129,16 +130,16 @@ namespace simbi::structs {
     };
 
     // pipeline factory functions
-    constexpr auto scale_gas(real factor) { return scale_gas_t{factor}; }
+    constexpr DEV auto scale_gas(real factor) { return scale_gas_t{factor}; }
 
     template <typename T>
-    constexpr auto add_gas(T&& other)
+    constexpr DEV auto add_gas(T&& other)
     {
         return add_gas_t<std::decay_t<T>>{std::forward<T>(other)};
     }
 
     template <typename BinaryOp>
-    constexpr auto combine_gas(BinaryOp&& op)
+    constexpr DEV auto combine_gas(BinaryOp&& op)
     {
         return combine_gas_t<std::decay_t<BinaryOp>>{
           std::forward<BinaryOp>(op)
@@ -148,7 +149,7 @@ namespace simbi::structs {
     // ---- helper functions for gas variable manipulation ----
 
     template <typename StateT, typename F>
-    constexpr auto map_gas_vars(const StateT& state, F&& func)
+    constexpr DEV auto map_gas_vars(const StateT& state, F&& func)
     {
         using traits_t = state_traits<StateT>;
         StateT result  = state;   // copy preserves magnetic fields
@@ -177,7 +178,7 @@ namespace simbi::structs {
 
     // scale gas variables
     template <is_any_state_variable_c StateT>
-    constexpr auto operator|(const StateT& state, scale_gas_t op)
+    constexpr DEV auto operator|(const StateT& state, scale_gas_t op)
     {
         return map_gas_vars(state, [factor = op.factor](auto&... vars) {
             ((vars *= factor), ...);   // fold expression
@@ -186,7 +187,7 @@ namespace simbi::structs {
 
     // add to gas variables
     template <is_any_state_variable_c StateT>
-    constexpr auto operator|(const StateT& state, add_gas_t<StateT> op)
+    constexpr DEV auto operator|(const StateT& state, add_gas_t<StateT> op)
     {
         using traits_t = state_traits<StateT>;
         return map_gas_vars(state, [&op](auto&... vars) {
@@ -214,7 +215,8 @@ namespace simbi::structs {
 
     // combine gas variables with binary operation
     template <is_any_state_variable_c StateT, typename BinaryOp>
-    constexpr auto operator|(const StateT& state, combine_gas_t<BinaryOp> op)
+    constexpr DEV auto
+    operator|(const StateT& state, combine_gas_t<BinaryOp> op)
     {
         return map_gas_vars(state, [&op](auto&... vars) {
             ((vars = op.op(vars)), ...);
@@ -222,7 +224,7 @@ namespace simbi::structs {
     }
 
     template <is_any_state_variable_c StateT>
-    constexpr auto operator+(const StateT& lhs, const StateT& rhs)
+    constexpr DEV auto operator+(const StateT& lhs, const StateT& rhs)
     {
         using traits_t = state_traits<StateT>;
         StateT result;
@@ -255,7 +257,7 @@ namespace simbi::structs {
     }
 
     template <is_any_state_variable_c StateT>
-    constexpr auto operator-(const StateT& lhs, const StateT& rhs)
+    constexpr DEV auto operator-(const StateT& lhs, const StateT& rhs)
     {
         using traits_t = state_traits<StateT>;
         StateT result;
@@ -288,7 +290,7 @@ namespace simbi::structs {
     }
 
     template <is_any_state_variable_c StateT>
-    constexpr auto operator*(const StateT& lhs, const real rhs)
+    constexpr DEV auto operator*(const StateT& lhs, const real rhs)
     {
         using traits_t = state_traits<StateT>;
         StateT result;
@@ -317,13 +319,13 @@ namespace simbi::structs {
     }
 
     template <is_any_state_variable_c StateT>
-    constexpr auto operator*(const real lhs, const StateT& rhs)
+    constexpr DEV auto operator*(const real lhs, const StateT& rhs)
     {
         return rhs * lhs;
     }
 
     template <is_any_state_variable_c StateT>
-    constexpr auto operator/(const StateT& lhs, const real rhs)
+    constexpr DEV auto operator/(const StateT& lhs, const real rhs)
     {
         return lhs * (1.0 / rhs);
     }
@@ -367,7 +369,7 @@ namespace simbi::structs {
     }
 
     template <is_any_state_variable_c StateT>
-    constexpr auto operator==(const StateT& lhs, const StateT& rhs)
+    constexpr DEV auto operator==(const StateT& lhs, const StateT& rhs)
     {
         using traits_t = state_traits<StateT>;
         bool result =
@@ -387,13 +389,13 @@ namespace simbi::structs {
     }
 
     template <is_any_state_variable_c StateT>
-    constexpr auto operator!=(const StateT& lhs, const StateT& rhs)
+    constexpr DEV auto operator!=(const StateT& lhs, const StateT& rhs)
     {
         return !(lhs == rhs);
     }
 
     template <is_any_state_variable_c StateT>
-    constexpr auto operator-(const StateT& v)
+    constexpr DEV auto operator-(const StateT& v)
     {
         using traits_t = state_traits<StateT>;
         StateT result;

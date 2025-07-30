@@ -3,6 +3,8 @@
 
 #include "config.hpp"
 
+#include <cstdint>
+
 namespace simbi::expression {
     // expanded operation types to match python implementation :)
     enum class ExprOp : std::int64_t {

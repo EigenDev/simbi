@@ -3,6 +3,7 @@
 #include "containers/ndarray.hpp"
 #include "math/expression.hpp"
 #include "utility/config_dict.hpp"
+
 #include <iostream>
 #include <list>
 #include <string>

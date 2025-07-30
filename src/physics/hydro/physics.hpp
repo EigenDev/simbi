@@ -6,7 +6,8 @@
 #include "containers/vector.hpp"   // for vector_t
 #include "physics/em/electromagnetism.hpp"
 #include "physics/eos/isothermal.hpp"   // for isothermal_gas_eos_t
-#include <concepts>                     // for std::same_as
+
+#include <concepts>   // for std::same_as
 #include <cstddef>
 #include <iostream>
 

@@ -1,10 +1,11 @@
 #include "serializer.hpp"   // for serialization_context_t
 #include "result.hpp"       // for result_t<T> monad
-#include <H5Cpp.h>          // for H5::H5File
-#include <functional>       // for std::function
-#include <string>           // for std::string
-#include <utility>          // for std::move
-#include <vector>           // for std::vector
+
+#include <H5Cpp.h>      // for H5::H5File
+#include <functional>   // for std::function
+#include <string>       // for std::string
+#include <utility>      // for std::move
+#include <vector>       // for std::vector
 
 namespace simbi::io {
 

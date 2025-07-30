@@ -5,10 +5,11 @@
 #include "config.hpp"              // for real, DEV
 #include "containers/vector.hpp"   // for vector_t
 #include "utility/helpers.hpp"     // for sgn
-#include <cstdint>                 // for std::uint64_t
-#include <tuple>                   // for std::tuple_size, std::tuple_element
-#include <type_traits>             // for std::integral_constant, std::is_same_v
-#include <utility>                 // for std::tuple_size, std::tuple_element
+
+#include <cstdint>       // for std::uint64_t
+#include <tuple>         // for std::tuple_size, std::tuple_element
+#include <type_traits>   // for std::integral_constant, std::is_same_v
+#include <utility>       // for std::tuple_size, std::tuple_element
 #include <utility>
 
 namespace simbi::hydro {

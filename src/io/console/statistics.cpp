@@ -1,6 +1,7 @@
 #include "io/console/statistics.hpp"
 #include "config.hpp"
 #include "io/tabulate/table.hpp"
+
 #include <cstddef>
 #include <cstdint>
 #include <iomanip>

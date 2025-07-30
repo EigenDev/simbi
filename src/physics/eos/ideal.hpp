@@ -3,6 +3,7 @@
 
 #include "config.hpp"
 #include "utility/enums.hpp"
+
 #include <cmath>   // for std::sqrt
 
 namespace simbi::eos {

@@ -3,6 +3,8 @@
 
 #include "containers/ndarray.hpp"
 #include "expression.hpp"
+
+#include <cstdint>
 #include <utility>
 #include <vector>
 

@@ -82,7 +82,7 @@ namespace simbi::cfd {
         const auto* gravity_source = &state.sources.gravity_source;
         const auto prim            = state.prim[mesh.domain];
         return compute_field_t{
-          [=](auto coord) {
+          [=] DEV(auto coord) {
               using conserved_t = typename HydroState::conserved_t;
               if (!gravity_source->enabled) {
                   return conserved_t{};
@@ -311,7 +311,6 @@ namespace simbi::cfd {
             );
         }
     }
-
 }   // namespace simbi::cfd
 
 #endif   // SIMBI_CFD_OPS_HPP

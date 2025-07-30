@@ -5,6 +5,8 @@
 #include "containers/ndarray.hpp"
 #include "math/expression.hpp"
 #include "utility/config_dict.hpp"
+
+#include <cstdint>
 #include <string>
 #include <tuple>
 

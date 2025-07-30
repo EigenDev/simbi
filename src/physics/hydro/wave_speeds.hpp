@@ -8,11 +8,12 @@
 #include "physics/hydro/physics.hpp"   // for is_hydro_primitive_c, is_mhd_primitive_c, is_rmhd_c, is_srhd_c
 #include "utility/enums.hpp"     // for WaveSpeedEstimate
 #include "utility/helpers.hpp"   // for solve_quartic,
-#include <algorithm>             // for std::min, std::max
-#include <cmath>                 // for std::sqrt, std::pow
-#include <cstdio>                // for printf
-#include <tuple>                 // for std::tuple_size, std::tuple_element
-#include <type_traits>           // for std::integral_constant, std::is_same_v
+
+#include <algorithm>     // for std::min, std::max
+#include <cmath>         // for std::sqrt, std::pow
+#include <cstdio>        // for printf
+#include <tuple>         // for std::tuple_size, std::tuple_element
+#include <type_traits>   // for std::integral_constant, std::is_same_v
 
 namespace simbi::hydro {
     struct wave_speeds_t;
