@@ -7,7 +7,6 @@
 #include "utility/helpers.hpp"
 
 #include <cstdint>
-#include <iostream>
 #include <type_traits>
 #include <utility>
 
