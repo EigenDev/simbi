@@ -16,6 +16,7 @@
 #include <cstdlib>
 #include <exception>
 #include <functional>
+#include <future>
 #include <memory>
 #include <mutex>
 #include <queue>
@@ -403,7 +404,7 @@ namespace simbi::async {
             auto total_size = domain.size();
             auto chunk_size = (total_size + nthreads_ - 1) / nthreads_;
 
-            std::vector<std::thread> threads;
+            std::vector<std::future<void>> futures;
 
             for (std::size_t tt = 0; tt < nthreads_; ++tt) {
                 auto start_idx = tt * chunk_size;
@@ -413,16 +414,16 @@ namespace simbi::async {
                     break;
                 }
 
-                threads.emplace_back([=]() {
+                futures.push_back(std::async(std::launch::async, [=]() {
                     for (auto idx = start_idx; idx < end_idx; ++idx) {
                         auto coord = domain.linear_to_coord(idx);
                         func(coord);
                     }
-                });
+                }));
             }
 
-            for (auto& thread : threads) {
-                thread.join();
+            for (auto& future : futures) {
+                future.wait();
             }
         }
     };
