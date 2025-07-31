@@ -47,61 +47,12 @@ namespace simbi::mem {
             data_ = arena_->get(domain_.size());
         }
 
-        ~accessor_t() {}
-
-        // copy ctor
-        accessor_t(const accessor_t& other)
-            : arena_(other.arena_),
-              domain_(other.domain_),
-              strides_(other.strides_)
-        {
-            if (other.data_) {   // check if other has valid data
-                data_ = arena_->get(domain_.size());
-                std::copy_n(other.data(), domain_.size(), this->data());
-            }
-            // if other.data_ is null, data_ remains null (default constructed)
-        }
-
-        // assignment operator
-        accessor_t& operator=(const accessor_t& other)
-        {
-            if (this != &other) {
-                arena_   = other.arena_;
-                domain_  = other.domain_;
-                strides_ = other.strides_;
-
-                if (other.data_) {
-                    data_ = arena_->get(domain_.size());
-                    std::copy_n(other.data(), domain_.size(), this->data());
-                }
-                else {
-                    data_.reset();   // clear our data
-                }
-            }
-            return *this;
-        }
-
-        // move ctor
-        accessor_t(accessor_t&& other) noexcept
-            : data_(std::move(other.data_)),
-              arena_(std::move(other.arena_)),
-              domain_(other.domain_),
-              strides_(other.strides_)
-        {
-            // other.data_ is now null automatically due to move
-        }
-
-        // move assignment
-        accessor_t& operator=(accessor_t&& other) noexcept
-        {
-            if (this != &other) {
-                data_    = std::move(other.data_);
-                arena_   = std::move(other.arena_);
-                domain_  = other.domain_;
-                strides_ = other.strides_;
-            }
-            return *this;
-        }
+        ~accessor_t() = default;
+        // copy / move semantics (cheap shallow copy)
+        accessor_t(const accessor_t& other)                = default;
+        accessor_t& operator=(const accessor_t& other)     = default;
+        accessor_t(accessor_t&& other) noexcept            = default;
+        accessor_t& operator=(accessor_t&& other) noexcept = default;
 
         // host-device element access
         DUAL const T& operator[](coordinate_t<Dims> coord) const
