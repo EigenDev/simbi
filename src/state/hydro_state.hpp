@@ -61,6 +61,7 @@ namespace simbi::state {
             // numerics
             real gamma;
             real plm_theta;
+            real viscosity;
             real cfl;
             real time;
             real tend;
@@ -234,6 +235,7 @@ namespace simbi::state {
             meta_data_t metadata = {
               .gamma               = init.gamma,
               .plm_theta           = init.plm_theta,
+              .viscosity           = init.viscosity,
               .cfl                 = init.cfl,
               .time                = init.time,
               .tend                = init.tend,

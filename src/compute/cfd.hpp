@@ -18,6 +18,7 @@
 #include "update/rk.hpp"
 #include "utility/enums.hpp"
 
+#include <cmath>
 #include <cstdint>
 #include <type_traits>
 
@@ -218,6 +219,197 @@ namespace simbi::cfd {
     // =================================================================
     // Flux Computation Operations
     // =================================================================
+    // viscous stress computation
+
+    // cylindrical/spherical coordinate gradients
+    template <typename PrimField, typename MeshConfig>
+    DEV auto compute_curvilinear_gradients(
+        const PrimField& prims,
+        const auto& coord,
+        const MeshConfig& mesh
+    )
+    {
+        constexpr auto dims = PrimField::value_type::dimensions;
+        constexpr auto geom = MeshConfig::geometry;
+
+        real dv_dx[dims][dims] = {};
+        const auto widths      = mesh::cell_widths(coord, mesh);
+        const auto cent        = mesh::centroid(coord, mesh);
+
+        for (std::uint64_t d = 0; d < dims; ++d) {
+            const auto offset = unit_vectors::logical_offset<dims>(d);
+            const real dx     = widths[d];
+
+            const auto v_plus  = prims[coord + offset].vel;
+            const auto v_minus = prims[coord - offset].vel;
+            const auto dv      = (v_plus - v_minus) / (2.0 * dx);
+
+            for (std::uint64_t i = 0; i < dims; ++i) {
+                if constexpr (geom == Geometry::CYLINDRICAL) {
+                    // cylindrical metric corrections
+                    if (d == dims - 1) {   // radial derivative
+                        dv_dx[i][d] = dv[i];
+                    }
+                    else if (d == dims - 2 &&
+                             dims > 1) {   // azimuthal derivative
+                        const real r = cent[dims - 1];
+                        dv_dx[i][d]  = dv[i] / r;   // 1/r ∂/∂φ
+                    }
+                    else {   // z derivative
+                        dv_dx[i][d] = dv[i];
+                    }
+                }
+                else if constexpr (geom == Geometry::SPHERICAL) {
+                    // spherical metric corrections
+                    if (d == dims - 1) {   // radial derivative
+                        dv_dx[i][d] = dv[i];
+                    }
+                    else if (d == dims - 2 && dims > 1) {   // theta derivative
+                        const real r = cent[dims - 1];
+                        dv_dx[i][d]  = dv[i] / r;
+                    }
+                    else if (d == dims - 3 && dims > 2) {   // phi derivative
+                        const real r     = cent[dims - 1];
+                        const real theta = cent[dims - 2];
+                        dv_dx[i][d]      = dv[i] / (r * std::sin(theta));
+                    }
+                }
+            }
+        }
+
+        return dv_dx;
+    }
+
+    // generalized velocity gradient computation accounting for coordinate
+    // system
+    template <typename PrimField, typename MeshConfig>
+    DEV auto compute_velocity_gradients(
+        const PrimField& prims,
+        const auto& coord,
+        const MeshConfig& mesh
+    )
+    {
+        constexpr auto dims = PrimField::dimensions;
+        constexpr auto geom = MeshConfig::geometry;
+
+        // velocity gradient tensor
+        vector_t<vector_t<real, dims>, dims> dv_dx;
+
+        if constexpr (geom == Geometry::CARTESIAN) {
+            // standard cartesian gradients
+            const auto widths = mesh::cell_widths(coord, mesh);
+
+            for (std::uint64_t d = 0; d < dims; ++d) {
+                const auto offset = unit_vectors::logical_offset<dims>(d);
+                const real dx     = widths[d];
+
+                const auto v_plus  = prims[coord + offset].vel;
+                const auto v_minus = prims[coord - offset].vel;
+                const auto dv      = (v_plus - v_minus) / (2.0 * dx);
+
+                for (std::uint64_t i = 0; i < dims; ++i) {
+                    dv_dx[i][d] = dv[i];
+                }
+            }
+        }
+        else {
+            // need metric tensor corrections for curvilinear coordinates
+            return compute_curvilinear_gradients(prims, coord, mesh);
+        }
+
+        return dv_dx;
+    }
+
+    // extract stress components for flux direction
+    template <std::uint64_t dims>
+    DEV auto
+    extract_stress_flux(const real (&sigma)[dims][dims], std::uint64_t dir)
+    {
+        using vec_t = vector_t<real, dims>;
+        vec_t stress_flux{};
+
+        for (std::uint64_t i = 0; i < dims; ++i) {
+            stress_flux[i] = sigma[i][dir];   // sigma column for direction j
+        }
+
+        return stress_flux;
+    }
+
+    // compute full stress tensor at cell center
+    template <typename PrimField, typename MeshConfig>
+    DEV auto compute_stress_tensor(
+        const PrimField& prims,
+        const auto& coord,
+        const MeshConfig& mesh,
+        real nu
+    )
+    {
+        constexpr auto dims = PrimField::dimensions;
+
+        // get velocity gradients
+        auto dv_dx = compute_velocity_gradients(prims, coord, mesh);
+
+        // compute divergence
+        real div_v = 0.0;
+        for (std::uint64_t i = 0; i < dims; ++i) {
+            div_v += dv_dx[i][i];
+        }
+
+        // dynamic viscosity
+        const auto rho = prims[coord].rho;
+        const auto mu  = rho * nu;
+
+        // assemble stress tensor
+        vector_t<vector_t<real, dims>, dims> sigma;
+        for (std::uint64_t i = 0; i < dims; ++i) {
+            for (std::uint64_t j = 0; j < dims; ++j) {
+                if (i == j) {
+                    // diagonal components
+                    sigma[i][j] = 2.0 * mu * (dv_dx[i][j] - div_v / 3.0);
+                }
+                else {
+                    // off-diagonal components
+                    sigma[i][j] = mu * (dv_dx[i][j] + dv_dx[j][i]);
+                }
+            }
+        }
+
+        return sigma;
+    }
+
+    // viscous stress computation
+    template <typename PrimField, typename MeshConfig>
+    DEV auto viscous_stress_flux(
+        const PrimField& prims,
+        const auto& coord,
+        std::uint64_t dir,
+        const MeshConfig& mesh,
+        real nu
+    )
+    {
+        constexpr auto dims = PrimField::dimensions;
+
+        // get cells on either side of interface
+        const auto offset     = unit_vectors::logical_offset<dims>(dir);
+        const auto left_cell  = coord - offset;
+        const auto right_cell = coord;
+
+        // compute stress tensor at both cells
+        auto stress_left  = compute_stress_tensor(prims, left_cell, mesh, nu);
+        auto stress_right = compute_stress_tensor(prims, right_cell, mesh, nu);
+
+        // average stress tensor to interface
+        real avg_stress[dims][dims] = {};
+        for (std::uint64_t i = 0; i < dims; ++i) {
+            for (std::uint64_t j = 0; j < dims; ++j) {
+                avg_stress[i][j] =
+                    0.5 * (stress_left[i][j] + stress_right[i][j]);
+            }
+        }
+
+        // extract stress flux for this direction
+        return extract_stress_flux<dims>(avg_stress, dir);
+    }
 
     /**
      * compute interface fluxes using Riemann solvers
@@ -237,6 +429,7 @@ namespace simbi::cfd {
         const auto shock_smoother = state.metadata.shock_smoother;
         const auto plm_theta      = state.metadata.plm_theta;
         const auto prims          = state.prim[mesh.domain];
+        const auto nu             = state.metadata.viscosity;
 
         return compute_field_t{
           [=] DEV(auto coord) {
@@ -249,7 +442,12 @@ namespace simbi::cfd {
               const auto vface = mesh::face_velocity(coord, dir, mesh);
 
               // solve Riemann problem
-              return ops.flux(pl, pr, nhat, vface, gamma, shock_smoother);
+              auto flux = ops.flux(pl, pr, nhat, vface, gamma, shock_smoother);
+              if (nu > 0) {
+                  auto visc = viscous_stress_flux(prims, coord, dir, mesh, nu);
+                  flux.mom  = flux.mom + visc;
+              }
+              return flux;
           },
           make_domain(face_domain.shape())
         };
