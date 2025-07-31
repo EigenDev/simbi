@@ -1,7 +1,6 @@
 #include "utility/helpers.hpp"
 #include "config.hpp"
 #include "io/exceptions.hpp"
-#include "types/alias.hpp"
 #include "utility/enums.hpp"
 #include <algorithm>
 #include <atomic>

@@ -5,7 +5,6 @@
 #include "containers/vector.hpp"   // for vector_t
 #include "enums.hpp"
 #include "functional/monad/maybe.hpp"
-#include "types/alias.hpp"
 #include <cstdint>
 #include <exception>
 #include <list>
