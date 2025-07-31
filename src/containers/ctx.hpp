@@ -1,5 +1,5 @@
-#ifndef SIMBI_DATA_CTX_HPP
-#define SIMBI_DATA_CTX_HPP
+#ifndef DATA_CTX_HPP
+#define DATA_CTX_HPP
 
 #include "base/concepts.hpp"
 #include "config.hpp"

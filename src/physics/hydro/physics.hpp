@@ -1,5 +1,5 @@
-#ifndef SIMBI_PHYSICS_HPP
-#define SIMBI_PHYSICS_HPP
+#ifndef PHYSICS_HPP
+#define PHYSICS_HPP
 
 #include "base/concepts.hpp"   // for is_hydro_primitive_c, is_mhd_primitive_c, is_rmhd_c, is_srhd_c, is_hydro_conserved_c
 #include "config.hpp"          // for global::using_four_velocity

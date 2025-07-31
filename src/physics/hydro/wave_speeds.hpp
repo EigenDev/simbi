@@ -1,5 +1,5 @@
-#ifndef SIMBI_PHYSICS_WAVE_SPEEDS_HPP
-#define SIMBI_PHYSICS_WAVE_SPEEDS_HPP
+#ifndef PHYSICS_WAVE_SPEEDS_HPP
+#define PHYSICS_WAVE_SPEEDS_HPP
 
 #include "base/concepts.hpp"
 #include "config.hpp"               // for DEV, real, global
@@ -449,4 +449,4 @@ namespace simbi::hydro {
     }
 }   // namespace simbi::hydro
 
-#endif   // SIMBI_PHYSICS_WAVE_SPEEDS_HPP
+#endif   // PHYSICS_WAVE_SPEEDS_HPP

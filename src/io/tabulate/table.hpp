@@ -1,5 +1,5 @@
-#ifndef SIMBI_TABLE_HPP
-#define SIMBI_TABLE_HPP
+#ifndef TABLE_HPP
+#define TABLE_HPP
 
 #include <chrono>
 #include <cstddef>
@@ -456,4 +456,4 @@ namespace simbi {
     }   // namespace io
 }   // namespace simbi
 
-#endif   // SIMBI_MODERN_TABLE_HPP
+#endif   // MODERN_TABLE_HPP

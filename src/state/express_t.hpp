@@ -1,5 +1,5 @@
-#ifndef SIMBI_STATE_EXPRESSION_HPP
-#define SIMBI_STATE_EXPRESSION_HPP
+#ifndef STATE_EXPRESSION_HPP
+#define STATE_EXPRESSION_HPP
 
 #include "base/concepts.hpp"
 #include "config.hpp"

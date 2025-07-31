@@ -1,5 +1,5 @@
-#ifndef SIMBI_STENCIL_VIEW_HPP
-#define SIMBI_STENCIL_VIEW_HPP
+#ifndef STENCIL_VIEW_HPP
+#define STENCIL_VIEW_HPP
 
 #include "base/stencil.hpp"
 #include "containers/vector.hpp"
@@ -115,4 +115,4 @@ namespace simbi::base::stencils {
     }
 }   // namespace simbi::base::stencils
 
-#endif   // SIMBI_STENCIL_VIEW_HPP
+#endif   // STENCIL_VIEW_HPP

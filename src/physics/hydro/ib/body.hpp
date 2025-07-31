@@ -1,5 +1,5 @@
-#ifndef SIMBI_BODY_HPP
-#define SIMBI_BODY_HPP
+#ifndef BODY_HPP
+#define BODY_HPP
 
 #include "config.hpp"
 #include "containers/vector.hpp"

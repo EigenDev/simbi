@@ -1,5 +1,5 @@
-#ifndef SIMBI_HYDRO_HLLE_HPP
-#define SIMBI_HYDRO_HLLE_HPP
+#ifndef HYDRO_HLLE_HPP
+#define HYDRO_HLLE_HPP
 
 // HLLE is the same for all regimes, so it can be defined here
 #include "base/concepts.hpp"

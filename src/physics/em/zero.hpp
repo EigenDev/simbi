@@ -1,5 +1,5 @@
-#ifndef SIMBI_CT_ZERO_HPP
-#define SIMBI_CT_ZERO_HPP
+#ifndef CT_ZERO_HPP
+#define CT_ZERO_HPP
 
 #include "config.hpp"
 #include "containers/vector.hpp"
@@ -19,4 +19,4 @@ namespace simbi::em {
         const vector_t<real, 4>& cell_e_fields
     );
 }   // namespace simbi::em
-#endif   // SIMBI_CT_ZERO_HPP
+#endif   // CT_ZERO_HPP

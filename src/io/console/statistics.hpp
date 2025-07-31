@@ -226,4 +226,4 @@ namespace simbi {
     }   // namespace statistics
 }   // namespace simbi
 
-#endif   // SIMBI_STATISTICS_HPP
+#endif   // STATISTICS_HPP

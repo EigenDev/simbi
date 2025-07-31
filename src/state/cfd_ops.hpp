@@ -1,5 +1,5 @@
-#ifndef SIMBI_CFD_OPERATIONS_HPP
-#define SIMBI_CFD_OPERATIONS_HPP
+#ifndef CFD_OPERATIONS_HPP
+#define CFD_OPERATIONS_HPP
 
 #include "base/stencil_view.hpp"
 #include "config.hpp"

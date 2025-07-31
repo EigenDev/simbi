@@ -1,5 +1,5 @@
-#ifndef SIMBI_CORE_GRAPH_STENCIL_HPP
-#define SIMBI_CORE_GRAPH_STENCIL_HPP
+#ifndef CORE_GRAPH_STENCIL_HPP
+#define CORE_GRAPH_STENCIL_HPP
 
 #include "base/concepts.hpp"
 #include "containers/vector.hpp"

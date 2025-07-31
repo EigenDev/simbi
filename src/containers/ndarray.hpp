@@ -282,4 +282,4 @@ namespace simbi::nd {
 
 }   // namespace simbi::nd
 
-#endif   // SIMBI_NDARRAY_SYSTEM_HPP
+#endif   // NDARRAY_SYSTEM_HPP

@@ -1,5 +1,5 @@
-#ifndef SIMBI_EOS_IDEAL_HPP
-#define SIMBI_EOS_IDEAL_HPP
+#ifndef EOS_IDEAL_HPP
+#define EOS_IDEAL_HPP
 
 #include "config.hpp"
 #include "utility/enums.hpp"

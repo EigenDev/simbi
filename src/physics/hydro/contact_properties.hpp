@@ -1,5 +1,5 @@
-#ifndef SIMBI_PHYSICS_CONTACT_PROPERTIES
-#define SIMBI_PHYSICS_CONTACT_PROPERTIES
+#ifndef PHYSICS_CONTACT_PROPERTIES
+#define PHYSICS_CONTACT_PROPERTIES
 
 #include "base/concepts.hpp"   // for is_hydro_primitive_c, is_hydro_conserved_c, is_srhd_c, is_relativistic_c
 #include "config.hpp"              // for real, DEV

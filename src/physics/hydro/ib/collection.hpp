@@ -1,5 +1,5 @@
-#ifndef SIMBI_BODY_COLLECTION_HPP
-#define SIMBI_BODY_COLLECTION_HPP
+#ifndef BODY_COLLECTION_HPP
+#define BODY_COLLECTION_HPP
 
 #include "body.hpp"
 #include "config.hpp"

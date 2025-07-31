@@ -1,5 +1,5 @@
-#ifndef SIMBI_BODY_FACrealORY_HPP
-#define SIMBI_BODY_FACrealORY_HPP
+#ifndef BODY_FACTORY_HPP
+#define BODY_FACTORY_HPP
 
 #include "body.hpp"
 #include "collection.hpp"
@@ -7,9 +7,9 @@
 #include "containers/vector.hpp"
 #include "utility/config_dict.hpp"
 #include "utility/init_conditions.hpp"
+
 #include <cmath>
 #include <cstdint>
-#include <iostream>
 #include <list>
 #include <numbers>
 #include <optional>

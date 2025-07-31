@@ -1,5 +1,5 @@
-#ifndef SIMBI_CFD_OPS_HPP
-#define SIMBI_CFD_OPS_HPP
+#ifndef CFD_OPS_HPP
+#define CFD_OPS_HPP
 
 #include "base/stencil_view.hpp"
 #include "compute/field.hpp"
@@ -511,4 +511,4 @@ namespace simbi::cfd {
     }
 }   // namespace simbi::cfd
 
-#endif   // SIMBI_CFD_OPS_HPP
+#endif   // CFD_OPS_HPP

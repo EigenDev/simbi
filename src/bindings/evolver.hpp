@@ -1,5 +1,5 @@
-#ifndef SIMBI_BINDINGS_STATE_HPP
-#define SIMBI_BINDINGS_STATE_HPP
+#ifndef BINDINGS_STATE_HPP
+#define BINDINGS_STATE_HPP
 
 #include "config.hpp"
 #include <functional>

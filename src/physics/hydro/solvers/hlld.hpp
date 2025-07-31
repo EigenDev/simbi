@@ -1,5 +1,5 @@
-#ifndef SIMBI_HYDRO_HLLD_HPP
-#define SIMBI_HYDRO_HLLD_HPP
+#ifndef HYDRO_HLLD_HPP
+#define HYDRO_HLLD_HPP
 
 #include "base/concepts.hpp"   // for is_hydro_primitive_c, is_mhd_primitive_c
 #include "config.hpp"          // for global::epsilon
@@ -368,4 +368,4 @@ namespace simbi::hydro::rmhd {
     };
 }   // namespace simbi::hydro::rmhd
 
-#endif   // SIMBI_HYDRO_HLLD_HPP
+#endif   // HYDRO_HLLD_HPP

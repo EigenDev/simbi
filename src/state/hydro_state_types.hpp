@@ -1,5 +1,5 @@
-#ifndef SIMBI_STATE_HYDRO_STATE_TYPES_HPP
-#define SIMBI_STATE_HYDRO_STATE_TYPES_HPP
+#ifndef STATE_HYDRO_STATE_TYPES_HPP
+#define STATE_HYDRO_STATE_TYPES_HPP
 
 #include "containers/state_struct.hpp"
 #include "utility/enums.hpp"
@@ -39,4 +39,4 @@ namespace simbi::state {
     };
 }   // namespace simbi::state
 
-#endif   // SIMBI_STATE_HYDRO_STATE_TYPES_HPP
+#endif   // STATE_HYDRO_STATE_TYPES_HPP

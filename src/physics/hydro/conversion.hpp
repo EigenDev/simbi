@@ -1,5 +1,5 @@
-#ifndef SIMBI_PHYSICS_CONVERSION_HPP
-#define SIMBI_PHYSICS_CONVERSION_HPP
+#ifndef PHYSICS_CONVERSION_HPP
+#define PHYSICS_CONVERSION_HPP
 
 #include "base/concepts.hpp"            // for is_hydro_conserved_c
 #include "config.hpp"                   // for global::epsilon

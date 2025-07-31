@@ -1,5 +1,5 @@
-#ifndef SIMBI_GEOMETRY_CT_EXTENSIONS_HPP
-#define SIMBI_GEOMETRY_CT_EXTENSIONS_HPP
+#ifndef GEOMETRY_CT_EXTENSIONS_HPP
+#define GEOMETRY_CT_EXTENSIONS_HPP
 
 #include "config.hpp"
 #include "containers/vector.hpp"
@@ -201,4 +201,4 @@ namespace simbi::em {
     }
 }   // namespace simbi::em
 
-#endif   // SIMBI_GEOMETRY_CT_EXTENSIONS_HPP
+#endif   // GEOMETRY_CT_EXTENSIONS_HPP

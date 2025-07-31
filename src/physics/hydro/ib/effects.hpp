@@ -1,5 +1,5 @@
-#ifndef SIMBI_BODY_EXPR_EFFECTS_HPP
-#define SIMBI_BODY_EXPR_EFFECTS_HPP
+#ifndef BODY_EXPR_EFFECTS_HPP
+#define BODY_EXPR_EFFECTS_HPP
 
 #include "base/concepts.hpp"
 #include "body.hpp"
@@ -304,4 +304,4 @@ namespace simbi::body::expr {
     };
 }   // namespace simbi::body::expr
 
-#endif   // SIMBI_BODY_EXPR_EFFECTS_HPP
+#endif   // BODY_EXPR_EFFECTS_HPP

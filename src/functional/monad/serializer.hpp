@@ -1,5 +1,5 @@
-#ifndef SIMBI_SERIALIZATION_HPP
-#define SIMBI_SERIALIZATION_HPP
+#ifndef SERIALIZATION_HPP
+#define SERIALIZATION_HPP
 
 #include "compute/field.hpp"   // for field_t<T, Dims>
 #include "config.hpp"          // for real, DEV, etc
@@ -1044,4 +1044,4 @@ namespace simbi::io {
 
 }   // namespace simbi::io
 
-#endif   // SIMBI_SERIALIZATION_HPP
+#endif   // SERIALIZATION_HPP

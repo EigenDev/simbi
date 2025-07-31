@@ -1,5 +1,5 @@
-#ifndef SIMBI_HYDRO_DISPATCH_HPP
-#define SIMBI_HYDRO_DISPATCH_HPP
+#ifndef HYDRO_DISPATCH_HPP
+#define HYDRO_DISPATCH_HPP
 
 #include "config.hpp"
 #include "containers/vector.hpp"
@@ -609,4 +609,4 @@ namespace simbi::dispatch {
 
 }   // namespace simbi::dispatch
 
-#endif   // SIMBI_HYDRO_DISPATCH_HPP
+#endif   // HYDRO_DISPATCH_HPP

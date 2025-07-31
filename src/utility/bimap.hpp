@@ -1,5 +1,5 @@
-#ifndef SIMBI_UTILITY_BIMAP_HPP
-#define SIMBI_UTILITY_BIMAP_HPP
+#ifndef UTILITY_BIMAP_HPP
+#define UTILITY_BIMAP_HPP
 
 #include <algorithm>
 #include <array>

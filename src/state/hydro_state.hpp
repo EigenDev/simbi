@@ -1,5 +1,5 @@
-#ifndef SIMBI_STATE_HYDRO_STATE_HPP
-#define SIMBI_STATE_HYDRO_STATE_HPP
+#ifndef STATE_HYDRO_STATE_HPP
+#define STATE_HYDRO_STATE_HPP
 
 #include "compute/field.hpp"
 #include "config.hpp"
@@ -335,4 +335,4 @@ namespace simbi::state {
     };
 }   // namespace simbi::state
 
-#endif   // SIMBI_STATE_HYDRO_STATE_HPP
+#endif   // STATE_HYDRO_STATE_HPP

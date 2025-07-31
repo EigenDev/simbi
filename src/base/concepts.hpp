@@ -1,5 +1,5 @@
-#ifndef SIMBI_CONCEPTS_HPP
-#define SIMBI_CONCEPTS_HPP
+#ifndef CONCEPTS_HPP
+#define CONCEPTS_HPP
 
 #include "config.hpp"
 #include "utility/enums.hpp"

@@ -194,4 +194,4 @@ namespace simbi::mesh {
     }
 }   // namespace simbi::mesh
 
-#endif   // SIMBI_MESH_MESH_CONFIG_HPP
+#endif   // MESH_MESH_CONFIG_HPP

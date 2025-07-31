@@ -1,5 +1,5 @@
-#ifndef SIMBI_HYDRO_HLLC_HPP
-#define SIMBI_HYDRO_HLLC_HPP
+#ifndef HYDRO_HLLC_HPP
+#define HYDRO_HLLC_HPP
 
 #include "base/concepts.hpp"                 // for is_hydro_primitive_c
 #include "config.hpp"                        // for DEV macro

@@ -1,5 +1,5 @@
-#ifndef SIMBI_MESH_OPS_HPP
-#define SIMBI_MESH_OPS_HPP
+#ifndef MESH_OPS_HPP
+#define MESH_OPS_HPP
 
 #include "base/concepts.hpp"
 #include "config.hpp"

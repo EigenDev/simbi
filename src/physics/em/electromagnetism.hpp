@@ -1,5 +1,5 @@
-#ifndef SIMBI_PHYSICS_EM_HPP
-#define SIMBI_PHYSICS_EM_HPP
+#ifndef PHYSICS_EM_HPP
+#define PHYSICS_EM_HPP
 
 #include "base/concepts.hpp"
 #include "config.hpp"

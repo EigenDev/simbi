@@ -1,5 +1,5 @@
-#ifndef SIMBI_CT_CONTACT_HPP
-#define SIMBI_CT_CONTACT_HPP
+#ifndef CT_CONTACT_HPP
+#define CT_CONTACT_HPP
 
 #include "config.hpp"
 #include "containers/vector.hpp"
@@ -19,4 +19,4 @@ namespace simbi::em {
         const vector_t<real, 4>& density_fluxes
     );
 }   // namespace simbi::em
-#endif   // SIMBI_CT_CONTACT_HPP
+#endif   // CT_CONTACT_HPP
