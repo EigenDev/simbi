@@ -6,7 +6,7 @@
 #include "config.hpp"
 #include "containers/state_ops.hpp"
 #include "containers/vector.hpp"
-#include "math/domain.hpp"
+#include "domain/domain.hpp"
 #include "mesh/mesh_ops.hpp"
 #include "physics/em/perm.hpp"
 #include "physics/hydro/ib/body.hpp"
