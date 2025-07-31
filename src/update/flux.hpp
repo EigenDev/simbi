@@ -16,11 +16,16 @@ namespace simbi::cfd {
     );
 }
 namespace simbi {
+    struct bfield_parameter {
+        bool advance_bfields = true;
+    };
+
     template <typename HydroState, typename CfdOps, typename MeshConfig>
     void update_staggered_fields(
         HydroState& state,
         const CfdOps& ops,
-        const MeshConfig& mesh
+        const MeshConfig& mesh,
+        bfield_parameter params = {.advance_bfields = true}
     )
     {
         for (std::uint64_t dir = 0; dir < HydroState::dimensions; ++dir) {
@@ -38,8 +43,10 @@ namespace simbi {
             // applied since we do not save the edge-centered
             // electric fields but rather compute them
             // on-the-fly,
-            boundary::apply_flux_bcs(state, mesh);
-            em::update_magnetic_fields(state, mesh);
+            if (params.advance_bfields) {
+                boundary::apply_flux_bcs(state, mesh);
+                em::update_magnetic_fields(state, mesh);
+            }
         }
     }
 
