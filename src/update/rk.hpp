@@ -16,6 +16,7 @@ namespace simbi {
     // RK2 step
     namespace rk {
         using namespace simbi::structs;
+
         template <typename HydroState, typename MeshConfig, typename CfdOps>
         auto rk2_step(
             HydroState& workspace,
@@ -34,12 +35,12 @@ namespace simbi {
 
             auto u1  = workspace.cons.clone();
             auto u1c = u1[mesh.domain];
-            u1c      = u1c.map([=](const auto coord, const auto u) {
+            u1c      = u1c.map([k1, dt](const auto coord, const auto u) {
                 return u | add_gas(k1(coord) * dt);
             });
 
             // === intermediate state u_star ===
-            workspace.cons = u1.map([=](auto u) { return u; });
+            workspace.cons = u1.map([](auto u) { return u; });
             if constexpr (HydroState::is_mhd) {
                 // correct energy density from CT algorithm
                 em::update_energy_density(workspace, mesh);
@@ -48,7 +49,12 @@ namespace simbi {
 
             // === k2 evaluation ===
             hydro::recover_primitives(workspace);
-            update_staggered_fields(workspace, ops, mesh);
+            update_staggered_fields(
+                workspace,
+                ops,
+                mesh,
+                {.advance_bfields = false}
+            );
             auto k2 = cfd::godunov_op(workspace, mesh);
 
             auto unc = un[mesh.domain];
@@ -60,13 +66,12 @@ namespace simbi {
             );
 
             // final update
-            workspace.cons = un.map([=](auto u) { return u; });
+            workspace.cons = un.map([](auto u) { return u; });
             if constexpr (HydroState::is_mhd) {
                 // correct energy density from CT algorithm
                 em::update_energy_density(workspace, mesh);
             }
             boundary::apply_boundary_conditions(workspace, mesh);
-
             hydro::recover_primitives(workspace);
             update_timestep(workspace, mesh);
 
