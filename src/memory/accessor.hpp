@@ -1,7 +1,7 @@
 #ifndef UNIFIED_ACCESSOR_HPP
 #define UNIFIED_ACCESSOR_HPP
 
-#include "buffer_pool.hpp"
+#include "arena.hpp"
 #include "config.hpp"
 #include "containers/vector.hpp"
 #include "domain/domain.hpp"
@@ -24,8 +24,8 @@ namespace simbi::mem {
     template <typename T, std::uint64_t Dims>
     class accessor_t
     {
-        buffer_id_t buffer_id_;
-        std::shared_ptr<buffer_pool_t<T>> pool_;
+        std::shared_ptr<T[]> data_;
+        std::shared_ptr<arena_t<T>> arena_;
         domain_t<Dims> domain_;
         iarray<Dims> strides_;
 
@@ -38,30 +38,80 @@ namespace simbi::mem {
 
         accessor_t(
             domain_t<Dims> domain,
-            std::shared_ptr<buffer_pool_t<T>> pool = global_buffer_pool<T>()
+            std::shared_ptr<arena_t<T>> arena = global_arena<T>()
         )
-            : pool_(std::move(pool)),
+            : arena_(std::move(arena)),
               domain_(domain),
               strides_(compute_strides(domain.shape()))
         {
-            buffer_id_ = pool_->allocate(domain_.size());
+            data_ = arena_->get(domain_.size());
         }
 
-        // copy semantics - share buffer via shared_ptr
-        accessor_t(const accessor_t&)            = default;
-        accessor_t& operator=(const accessor_t&) = default;
-        accessor_t(accessor_t&&)                 = default;
-        accessor_t& operator=(accessor_t&&)      = default;
+        ~accessor_t() {}
+
+        // copy ctor
+        accessor_t(const accessor_t& other)
+            : arena_(other.arena_),
+              domain_(other.domain_),
+              strides_(other.strides_)
+        {
+            if (other.data_) {   // check if other has valid data
+                data_ = arena_->get(domain_.size());
+                std::copy_n(other.data(), domain_.size(), this->data());
+            }
+            // if other.data_ is null, data_ remains null (default constructed)
+        }
+
+        // assignment operator
+        accessor_t& operator=(const accessor_t& other)
+        {
+            if (this != &other) {
+                arena_   = other.arena_;
+                domain_  = other.domain_;
+                strides_ = other.strides_;
+
+                if (other.data_) {
+                    data_ = arena_->get(domain_.size());
+                    std::copy_n(other.data(), domain_.size(), this->data());
+                }
+                else {
+                    data_.reset();   // clear our data
+                }
+            }
+            return *this;
+        }
+
+        // move ctor
+        accessor_t(accessor_t&& other) noexcept
+            : data_(std::move(other.data_)),
+              arena_(std::move(other.arena_)),
+              domain_(other.domain_),
+              strides_(other.strides_)
+        {
+            // other.data_ is now null automatically due to move
+        }
+
+        // move assignment
+        accessor_t& operator=(accessor_t&& other) noexcept
+        {
+            if (this != &other) {
+                data_    = std::move(other.data_);
+                arena_   = std::move(other.arena_);
+                domain_  = other.domain_;
+                strides_ = other.strides_;
+            }
+            return *this;
+        }
 
         // host-device element access
         DUAL const T& operator[](coordinate_t<Dims> coord) const
         {
-            return pool_->get_data(buffer_id_)[compute_offset(coord)];
+            return data_.get()[compute_offset(coord)];
         }
 
         DUAL T& operator[](coordinate_t<Dims> coord)
         {
-            return pool_->get_data(buffer_id_)[compute_offset(coord)];
+            return data_.get()[compute_offset(coord)];
         }
 
         DUAL const T& operator()(coordinate_t<Dims> coord) const
@@ -70,30 +120,30 @@ namespace simbi::mem {
         }
 
         // direct data access
-        DUAL const T* data() const { return pool_->get_data(buffer_id_); }
+        DUAL const T* data() const { return data_.get(); }
 
-        DUAL T* data() { return pool_->get_data(buffer_id_); }
+        DUAL T* data() { return data_.get(); }
 
         // queries
         const domain_t<Dims>& domain() const { return domain_; }
         std::size_t size() const { return domain_.size(); }
-        bool is_allocated() const { return pool_ && pool_->exists(buffer_id_); }
+        bool is_allocated() const { return static_cast<bool>(data_); }
 
         // materialization interface for compute fields
         template <typename ComputeField, typename Executor>
         void commit(const ComputeField& computation, const Executor& executor)
         {
             // ensure we have a valid pool
-            if (!pool_) {
-                pool_ = global_buffer_pool<T>();
+            if (!arena_) {
+                arena_ = global_arena<T>();
             }
 
             // ensure we have allocated memory
             if (!is_allocated()) {
                 // allocate with same domain as computation
-                buffer_id_ = pool_->allocate(computation.domain().size());
-                domain_    = computation.domain();
-                strides_   = compute_strides(domain_.shape());
+                data_    = arena_->get(computation.domain().size());
+                domain_  = computation.domain();
+                strides_ = compute_strides(domain_.shape());
             }
 
             using source_result_t = ComputeField::value_type;
@@ -139,7 +189,7 @@ namespace simbi::mem {
 
         auto clone() const
         {
-            auto new_accessor = accessor_t{domain_, pool_};
+            auto new_accessor = accessor_t{domain_, arena_};
             std::copy_n(this->data(), size(), new_accessor.data());
             return new_accessor;
         }
@@ -147,7 +197,7 @@ namespace simbi::mem {
         // factory methods
         static auto zeros(
             const iarray<Dims>& shape,
-            std::shared_ptr<buffer_pool_t<T>> pool = global_buffer_pool<T>()
+            std::shared_ptr<arena_t<T>> pool = global_arena<T>()
         )
         {
             auto domain   = make_domain(shape);
@@ -163,7 +213,7 @@ namespace simbi::mem {
         static auto from_numpy(
             T* numpy_data,
             const iarray<Dims>& shape,
-            std::shared_ptr<buffer_pool_t<T>> pool = global_buffer_pool<T>()
+            std::shared_ptr<arena_t<T>> pool = global_arena<T>()
         )
         {
             auto domain   = make_domain(shape);
