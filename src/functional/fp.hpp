@@ -918,7 +918,6 @@ namespace simbi::fp {
                 using value_type =
                     typename std::iterator_traits<decltype(begin)>::value_type;
                 // For empty range, return default-constructed value
-                // This might need adjustment based on your needs
                 return value_type{};
             }
 

@@ -1,151 +1,272 @@
-#ifndef SIMBI_NDARRAY_SYSTEM_HPP
-#define SIMBI_NDARRAY_SYSTEM_HPP
+#ifndef NDARRAY_HPP
+#define NDARRAY_HPP
 
 #include "base/concepts.hpp"
 #include "config.hpp"
-#include "memory/unified.hpp"
+#include "memory/device.hpp"
+#include "memory/span.hpp"
 
 #include <cstddef>
 #include <cstdint>
-#include <memory>
 #include <stdexcept>
+#include <string>
 #include <vector>
 
 namespace simbi::nd {
     using namespace simbi::concepts;
     using namespace simbi::mem;
-    // =============================================================================
-    // Memory-Backed ndarray_t
-    // =============================================================================
+
     template <typename T, std::uint64_t Dims = 1>
     class ndarray_t
     {
       private:
-        std::unique_ptr<unified_memory_t<T>> memory_;
+        device_owned_span_t<T> memory_;
         std::uint64_t size_ = 0;
+
+        void ensure_cpu_accessible(const char* operation) const
+        {
+            if (is_on_gpu()) {
+                throw std::runtime_error(
+                    std::string(operation) +
+                    " requires cpu memory - call move_to_cpu() first"
+                );
+            }
+        }
 
       public:
         using value_type                    = T;
         static constexpr std::uint64_t rank = Dims;
 
+        // construction
         ndarray_t() = default;
 
-        // construction
-        ndarray_t(const std::uint64_t& size)
-            : memory_(std::make_unique<unified_memory_t<T>>(size)), size_(size)
+        explicit ndarray_t(std::uint64_t size, bool use_gpu = global::on_gpu)
+            : memory_(size, use_gpu), size_(size)
         {
         }
 
-        // move constructor
-        ndarray_t(ndarray_t&& other) noexcept
-            : memory_(std::move(other.memory_)), size_(other.size_)
+        // move semantics
+        ndarray_t(ndarray_t&&) noexcept            = default;
+        ndarray_t& operator=(ndarray_t&&) noexcept = default;
+
+        // copy semantics (explicit deep copy)
+        ndarray_t(const ndarray_t& other)
+            : memory_(other.size_, other.is_on_gpu()), size_(other.size_)
         {
-            other.size_ = 0;   // reset other's size
+            if (size_ > 0) {
+                if (other.is_on_gpu()) {
+                    memory_.copy_from_device(other.memory_, size_);
+                }
+                else {
+                    memory_.copy_from_host(other.memory_.data(), size_);
+                }
+            }
         }
 
-        // move assignment
-        ndarray_t& operator=(ndarray_t&& other) noexcept
+        ndarray_t& operator=(const ndarray_t& other)
         {
             if (this != &other) {
-                memory_     = std::move(other.memory_);
-                size_       = other.size_;
-                other.size_ = 0;   // reset other's size
+                memory_ =
+                    device_owned_span_t<T>(other.size_, other.is_on_gpu());
+                size_ = other.size_;
+                if (size_ > 0) {
+                    if (other.is_on_gpu()) {
+                        memory_.copy_from_device(other.memory_, size_);
+                    }
+                    else {
+                        memory_.copy_from_host(other.memory_.data(), size_);
+                    }
+                }
             }
             return *this;
         }
 
-        // from vector
-        ndarray_t(const std::vector<T>& vec)
-            : memory_(std::make_unique<unified_memory_t<T>>(vec.size())),
-              size_(vec.size())
+        // from vector (always starts on cpu)
+        explicit ndarray_t(const std::vector<T>& vec)
+            : memory_(vec.size(), false), size_(vec.size())
         {
-            std::copy(vec.begin(), vec.end(), memory_->data());
+            if (!vec.empty()) {
+                memory_.copy_from_host(vec.data(), vec.size());
+            }
         }
 
-        // element access (immutable)
-        DUAL T& operator[](const std::uint64_t idx)
+        // element access (cpu only, bounds checked in debug)
+        DUAL T& operator[](std::uint64_t idx)
         {
-            return memory_->data()[idx];
+            if constexpr (global::bounds_checking) {
+                if (idx >= size_) {
+                    throw std::out_of_range("ndarray index out of bounds");
+                }
+            }
+            return memory_.data()[idx];
         }
 
-        DUAL const T& operator[](const std::uint64_t idx) const
+        DUAL const T& operator[](std::uint64_t idx) const
         {
-            return memory_->data()[idx];
+            if constexpr (global::bounds_checking) {
+                // bounds checking only in debug mode
+                if (idx >= size_) {
+                    throw std::out_of_range("ndarray index out of bounds");
+                }
+            }
+            return memory_.data()[idx];
         }
 
-        void reserve(std::uint64_t new_size)
+        // device transfers - copy operations (immutable)
+        [[nodiscard]] ndarray_t copy_to_gpu() const
         {
-            if (!memory_) {
-                memory_ = std::make_unique<unified_memory_t<T>>(new_size);
+            if (is_on_gpu()) {
+                return *this;   // copy constructor handles deep copy
+            }
+
+            ndarray_t gpu_copy(size_, true);
+            if (size_ > 0) {
+                gpu_copy.memory_.copy_from_host(memory_.data(), size_);
+            }
+            return gpu_copy;
+        }
+
+        [[nodiscard]] ndarray_t copy_to_cpu() const
+        {
+            if (is_on_cpu()) {
+                return *this;   // copy constructor handles deep copy
+            }
+
+            ndarray_t cpu_copy(size_, false);
+            if (size_ > 0) {
+                memory_.copy_to_host(cpu_copy.memory_.data(), size_);
+            }
+            return cpu_copy;
+        }
+
+        // device transfers - move operations
+        void move_to_gpu()
+        {
+            if (is_on_gpu()) {
                 return;
             }
-            if (new_size > capacity()) {
-                memory_->reserve(new_size);
+
+            device_owned_span_t<T> gpu_memory(size_, true);
+            if (size_ > 0) {
+                gpu_memory.copy_from_host(memory_.data(), size_);
             }
+            memory_ = std::move(gpu_memory);
+        }
+
+        void move_to_cpu()
+        {
+            if (is_on_cpu()) {
+                return;
+            }
+
+            device_owned_span_t<T> cpu_memory(size_, false);
+            if (size_ > 0) {
+                memory_.copy_to_host(cpu_memory.data(), size_);
+            }
+            memory_ = std::move(cpu_memory);
+        }
+
+        // dynamic operations (cpu only)
+        void reserve(std::uint64_t new_capacity)
+        {
+            if (new_capacity <= capacity()) {
+                return;
+            }
+
+            device_owned_span_t<T> new_memory(new_capacity, is_on_gpu());
+            if (size_ > 0) {
+                if (is_on_gpu()) {
+                    new_memory.copy_from_device(memory_, size_);
+                }
+                else {
+                    new_memory.copy_from_host(memory_.data(), size_);
+                }
+            }
+            memory_ = std::move(new_memory);
         }
 
         void push_back(const T& value)
         {
-            memory_->data()[size_] = value;
-            size_++;
+            ensure_cpu_accessible("push_back");
+
+            if (size_ >= capacity()) {
+                std::uint64_t new_cap = capacity() == 0 ? 1 : capacity() * 2;
+                reserve(new_cap);
+            }
+
+            memory_.data()[size_] = value;
+            ++size_;
         }
 
-        void push_back_with_sync(const T& value)
+        void resize(std::uint64_t new_size)
         {
-            push_back(value);
-            ensure_host_synced();   // sync after push_back
+            if (new_size > capacity()) {
+                reserve(new_size);
+            }
+            size_ = new_size;
         }
 
-        // Enhanced memory management methods
-        void to_gpu() { memory_->to_gpu(); }
-
-        void to_cpu() { memory_->to_cpu(); }
-
-        void ensure_device_synced() { memory_->ensure_gpu_synced(); }
-
-        void ensure_host_synced() { memory_->ensure_cpu_synced(); }
-
-        void mark_host_dirty() { memory_->mark_cpu_dirty(); }
-
-        void mark_device_dirty() { memory_->mark_gpu_dirty(); }
-
-        bool is_host_synced() const { return memory_->is_cpu_valid(); }
-
-        bool is_device_synced() const { return memory_->is_gpu_valid(); }
-
-        T* cpu_data() const { return memory_->cpu_data(); }
-        T* gpu_data() const { return memory_->gpu_data(); }
-        T* data() const { return memory_->data(); }
+        // data access
+        T* data() { return memory_.data(); }
+        const T* data() const { return memory_.data(); }
 
         // properties
         std::uint64_t size() const { return size_; }
-        std::uint64_t capacity() const
-        {
-            return memory_ ? memory_->capacity() : 0;
-        }
+        std::uint64_t capacity() const { return memory_.size(); }
+        bool empty() const { return size_ == 0; }
 
-        // utility
+        bool is_on_gpu() const { return memory_.is_device_memory(); }
+        bool is_on_cpu() const { return !memory_.is_device_memory(); }
+
+        // utilities
         void fill(const T& value)
         {
-            T* ptr = memory_->data();
-            for (std::uint64_t i = 0; i < size(); ++i) {
-                ptr[i] = value;
+            if (size_ > 0) {
+                memory_.fill(value);
             }
         }
 
-        // initialization from function
         template <ArrayFunction<Dims> Func>
         void initialize_from(const Func& func)
         {
-            if (!memory_) {
-                throw std::runtime_error("ndarray_t not initialized");
+            ensure_cpu_accessible("initialize_from");
+
+            for (std::uint64_t i = 0; i < size_; ++i) {
+                memory_.data()[i] = func(i);
             }
-            for (std::uint64_t ii = 0; ii < size(); ++ii) {
-                memory_->data()[ii] = func(ii);
+        }
+
+        // conversion to vector (always creates cpu copy)
+        [[nodiscard]] std::vector<T> to_vector() const
+        {
+            if (empty()) {
+                return {};
             }
+
+            std::vector<T> result(size_);
+            if (is_on_gpu()) {
+                memory_.copy_to_host(result.data(), size_);
+            }
+            else {
+                std::copy_n(memory_.data(), size_, result.data());
+            }
+            return result;
+        }
+
+        // span access (cpu only)
+        span_t<T> span()
+        {
+            ensure_cpu_accessible("span access");
+            return span_t<T>{memory_.data(), size_};
+        }
+
+        span_t<const T> span() const
+        {
+            ensure_cpu_accessible("span access");
+            return span_t<const T>{memory_.data(), size_};
         }
     };
 
 }   // namespace simbi::nd
 
-#endif   // NDARRAY_SYSTEM_HPP
+#endif   // SIMBI_NDARRAY_SYSTEM_HPP

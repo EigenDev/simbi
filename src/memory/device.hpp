@@ -10,7 +10,7 @@
 #include <cstdint>
 #include <stdexcept>
 
-namespace simbi {
+namespace simbi::mem {
     enum class device_type_t : std::uint8_t {
         cpu,
         gpu
@@ -40,7 +40,7 @@ namespace simbi {
      * device_owned_span_t - RAII wrapper for device memory
      *
      * SRP: manage lifetime of GPU/CPU allocated memory
-     * uses your device_adapter_api underneath
+     * uses device_adapter_api underneath
      */
     template <typename T>
     class device_owned_span_t
@@ -115,16 +115,38 @@ namespace simbi {
             return span_t<const T>{data_, size_};
         }
 
+        // resize support
+        void resize(std::size_t new_size, bool use_device = global::on_gpu)
+        {
+            if (new_size == size_) {
+                return;   // no change
+            }
+
+            cleanup();   // free old memory
+
+            size_             = new_size;
+            is_device_memory_ = use_device;
+
+            if (is_device_memory_) {
+                gpu::api::malloc(
+                    reinterpret_cast<void**>(&data_),
+                    new_size * sizeof(T)
+                );
+            }
+            else {
+                data_ = new T[new_size];
+            }
+        }
+
         // direct access (use with caution for GPU memory)
-        T* data() noexcept { return data_; }
-        const T* data() const noexcept { return data_; }
+        DUAL T* data() noexcept { return data_; }
+        DUAL const T* data() const noexcept { return data_; }
 
         std::size_t size() const noexcept { return size_; }
         std::size_t size_bytes() const noexcept { return size_ * sizeof(T); }
         bool empty() const noexcept { return size_ == 0; }
         bool is_device_memory() const noexcept { return is_device_memory_; }
 
-        // memory operations using device_adapter_api
         void
         copy_from_host(const T* host_data, std::size_t count = std::size_t(-1))
         {
@@ -304,6 +326,6 @@ namespace simbi {
         );
     }
 
-}   // namespace simbi
+}   // namespace simbi::mem
 
 #endif

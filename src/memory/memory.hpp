@@ -7,8 +7,7 @@
 #include <memory>
 #include <utility>
 
-namespace simbi {
-
+namespace simbi::mem {
     /**
      * owned_span_t - RAII wrapper for owned memory
      *
@@ -210,6 +209,6 @@ namespace simbi {
         return result;
     }
 
-}   // namespace simbi
+}   // namespace simbi::mem
 
 #endif

@@ -4,9 +4,11 @@
 #include "math/expression.hpp"
 #include "utility/config_dict.hpp"
 
+#include <cstdint>
 #include <iostream>
 #include <list>
 #include <string>
+#include <tuple>
 #include <unordered_map>
 #include <vector>
 
@@ -147,9 +149,9 @@ namespace simbi::expression {
                     }
                 }
             }
-            nodes.push_back_with_sync(node);
+            nodes.push_back(node);
         }
-
+        nodes.move_to_gpu();
         return nodes;
     }
 
@@ -162,7 +164,7 @@ namespace simbi::expression {
 
         ndarray_t res(expr_data.at("output_indices")
                           .template get<std::vector<std::int64_t>>());
-        res.to_gpu();
+        res.move_to_gpu();
         return res;
     }
 
@@ -176,7 +178,7 @@ namespace simbi::expression {
         ndarray_t res(
             expr_data.at("parameters").template get<std::vector<real>>()
         );
-        res.to_gpu();
+        res.move_to_gpu();
         return res;
     }
 
@@ -189,7 +191,7 @@ namespace simbi::expression {
         auto res = ndarray_t<real>(
             expr_data.at("param_count").template get<std::int64_t>()
         );
-        res.to_gpu();
+        res.move_to_gpu();
         return res;
     }
 

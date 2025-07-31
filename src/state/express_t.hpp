@@ -150,11 +150,11 @@ namespace simbi::state {
             expr.register_count = expression::get_max_register(linear_instrs);
 
             if constexpr (platform::is_gpu) {
-                expr.nodes.to_gpu();
-                expr.output_indices.to_gpu();
-                expr.parameters.to_gpu();
-                expr.linear_instructions.to_gpu();
-                expr.output_indices_mapped.to_gpu();
+                expr.nodes.move_to_gpu();
+                expr.output_indices.move_to_gpu();
+                expr.parameters.move_to_gpu();
+                expr.linear_instructions.move_to_gpu();
+                expr.output_indices_mapped.move_to_gpu();
             }
 
             return expr;

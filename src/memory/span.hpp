@@ -3,8 +3,7 @@
 
 #include <cstddef>
 
-namespace simbi {
-
+namespace simbi::mem {
     /**
      * span_t - non-owning view of contiguous data
      *
@@ -94,6 +93,6 @@ namespace simbi {
         return {reinterpret_cast<std::byte*>(s.data), s.size_bytes()};
     }
 
-}   // namespace simbi
+}   // namespace simbi::mem
 
 #endif

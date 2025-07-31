@@ -536,11 +536,11 @@ namespace simbi::async {
     class gpu_executor_t : public executor_base_t<gpu_executor_t>
     {
       private:
-        device_id_t device_;
+        mem::device_id_t device_;
         adapter::stream_t<> stream_;
 
       public:
-        explicit gpu_executor_t(device_id_t device) : device_(device)
+        explicit gpu_executor_t(mem::device_id_t device) : device_(device)
         {
             gpu::api::set_device(device.device_id);
             gpu::api::stream_create(&stream_);
@@ -670,7 +670,7 @@ namespace simbi::async {
             });
         }
 
-        device_id_t device() const { return device_; }
+        mem::device_id_t device() const { return device_; }
         adapter::stream_t<> stream() const { return stream_; }
         void synchronize() { gpu::api::stream_synchronize(stream_); }
 
@@ -711,7 +711,7 @@ namespace simbi::async {
 
     inline auto gpu_executor(int device_id = 0) -> gpu_executor_t
     {
-        return gpu_executor_t{device_id_t::gpu_device(device_id)};
+        return gpu_executor_t{mem::device_id_t::gpu_device(device_id)};
     }
 
     inline auto default_executor(std::size_t device_id = 0)

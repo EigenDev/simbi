@@ -60,7 +60,6 @@ namespace simbi::body::expr {
             const auto r_vec = ctx.cell_pos - body.position;
             const auto r_mag = r_vec.norm();
 
-            // get softening length using your accessor
             const auto softening    = softening_length(body);
             const auto softening_sq = softening * softening;
             const auto r_eff        = std::sqrt(r_mag * r_mag + softening_sq);
@@ -102,7 +101,6 @@ namespace simbi::body::expr {
             const auto r_vec = ctx.cell_pos - body.position;
             const auto r_mag = r_vec.norm();
 
-            // get accretion properties using your accessors
             const auto accr_radius = accretion_radius(body);
 
             // skip if too far away
