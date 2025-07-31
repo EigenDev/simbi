@@ -8,6 +8,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <cstdio>
 #include <stdexcept>
 #include <string>
 #include <vector>
@@ -94,8 +95,14 @@ namespace simbi::nd {
         DUAL T& operator[](std::uint64_t idx)
         {
             if constexpr (global::bounds_checking) {
-                if (idx >= size_) {
-                    throw std::out_of_range("ndarray index out of bounds");
+                if constexpr (platform::is_cpu) {
+                    if (idx >= size_) {
+                        throw std::out_of_range("ndarray index out of bounds");
+                    }
+                }
+                else {
+                    // GPU bounds checking is not supported
+                    printf("ndarray index out of bounds: %lu", idx);
                 }
             }
             return memory_.data()[idx];
@@ -105,8 +112,14 @@ namespace simbi::nd {
         {
             if constexpr (global::bounds_checking) {
                 // bounds checking only in debug mode
-                if (idx >= size_) {
-                    throw std::out_of_range("ndarray index out of bounds");
+                if constexpr (platform::is_cpu) {
+                    if (idx >= size_) {
+                        throw std::out_of_range("ndarray index out of bounds");
+                    }
+                }
+                else {
+                    // GPU bounds checking is not supported
+                    printf("ndarray index out of bounds: %lu", idx);
                 }
             }
             return memory_.data()[idx];
