@@ -51,12 +51,11 @@
 #define ENUMS_HPP
 
 #include "bimap.hpp"
+
 #include <cstddef>
 #include <cstdint>
 
 namespace simbi {
-    using namespace simbi::utility;
-
     enum class Cellspacing {
         LINEAR,
         LOG,
