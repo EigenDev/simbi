@@ -128,6 +128,9 @@ namespace simbi::nd {
         // device transfers - copy operations (immutable)
         [[nodiscard]] ndarray_t copy_to_gpu() const
         {
+            if constexpr (platform::is_cpu) {
+                return *this;
+            }
             if (is_on_gpu()) {
                 return *this;   // copy constructor handles deep copy
             }
@@ -141,6 +144,9 @@ namespace simbi::nd {
 
         [[nodiscard]] ndarray_t copy_to_cpu() const
         {
+            if constexpr (platform::is_cpu) {
+                return *this;
+            }
             if (is_on_cpu()) {
                 return *this;   // copy constructor handles deep copy
             }
@@ -155,6 +161,9 @@ namespace simbi::nd {
         // device transfers - move operations
         void move_to_gpu()
         {
+            if constexpr (platform::is_cpu) {
+                return;
+            }
             if (is_on_gpu()) {
                 return;
             }
@@ -168,6 +177,9 @@ namespace simbi::nd {
 
         void move_to_cpu()
         {
+            if constexpr (platform::is_cpu) {
+                return;
+            }
             if (is_on_cpu()) {
                 return;
             }
