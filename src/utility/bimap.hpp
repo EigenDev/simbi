@@ -12,7 +12,7 @@
 #include <string_view>
 #include <utility>
 
-namespace simbi::utility {
+namespace simbi {
     template <typename T1, typename T2, size_t N>
     class bi_map_t
     {
@@ -138,6 +138,7 @@ namespace simbi::utility {
 
     template <typename EnumType, size_t N>
     using EnumBiMap = bi_map_t<EnumType, std::string_view, N>;
+}   // namespace simbi
 
 // convenience macro for registration
 #define REGISTER_ENUM_BIMAP(EnumType, ...)                                     \
@@ -152,6 +153,5 @@ namespace simbi::utility {
             data{{__VA_ARGS__}};                                               \
         static constexpr auto map = EnumBiMap<EnumType, data.size()>{data};    \
     };
-}   // namespace simbi::utility
 
 #endif
