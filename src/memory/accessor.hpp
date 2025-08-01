@@ -33,7 +33,7 @@ namespace simbi::mem {
         using value_type                          = T;
         static constexpr std::uint64_t dimensions = Dims;
 
-        // construction
+        // ctors
         accessor_t() = default;
 
         accessor_t(

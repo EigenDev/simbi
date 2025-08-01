@@ -20,6 +20,8 @@
 
 #include <cmath>
 #include <cstdint>
+#include <stdexcept>
+#include <string>
 #include <type_traits>
 
 namespace simbi::cfd {

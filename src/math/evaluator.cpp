@@ -34,13 +34,13 @@ namespace simbi::expression {
     std::int64_t
     get_max_register(const ndarray_t<LinearExprInstr>& instructions)
     {
-        std::int64_t max_reg = 4;   // Start with input registers
+        std::int64_t max_reg = 4;   // start with input registers
 
         for (size_t ii = 0; ii < instructions.size(); ii++) {
             const auto& instr = instructions[ii];
             max_reg           = std::max(max_reg, instr.result_register);
 
-            // Also check operands for completeness
+            // also check operands for completeness
             if (instr.op != ExprOp::CONSTANT && instr.op != ExprOp::PARAMETER) {
                 max_reg = std::max(max_reg, instr.register_operands.operand1);
                 max_reg = std::max(max_reg, instr.register_operands.operand2);
@@ -66,20 +66,20 @@ namespace simbi::expression {
         real* outputs
     )
     {
-        // Create register bank
-        // Use a fixed size array for performance - adjust MAX_REGISTERS as
-        // needed
+        // create register bank
+        // use a fixed size array for performance
+        // [TODO]: play around with this size
         constexpr std::int64_t MAX_REGISTERS = 256;
         real registers[MAX_REGISTERS]        = {0.0};
 
-        // Initialize input registers
+        // init input registers
         registers[0] = x1;
         registers[1] = x2;
         registers[2] = x3;
         registers[3] = t;
         registers[4] = dt;   // if needed
 
-        // Execute each instruction in reverse order
+        // execute each instruction in reverse order
         for (std::uint64_t ii = 0; ii < instruction_count; ii++) {
             const auto& instr             = instructions[ii];
             const std::int64_t result_reg = instr.result_register;
@@ -99,7 +99,7 @@ namespace simbi::expression {
                 case ExprOp::VARIABLE_X3:
                 case ExprOp::VARIABLE_T:
                 case ExprOp::VARIABLE_DT:
-                    // Already handled in initialization
+                    // already handled in initialization
                     break;
 
                 case ExprOp::PARAMETER:
@@ -132,7 +132,7 @@ namespace simbi::expression {
                             "%llu\n",
                             ii
                         );
-                        registers[result_reg] = 0.0;   // Handle gracefully
+                        registers[result_reg] = 0.0;   // handle gracefully
                         break;
                     }
                     registers[result_reg] =
@@ -144,7 +144,7 @@ namespace simbi::expression {
                 case ExprOp::POWER: {
                     real base     = registers[instr.register_operands.operand1];
                     real exponent = registers[instr.register_operands.operand2];
-                    // Handle potential domain errors
+                    // handle potential domain errors
                     if (base == 0.0 && exponent < 0.0) {
                         printf(
                             "[ExprError] Zero raised to negative power in "
@@ -460,14 +460,14 @@ namespace simbi::expression {
             }
         }
 
-        // Copy results to output array
+        // copy results to output array
         for (std::uint64_t i = 0; i < output_count; i++) {
             std::int64_t reg_idx = mapped_output_indices[i];
             if (reg_idx >= 0 && reg_idx < MAX_REGISTERS) {
                 outputs[i] = registers[reg_idx];
             }
             else {
-                outputs[i] = 0.0;   // Fallback for invalid register
+                outputs[i] = 0.0;   // fallback for invalid register
             }
         }
     }
@@ -631,7 +631,7 @@ namespace simbi::expression {
                     dt,
                     parameters
                 );
-                // Handle potential domain errors
+                // handle potential domain errors
                 if (base == 0.0 && exponent < 0.0) {
                     HANDLE_ERROR("Zero raised to negative power");
                 }
@@ -1829,18 +1829,18 @@ namespace simbi::expression {
                             else if (entry.children_needed == 2) {
                                 // binary op - need both left and right
                                 if (entry.children_evaluated == 0) {
-                                    // Process left child first
+                                    // process left child first
                                     child_idx = node.children.left;
                                 }
                                 else {
-                                    // Then process right child
+                                    // then process right child
                                     child_idx = node.children.right;
                                 }
                             }
                             else if (entry.children_needed == 3) {
                                 // ternary op (if-then-else)
                                 if (entry.children_evaluated == 0) {
-                                    // First evaluate condition
+                                    // first evaluate condition
                                     child_idx = node.ternary.condition;
                                 }
                                 else if (entry.children_evaluated == 1) {

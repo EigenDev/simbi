@@ -452,14 +452,8 @@ namespace simbi {
             return maybe_t<T>{Nothing};
         }
 
-        // implicit conversion to bool
-        // DUAL constexpr explicit operator bool() const { return valid; }
-
         // implicit conversion to T
         DUAL constexpr operator T() const { return this_value; }
-
-        // implicit conversion to T
-        // DUAL constexpr operator T() && { return std::move(this_value); }
 
       private:
         bool valid;

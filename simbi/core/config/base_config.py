@@ -88,6 +88,12 @@ class SimbiBaseConfig(CLIConfigurableModel):
         TimeStepping.RK2, description="Time stepping method"
     )
 
+    order: Optional[int] = SimbiField(
+        None,
+        description="Order of accuracy (time & space) for the simulation",
+        json_schema_extra={"cli_info": {"choices": [1, 2]}},
+    )
+
     x1_spacing: CellSpacing = SimbiField(
         CellSpacing.LINEAR, description="Spacing in x1 direction"
     )
@@ -338,6 +344,23 @@ class SimbiBaseConfig(CLIConfigurableModel):
     def locally_isothermal(self) -> bool:
         """Check if the simulation is locally isothermal"""
         return False
+
+    @model_validator(mode="after")
+    def enforce_order_settings(self) -> "SimbiBaseConfig":
+        """Enforce reconstruction and timestepping based on order parameter."""
+        if self.order is not None:
+            if self.order == 1:
+                # Override with first-order settings
+                object.__setattr__(self, "reconstruction", Reconstruction.PCM)
+                object.__setattr__(self, "timestepping", TimeStepping.RK1)
+            elif self.order == 2:
+                # Override with second-order settings
+                object.__setattr__(self, "reconstruction", Reconstruction.PLM)
+                object.__setattr__(self, "timestepping", TimeStepping.RK2)
+            else:
+                raise ValueError("Order parameter must be either 1 or 2")
+
+        return self
 
     @model_validator(mode="after")
     def validate_isothermal_settings(self) -> "SimbiBaseConfig":

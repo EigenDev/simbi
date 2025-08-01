@@ -6,12 +6,12 @@
 #include <cstdint>
 
 namespace simbi::state {
-    // Type traits to select the correct primitive/conserved type based on
+    // type traits to select the correct primitive/conserved type based on
     // regime
     template <Regime R, std::uint64_t Dims, typename EoS>
     struct vtraits;
 
-    // Specialization for NEWTONIAN regime
+    // specialization for NEWTONIAN regime
     template <std::uint64_t Dims, typename EoS>
     struct vtraits<Regime::NEWTONIAN, Dims, EoS> {
         using conserved_type =
@@ -20,7 +20,7 @@ namespace simbi::state {
             typename structs::primitive_t<Regime::NEWTONIAN, Dims, EoS>;
     };
 
-    // Specialization for SRHD regime
+    // specialization for SRHD regime
     template <std::uint64_t Dims, typename EoS>
     struct vtraits<Regime::SRHD, Dims, EoS> {
         using conserved_type =
@@ -29,7 +29,7 @@ namespace simbi::state {
             typename structs::primitive_t<Regime::SRHD, Dims, EoS>;
     };
 
-    // Specialization for RMHD regime
+    // specialization for RMHD regime
     template <std::uint64_t Dims, typename EoS>
     struct vtraits<Regime::RMHD, Dims, EoS> {
         using conserved_type =

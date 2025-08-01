@@ -3,10 +3,10 @@
 
 #include "containers/vector.hpp"
 #include "domain.hpp"
+#include "functional/fp.hpp"
 
 #include <cstddef>
 #include <cstdint>
-#include <iostream>
 #include <utility>
 
 namespace simbi::domain_algebra {
@@ -234,7 +234,7 @@ namespace simbi::domain_algebra {
 
         // for each dimension, generate exactly 3 intervals: {before, overlap,
         // after}
-        vector_t<std::array<interval_t, 3>, Dims> interval_sets;
+        vector_t<vector_t<interval_t, 3>, Dims> interval_sets;
 
         for (std::uint64_t dim = 0; dim < Dims; ++dim) {
             interval_sets[dim] = {

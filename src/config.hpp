@@ -2,14 +2,7 @@
  * config.hpp - Modern configuration system for SIMBI
  *
  * This file provides a type-safe, compile-time configuration system
- * that improves upon the basic preprocessor defines from build_options.hpp.
  *
- * Design principles:
- * - Minimize preprocessor usage (they're error-prone and hard to debug)
- * - Favor compile-time constants over runtime checks
- * - Create clear namespaces with logical grouping
- * - Provide backward compatibility where needed
- * - Support proper IDE tooling and static analysis
  */
 #ifndef CONFIG_HPP
 #define CONFIG_HPP

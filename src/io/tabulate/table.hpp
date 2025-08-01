@@ -314,12 +314,10 @@ namespace simbi {
             ThemeConfig get_theme_config(TableTheme theme) const;
 
           public:
-            // constructors
             Table();
             explicit Table(TableTheme theme);
             Table(BorderStyle style, DisplayMode mode = DisplayMode::Static);
 
-            // destructor
             ~Table();
 
             // disable copy constructor and assignment to avoid issues

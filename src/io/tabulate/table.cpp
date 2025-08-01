@@ -1,7 +1,9 @@
 #include "table.hpp"
+
 #include <algorithm>
 #include <chrono>
 #include <cstddef>
+#include <cstdint>
 #include <cstdlib>
 #include <ctime>
 #include <fstream>

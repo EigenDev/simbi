@@ -4,6 +4,7 @@
 #include "body.hpp"
 #include "config.hpp"
 #include "containers/vector.hpp"
+
 #include <cassert>
 #include <cstddef>
 #include <cstdint>
@@ -21,7 +22,8 @@ namespace simbi::body {
         gravitational_body_t<Dims>,
         black_hole_t<Dims>,
         planet_t<Dims>
-        // add more combinations as needed
+        // add more combinations as needed (maybe...)
+        // [TODO]: revisit later
         >;
 
     struct binary_system_config_t {
@@ -47,7 +49,6 @@ namespace simbi::body {
         // constructors
         constexpr body_collection_t() = default;
 
-        // add body with perfect forwarding
         template <typename Body>
         constexpr auto add(Body&& body) &&
         {
@@ -60,7 +61,6 @@ namespace simbi::body {
             return std::move(*this);
         }
 
-        // immutable add (returns new collection)
         template <typename Body>
         constexpr auto add(Body&& body) const&
         {
@@ -68,17 +68,14 @@ namespace simbi::body {
             return std::move(result).add(std::forward<Body>(body));
         }
 
-        // size and capacity
         constexpr std::size_t size() const { return size_; }
         constexpr std::size_t capacity() const { return MaxBodies; }
         constexpr bool empty() const { return size_ == 0; }
         constexpr bool full() const { return size_ == MaxBodies; }
 
-        // iteration support
         constexpr auto begin() const { return bodies_.begin(); }
         constexpr auto end() const { return bodies_.begin() + size_; }
 
-        // indexed access
         constexpr const auto& operator[](std::size_t idx) const
         {
             if constexpr (global::bounds_checking) {
@@ -127,7 +124,7 @@ namespace simbi::body {
             visit_with_capability<capabilities::rigid_tag>(visitor);
         }
 
-        // fo integration b/c I dig it a lot lately
+        // fp integration b/c I dig it a lot lately
         template <typename Op>
         constexpr auto operator|(Op&& op) const
         {
@@ -161,7 +158,6 @@ namespace simbi::body {
             return count_with_capability(capabilities::rigid_tag{});
         }
 
-        // find body by index
         template <typename Predicate>
         constexpr auto find_if(Predicate&& pred) const
         {
@@ -170,11 +166,10 @@ namespace simbi::body {
                     return i;
                 }
             }
-            return size_;   // not found
+            return size_;
         }
     };
 
-    // factory functions for fluent interface
     template <std::uint64_t Dims, std::uint64_t MaxBodies = 8>
     constexpr auto make_body_collection()
     {
@@ -279,7 +274,6 @@ namespace simbi::body {
         }
     }
 
-    // functional programming helpers
     namespace collection_ops {
         // map operation over collection
         template <typename Func>

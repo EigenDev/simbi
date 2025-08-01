@@ -109,7 +109,7 @@ namespace simbi {
     template <typename T>
     inline constexpr bool is_maybe_v = is_maybe<std::decay_t<T>>::value;
 
-    // Check if type has value_type member
+    // check if type has value_type member
     template <typename T, typename = void>
     struct has_value_type : std::false_type {
     };
@@ -119,10 +119,10 @@ namespace simbi {
         : std::true_type {
     };
 
-    // Get value_type safely
+    // get value_type safely
     template <typename T, typename Enable = void>
     struct get_value_type {
-        using type = T;   // Fallback to T if no value_type
+        using type = T;   // fallback to T if no value_type
     };
 
     template <typename T>
@@ -163,36 +163,36 @@ namespace simbi {
     template <typename T>
     struct function_traits;
 
-    // Specialization for regular function types
+    // specialization for regular function types
     template <typename Ret, typename... Args>
     struct function_traits<Ret(Args...)> {
         using return_type                  = Ret;
         using signature                    = Ret(Args...);
         static constexpr std::size_t arity = sizeof...(Args);
 
-        // Get argument type by index
+        // get argument type by index
         template <std::size_t I>
         using arg_type = std::tuple_element_t<I, std::tuple<Args...>>;
     };
 
-    // Specialization for function pointers
+    // specialization for function pointers
     template <typename Ret, typename... Args>
     struct function_traits<Ret (*)(Args...)> : function_traits<Ret(Args...)> {
     };
 
-    // Specialization for member function pointers
+    // specialization for member function pointers
     template <typename Class, typename Ret, typename... Args>
     struct function_traits<Ret (Class::*)(Args...)>
         : function_traits<Ret(Args...)> {
     };
 
-    // Specialization for const member function pointers
+    // specialization for const member function pointers
     template <typename Class, typename Ret, typename... Args>
     struct function_traits<Ret (Class::*)(Args...) const>
         : function_traits<Ret(Args...)> {
     };
 
-    // Specialization for std::function
+    // specialization for std::function
     template <typename Ret, typename... Args>
     struct function_traits<std::function<Ret(Args...)>>
         : function_traits<Ret(Args...)> {

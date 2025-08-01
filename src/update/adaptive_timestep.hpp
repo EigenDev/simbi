@@ -13,10 +13,6 @@
 #include <limits>
 
 namespace simbi {
-    // ============================================================================
-    // ADAPTIVE TIMESTEP CALCULATION
-    // ============================================================================
-
     // pure timestep computation function (unchanged)
     template <typename prim_t, std::uint64_t Dims>
     real compute_local_timestep(
@@ -85,43 +81,6 @@ namespace simbi {
             [](real a, real b) { return std::min(a, b); }
         );
     }
-
-    // ============================================================================
-    // ALTERNATIVE: FULLY FUNCTIONAL APPROACH
-    // ============================================================================
-
-    template <typename HydroState, typename MeshConfig>
-    auto
-    compute_timestep_functional(const HydroState& state, const MeshConfig& mesh)
-    {
-        const auto gamma = state.metadata.gamma;
-        const auto cfl   = state.metadata.cfl;
-
-        auto prim_field = state.prim.at(mesh.full_domain);
-
-        auto width_field = field(mesh.full_domain, [mesh](auto coord) {
-            return mesh::cell_widths(coord, mesh);
-        });
-
-        auto timestep_field = prim_field.zip(
-            width_field,
-            [gamma, cfl](const auto& prim, const auto& widths) {
-                return compute_local_timestep(prim, widths, gamma, cfl);
-            }
-        );
-
-        auto executor = async::default_executor();
-        return executor.reduce(
-            timestep_field.domain_,
-            std::numeric_limits<real>::max(),
-            [&timestep_field](auto coord) { return timestep_field(coord); },
-            [](real a, real b) { return std::min(a, b); }
-        );
-    }
-
-    // ============================================================================
-    // CLEAN INTERFACE
-    // ============================================================================
 
     template <typename HydroState, typename MeshConfig>
     void update_timestep(HydroState& state, const MeshConfig& mesh)

@@ -25,7 +25,6 @@
 
 namespace simbi::state {
     using namespace body::factory;
-    // using namespace ibsystem;
 
     /**
      * modern implementation of hydro_state_t using mesh abstractions

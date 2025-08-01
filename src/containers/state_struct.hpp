@@ -274,9 +274,9 @@ namespace simbi::structs {
     {
         // os << "Primitive State (Regime: " << serialize(R) << ", Dims: " <<
         // Dims
-        //    << "):\n";
+        //    << "):";
         os << "( " << p.rho << ", ";
-        os << p.vel << ", " << p.pre << ", " << p.chi << " )\n";
+        os << p.vel << ", " << p.pre << ", " << p.chi << " )";
 
         return os;
     }
@@ -288,9 +288,9 @@ namespace simbi::structs {
     {
         // os << "Conserved State (Regime: " << serialize(R) << ", Dims: " <<
         // Dims
-        //    << "):\n";
+        //    << "):";
         os << "( " << c.den << ", ";
-        os << c.mom << ", " << c.nrg << ", " << c.chi << " )\n";
+        os << c.mom << ", " << c.nrg << ", " << c.chi << " )";
         return os;
     }
 
@@ -300,10 +300,9 @@ namespace simbi::structs {
     operator<<(std::ostream& os, const mhd_primitive_t<R, Dims, EoS>& p)
     {
         // os << "MHD Primitive State (Regime: " << serialize(R)
-        //    << ", Dims: " << Dims << "):\n";
+        //    << ", Dims: " << Dims << "):";
         os << "( " << p.rho << ", ";
-        os << p.vel << ", " << p.pre << ", " << p.mag << ", " << p.chi
-           << " )\n";
+        os << p.vel << ", " << p.pre << ", " << p.mag << ", " << p.chi << " )";
         return os;
     }
 
@@ -313,10 +312,9 @@ namespace simbi::structs {
     operator<<(std::ostream& os, const mhd_conserved_t<R, Dims, EoS>& c)
     {
         // os << "MHD Primitive State (Regime: " << serialize(R)
-        //    << ", Dims: " << Dims << "):\n";
+        //    << ", Dims: " << Dims << "):";
         os << "( " << c.den << ", ";
-        os << c.mom << ", " << c.nrg << ", " << c.mag << ", " << c.chi
-           << " )\n";
+        os << c.mom << ", " << c.nrg << ", " << c.mag << ", " << c.chi << " )";
         return os;
     }
 }   // namespace simbi::structs

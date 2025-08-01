@@ -5,12 +5,8 @@
 #include "containers/vector.hpp"
 
 namespace simbi::em {
-    // Constrained transport contact algorithm developed by Gardiner & Stone
+    // constrained transport contact algorithm developed by Gardiner & Stone
     // https://ui.adsabs.harvard.edu/abs/2005JCoPh.205..509G/abstract
-
-    // ========================================================================
-    // CT CONTACT EMF COMPUTATION
-    // ========================================================================
 
     // CT Contact formula (Gardiner & Stone Eq. 51)
     DEV real ct_contact_formula(

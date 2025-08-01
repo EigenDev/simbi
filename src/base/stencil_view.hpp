@@ -24,7 +24,6 @@ namespace simbi::base::stencils {
         iarray<Dims> base_coord_;
         std::uint64_t direction_;
 
-        // direct stencil gathering - no intermediate fields!
         stencil_values_t left_values() const
         {
             auto pattern = base::stencil_t<Dims, Rec>::left_pattern(direction_);
@@ -59,7 +58,6 @@ namespace simbi::base::stencils {
         }
     };
 
-    // factory function for clean stencil creation
     template <
         Reconstruction Rec,
         typename field_type,
@@ -74,8 +72,6 @@ namespace simbi::base::stencils {
     }
 
     // === RECONSTRUCTION INTERFACE ===
-    // reconstruction that works directly with stencil values
-
     template <Reconstruction Rec, typename T>
     T reconstruct_left(
         const vector_t<T, base::stencil_size<Rec>()>& values,

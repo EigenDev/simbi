@@ -50,8 +50,8 @@ namespace simbi::expression {
     // evaluate a vector of expressions (e.g., for 3D vector results)
     DEV void evaluate_expr_vector(
         const ExprNode* nodes,
-        const std::int64_t* root_indices,   // array of root node indices
-        std::int64_t num_components,   // number of components in the vector
+        const std::int64_t* root_indices,
+        std::int64_t num_components,
         real x1,
         real x2,
         real x3,

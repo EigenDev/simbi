@@ -35,7 +35,6 @@ namespace simbi::body {
     template <typename Tag, typename First, typename... Rest>
     struct find_capability_index<Tag, First, Rest...> {
       private:
-        // check if the current capability has the tag we're looking for
         static constexpr bool is_match =
             std::is_same_v<Tag, typename First::tag_type>;
 
@@ -44,8 +43,6 @@ namespace simbi::body {
             find_capability_index<Tag, Rest...>::value;
 
       public:
-        // if current is a match, index is 0, otherwise add 1 to next match
-        // index
         static constexpr std::size_t value =
             is_match ? 0
                      : (next_index == std::numeric_limits<std::size_t>::max()
@@ -65,14 +62,12 @@ namespace simbi::body {
         std::unordered_map<std::string, T> scalars;
         std::unordered_map<std::string, bool> flags;
 
-        // helper to check if body has a capability
         bool has_capability(const std::string& cap) const
         {
             auto it = flags.find(cap);
             return it != flags.end() && it->second;
         }
 
-        // helper to get scalar property with default
         T get_scalar(const std::string& key, T default_val = T{0}) const
         {
             auto it = scalars.find(key);
@@ -136,7 +131,6 @@ namespace simbi::body {
         using caps_tuple                     = std::tuple<Caps...>;
         static constexpr std::uint64_t ncaps = sizeof...(Caps);
 
-        // core properties (always present)
         vector_t<real, Dims> position;
         vector_t<real, Dims> velocity;
         vector_t<real, Dims> force;
@@ -146,7 +140,6 @@ namespace simbi::body {
         bool two_way_coupling;
         std::uint64_t index;
 
-        // capabilities stored as tuple
         std::tuple<Caps...> capabilities;
 
         template <typename Tag>
@@ -356,7 +349,9 @@ namespace simbi::body {
           two_way_coupling,
           0,   // index will be set later
           std::make_tuple(
-              grav_component_t{0.0},   // no softening for planets
+              grav_component_t{
+                0.0
+              },   // no softening for planets (can be set later)
               rigid_component_t{inertia, apply_no_slip}
           )
         };

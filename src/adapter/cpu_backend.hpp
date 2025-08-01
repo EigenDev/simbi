@@ -77,8 +77,7 @@ namespace simbi::adapter {
 
         void malloc_managed(void** obj, std::size_t bytes)
         {
-            // on CPU, regular malloc serves as managed memory
-            malloc(obj, bytes);
+            // no-op on CPU
         }
 
         void free(void* obj) { std::free(obj); }
@@ -88,10 +87,8 @@ namespace simbi::adapter {
             std::memset(obj, val, bytes);
         }
 
-        // Event handling (using std::chrono for timing)
         void event_create(adapter::event_t<cpu_backend_tag>* event)
         {
-            // Create a new event and initialize it
             (*event).value = std::chrono::high_resolution_clock::time_point();
         }
 
@@ -105,7 +102,6 @@ namespace simbi::adapter {
             adapter::stream_t<cpu_backend_tag> /*stream*/
         )
         {
-            // record the current time
             event.value = std::chrono::high_resolution_clock::now();
         }
 
@@ -120,14 +116,13 @@ namespace simbi::adapter {
             adapter::event_t<cpu_backend_tag> end
         )
         {
-            // Calculate elapsed time between two events
             auto duration =
                 std::chrono::duration_cast<std::chrono::microseconds>(
                     end.value - start.value
                 )
                     .count();
 
-            // Convert to milliseconds to match CUDA behavior
+            // convert to milliseconds to match CUDA behavior
             *time = static_cast<float>(duration) / 1000.0f;
         }
 
@@ -135,6 +130,7 @@ namespace simbi::adapter {
         void get_device_count(int* count)
         {
             // CPU backend reports a single "device"
+            // [TODO]: update this for MPI later
             *count = 1;
         }
 
@@ -143,7 +139,6 @@ namespace simbi::adapter {
             std::int64_t device
         )
         {
-            // Validate device ID
             if (device != 0) {
                 throw error::runtime_error(
                     error::status_t::error,
@@ -152,12 +147,10 @@ namespace simbi::adapter {
                 );
             }
 
-            // Set generic CPU properties
             std::strncpy(props->name, "CPU", sizeof(props->name) - 1);
-            props->major = 1;
-            props->minor = 0;
-            props->totalGlobalMem =
-                0;   // Unknown, could use system calls to determine
+            props->major               = 1;
+            props->minor               = 0;
+            props->totalGlobalMem      = 0;
             props->multiProcessorCount = std::thread::hardware_concurrency();
             props->maxThreadsPerBlock  = 1;
             props->maxThreadsPerMultiProcessor = 1;
@@ -167,7 +160,6 @@ namespace simbi::adapter {
 
         void set_device(std::int64_t device)
         {
-            // Validate device ID (only 0 is valid for CPU)
             if (device != 0) {
                 throw error::runtime_error(
                     error::status_t::error,
@@ -182,10 +174,10 @@ namespace simbi::adapter {
             // No-op on CPU, all operations are synchronous
         }
 
-        // Stream operations (CPU fallbacks)
+        // stream operations (CPU fallbacks)
         void stream_create(adapter::stream_t<cpu_backend_tag>* stream)
         {
-            // Dummy stream for compatibility
+            // dummy stream for compatibility
             *stream = {};
         }
 
@@ -196,7 +188,7 @@ namespace simbi::adapter {
 
         void stream_synchronize(adapter::stream_t<cpu_backend_tag> /*stream*/)
         {
-            // No-op for CPU
+            // no-op for CPU
         }
 
         void stream_wait_event(
@@ -205,17 +197,17 @@ namespace simbi::adapter {
             std::uint64_t /*flags*/ = 0
         )
         {
-            // No-op for CPU
+            // no-op for CPU
         }
 
         void
         stream_query(adapter::stream_t<cpu_backend_tag> /*stream*/, int* status)
         {
-            // Always report streams as completed on CPU
+            // always report streams as completed on CPU
             *status = 0;   // 0 typically means "completed" in GPU APIs
         }
 
-        // Asynchronous operations (synchronous on CPU)
+        // asynchronous operations (synchronous on CPU)
         void async_copy_host_to_device(
             void* to,
             const void* from,
@@ -278,7 +270,7 @@ namespace simbi::adapter {
             adapter::stream_t<cpu_backend_tag> /*stream*/
         )
         {
-            // Validate device IDs (only 0 is valid for CPU)
+            // validate device IDs (only 0 is valid for CPU)
             if (dst_device != 0 || src_device != 0) {
                 throw error::runtime_error(
                     error::status_t::error,
@@ -290,7 +282,6 @@ namespace simbi::adapter {
             std::memcpy(dst, src, bytes);
         }
 
-        // Host memory management
         void host_register(
             void* /*ptr*/,
             std::size_t /*size*/,
@@ -307,7 +298,7 @@ namespace simbi::adapter {
 
         void aligned_malloc(void** ptr, std::size_t size)
         {
-            // Use aligned_alloc with 64-byte alignment (cache line size on most
+            // use aligned_alloc with 64-byte alignment (cache line size on most
             // CPUs)
             constexpr std::size_t alignment = 64;
             std::size_t aligned_size =
@@ -323,7 +314,7 @@ namespace simbi::adapter {
             }
         }
 
-        // Specialized operations
+        // specialized operations
         void
         memcpy_from_symbol(void* dst, const void* symbol, std::size_t count)
         {

@@ -4,6 +4,7 @@
 #include "base/concepts.hpp"
 #include "config.hpp"
 #include "containers/vector.hpp"
+#include "functional/fp.hpp"
 #include "mesh_config.hpp"
 #include "physics/hydro/physics.hpp"
 #include "utility/enums.hpp"

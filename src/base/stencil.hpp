@@ -36,7 +36,7 @@ namespace simbi::base {
             coord_array_t pattern{};
 
             if constexpr (Rec == Reconstruction::PCM) {
-                pattern[0][direction] = -1;   // Use left cell
+                pattern[0][direction] = -1;   // use left cell
             }
             else if constexpr (Rec == Reconstruction::PLM) {
                 // PLM: i-1, i, i+1
@@ -54,7 +54,7 @@ namespace simbi::base {
             coord_array_t pattern{};
 
             if constexpr (Rec == Reconstruction::PCM) {
-                pattern[0][direction] = 0;   // Use right cell
+                pattern[0][direction] = 0;   // use right cell
             }
             else if constexpr (Rec == Reconstruction::PLM) {
                 // PLM: i, i+1, i+2

@@ -24,7 +24,7 @@ namespace simbi::expression {
             case ExprOp::VARIABLE_X3: return 2;
             case ExprOp::VARIABLE_T: return 3;
             case ExprOp::VARIABLE_DT: return 4;
-            default: return -1;   // Invalid operation
+            default: return -1;   // invalid operation
         }
     }
 
@@ -76,7 +76,7 @@ namespace simbi::expression {
                 case ExprOp::VARIABLE_X3:
                 case ExprOp::VARIABLE_T:
                 case ExprOp::VARIABLE_DT:
-                    // Map variable to its input register
+                    // map variable to its input register
                     instr.register_operands.operand1 = op2reg(node.op);
                     break;
 
@@ -196,13 +196,13 @@ namespace simbi::expression {
             }
         }
 
-        // Now perform the actual topological sort using DFS
+        // now perform the actual topological sort using DFS
         std::function<void(int)> visit = [&](std::int64_t node_id) {
-            // Check visited status
+            // check visited status
             auto it = visited.find(node_id);
             if (it != visited.end()) {
                 if (it->second == 1) {
-                    // Temporary mark means cycle
+                    // temporary mark means cycle
                     throw std::runtime_error(
                         "Cycle detected in expression graph"
                     );
@@ -213,12 +213,12 @@ namespace simbi::expression {
                 }
             }
 
-            // Mark temporarily
+            // mark temporarily
             visited[node_id] = 1;
 
             const auto& node = nodes[node_id];
 
-            // Visit dependencies based on operation type
+            // visit dependencies based on operation type
             switch (node.op) {
                 case ExprOp::IF_THEN_ELSE:
                     visit(node.ternary.condition);
@@ -237,7 +237,7 @@ namespace simbi::expression {
                     break;
 
                 default:
-                    // Binary and unary operations
+                    // binary and unary operations
                     if (node.children.left >= 0) {
                         visit(node.children.left);
                     }
@@ -247,19 +247,19 @@ namespace simbi::expression {
                     break;
             }
 
-            // Mark permanently and add to result
+            // mark permanently and add to result
             visited[node_id] = 2;
             result.push_back(node_id);
         };
 
-        // Start the sort from each needed output node
+        // start the sort from each needed output node
         for (std::int64_t node_id : needed_nodes) {
             if (visited.find(node_id) == visited.end()) {
                 visit(node_id);
             }
         }
 
-        // Our DFS gives reverse topological order, so reverse it
+        // our DFS gives reverse topological order, so reverse it
         std::reverse(result.begin(), result.end());
     }
 }   // namespace simbi::expression

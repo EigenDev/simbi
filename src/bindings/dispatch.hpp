@@ -176,7 +176,45 @@ namespace simbi::dispatch {
             const initial_conditions_t& init
         )
         {
-            if (init.gamma > 1.0) {
+            if constexpr (R == Regime::NEWTONIAN) {
+                if (init.gamma > 1.0) {
+                    call_visitor_with_state<
+                        R,
+                        D,
+                        G,
+                        S,
+                        Rec,
+                        eos::ideal_gas_eos_t<R>>(
+                        std::forward<Visitor>(visitor),
+                        cons_data,
+                        prim_data,
+                        bfield_data,
+                        scale_factor,
+                        scale_factor_derivative,
+                        init
+                    );
+                }
+                else {
+                    call_visitor_with_state<
+                        R,
+                        D,
+                        G,
+                        S,
+                        Rec,
+                        eos::isothermal_gas_eos_t>(
+                        std::forward<Visitor>(visitor),
+                        cons_data,
+                        prim_data,
+                        bfield_data,
+                        scale_factor,
+                        scale_factor_derivative,
+                        init
+                    );
+                }
+            }
+            else {
+                // for regimes other than NEWTONIAN, we assume ideal gas EOS
+                // [TODO]: update this later
                 call_visitor_with_state<
                     R,
                     D,
@@ -184,23 +222,6 @@ namespace simbi::dispatch {
                     S,
                     Rec,
                     eos::ideal_gas_eos_t<R>>(
-                    std::forward<Visitor>(visitor),
-                    cons_data,
-                    prim_data,
-                    bfield_data,
-                    scale_factor,
-                    scale_factor_derivative,
-                    init
-                );
-            }
-            else {
-                call_visitor_with_state<
-                    R,
-                    D,
-                    G,
-                    S,
-                    Rec,
-                    eos::isothermal_gas_eos_t>(
                     std::forward<Visitor>(visitor),
                     cons_data,
                     prim_data,
@@ -493,36 +514,36 @@ namespace simbi::dispatch {
         )
         {
             switch (regime) {
-                // case Regime::NEWTONIAN:
-                //     dispatch_dimensions<Regime::NEWTONIAN>(
-                //         dims,
-                //         geometry,
-                //         solver,
-                //         rec,
-                //         std::forward<Visitor>(visitor),
-                //         cons_data,
-                //         prim_data,
-                //         bfield_data,
-                //         scale_factor,
-                //         scale_factor_derivative,
-                //         init
-                //     );
-                //     break;
-                // case Regime::SRHD:
-                //     dispatch_dimensions<Regime::SRHD>(
-                //         dims,
-                //         geometry,
-                //         solver,
-                //         rec,
-                //         std::forward<Visitor>(visitor),
-                //         cons_data,
-                //         prim_data,
-                //         bfield_data,
-                //         scale_factor,
-                //         scale_factor_derivative,
-                //         init
-                //     );
-                //     break;
+                case Regime::NEWTONIAN:
+                    dispatch_dimensions<Regime::NEWTONIAN>(
+                        dims,
+                        geometry,
+                        solver,
+                        rec,
+                        std::forward<Visitor>(visitor),
+                        cons_data,
+                        prim_data,
+                        bfield_data,
+                        scale_factor,
+                        scale_factor_derivative,
+                        init
+                    );
+                    break;
+                case Regime::SRHD:
+                    dispatch_dimensions<Regime::SRHD>(
+                        dims,
+                        geometry,
+                        solver,
+                        rec,
+                        std::forward<Visitor>(visitor),
+                        cons_data,
+                        prim_data,
+                        bfield_data,
+                        scale_factor,
+                        scale_factor_derivative,
+                        init
+                    );
+                    break;
                 case Regime::RMHD:
                     dispatch_dimensions<Regime::RMHD>(
                         dims,
