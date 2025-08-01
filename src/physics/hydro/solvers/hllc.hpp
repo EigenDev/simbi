@@ -3,7 +3,7 @@
 
 #include "base/concepts.hpp"                 // for is_hydro_primitive_c
 #include "config.hpp"                        // for DEV macro
-#include "containers/vector.hpp"             // for VectorLike
+#include "containers/vector.hpp"             // for vector_like_c
 #include "physics/em/electromagnetism.hpp"   // for shift_electric_field
 #include "physics/hydro/solvers/hlle.hpp"    // for hlle_flux
 #include "physics/hydro/wave_speeds.hpp"     // for extremal_speeds
@@ -62,7 +62,7 @@ namespace simbi::hydro {
             }
         }
 
-        template <is_hydro_primitive_c primitive_t, VectorLike UnitVector>
+        template <is_hydro_primitive_c primitive_t, vector_like_c UnitVector>
         DEV static real detect_shock_correction(
             const primitive_t& primL,
             const primitive_t& primR,
@@ -119,7 +119,7 @@ namespace simbi::hydro {
             }
         }
 
-        template <is_hydro_primitive_c primitive_t, VectorLike UnitVector>
+        template <is_hydro_primitive_c primitive_t, vector_like_c UnitVector>
         DEV static real detect_alignment_correction(
             const primitive_t& primL,
             const primitive_t& primR,
@@ -151,7 +151,7 @@ namespace simbi::hydro {
             return 0.0;   // no correction
         }
 
-        template <is_hydro_primitive_c primitive_t, VectorLike UnitVector>
+        template <is_hydro_primitive_c primitive_t, vector_like_c UnitVector>
         DEV static real compute_adaptive_phi(
             const primitive_t& primL,
             const primitive_t& primR,

@@ -75,7 +75,7 @@ namespace simbi::adapter {
             // no-op on CPU
         }
 
-        void malloc_managed(void** obj, std::size_t bytes)
+        void malloc_managed(void**, std::size_t)
         {
             // no-op on CPU
         }

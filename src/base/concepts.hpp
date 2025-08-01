@@ -3,11 +3,11 @@
 
 #include "config.hpp"
 #include "utility/enums.hpp"
+
 #include <array>
 #include <concepts>
 #include <cstddef>
 #include <cstdint>
-#include <iterator>
 #include <type_traits>
 
 namespace simbi {
@@ -18,18 +18,7 @@ namespace simbi {
 namespace simbi::concepts {
     // =============================================================================
     // Core Concepts
-    // =============================================================================
-    namespace sim_type {
-        template <Regime R>
-        concept MHD = R == Regime::RMHD;
-
-        template <Regime R>
-        concept Relativistic = R == Regime::SRHD || R == Regime::RMHD;
-
-        template <Regime R>
-        concept Newtonian = R == Regime::NEWTONIAN;
-    }   // namespace sim_type
-
+    // ============================================================================
     template <typename T>
     concept Arithmetic = std::integral<T> || std::floating_point<T>;
 
@@ -40,24 +29,6 @@ namespace simbi::concepts {
 
     template <std::uint64_t Dims>
     concept valid_dimension = (Dims >= 1 && Dims <= 3);
-
-    // concept for iterable types that support begin/end
-    template <typename T>
-    concept Iterable = requires(T t) {
-        { std::begin(t) } -> std::input_iterator;
-        { std::end(t) } -> std::sentinel_for<decltype(std::begin(t))>;
-    };
-
-    // concept for containers that support indexing and size
-    template <typename T>
-    concept Indexable = requires(T t, std::uint64_t i) {
-        { t[i] } -> std::convertible_to<typename T::value_type>;
-        { t.size() } -> std::convertible_to<std::uint64_t>;
-    };
-
-    // concept for containers that support both iterating and indexing
-    template <typename T>
-    concept Container = Iterable<T> && Indexable<T>;
 
     // concept defining a state variable - structural approach
     template <typename T>
@@ -153,25 +124,10 @@ namespace simbi::concepts {
     };
 
     template <typename T>
-    concept VectorLike = requires(T vec, size_t i) {
+    concept vector_like_c = requires(T vec, size_t i) {
         { vec[i] } -> std::convertible_to<typename T::value_type>;
         { vec.size() } -> std::convertible_to<size_t>;
         { T::dimensions } -> std::convertible_to<size_t>;
-    };
-
-    // base lazy range concept
-    template <typename T>
-    concept LazyRange = requires(T t, std::uint64_t i) {
-        { t[i] } -> std::convertible_to<typename T::value_type>;
-        { t.size() } -> std::convertible_to<std::uint64_t>;
-        typename T::value_type;
-    };
-
-    // core expression concept - defines what makes something an expression
-    template <typename T>
-    concept Expression = requires(const T& t) {
-        { t.size() } -> std::convertible_to<std::uint64_t>;
-        { t.realize() };   // all expressions must be materializable
     };
 
 }   // namespace simbi::concepts
