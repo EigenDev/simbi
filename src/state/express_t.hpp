@@ -141,13 +141,13 @@ namespace simbi::state {
             auto [linear_instrs, mapped_output] =
                 expression::linearize_expression_tree(nodes, output_indices);
 
-            expr.enabled               = true;
-            expr.nodes                 = std::move(nodes);
+            expr.enabled        = true;
+            expr.register_count = expression::get_max_register(linear_instrs);
+            expr.nodes          = std::move(nodes);
             expr.linear_instructions   = std::move(linear_instrs);
             expr.output_indices        = std::move(output_indices);
             expr.output_indices_mapped = std::move(mapped_output);
             expr.parameters            = std::move(params);
-            expr.register_count = expression::get_max_register(linear_instrs);
 
             if constexpr (platform::is_gpu) {
                 expr.nodes.move_to_gpu();

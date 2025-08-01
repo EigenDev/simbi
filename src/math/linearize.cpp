@@ -34,14 +34,14 @@ namespace simbi::expression {
         const ndarray_t<std::int64_t>& output_indices
     )
     {
-        // First identify all nodes needed for output expressions
+        // first identify all nodes needed for output expressions
         std::vector<std::int64_t> eval_order;
         topological_sort(nodes, output_indices, eval_order);
 
-        // Map tree node indices to register numbers
+        // map tree node indices to register numbers
         std::unordered_map<std::int64_t, std::int64_t> node_to_reg;
 
-        // Fixed registers for inputs
+        // fixed registers for inputs
         node_to_reg[-1] = 0;   // x1
         node_to_reg[-2] = 1;   // x2
         node_to_reg[-3] = 2;   // x3
@@ -120,7 +120,7 @@ namespace simbi::expression {
         // place leaf nodes at the front of the instruction list
         std::reverse(instructions.begin(), instructions.end());
 
-        // Create mapped output indices to match the register numbers
+        // create mapped output indices to match the register numbers
         ndarray_t<std::int64_t> mapped_output_indices(output_indices.size());
         ndarray_t<LinearExprInstr> result_instrs(instructions.size());
         for (size_t ii = 0; ii < output_indices.size(); ii++) {
@@ -140,15 +140,12 @@ namespace simbi::expression {
     )
     {
         result.clear();
-
-        // Track visited status: 0 = unvisited, 1 = temporary mark, 2 =
+        // track visited status: 0 = unvisited, 1 = temporary mark, 2 =
         // permanently marked
         std::unordered_map<std::int64_t, std::int64_t> visited;
-
-        // Set of all nodes needed for evaluation (to be populated)
+        // set of all nodes needed for evaluation (to be populated)
         std::unordered_set<std::int64_t> needed_nodes;
-
-        // First identify all nodes needed for evaluation
+        // first identify all nodes needed for evaluation
         std::stack<std::int64_t> to_process;
         for (size_t i = 0; i < output_indices.size(); i++) {
             to_process.push(output_indices[i]);
@@ -159,14 +156,14 @@ namespace simbi::expression {
             to_process.pop();
 
             if (needed_nodes.find(node_id) != needed_nodes.end()) {
-                continue;   // Already processed
+                continue;   // already processed
             }
 
             needed_nodes.insert(node_id);
 
             const auto& node = nodes[node_id];
 
-            // Add dependencies based on operation type
+            // add dependencies based on operation type
             switch (node.op) {
                 case ExprOp::IF_THEN_ELSE:
                     to_process.push(node.ternary.condition);
@@ -181,11 +178,11 @@ namespace simbi::expression {
                 case ExprOp::VARIABLE_T:
                 case ExprOp::VARIABLE_DT:
                 case ExprOp::PARAMETER:
-                    // No dependencies
+                    // no dependencies
                     break;
 
                 default:
-                    // Binary and unary operations
+                    // binary and unary operations
                     if (node.children.left >= 0) {
                         to_process.push(node.children.left);
                     }
