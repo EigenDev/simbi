@@ -498,8 +498,8 @@ namespace simbi::adapter {
                 else {   // double
                     std::uint64_t int* address_as_ull =
                         reinterpret_cast<std::uint64_t int*>(address);
-                    std::uint64_t std::int64_t old = *address_as_ull;
-                    std::uint64_t std::int64_t assumed;
+                    std::uint64_t old = *address_as_ull;
+                    std::uint64_t assumed;
 
                     do {
                         assumed = old;
