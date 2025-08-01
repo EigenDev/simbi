@@ -234,9 +234,9 @@ namespace simbi::cfd {
         constexpr auto dims = PrimField::value_type::dimensions;
         constexpr auto geom = MeshConfig::geometry;
 
-        real dv_dx[dims][dims] = {};
-        const auto widths      = mesh::cell_widths(coord, mesh);
-        const auto cent        = mesh::centroid(coord, mesh);
+        vector_t<vector_t<real, dims>, dims> dv_dx{};
+        const auto widths = mesh::cell_widths(coord, mesh);
+        const auto cent   = mesh::centroid(coord, mesh);
 
         for (std::uint64_t d = 0; d < dims; ++d) {
             const auto offset = unit_vectors::logical_offset<dims>(d);
