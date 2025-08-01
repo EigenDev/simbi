@@ -46,27 +46,27 @@ namespace simbi::fp {
             {
             }
 
-            constexpr T operator*() const { return current_; }
+            constexpr T operator*() const noexcept { return current_; }
 
-            constexpr iterator& operator++()
+            constexpr iterator& operator++() noexcept
             {
                 current_ += step_;
                 return *this;
             }
 
-            constexpr iterator operator++(int)
+            constexpr iterator operator++(int) noexcept
             {
                 auto temp = *this;
                 ++(*this);
                 return temp;
             }
 
-            constexpr bool operator==(const iterator& other) const
+            constexpr bool operator==(const iterator& other) const noexcept
             {
                 return current_ >= end_ || current_ == other.current_;
             }
 
-            constexpr bool operator!=(const iterator& other) const
+            constexpr bool operator!=(const iterator& other) const noexcept
             {
                 return !(*this == other);
             }
@@ -113,7 +113,10 @@ namespace simbi::fp {
             {
             }
 
-            constexpr value_type operator*() const { return (*gen_)(index_); }
+            constexpr value_type operator*() const noexcept
+            {
+                return (*gen_)(index_);
+            }
 
             constexpr iterator& operator++()
             {
@@ -154,8 +157,9 @@ namespace simbi::fp {
         Func func_;
 
       public:
-        constexpr map_view_t(Source source, Func func)
-            : source_(std::move(source)), func_(std::move(func))
+        template <typename S>
+        constexpr map_view_t(S&& source, Func func)
+            : source_(std::forward<S>(source)), func_(std::move(func))
         {
         }
 
@@ -181,7 +185,7 @@ namespace simbi::fp {
             {
             }
 
-            constexpr reference operator*() const
+            constexpr reference operator*() const noexcept
             {
                 return std::invoke(*func_, *it_);
             }
@@ -235,8 +239,9 @@ namespace simbi::fp {
         Pred pred_;
 
       public:
-        constexpr filter_view_t(Source source, Pred pred)
-            : source_(std::move(source)), pred_(std::move(pred))
+        template <typename S>
+        constexpr filter_view_t(S&& source, Pred pred)
+            : source_(std::forward<S>(source)), pred_(std::move(pred))
         {
         }
 
@@ -275,7 +280,7 @@ namespace simbi::fp {
                 }
             }
 
-            constexpr reference operator*() const { return *it_; }
+            constexpr reference operator*() const noexcept { return *it_; }
             constexpr iterator_t& operator++()
             {
                 ++it_;
@@ -329,8 +334,9 @@ namespace simbi::fp {
         Second second_;
 
       public:
-        constexpr zip_view_t(First first, Second second)
-            : first_(std::move(first)), second_(std::move(second))
+        template <typename F, typename S>
+        constexpr zip_view_t(F&& first, S&& second)
+            : first_(std::forward<F>(first)), second_(std::forward<S>(second))
         {
         }
 
@@ -355,7 +361,7 @@ namespace simbi::fp {
             {
             }
 
-            constexpr reference operator*() const
+            constexpr reference operator*() const noexcept
             {
                 return {*first_it_, *second_it_};
             }
@@ -415,8 +421,9 @@ namespace simbi::fp {
         std::size_t count_;
 
       public:
-        constexpr take_view_t(Source source, std::size_t count)
-            : source_(std::move(source)), count_(count)
+        template <typename S>
+        constexpr take_view_t(S&& source, std::size_t count)
+            : source_(std::forward<S>(source)), count_(count)
         {
         }
 
@@ -442,7 +449,7 @@ namespace simbi::fp {
             {
             }
 
-            constexpr reference operator*() const { return *it_; }
+            constexpr reference operator*() const noexcept { return *it_; }
             constexpr iterator_t& operator++()
             {
                 if (remaining_ > 0) {
@@ -673,7 +680,7 @@ namespace simbi::fp {
             {
             }
 
-            value_type operator*() const
+            value_type operator*() const noexcept
             {
                 auto coord = *domain_it_;
                 return {coord, func_->apply(coord, *domain_)};
@@ -771,7 +778,7 @@ namespace simbi::fp {
 
     struct sum_fn_t {
         template <iterable Range>
-        constexpr auto operator()(Range&& range) const
+        constexpr auto operator()(Range&& range) const noexcept
         {
             auto begin = std::begin(std::forward<Range>(range));
             auto end   = std::end(std::forward<Range>(range));
@@ -793,7 +800,7 @@ namespace simbi::fp {
 
     struct product_fn_t {
         template <iterable Range>
-        constexpr auto operator()(Range&& range) const
+        constexpr auto operator()(Range&& range) const noexcept
         {
             auto begin = std::begin(std::forward<Range>(range));
             auto end   = std::end(std::forward<Range>(range));
