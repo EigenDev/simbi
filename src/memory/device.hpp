@@ -9,6 +9,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <stdexcept>
+#include <utility>
 
 namespace simbi::mem {
     enum class device_type_t : std::uint8_t {
@@ -79,23 +80,19 @@ namespace simbi::mem {
         device_owned_span_t& operator=(const device_owned_span_t&) = delete;
 
         device_owned_span_t(device_owned_span_t&& other) noexcept
-            : data_(other.data_),
-              size_(other.size_),
+            : data_(std::exchange(other.data_, nullptr)),
+              size_(std::exchange(other.size_, 0)),
               is_device_memory_(other.is_device_memory_)
         {
-            other.data_ = nullptr;
-            other.size_ = 0;
         }
 
         device_owned_span_t& operator=(device_owned_span_t&& other) noexcept
         {
             if (this != &other) {
                 cleanup();
-                data_             = other.data_;
-                size_             = other.size_;
+                data_             = std::exchange(other.data_, nullptr);
+                size_             = std::exchange(other.size_, 0);
                 is_device_memory_ = other.is_device_memory_;
-                other.data_       = nullptr;
-                other.size_       = 0;
             }
             return *this;
         }
