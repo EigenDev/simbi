@@ -760,7 +760,7 @@ namespace simbi {
             bool&,
             bool&,
             std::uint64_t& nvars,
-            std::uint64_t& halo_radius
+            std::uint64_t&
         ) override
         {
             if (dimensionality < 1 || dimensionality > 3) {
@@ -768,9 +768,6 @@ namespace simbi {
             }
             if (nvars == 0) {
                 throw std::runtime_error("Number of variables cannot be zero");
-            }
-            if (halo_radius < 0) {
-                throw std::runtime_error("Halo radius cannot be negative");
             }
         }
     };
