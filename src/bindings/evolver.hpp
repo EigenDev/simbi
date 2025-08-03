@@ -2,6 +2,7 @@
 #define BINDINGS_STATE_HPP
 
 #include "config.hpp"
+
 #include <functional>
 #include <pybind11/buffer_info.h>
 #include <pybind11/numpy.h>
