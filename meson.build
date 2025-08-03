@@ -70,7 +70,6 @@ py3.extension_module(
   'cpu_ext',
   ['src/bindings/cpu_binding.cpp'] + sources,
   include_directories: [all_inc],
-  cpp_args: ['-DGPU_ENABLED=0'],
   dependencies: general_dependencies,
   install: true,
   install_dir: py_install_dir,
