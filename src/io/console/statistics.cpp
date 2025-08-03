@@ -8,7 +8,7 @@
 #include <iostream>
 #include <sstream>
 #include <string>
-#include <sys/sysctl.h>
+// #include <sys/sysctl.h>
 #include <thread>
 #include <vector>
 

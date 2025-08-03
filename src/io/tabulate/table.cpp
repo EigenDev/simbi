@@ -19,7 +19,7 @@
 #include <windows.h>
 #else
 #include <sys/ioctl.h>
-#include <sys/ttycom.h>
+// #include <sys/ttycom.h>
 #include <unistd.h>
 #endif
 
