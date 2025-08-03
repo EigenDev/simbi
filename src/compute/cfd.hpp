@@ -231,7 +231,7 @@ namespace simbi::cfd {
         const MeshConfig& mesh
     )
     {
-        constexpr auto dims = PrimField::value_type::dimensions;
+        constexpr auto dims = PrimField::dimensions;
         constexpr auto geom = MeshConfig::geometry;
 
         vector_t<vector_t<real, dims>, dims> dv_dx{};
