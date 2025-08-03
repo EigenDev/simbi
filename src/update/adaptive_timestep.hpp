@@ -77,7 +77,7 @@ namespace simbi {
         return executor.reduce(
             timestep_field.domain(),
             std::numeric_limits<real>::max(),
-            [&timestep_field](auto coord) { return timestep_field(coord); },
+            [timestep_field](auto coord) { return timestep_field(coord); },
             [](real a, real b) { return std::min(a, b); }
         );
     }
