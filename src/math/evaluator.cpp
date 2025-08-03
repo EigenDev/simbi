@@ -129,7 +129,7 @@ namespace simbi::expression {
                     if (denominator == 0.0) {
                         printf(
                             "[ExprError] Division by zero in instruction "
-                            "%llu\n",
+                            "%lu\n",
                             ii
                         );
                         registers[result_reg] = 0.0;   // handle gracefully
@@ -148,14 +148,14 @@ namespace simbi::expression {
                     if (base == 0.0 && exponent < 0.0) {
                         printf(
                             "[ExprError] Zero raised to negative power in "
-                            "instruction %llu\n",
+                            "instruction %lu\n",
                             ii
                         );
                     }
                     if (base < 0.0 && std::floor(exponent) != exponent) {
                         printf(
                             "[ExprError] Negative base with non-integer "
-                            "exponent in instruction %llu\n",
+                            "exponent in instruction %lu\n",
                             ii
                         );
                     }
