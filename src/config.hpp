@@ -8,7 +8,6 @@
 #define CONFIG_HPP
 
 #include "build_options.hpp"   // include the Meson-generated configuration
-#include <cstddef>             // for std::size_t
 #include <cstdint>             // for fixed-width integer types
 #include <type_traits>         // for std::conditional_t and other type traits
 
