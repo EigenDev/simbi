@@ -370,58 +370,58 @@ namespace simbi::dispatch {
                         init
                     );
                     break;
-                // case Geometry::CYLINDRICAL:
-                //     dispatch_solver<R, D, Geometry::CYLINDRICAL>(
-                //         solver,
-                //         rec,
-                //         std::forward<Visitor>(visitor),
-                //         cons_data,
-                //         prim_data,
-                //         bfield_data,
-                //         scale_factor,
-                //         scale_factor_derivative,
-                //         init
-                //     );
-                //     break;
-                // case Geometry::AXIS_CYLINDRICAL:
-                //     dispatch_solver<R, D, Geometry::AXIS_CYLINDRICAL>(
-                //         solver,
-                //         rec,
-                //         std::forward<Visitor>(visitor),
-                //         cons_data,
-                //         prim_data,
-                //         bfield_data,
-                //         scale_factor,
-                //         scale_factor_derivative,
-                //         init
-                //     );
-                //     break;
-                // case Geometry::PLANAR_CYLINDRICAL:
-                //     dispatch_solver<R, D, Geometry::PLANAR_CYLINDRICAL>(
-                //         solver,
-                //         rec,
-                //         std::forward<Visitor>(visitor),
-                //         cons_data,
-                //         prim_data,
-                //         bfield_data,
-                //         scale_factor,
-                //         scale_factor_derivative,
-                //         init
-                //     );
-                //     break;
-                // case Geometry::SPHERICAL:
-                //     dispatch_solver<R, D, Geometry::SPHERICAL>(
-                //         solver,
-                //         rec,
-                //         std::forward<Visitor>(visitor),
-                //         cons_data,
-                //         prim_data,
-                //         bfield_data,
-                //         scale_factor,
-                //         scale_factor_derivative,
-                //         init
-                //     );
-                //     break;
+                case Geometry::CYLINDRICAL:
+                    dispatch_solver<R, D, Geometry::CYLINDRICAL>(
+                        solver,
+                        rec,
+                        std::forward<Visitor>(visitor),
+                        cons_data,
+                        prim_data,
+                        bfield_data,
+                        scale_factor,
+                        scale_factor_derivative,
+                        init
+                    );
+                    break;
+                case Geometry::AXIS_CYLINDRICAL:
+                    dispatch_solver<R, D, Geometry::AXIS_CYLINDRICAL>(
+                        solver,
+                        rec,
+                        std::forward<Visitor>(visitor),
+                        cons_data,
+                        prim_data,
+                        bfield_data,
+                        scale_factor,
+                        scale_factor_derivative,
+                        init
+                    );
+                    break;
+                case Geometry::PLANAR_CYLINDRICAL:
+                    dispatch_solver<R, D, Geometry::PLANAR_CYLINDRICAL>(
+                        solver,
+                        rec,
+                        std::forward<Visitor>(visitor),
+                        cons_data,
+                        prim_data,
+                        bfield_data,
+                        scale_factor,
+                        scale_factor_derivative,
+                        init
+                    );
+                    break;
+                case Geometry::SPHERICAL:
+                    dispatch_solver<R, D, Geometry::SPHERICAL>(
+                        solver,
+                        rec,
+                        std::forward<Visitor>(visitor),
+                        cons_data,
+                        prim_data,
+                        bfield_data,
+                        scale_factor,
+                        scale_factor_derivative,
+                        init
+                    );
+                    break;
                 default:
                     throw unsupported_configuration(
                         "unsupported geometry: " +
