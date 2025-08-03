@@ -1,9 +1,10 @@
+#include "driver.hpp"
 #include "config.hpp"
 #include "config_converter.hpp"
 #include "evolver.hpp"
 #include "utility/config_dict.hpp"
 #include "utility/init_conditions.hpp"
-#include <functional>
+
 #include <pybind11/cast.h>
 #include <pybind11/functional.h>
 #include <pybind11/gil.h>
