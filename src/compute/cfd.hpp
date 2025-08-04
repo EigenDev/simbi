@@ -222,21 +222,7 @@ namespace simbi::cfd {
         {
             using conserved_t   = typename HydroState::conserved_t;
             constexpr auto dims = HydroState::dimensions;
-
-            // effect operators
-            auto grav_op =
-                gravitational_effect_op_t<HydroState, MeshConfig, dims>{
-                  state,
-                  mesh
-                };
-            auto accr_op = accretion_effect_op_t<HydroState, MeshConfig, dims>{
-              state,
-              mesh
-            };
-            auto rigid_op =
-                rigid_effect_op_t<HydroState, MeshConfig, dims>{state, mesh};
-
-            const auto bodies = state.bodies;
+            const auto bodies   = state.bodies;
 
             // check if we have bodies
             if (!bodies.has_value() || bodies->empty()) {
