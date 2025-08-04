@@ -5,6 +5,7 @@
 #include "utility/helpers.hpp"
 
 #include <algorithm>
+#include <cinttypes>
 #include <cmath>
 #include <cstdint>
 #include <cstdio>
@@ -129,7 +130,7 @@ namespace simbi::expression {
                     if (denominator == 0.0) {
                         printf(
                             "[ExprError] Division by zero in instruction "
-                            "%lu\n",
+                            "%" PRIu64 "n",
                             ii
                         );
                         registers[result_reg] = 0.0;   // handle gracefully
@@ -148,14 +149,14 @@ namespace simbi::expression {
                     if (base == 0.0 && exponent < 0.0) {
                         printf(
                             "[ExprError] Zero raised to negative power in "
-                            "instruction %lu\n",
+                            "instruction %" PRIu64 "n",
                             ii
                         );
                     }
                     if (base < 0.0 && std::floor(exponent) != exponent) {
                         printf(
                             "[ExprError] Negative base with non-integer "
-                            "exponent in instruction %lu\n",
+                            "exponent in instruction %" PRIu64 "n",
                             ii
                         );
                     }
