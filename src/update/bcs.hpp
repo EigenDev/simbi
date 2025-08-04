@@ -122,19 +122,22 @@ namespace simbi::boundary {
 
             // handle special spherical geometry case
             if constexpr (MeshConfig::geometry == Geometry::SPHERICAL) {
-                if (contact_dim == Dims - 2) {
-                    const auto theta_max = mesh.current_bounds_max()[Dims - 2];
-                    if (helpers::goes_to_zero(
-                            theta_max - 0.5 * std::numbers::pi
-                        ) &&
-                        contact_dir == face_side_t::plus) {
-                        modified.mom[Dims - 2] = -modified.mom[Dims - 2];
-                        return modified;
-                    }
-                    else {
-                        // theta momentum is continuous acrross the poles,
-                        // so we do not flip it
-                        return modified;
+                if constexpr (Dims > 1) {
+                    if (contact_dim == Dims - 2) {
+                        const auto theta_max =
+                            mesh.current_bounds_max()[Dims - 2];
+                        if (helpers::goes_to_zero(
+                                theta_max - 0.5 * std::numbers::pi
+                            ) &&
+                            contact_dir == face_side_t::plus) {
+                            modified.mom[Dims - 2] = -modified.mom[Dims - 2];
+                            return modified;
+                        }
+                        else {
+                            // theta momentum is continuous acrross the poles,
+                            // so we do not flip it
+                            return modified;
+                        }
                     }
                 }
             }
