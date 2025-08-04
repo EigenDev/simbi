@@ -63,8 +63,10 @@ namespace simbi {
 
             void event_destroy(adapter::event_t<> event);
 
-            void
-            event_record(adapter::event_t<> event, adapter::stream_t<> stream);
+            void event_record(
+                adapter::event_t<> event,
+                adapter::stream_t<> stream = {}
+            );
 
             void event_synchronize(adapter::event_t<> event);
 
@@ -75,7 +77,7 @@ namespace simbi {
             );
 
             // device management
-            void get_device_count(int* count);
+            void get_device_count(std::int64_t* count);
 
             void get_device_properties(
                 adapter::device_properties_t<>* props,

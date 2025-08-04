@@ -165,7 +165,7 @@ namespace simbi::hydro::rmhd {
     };
 
     template <is_mhd_primitive_c primitive_t>
-    DUAL auto hlld_flux(
+    DEV constexpr auto hlld_flux(
         const primitive_t& primL,
         const primitive_t& primR,
         const unit_vector_t<primitive_t::dimensions>& nhat,

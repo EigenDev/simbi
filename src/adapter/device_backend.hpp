@@ -131,7 +131,7 @@ namespace simbi::adapter {
         void event_elapsed_time(float* time, void* start, void* end);
 
         // device management
-        void get_device_count(int* count);
+        void get_device_count(std::int64_t* count);
         void get_device_properties(void* props, std::int64_t device);
         void set_device(std::int64_t device);
         void device_synchronize();

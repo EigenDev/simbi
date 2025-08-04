@@ -216,7 +216,7 @@ namespace simbi::hydro {
 namespace simbi::hydro::newtonian {
     using namespace simbi::concepts;
     template <is_hydro_primitive_c primitive_t>
-    DEV auto hllc_flux(
+    DEV constexpr auto hllc_flux(
         const primitive_t& primL,
         const primitive_t& primR,
         const unit_vector_t<primitive_t::dimensions>& nhat,
@@ -317,7 +317,7 @@ namespace simbi::hydro::srhd {
     using namespace simbi::concepts;
 
     template <is_hydro_primitive_c primitive_t>
-    DUAL auto hllc_flux(
+    DUAL constexpr auto hllc_flux(
         const primitive_t& primL,
         const primitive_t& primR,
         const unit_vector_t<primitive_t::dimensions>& nhat,
@@ -387,7 +387,7 @@ namespace simbi::hydro::rmhd {
     using namespace simbi::em;
 
     template <is_hydro_primitive_c primitive_t>
-    DUAL auto hllc_flux(
+    DUAL constexpr auto hllc_flux(
         const primitive_t& primL,
         const primitive_t& primR,
         const unit_vector_t<primitive_t::dimensions>& nhat,
@@ -541,7 +541,7 @@ namespace simbi::hydro::rmhd {
 namespace simbi::hydro {
     // HLLC flux function
     template <is_hydro_primitive_c primitive_t>
-    DUAL auto hllc_flux(
+    DUAL constexpr auto hllc_flux(
         const primitive_t& primL,
         const primitive_t& primR,
         const unit_vector_t<primitive_t::dimensions>& nhat,

@@ -127,7 +127,7 @@ namespace simbi::adapter {
         }
 
         // Device management
-        void get_device_count(int* count)
+        void get_device_count(std::int64_t* count)
         {
             // CPU backend reports a single "device"
             // [TODO]: update this for MPI later

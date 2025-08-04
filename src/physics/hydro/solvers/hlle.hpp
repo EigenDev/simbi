@@ -13,7 +13,7 @@
 namespace simbi::hydro {
     using namespace simbi::em;
     template <is_hydro_primitive_c primitive_t>
-    DEV auto hlle_flux(
+    DEV constexpr auto hlle_flux(
         const primitive_t& primL,
         const primitive_t& primR,
         const unit_vector_t<primitive_t::dimensions>& nhat,

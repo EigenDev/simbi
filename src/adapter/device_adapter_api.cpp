@@ -80,7 +80,7 @@ namespace simbi {
             }
 
             // device management
-            void get_device_count(int* count)
+            void get_device_count(std::int64_t* count)
             {
                 adapter::get_device_backend().get_device_count(count);
             }

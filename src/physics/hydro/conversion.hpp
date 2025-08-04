@@ -19,7 +19,7 @@ namespace simbi::hydro::newtonian {
     template <
         concepts::is_hydro_conserved_c conserved_t,
         typename EoS = ideal_gas_eos_t<conserved_t::regime>>
-    DEV auto to_primitive(const conserved_t& cons, real gamma)
+    DEV constexpr auto to_primitive(const conserved_t& cons, real gamma)
         -> maybe_t<typename conserved_t::counterpart_t>
     {
         using primitive_t = typename conserved_t::counterpart_t;
@@ -228,7 +228,7 @@ namespace simbi::hydro::rmhd {
 
 namespace simbi::hydro {
     template <is_hydro_conserved_c conserved_t>
-    DEV auto to_primitive(const conserved_t& cons, real gamma)
+    DEV constexpr auto to_primitive(const conserved_t& cons, real gamma)
     {
         if constexpr (conserved_t::regime == Regime::NEWTONIAN) {
             return newtonian::to_primitive(cons, gamma);

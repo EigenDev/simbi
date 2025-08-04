@@ -179,9 +179,9 @@ namespace simbi::adapter {
         }
 
         // Device management
-        void get_device_count(int* count)
+        void get_device_count(std::int64_t* count)
         {
-            cudaError_t status = cudaGetDeviceCount(count);
+            cudaError_t status = cudaGetDeviceCount(std::bit_cast<int*>(count));
             error::check_err(
                 cuda_error::check_cuda_error(status),
                 "CUDA get device count failed"
@@ -465,16 +465,15 @@ namespace simbi::adapter {
                     sizeof(T) == 4,
                     std::uint64_t,
                     std::uint64_t>::type;
-                IntType* address_as_std::int64_t =
-                    reinterpret_cast<IntType*>(address);
-                IntType old_val = *address_as_int;
+                IntType* address_as_int = reinterpret_cast<IntType*>(address);
+                IntType old_val         = *address_as_int;
                 IntType assumed;
 
                 do {
                     assumed      = old_val;
                     T value_as_t = *reinterpret_cast<T*>(&assumed);
                     T min_val    = (val < value_as_t) ? val : value_as_t;
-                    IntType min_val_as_std::int64_t =
+                    IntType min_val_as_int =
                         *reinterpret_cast<IntType*>(&min_val);
 
                     old_val =
@@ -496,8 +495,8 @@ namespace simbi::adapter {
                     return atomicAdd(address, val);
                 }
                 else {   // double
-                    std::uint64_t int* address_as_ull =
-                        reinterpret_cast<std::uint64_t int*>(address);
+                    std::uint64_t* address_as_ull =
+                        reinterpret_cast<std::uint64_t*>(address);
                     std::uint64_t old = *address_as_ull;
                     std::uint64_t assumed;
 
@@ -619,7 +618,7 @@ namespace simbi::adapter {
         }
 
         // Device management
-        void get_device_count(int* /*count*/)
+        void get_device_count(std::int64_t* /*count*/)
         {
             not_supported("get_device_count");
         }

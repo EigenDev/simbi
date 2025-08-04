@@ -33,6 +33,42 @@ namespace simbi::cfd {
     // Pure CFD Operations - Return compute_field_t
     // =================================================================
 
+    template <typename HydroState, typename MeshConfig>
+    struct flux_divergence_op_t {
+        HydroState state;
+        MeshConfig mesh;
+
+        DEV auto operator()(auto coord) const
+        {
+            using conserved_t   = typename HydroState::conserved_t;
+            constexpr auto dims = HydroState::dimensions;
+
+            conserved_t divergence{};
+            const auto dv    = mesh::volume(coord, mesh);
+            const auto& flux = state.flux;
+
+            // compute divergence using pre-computed fluxes
+            for (std::uint64_t dim = 0; dim < dims; ++dim) {
+                auto offset     = unit_vectors::logical_offset<dims>(dim);
+                auto coord_plus = coord + offset;
+
+                // flux values at left and right faces
+                auto fd = mesh.face_domain[dim];
+                auto fl = flux[dim][fd][coord];
+                auto fr = flux[dim][fd][coord_plus];
+
+                // geometric face areas
+                auto al = mesh::face_area(coord, dim, Dir::W, mesh);
+                auto ar = mesh::face_area(coord, dim, Dir::E, mesh);
+
+                // add contribution to divergence
+                divergence = divergence + (fr * ar - fl * al) / dv;
+            }
+
+            return divergence * (-1.0);
+        }
+    };
+
     /**
      * flux divergence using pre-computed interface fluxes
      * returns: conservative update from flux divergence
@@ -40,38 +76,38 @@ namespace simbi::cfd {
     template <typename HydroState, typename MeshConfig>
     auto flux_divergence(const HydroState& state, const MeshConfig& mesh)
     {
-        const auto flux = state.flux;
         return compute_field_t{
-          [=] DEV(auto coord) {
-              using conserved_t   = typename HydroState::conserved_t;
-              constexpr auto dims = HydroState::dimensions;
-
-              conserved_t divergence{};
-              const auto dv = mesh::volume(coord, mesh);
-
-              // compute divergence using pre-computed fluxes
-              for (std::uint64_t dim = 0; dim < dims; ++dim) {
-                  auto offset     = unit_vectors::logical_offset<dims>(dim);
-                  auto coord_plus = coord + offset;
-
-                  // flux values at left and right faces
-                  auto fd = mesh.face_domain[dim];
-                  auto fl = flux[dim][fd][coord];
-                  auto fr = flux[dim][fd][coord_plus];
-
-                  // geometric face areas
-                  auto al = mesh::face_area(coord, dim, Dir::W, mesh);
-                  auto ar = mesh::face_area(coord, dim, Dir::E, mesh);
-
-                  // add contribution to divergence
-                  divergence = divergence + (fr * ar - fl * al) / dv;
-              }
-
-              return divergence * (-1.0);
-          },
+          flux_divergence_op_t{state, mesh},
           make_domain(mesh.domain.shape())
         };
     }
+
+    template <typename HydroState, typename MeshConfig>
+    struct gravity_source_op_t {
+        HydroState state;
+        MeshConfig mesh;
+        constexpr static auto dims = HydroState::dimensions;
+
+        DEV auto operator()(auto coord) const
+        {
+            using conserved_t          = typename HydroState::conserved_t;
+            const auto* gravity_source = &state.sources.gravity_source;
+
+            if (!gravity_source->enabled) {
+                return conserved_t{};
+            }
+
+            const auto position  = mesh::centroid(coord, mesh);
+            const auto primitive = state.prim[mesh.domain][coord];
+
+            return gravity_source->apply(
+                position,
+                primitive,
+                state.metadata.time,
+                state.metadata.dt
+            );
+        }
+    };
 
     /**
      * gravity source terms
@@ -80,25 +116,37 @@ namespace simbi::cfd {
     template <typename HydroState, typename MeshConfig>
     auto gravity_sources(const HydroState& state, const MeshConfig& mesh)
     {
-        const auto time            = state.metadata.time;
-        const auto dt              = state.metadata.dt;
-        const auto* gravity_source = &state.sources.gravity_source;
-        const auto prim            = state.prim[mesh.domain];
         return compute_field_t{
-          [=] DEV(auto coord) {
-              using conserved_t = typename HydroState::conserved_t;
-              if (!gravity_source->enabled) {
-                  return conserved_t{};
-              }
-
-              const auto position  = mesh::centroid(coord, mesh);
-              const auto primitive = prim[coord];
-
-              return gravity_source->apply(position, primitive, time, dt);
-          },
+          gravity_source_op_t<HydroState, MeshConfig>{state, mesh},
           make_domain(mesh.domain.shape())
         };
     }
+
+    template <typename HydroState, typename MeshConfig>
+    struct hydro_sources_op_t {
+        HydroState state;
+        MeshConfig mesh;
+
+        DEV auto operator()(auto coord) const
+        {
+            using conserved_t         = typename HydroState::conserved_t;
+            const auto* hydro_sources = &state.sources.hydro_source;
+
+            if (!hydro_sources->enabled) {
+                return conserved_t{};
+            }
+
+            const auto position  = mesh::centroid(coord, mesh);
+            const auto conserved = state.cons[mesh.domain][coord];
+
+            return hydro_sources->apply(
+                position,
+                conserved,
+                state.metadata.time,
+                state.metadata.gamma
+            );
+        }
+    };
 
     /**
      * hydro source terms (cooling, heating, etc.)
@@ -107,26 +155,37 @@ namespace simbi::cfd {
     template <typename HydroState, typename MeshConfig>
     auto hydro_sources(const HydroState& state, const MeshConfig& mesh)
     {
-        const auto time           = state.metadata.time;
-        const auto gamma          = state.metadata.gamma;
-        const auto* hydro_sources = &state.sources.hydro_source;
-        const auto cons           = state.cons[mesh.domain];
         return compute_field_t{
-          [=] DEV(auto coord) {
-              using conserved_t = typename HydroState::conserved_t;
-
-              if (!hydro_sources->enabled) {
-                  return conserved_t{};
-              }
-
-              const auto position  = mesh::centroid(coord, mesh);
-              const auto conserved = cons[coord];
-
-              return hydro_sources->apply(position, conserved, time, gamma);
-          },
+          hydro_sources_op_t<HydroState, MeshConfig>{state, mesh},
           make_domain(mesh.domain.shape())
         };
     }
+
+    template <typename HydroState, typename MeshConfig>
+    struct geometric_source_op_t {
+        HydroState state;
+        MeshConfig mesh;
+
+        DEV auto operator()(auto coord) const
+        {
+            using conserved_t   = typename HydroState::conserved_t;
+            constexpr auto dims = HydroState::dimensions;
+
+            // geometric sources only exist for non-Cartesian geometries
+            if constexpr (MeshConfig::geometry == Geometry::CARTESIAN) {
+                return conserved_t{};
+            }
+            else {
+                const auto primitive = state.prim[mesh.domain][coord];
+                return mesh::geometric_source_terms(
+                    primitive,
+                    coord,
+                    mesh,
+                    state.metadata.gamma
+                );
+            }
+        }
+    };
 
     /**
      * geometric source terms for non-Cartesian coordinates
@@ -135,32 +194,94 @@ namespace simbi::cfd {
     template <typename HydroState, typename MeshConfig>
     auto geometric_sources(const HydroState& state, const MeshConfig& mesh)
     {
-        const auto domain = mesh.domain;
-        const auto gamma  = state.metadata.gamma;
-        const auto prims  = state.prim;
         return compute_field_t{
-          [=] DEV(auto coord) {
-              using conserved_t = typename HydroState::conserved_t;
-
-              // geometric sources only exist for
-              // non-Cartesian geometries
-              if constexpr (MeshConfig::geometry == Geometry::CARTESIAN) {
-                  return conserved_t{};
-              }
-              else {
-                  const auto primitive = prims[domain][coord];
-                  auto val             = mesh::geometric_source_terms(
-                      primitive,
-                      coord,
-                      mesh,
-                      gamma
-                  );
-                  return val;
-              }
-          },
+          geometric_source_op_t<HydroState, MeshConfig>{state, mesh},
           make_domain(mesh.domain.shape())
         };
     }
+
+    template <typename HydroState, typename MeshConfig>
+    struct body_effects_op_t {
+        HydroState state;
+        MeshConfig mesh;
+        constexpr static auto dims = HydroState::dimensions;
+
+        DEV auto apply_to_body(const auto& body, const auto& coord) const
+        {
+            using conserved_t = typename HydroState::conserved_t;
+            return body.apply_effects(state, coord);
+        }
+    };
+
+    template <typename HydroState, typename MeshConfig>
+    struct body_effects_op {
+        HydroState state;
+        MeshConfig mesh;
+
+        DEV auto operator()(auto coord) const
+        {
+            using conserved_t   = typename HydroState::conserved_t;
+            constexpr auto dims = HydroState::dimensions;
+
+            // effect operators
+            auto grav_op =
+                gravitational_effect_op_t<HydroState, MeshConfig, dims>{
+                  state,
+                  mesh
+                };
+            auto accr_op = accretion_effect_op_t<HydroState, MeshConfig, dims>{
+              state,
+              mesh
+            };
+            auto rigid_op =
+                rigid_effect_op_t<HydroState, MeshConfig, dims>{state, mesh};
+
+            const auto bodies = state.bodies;
+
+            // check if we have bodies
+            if (!bodies.has_value() || bodies->empty()) {
+                return conserved_t{};
+            }
+
+            conserved_t total_effect{};
+
+            // visit all bodies and accumulate effects
+            bodies->visit_all([&](const auto& body) {
+                using body_type = std::decay_t<decltype(body)>;
+
+                // For the constexpr-if issue, move the operators inside the
+                // lambda or use if constexpr with local variables
+                if constexpr (has_gravitational_capability_c<body_type>) {
+                    auto local_grav_op =
+                        gravitational_effect_op_t<HydroState, MeshConfig, dims>{
+                          state,
+                          mesh
+                        };
+                    total_effect += local_grav_op.apply_to_body(body, coord);
+                }
+
+                if constexpr (has_accretion_capability_c<body_type>) {
+                    auto local_accr_op =
+                        accretion_effect_op_t<HydroState, MeshConfig, dims>{
+                          state,
+                          mesh
+                        };
+                    total_effect += local_accr_op.apply_to_body(body, coord);
+                }
+
+                if constexpr (has_rigid_capability_c<body_type>) {
+                    auto local_rigid_op =
+                        rigid_effect_op_t<HydroState, MeshConfig, dims>{
+                          state,
+                          mesh
+                        };
+                    total_effect += local_rigid_op.apply_to_body(body, coord);
+                }
+            });
+
+            return total_effect;
+        }
+    };
 
     /**
      * immersed body effects
@@ -169,51 +290,8 @@ namespace simbi::cfd {
     template <typename HydroState, typename MeshConfig>
     auto body_effects(const HydroState& state, const MeshConfig& mesh)
     {
-        constexpr auto dims = HydroState::dimensions;
-        // effect operators
-        auto grav_op = gravitational_effect_op_t<HydroState, MeshConfig, dims>{
-          state,
-          mesh
-        };
-        auto accr_op =
-            accretion_effect_op_t<HydroState, MeshConfig, dims>{state, mesh};
-        auto rigid_op =
-            rigid_effect_op_t<HydroState, MeshConfig, dims>{state, mesh};
-
-        const auto bodies = state.bodies;
         return compute_field_t{
-          [=] DEV(auto coord) {
-              using conserved_t = typename HydroState::conserved_t;
-
-              // check if we have bodies
-              if (!bodies.has_value() || bodies->empty()) {
-                  return conserved_t{};
-              }
-
-              conserved_t total_effect{};
-
-              // visit all bodies and accumulate effects
-              bodies->visit_all([&](const auto& body) {
-                  using body_type = std::decay_t<decltype(body)>;
-
-                  // gravitational effects
-                  if constexpr (has_gravitational_capability_c<body_type>) {
-                      total_effect += grav_op.apply_to_body(body, coord);
-                  }
-
-                  // accretion effects
-                  if constexpr (has_accretion_capability_c<body_type>) {
-                      total_effect += accr_op.apply_to_body(body, coord);
-                  }
-
-                  // rigid body effects
-                  if constexpr (has_rigid_capability_c<body_type>) {
-                      total_effect += rigid_op.apply_to_body(body, coord);
-                  }
-              });
-
-              return total_effect;
-          },
+          body_effects_op<HydroState, MeshConfig>{state, mesh},
           make_domain(mesh.domain.shape())
         };
     }
@@ -413,6 +491,40 @@ namespace simbi::cfd {
         return extract_stress_flux<dims>(avg_stress, dir);
     }
 
+    template <typename HydroState, typename CfdOps, typename MeshConfig>
+    struct compute_fluxes_op_t {
+        HydroState state;
+        MeshConfig mesh;
+        CfdOps ops;
+        std::uint64_t dir;
+
+        DEV auto operator()(auto coord) const
+        {
+            constexpr auto dims       = HydroState::dimensions;
+            const auto gamma          = state.metadata.gamma;
+            const auto shock_smoother = state.metadata.shock_smoother;
+            const auto plm_theta      = state.metadata.plm_theta;
+            const auto prims          = state.prim[mesh.domain];
+            const auto nu             = state.metadata.viscosity;
+
+            // create stencil for reconstruction around this interface
+            const auto stenc = make_stencil<CfdOps::rec_t>(prims, coord, dir);
+            const auto [pl, pr] = ops.reconstruct(stenc, plm_theta);
+            // normal vector for this dimension
+            const auto nhat = unit_vectors::ehat<dims>(dir);
+            // face velocity (for moving meshes)
+            const auto vface = mesh::face_velocity(coord, dir, mesh);
+
+            // solve Riemann problem
+            auto flux = ops.flux(pl, pr, nhat, vface, gamma, shock_smoother);
+            if (nu > 0) {
+                auto visc = viscous_stress_flux(prims, coord, dir, mesh, nu);
+                flux.mom  = flux.mom + visc;
+            }
+            return flux;
+        }
+    };
+
     /**
      * compute interface fluxes using Riemann solvers
      * returns: flux field for a specific direction
@@ -425,33 +537,14 @@ namespace simbi::cfd {
         std::uint64_t dir
     )
     {
-        constexpr auto dims       = HydroState::dimensions;
-        const auto face_domain    = mesh.face_domain[dir];
-        const auto gamma          = state.metadata.gamma;
-        const auto shock_smoother = state.metadata.shock_smoother;
-        const auto plm_theta      = state.metadata.plm_theta;
-        const auto prims          = state.prim[mesh.domain];
-        const auto nu             = state.metadata.viscosity;
-
         return compute_field_t{
-          [=] DEV(auto coord) {
-              // create stencil for reconstruction around this interface
-              const auto stenc = make_stencil<CfdOps::rec_t>(prims, coord, dir);
-              const auto [pl, pr] = ops.reconstruct(stenc, plm_theta);
-              // normal vector for this dimension
-              const auto nhat = unit_vectors::ehat<dims>(dir);
-              // face velocity (for moving meshes)
-              const auto vface = mesh::face_velocity(coord, dir, mesh);
-
-              // solve Riemann problem
-              auto flux = ops.flux(pl, pr, nhat, vface, gamma, shock_smoother);
-              if (nu > 0) {
-                  auto visc = viscous_stress_flux(prims, coord, dir, mesh, nu);
-                  flux.mom  = flux.mom + visc;
-              }
-              return flux;
+          compute_fluxes_op_t<HydroState, CfdOps, MeshConfig>{
+            state,
+            mesh,
+            ops,
+            dir
           },
-          make_domain(face_domain.shape())
+          make_domain(mesh.face_domain[dir].shape())
         };
     }
     // =================================================================

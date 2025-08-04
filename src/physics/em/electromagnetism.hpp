@@ -12,7 +12,7 @@ namespace simbi::em {
     template <
         is_hydro_conserved_c conserved_t,
         std::uint64_t Dims = conserved_t::dimensions>
-    DEV conserved_t shift_electric_field(
+    DEV constexpr conserved_t shift_electric_field(
         const conserved_t& flux,
         const unit_vector_t<Dims>& nhat
     )
@@ -27,7 +27,7 @@ namespace simbi::em {
     template <
         is_mhd_primitive_c prim_t,
         std::uint64_t Dims = prim_t::dimensions>
-    DEV auto electric_field(const prim_t& prim)
+    DEV constexpr auto electric_field(const prim_t& prim)
     {
         return -vecops::cross(prim.vel, prim.mag);
     }

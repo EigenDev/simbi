@@ -540,7 +540,10 @@ namespace simbi::async {
         adapter::stream_t<> stream_;
 
       public:
-        explicit gpu_executor_t(mem::device_id_t device) : device_(device)
+        explicit gpu_executor_t(
+            mem::device_id_t device = mem::device_id_t::gpu_device(0)
+        )
+            : device_(device)
         {
             gpu::api::set_device(device.device_id);
             gpu::api::stream_create(&stream_);
