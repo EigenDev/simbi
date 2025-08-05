@@ -7,9 +7,9 @@
 #include "containers/vector.hpp"
 #include "mesh/mesh_ops.hpp"
 #include "physics/hydro/physics.hpp"
+
 #include <cmath>
 #include <cstdint>
-#include <type_traits>
 
 namespace simbi::body::expr {
     using namespace simbi::hydro;
@@ -241,65 +241,6 @@ namespace simbi::body::expr {
             const auto dE    = vecops::dot(v_avg, dp);
 
             return conserved_t{0.0, dp, dE};
-        }
-    };
-
-    // ========================================================================
-    // unified body effects operation
-    // ========================================================================
-
-    template <typename HydroState, typename MeshConfig>
-    struct body_effects_op_t {
-        const HydroState& state_;
-        const MeshConfig& mesh_;
-
-        template <typename Coord>
-        auto operator()(Coord coord) const
-        {
-            using conserved_t   = typename HydroState::conserved_t;
-            constexpr auto dims = HydroState::dimensions;
-
-            // check if we have bodies
-            if (!state_.bodies.has_value() || state_.bodies->empty()) {
-                return conserved_t{};
-            }
-
-            conserved_t total_effect{};
-
-            // create effect operators
-            auto grav_op =
-                gravitational_effect_op_t<HydroState, MeshConfig, dims>{
-                  state_,
-                  mesh_
-                };
-            auto accr_op = accretion_effect_op_t<HydroState, MeshConfig, dims>{
-              state_,
-              mesh_
-            };
-            auto rigid_op =
-                rigid_effect_op_t<HydroState, MeshConfig, dims>{state_, mesh_};
-
-            // visit all bodies and accumulate effects
-            state_.bodies->visit_all([&](const auto& body) {
-                using body_type = std::decay_t<decltype(body)>;
-
-                // gravitational effects
-                if constexpr (has_gravitational_capability_c<body_type>) {
-                    total_effect += grav_op.apply_to_body(body, coord);
-                }
-
-                // accretion effects
-                if constexpr (has_accretion_capability_c<body_type>) {
-                    total_effect += accr_op.apply_to_body(body, coord);
-                }
-
-                // rigid body effects
-                if constexpr (has_rigid_capability_c<body_type>) {
-                    total_effect += rigid_op.apply_to_body(body, coord);
-                }
-            });
-
-            return total_effect;
         }
     };
 }   // namespace simbi::body::expr
