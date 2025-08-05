@@ -173,6 +173,9 @@ namespace simbi::mem {
             // copy from numpy
             std::copy_n(numpy_data, domain.size(), accessor.data());
 
+            // deallocate the numpy array since we own the data now
+            numpy_data = nullptr;
+
             return accessor;
         }
 
