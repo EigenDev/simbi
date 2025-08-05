@@ -64,7 +64,7 @@ class Theme:
         colormap = plt.get_cmap(next(cycle(self.color_maps)))
         nlines = nfields
         nind_curves = nfields * nfiles
-        colors = np.array([colormap(k) for k in np.linspace(0.1, 0.9, 2)])
+        colors = np.array([colormap(k) for k in np.linspace(0.1, 0.9, nind_curves)])
         linestyles = [x[0] for x in zip(cycle(["-", "--", ":", "-."]), range(nlines))]
         if len(colors) == len(linestyles):
             default_cycler = cycler(color=colors) + (cycler(linestyle=linestyles))

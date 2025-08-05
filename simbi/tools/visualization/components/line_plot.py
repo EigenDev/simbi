@@ -47,7 +47,14 @@ class LinePlotComponent(Component):
         for idx, file_path in enumerate(files):
             for field in self.props.get("fields", ["rho"]):
                 # Get field label for legend
-                label = get_field_str(field)
+                if len(self.props["fields"]) > 1:
+                    label = get_field_str(field)
+                else:
+                    user_labels = self.state.config["style"].get("labels", None)
+                    if user_labels:
+                        label = user_labels[idx]
+                    else:
+                        label = ""
 
                 # Create and store the line
                 line = self.ax.plot(
@@ -179,6 +186,8 @@ class LinePlotComponent(Component):
                     for label in labs
                 ]
                 self.ax.legend(handles=legend_lines, loc="upper right")
+            elif len(config["style"]["labels"]) > 0:
+                self.ax.legend()
 
             # Return the first line for animation compatibility
             return (

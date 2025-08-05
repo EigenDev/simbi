@@ -66,8 +66,8 @@ class AxisFormatter:
             ax.set_ylim(ylims)
 
         # Show legend if needed
-        # if config["style"]["legend"] and len(ax.get_lines()) > 1:
-        #     ax.legend()
+        if config["style"]["legend"] and len(ax.get_lines()) > 1:
+            ax.legend()
 
     def _format_multidim_plot(self, ax, setup, config, field_info):
         """Format a multidimensional plot axis"""

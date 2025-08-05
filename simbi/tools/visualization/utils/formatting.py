@@ -4,7 +4,6 @@ from itertools import cycle
 from math import pi
 from typing import Any, Sequence, Optional
 
-import matplotlib.colors as mcolors
 import matplotlib.pyplot as plt
 import numpy as np
 from cycler import cycler
