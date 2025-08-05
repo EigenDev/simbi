@@ -168,8 +168,7 @@ namespace simbi::cfd {
 
         DEV auto operator()(auto coord) const
         {
-            using conserved_t   = typename HydroState::conserved_t;
-            constexpr auto dims = HydroState::dimensions;
+            using conserved_t = typename HydroState::conserved_t;
 
             // geometric sources only exist for non-Cartesian geometries
             if constexpr (MeshConfig::geometry == Geometry::CARTESIAN) {
@@ -202,19 +201,6 @@ namespace simbi::cfd {
 
     template <typename HydroState, typename MeshConfig>
     struct body_effects_op_t {
-        HydroState state;
-        MeshConfig mesh;
-        constexpr static auto dims = HydroState::dimensions;
-
-        DEV auto apply_to_body(const auto& body, const auto& coord) const
-        {
-            using conserved_t = typename HydroState::conserved_t;
-            return body.apply_effects(state, coord);
-        }
-    };
-
-    template <typename HydroState, typename MeshConfig>
-    struct body_effects_op {
         HydroState state;
         MeshConfig mesh;
 
@@ -277,7 +263,7 @@ namespace simbi::cfd {
     auto body_effects(const HydroState& state, const MeshConfig& mesh)
     {
         return compute_field_t{
-          body_effects_op<HydroState, MeshConfig>{state, mesh},
+          body_effects_op_t<HydroState, MeshConfig>{state, mesh},
           make_domain(mesh.domain.shape())
         };
     }
