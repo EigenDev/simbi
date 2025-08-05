@@ -304,7 +304,7 @@ namespace simbi::boundary {
 
     // flux BC transform creation
     template <typename HydroState, typename MeshConfig>
-    auto create_flux_bc_transform(
+    auto create_stagg_bc_transform(
         const ghost_region_t<HydroState::dimensions>& ghost,
         domain_t<HydroState::dimensions> active_staggered,
         std::uint64_t flux_dim,
@@ -381,7 +381,7 @@ namespace simbi::boundary {
     }
 
     template <typename HydroState, typename MeshConfig>
-    void apply_flux_bcs(HydroState& state, const MeshConfig& mesh)
+    void apply_stagg_bcs(HydroState& state, const MeshConfig& mesh)
     {
         constexpr auto Dims = HydroState::dimensions;
 
@@ -399,7 +399,7 @@ namespace simbi::boundary {
                     continue;
                 }
 
-                auto flux_bc_transform = create_flux_bc_transform(
+                auto flux_bc_transform = create_stagg_bc_transform(
                     ghost,
                     active_staggered,
                     flux_dim,

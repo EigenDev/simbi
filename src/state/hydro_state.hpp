@@ -54,6 +54,10 @@ namespace simbi::state {
 
         // optional magnetic fields for mhd (face-centered)
         vector_t<field_t<real, Dims>, Dims> bstaggs;
+        // b_old is used only when we are using the
+        // UCT CT algorithm from Mignone & DelZanna (2021)
+        // https://www.sciencedirect.com/science/article/pii/S0021999120305222
+        vector_t<field_t<real, Dims>, Dims> b_old;
 
         // simulation metadata
         struct meta_data_t {
@@ -150,17 +154,23 @@ namespace simbi::state {
             const initial_conditions_t& init
         )
         {
-
+            bool uct_ct = comp_ct_type == CTAlgo::MdZ;
+            vector_t<field_t<real, Dims>, Dims> bstaggs_clone;
             auto [cons, prims, flux_vec, bstaggs] =
                 setup_hydro_state(cons_data, prim_data, bfield_data, init);
 
             auto bodies = create_body_collection_from_init<Dims>(init);
+
+            if (uct_ct) {
+                bstaggs_clone = bstaggs;
+            }
 
             return hydro_state_t{
               .cons     = std::move(cons),
               .prim     = std::move(prims),
               .flux     = {std::move(flux_vec)},
               .bstaggs  = {std::move(bstaggs)},
+              .b_old    = {std::move(bstaggs_clone)},
               .metadata = setup_metadata(init),
               .sources  = setup_sources(init),
               .bodies   = std::move(bodies),

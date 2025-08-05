@@ -44,7 +44,7 @@ namespace simbi {
             // electric fields but rather compute them
             // on-the-fly,
             if (params.advance_bfields) {
-                boundary::apply_flux_bcs(state, mesh);
+                boundary::apply_stagg_bcs(state, mesh);
                 em::update_magnetic_fields(state, mesh);
             }
         }
