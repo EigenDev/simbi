@@ -7,7 +7,9 @@
 #include "containers/vector.hpp"
 #include "domain/domain.hpp"
 #include "execution/future.hpp"
+#include "functional/fp.hpp"
 #include "memory/device.hpp"
+#include "tiling.hpp"
 
 #include <algorithm>
 #include <condition_variable>
@@ -177,6 +179,46 @@ namespace simbi::async {
                 std::forward<Reducer>(reducer)
             );
         }
+
+        // tiled domain-aware parallel iteration
+        template <std::uint64_t Dims, typename T, typename Func>
+        auto for_each_tiled(
+            const domain_t<Dims>& domain,
+            Func&& func,
+            const iarray<Dims>& tile_size = {-1}
+        ) const -> future_t<void>
+        {
+            return derived().for_each_tiled_impl(
+                domain,
+                std::forward<Func>(func),
+                tile_size[0] == -1 ? tiling::optimal_tile_size<Dims, T>()
+                                   : tile_size
+            );
+        }
+
+        template <
+            std::uint64_t Dims,
+            typename T,   // type of the elements being processed
+            typename U,
+            typename Mapper,
+            typename Reducer>
+        auto reduce_tiled(
+            const domain_t<Dims>& domain,
+            U init,
+            Mapper&& mapper,
+            Reducer&& reducer,
+            const iarray<Dims>& tile_size = {-1}
+        ) const -> future_t<T>
+        {
+            return derived().reduce_tiled_impl(
+                domain,
+                init,
+                std::forward<Mapper>(mapper),
+                std::forward<Reducer>(reducer),
+                tile_size[0] == -1 ? tiling::optimal_tile_size<Dims, T>()
+                                   : tile_size
+            );
+        }
     };
 
     // cpu executor
@@ -245,6 +287,48 @@ namespace simbi::async {
             });
         }
 
+        template <std::uint64_t Dims, typename Func>
+        auto for_each_tiled_impl(
+            const domain_t<Dims>& domain,
+            Func&& func,
+            const iarray<Dims>& tile_size
+        ) const -> future_t<void>
+        {
+            return async_impl([=, this]() {
+                tiling::tile_range(domain, tile_size) |
+                    fp::for_each([&](const auto& tile) {
+                        iterate_domain(tile.domain, func);
+                    });
+            });
+        }
+
+        template <
+            std::uint64_t Dims,
+            typename T,
+            typename Mapper,
+            typename Reducer>
+        auto reduce_tiled_impl(
+            const domain_t<Dims>& domain,
+            T init,
+            Mapper&& mapper,
+            Reducer&& reducer,
+            const iarray<Dims>& tile_size
+        ) const -> future_t<T>
+        {
+            return async_impl([=, this]() {
+                return tiling::tile_range(domain, tile_size) |
+                       fp::map([&](const auto& tile) {
+                           T tile_result = init;
+                           iterate_domain(tile.domain, [&](auto coord) {
+                               tile_result =
+                                   reducer(tile_result, mapper(coord));
+                           });
+                           return tile_result;
+                       }) |
+                       fp::reduce(reducer);
+            });
+        }
+
       private:
         template <std::uint64_t Dims, typename Func>
         void iterate_domain(const domain_t<Dims>& domain, Func func) const
@@ -278,7 +362,6 @@ namespace simbi::async {
     class par_cpu_executor_t : public executor_base_t<par_cpu_executor_t>
     {
       private:
-        // std::unique_ptr<thread_pool_t> pool_;
         thread_pool_t* pool_;
         std::size_t nthreads_;
 
@@ -336,9 +419,7 @@ namespace simbi::async {
         auto for_each_impl(const domain_t<Dims>& domain, Func&& func) const
             -> future_t<void>
         {
-            return async_impl([=, this]() {
-                parallel_iterate_domain(domain, func);
-            });
+            return async_impl([=, this]() { iterate_domain(domain, func); });
         }
 
         // parallel reduction implementation
@@ -395,10 +476,76 @@ namespace simbi::async {
             });
         }
 
+        template <std::uint64_t Dims, typename Func>
+        auto for_each_tiled_impl(
+            const domain_t<Dims>& domain,
+            Func&& func,
+            const iarray<Dims>& tile_size
+        ) const -> future_t<void>
+        {
+            return async_impl([=, this]() {
+                auto tiles =
+                    tiling::tile_range(domain, tile_size) | fp::collect<>;
+
+                std::vector<future_t<void>> tile_futures;
+                tile_futures.reserve(tiles.size());
+
+                for (const auto& tile : tiles) {
+                    tile_futures.push_back(async_impl([=, this]() {
+                        iterate_domain(tile.domain, func);
+                    }));
+                }
+
+                for (auto& future : tile_futures) {
+                    future.wait();
+                }
+            });
+        }
+
+        template <
+            std::uint64_t Dims,
+            typename T,
+            typename Mapper,
+            typename Reducer>
+        auto reduce_tiled_impl(
+            const domain_t<Dims>& domain,
+            T init,
+            Mapper&& mapper,
+            Reducer&& reducer,
+            const iarray<Dims>& tile_size
+        ) const -> future_t<T>
+        {
+            return async_impl([=, this]() {
+                auto tiles =
+                    tiling::tile_range(domain, tile_size) | fp::collect<>;
+
+                std::vector<future_t<T>> tile_futures;
+                tile_futures.reserve(tiles.size());
+
+                // process each tile in parallel
+                for (const auto& tile : tiles) {
+                    tile_futures.push_back(async_impl([=, this]() {
+                        T tile_result = init;
+                        iterate_domain(tile.domain, [&](auto coord) {
+                            tile_result = reducer(tile_result, mapper(coord));
+                        });
+                        return tile_result;
+                    }));
+                }
+
+                // collect and reduce tile results
+                T final_result = init;
+                for (auto& future : tile_futures) {
+                    final_result = reducer(final_result, future.wait());
+                }
+
+                return final_result;
+            });
+        }
+
       private:
         template <std::uint64_t Dims, typename Func>
-        void
-        parallel_iterate_domain(const domain_t<Dims>& domain, Func func) const
+        void iterate_domain(const domain_t<Dims>& domain, Func func) const
         {
             auto total_size = domain.size();
             auto chunk_size = (total_size + nthreads_ - 1) / nthreads_;
@@ -669,6 +816,98 @@ namespace simbi::async {
                 // use shared memory + atomics
                 T accumulator = init;
                 // sequential fallback for now
+                return accumulator;
+            });
+        }
+
+        template <std::uint64_t Dims, typename Func>
+        auto for_each_tiled_impl(
+            const domain_t<Dims>& domain,
+            Func&& func,
+            const iarray<Dims>& tile_size
+        ) const -> future_t<void>
+        {
+            // For GPU, we can either:
+            // 1. Launch one kernel per tile (good for large tiles)
+            // 2. Use single kernel with tile-aware indexing (better for small
+            // tiles)
+
+            auto state =
+                std::make_shared<typename future_t<void>::future_state_t>();
+            state->stream = stream_;
+
+            try {
+                gpu::api::set_device(device_.device_id);
+
+                // collect tiles upfront for GPU processing
+                auto tiles =
+                    tiling::tile_range(domain, tile_size) | fp::collect<>;
+
+                if (tiles.size() == 1) {
+                    // single tile - use existing implementation
+                    return for_each_impl(domain, std::forward<Func>(func));
+                }
+
+                // multiple tiles - launch kernel per tile or batch them
+                for (const auto& tile : tiles) {
+                    auto [blocks, threads] = optimal_grid_size(tile.domain);
+
+                    auto kernel = [=] DEV(
+                                      int thread_idx,
+                                      int block_idx,
+                                      int block_dim,
+                                      int grid_dim
+                                  ) {
+                        auto global_idx    = block_idx * block_dim + thread_idx;
+                        auto total_threads = grid_dim * block_dim;
+                        auto tile_size     = tile.domain.size();
+
+                        for (auto idx = global_idx; idx < tile_size;
+                             idx += total_threads) {
+                            auto coord = tile.domain.linear_to_coord(idx);
+                            func(coord);
+                        }
+                    };
+
+                    auto launch_config = grid::config(blocks, threads);
+                    grid::launch(kernel, launch_config);
+                }
+
+                gpu::api::event_create(&state->event);
+                gpu::api::event_record(state->event, stream_);
+            }
+            catch (...) {
+                state->exception = std::current_exception();
+                state->has_error.store(true);
+                state->ready.store(true);
+            }
+
+            return future_t<void>{std::move(state)};
+        }
+
+        template <
+            std::uint64_t Dims,
+            typename T,
+            typename Mapper,
+            typename Reducer>
+        auto reduce_tiled_impl(
+            const domain_t<Dims>& domain,
+            T init,
+            Mapper&& mapper,
+            Reducer&& reducer,
+            const iarray<Dims>& tile_size
+        ) const -> future_t<T>
+        {
+            // GPU reductions with tiling are complex - for now, fallback to CPU
+            // TODO: implement proper GPU tiled reduction with shared memory
+            return async_impl([=]() {
+                T accumulator = init;
+                tiling::tile_range(domain, tile_size) |
+                    fp::for_each([&](const auto& tile) {
+                        // would need to transfer tile data to CPU, reduce, then
+                        // accumulate this is a placeholder for proper GPU tiled
+                        // reduction
+                    });
                 return accumulator;
             });
         }
