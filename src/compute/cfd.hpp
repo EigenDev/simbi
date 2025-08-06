@@ -8,9 +8,11 @@
 #include "containers/vector.hpp"
 #include "domain/domain.hpp"
 #include "mesh/mesh_ops.hpp"
-#include "physics/em/perm.hpp"
-#include "physics/hydro/ib/body.hpp"
-#include "physics/hydro/ib/effects.hpp"
+#include "physics/em/ct_updater.hpp"
+#include "physics/ib/body.hpp"
+#include "physics/ib/body_delta.hpp"
+#include "physics/ib/diagnostics.hpp"
+#include "physics/ib/effects.hpp"
 #include "update/adaptive_timestep.hpp"
 #include "update/bcs.hpp"
 #include "update/flux.hpp"
@@ -35,8 +37,8 @@ namespace simbi::cfd {
 
     template <typename HydroState, typename MeshConfig>
     struct flux_divergence_op_t {
-        HydroState state;
-        MeshConfig mesh;
+        const HydroState& state;
+        const MeshConfig& mesh;
 
         DEV auto operator()(auto coord) const
         {
@@ -84,8 +86,8 @@ namespace simbi::cfd {
 
     template <typename HydroState, typename MeshConfig>
     struct gravity_source_op_t {
-        HydroState state;
-        MeshConfig mesh;
+        const HydroState& state;
+        const MeshConfig& mesh;
         constexpr static auto dims = HydroState::dimensions;
 
         DEV auto operator()(auto coord) const
@@ -124,8 +126,8 @@ namespace simbi::cfd {
 
     template <typename HydroState, typename MeshConfig>
     struct hydro_sources_op_t {
-        HydroState state;
-        MeshConfig mesh;
+        const HydroState& state;
+        const MeshConfig& mesh;
 
         DEV auto operator()(auto coord) const
         {
@@ -163,8 +165,8 @@ namespace simbi::cfd {
 
     template <typename HydroState, typename MeshConfig>
     struct geometric_source_op_t {
-        HydroState state;
-        MeshConfig mesh;
+        const HydroState& state;
+        const MeshConfig& mesh;
 
         DEV auto operator()(auto coord) const
         {
@@ -201,8 +203,8 @@ namespace simbi::cfd {
 
     template <typename HydroState, typename MeshConfig>
     struct body_effects_op_t {
-        HydroState state;
-        MeshConfig mesh;
+        const HydroState& state;
+        const MeshConfig& mesh;
 
         DEV auto operator()(auto coord) const
         {
@@ -214,41 +216,55 @@ namespace simbi::cfd {
             if (!bodies.has_value() || bodies->empty()) {
                 return conserved_t{};
             }
-
             conserved_t total_effect{};
 
             // visit all bodies and accumulate effects
             bodies->visit_all([&](const auto& body) {
                 using body_type = std::decay_t<decltype(body)>;
+                body_delta_t<dims> delta{
+                  .idx                  = body.idx,
+                  .force_delta          = {},
+                  .torque_delta         = {},
+                  .mass_delta           = 0.0,
+                  .accretion_rate_delta = 0.0
+                };
 
-                // For the constexpr-if issue, move the operators inside the
-                // lambda or use if constexpr with local variables
                 if constexpr (has_gravitational_capability_c<body_type>) {
-                    auto local_grav_op =
+                    const auto grav_op =
                         gravitational_effect_op_t<HydroState, MeshConfig, dims>{
                           state,
                           mesh
                         };
-                    total_effect += local_grav_op.apply_to_body(body, coord);
+                    auto [effect, delta] = grav_op.apply_to_body(body, coord);
+                    total_effect += effect;
+                    delta += delta;
                 }
 
                 if constexpr (has_accretion_capability_c<body_type>) {
-                    auto local_accr_op =
+                    auto accr_op =
                         accretion_effect_op_t<HydroState, MeshConfig, dims>{
                           state,
                           mesh
                         };
-                    total_effect += local_accr_op.apply_to_body(body, coord);
+                    auto [effect, delta] = accr_op.apply_to_body(body, coord);
+                    total_effect += effect;
+                    delta += delta;
                 }
 
                 if constexpr (has_rigid_capability_c<body_type>) {
-                    auto local_rigid_op =
+                    auto rigid_op =
                         rigid_effect_op_t<HydroState, MeshConfig, dims>{
                           state,
                           mesh
                         };
-                    total_effect += local_rigid_op.apply_to_body(body, coord);
+                    auto [effect, delta] = rigid_op.apply_to_body(body, coord);
+                    total_effect += effect;
+                    delta += delta;
                 }
+
+                diagnostics_reader_t<dims>::with_env([&](auto& diag) {
+                    diag.accumulate_delta(delta);
+                });
             });
 
             return total_effect;
