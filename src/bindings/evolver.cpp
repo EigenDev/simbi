@@ -5,6 +5,7 @@
 #include "containers/vector.hpp"
 #include "dispatch.hpp"
 #include "functional/monad/computation.hpp"
+#include "physics/ib/motion.hpp"
 #include "update/adaptive_timestep.hpp"
 
 #include <cstdint>
@@ -68,6 +69,11 @@ namespace simbi::hydrostate {
                     sim.evolve([&](auto& ctx) {
                         compute(ctx)
                             .then([&](auto& s) { cfd::step(s, mesh, ops); })
+                            .then([&](auto& s) {
+                                if (s.bodies) {
+                                    body::evolve_bodies(s);
+                                }
+                            })
                             .run();
                     });
                 });
