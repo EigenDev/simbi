@@ -4,7 +4,7 @@
 #include "bcs.hpp"
 #include "containers/state_ops.hpp"
 #include "flux.hpp"
-#include "physics/em/perm.hpp"
+#include "physics/em/ct_updater.hpp"
 #include "prim_recovery.hpp"
 
 namespace simbi::cfd {

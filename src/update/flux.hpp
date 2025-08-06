@@ -2,7 +2,7 @@
 #define FLUX_HPP
 
 #include "bcs.hpp"
-#include "physics/em/perm.hpp"
+#include "physics/em/ct_updater.hpp"
 
 #include <cstdint>
 
