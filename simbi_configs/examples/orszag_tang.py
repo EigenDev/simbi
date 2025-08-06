@@ -20,7 +20,7 @@ from typing import Any
 
 # Domain constants
 XMIN = 0.0
-XMAX = 2.0 * math.pi
+XMAX = 1.0
 
 
 class OrszagTang(SimbiBaseConfig):
@@ -105,8 +105,8 @@ class OrszagTang(SimbiBaseConfig):
                         x = xbounds[0] + (i + 0.5) * dx  # Cell center
 
                         # Velocity field for vortex
-                        vx = -v0 * math.sin(y)
-                        vy = +v0 * math.sin(x)
+                        vx = -v0 * math.sin(2.0 * math.pi * y)
+                        vy = +v0 * math.sin(2.0 * math.pi * x)
 
                         yield (rho0, vx, vy, 0.0, p0)
 
@@ -129,9 +129,9 @@ class OrszagTang(SimbiBaseConfig):
 
                         # Different B-field formula for each component
                         if bn == "bx":
-                            yield -b0 * math.sin(1.0 * y)
+                            yield -b0 * math.sin(2.0 * math.pi * y)
                         elif bn == "by":
-                            yield +b0 * math.sin(2.0 * x)
+                            yield +b0 * math.sin(4.0 * math.pi * x)
                         else:
                             yield 0.0
 
