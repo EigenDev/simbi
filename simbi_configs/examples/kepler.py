@@ -114,7 +114,8 @@ class KeplerianRingTest(SimbiBaseConfig):
     @property
     def immersed_bodies(self) -> list[ImmersedBodyConfig]:
         """Define immersed bodies"""
-        softening_length = 0.01 * 0.05
+        dx = (self.bounds[0][1] - self.bounds[0][0]) / self.resolution[0]
+        softening_length = 2.0 * dx
         return [
             ImmersedBodyConfig(
                 capability=BodyCapability.GRAVITATIONAL,
