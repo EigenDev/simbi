@@ -6,121 +6,27 @@
 #include "config.hpp"
 #include "containers/vector.hpp"
 #include "domain/domain.hpp"
+#include "execution/completion.hpp"
 #include "execution/future.hpp"
 #include "functional/fp.hpp"
 #include "memory/device.hpp"
+#include "thread_pool.hpp"
 #include "tiling.hpp"
 
 #include <algorithm>
-#include <condition_variable>
+#include <atomic>
 #include <cstddef>
 #include <cstdint>
 #include <cstdlib>
 #include <exception>
-#include <functional>
 #include <memory>
 #include <mutex>
-#include <queue>
-#include <string>
 #include <thread>
 #include <type_traits>
 #include <utility>
 #include <vector>
 
 namespace simbi::async {
-    inline auto get_nthreads() -> std::uint64_t
-    {
-        if (const char* thread_env = std::getenv("NTHREADS")) {
-            return static_cast<std::uint64_t>(
-                std::stoul(std::string(thread_env))
-            );
-        }
-
-        if (const char* thread_env = std::getenv("OMP_NUM_THREADS")) {
-            return static_cast<std::uint64_t>(
-                std::stoul(std::string(thread_env))
-            );
-        }
-
-        return std::thread::hardware_concurrency();
-    };
-
-    // minimal thread pool implementation
-    class thread_pool_t
-    {
-      private:
-        std::vector<std::thread> workers_;
-        std::queue<std::function<void()>> tasks_;
-        std::mutex queue_mutex_;
-        std::condition_variable condition_;
-        bool stop_;
-
-      public:
-        explicit thread_pool_t(std::size_t threads) : stop_(false)
-        {
-            for (std::size_t i = 0; i < threads; ++i) {
-                workers_.emplace_back([this] {
-                    for (;;) {
-                        std::function<void()> task;
-                        {
-                            std::unique_lock<std::mutex> lock(queue_mutex_);
-                            condition_.wait(lock, [this] {
-                                return stop_ || !tasks_.empty();
-                            });
-                            if (stop_ && tasks_.empty()) {
-                                return;
-                            }
-                            task = std::move(tasks_.front());
-                            tasks_.pop();
-                        }
-                        task();
-                    }
-                });
-            }
-        }
-
-        template <typename Func>
-        void submit(Func&& func)
-        {
-            {
-                std::unique_lock<std::mutex> lock(queue_mutex_);
-                if (stop_) {
-                    return;
-                }
-                tasks_.emplace(std::forward<Func>(func));
-            }
-            condition_.notify_one();
-        }
-
-        ~thread_pool_t()
-        {
-            {
-                std::unique_lock<std::mutex> lock(queue_mutex_);
-                stop_ = true;
-            }
-            condition_.notify_all();
-            for (std::thread& worker : workers_) {
-                worker.join();
-            }
-        }
-    };
-
-    // singleton thread pool manager - lazy initialization
-    class thread_pool_manager_t
-    {
-      public:
-        static thread_pool_t& get_pool()
-        {
-            static thread_pool_t singleton(get_nthreads());
-            return singleton;
-        }
-
-        static std::size_t get_nthreads()
-        {
-            return ::simbi::async::get_nthreads();
-        }
-    };
-
     // executor base
     template <typename Derived>
     class executor_base_t
@@ -236,6 +142,7 @@ namespace simbi::async {
 
             auto state =
                 std::make_shared<typename future_t<result_t>::future_state_t>();
+            state->completion_context = completion_context_t::direct();
 
             try {
                 if constexpr (std::is_void_v<result_t>) {
@@ -381,6 +288,7 @@ namespace simbi::async {
 
             auto state =
                 std::make_shared<typename future_t<result_t>::future_state_t>();
+            state->completion_context = completion_context_t::work_stealing();
 
             pool_->submit(
                 [state, func = std::forward<Func>(func), args...]() mutable {
@@ -717,7 +625,8 @@ namespace simbi::async {
         {
             auto state =
                 std::make_shared<typename future_t<void>::future_state_t>();
-            state->stream = stream_;
+            state->completion_context =
+                completion_context_t::gpu_stream(stream_);
 
             try {
                 gpu::api::set_device(device_.device_id);
@@ -893,8 +802,8 @@ namespace simbi::async {
         auto reduce_tiled_impl(
             const domain_t<Dims>& domain,
             T init,
-            Mapper&& mapper,
-            Reducer&& reducer,
+            Mapper&&,
+            Reducer&&,
             const iarray<Dims>& tile_size
         ) const -> future_t<T>
         {
@@ -903,7 +812,7 @@ namespace simbi::async {
             return async_impl([=]() {
                 T accumulator = init;
                 tiling::tile_range(domain, tile_size) |
-                    fp::for_each([&](const auto& tile) {
+                    fp::for_each([&](const auto&) {
                         // would need to transfer tile data to CPU, reduce, then
                         // accumulate this is a placeholder for proper GPU tiled
                         // reduction

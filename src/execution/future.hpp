@@ -3,6 +3,7 @@
 
 #include "adapter/device_adapter_api.hpp"
 #include "adapter/device_types.hpp"
+#include "completion.hpp"
 
 #include <atomic>
 #include <condition_variable>
@@ -34,6 +35,7 @@ namespace simbi::async {
 
             std::condition_variable cv;
             std::mutex mutex;
+            completion_context_t completion_context;
 
             T& result() { return *reinterpret_cast<T*>(result_storage); }
 
@@ -111,12 +113,8 @@ namespace simbi::async {
 
         void wait_impl() const
         {
-            std::unique_lock<std::mutex> lock(state_->mutex);
-            state_->cv.wait(lock, [this] { return state_->ready.load(); });
-            // if (state_->stream) {
-            //     gpu::api::stream_synchronize(state_->stream);
-            // }
-            // state_->ready.store(true);
+            state_->completion_context
+                .wait_fn(state_->ready, state_->mutex, state_->cv);
         }
 
         bool check_completion() const
@@ -146,6 +144,7 @@ namespace simbi::async {
             adapter::event_t<> event{};
             std::condition_variable cv;
             std::mutex mutex;
+            completion_context_t completion_context;
 
             ~future_state_t()
             {
@@ -173,16 +172,7 @@ namespace simbi::async {
         void wait() const
         {
             if (!state_->ready.load()) {
-                if (state_->stream) {
-                    gpu::api::stream_synchronize(state_->stream);
-                }
-                else {
-                    // CPU synchronization
-                    std::unique_lock<std::mutex> lock(state_->mutex);
-                    state_->cv.wait(lock, [this] {
-                        return state_->ready.load();
-                    });
-                }
+                wait_impl();
             }
 
             if (state_->has_error.load()) {
@@ -211,6 +201,12 @@ namespace simbi::async {
         explicit future_t(std::shared_ptr<future_state_t> state)
             : state_(std::move(state))
         {
+        }
+
+        void wait_impl() const
+        {
+            state_->completion_context
+                .wait_fn(state_->ready, state_->mutex, state_->cv);
         }
     };
 
