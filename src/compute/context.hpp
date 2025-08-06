@@ -5,6 +5,7 @@
 #include "adapter/device_types.hpp"
 #include "config.hpp"
 #include "containers/vector.hpp"
+#include "functional/monad/reader.hpp"
 #include "functional/monad/serializer.hpp"
 #include "io/console/printb.hpp"
 #include "io/console/statistics.hpp"
@@ -12,6 +13,7 @@
 #include "io/tabulate/table.hpp"
 #include "mesh/mesh_ops.hpp"
 #include "physics/hydro/conversion.hpp"
+#include "physics/ib/diagnostics.hpp"
 #include "utility/helpers.hpp"
 
 #include <chrono>
@@ -109,6 +111,8 @@ namespace simbi {
     struct simulation_context_t {
         State& state_;
         Mesh& mesh_;
+        body::body_diagnostics_t<State::dimensions> body_diagnostics_;
+        diagnostics_reader_t<State::dimensions>::scope_t diagnostic_scope_;
         real end_time_;
         std::uint64_t iteration_ = 0;
         timer_t timer_;
@@ -127,6 +131,8 @@ namespace simbi {
         )
             : state_(state),
               mesh_(mesh),
+              body_diagnostics_{},
+              diagnostic_scope_(body_diagnostics_),
               end_time_(end_time),
               table_(
                   io::TableFactory::create_elegant_table(
