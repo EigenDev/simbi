@@ -19,7 +19,7 @@ namespace simbi::mem {
      * accessor_t - host-device agnostic field storage
      *
      * srp: provide coordinate-based access to arena-backed memory
-     * works on both cpu and gpu via hd annotations
+     * works on both cpu and gpu via DUAL annotations
      */
     template <typename T, std::uint64_t Dims>
     class accessor_t
