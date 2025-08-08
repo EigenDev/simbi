@@ -139,63 +139,6 @@ namespace simbi::domain_algebra {
         bool empty() const { return count == 0; }
     };
 
-    // set difference - subtract domain b from domain a
-    // returns non-overlapping regions that cover a - b
-    // template <std::uint64_t Dims>
-    // constexpr auto difference(const domain_t<Dims>& a, const domain_t<Dims>&
-    // b)
-    // {
-    //     auto overlap = intersection(a, b);
-    //     difference_set_t<Dims> result;
-
-    //     // no overlap - return original domain
-    //     if (overlap.empty()) {
-    //         result.regions[0] = a;
-    //         result.count      = 1;
-    //         return result;
-    //     }
-
-    //     // completely contained - return empty
-    //     if (overlap.start == a.start && overlap.end == a.end) {
-    //         result.count = 0;
-    //         return result;
-    //     }
-
-    //     // create template domain with future constraints applied
-    //     auto working = a;
-
-    //     for (std::uint64_t dim = 0; dim < Dims; ++dim) {
-    //         // create slab template with future dimension constraints applied
-    //         auto slab_template = working;
-    //         for (std::uint64_t future_dim = dim + 1; future_dim < Dims;
-    //              ++future_dim) {
-    //             slab_template.start[future_dim] = overlap.start[future_dim];
-    //             slab_template.end[future_dim]   = overlap.end[future_dim];
-    //         }
-
-    //         // slab before overlap in this dimension
-    //         if (working.start[dim] < overlap.start[dim]) {
-    //             auto slab                      = slab_template;
-    //             slab.end[dim]                  = overlap.start[dim];
-    //             result.regions[result.count++] = slab;
-    //         }
-
-    //         // slab after overlap in this dimension
-    //         if (overlap.end[dim] < working.end[dim]) {
-    //             auto slab                      = slab_template;
-    //             slab.start[dim]                = overlap.end[dim];
-    //             result.regions[result.count++] = slab;
-    //         }
-
-    //         // constrain current dimension ONLY for next iteration
-    //         working.start[dim] = overlap.start[dim];
-    //         working.end[dim]   = overlap.end[dim];
-    //     }
-
-    //     return result;
-    // }
-
-    // helper function to increment base-3 coordinates
     template <std::uint64_t Dims>
     constexpr bool increment_base3_coord(iarray<Dims>& coord)
     {
