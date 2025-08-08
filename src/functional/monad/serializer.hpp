@@ -303,8 +303,11 @@ namespace simbi::io {
 
                 // serialize metadata fields
                 if constexpr (requires { metadata.gamma; }) {
-                    auto result =
-                        write_attr("gamma", metadata.gamma, real_type);
+                    auto result = write_attr(
+                        "adiabatic_index",
+                        metadata.gamma,
+                        real_type
+                    );
                     if (!result.is_ok()) {
                         return result_t<serialization_context_t>::error(
                             result.error()
@@ -323,7 +326,8 @@ namespace simbi::io {
                 }
 
                 if constexpr (requires { metadata.cfl; }) {
-                    auto result = write_attr("cfl", metadata.cfl, real_type);
+                    auto result =
+                        write_attr("cfl_number", metadata.cfl, real_type);
                     if (!result.is_ok()) {
                         return result_t<serialization_context_t>::error(
                             result.error()
@@ -341,7 +345,8 @@ namespace simbi::io {
                 }
 
                 if constexpr (requires { metadata.tend; }) {
-                    auto result = write_attr("tend", metadata.tend, real_type);
+                    auto result =
+                        write_attr("end_time", metadata.tend, real_type);
                     if (!result.is_ok()) {
                         return result_t<serialization_context_t>::error(
                             result.error()
@@ -577,6 +582,70 @@ namespace simbi::io {
                 if constexpr (requires { metadata.dimensions; }) {
                     auto result =
                         write_attr("dimensions", metadata.dimensions, int_type);
+                    if (!result.is_ok()) {
+                        return result_t<serialization_context_t>::error(
+                            result.error()
+                        );
+                    }
+                }
+                if constexpr (requires { metadata.checkpoint_index; }) {
+                    auto result = write_attr(
+                        "checkpoint_index",
+                        metadata.checkpoint_index,
+                        uint64_type
+                    );
+                    if (!result.is_ok()) {
+                        return result_t<serialization_context_t>::error(
+                            result.error()
+                        );
+                    }
+                }
+                if constexpr (requires { metadata.checkpoint_zones; }) {
+                    auto result = write_attr(
+                        "checkpoint_zones",
+                        metadata.checkpoint_zones,
+                        uint64_type
+                    );
+                    if (!result.is_ok()) {
+                        return result_t<serialization_context_t>::error(
+                            result.error()
+                        );
+                    }
+                }
+                if constexpr (requires { metadata.data_dir; }) {
+                    auto result = write_str_attr("data_dir", metadata.data_dir);
+                    if (!result.is_ok()) {
+                        return result_t<serialization_context_t>::error(
+                            result.error()
+                        );
+                    }
+                }
+                if constexpr (requires { metadata.dlogt; }) {
+                    auto result = write_attr("dlogt", metadata.dlogt, int_type);
+                    if (!result.is_ok()) {
+                        return result_t<serialization_context_t>::error(
+                            result.error()
+                        );
+                    }
+                }
+                if constexpr (requires { metadata.checkpoint_interval; }) {
+                    auto result = write_attr(
+                        "checkpoint_interval",
+                        metadata.checkpoint_interval,
+                        real_type
+                    );
+                    if (!result.is_ok()) {
+                        return result_t<serialization_context_t>::error(
+                            result.error()
+                        );
+                    }
+                }
+                if constexpr (requires { metadata.checkpoint_time; }) {
+                    auto result = write_attr(
+                        "checkpoint_time",
+                        metadata.checkpoint_time,
+                        real_type
+                    );
                     if (!result.is_ok()) {
                         return result_t<serialization_context_t>::error(
                             result.error()

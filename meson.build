@@ -11,6 +11,8 @@ project(
     'cpp_args': ['-march=native'],
     'warning_level': '3',
     'b_lto': true,
+    'b_lto_mode': 'thin',
+    'b_thinlto_cache': true,
   },
 )
 

@@ -12,7 +12,7 @@ sources = files(
   'math/exp_load.cpp',
   'math/linearize.cpp',
   'physics/em/contact.cpp',
-  'physics/hydro/ib/factory.cpp',
-  'physics/hydro/ib/system_serialization.cpp',
+  'physics/ib/factory.cpp',
+  # 'physics/ib/system_serialization.cpp',
   'utility/helpers.cpp',
 )

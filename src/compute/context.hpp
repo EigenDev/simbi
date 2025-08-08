@@ -5,7 +5,6 @@
 #include "adapter/device_types.hpp"
 #include "config.hpp"
 #include "containers/vector.hpp"
-#include "functional/monad/reader.hpp"
 #include "functional/monad/serializer.hpp"
 #include "io/console/printb.hpp"
 #include "io/console/statistics.hpp"
