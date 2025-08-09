@@ -29,29 +29,8 @@ namespace simbi::cfd {
         using unit_vector_t = simbi::unit_vector_t<Dims>;
         static constexpr auto rec_t = Rec;
 
-        static constexpr auto compute_flux = []() {
-            if constexpr (S == Solver::HLLE) {
-                return hydro::hlle_flux<primitive_t>;
-            }
-            else if constexpr (S == Solver::HLLC) {
-                if constexpr (R == Regime::NEWTONIAN) {
-                    return hydro::newtonian::hllc_flux<primitive_t>;
-                }
-                else if constexpr (R == Regime::SRHD) {
-                    return hydro::srhd::hllc_flux<primitive_t>;
-                }
-                else if constexpr (R == Regime::RMHD) {
-                    return hydro::rmhd::hllc_flux<primitive_t>;
-                }
-            }
-            else if constexpr (S == Solver::HLLD && R == Regime::RMHD) {
-                return hydro::rmhd::hlld_flux<primitive_t>;
-            }
-            else {
-                static_assert(false, "Invalid solver/regime combination");
-            }
-        }();
-
+        // need template function b/c nvcc complains about if constexpr in
+        // lambda sigh...
         DEV conserved_t flux(
             const primitive_t& primL,
             const primitive_t& primR,
@@ -61,7 +40,63 @@ namespace simbi::cfd {
             ShockWaveLimiter limiter = ShockWaveLimiter::NONE
         ) const
         {
-            return compute_flux(primL, primR, nhat, vface, gamma, limiter);
+            if constexpr (S == Solver::HLLE) {
+                return hydro::hlle_flux<primitive_t>(
+                    primL,
+                    primR,
+                    nhat,
+                    vface,
+                    gamma,
+                    limiter
+                );
+            }
+            else if constexpr (S == Solver::HLLC) {
+                if constexpr (R == Regime::NEWTONIAN) {
+                    return hydro::newtonian::hllc_flux<primitive_t>(
+                        primL,
+                        primR,
+                        nhat,
+                        vface,
+                        gamma,
+                        limiter
+                    );
+                }
+                else if constexpr (R == Regime::SRHD) {
+                    return hydro::srhd::hllc_flux<primitive_t>(
+                        primL,
+                        primR,
+                        nhat,
+                        vface,
+                        gamma,
+                        limiter
+                    );
+                }
+                else if constexpr (R == Regime::RMHD) {
+                    return hydro::rmhd::hllc_flux<primitive_t>(
+                        primL,
+                        primR,
+                        nhat,
+                        vface,
+                        gamma,
+                        limiter
+                    );
+                }
+            }
+            else if constexpr (S == Solver::HLLD && R == Regime::RMHD) {
+                return hydro::rmhd::hlld_flux<primitive_t>(
+                    primL,
+                    primR,
+                    nhat,
+                    vface,
+                    gamma,
+                    limiter
+                );
+            }
+            else {
+                []<bool flag = false>() {
+                    static_assert(flag, "Invalid solver/regime combination");
+                }();
+            }
         }
 
         template <typename field_type>
