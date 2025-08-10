@@ -189,9 +189,9 @@ namespace simbi::boundary {
 
     // BC transform creation for face ghosts
     template <typename HydroState, typename MeshConfig>
-    auto face_bc_transform(
+    void face_bc_transform(
         const ghost_region_t<HydroState::dimensions>& ghost,
-        const HydroState& state,
+        HydroState& state,
         const MeshConfig& mesh
     )
     {
@@ -215,7 +215,7 @@ namespace simbi::boundary {
         const auto* bc_sources = state.sources.bc_sources.data();
         const auto cons        = state.cons;
 
-        auto bc_func = [=](coordinate_t<Dims> coord) -> conserved_t {
+        auto bc_func = [=] DEV(coordinate_t<Dims> coord) -> conserved_t {
             if (bc_type == BoundaryCondition::DYNAMIC) {
                 return evaluate_dynamic_bc(
                     coord,
@@ -245,14 +245,14 @@ namespace simbi::boundary {
             return source_value;
         };
 
-        return field(ghost_domain, bc_func);
+        state.cons = state.cons.insert(field(ghost_domain, bc_func));
     }
 
     // BC transform creation for corner ghosts
     template <typename HydroState, typename MeshConfig>
-    auto corner_bc_transform(
+    void corner_bc_transform(
         const ghost_region_t<HydroState::dimensions>& ghost,
-        const HydroState& state,
+        HydroState& state,
         const MeshConfig& mesh
     )
     {
@@ -264,7 +264,7 @@ namespace simbi::boundary {
         auto boundary_conditions = state.metadata.boundary_conditions;
         const auto cons          = state.cons;
 
-        auto bc_func = [=](coordinate_t<Dims> coord) -> conserved_t {
+        auto bc_func = [=] DEV(coordinate_t<Dims> coord) -> conserved_t {
             // map to interior cell
             auto interior_coord = coord;
             for (std::uint64_t d = 0; d < Dims; ++d) {
@@ -299,16 +299,16 @@ namespace simbi::boundary {
             return final_value;
         };
 
-        return field(ghost.domain, bc_func);
+        state.cons = state.cons.insert(field(ghost.domain, bc_func));
     }
 
     // flux BC transform creation
     template <typename HydroState, typename MeshConfig>
-    auto create_stagg_bc_transform(
+    void stagg_bc_transform(
         const ghost_region_t<HydroState::dimensions>& ghost,
         domain_t<HydroState::dimensions> active_staggered,
         std::uint64_t flux_dim,
-        const HydroState& state,
+        HydroState& state,
         const MeshConfig& mesh
     )
     {
@@ -329,7 +329,7 @@ namespace simbi::boundary {
         auto thin_dims = get_thin_dimensions(mesh);
 
         auto flux    = state.flux[flux_dim];
-        auto bc_func = [=](coordinate_t<Dims> coord) -> conserved_t {
+        auto bc_func = [=] DEV(coordinate_t<Dims> coord) -> conserved_t {
             //  do regular BC handling first
             auto source_coord = transform.apply(coord, bc_type);
 
@@ -355,7 +355,8 @@ namespace simbi::boundary {
 
             return source_value;
         };
-        return field(ghost.domain, bc_func);
+        state.flux[flux_dim] =
+            state.flux[flux_dim].insert(field(ghost.domain, bc_func));
     }
 
     // main BC application functions using cursor + map pattern
@@ -368,13 +369,11 @@ namespace simbi::boundary {
 
         for (auto ghost : ghost_info) {
             if (ghost.type == ghost_type_t::face) {
-                auto bc_transform = face_bc_transform(ghost, state, mesh);
-                state.cons        = state.cons.insert(bc_transform);
+                face_bc_transform(ghost, state, mesh);
             }
             if constexpr (HydroState::is_mhd) {
                 if (ghost.type == ghost_type_t::corner) {
-                    auto bc_transform = corner_bc_transform(ghost, state, mesh);
-                    state.cons        = state.cons.insert(bc_transform);
+                    corner_bc_transform(ghost, state, mesh);
                 }
             }
         }
@@ -399,14 +398,13 @@ namespace simbi::boundary {
                     continue;
                 }
 
-                auto flux_bc_transform = create_stagg_bc_transform(
+                stagg_bc_transform(
                     ghost,
                     active_staggered,
                     flux_dim,
                     state,
                     mesh
                 );
-                flux = flux.insert(flux_bc_transform);
             }
         }
     }
