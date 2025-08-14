@@ -2,7 +2,6 @@
 #include "config.hpp"
 #include "config_converter.hpp"
 #include "evolver.hpp"
-#include "utility/config_dict.hpp"
 #include "utility/init_conditions.hpp"
 
 #include <pybind11/cast.h>
@@ -25,9 +24,8 @@ namespace simbi::driver {
     )
     {
         // convert Python dict to config_dict_t
-        config_dict_t config_dict = dict_to_config(sim_info);
-        initial_conditions_t init_cond =
-            initial_conditions_t::create(config_dict);
+        auto config_dict = dict_to_config(sim_info);
+        auto init_cond   = initial_conditions_t::create(config_dict);
 
         // create C++ function wrappers for callbacks
         auto scale_factor = [a_func](real t) -> real {
