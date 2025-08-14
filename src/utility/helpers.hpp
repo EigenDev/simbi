@@ -761,7 +761,7 @@ namespace simbi::helpers {
 
         constexpr auto zero = static_cast<std::int64_t>(0);
         if constexpr (platform::is_gpu) {
-            iterativeQuickSort(res, 0, 3);
+            iterativeQuickSort(res, zero, static_cast<std::int64_t>(3));
         }
         else {
             recursiveQuickSort(res, zero, nroots - 1);
