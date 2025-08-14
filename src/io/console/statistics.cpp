@@ -440,10 +440,10 @@ namespace simbi {
                 memory_table.set_header(header);
 
                 // align columns
-                for (std::int64_t i = 0; i < 5; i++) {
+                for (std::int64_t ii = 0; ii < 5; ii++) {
                     memory_table.set_column_alignment(
-                        i,
-                        i == 0 ? io::Alignment::Left : io::Alignment::Right
+                        ii,
+                        ii == 0 ? io::Alignment::Left : io::Alignment::Right
                     );
                 }
 

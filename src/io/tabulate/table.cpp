@@ -633,7 +633,7 @@ namespace simbi {
         {
             // handle unicode characters properly by using loops instead of
             // string multiplication
-            for (std::int64_t i = 0; i < length; ++i) {
+            for (std::int64_t ii = 0; ii < length; ++ii) {
                 os << char_to_use;
             }
         }
@@ -841,7 +841,7 @@ namespace simbi {
             }
 
             // add spacing based on theme
-            for (std::int64_t i = 0; i < theme_config.title_spacing; ++i) {
+            for (std::int64_t ii = 0; ii < theme_config.title_spacing; ++ii) {
                 os << "\n";
             }
         }
@@ -855,7 +855,7 @@ namespace simbi {
             size_t total_width = calculate_total_width();
 
             // add spacing
-            for (std::int64_t i = 0; i < theme_config.section_spacing; ++i) {
+            for (std::int64_t ii = 0; ii < theme_config.section_spacing; ++ii) {
                 os << "\n";
             }
 
@@ -1661,7 +1661,7 @@ namespace simbi {
             // prstd::int64_t T-jostd::int64_t separator before progress bar
             os << get_color_code(theme_config.border_color);
             os << border_chars.t_left;   // left T-joint
-            for (std::int64_t i = 0; i < bar_width; ++i) {
+            for (std::int64_t ii = 0; ii < bar_width; ++ii) {
                 os << border_chars.horizontal;
             }
             os << border_chars.t_right << "\n";   // right T-joint
@@ -1747,11 +1747,11 @@ namespace simbi {
                     break;
                 }
                 default:
-                    for (std::int64_t i = 0; i < bar_width; ++i) {
-                        if (i < pos) {
+                    for (std::int64_t ii = 0; ii < bar_width; ++ii) {
+                        if (ii < pos) {
                             os << "=";
                         }
-                        else if (i == pos) {
+                        else if (ii == pos) {
                             os << ">";
                         }
                         else {

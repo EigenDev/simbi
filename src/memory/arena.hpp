@@ -1,6 +1,8 @@
 #ifndef ARENA_HPP
 #define ARENA_HPP
 
+#include "smart_ptr.hpp"
+
 #include <algorithm>
 #include <array>
 #include <cstddef>
@@ -49,7 +51,7 @@ namespace simbi::mem {
          * returns shared_ptr with custom deleter that returns memory to
          arena
          */
-        std::shared_ptr<T[]> get(std::size_t count)
+        mem::shared_ptr<T> get(std::size_t count)
         {
             if (count == 0) {
                 throw std::invalid_argument(
@@ -74,27 +76,30 @@ namespace simbi::mem {
                     // create shared_ptr with custom deleter that returns to
                     // arena
                     auto self = this->shared_from_this();
-                    return {buffer.release(), [self, bucket](T* ptr) {
-                                self->return_to_bucket(bucket, ptr);
-                            }};
+                    return mem::shared_ptr<T>{
+                      buffer.release(),
+                      [self, bucket](T* ptr) {
+                          self->return_to_bucket(bucket, ptr);
+                      }
+                    };
                 }
             }
 
             // allocate new buffer
-            auto buffer = std::make_unique<T[]>(actual_size);
+            auto buffer = mem::make_unique<T>(actual_size);
             update_stats(actual_size * sizeof(T), +1);
 
             // return with custom deleter
             auto self = this->shared_from_this();
-            return {buffer.release(), [self, bucket](T* ptr) {
-                        self->return_to_bucket(bucket, ptr);
-                    }};
+            return mem::shared_ptr<T>{buffer.release(), [self, bucket](T* ptr) {
+                                          self->return_to_bucket(bucket, ptr);
+                                      }};
         }
 
         /**
          * get_zeroed - allocate zero-initialized memory
          */
-        std::shared_ptr<T[]> get_zeroed(std::size_t count)
+        mem::shared_ptr<T> get_zeroed(std::size_t count)
         {
             auto buffer                   = get(count);
             const std::size_t actual_size = bucket_size(bucket_for(count));

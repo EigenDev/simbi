@@ -2209,13 +2209,13 @@ namespace simbi::expression {
         std::int64_t count
     )
     {
-        for (std::int64_t i = 0; i < count; ++i) {
-            results[i] = evaluate_expr(
+        for (std::int64_t ii = 0; ii < count; ++ii) {
+            results[ii] = evaluate_expr(
                 nodes,
                 root_idx,
-                x1_values[i],
-                x2_values ? x2_values[i] : 0.0,
-                x3_values ? x3_values[i] : 0.0,
+                x1_values[ii],
+                x2_values ? x2_values[ii] : 0.0,
+                x3_values ? x3_values[ii] : 0.0,
                 t,
                 dt,
                 parameters
@@ -2237,13 +2237,13 @@ namespace simbi::expression {
         real dt
     )
     {
-        for (std::int64_t i = 0; i < num_components; ++i) {
+        for (std::int64_t ii = 0; ii < num_components; ++ii) {
             if constexpr (platform::is_gpu) {
                 // gpu version uses non-recursive evaluation
                 // this avoids stack overflow issues
-                results[i] = evaluate_expr_nonrecursive(
+                results[ii] = evaluate_expr_nonrecursive(
                     nodes,
-                    root_indices[i],
+                    root_indices[ii],
                     x1,
                     x2,
                     x3,
@@ -2253,9 +2253,9 @@ namespace simbi::expression {
                 );
             }
             else {
-                results[i] = evaluate_expr(
+                results[ii] = evaluate_expr(
                     nodes,
-                    root_indices[i],
+                    root_indices[ii],
                     x1,
                     x2,
                     x3,
