@@ -319,7 +319,7 @@ namespace simbi::em {
         auto bavg = interpolate_face_to_cell_magnetic(state, mesh);
         auto u_p  = state.cons[mesh.domain];
 
-        u_p = u_p.map([bavg](auto coord, auto u) {
+        u_p = u_p.enum_map([bavg](auto coord, auto u) {
             const auto b_interp = bavg(coord);
             const auto bmean    = u.mag;
             const auto old_emag = 0.5 * vecops::dot(bmean, bmean);
@@ -335,7 +335,7 @@ namespace simbi::em {
         auto bavg = interpolate_face_to_cell_magnetic(state, mesh);
         auto u_p  = state.cons[mesh.domain];
 
-        u_p = u_p.map([bavg](auto coord, auto u) {
+        u_p = u_p.enum_map([bavg](auto coord, auto u) {
             // update magnetic field in the conservative state
             u.mag = bavg(coord);
             return u;
@@ -350,7 +350,7 @@ namespace simbi::em {
 
         auto db     = ct_magnetic_update<MagComp>(state, mesh);
         auto bfield = state.bstaggs[comp][face_domain];
-        bfield      = bfield.map([db](auto coord, auto b_old) {
+        bfield      = bfield.enum_map([db](auto coord, auto b_old) {
             return b_old + db(coord);
         });
     }
