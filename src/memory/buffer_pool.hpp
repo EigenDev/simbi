@@ -11,7 +11,6 @@
 #include <mutex>
 
 namespace simbi::mem {
-
     using buffer_id_t = std::uint64_t;
 
     /**
