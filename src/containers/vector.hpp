@@ -329,14 +329,11 @@ namespace simbi {
         DUAL auto reverse() const
         {
             // traditional for loop version
-            // vector_t<T, Dims> result;
-            // for (std::uint64_t ii = 0; ii < Dims; ++ii) {
-            //     result[ii] = storage[Dims - ii - 1];
-            // }
-            // return result;
-            return *this | fp::map([this](const auto& x) -> T {
-                return storage[Dims - 1 - (&x - &storage[0])];
-            }) | fp::collect<vector_t<T, Dims>>;
+            vector_t<T, Dims> result;
+            for (std::uint64_t ii = 0; ii < Dims; ++ii) {
+                result[ii] = storage[Dims - ii - 1];
+            }
+            return result;
         }
 
         // data access for algorithms
