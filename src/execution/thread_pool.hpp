@@ -13,7 +13,7 @@
 #include <utility>
 #include <vector>
 
-namespace simbi::async {
+namespace simbi::exec {
     inline auto get_nthreads() -> std::uint64_t
     {
         if (const char* thread_env = std::getenv("NTHREADS")) {
@@ -129,8 +129,8 @@ namespace simbi::async {
 
         static std::size_t get_nthreads()
         {
-            return ::simbi::async::get_nthreads();
+            return ::simbi::exec::get_nthreads();
         }
     };
-}   // namespace simbi::async
+}   // namespace simbi::exec
 #endif

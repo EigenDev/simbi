@@ -21,7 +21,7 @@ namespace simbi::execution {
 
     // specializations for each executor type
     template <>
-    struct executor_traits<async::cpu_executor_t> {
+    struct executor_traits<exec::cpu_executor_t> {
         static constexpr bool is_gpu      = false;
         static constexpr bool is_parallel = false;
         static constexpr strategy_type default_strategy =
@@ -29,7 +29,7 @@ namespace simbi::execution {
     };
 
     template <>
-    struct executor_traits<async::par_cpu_executor_t> {
+    struct executor_traits<exec::par_cpu_executor_t> {
         static constexpr bool is_gpu      = false;
         static constexpr bool is_parallel = true;
         static constexpr strategy_type default_strategy =
@@ -37,7 +37,7 @@ namespace simbi::execution {
     };
 
     template <>
-    struct executor_traits<async::gpu_executor_t> {
+    struct executor_traits<exec::gpu_executor_t> {
         static constexpr bool is_gpu                    = true;
         static constexpr bool is_parallel               = true;
         static constexpr strategy_type default_strategy = strategy_type::gpu;
