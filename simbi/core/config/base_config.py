@@ -585,15 +585,7 @@ class SimbiBaseConfig(CLIConfigurableModel):
         """Create config from checkpoint data."""
         # Process checkpoint metadata into the right format
         checkpoint_data = {
-            "resolution": tuple(
-                r
-                for r, _ in zip(
-                    [metadata["active_x"], metadata["active_y"], metadata["active_z"]],
-                    range(default_config.dimensionality),
-                )
-            )
-            if default_config.dimensionality > 1
-            else metadata["active_x"],
+            "resolution": metadata["resolution"][::-1],
             "start_time": float(metadata["time"]),
             "end_time": float(metadata["end_time"]),
             "adiabatic_index": float(metadata["adiabatic_index"]),
