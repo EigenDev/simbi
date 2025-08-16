@@ -655,11 +655,11 @@ namespace simbi {
     namespace unit_vectors {
 
         template <std::uint64_t Dims>
-        DEV constexpr auto canonical_basis(std::uint64_t i)
+        DEV constexpr auto canonical_basis(std::uint64_t ii)
         {
             vector_t<std::uint64_t, Dims> basis{0};
-            if (i > 0 && i <= Dims) {
-                basis[i - 1] = 1;   // 1-indexed to 0-indexed
+            if (ii > 0 && ii <= Dims) {
+                basis[ii - 1] = 1;   // 1-indexed to 0-indexed
             }
             return basis;
         }
