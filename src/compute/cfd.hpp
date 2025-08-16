@@ -320,42 +320,42 @@ namespace simbi::cfd {
         const auto widths = mesh::cell_widths(coord, mesh);
         const auto cent   = mesh::centroid(coord, mesh);
 
-        for (std::uint64_t d = 0; d < dims; ++d) {
-            const auto offset = unit_vectors::logical_offset<dims>(d);
-            const real dx     = widths[d];
+        for (std::uint64_t dd = 0; dd < dims; ++dd) {
+            const auto ldd    = dims - 1 - dd;   // logical dimension
+            const auto offset = unit_vectors::logical_offset<dims>(ldd);
+            const real dx     = widths[ldd];
 
             const auto v_plus  = prims[coord + offset].vel;
             const auto v_minus = prims[coord - offset].vel;
             const auto dv      = (v_plus - v_minus) / (2.0 * dx);
 
-            for (std::uint64_t i = 0; i < dims; ++i) {
+            for (std::uint64_t ii = 0; ii < dims; ++ii) {
                 if constexpr (geom == Geometry::CYLINDRICAL) {
                     // cylindrical metric corrections
-                    if (d == dims - 1) {   // radial derivative
-                        dv_dx[i][d] = dv[i];
+                    if (dd == 0) {   // radial derivative
+                        dv_dx[ii][dd] = dv[ii];
                     }
-                    else if (d == dims - 2 &&
-                             dims > 1) {   // azimuthal derivative
-                        const real r = cent[dims - 1];
-                        dv_dx[i][d]  = dv[i] / r;   // 1/r ∂/∂φ
+                    else if (dd == 1 && dims > 1) {   // azimuthal derivative
+                        const real r  = cent[dims - 1];
+                        dv_dx[ii][dd] = dv[ii] / r;
                     }
                     else {   // z derivative
-                        dv_dx[i][d] = dv[i];
+                        dv_dx[ii][dd] = dv[ii];
                     }
                 }
                 else if constexpr (geom == Geometry::SPHERICAL) {
                     // spherical metric corrections
-                    if (d == dims - 1) {   // radial derivative
-                        dv_dx[i][d] = dv[i];
+                    if (dd == 0) {   // radial derivative
+                        dv_dx[ii][dd] = dv[ii];
                     }
-                    else if (d == dims - 2 && dims > 1) {   // theta derivative
-                        const real r = cent[dims - 1];
-                        dv_dx[i][d]  = dv[i] / r;
+                    else if (dd == 1 && dims > 1) {   // theta derivative
+                        const real r  = cent[dims - 1];
+                        dv_dx[ii][dd] = dv[ii] / r;
                     }
-                    else if (d == dims - 3 && dims > 2) {   // phi derivative
+                    else if (dd == 2 && dims > 2) {   // phi derivative
                         const real r     = cent[dims - 1];
                         const real theta = cent[dims - 2];
-                        dv_dx[i][d]      = dv[i] / (r * std::sin(theta));
+                        dv_dx[ii][dd]    = dv[ii] / (r * std::sin(theta));
                     }
                 }
             }
@@ -380,19 +380,19 @@ namespace simbi::cfd {
         vector_t<vector_t<real, dims>, dims> dv_dx;
 
         if constexpr (geom == Geometry::CARTESIAN) {
-            // standard cartesian gradients
             const auto widths = mesh::cell_widths(coord, mesh);
 
-            for (std::uint64_t d = 0; d < dims; ++d) {
-                const auto offset = unit_vectors::logical_offset<dims>(d);
-                const real dx     = widths[d];
+            for (std::uint64_t dd = 0; dd < dims; ++dd) {
+                const auto ldd    = dims - 1 - dd;   // logical dimension
+                const auto offset = unit_vectors::logical_offset<dims>(ldd);
+                const real dxi    = widths[ldd];
 
                 const auto v_plus  = prims[coord + offset].vel;
                 const auto v_minus = prims[coord - offset].vel;
-                const auto dv      = (v_plus - v_minus) / (2.0 * dx);
+                const auto dv      = (v_plus - v_minus) / (2.0 * dxi);
 
-                for (std::uint64_t i = 0; i < dims; ++i) {
-                    dv_dx[i][d] = dv[i];
+                for (std::uint64_t ii = 0; ii < dims; ++ii) {
+                    dv_dx[ii][dd] = dv[ii];
                 }
             }
         }
@@ -406,14 +406,16 @@ namespace simbi::cfd {
 
     // extract stress components for flux direction
     template <std::uint64_t dims>
-    DEV auto
-    extract_stress_flux(const real (&sigma)[dims][dims], std::uint64_t dir)
+    DEV auto extract_stress_flux(
+        const vector_t<vector_t<real, dims>, dims>& sigma,
+        std::uint64_t dir
+    )
     {
-        using vec_t = vector_t<real, dims>;
-        vec_t stress_flux{};
-
+        vector_t<real, dims> stress_flux{};
+        // logical dimension
+        const auto ldd = dims - 1 - dir;
         for (std::uint64_t ii = 0; ii < dims; ++ii) {
-            stress_flux[ii] = sigma[ii][dir];   // sigma column for direction j
+            stress_flux[ii] = sigma[ii][ldd];   // sigma column for direction j
         }
 
         return stress_flux;
@@ -421,27 +423,25 @@ namespace simbi::cfd {
 
     // compute full stress tensor at cell center
     template <typename PrimField, typename MeshConfig>
-    DEV auto compute_stress_tensor(
+    DEV auto stress_tensor(
         const PrimField& prims,
         const auto& coord,
         const MeshConfig& mesh,
-        real nu
+        real nu,
+        real rho_interface
     )
     {
         constexpr auto dims = PrimField::dimensions;
 
-        // get velocity gradients
-        auto dv_dx = compute_velocity_gradients(prims, coord, mesh);
+        const auto dv_dx = compute_velocity_gradients(prims, coord, mesh);
 
-        // compute divergence
         real div_v = 0.0;
         for (std::uint64_t ii = 0; ii < dims; ++ii) {
             div_v += dv_dx[ii][ii];
         }
 
         // dynamic viscosity
-        const auto rho = prims[coord].rho;
-        const auto mu  = rho * nu;
+        const auto mu = rho_interface * nu;
 
         // assemble stress tensor
         vector_t<vector_t<real, dims>, dims> sigma;
@@ -468,7 +468,9 @@ namespace simbi::cfd {
         const auto& coord,
         std::uint64_t dir,
         const MeshConfig& mesh,
-        real nu
+        real nu,
+        real rhoL,
+        real rhoR
     )
     {
         constexpr auto dims = PrimField::dimensions;
@@ -479,11 +481,11 @@ namespace simbi::cfd {
         const auto right_cell = coord;
 
         // compute stress tensor at both cells
-        auto stress_left  = compute_stress_tensor(prims, left_cell, mesh, nu);
-        auto stress_right = compute_stress_tensor(prims, right_cell, mesh, nu);
+        auto stress_left  = stress_tensor(prims, left_cell, mesh, nu, rhoL);
+        auto stress_right = stress_tensor(prims, right_cell, mesh, nu, rhoR);
 
         // average stress tensor to interface
-        real avg_stress[dims][dims] = {};
+        vector_t<vector_t<real, dims>, dims> avg_stress;
         for (std::uint64_t ii = 0; ii < dims; ++ii) {
             for (std::uint64_t jj = 0; jj < dims; ++jj) {
                 avg_stress[ii][jj] =
@@ -526,8 +528,17 @@ namespace simbi::cfd {
             // solve Riemann problem
             auto flux = ops.flux(pl, pr, nhat, vface, gamma, shock_smoother);
             if (nu > 0) {
-                auto visc = viscous_stress_flux(prims, coord, dir, mesh, nu);
-                flux.mom  = flux.mom + visc;
+                const auto visc = viscous_stress_flux(
+                    prims,
+                    coord,
+                    dir,
+                    mesh,
+                    nu,
+                    pl.rho,
+                    pr.rho
+                );
+                flux.mom = flux.mom - visc;
+                // flux.nrg = flux.nrg + vecops::dot(visc, pl.vel);
             }
             return flux;
         }
