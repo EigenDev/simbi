@@ -53,7 +53,7 @@ namespace simbi::body {
             }
 
             // toeque vector is always 3D
-            // where it is 0 for 1D, it exists
+            // where it is 0 for 1D, it points
             // along the z-index in 2D, and
             // works the usual way for 3D
             torque_1[body_delta.idx].fetch_add(
