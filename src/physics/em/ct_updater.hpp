@@ -222,50 +222,57 @@ namespace simbi::em {
     // ========================================================================
     // CT MAGNETIC UPDATE
     // ========================================================================
+    template <typename HydroState, typename MeshConfig, magnetic_comp_t MagComp>
+    struct ct_magnetic_update_op_t {
+        const HydroState& state;
+        const MeshConfig& mesh;
+
+        DEV auto operator()(auto face_coord) const
+        {
+            const auto dt = state.metadata.dt;
+
+            const auto fluxes = vector_t{
+              state.flux[0][mesh.face_domain[0]],
+              state.flux[1][mesh.face_domain[1]],
+              state.flux[2][mesh.face_domain[2]]
+            };
+            const auto prim = state.prim[mesh.domain];
+
+            constexpr auto perm_list = permutation_list<MagComp>();
+
+            const auto emf_computer = [&]<typename Perm>(Perm) {
+                return [&](const iarray<3>& edge_coord) {
+                    auto flux_coords = flux_stencil<Perm>(edge_coord);
+                    auto prim_coords = prim_stencil<Perm>(edge_coord);
+
+                    auto ef    = face_efields<Perm>(fluxes, flux_coords);
+                    auto ec    = center_efields<Perm>(prim, prim_coords);
+                    auto densf = den_fluxes<Perm>(fluxes, flux_coords);
+
+                    return ct_contact_formula(ef, ec, densf);
+                };
+            };
+
+            const auto edge_generator = [&]<typename Permutation>(Permutation) {
+                return gen_edge_coords<MagComp, Permutation>(face_coord);
+            };
+
+            auto emfs = map_permutations(perm_list, [&]<typename Perm>(Perm p) {
+                return edge_generator(p) | fp::map(emf_computer(p)) |
+                       fp::collect<vector_t<real, 2>>;
+            });
+
+            real curl = discrete_curl<MagComp>(emfs, face_coord, mesh);
+            return -dt * curl;   // Faraday's law
+        }
+    };
 
     template <magnetic_comp_t MagComp, typename HydroState, typename MeshConfig>
     auto ct_magnetic_update(const HydroState& state, const MeshConfig& mesh)
     {
         constexpr auto comp = static_cast<std::uint64_t>(MagComp);
-        const auto dt       = state.metadata.dt;
-
         return compute_field_t{
-          [dt,
-           mesh,
-           prim  = state.prim[mesh.domain],
-           flux0 = state.flux[0][mesh.face_domain[0]],
-           flux1 = state.flux[1][mesh.face_domain[1]],
-           flux2 = state.flux[2][mesh.face_domain[2]]](auto face_coord) {
-              const auto fluxes        = vector_t{flux0, flux1, flux2};
-              constexpr auto perm_list = permutation_list<MagComp>();
-
-              const auto emf_computer = [&]<typename Perm>(Perm) {
-                  return [&](const iarray<3>& edge_coord) {
-                      auto flux_coords = flux_stencil<Perm>(edge_coord);
-                      auto prim_coords = prim_stencil<Perm>(edge_coord);
-
-                      auto ef    = face_efields<Perm>(fluxes, flux_coords);
-                      auto ec    = center_efields<Perm>(prim, prim_coords);
-                      auto densf = den_fluxes<Perm>(fluxes, flux_coords);
-
-                      return ct_contact_formula(ef, ec, densf);
-                  };
-              };
-
-              const auto edge_generator =
-                  [&]<typename Permutation>(Permutation) {
-                      return gen_edge_coords<MagComp, Permutation>(face_coord);
-                  };
-
-              auto emfs =
-                  map_permutations(perm_list, [&]<typename Perm>(Perm p) {
-                      return edge_generator(p) | fp::map(emf_computer(p)) |
-                             fp::collect<vector_t<real, 2>>;
-                  });
-
-              real curl = discrete_curl<MagComp>(emfs, face_coord, mesh);
-              return -dt * curl;   // Faraday's law
-          },
+          ct_magnetic_update_op_t<HydroState, MeshConfig, MagComp>{state, mesh},
           make_domain(mesh.face_domain[comp].shape())
         };
     }
@@ -273,6 +280,38 @@ namespace simbi::em {
     // ========================================================================
     // INTERPOLATION FIELDS
     // ========================================================================
+    template <typename HydroState, typename MeshConfig>
+    struct interpolate_magnetic_op_t {
+        const HydroState& state;
+        const MeshConfig& mesh;
+
+        DEV auto operator()(auto coord) const
+        {
+            const auto bz = state.bstaggs[0][mesh.face_domain[0]];
+            const auto by = state.bstaggs[1][mesh.face_domain[1]];
+            const auto bx = state.bstaggs[2][mesh.face_domain[2]];
+
+            auto get_face_avg = [this](const auto& bface, auto cm, int dir) {
+                const auto cp = cm + array_offset<3>(dir);
+                if constexpr (MeshConfig::geometry == Geometry::CARTESIAN) {
+                    (void) mesh;   // unused in Cartesian case
+                    return 0.5 * (bface[cm] + bface[cp]);
+                }
+                else {
+                    // volume-average for non-Cartesian geometries
+                    auto al = mesh::face_area(cm, dir, Dir::E, mesh);
+                    auto ar = mesh::face_area(cp, dir, Dir::W, mesh);
+                    return (bface[cm] * al + bface[cp] * ar) / (al + ar);
+                }
+            };
+
+            return vector_t<real, 3>{
+              get_face_avg(bx, coord, 2),   // x1-component
+              get_face_avg(by, coord, 1),   // x2-component
+              get_face_avg(bz, coord, 0)    // x3-component
+            };
+        }
+    };
 
     template <typename HydroState, typename MeshConfig>
     auto interpolate_face_to_cell_magnetic(
@@ -280,31 +319,8 @@ namespace simbi::em {
         const MeshConfig& mesh
     )
     {
-        const auto bz = state.bstaggs[0][mesh.face_domain[0]];
-        const auto by = state.bstaggs[1][mesh.face_domain[1]];
-        const auto bx = state.bstaggs[2][mesh.face_domain[2]];
         return compute_field_t{
-          [bx, by, bz, mesh](auto coord) {
-              auto get_face_avg = [mesh](const auto& bface, auto cm, int dir) {
-                  const auto cp = cm + array_offset<3>(dir);
-                  if constexpr (MeshConfig::geometry == Geometry::CARTESIAN) {
-                      (void) mesh;   // unused in Cartesian case
-                      return 0.5 * (bface[cm] + bface[cp]);
-                  }
-                  else {
-                      // volume-average for non-Cartesian geometries
-                      auto al = mesh::face_area(cm, dir, Dir::E, mesh);
-                      auto ar = mesh::face_area(cp, dir, Dir::W, mesh);
-                      return (bface[cm] * al + bface[cp] * ar) / (al + ar);
-                  }
-              };
-
-              return vector_t<real, 3>{
-                get_face_avg(bx, coord, 2),   // x1-component
-                get_face_avg(by, coord, 1),   // x2-component
-                get_face_avg(bz, coord, 0)    // x3-component
-              };
-          },
+          interpolate_magnetic_op_t<HydroState, MeshConfig>{state, mesh},
           make_domain(mesh.domain.shape())
         };
     }
@@ -319,7 +335,7 @@ namespace simbi::em {
         auto bavg = interpolate_face_to_cell_magnetic(state, mesh);
         auto u_p  = state.cons[mesh.domain];
 
-        u_p = u_p.map([bavg](auto coord, auto u) {
+        u_p = u_p.map([bavg] DEV(auto coord, auto u) {
             const auto b_interp = bavg(coord);
             const auto bmean    = u.mag;
             const auto old_emag = 0.5 * vecops::dot(bmean, bmean);
@@ -335,7 +351,7 @@ namespace simbi::em {
         auto bavg = interpolate_face_to_cell_magnetic(state, mesh);
         auto u_p  = state.cons[mesh.domain];
 
-        u_p = u_p.map([bavg](auto coord, auto u) {
+        u_p = u_p.map([bavg] DEV(auto coord, auto u) {
             // update magnetic field in the conservative state
             u.mag = bavg(coord);
             return u;
@@ -350,7 +366,7 @@ namespace simbi::em {
 
         auto db     = ct_magnetic_update<MagComp>(state, mesh);
         auto bfield = state.bstaggs[comp][face_domain];
-        bfield      = bfield.map([db](auto coord, auto b_old) {
+        bfield      = bfield.map([db] DEV(auto coord, auto b_old) {
             return b_old + db(coord);
         });
     }
