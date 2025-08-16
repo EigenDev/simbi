@@ -66,7 +66,7 @@ namespace simbi {
     }
 
     template <typename HydroState, typename MeshConfig>
-    auto compute_timestep_async(const HydroState& state, const MeshConfig& mesh)
+    auto compute_timestep(const HydroState& state, const MeshConfig& mesh)
     {
         // create lazy timestep field
         auto timestep_field = create_timestep_field(state, mesh);
@@ -85,7 +85,7 @@ namespace simbi {
     template <typename HydroState, typename MeshConfig>
     void update_timestep(HydroState& state, const MeshConfig& mesh)
     {
-        auto dt_future    = compute_timestep_async(state, mesh);
+        auto dt_future    = compute_timestep(state, mesh);
         state.metadata.dt = dt_future.wait();
     }
 
