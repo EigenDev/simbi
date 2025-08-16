@@ -51,8 +51,8 @@ namespace simbi::body {
                     }
                 );
 
-            for (std::size_t i = 0; i < state.bodies->size(); ++i) {
-                new_coll = std::move(new_coll).add(updated_body_variants[i]);
+            for (std::size_t ii = 0; ii < state.bodies->size(); ++ii) {
+                new_coll = std::move(new_coll).add(updated_body_variants[ii]);
             }
 
             state.bodies = std::move(new_coll);
