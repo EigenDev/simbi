@@ -240,10 +240,14 @@ namespace simbi::hydro {
             return rmhd::to_primitive(cons, gamma);
         }
         else {
-            static_assert(
-                false,
-                "Unsupported regime for primitive conversion in hydro namespace"
-            );
+            // lambda trick for nvcc compatibility
+            []<bool flag = false>() {
+                static_assert(
+                    flag,
+                    "Unsupported regime for primitive conversion in hydro "
+                    "namespace"
+                );
+            }();
         }
     }
 

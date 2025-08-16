@@ -26,6 +26,8 @@
 #define DEVICE_TYPES_HPP
 
 #include "config.hpp"
+#include "kernel.hpp"
+
 #include <atomic>
 #include <chrono>
 #include <cstddef>
@@ -438,10 +440,10 @@ namespace simbi::adapter {
         else {
             // gpu implementation uses appropriate launch syntax
 #if defined(CUDA_ENABLED) || defined(HIP_ENABLED)
-            kernel<<<
+            generic_kernel<<<
                 grid::to_native_dim3(config.grid()),
                 grid::to_native_dim3(config.block()),
-                config.shared_memory()>>>(std::forward<Args>(args)...);
+                config.shared_memory()>>>(kernel, std::forward<Args>(args)...);
 #endif
         }
     }

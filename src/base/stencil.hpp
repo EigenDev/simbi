@@ -20,7 +20,11 @@ namespace simbi::base {
             return 3;
         }
         else {
-            static_assert(false, "Unsupported reconstruction order");
+            // nvcc doesn't like false static_assert, so we switch to the
+            // lambda trick
+            []<bool flag = false>() {
+                static_assert(flag, "Unsupported reconstruction order");
+            }();
         }
     }
 
