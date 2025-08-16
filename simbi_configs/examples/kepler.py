@@ -102,7 +102,7 @@ class KeplerianRingTest(SimbiBaseConfig):
     @computed_field
     @property
     def ambient_sound_speed(self) -> float:
-        return 0.01  # Isothermal sound speed (constant)
+        return 0.01
 
     @computed_field
     @property
@@ -182,7 +182,6 @@ class KeplerianRingTest(SimbiBaseConfig):
                         vy = 0.0
                         p = sigma * cs_squared
                         yield (sigma, vx, vy, p)
-                        continue
 
                     # Calculate density profile
                     if r <= r_buffer:
@@ -226,7 +225,6 @@ class KeplerianRingTest(SimbiBaseConfig):
 
                     vx = -v_k * (y / r)
                     vy = +v_k * (x / r)
-
                     # Isothermal pressure (cs = constant)
                     p = sigma * cs_squared
 

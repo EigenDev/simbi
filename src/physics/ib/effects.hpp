@@ -8,6 +8,7 @@
 #include "containers/vector.hpp"
 #include "mesh/mesh_ops.hpp"
 #include "physics/hydro/physics.hpp"
+#include "utility/helpers.hpp"
 
 #include <cmath>
 #include <cstdint>
@@ -20,22 +21,18 @@ namespace simbi::body::expr {
     // ========================================================================
 
     // gravitational effect operation
-    template <typename HydroState, typename MeshConfig, std::uint64_t Dims>
-    struct gravitational_effect_op_t {
-        const HydroState& state_;
-        const MeshConfig& mesh_;
+    template <typename Primitive, typename MeshConfig>
+    struct grav_op_t {
+        using conserved_t                   = Primitive::counterpart_t;
+        static constexpr std::uint64_t Dims = Primitive::dimensions;
+
+        Primitive prim;
+        MeshConfig mesh_;
 
         template <typename Body, typename Coord>
-        auto apply_to_body(const Body& body, Coord coord) const
+        constexpr auto operator()(const Body& body, Coord coord) const
         {
-            using conserved_t = typename HydroState::conserved_t;
-
-            // get physics context
-            const auto& ctx = state_.metadata;
-            auto cell_pos   = mesh::to_cartesian(coord, mesh_);
-
-            const auto prim = state_.prim[coord];
-
+            const auto cell_pos = mesh::to_cartesian(coord, mesh_);
             // gravitational physics
             const auto r_vec = cell_pos - body.position;
             const auto r_mag = r_vec.norm();
@@ -45,17 +42,13 @@ namespace simbi::body::expr {
             const auto r_eff        = std::sqrt(r_mag * r_mag + softening_sq);
 
             // gravitational acceleration (G = 1)
-            const auto g_accel = -body.mass * r_vec / (r_eff * r_eff * r_eff);
+            const auto g_cart  = body.mass * r_vec / (r_eff * r_eff * r_eff);
+            const auto g_accel = -vecops::centralize(g_cart, mesh_.geometry);
 
             // fluid changes
-            const auto dt      = state_.metadata.dt;
             const auto density = labframe_density(prim);
             const auto dp_dt   = density * g_accel;
-            const auto v_old   = prim.vel;
-            const auto v_new =
-                (linear_momentum(prim, ctx.gamma) + dp_dt * dt) / density;
-            const auto v_avg = 0.5 * (v_old + v_new);
-            const auto dE_dt = vecops::dot(v_avg, dp_dt);
+            const auto dE_dt   = vecops::dot(prim.vel, dp_dt);
 
             // [TODO]: impl torque from gravity?
             return std::make_pair(
@@ -72,50 +65,61 @@ namespace simbi::body::expr {
     };
 
     // accretion effect operation
-    template <typename HydroState, typename MeshConfig, std::uint64_t Dims>
-    struct accretion_effect_op_t {
-        const HydroState& state_;
-        const MeshConfig& mesh_;
+    template <typename Primitive, typename MeshConfig>
+    struct accretion_op_t {
+        using conserved_t                   = Primitive::counterpart_t;
+        static constexpr std::uint64_t Dims = Primitive::dimensions;
+
+        Primitive prim;
+        MeshConfig mesh_;
+        real gamma;
+        real dt;
 
         template <typename Body, typename Coord>
-        auto apply_to_body(const Body& body, Coord coord) const
+        constexpr auto operator()(const Body& body, Coord coord) const
         {
-            using conserved_t   = typename HydroState::conserved_t;
-            const auto& ctx     = state_.metadata;
+            using namespace simbi::helpers;
             const auto cell_pos = mesh::to_cartesian(coord, mesh_);
-
-            const auto prim  = state_.prim[coord];
-            const auto r_vec = cell_pos - body.position;
-            const auto r_mag = r_vec.norm();
+            const auto r_vec    = cell_pos - body.position;
+            const auto r_mag    = r_vec.norm();
 
             const auto accr_radius = accretion_radius(body);
 
             // skip if too far away
             if (r_mag > 2.5 * accr_radius) {
-                return std::make_pair(conserved_t{}, body_delta_t<Dims>{});
+                return std::make_pair(
+                    conserved_t{},
+                    body_delta_t<Dims>{
+                      .idx                  = body.idx,
+                      .force_delta          = {},
+                      .torque_delta         = {},
+                      .mass_delta           = 0.0,
+                      .accretion_rate_delta = 0.0
+                    }
+                );
             }
 
             // accretion physics
             const auto accr_eff            = accretion_efficiency(body);
             const auto cell_size           = mesh::max_cell_width(coord, mesh_);
-            const auto local_cs            = sound_speed(prim, ctx.gamma);
+            const auto local_cs            = sound_speed(prim, gamma);
             const auto sound_crossing_time = cell_size / local_cs;
-            const auto stability_limit     = ctx.dt / sound_crossing_time;
-            const auto eps = std::min({accr_eff, 0.5, stability_limit});
+            const auto stability_limit     = dt / sound_crossing_time;
+            const auto eps = my_min3(accr_eff, 0.5, stability_limit);
             // for now, I will set the sink rate to the inverse of sound
             // crossing time [TODO]: make this configurable
             const auto sr = 1.0 / sound_crossing_time;
 
             // calculate accreted quantities
             const auto den_dot = eps * labframe_density(prim) * sr;
-            const auto mom_dot = eps * linear_momentum(prim, ctx.gamma) * sr;
-            const auto power   = eps * energy_density(prim, ctx.gamma) * sr;
+            const auto mom_dot = eps * linear_momentum(prim, gamma) * sr;
+            const auto power   = eps * energy_density(prim, gamma) * sr;
 
             const auto dv          = mesh::volume(coord, mesh_);
-            const auto force_delta = -mom_dot * dv * ctx.dt;
+            const auto force_delta = -mom_dot * dv;
             auto torque_delta      = [&]() -> vector_t<real, 3> {
                 if constexpr (Dims == 3) {
-                    return vecops::cross(r_vec, force_delta) * dv;
+                    return vecops::cross(r_vec, force_delta);
                 }
                 else if constexpr (Dims == 2) {
                     return vector_t<real, 3>{
@@ -135,7 +139,7 @@ namespace simbi::body::expr {
                   .idx                  = body.idx,
                   .force_delta          = force_delta,
                   .torque_delta         = std::move(torque_delta),
-                  .mass_delta           = den_dot * dv * ctx.dt,
+                  .mass_delta           = den_dot * dv * dt,
                   .accretion_rate_delta = den_dot * dv
                 }
             );
@@ -143,35 +147,37 @@ namespace simbi::body::expr {
     };
 
     // rigid body effect operation
-    template <typename HydroState, typename MeshConfig, std::uint64_t Dims>
-    struct rigid_effect_op_t {
-        const HydroState& state_;
-        const MeshConfig& mesh_;
+    template <typename Primitive, typename MeshConfig>
+    struct rigid_op_t {
+        using conserved_t                   = Primitive::counterpart_t;
+        static constexpr std::uint64_t Dims = Primitive::dimensions;
+
+        Primitive prim;
+        MeshConfig mesh_;
+        real gamma;
 
         template <typename Body, typename Coord>
-        auto apply_to_body(const Body& body, Coord coord) const
+        constexpr auto operator()(const Body& body, Coord coord) const
         {
-            using conserved_t         = typename HydroState::conserved_t;
-            const auto& ctx           = state_.metadata;
+            using namespace simbi::helpers;
             const auto cell_pos       = mesh::to_cartesian(coord, mesh_);
             const auto min_cell_width = mesh::min_cell_width(coord, mesh_);
 
-            const auto prim     = state_.prim[coord];
             const auto r_vec    = cell_pos - body.position;
             const auto distance = r_vec.norm();
 
             // early exit if too far from body
             constexpr real SAFE_MINIMUM = 1e-10;
-            const auto r_norm           = std::max(SAFE_MINIMUM, distance);
+            const auto r_norm           = my_max(SAFE_MINIMUM, distance);
             const auto r_hat            = r_vec / r_norm;
             const auto signed_distance  = distance - body.radius;
 
             // get fluid properties
             const auto density         = labframe_density(prim);
-            const auto sound_speed_val = sound_speed(prim, ctx.gamma);
+            const auto sound_speed_val = sound_speed(prim, gamma);
             const auto fluid_velocity  = prim.vel;
             const auto mach_number =
-                fluid_velocity.norm() / std::max(sound_speed_val, SAFE_MINIMUM);
+                fluid_velocity.norm() / my_max(sound_speed_val, SAFE_MINIMUM);
 
             // calculate boundary thickness
             real boundary_thickness =
@@ -198,7 +204,7 @@ namespace simbi::body::expr {
                     ? 25.0 * density * sound_speed_val * sound_speed_val
                     : 10.0 * density * sound_speed_val * sound_speed_val;
 
-            vector_t<real, Dims> total_force{};
+            vector_t<real, Dims> dp_dt{};
 
             if (signed_distance < 0) {
                 // inside body - strong forcing
@@ -206,7 +212,7 @@ namespace simbi::body::expr {
                     std::abs(signed_distance) / body.radius;
                 const real interior_factor =
                     1.0 + 10.0 * depth_ratio * depth_ratio;
-                total_force = -rel_velocity * base_strength * interior_factor;
+                dp_dt = -rel_velocity * base_strength * interior_factor;
             }
             else if (signed_distance < boundary_thickness) {
                 // boundary region
@@ -216,7 +222,7 @@ namespace simbi::body::expr {
 
                 // check if body has no-slip (would need to access rigid
                 // component) for now, assume no-slip
-                total_force = -rel_velocity * base_strength * sharp_factor;
+                dp_dt = -rel_velocity * base_strength * sharp_factor;
             }
             else if (mach_number > 1.0 &&
                      signed_distance < 2.0 * boundary_thickness) {
@@ -228,30 +234,24 @@ namespace simbi::body::expr {
                     0.5 * base_strength * std::pow(pre_factor, 2);
 
                 const real incoming_velocity =
-                    -std::min(real{0}, vecops::dot(rel_velocity, r_hat));
+                    -my_min(real{0}, vecops::dot(rel_velocity, r_hat));
                 if (incoming_velocity > 0.1 * sound_speed_val) {
-                    total_force = -normal_rel_velocity * pre_strength;
+                    dp_dt = -normal_rel_velocity * pre_strength;
                 }
             }
 
-            // convert force to momentum change
-            const auto dp = total_force * ctx.dt;
-
             // calculate energy change
-            const auto invd  = 1.0 / density;
-            const auto v_new = (linear_momentum(prim, ctx.gamma) + dp) * invd;
-            const auto v_avg = 0.5 * (fluid_velocity + v_new);
-            const auto dE    = vecops::dot(v_avg, dp);
+            const auto dE_dt = vecops::dot(prim.vel, dp_dt);
             const auto dv    = mesh::volume(coord, mesh_);
             auto torque      = [&]() -> vector_t<real, 3> {
                 if constexpr (Dims == 3) {
-                    return vecops::cross(r_vec, total_force) * dv;
+                    return vecops::cross(r_vec, dp_dt) * dv;
                 }
                 else if constexpr (Dims == 2) {
                     return vector_t<real, 3>{
                       0,
                       0,
-                      r_vec[0] * total_force[1] - r_vec[1] * total_force[0]
+                      r_vec[0] * dp_dt[1] - r_vec[1] * dp_dt[0]
                     };
                 }
                 else {
@@ -260,10 +260,10 @@ namespace simbi::body::expr {
             }();
 
             return std::make_pair(
-                conserved_t{0.0, dp, dE},
+                conserved_t{0.0, dp_dt, dE_dt},
                 body_delta_t<Dims>{
                   .idx                  = body.idx,
-                  .force_delta          = -total_force * dv,
+                  .force_delta          = -dp_dt,
                   .torque_delta         = std::move(torque),
                   .mass_delta           = 0.0,
                   .accretion_rate_delta = 0.0

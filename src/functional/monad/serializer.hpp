@@ -1,19 +1,22 @@
 #ifndef SERIALIZATION_HPP
 #define SERIALIZATION_HPP
 
-#include "compute/field.hpp"   // for field_t<T, Dims>
-#include "config.hpp"          // for real, DEV, etc
-#include "io/tabulate/table.hpp"
-#include "mesh/mesh_config.hpp"   // for mesh::mesh_config_t
-#include "result.hpp"             // for result_t<T> monad
-#include "utility/enums.hpp"
-#include "utility/helpers.hpp"
+#include "compute/field.hpp"            // for field_t<T, Dims>
+#include "config.hpp"                   // for real, DEV, etc
+#include "containers/vector.hpp"        // for simbi::vector_t
+#include "io/tabulate/table.hpp"        // for tabulate::table_t
+#include "mesh/mesh_config.hpp"         // for mesh::mesh_config_t
+#include "physics/ib/collection.hpp"    // for ib::body_collection_t
+#include "physics/ib/diagnostics.hpp"   // for ib::body_diagnostics_t
+#include "result.hpp"                   // for result_t<T> monad
+#include "utility/enums.hpp"            // for Regime, Geometry, etc
+#include "utility/helpers.hpp"          // for simbi::helpers::serialize
 
 #include <H5Cpp.h>         // for HDF5 C++ API
 #include <concepts>        // for concepts
 #include <cstdint>         // for std::uint64_t
 #include <functional>      // for std::function
-#include <iostream>        // for std::cout, std::cerr
+#include <optional>        // for std::optional
 #include <string>          // for std::string
 #include <type_traits>     // for std::is_arithmetic_v, std::same_as
 #include <unordered_map>   // for std::unordered_map
@@ -22,6 +25,22 @@
 
 namespace simbi::io {
     using namespace simbi::helpers;
+
+    template <typename T>
+    concept body_collection_serializable_c = requires(const T& collection) {
+        collection.size();
+        collection.name();
+        collection.begin();
+        collection.end();
+    };
+
+    template <typename T>
+    concept body_diagnostics_serializable_c = requires(const T& diagnostics) {
+        diagnostics.force_1;
+        diagnostics.total_mass;
+        diagnostics.accretion_rate;
+    };
+
     // serialization context - accumulates state through pipeline
     struct serialization_context_t {
         H5::H5File file;
@@ -872,10 +891,6 @@ namespace simbi::io {
                     );
                 }
 
-                // std::cout << "Serialized mesh config to group: " <<
-                // group_name
-                //           << std::endl;
-
                 mesh_group.close();
                 return result_t<serialization_context_t>::ok(
                     ctx.with_dataset(group_name)
@@ -886,6 +901,293 @@ namespace simbi::io {
                     "hdf5 error writing mesh config: " + e.getDetailMsg()
                 );
             }
+        }
+    };
+
+    // body collection serialization trait
+    template <std::uint64_t Dims, std::uint64_t MaxBodies>
+    struct serialization_trait_t<
+        std::optional<body::body_collection_t<Dims, MaxBodies>>> {
+        constexpr static bool serializable = true;
+
+        static result_t<serialization_context_t> serialize(
+            const std::optional<body::body_collection_t<Dims, MaxBodies>>&
+                optional_collection,
+            serialization_context_t ctx
+        )
+        {
+            if (!optional_collection.has_value()) {
+                return result_t<serialization_context_t>::error(
+                    "no body collection to serialize"
+                );
+            }
+
+            const auto& collection = optional_collection.value();
+            if (collection.empty()) {
+                return result_t<serialization_context_t>::error(
+                    "body collection is empty, nothing to serialize"
+                );
+            }
+
+            const auto dataset_name = "bodies/" + collection.name();
+
+            // serialize body count and metadata
+            auto scalar_space = H5::DataSpace(H5S_SCALAR);
+            auto group        = ctx.file.createGroup("bodies");
+
+            // basic collection info
+            auto size_attr = group.createAttribute(
+                "body_count",
+                H5::PredType::NATIVE_UINT64,
+                scalar_space
+            );
+            const auto size = collection.size();
+            size_attr.write(H5::PredType::NATIVE_UINT64, &size);
+
+            auto name_type =
+                H5::StrType(H5::PredType::C_S1, collection.name().size());
+            auto name_attr =
+                group.createAttribute("system_name", name_type, scalar_space);
+            name_attr.write(name_type, collection.name().c_str());
+
+            // serialize binary parameters if present
+            if (collection.binary_params_) {
+                auto binary_group  = group.createGroup("binary_params");
+                const auto& params = collection.binary_params();
+
+                auto write_param = [&](const char* name, real value) {
+                    auto attr = binary_group.createAttribute(
+                        name,
+                        H5::PredType::NATIVE_DOUBLE,
+                        scalar_space
+                    );
+                    attr.write(H5::PredType::NATIVE_DOUBLE, &value);
+                };
+
+                write_param("total_mass", params.total_mass);
+                write_param("semi_major", params.semi_major);
+                write_param("eccentricity", params.eccentricity);
+                write_param("mass_ratio", params.mass_ratio);
+                write_param("orbital_period", params.orbital_period);
+
+                auto bool_attr = binary_group.createAttribute(
+                    "is_circular_orbit",
+                    H5::PredType::NATIVE_HBOOL,
+                    scalar_space
+                );
+                bool_attr.write(
+                    H5::PredType::NATIVE_HBOOL,
+                    &params.is_circular_orbit
+                );
+            }
+
+            // serialize individual bodies
+            collection.visit_all([&](const auto& body) {
+                auto bg = group.createGroup("body_" + std::to_string(body.idx));
+                serialize_body(body, bg);
+            });
+
+            return result_t<serialization_context_t>::ok(
+                ctx.with_dataset(dataset_name)
+            );
+        }
+
+      private:
+        template <typename Body>
+        static void serialize_body(const Body& body, H5::Group& group)
+        {
+            auto scalar_space = H5::DataSpace(H5S_SCALAR);
+
+            // common properties
+            auto mass_attr = group.createAttribute(
+                "mass",
+                H5::PredType::NATIVE_DOUBLE,
+                scalar_space
+            );
+            mass_attr.write(H5::PredType::NATIVE_DOUBLE, &body.mass);
+
+            auto radius_attr = group.createAttribute(
+                "radius",
+                H5::PredType::NATIVE_DOUBLE,
+                scalar_space
+            );
+            radius_attr.write(H5::PredType::NATIVE_DOUBLE, &body.radius);
+
+            // position and velocity arrays
+            hsize_t vec_dims[] = {Dims};
+            auto vec_space     = H5::DataSpace(1, vec_dims);
+
+            auto pos_dataset = group.createDataSet(
+                "position",
+                H5::PredType::NATIVE_DOUBLE,
+                vec_space
+            );
+            pos_dataset.write(
+                body.position.data(),
+                H5::PredType::NATIVE_DOUBLE
+            );
+
+            auto vel_dataset = group.createDataSet(
+                "velocity",
+                H5::PredType::NATIVE_DOUBLE,
+                vec_space
+            );
+            vel_dataset.write(
+                body.velocity.data(),
+                H5::PredType::NATIVE_DOUBLE
+            );
+
+            // type-specific properties
+            if constexpr (requires { body.softening_length; }) {
+                auto soft_attr = group.createAttribute(
+                    "softening_length",
+                    H5::PredType::NATIVE_DOUBLE,
+                    scalar_space
+                );
+                soft_attr.write(
+                    H5::PredType::NATIVE_DOUBLE,
+                    &body.softening_length
+                );
+            }
+
+            if constexpr (requires { body.accretion_efficiency; }) {
+                auto accr_eff_attr = group.createAttribute(
+                    "accretion_efficiency",
+                    H5::PredType::NATIVE_DOUBLE,
+                    scalar_space
+                );
+                accr_eff_attr.write(
+                    H5::PredType::NATIVE_DOUBLE,
+                    &body.accretion_efficiency
+                );
+
+                auto accr_rad_attr = group.createAttribute(
+                    "accretion_radius",
+                    H5::PredType::NATIVE_DOUBLE,
+                    scalar_space
+                );
+                accr_rad_attr.write(
+                    H5::PredType::NATIVE_DOUBLE,
+                    &body.accretion_radius
+                );
+            }
+
+            // store body type name for reconstruction
+            std::string type_name = typeid(Body).name();
+            auto type_str = H5::StrType(H5::PredType::C_S1, type_name.size());
+            auto type_attr =
+                group.createAttribute("body_type", type_str, scalar_space);
+            type_attr.write(type_str, type_name.c_str());
+        }
+    };
+
+    // body diagnostics serialization trait
+    template <std::uint64_t Dims, std::uint64_t MaxBodies>
+    struct serialization_trait_t<body::body_diagnostics_t<Dims, MaxBodies>> {
+        constexpr static bool serializable = true;
+
+        static result_t<serialization_context_t> serialize(
+            const body::body_diagnostics_t<Dims, MaxBodies>& diagnostics,
+            serialization_context_t ctx
+        )
+        {
+            const auto dataset_name = "diagnostics/body_diagnostics";
+
+            try {
+                auto diag_group = ctx.file.createGroup("diagnostics");
+                auto body_diag_group =
+                    diag_group.createGroup("body_diagnostics");
+
+                // serialize force components
+                serialize_atomic_vector(
+                    body_diag_group,
+                    "force_1",
+                    diagnostics.force_1
+                );
+                if constexpr (Dims > 1) {
+                    serialize_atomic_vector(
+                        body_diag_group,
+                        "force_2",
+                        diagnostics.force_2
+                    );
+                }
+                if constexpr (Dims > 2) {
+                    serialize_atomic_vector(
+                        body_diag_group,
+                        "force_3",
+                        diagnostics.force_3
+                    );
+                }
+
+                // serialize torque components (always 3d)
+                serialize_atomic_vector(
+                    body_diag_group,
+                    "torque_1",
+                    diagnostics.torque_1
+                );
+                serialize_atomic_vector(
+                    body_diag_group,
+                    "torque_2",
+                    diagnostics.torque_2
+                );
+                serialize_atomic_vector(
+                    body_diag_group,
+                    "torque_3",
+                    diagnostics.torque_3
+                );
+
+                // serialize mass diagnostics
+                serialize_atomic_vector(
+                    body_diag_group,
+                    "total_mass",
+                    diagnostics.total_mass
+                );
+                serialize_atomic_vector(
+                    body_diag_group,
+                    "accreted_mass",
+                    diagnostics.accreted_mass
+                );
+                serialize_atomic_vector(
+                    body_diag_group,
+                    "accretion_rate",
+                    diagnostics.accretion_rate
+                );
+            }
+            catch (const H5::Exception& e) {
+                return result_t<serialization_context_t>::error(
+                    "hdf5 error writing body diagnostics: " + e.getDetailMsg()
+                );
+            }
+
+            return result_t<serialization_context_t>::ok(
+                ctx.with_dataset(dataset_name)
+            );
+        }
+
+      private:
+        template <std::uint64_t N>
+        static void serialize_atomic_vector(
+            H5::Group& group,
+            const char* name,
+            const vector_t<std::atomic<real>, N>& atomic_vec
+        )
+        {
+            // extract values from atomics
+            std::vector<real> values;
+            values.reserve(N);
+
+            for (std::size_t i = 0; i < N; ++i) {
+                values.push_back(atomic_vec[i].load(std::memory_order_acquire));
+            }
+
+            hsize_t dims[] = {N};
+            auto dataspace = H5::DataSpace(1, dims);
+            auto dataset   = group.createDataSet(
+                name,
+                H5::PredType::NATIVE_DOUBLE,
+                dataspace
+            );
+            dataset.write(values.data(), H5::PredType::NATIVE_DOUBLE);
         }
     };
 
@@ -917,6 +1219,45 @@ namespace simbi::io {
                 metadata,
                 group_name,
                 ctx
+            );
+        };
+    }
+
+    // extend existing pipeline functions
+    auto serialize_body_collection(const auto& collection)
+    {
+        return [collection](
+                   serialization_context_t ctx
+               ) -> result_t<serialization_context_t> {
+            using collection_type = std::decay_t<decltype(collection)>;
+            return serialization_trait_t<collection_type>::serialize(
+                collection,
+                ctx
+            );
+        };
+    }
+
+    auto serialize_body_diagnostics(const auto& diagnostics)
+    {
+        return [&diagnostics](
+                   serialization_context_t ctx
+               ) -> result_t<serialization_context_t> {
+            using diagnostics_type = std::decay_t<decltype(diagnostics)>;
+            return serialization_trait_t<diagnostics_type>::serialize(
+                diagnostics,
+                ctx
+            );
+        };
+    }
+
+    // convenience function for complete body system serialization
+    auto serialize_body_system(const auto& collection, const auto& diagnostics)
+    {
+        return [collection, &diagnostics](
+                   serialization_context_t ctx
+               ) -> result_t<serialization_context_t> {
+            return serialize_body_collection(collection)(ctx).and_then(
+                serialize_body_diagnostics(diagnostics)
             );
         };
     }
@@ -1037,7 +1378,9 @@ namespace simbi::io {
     result_t<std::string> serialize_hydro_state(
         HydroState& state,
         const MeshConfig& mesh,
+        const body::body_diagnostics_t<HydroState::dimensions>& bd,
         Table& table
+
     )
     {
         const auto filename = compute_filename(state);
@@ -1051,6 +1394,7 @@ namespace simbi::io {
             .and_then(serialize_magnetic_fields(state))
             .and_then(serialize_attributes(mesh, "mesh_config"))
             .and_then(serialize_attributes(state.metadata))
+            .and_then(serialize_body_system(state.bodies, bd))
             .and_then(close_file());
     }
 
@@ -1060,56 +1404,6 @@ namespace simbi::io {
     {
         return result.and_then(std::forward<F>(func));
     }
-
-    // convenience functions for common patterns
-    template <typename T, std::uint64_t Dims>
-    result_t<std::string> quick_serialize_field(
-        const field_t<T, Dims>& field,
-        const std::string& filename,
-        const std::string& dataset_name = "data"
-    )
-    {
-        return create_file(filename)
-            .and_then([&field, &dataset_name](auto ctx) {
-                return serialization_trait_t<field_t<T, Dims>>::serialize(
-                    field,
-                    dataset_name,
-                    ctx
-                );
-            })
-            .and_then(close_file());
-    }
-
-    // error handling helpers for better error messages
-    namespace error_handling {
-        template <typename T>
-        void handle_serialization_result(
-            const result_t<T>& result,
-            const std::string& operation
-        )
-        {
-            if (result.is_ok()) {
-                std::cout << "✓ " << operation
-                          << " succeeded: " << result.value() << std::endl;
-            }
-            else {
-                std::cerr << "✗ " << operation << " failed: " << result.error()
-                          << std::endl;
-            }
-        }
-
-        template <typename T>
-        bool
-        check_and_log(const result_t<T>& result, const std::string& operation)
-        {
-            if (!result.is_ok()) {
-                std::cerr << "[serialization error] " << operation << ": "
-                          << result.error() << std::endl;
-                return false;
-            }
-            return true;
-        }
-    }   // namespace error_handling
 
 }   // namespace simbi::io
 

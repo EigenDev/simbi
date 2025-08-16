@@ -171,7 +171,12 @@ namespace simbi {
                     if (state_.in_failure_state) {
                         throw exception::SimulationFailureException();
                     }
-                    io::serialize_hydro_state(state_, mesh_, table_);
+                    io::serialize_hydro_state(
+                        state_,
+                        mesh_,
+                        body_diagnostics_,
+                        table_
+                    );
                 }
             }
             catch (exception::SimulationFailureException& e) {
@@ -201,7 +206,12 @@ namespace simbi {
                                 (meta.time / meta.tend) * 100.0
                             )
                         );
-                        io::serialize_hydro_state(state_, mesh_, table_);
+                        io::serialize_hydro_state(
+                            state_,
+                            mesh_,
+                            body_diagnostics_,
+                            table_
+                        );
                     }
 
                     iteration_++;
@@ -272,7 +282,7 @@ namespace simbi {
             table_.post_error(std::string("Exception: ") + err.what());
             // state_.sync_to_host();
             state_.in_failure_state = true;
-            io::serialize_hydro_state(state_, mesh_, table_);
+            io::serialize_hydro_state(state_, mesh_, body_diagnostics_, table_);
             emit_troubled_cells();
         }
 

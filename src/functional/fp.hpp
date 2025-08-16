@@ -1,14 +1,28 @@
 #ifndef FP_TOOKKIT_HPP
 #define FP_TOOKKIT_HPP
 
+#include "config.hpp"
+
 #include <algorithm>
 #include <cstddef>
 #include <cstdint>
 #include <functional>
 #include <iterator>
+#include <tuple>
 #include <type_traits>
 #include <utility>
 #include <vector>
+
+namespace simbi {
+    template <typename T, std::uint64_t Dims>
+    struct vector_t;
+
+    template <std::uint64_t Dims>
+    using coordinate_t = vector_t<std::int64_t, Dims>;
+
+    template <std::uint64_t Dims>
+    struct domain_t;
+}   // namespace simbi
 
 namespace simbi::fp {
     // ========================================================================
@@ -20,6 +34,269 @@ namespace simbi::fp {
         { std::begin(t) } -> std::input_iterator;
         { std::end(t) } -> std::sentinel_for<decltype(std::begin(t))>;
     };
+
+    // ========================================================================
+    // core utilities
+    // ========================================================================
+    // ========================================================================
+    // composition: (f (of) g)(x) = f(g(x))
+    // ========================================================================
+
+    template <typename F, typename G>
+    struct compose_t {
+        F f;
+        G g;
+
+        template <typename Arg>
+        constexpr DUAL auto operator()(Arg&& arg) const -> decltype(auto)
+        {
+            return f(g(std::forward<Arg>(arg)));
+        }
+    };
+
+    template <typename F, typename G>
+    constexpr auto compose(F f, G g)
+    {
+        return compose_t<F, G>{std::move(f), std::move(g)};
+    }
+
+    // ========================================================================
+    // partial application: curry(f, args...)(x) = f(args..., x)
+    // ========================================================================
+
+    template <typename F, typename... BoundArgs>
+    struct partial_t {
+        F f;
+        std::tuple<BoundArgs...> bound_args;
+
+        template <typename... Args>
+        constexpr DUAL auto operator()(Args&&... args) const -> decltype(auto)
+        {
+            return std::apply(
+                [&](auto&&... bound) -> decltype(auto) {
+                    return f(bound..., std::forward<Args>(args)...);
+                },
+                bound_args
+            );
+        }
+    };
+
+    template <typename F, typename... Args>
+    constexpr auto partial(F f, Args... args)
+    {
+        return partial_t<F, Args...>{
+          std::move(f),
+          std::make_tuple(std::move(args)...)
+        };
+    }
+
+    // ========================================================================
+    // selection: pred(x) ? a(x) : b(x)
+    // ========================================================================
+
+    template <typename Pred, typename A, typename B>
+    struct select_t {
+        Pred pred;
+        A a;
+        B b;
+
+        template <typename Arg>
+        constexpr DUAL auto operator()(Arg&& arg) const
+        {
+            if (pred(arg)) {
+                return a(std::forward<Arg>(arg));
+            }
+            else {
+                return b(std::forward<Arg>(arg));
+            }
+        }
+    };
+
+    template <typename Pred, typename A, typename B>
+    constexpr auto select(Pred pred, A a, B b)
+    {
+        return select_t<Pred, A, B>{
+          std::move(pred),
+          std::move(a),
+          std::move(b)
+        };
+    }
+
+    // ========================================================================
+    // product/zip: combine(f, g)(x) = binary_op(f(x), g(x))
+    // ========================================================================
+
+    template <typename F, typename G, typename BinaryOp>
+    struct zip_t {
+        F f;
+        G g;
+        BinaryOp op;
+
+        template <typename Arg>
+        constexpr DUAL auto operator()(Arg&& arg) const -> decltype(auto)
+        {
+            return op(f(arg), g(arg));
+        }
+    };
+
+    template <typename F, typename G, typename BinaryOp>
+    constexpr auto zip(F f, G g, BinaryOp op)
+    {
+        return zip_t<F, G, BinaryOp>{std::move(f), std::move(g), std::move(op)};
+    }
+
+    // ========================================================================
+    // coordinate transformation: transform(f, t)(x) = f(t(x))
+    // ========================================================================
+
+    template <typename F, typename Transform>
+    struct transform_t {
+        F f;
+        Transform t;
+
+        template <typename Arg>
+        constexpr DUAL auto operator()(Arg&& arg) const -> decltype(auto)
+        {
+            return f(t(std::forward<Arg>(arg)));
+        }
+
+        template <typename Arg>
+        constexpr DUAL auto operator()(Arg&& arg) -> decltype(auto)
+        {
+            return f(t(std::forward<Arg>(arg)));
+        }
+    };
+
+    template <typename F, typename Transform>
+    constexpr auto transform(F f, Transform t)
+    {
+        return transform_t<F, Transform>{std::move(f), std::move(t)};
+    }
+
+    // ========================================================================
+    // mathematical operators as function objects
+    // ========================================================================
+
+    struct add_op_t {
+        template <typename A, typename B>
+        constexpr DUAL auto operator()(A&& a, B&& b) const -> decltype(auto)
+        {
+            return std::forward<A>(a) + std::forward<B>(b);
+        }
+    };
+
+    struct subtract_op_t {
+        template <typename A, typename B>
+        constexpr DUAL auto operator()(A&& a, B&& b) const -> decltype(auto)
+        {
+            return std::forward<A>(a) - std::forward<B>(b);
+        }
+    };
+
+    struct multiply_op_t {
+        template <typename A, typename B>
+        constexpr DUAL auto operator()(A&& a, B&& b) const -> decltype(auto)
+        {
+            return std::forward<A>(a) * std::forward<B>(b);
+        }
+    };
+
+    struct divide_op_t {
+        template <typename A, typename B>
+        constexpr DUAL auto operator()(A&& a, B&& b) const -> decltype(auto)
+        {
+            return std::forward<A>(a) / std::forward<B>(b);
+        }
+    };
+
+    constexpr auto add_op      = add_op_t{};
+    constexpr auto subtract_op = subtract_op_t{};
+    constexpr auto multiply_op = multiply_op_t{};
+    constexpr auto divide_op   = divide_op_t{};
+
+    // ========================================================================
+    // coordinate utilities
+    // ========================================================================
+
+    template <std::uint64_t Dims>
+    struct offset_transform_t {
+        coordinate_t<Dims> offset;
+
+        constexpr DUAL auto operator()(coordinate_t<Dims> coord) const
+        {
+            return offset + coord;
+        }
+    };
+
+    template <std::uint64_t Dims>
+    constexpr auto offset_transform(coordinate_t<Dims> offset)
+    {
+        return offset_transform_t<Dims>{offset};
+    }
+
+    template <std::uint64_t Dims>
+    struct domain_predicate_t {
+        domain_t<Dims> domain;
+
+        constexpr DUAL bool operator()(coordinate_t<Dims> coord) const
+        {
+            return domain.contains(coord);
+        }
+    };
+
+    template <std::uint64_t Dims>
+    constexpr auto domain_predicate(domain_t<Dims> domain)
+    {
+        return domain_predicate_t<Dims>{domain};
+    }
+
+    // ========================================================================
+    // identity and constants
+    // ========================================================================
+
+    struct identity_t {
+        template <typename T>
+        constexpr DUAL auto operator()(T&& t) const -> decltype(auto)
+        {
+            return std::forward<T>(t);
+        }
+    };
+
+    template <typename T>
+    struct constant_t {
+        T value;
+
+        template <typename Arg>
+        constexpr DUAL auto operator()(Arg&&) const -> const T&
+        {
+            return value;
+        }
+    };
+
+    constexpr auto identity = identity_t{};
+
+    template <typename T>
+    constexpr auto constant(T value)
+    {
+        return constant_t<T>{std::move(value)};
+    }
+
+    // domain operations
+    template <std::uint64_t Dims>
+    struct contains_op_t {
+        domain_t<Dims> domain;
+
+        constexpr DEV bool operator()(coordinate_t<Dims> coord) const
+        {
+            return domain.contains(coord);
+        }
+    };
+
+    template <std::uint64_t Dims>
+    constexpr auto contains_op(domain_t<Dims> domain)
+    {
+        return contains_op_t<Dims>{domain};
+    }
 
     // ========================================================================
     // integer range generator
@@ -533,17 +810,17 @@ namespace simbi::fp {
                         result.push_back(item);
                     }
                 }
-                else if constexpr (requires {
-                                       result.insert(
-                                           result.end(),
-                                           source_value_type{}
-                                       );
-                                   }) {
-                    // associative containers
-                    for (auto&& item : source) {
-                        result.insert(result.end(), item);
-                    }
-                }
+                // else if constexpr (requires {
+                //                        result.insert(
+                //                            result.end(),
+                //                            source_value_type{}
+                //                        );
+                //                    }) {
+                //     // associative containers
+                //     for (auto&& item : source) {
+                //         result.insert(result.end(), item);
+                //     }
+                // }
                 else if constexpr (requires {
                                        result[0] = source_value_type{};
                                        result.size();
@@ -1002,47 +1279,6 @@ namespace simbi::fp {
             std::forward<Executor>(executor)
         );
     }
-
-    // ========================================================================
-    // common binary operations
-    // ========================================================================
-
-    struct min_op_t {
-        template <typename T>
-        constexpr T operator()(const T& a, const T& b) const
-        {
-            return (a < b) ? a : b;
-        }
-    };
-
-    struct max_op_t {
-        template <typename T>
-        constexpr T operator()(const T& a, const T& b) const
-        {
-            return (a > b) ? a : b;
-        }
-    };
-
-    struct add_op_t {
-        template <typename T>
-        constexpr T operator()(const T& a, const T& b) const
-        {
-            return a + b;
-        }
-    };
-
-    struct multiply_op_t {
-        template <typename T>
-        constexpr T operator()(const T& a, const T& b) const
-        {
-            return a * b;
-        }
-    };
-
-    constexpr auto min_op      = min_op_t{};
-    constexpr auto max_op      = max_op_t{};
-    constexpr auto add_op      = add_op_t{};
-    constexpr auto multiply_op = multiply_op_t{};
 
     // ========================================================================
     // convenience helpers

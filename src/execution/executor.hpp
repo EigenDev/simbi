@@ -26,7 +26,7 @@
 #include <utility>
 #include <vector>
 
-namespace simbi::async {
+namespace simbi::exec {
     // executor base
     template <typename Derived>
     class executor_base_t
@@ -481,7 +481,7 @@ namespace simbi::async {
         }
     };
 
-    // openMP executor
+    // OpenMP executor
     class omp_executor_t : public executor_base_t<omp_executor_t>
     {
       public:
@@ -785,6 +785,6 @@ namespace simbi::async {
     using default_executor_t =
         std::conditional_t<global::on_gpu, gpu_executor_t, par_cpu_executor_t>;
 
-}   // namespace simbi::async
+}   // namespace simbi::exec
 
 #endif   // EXECUTOR_HPP

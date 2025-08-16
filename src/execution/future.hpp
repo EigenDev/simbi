@@ -13,7 +13,7 @@
 #include <mutex>
 #include <utility>
 
-namespace simbi::async {
+namespace simbi::exec {
     // forward declarations
     class cpu_executor_t;
     class par_cpu_executor_t;
@@ -210,6 +210,6 @@ namespace simbi::async {
         }
     };
 
-}   // namespace simbi::async
+}   // namespace simbi::exec
 
 #endif   // ASYNC_EXECUTOR_HPP

@@ -57,6 +57,17 @@
 #include <new>          // for new, delete
 
 namespace simbi {
+    // ===============================================================================
+    // This is adapted from:
+    // https://developer.nvidia.com/blog/unified-memory-in-cuda-6/
+    // ==============================================================================
+    /**
+     * @brief
+     * A custom implementation of managed memory that can be used
+     * for both GPU and CPU memory management.
+     * srp: provide a consistent interface for memory management
+     * across CPU and GPU, with optional GPU managed memory.
+     */
     template <bool gpu_managed = global::managed_memory>
     class managed_t
     {

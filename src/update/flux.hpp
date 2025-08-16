@@ -15,6 +15,7 @@ namespace simbi::cfd {
         std::uint64_t dir
     );
 }
+
 namespace simbi {
     struct bfield_parameter {
         bool advance_bfields = true;
@@ -29,11 +30,9 @@ namespace simbi {
     )
     {
         for (std::uint64_t dir = 0; dir < HydroState::dimensions; ++dir) {
-            const auto interface_f = cfd::compute_fluxes(state, mesh, ops, dir);
-            auto flux              = state.flux[dir][mesh.face_domain[dir]];
-            flux                   = flux.map([interface_f](auto coord, auto) {
-                return interface_f(coord);
-            });
+            auto interface_f = cfd::compute_fluxes(state, mesh, ops, dir);
+            auto flux        = state.flux[dir][mesh.face_domain[dir]];
+            flux             = flux.coord_map(interface_f);
         }
 
         if constexpr (HydroState::is_mhd) {
@@ -42,7 +41,7 @@ namespace simbi {
             // correctly have the perpendicular boundary conditions
             // applied since we do not save the edge-centered
             // electric fields but rather compute them
-            // on-the-fly,
+            // on-the-fly.
             if (params.advance_bfields) {
                 boundary::apply_stagg_bcs(state, mesh);
                 em::update_magnetic_fields(state, mesh);

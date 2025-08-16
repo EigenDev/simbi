@@ -432,8 +432,9 @@ namespace simbi::mesh {
         const mesh_config_t<Dims, Geometry::CARTESIAN>& config
     )
     {
-        // Cartesian coordinates are already in Cartesian space
-        return centroid(coord, config);
+        // need logical ordering for this function
+        const auto cent = centroid(coord, config).reverse();
+        return cent;
     }
 
     template <std::uint64_t Dims>
@@ -442,7 +443,9 @@ namespace simbi::mesh {
         const mesh_config_t<Dims, Geometry::CYLINDRICAL>& config
     )
     {
-        return vecops::cylindrical_to_cartesian(centroid(coord, config));
+        // need logical ordering instead of default array ordering
+        const auto cent = centroid(coord, config).reverse();
+        return vecops::cylindrical_to_cartesian(cent);
     }
 
     template <std::uint64_t Dims>
@@ -451,7 +454,8 @@ namespace simbi::mesh {
         const mesh_config_t<Dims, Geometry::AXIS_CYLINDRICAL>& config
     )
     {
-        return vecops::cylindrical_to_cartesian(centroid(coord, config));
+        const auto cent = centroid(coord, config).reverse();
+        return vecops::cylindrical_to_cartesian(cent);
     }
 
     template <std::uint64_t Dims>

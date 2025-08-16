@@ -10,7 +10,7 @@
 #include <functional>
 #include <mutex>
 
-namespace simbi::async {
+namespace simbi::exec {
     /**
      * Completion context for waiting on futures or tasks.
      * Provides different strategies for waiting based on the execution context.
@@ -55,5 +55,5 @@ namespace simbi::async {
         }
     };
 
-}   // namespace simbi::async
+}   // namespace simbi::exec
 #endif

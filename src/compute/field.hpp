@@ -1,26 +1,67 @@
 #ifndef FIELD_HPP
 #define FIELD_HPP
 
+#include "config.hpp"
 #include "containers/vector.hpp"
 #include "domain/algebra.hpp"
 #include "domain/domain.hpp"
 #include "execution/executor.hpp"
+#include "functional/fp.hpp"
 #include "memory/accessor.hpp"
 
 #include <cstdint>
-#include <functional>
 #include <type_traits>
 
 namespace simbi {
     using namespace mem;
-    template <std::uint64_t Dims, typename Func>
+
+    namespace detail {
+        // type trait to check if Computation wraps accessor_t
+        template <typename Comp>
+        struct is_accessor_computation : std::false_type {
+        };
+
+        template <typename T, std::uint64_t Dims>
+        struct is_accessor_computation<accessor_t<T, Dims>> : std::true_type {
+        };
+
+        template <typename Comp>
+        inline constexpr bool is_accessor_v =
+            is_accessor_computation<Comp>::value;
+
+        // helper to detect if computation returns a reference
+        template <typename Comp, std::uint64_t Dims>
+        struct returns_reference {
+            template <typename C>
+            static auto test(int)
+                -> std::is_reference<decltype(std::declval<C>()(
+                    std::declval<coordinate_t<Dims>>()
+                ))>;
+
+            template <typename>
+            static std::false_type test(...);
+
+            static constexpr bool value = decltype(test<Comp>(0))::value;
+        };
+
+        template <typename Comp, std::uint64_t Dims>
+        inline constexpr bool returns_reference_v =
+            returns_reference<Comp, Dims>::value;
+
+        // get value type from computation
+        template <typename Comp, std::uint64_t Dims>
+        using computation_value_t =
+            std::invoke_result_t<Comp, coordinate_t<Dims>>;
+    }   // namespace detail
+
+    // forward declarations
+    template <std::uint64_t Dims, typename Computation>
     struct compute_field_t;
 
-    // deduction guides for compute_field_t
-    // to make my life easier...
-    template <std::uint64_t Dims, typename Func>
-    compute_field_t(Func&&, domain_t<Dims>)
-        -> compute_field_t<Dims, std::decay_t<Func>>;
+    // deduction guides
+    template <std::uint64_t Dims, typename Computation>
+    compute_field_t(Computation&&, domain_t<Dims>)
+        -> compute_field_t<Dims, std::decay_t<Computation>>;
 
     template <typename T, std::uint64_t Dims>
     compute_field_t(accessor_t<T, Dims>, domain_t<Dims>)
@@ -29,261 +70,188 @@ namespace simbi {
     template <typename T, std::uint64_t Dims>
     using field_t = compute_field_t<Dims, accessor_t<T, Dims>>;
 
-    namespace detail {
-        // type trait to check if F is accessor_t
-        template <typename F>
-        struct is_accessor : std::false_type {
-        };
-
-        template <typename T, std::uint64_t Dims>
-        struct is_accessor<accessor_t<T, Dims>> : std::true_type {
-        };
-
-        template <typename F>
-        inline constexpr bool is_accessor_v = is_accessor<F>::value;
-
-        // helper to get value type from function
-        template <typename F, std::uint64_t Dims>
-        using field_value_t = std::invoke_result_t<F, coordinate_t<Dims>>;
-
-        template <typename F, std::uint64_t Dims>
-        struct returns_reference {
-            template <typename G>
-            static auto test(
-                int
-            ) -> std::is_reference<std::invoke_result_t<G, coordinate_t<Dims>>>;
-
-            template <typename>
-            static std::false_type test(...);
-
-            static constexpr bool value = decltype(test<F>(0))::value;
-        };
-
-        template <typename F, std::uint64_t Dims>
-        inline constexpr bool returns_reference_v =
-            returns_reference<F, Dims>::value;
-
-    }   // namespace detail
-
-    // unified field abstraction - everything is a compute_field_t
-    template <std::uint64_t Dims, typename Func>
+    // unified field abstraction using mathematical function composition
+    template <std::uint64_t Dims, typename Computation>
     struct compute_field_t {
-        using value_type = detail::field_value_t<Func, Dims>;
+        using value_type = detail::computation_value_t<Computation, Dims>;
         static constexpr std::uint64_t dimensions = Dims;
 
-        Func function;
+        Computation computation;
         domain_t<Dims> domain_;
 
         // basic queries
         constexpr auto domain() const { return domain_; }
+
         auto data() const
-            requires detail::is_accessor_v<Func>
+            requires detail::is_accessor_v<Computation>
         {
-            return function.data();
+            return computation.data();
         }
 
-        // assignment materialization - triggers lazy evaluation
-        template <typename OtherFunc>
-        auto operator=(const compute_field_t<Dims, OtherFunc>& source)
+        // assignment materialization
+        template <typename OtherComputation>
+        auto operator=(const compute_field_t<Dims, OtherComputation>& source)
         {
-            if constexpr (detail::is_accessor_v<Func>) {
-                // direct memory storage
-                function.commit(source, async::default_executor());
+            if constexpr (detail::is_accessor_v<Computation>) {
+                computation.commit(source, exec::default_executor());
                 if (domain_.empty()) {
                     domain_ = source.domain_;
                 }
             }
-            else if constexpr (detail::returns_reference_v<Func, Dims>) {
-                // storage view - can assign directly
-                async::default_executor()
+            else if constexpr (detail::returns_reference_v<Computation, Dims>) {
+                exec::default_executor()
                     .for_each(
                         domain_,
                         [this, source](auto coord) {
-                            function(coord) = source.function(coord);
+                            computation(coord) = source(coord);
                         }
                     )
                     .wait();
             }
             else {
-                // pure comp (including computation views) - just copy
-                function = source.function;
-                domain_  = source.domain_;
+                computation = source.computation;
+                domain_     = source.domain_;
             }
-
             return *this;
         }
 
         auto clone() const
-            requires detail::is_accessor_v<Func>
+            requires detail::is_accessor_v<Computation>
         {
-            // clone accessor
-            auto new_accessor = function.clone();
+            auto new_accessor = computation.clone();
             return compute_field_t<Dims, decltype(new_accessor)>{
               std::move(new_accessor),
               domain_
             };
         }
 
-        // mathematical function evaluation
-        value_type operator()(const coordinate_t<Dims>& coord) const
+        // function evaluation
+        constexpr DEV decltype(auto)
+        operator()(const coordinate_t<Dims>& coord) const
         {
-            return function(coord);
+            return computation(coord);
         }
 
-        constexpr value_type operator[](coordinate_t<Dims> coord) const
+        constexpr DEV decltype(auto) operator()(const coordinate_t<Dims>& coord)
         {
-            return function(coord);
-        }
-        constexpr value_type operator[](std::int64_t idx) const
-        {
-            return function(domain_.linear_to_coord(idx));
+            return computation(coord);
         }
 
-        // slicing - creates lazy view with coordinate transform
-        constexpr auto operator[](domain_t<Dims> subdomain)
+        constexpr DEV decltype(auto) operator[](coordinate_t<Dims> coord) const
         {
-            if constexpr (detail::is_accessor_v<Func>) {
-                auto view_function =
-                    [=, this](coordinate_t<Dims> local_coord) -> auto& {
-                    return function[subdomain.start + local_coord];
-                };
-                auto local_domain = make_domain(subdomain.shape());
-                return compute_field_t<Dims, decltype(view_function)>{
-                  std::move(view_function),
-                  local_domain
-                };
-            }
-            else {
-                auto view_function =
-                    [=, func = function](coordinate_t<Dims> local_coord) {
-                        return func(subdomain.start + local_coord);
-                    };
-                auto local_domain = make_domain(subdomain.shape());
-                return compute_field_t<Dims, decltype(view_function)>{
-                  std::move(view_function),
-                  local_domain
-                };
-            }
+            return computation(coord);
         }
 
+        constexpr DEV decltype(auto) operator[](coordinate_t<Dims> coord)
+        {
+            return computation(coord);
+        }
+
+        constexpr decltype(auto) operator[](std::int64_t idx) const
+        {
+            return computation(domain_.linear_to_coord(idx));
+        }
+
+        // slicing using mathematical transformation
         constexpr auto operator[](domain_t<Dims> subdomain) const
         {
-            if constexpr (detail::is_accessor_v<Func>) {
-                auto view_function =
-                    [=, this](coordinate_t<Dims> local_coord) -> const auto& {
-                    return function[subdomain.start + local_coord];
-                };
-                auto local_domain = make_domain(subdomain.shape());
-                return compute_field_t<Dims, decltype(view_function)>{
-                  std::move(view_function),
-                  local_domain
-                };
-            }
-            else {
-                auto view_function =
-                    [=, func = function](coordinate_t<Dims> local_coord) {
-                        return func(subdomain.start + local_coord);
-                    };
-                auto local_domain = make_domain(subdomain.shape());
-                return compute_field_t<Dims, decltype(view_function)>{
-                  std::move(view_function),
-                  local_domain
-                };
-            }
+            auto sliced_computation = fp::transform(
+                computation,
+                fp::partial(fp::add_op, subdomain.start)
+            );
+            auto local_domain = make_domain(subdomain.shape());
+
+            return compute_field_t<Dims, decltype(sliced_computation)>{
+              std::move(sliced_computation),
+              local_domain
+            };
         }
 
-        // map: apply unary / binary operation to every element
-        template <typename SomeOp>
-        auto map(SomeOp op) const
+        // map using function composition
+        template <typename UnaryOp>
+        auto map(UnaryOp op) const
         {
-            if constexpr (std::is_invocable_v<SomeOp, value_type>) {
-                auto mapped_function = [my_func = function,
-                                        op](coordinate_t<Dims> coord) {
-                    return op(my_func(coord));
-                };
-                return compute_field_t<Dims, decltype(mapped_function)>{
-                  std::move(mapped_function),
-                  domain_
-                };
-            }
-            else if constexpr (std::is_invocable_v<
-                                   SomeOp,
-                                   coordinate_t<Dims>,
-                                   value_type>) {
-                auto mapped_function = [my_func = function,
-                                        op](coordinate_t<Dims> coord) {
-                    return op(coord, my_func(coord));
-                };
-                return compute_field_t<Dims, decltype(mapped_function)>{
-                  std::move(mapped_function),
-                  domain_
-                };
-            }
-            else {
-                static_assert(
-                    false,
-                    "map function must accept either (value) or (coord, value)"
-                );
-            }
+            auto mapped_computation = fp::compose(op, computation);
+            return compute_field_t<Dims, decltype(mapped_computation)>{
+              std::move(mapped_computation),
+              domain_
+            };
         }
 
-        // zip: combine with another field using binary operation
-        template <typename OtherFunc, typename BinaryOp>
+        template <typename BinaryOp>
+        auto enum_map(BinaryOp op) const
+        {
+            auto coord_func = fp::identity;
+            auto value_func = computation;
+            auto enum_func  = fp::zip(coord_func, value_func, op);
+            return compute_field_t<Dims, decltype(enum_func)>{
+              std::move(enum_func),
+              domain_
+            };
+        }
+
+        template <typename UnaryOp>
+        auto coord_map(UnaryOp op) const
+        {
+            auto coord_func  = fp::identity;
+            auto mapped_func = fp::compose(op, coord_func);
+            return compute_field_t<Dims, decltype(mapped_func)>{
+              std::move(mapped_func),
+              domain_
+            };
+        }
+
+        // zip using binary combination
+        template <typename OtherComputation, typename BinaryOp>
         auto
-        zip(const compute_field_t<Dims, OtherFunc>& other, BinaryOp op) const
+        zip(const compute_field_t<Dims, OtherComputation>& other,
+            BinaryOp op) const
         {
             using namespace domain_algebra;
             auto combined_domain = intersection(domain_, other.domain_);
+            auto zipped_computation =
+                fp::zip(computation, other.computation, op);
 
-            auto zipped_func = [f = function, g = other.function, op](
-                                   auto coord
-                               ) { return op(f(coord), g(coord)); };
-
-            return compute_field_t<Dims, decltype(zipped_func)>{
-              std::move(zipped_func),
+            return compute_field_t<Dims, decltype(zipped_computation)>{
+              std::move(zipped_computation),
               combined_domain
             };
         }
 
-        // at: restrict to subdomain (lens)
+        // at: restrict to subdomain
         auto at(const domain_t<Dims>& subdomain) const
         {
             using namespace domain_algebra;
             auto restricted_domain = intersection(domain_, subdomain);
-            return compute_field_t{function, restricted_domain};
+            return compute_field_t{computation, restricted_domain};
         }
 
-        // insert: overlay another field
-        template <typename OtherFunc>
-        auto insert(const compute_field_t<Dims, OtherFunc> overlay) const
+        // insert using conditional selection
+        template <typename OtherComputation>
+        auto
+        insert(const compute_field_t<Dims, OtherComputation>& overlay) const
         {
             using namespace domain_algebra;
-            auto union_domain  = domain_union(domain_, overlay.domain_);
-            auto combined_func = [=, func = function](auto coord) {
-                if (overlay.domain_.contains(coord)) {
-                    return overlay.function(coord);   // use overlay value
-                }
-                return func(coord);   // use base value
-            };
-            return compute_field_t<Dims, decltype(combined_func)>{
-              std::move(combined_func),
+            auto union_domain      = domain_union(domain_, overlay.domain_);
+            auto overlay_predicate = fp::contains_op(overlay.domain_);
+            auto insert_computation =
+                fp::select(overlay_predicate, overlay.computation, computation);
+
+            return compute_field_t<Dims, decltype(insert_computation)>{
+              std::move(insert_computation),
               union_domain
             };
         }
 
-        template <typename Executor = async::default_executor_t>
-        auto
-        commit(const Executor& executor = async::default_executor_t{}) const
+        template <typename Executor = exec::default_executor_t>
+        auto commit(const Executor& executor = exec::default_executor_t{}) const
         {
-            if constexpr (detail::is_accessor_v<Func>) {
+            if constexpr (detail::is_accessor_v<Computation>) {
                 return *this;
             }
             else {
                 auto result = accessor_t<value_type, Dims>{domain_};
-                result.commit(
-                    *this,
-                    executor
-                );   // materialize lazy computation
+                result.commit(*this, executor);
                 return compute_field_t<Dims, accessor_t<value_type, Dims>>{
                   std::move(result),
                   domain_
@@ -292,87 +260,129 @@ namespace simbi {
         }
     };
 
-    // arithmetic operators using functional combinators
-    template <std::uint64_t Dims, typename FuncA, typename FuncB>
+    // arithmetic operators using mathematical primitives
+    template <std::uint64_t Dims, typename CompA, typename CompB>
     auto operator+(
-        const compute_field_t<Dims, FuncA>& a,
-        const compute_field_t<Dims, FuncB>& b
+        const compute_field_t<Dims, CompA>& a,
+        const compute_field_t<Dims, CompB>& b
     )
     {
-        return a.zip(b, std::plus{});
+        return a.zip(b, fp::add_op);
     }
 
-    template <std::uint64_t Dims, typename FuncA, typename FuncB>
+    template <std::uint64_t Dims, typename CompA, typename CompB>
     auto operator-(
-        const compute_field_t<Dims, FuncA>& a,
-        const compute_field_t<Dims, FuncB>& b
+        const compute_field_t<Dims, CompA>& a,
+        const compute_field_t<Dims, CompB>& b
     )
     {
-        return a.zip(b, std::minus{});
+        return a.zip(b, fp::subtract_op);
     }
 
-    template <std::uint64_t Dims, typename FuncA, typename FuncB>
+    template <std::uint64_t Dims, typename CompA, typename CompB>
     auto operator*(
-        const compute_field_t<Dims, FuncA>& a,
-        const compute_field_t<Dims, FuncB>& b
+        const compute_field_t<Dims, CompA>& a,
+        const compute_field_t<Dims, CompB>& b
     )
     {
-        return a.zip(b, std::multiplies{});
+        return a.zip(b, fp::multiply_op);
     }
 
-    template <std::uint64_t Dims, typename FuncA, typename FuncB>
+    template <std::uint64_t Dims, typename CompA, typename CompB>
     auto operator/(
-        const compute_field_t<Dims, FuncA>& a,
-        const compute_field_t<Dims, FuncB>& b
+        const compute_field_t<Dims, CompA>& a,
+        const compute_field_t<Dims, CompB>& b
     )
     {
-        return a.zip(b, std::divides{});
+        return a.zip(b, fp::divide_op);
     }
 
-    // scalar operations using map
-    template <std::uint64_t Dims, typename Func, typename Scalar>
-    auto operator*(compute_field_t<Dims, Func> field, Scalar scalar)
+    // scalar operations using zip with constants
+    template <std::uint64_t Dims, typename Computation, typename Scalar>
+    auto
+    operator*(const compute_field_t<Dims, Computation>& field, Scalar scalar)
     {
-        return field.map([=](auto value) { return value * scalar; });
+        auto scalar_computation = fp::constant(scalar);
+        auto result_computation =
+            fp::zip(field.computation, scalar_computation, fp::multiply_op);
+
+        return compute_field_t<Dims, decltype(result_computation)>{
+          std::move(result_computation),
+          field.domain_
+        };
     }
 
-    template <std::uint64_t Dims, typename Func, typename Scalar>
-    auto operator*(Scalar scalar, compute_field_t<Dims, Func> field)
+    template <std::uint64_t Dims, typename Computation, typename Scalar>
+    auto
+    operator*(Scalar scalar, const compute_field_t<Dims, Computation>& field)
     {
         return field * scalar;
     }
 
-    template <std::uint64_t Dims, typename Func, typename Scalar>
-    auto operator/(compute_field_t<Dims, Func> field, Scalar scalar)
+    template <std::uint64_t Dims, typename Computation, typename Scalar>
+    auto
+    operator/(const compute_field_t<Dims, Computation>& field, Scalar scalar)
     {
-        return field.map([=](auto value) { return value / scalar; });
+        auto scalar_computation = fp::constant(scalar);
+        auto result_computation =
+            fp::zip(field.computation, scalar_computation, fp::divide_op);
+
+        return compute_field_t<Dims, decltype(result_computation)>{
+          std::move(result_computation),
+          field.domain_
+        };
     }
 
-    template <std::uint64_t Dims, typename Func, typename Scalar>
-    auto operator+(compute_field_t<Dims, Func> field, Scalar scalar)
+    template <std::uint64_t Dims, typename Computation, typename Scalar>
+    auto
+    operator+(const compute_field_t<Dims, Computation>& field, Scalar scalar)
     {
-        return field.map([=](auto value) { return value + scalar; });
+        auto scalar_computation = fp::constant(scalar);
+        auto result_computation =
+            fp::zip(field.computation, scalar_computation, fp::add_op);
+
+        return compute_field_t<Dims, decltype(result_computation)>{
+          std::move(result_computation),
+          field.domain_
+        };
     }
 
-    template <std::uint64_t Dims, typename Func, typename Scalar>
-    auto operator+(Scalar scalar, compute_field_t<Dims, Func> field)
+    template <std::uint64_t Dims, typename Computation, typename Scalar>
+    auto
+    operator+(Scalar scalar, const compute_field_t<Dims, Computation>& field)
     {
-        return field + scalar;   // commutative
+        return field + scalar;
     }
 
-    template <std::uint64_t Dims, typename Func, typename Scalar>
-    auto operator-(compute_field_t<Dims, Func> field, Scalar scalar)
+    template <std::uint64_t Dims, typename Computation, typename Scalar>
+    auto
+    operator-(const compute_field_t<Dims, Computation>& field, Scalar scalar)
     {
-        return field.map([=](auto value) { return value - scalar; });
+        auto scalar_computation = fp::constant(scalar);
+        auto result_computation =
+            fp::zip(field.computation, scalar_computation, fp::subtract_op);
+
+        return compute_field_t<Dims, decltype(result_computation)>{
+          std::move(result_computation),
+          field.domain_
+        };
     }
 
-    template <std::uint64_t Dims, typename Func, typename Scalar>
-    auto operator-(Scalar scalar, compute_field_t<Dims, Func> field)
+    template <std::uint64_t Dims, typename Computation, typename Scalar>
+    auto
+    operator-(Scalar scalar, const compute_field_t<Dims, Computation>& field)
     {
-        return field.map([=](auto value) { return scalar - value; });
+        auto scalar_computation = fp::constant(scalar);
+        auto result_computation =
+            fp::zip(scalar_computation, field.computation, fp::subtract_op);
+
+        return compute_field_t<Dims, decltype(result_computation)>{
+          std::move(result_computation),
+          field.domain_
+        };
     }
 
-    // factory functions for creating fields
+    // factory functions
     template <std::uint64_t Dims, typename F>
     auto field(const domain_t<Dims>& domain, F&& fn)
     {
@@ -387,12 +397,10 @@ namespace simbi {
         return compute_field_t{std::move(accessor), domain};
     }
 
-    // coordinate field factory (useful for testing and initialization...maybe)
     template <std::uint64_t Dims>
     auto identity(const domain_t<Dims>& domain)
     {
-        auto coord_func = [](auto coord) { return coord; };
-        return compute_field_t{coord_func, domain};
+        return compute_field_t{fp::identity, domain};
     }
 
 }   // namespace simbi

@@ -329,14 +329,11 @@ namespace simbi {
         DUAL auto reverse() const
         {
             // traditional for loop version
-            // vector_t<T, Dims> result;
-            // for (std::uint64_t ii = 0; ii < Dims; ++ii) {
-            //     result[ii] = storage[Dims - ii - 1];
-            // }
-            // return result;
-            return *this | fp::map([this](const auto& x) -> T {
-                return storage[Dims - 1 - (&x - &storage[0])];
-            }) | fp::collect<vector_t<T, Dims>>;
+            vector_t<T, Dims> result;
+            for (std::uint64_t ii = 0; ii < Dims; ++ii) {
+                result[ii] = storage[Dims - ii - 1];
+            }
+            return result;
         }
 
         // data access for algorithms
@@ -658,11 +655,11 @@ namespace simbi {
     namespace unit_vectors {
 
         template <std::uint64_t Dims>
-        DEV constexpr auto canonical_basis(std::uint64_t i)
+        DEV constexpr auto canonical_basis(std::uint64_t ii)
         {
             vector_t<std::uint64_t, Dims> basis{0};
-            if (i > 0 && i <= Dims) {
-                basis[i - 1] = 1;   // 1-indexed to 0-indexed
+            if (ii > 0 && ii <= Dims) {
+                basis[ii - 1] = 1;   // 1-indexed to 0-indexed
             }
             return basis;
         }

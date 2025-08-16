@@ -30,7 +30,7 @@ namespace simbi::rk {
 
         auto u1  = workspace.cons.clone();
         auto u1c = u1[mesh.domain];
-        u1c      = u1c.map([k1, dt](const auto coord, const auto u) {
+        u1c      = u1c.enum_map([k1, dt](const auto coord, const auto u) {
             return u | add_gas(k1(coord) * dt);
         });
 
@@ -50,10 +50,9 @@ namespace simbi::rk {
             mesh,
             {.advance_bfields = false}
         );
-        auto k2 = cfd::godunov_op(workspace, mesh);
-
-        auto unc = un[mesh.domain];
-        unc      = unc.map(
+        const auto k2 = cfd::godunov_op(workspace, mesh);
+        auto unc      = un[mesh.domain];
+        unc           = unc.enum_map(
             [k2, dt, us = u1[mesh.domain]](const auto coord, const auto u) {
                 return u | scale_gas(0.5) | add_gas(0.5 * us[coord]) |
                        add_gas(0.5 * dt * k2(coord));

@@ -6,6 +6,7 @@
 #include "containers/vector.hpp"
 #include "domain/domain.hpp"
 #include "io/exceptions.hpp"
+#include "smart_ptr.hpp"
 #include "traits/traits.hpp"
 
 #include <cstddef>
@@ -24,7 +25,7 @@ namespace simbi::mem {
     template <typename T, std::uint64_t Dims>
     class accessor_t
     {
-        std::shared_ptr<T[]> data_;
+        mem::shared_ptr<T> data_;
         std::shared_ptr<arena_t<T>> arena_;
         domain_t<Dims> domain_;
         iarray<Dims> strides_;
@@ -69,6 +70,8 @@ namespace simbi::mem {
         {
             return (*this)[coord];
         }
+
+        DUAL T& operator()(coordinate_t<Dims> coord) { return (*this)[coord]; }
 
         // direct data access
         DUAL const T* data() const { return data_.get(); }
@@ -131,7 +134,7 @@ namespace simbi::mem {
                     .for_each(
                         domain_,
                         [this, computation] DUAL(coordinate_t<Dims> coord) {
-                            (*this)[coord] = computation.function(coord);
+                            (*this)[coord] = computation(coord);
                         }
                     )
                     .wait();
