@@ -8,6 +8,7 @@
 #include "containers/vector.hpp"
 #include "mesh/mesh_ops.hpp"
 #include "physics/hydro/physics.hpp"
+#include "utility/helpers.hpp"
 
 #include <cmath>
 #include <cstdint>
@@ -77,6 +78,7 @@ namespace simbi::body::expr {
         template <typename Body, typename Coord>
         constexpr auto operator()(const Body& body, Coord coord) const
         {
+            using namespace simbi::helpers;
             const auto cell_pos = mesh::to_cartesian(coord, mesh_);
             const auto r_vec    = cell_pos - body.position;
             const auto r_mag    = r_vec.norm();
@@ -85,7 +87,16 @@ namespace simbi::body::expr {
 
             // skip if too far away
             if (r_mag > 2.5 * accr_radius) {
-                return std::make_pair(conserved_t{}, body_delta_t<Dims>{});
+                return std::make_pair(
+                    conserved_t{},
+                    body_delta_t<Dims>{
+                      .idx                  = body.idx,
+                      .force_delta          = {},
+                      .torque_delta         = {},
+                      .mass_delta           = 0.0,
+                      .accretion_rate_delta = 0.0
+                    }
+                );
             }
 
             // accretion physics
@@ -94,7 +105,7 @@ namespace simbi::body::expr {
             const auto local_cs            = sound_speed(prim, gamma);
             const auto sound_crossing_time = cell_size / local_cs;
             const auto stability_limit     = dt / sound_crossing_time;
-            const auto eps = std::min({accr_eff, 0.5, stability_limit});
+            const auto eps = my_min3(accr_eff, 0.5, stability_limit);
             // for now, I will set the sink rate to the inverse of sound
             // crossing time [TODO]: make this configurable
             const auto sr = 1.0 / sound_crossing_time;
@@ -105,10 +116,10 @@ namespace simbi::body::expr {
             const auto power   = eps * energy_density(prim, gamma) * sr;
 
             const auto dv          = mesh::volume(coord, mesh_);
-            const auto force_delta = -mom_dot * dv * dt;
+            const auto force_delta = -mom_dot * dv;
             auto torque_delta      = [&]() -> vector_t<real, 3> {
                 if constexpr (Dims == 3) {
-                    return vecops::cross(r_vec, force_delta) * dv;
+                    return vecops::cross(r_vec, force_delta);
                 }
                 else if constexpr (Dims == 2) {
                     return vector_t<real, 3>{
@@ -148,6 +159,7 @@ namespace simbi::body::expr {
         template <typename Body, typename Coord>
         constexpr auto operator()(const Body& body, Coord coord) const
         {
+            using namespace simbi::helpers;
             const auto cell_pos       = mesh::to_cartesian(coord, mesh_);
             const auto min_cell_width = mesh::min_cell_width(coord, mesh_);
 
@@ -156,7 +168,7 @@ namespace simbi::body::expr {
 
             // early exit if too far from body
             constexpr real SAFE_MINIMUM = 1e-10;
-            const auto r_norm           = std::max(SAFE_MINIMUM, distance);
+            const auto r_norm           = my_max(SAFE_MINIMUM, distance);
             const auto r_hat            = r_vec / r_norm;
             const auto signed_distance  = distance - body.radius;
 
@@ -165,7 +177,7 @@ namespace simbi::body::expr {
             const auto sound_speed_val = sound_speed(prim, gamma);
             const auto fluid_velocity  = prim.vel;
             const auto mach_number =
-                fluid_velocity.norm() / std::max(sound_speed_val, SAFE_MINIMUM);
+                fluid_velocity.norm() / my_max(sound_speed_val, SAFE_MINIMUM);
 
             // calculate boundary thickness
             real boundary_thickness =
@@ -222,7 +234,7 @@ namespace simbi::body::expr {
                     0.5 * base_strength * std::pow(pre_factor, 2);
 
                 const real incoming_velocity =
-                    -std::min(real{0}, vecops::dot(rel_velocity, r_hat));
+                    -my_min(real{0}, vecops::dot(rel_velocity, r_hat));
                 if (incoming_velocity > 0.1 * sound_speed_val) {
                     dp_dt = -normal_rel_velocity * pre_strength;
                 }
