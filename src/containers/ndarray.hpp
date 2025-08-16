@@ -95,15 +95,14 @@ namespace simbi::nd {
         DUAL T& operator[](std::uint64_t idx)
         {
             if constexpr (global::bounds_checking) {
-                if constexpr (!global::on_gpu) {
-                    if (idx >= size_) {
-                        throw std::out_of_range("ndarray index out of bounds");
-                    }
+#if !defined(__CUDA_ARCH__) && !defined(__HIP_DEVICE_COMPILE__)
+                if (idx >= size_) {
+                    throw std::out_of_range("ndarray index out of bounds");
                 }
-                else {
-                    // GPU bounds checking is not supported
-                    printf("ndarray index out of bounds: %lu", idx);
-                }
+#else
+                // GPU bounds checking is not supported
+                printf("ndarray index out of bounds: %lu", idx);
+#endif
             }
             return memory_.data()[idx];
         }
@@ -111,16 +110,15 @@ namespace simbi::nd {
         DUAL const T& operator[](std::uint64_t idx) const
         {
             if constexpr (global::bounds_checking) {
-                // bounds checking only in debug mode
-                if constexpr (!global::on_gpu) {
-                    if (idx >= size_) {
-                        throw std::out_of_range("ndarray index out of bounds");
-                    }
+// bounds checking only in debug mode
+#if !defined(__CUDA_ARCH__) && !defined(__HIP_DEVICE_COMPILE__)
+                if (idx >= size_) {
+                    throw std::out_of_range("ndarray index out of bounds");
                 }
-                else {
-                    // GPU bounds checking is not supported
-                    printf("ndarray index out of bounds: %lu", idx);
-                }
+#else
+                // GPU bounds checking is not supported
+                printf("ndarray index out of bounds: %lu", idx);
+#endif
             }
             return memory_.data()[idx];
         }
