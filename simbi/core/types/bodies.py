@@ -1,6 +1,10 @@
-from typing import Optional, Sequence
-from dataclasses import dataclass, field
+from typing import ClassVar, Optional, Sequence, Literal, Any
+from dataclasses import dataclass, field, asdict
 from enum import IntFlag
+from numpy.typing import NDArray
+import numpy as np
+
+Array = NDArray[np.floating]
 
 
 class BodyCapability(IntFlag):
@@ -70,6 +74,73 @@ class GravitationalSystemConfig(BodySystemConfig):
     # Only used if system_type="binary"
     binary_config: BinaryConfig
 
+
+@dataclass(frozen=True)
+class BodyData:
+    mass: float
+    radius: float
+    position: tuple[float, ...]
+    velocity: tuple[float, ...]
+    # Type-specific fields would need handling
+
+
+@dataclass(frozen=True)
+class BodyDiagnostics:
+    force_components: dict[str, Array]  # force_1, force_2, force_3
+    torque_components: dict[str, Array]  # torque_1, torque_2, torque_3
+    total_mass: Array
+    accreted_mass: Array
+    accretion_rate: Array
+
+
+@dataclass(frozen=True)
+class Unionable:
+    def __or__(self, other: Any) -> Any:
+        return self.__class__(**asdict(self) | asdict(other))
+
+
+@dataclass(frozen=True)
+class BaseBody(Unionable):
+    mass: float
+    radius: float
+    position: tuple[float, ...]
+    velocity: tuple[float, ...]
+    capabilities: BodyCapability
+
+
+@dataclass(frozen=True)
+class GravitationalBody(BaseBody):
+    softening_length: float
+
+
+@dataclass(frozen=True)
+class AccretionBody(BaseBody):
+    accretion_efficiency: float
+    accretion_radius: float
+    total_accreted_mass: float
+    accretion_rate: float
+
+
+@dataclass(frozen=True)
+class RigidBody(BaseBody):
+    inertia: float
+    apply_no_slip: bool
+
+
+@dataclass(frozen=True)
+class DeformableBody(BaseBody):
+    yield_stress: float
+    plastic_strain: float
+
+
+@dataclass(frozen=True)
+class ElasticBody(BaseBody):
+    elastic_modulus: float
+    poisson_ratio: float
+
+
+# Union type for all body types
+Body = GravitationalBody | AccretionBody | RigidBody | DeformableBody | ElasticBody
 
 __all__ = [
     "ImmersedBodyConfig",
