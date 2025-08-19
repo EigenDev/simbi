@@ -1,11 +1,14 @@
 #ifndef ARENA_HPP
 #define ARENA_HPP
 
+#include "adapter/device_adapter_api.hpp"
+#include "memory/device.hpp"
 #include "smart_ptr.hpp"
 
 #include <algorithm>
 #include <array>
 #include <cstddef>
+#include <map>
 #include <memory>
 #include <mutex>
 #include <stdexcept>
@@ -38,12 +41,16 @@ namespace simbi::mem {
         std::size_t total_allocated_bytes_ = 0;
         std::size_t active_allocations_    = 0;
 
+        // location
+        device_id_t device_;
+
       public:
         // factory method - arena must be managed by shared_ptr for safe
         // deleters
-        static std::shared_ptr<arena_t> create()
+        static std::shared_ptr<arena_t>
+        create(device_id_t device = device_id_t::cpu_device())
         {
-            return std::shared_ptr<arena_t>(new arena_t{});
+            return std::shared_ptr<arena_t>(new arena_t{device});
         }
 
         /**
@@ -86,7 +93,7 @@ namespace simbi::mem {
             }
 
             // allocate new buffer
-            auto buffer = mem::make_unique<T>(actual_size);
+            auto buffer = allocate_on_device(actual_size);
             update_stats(actual_size * sizeof(T), +1);
 
             // return with custom deleter
@@ -142,9 +149,53 @@ namespace simbi::mem {
             return total;
         }
 
+        device_id_t device() const noexcept { return device_; }
+
       private:
         // private constructor - use create() factory
         arena_t() = default;
+
+        explicit arena_t(device_id_t device) : device_(device) {}
+
+        auto allocate_on_device(std::size_t count)
+        {
+            T* raw_ptr = nullptr;
+
+            if (device_.type == device_type_t::gpu) {
+                gpu::api::set_device(device_.device_id);
+                gpu::api::malloc(
+                    reinterpret_cast<void**>(&raw_ptr),
+                    count * sizeof(T)
+                );
+            }
+            else {
+                raw_ptr = new T[count];
+            }
+
+            return mem::unique_ptr{raw_ptr, device_deleter{device_}};
+        }
+
+        struct device_deleter {
+            device_id_t device;
+
+            device_deleter() = default;
+            device_deleter(device_id_t dev) : device(dev) {}
+
+            void operator()(T* ptr) const noexcept
+            {
+                if (!ptr) {
+                    return;
+                }
+
+                if (device.type == device_type_t::gpu) {
+                    gpu::api::set_device(device.device_id);
+                    gpu::api::free(ptr);
+                }
+                else {
+                    delete[] ptr;
+                }
+            }
+        };
 
         /**
          * bucket_for - determine bucket index for given element count
@@ -231,6 +282,23 @@ namespace simbi::mem {
     {
         static auto instance = arena_t<T>::create();
         return instance;
+    }
+
+    template <typename T>
+    std::shared_ptr<arena_t<T>>& get_arena_for_device(device_id_t device)
+    {
+        // separate arenas per device
+        static std::map<device_id_t, std::shared_ptr<arena_t<T>>> device_arenas;
+        static std::mutex arena_map_mutex;
+
+        std::lock_guard lock(arena_map_mutex);
+
+        auto it = device_arenas.find(device);
+        if (it == device_arenas.end()) {
+            device_arenas[device] = arena_t<T>::create(device);
+        }
+
+        return device_arenas[device];
     }
 
 }   // namespace simbi::mem

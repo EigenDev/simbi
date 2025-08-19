@@ -4,6 +4,7 @@
 #include "config.hpp"
 
 #include <atomic>
+#include <cstddef>
 #include <type_traits>
 #include <utility>
 
@@ -68,13 +69,9 @@ namespace simbi::mem {
 
         explicit unique_ptr(pointer ptr) noexcept : ptr_(ptr), deleter_() {}
 
-        unique_ptr(pointer ptr, const Deleter& deleter) noexcept
-            : ptr_(ptr), deleter_(deleter)
-        {
-        }
-
-        unique_ptr(pointer ptr, Deleter&& deleter) noexcept
-            : ptr_(ptr), deleter_(std::move(deleter))
+        template <typename CustomDeleter>
+        unique_ptr(pointer ptr, CustomDeleter&& deleter) noexcept
+            : ptr_(ptr), deleter_(std::forward<CustomDeleter>(deleter))
         {
         }
 
@@ -160,6 +157,12 @@ namespace simbi::mem {
         Deleter& get_deleter() noexcept { return deleter_; }
         const Deleter& get_deleter() const noexcept { return deleter_; }
     };
+
+    template <typename T, typename Deleter>
+    unique_ptr(T*, Deleter) -> unique_ptr<T, std::decay_t<Deleter>>;
+
+    template <typename T>
+    unique_ptr(T*) -> unique_ptr<T, default_delete<T>>;
 
     /**
      * control_block - shared ownership metadata with strong exception safety
@@ -302,18 +305,19 @@ namespace simbi::mem {
         {
         }
 
-        template <typename Deleter = default_delete<T>>
-        explicit shared_ptr(T* ptr, Deleter deleter = Deleter{})
+        template <typename Deleter>
+        explicit shared_ptr(T* ptr, Deleter deleter)
             : ptr_(ptr), control_(nullptr)
         {
             if (ptr) {
                 try {
+                    // create control block with actual deleter type
+                    auto* typed_control =
+                        new control_block<T, Deleter>(ptr, std::move(deleter));
+                    // store as base type for this shared_ptr instance
                     control_ =
                         reinterpret_cast<control_block<T, default_delete<T>>*>(
-                            new control_block<T, Deleter>(
-                                ptr,
-                                std::move(deleter)
-                            )
+                            typed_control
                         );
                 }
                 catch (...) {

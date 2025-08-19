@@ -18,9 +18,9 @@ namespace simbi::mem {
     };
 
     struct device_id_t {
-        int node_id;          // which physical node/machine
-        int device_id;        // which gpu/cpu on that node
-        device_type_t type;   // cpu or gpu
+        std::int64_t node_id;     // which physical node/machine
+        std::int64_t device_id;   // which gpu/cpu on that node
+        device_type_t type;       // cpu or gpu
 
         // convenience constructors
         static constexpr device_id_t cpu_device(int node = 0)
