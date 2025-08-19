@@ -7,7 +7,7 @@ This module provides components for running simulations with the Pybind11 backen
 import importlib
 import os
 from dataclasses import dataclass
-from typing import Callable, Sequence, Optional, cast
+from typing import Sequence, Optional, cast
 from types import ModuleType
 
 from simbi.functional.helpers import print_progress
