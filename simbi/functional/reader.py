@@ -1,9 +1,10 @@
-from typing_extensions import AnyStr
 import h5py
 import numpy as np
 from types import TracebackType
 from typing import Any, Callable, Optional, Union, Sequence
 from numpy.typing import NDArray
+
+from ..reader import load_simulation_data
 from ..core.types.bodies import BodyCapability, has_capability
 from ..physics.calculations import (
     VectorComponent,
@@ -133,7 +134,7 @@ class LazySimulationReader:
         """
         if isinstance(key, int):
             components = [
-                self._create_lazy_fields_dict,  # LazyFields dictionary
+                self._create_lazy_fields_dict,  # SimDict dictionary
                 self.metadata,  # Metadata dictionary
                 self.get_mesh,  # Mesh dictionary
             ]
