@@ -1,11 +1,12 @@
 #ifndef SERIALIZATION_HPP
 #define SERIALIZATION_HPP
 
-#include "compute/field.hpp"            // for field_t<T, Dims>
-#include "config.hpp"                   // for real, DEV, etc
-#include "containers/vector.hpp"        // for simbi::vector_t
-#include "io/tabulate/table.hpp"        // for tabulate::table_t
-#include "mesh/mesh_config.hpp"         // for mesh::mesh_config_t
+#include "compute/field.hpp"       // for field_t<T, Dims>
+#include "config.hpp"              // for real, DEV, etc
+#include "containers/vector.hpp"   // for simbi::vector_t
+#include "io/tabulate/table.hpp"   // for tabulate::table_t
+#include "mesh/mesh_config.hpp"    // for mesh::mesh_config_t
+#include "physics/ib/body.hpp"   // for softening_length, accretion_efficienct, etc
 #include "physics/ib/collection.hpp"    // for ib::body_collection_t
 #include "physics/ib/diagnostics.hpp"   // for ib::body_diagnostics_t
 #include "result.hpp"                   // for result_t<T> monad
@@ -996,6 +997,7 @@ namespace simbi::io {
         template <typename Body>
         static void serialize_body(const Body& body, H5::Group& group)
         {
+            using namespace simbi::body;
             auto scalar_space = H5::DataSpace(H5S_SCALAR);
 
             // common properties
@@ -1038,46 +1040,108 @@ namespace simbi::io {
             );
 
             // type-specific properties
-            if constexpr (requires { body.softening_length; }) {
+            if constexpr (has_gravitational_capability_c<Body>) {
                 auto soft_attr = group.createAttribute(
                     "softening_length",
                     H5::PredType::NATIVE_DOUBLE,
                     scalar_space
                 );
-                soft_attr.write(
-                    H5::PredType::NATIVE_DOUBLE,
-                    &body.softening_length
-                );
+
+                const auto soft = softening_length(body);
+                soft_attr.write(H5::PredType::NATIVE_DOUBLE, &soft);
             }
 
-            if constexpr (requires { body.accretion_efficiency; }) {
+            if constexpr (has_accretion_capability_c<Body>) {
                 auto accr_eff_attr = group.createAttribute(
                     "accretion_efficiency",
                     H5::PredType::NATIVE_DOUBLE,
                     scalar_space
                 );
-                accr_eff_attr.write(
-                    H5::PredType::NATIVE_DOUBLE,
-                    &body.accretion_efficiency
-                );
+                const auto eff = accretion_efficiency(body);
+                accr_eff_attr.write(H5::PredType::NATIVE_DOUBLE, &eff);
 
                 auto accr_rad_attr = group.createAttribute(
                     "accretion_radius",
                     H5::PredType::NATIVE_DOUBLE,
                     scalar_space
                 );
-                accr_rad_attr.write(
-                    H5::PredType::NATIVE_DOUBLE,
-                    &body.accretion_radius
-                );
+                const auto rad = accretion_radius(body);
+                accr_rad_attr.write(H5::PredType::NATIVE_DOUBLE, &rad);
             }
 
-            // store body type name for reconstruction
-            std::string type_name = typeid(Body).name();
-            auto type_str = H5::StrType(H5::PredType::C_S1, type_name.size());
-            auto type_attr =
-                group.createAttribute("body_type", type_str, scalar_space);
-            type_attr.write(type_str, type_name.c_str());
+            if constexpr (has_rigid_capability_c<Body>) {
+                auto inertia_attr = group.createAttribute(
+                    "inertia",
+                    H5::PredType::NATIVE_DOUBLE,
+                    scalar_space
+                );
+                const auto inert = inertia(body);
+                inertia_attr.write(H5::PredType::NATIVE_DOUBLE, &inert);
+
+                auto apply_no_slip_attr = group.createAttribute(
+                    "apply_no_slip",
+                    H5::PredType::NATIVE_HBOOL,
+                    scalar_space
+                );
+                const auto ans = apply_no_slip(body);
+                apply_no_slip_attr.write(H5::PredType::NATIVE_HBOOL, &ans);
+            }
+
+            // if constexpr (has_elastic_capability_c<Body>) {
+            //     auto elastic_mod_attr = group.createAttribute(
+            //         "elastic_modulus",
+            //         H5::PredType::NATIVE_DOUBLE,
+            //         scalar_space
+            //     );
+            //     const auto elastic_mod = body.elastic_modulus();
+            //     elastic_mod_attr.write(
+            //         H5::PredType::NATIVE_DOUBLE,
+            //         &elastic_mod
+            //     );
+
+            //     auto poisson_ratio_attr = group.createAttribute(
+            //         "poisson_ratio",
+            //         H5::PredType::NATIVE_DOUBLE,
+            //         scalar_space
+            //     );
+            //     const auto poisson_ratio = poisson_ratio(body);
+            //     poisson_ratio_attr.write(
+            //         H5::PredType::NATIVE_DOUBLE,
+            //         &poisson_ratio
+            //     );
+            // }
+
+            // if constexpr (has_deformable_capability_c<Body>) {
+            //     auto yield_stress_attr = group.createAttribute(
+            //         "yield_stress",
+            //         H5::PredType::NATIVE_DOUBLE,
+            //         scalar_space
+            //     );
+            //     const auto yield_stress = body.yield_stress();
+            //     yield_stress_attr.write(
+            //         H5::PredType::NATIVE_DOUBLE,
+            //         &yield_stress
+            //     );
+
+            //     auto plastic_strain_attr = group.createAttribute(
+            //         "plastic_strain",
+            //         H5::PredType::NATIVE_DOUBLE,
+            //         scalar_space
+            //     );
+            //     const auto plastic_strain = plastic_strain(body);
+            //     plastic_strain_attr.write(
+            //         H5::PredType::NATIVE_DOUBLE,
+            //         &plastic_strain
+            //     );
+            // }
+
+            auto cap_attr = group.createAttribute(
+                "capabilities",
+                H5::PredType::NATIVE_INT,
+                scalar_space
+            );
+            auto caps = body.caps();
+            cap_attr.write(H5::PredType::NATIVE_INT, &caps);
         }
     };
 
