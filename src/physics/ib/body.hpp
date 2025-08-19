@@ -3,6 +3,7 @@
 
 #include "config.hpp"
 #include "containers/vector.hpp"
+#include "utility/enums.hpp"
 #include <cstddef>
 #include <cstdint>
 #include <limits>
@@ -125,28 +126,6 @@ namespace simbi::body {
     template <std::uint64_t Dims>
     using planet_t = body_t<Dims, grav_component_t, rigid_component_t>;
 
-    template <std::uint64_t Dims, typename... Caps>
-    struct body_t {
-        // expose the types for easier access
-        using caps_tuple                     = std::tuple<Caps...>;
-        static constexpr std::uint64_t ncaps = sizeof...(Caps);
-
-        std::uint64_t idx;
-        vector_t<real, Dims> position;
-        vector_t<real, Dims> velocity;
-        vector_t<real, Dims> force;
-        vector_t<real, Dims> torque;
-        real mass;
-        real radius;
-        bool two_way_coupling;
-
-        std::tuple<Caps...> capabilities;
-
-        template <typename Tag>
-        static constexpr bool has_capability_v =
-            (std::is_same_v<Tag, typename Caps::tag_type> || ...);
-    };
-
     // concepts for capabilities b/c c++20 is amazing :D
     template <typename T>
     concept has_gravitational_capability_c = requires {
@@ -175,6 +154,49 @@ namespace simbi::body {
     concept has_deformable_capability_c = requires {
         requires T::template has_capability_v<capabilities::deformable_tag> ==
                      true;
+    };
+
+    template <std::uint64_t Dims, typename... Caps>
+    struct body_t {
+        // expose the types for easier access
+        using caps_tuple                     = std::tuple<Caps...>;
+        static constexpr std::uint64_t ncaps = sizeof...(Caps);
+
+        std::uint64_t idx;
+        vector_t<real, Dims> position;
+        vector_t<real, Dims> velocity;
+        vector_t<real, Dims> force;
+        vector_t<real, Dims> torque;
+        real mass;
+        real radius;
+        bool two_way_coupling;
+
+        std::tuple<Caps...> capabilities;
+
+        template <typename Tag>
+        static constexpr bool has_capability_v =
+            (std::is_same_v<Tag, typename Caps::tag_type> || ...);
+
+        constexpr std::uint32_t caps() const
+        {
+            auto caps = BodyCapability::NONE;
+            if constexpr (has_gravitational_capability_c<body_t>) {
+                caps |= BodyCapability::GRAVITATIONAL;
+            }
+            if constexpr (has_accretion_capability_c<body_t>) {
+                caps |= BodyCapability::ACCRETION;
+            }
+            if constexpr (has_elastic_capability_c<body_t>) {
+                caps |= BodyCapability::ELASTIC;
+            }
+            if constexpr (has_rigid_capability_c<body_t>) {
+                caps |= BodyCapability::RIGID;
+            }
+            if constexpr (has_deformable_capability_c<body_t>) {
+                caps |= BodyCapability::DEFORMABLE;
+            }
+            return static_cast<std::uint32_t>(caps);
+        }
     };
 
     // immutable update functions
@@ -429,8 +451,9 @@ namespace simbi::body {
     {
         // placeholder for sinking rate calculation
         return 1e-3;
-        // auto accr_cap = get_capabilities<capabilities::accretion_tag>(body);
-        // return accr_cap.accretion_rate / body.mass;
+        // auto accr_cap =
+        // get_capabilities<capabilities::accretion_tag>(body); return
+        // accr_cap.accretion_rate / body.mass;
     }
 
     // rigid body properties
@@ -439,6 +462,13 @@ namespace simbi::body {
     {
         auto rigid_cap = get_capabilities<capabilities::rigid_tag>(body);
         return rigid_cap.inertia;
+    }
+
+    template <has_rigid_capability_c Body>
+    DUAL constexpr auto apply_no_slip(const Body& body) -> bool
+    {
+        auto rigid_cap = get_capabilities<capabilities::rigid_tag>(body);
+        return rigid_cap.apply_no_slip;
     }
 
     // [TODO] add more properties as needed

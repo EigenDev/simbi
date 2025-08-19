@@ -1,11 +1,13 @@
 #ifndef UNIFIED_ACCESSOR_HPP
 #define UNIFIED_ACCESSOR_HPP
 
+#include "adapter/device_adapter_api.hpp"
 #include "arena.hpp"
 #include "config.hpp"
 #include "containers/vector.hpp"
 #include "domain/domain.hpp"
 #include "io/exceptions.hpp"
+#include "memory/device.hpp"
 #include "smart_ptr.hpp"
 #include "traits/traits.hpp"
 
@@ -13,6 +15,7 @@
 #include <cstdint>
 #include <functional>
 #include <memory>
+#include <stdexcept>
 #include <utility>
 
 namespace simbi::mem {
@@ -29,6 +32,7 @@ namespace simbi::mem {
         std::shared_ptr<arena_t<T>> arena_;
         domain_t<Dims> domain_;
         iarray<Dims> strides_;
+        device_id_t device_;
 
       public:
         using value_type                          = T;
@@ -39,11 +43,12 @@ namespace simbi::mem {
 
         accessor_t(
             domain_t<Dims> domain,
-            std::shared_ptr<arena_t<T>> arena = global_arena<T>()
+            device_id_t device = device_id_t::cpu_device()
         )
-            : arena_(std::move(arena)),
+            : arena_(get_arena_for_device<T>(device)),
               domain_(domain),
-              strides_(compute_strides(domain.shape()))
+              strides_(compute_strides(domain.shape())),
+              device_(device)
         {
             data_ = arena_->get(domain_.size());
         }
@@ -79,6 +84,14 @@ namespace simbi::mem {
         DUAL T* data() { return data_.get(); }
 
         // queries
+        device_id_t device() const { return device_; }
+        bool on_cpu() const { return device_.type == device_type_t::cpu; }
+        bool on_gpu() const { return device_.type == device_type_t::gpu; }
+        bool on_same_device(const accessor_t& other) const
+        {
+            return (device_ == other.device_) &&
+                   (device_.type == other.device_.type);
+        }
         const domain_t<Dims>& domain() const { return domain_; }
         std::size_t size() const { return domain_.size(); }
         bool is_allocated() const { return static_cast<bool>(data_); }
@@ -143,41 +156,60 @@ namespace simbi::mem {
 
         auto clone() const
         {
-            auto new_accessor = accessor_t{domain_, arena_};
-            std::copy_n(this->data(), size(), new_accessor.data());
+            auto new_accessor = accessor_t{domain_, device_};
+            copy_data_to(new_accessor);
             return new_accessor;
         }
 
         // factory methods
         static auto zeros(
             const iarray<Dims>& shape,
-            std::shared_ptr<arena_t<T>> pool = global_arena<T>()
+            device_id_t device = device_id_t::cpu_device()
         )
         {
             auto domain   = make_domain(shape);
-            auto accessor = accessor_t{domain, std::move(pool)};
-
-            // zero-fill the buffer
-            auto* data_ptr = accessor.data();
-            std::fill_n(data_ptr, domain.size(), T{});
-
+            auto accessor = accessor_t{domain, device};
+            accessor.zero_fill();
             return accessor;
         }
 
+        // static auto from_numpy(
+        //     T* numpy_data,
+        //     const iarray<Dims>& shape,
+        //     std::shared_ptr<arena_t<T>> pool = global_arena<T>()
+        // )
+        // {
+        //     auto domain   = make_domain(shape);
+        //     auto accessor = accessor_t{domain, std::move(pool)};
+
+        //     // copy from numpy
+        //     std::copy_n(numpy_data, domain.size(), accessor.data());
+
+        //     // deallocate the numpy array since we own the data now
+        //     numpy_data = nullptr;
+
+        //     return accessor;
+        // }
         static auto from_numpy(
             T* numpy_data,
             const iarray<Dims>& shape,
-            std::shared_ptr<arena_t<T>> pool = global_arena<T>()
+            device_id_t device = device_id_t::cpu_device()
         )
         {
             auto domain   = make_domain(shape);
-            auto accessor = accessor_t{domain, std::move(pool)};
+            auto accessor = accessor_t{domain, device};
 
-            // copy from numpy
-            std::copy_n(numpy_data, domain.size(), accessor.data());
-
-            // deallocate the numpy array since we own the data now
-            numpy_data = nullptr;
+            if (device.type == device_type_t::gpu) {
+                gpu::api::set_device(device.device_id);
+                gpu::api::copy_host_to_device(
+                    accessor.data_.get(),
+                    numpy_data,
+                    domain.size() * sizeof(T)
+                );
+            }
+            else {
+                std::copy_n(numpy_data, domain.size(), accessor.data_.get());
+            }
 
             return accessor;
         }
@@ -196,6 +228,40 @@ namespace simbi::mem {
                 strides[i] = strides[i + 1] * shape[i + 1];
             }
             return strides;
+        }
+
+        void zero_fill()
+        {
+            if (device_.type == device_type_t::gpu) {
+                gpu::api::set_device(device_.device_id);
+                gpu::api::memset(data_.get(), 0, domain_.size() * sizeof(T));
+            }
+            else {
+                std::fill_n(data_.get(), domain_.size(), T{});
+            }
+        }
+
+        void copy_data_to(const accessor_t& target) const
+        {
+            if (!on_same_device(target)) {
+                throw std::runtime_error(
+                    "Cross-device copy not implemented yet - use explicit "
+                    "transfers"
+                );
+            }
+
+            // same device copy
+            if (device_.type == device_type_t::gpu) {
+                gpu::api::set_device(device_.device_id);
+                gpu::api::copy_device_to_device(
+                    target.data_.get(),
+                    data_.get(),
+                    domain_.size() * sizeof(T)
+                );
+            }
+            else {
+                std::copy_n(data_.get(), domain_.size(), target.data_.get());
+            }
         }
     };
 

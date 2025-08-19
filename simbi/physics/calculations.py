@@ -33,10 +33,10 @@ def lorentz_factor(
     velocity: nested_array, regime: str, using_gamma_beta: bool = False
 ) -> Array | float:
     vsquared = dot_product(velocity, velocity)
-    if regime != "classical" and np.any(vsquared >= 1.0):
+    if regime != "newtonian" and np.any(vsquared >= 1.0):
         raise ValueError("Lorentz factor is not real. Velocity exceeds speed of light.")
 
-    if regime == "classical":
+    if regime == "newtonian":
         return 1.0
     elif not using_gamma_beta:
         return np.asarray(1.0 / np.sqrt(1.0 - vsquared))
@@ -55,7 +55,7 @@ def spec_enthalpy(
     pressure: Array,
     regime: str,
 ) -> Array | float:
-    if regime == "classical":
+    if regime == "newtonian":
         if adiabatic_index == 1.0:
             # Isothermal case - pressure = cs^2 * rho
             # where cs is the isothermal sound speed
@@ -75,10 +75,10 @@ def enthalpy(
     rho: Array,
     pre: Array,
     gamma: float,
-    regime: str = "classical",
+    regime: str = "newtonian",
 ) -> Array | float:
     """Calculate the enthalpy per particle"""
-    if regime == "classical":
+    if regime == "newtonian":
         return 1.0
     return 1.0 + gamma * pre / (rho * (gamma - 1.0))
 
@@ -89,11 +89,11 @@ def labframe_energy_density(
     vel: Sequence[Array],
     bfield: Sequence[Array],
     gamma: float,
-    regime: str = "classical",
+    regime: str = "newtonian",
 ) -> Array:
     """Calculate the labframe energy density"""
     vsq = sum(v**2 for v in vel)
-    if regime == "classical":
+    if regime == "newtonian":
         if gamma == 1.0:
             # for the isothermal case,
             # we store the sound speed squared in the
@@ -124,13 +124,13 @@ def labframe_momentum(
     vel: Sequence[Array],
     bfield: Sequence[Array],
     gamma: float,
-    regime: str = "classical",
+    regime: str = "newtonian",
     mode: VectorMode | VectorComponent = VectorMode.All,
 ) -> Array:
     """Calculate the labframe momentum"""
     # if user does not specify a component, return the momentum magnitude
     # otherwise, return the component
-    if regime == "classical":
+    if regime == "newtonian":
         mom_vec = rho * vel
     elif "sr" in regime:
         h = enthalpy(
@@ -196,9 +196,9 @@ def enthalpy_density(
     bfields: Sequence[Array],
     velocity: Sequence[Array],
     adiabatic_index: float,
-    regime: str = "classical",
+    regime: str = "newtonian",
 ) -> Array:
-    if regime == "classical":
+    if regime == "newtonian":
         return rho
     elif regime == "srhd":
         return rho * enthalpy(rho, pre, adiabatic_index)
@@ -224,7 +224,7 @@ def is_isothermal(adiabatic_index: float) -> bool:
 
 def validate_eos(adiabatic_index: float, regime: str) -> None:
     """Validate equation of state is physically consistent"""
-    if is_isothermal(adiabatic_index) and regime != "classical":
+    if is_isothermal(adiabatic_index) and regime != "newtonian":
         raise ValueError(
-            "Isothermal equation of state (gamma=1) is only valid for classical flows"
+            "Isothermal equation of state (gamma=1) is only valid for newtonian flows"
         )
