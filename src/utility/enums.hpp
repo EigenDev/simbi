@@ -246,9 +246,22 @@ namespace simbi {
         ELASTIC       = 1 << 2,
         DEFORMABLE    = 1 << 3,
         RIGID         = 1 << 4,
-
-        // TODO: add more capabilities as needed
     };
+
+    constexpr inline BodyCapability
+    operator|(BodyCapability lhs, BodyCapability rhs)
+    {
+        return static_cast<BodyCapability>(
+            static_cast<uint32_t>(lhs) | static_cast<uint32_t>(rhs)
+        );
+    }
+
+    constexpr inline BodyCapability&
+    operator|=(BodyCapability& lhs, BodyCapability rhs)
+    {
+        lhs = lhs | rhs;
+        return lhs;
+    }
 
     // component identifiers for magnetic field directions
     enum class magnetic_comp_t : std::uint64_t {
