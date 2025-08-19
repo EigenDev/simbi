@@ -5,8 +5,6 @@ This module adapts the existing checkpoint loading functionality to work with
 the new SimulationState structure.
 """
 
-from pathlib import Path
-from typing import Union
 import numpy as np
 
 
@@ -31,7 +29,7 @@ def load_checkpoint_to_state(default_config: SimbiBaseConfig) -> Maybe[Simulatio
     def extract_fields(
         reader: LazySimulationReader,
     ) -> Maybe[SimulationState]:
-        fields, metadata, mesh, immersed_bodies = reader
+        fields, metadata, _, immersed_bodies = reader
         config = SimbiBaseConfig.from_checkpoint_and_default(
             default_config, metadata, immersed_bodies
         )
