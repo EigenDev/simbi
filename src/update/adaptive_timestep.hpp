@@ -61,8 +61,7 @@ namespace simbi {
     }
 
     template <typename HydroState, typename MeshConfig>
-    exec::future_t<real>
-    compute_timestep_async(const HydroState& state, const MeshConfig& mesh)
+    auto compute_timestep(const HydroState& state, const MeshConfig& mesh)
     {
         auto timestep_at = create_timestep_field(state, mesh);
         auto executor    = exec::default_executor();
@@ -78,7 +77,7 @@ namespace simbi {
     template <typename HydroState, typename MeshConfig>
     void update_timestep(HydroState& state, const MeshConfig& mesh)
     {
-        auto dt_future    = compute_timestep_async(state, mesh);
+        auto dt_future    = compute_timestep(state, mesh);
         state.metadata.dt = dt_future.wait();
     }
 

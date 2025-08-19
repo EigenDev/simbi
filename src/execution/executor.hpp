@@ -349,7 +349,6 @@ namespace simbi::exec {
 
                 std::vector<T> partial_results(nthreads_, init);
                 std::vector<std::thread> threads;
-                std::mutex results_mutex;
 
                 for (std::size_t t = 0; t < nthreads_; ++t) {
                     auto start_idx = t * chunk_size;
@@ -670,14 +669,10 @@ namespace simbi::exec {
 
                 auto [blocks, threads] = optimal_grid_size(domain);
 
-                auto kernel = [=] DEV(
-                                  int thread_idx,
-                                  int block_idx,
-                                  int block_dim,
-                                  int grid_dim
-                              ) {
-                    auto global_idx    = block_idx * block_dim + thread_idx;
-                    auto total_threads = grid_dim * block_dim;
+                auto kernel = [=] DEV() {
+                    auto idx        = adapter::grid::execution_index::current();
+                    auto global_idx = idx.global_thread_id();
+                    auto total_threads = idx.total_threads();
                     auto domain_size   = domain.size();
 
                     // stride loop for large domains
@@ -729,98 +724,6 @@ namespace simbi::exec {
             });
         }
 
-        template <std::uint64_t Dims, typename Func>
-        auto for_each_tiled_impl(
-            const domain_t<Dims>& domain,
-            Func&& func,
-            const iarray<Dims>& tile_size
-        ) const -> future_t<void>
-        {
-            // For GPU, we can either:
-            // 1. Launch one kernel per tile (good for large tiles)
-            // 2. Use single kernel with tile-aware indexing (better for small
-            // tiles)
-
-            auto state =
-                std::make_shared<typename future_t<void>::future_state_t>();
-            state->stream = stream_;
-
-            try {
-                gpu::api::set_device(device_.device_id);
-
-                // collect tiles upfront for GPU processing
-                auto tiles =
-                    tiling::tile_range(domain, tile_size) | fp::collect<>;
-
-                if (tiles.size() == 1) {
-                    // single tile - use existing implementation
-                    return for_each_impl(domain, std::forward<Func>(func));
-                }
-
-                // multiple tiles - launch kernel per tile or batch them
-                for (const auto& tile : tiles) {
-                    auto [blocks, threads] = optimal_grid_size(tile.domain);
-
-                    auto kernel = [=] DEV(
-                                      int thread_idx,
-                                      int block_idx,
-                                      int block_dim,
-                                      int grid_dim
-                                  ) {
-                        auto global_idx    = block_idx * block_dim + thread_idx;
-                        auto total_threads = grid_dim * block_dim;
-                        auto tile_size     = tile.domain.size();
-
-                        for (auto idx = global_idx; idx < tile_size;
-                             idx += total_threads) {
-                            auto coord = tile.domain.linear_to_coord(idx);
-                            func(coord);
-                        }
-                    };
-
-                    auto launch_config = grid::config(blocks, threads);
-                    grid::launch(kernel, launch_config);
-                }
-
-                gpu::api::event_create(&state->event);
-                gpu::api::event_record(state->event, stream_);
-            }
-            catch (...) {
-                state->exception = std::current_exception();
-                state->has_error.store(true);
-                state->ready.store(true);
-            }
-
-            return future_t<void>{std::move(state)};
-        }
-
-        template <
-            std::uint64_t Dims,
-            typename T,
-            typename Mapper,
-            typename Reducer>
-        auto reduce_tiled_impl(
-            const domain_t<Dims>& domain,
-            T init,
-            Mapper&&,
-            Reducer&&,
-            const iarray<Dims>& tile_size
-        ) const -> future_t<T>
-        {
-            // GPU reductions with tiling are complex - for now, fallback to CPU
-            // TODO: implement proper GPU tiled reduction with shared memory
-            return async_impl([=]() {
-                T accumulator = init;
-                tiling::tile_range(domain, tile_size) |
-                    fp::for_each([&](const auto&) {
-                        // would need to transfer tile data to CPU, reduce, then
-                        // accumulate this is a placeholder for proper GPU tiled
-                        // reduction
-                    });
-                return accumulator;
-            });
-        }
-
         mem::device_id_t device() const { return device_; }
         adapter::stream_t<> stream() const { return stream_; }
         void synchronize() { gpu::api::stream_synchronize(stream_); }
@@ -865,9 +768,10 @@ namespace simbi::exec {
         return gpu_executor_t{mem::device_id_t::gpu_device(device_id)};
     }
 
-    inline auto default_executor(std::size_t device_id = 0)
+    template <bool OnGPU = global::on_gpu>
+    auto default_executor(std::size_t device_id = 0)
     {
-        if constexpr (global::on_gpu) {
+        if constexpr (OnGPU) {
             return gpu_executor(device_id);
         }
         else {

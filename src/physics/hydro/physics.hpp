@@ -316,7 +316,6 @@ namespace simbi::hydro {
             };
         }
         else {   // non-MHD (should not happen)
-            std::cout << "Warning: Non-MHD primitive to flux conversion.\n";
             return conserved_t{
               .den = den * vn,
               .mom = mom * vn + pre * nhat,
