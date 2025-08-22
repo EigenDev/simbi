@@ -2,6 +2,7 @@
 #define STENCIL_VIEW_HPP
 
 #include "base/stencil.hpp"
+#include "config.hpp"
 #include "containers/vector.hpp"
 #include "utility/enums.hpp"
 #include "utility/helpers.hpp"
@@ -24,13 +25,13 @@ namespace simbi::base::stencils {
         iarray<Dims> base_coord_;
         std::uint64_t direction_;
 
-        stencil_values_t left_values() const
+        stencil_values_t DEV left_values() const
         {
             auto pattern = base::stencil_t<Dims, Rec>::left_pattern(direction_);
             return gather_pattern(pattern);
         }
 
-        stencil_values_t right_values() const
+        stencil_values_t DEV right_values() const
         {
             auto pattern =
                 base::stencil_t<Dims, Rec>::right_pattern(direction_);
@@ -38,13 +39,14 @@ namespace simbi::base::stencils {
         }
 
         // both at once for reconstruction
-        std::pair<stencil_values_t, stencil_values_t> neighbor_values() const
+        std::pair<stencil_values_t, stencil_values_t>
+            DEV neighbor_values() const
         {
             return {left_values(), right_values()};
         }
 
       private:
-        stencil_values_t gather_pattern(const auto& pattern) const
+        stencil_values_t DEV gather_pattern(const auto& pattern) const
         {
             stencil_values_t values;
             for (std::uint64_t ii = 0; ii < stencil_size; ++ii) {
@@ -62,7 +64,7 @@ namespace simbi::base::stencils {
         Reconstruction Rec,
         typename field_type,
         std::uint64_t Dims = field_type::dimensions>
-    auto make_stencil(
+    DEV auto make_stencil(
         const field_type& field,
         const iarray<Dims>& coord,
         std::uint64_t dir
@@ -73,7 +75,7 @@ namespace simbi::base::stencils {
 
     // === RECONSTRUCTION INTERFACE ===
     template <Reconstruction Rec, typename T>
-    T reconstruct_left(
+    DEV T reconstruct_left(
         const vector_t<T, base::stencil_size<Rec>()>& values,
         double theta = 1.5
     )
@@ -87,12 +89,15 @@ namespace simbi::base::stencils {
             return values[1] + gradient * 0.5;
         }
         else {
-            static_assert(false, "Reconstruction method not implemented");
+            // lambda trick
+            []<bool flag = false>() {
+                static_assert(flag, "Reconstruction method not implemented");
+            }();
         }
     }
 
     template <Reconstruction Rec, typename T>
-    T reconstruct_right(
+    DEV T reconstruct_right(
         const vector_t<T, base::stencil_size<Rec>()>& values,
         double theta = 1.5
     )
@@ -106,7 +111,10 @@ namespace simbi::base::stencils {
             return values[1] - 0.5 * gradient;
         }
         else {
-            static_assert(false, "Reconstruction method not implemented");
+            // lambda trick to satisfy nvcc
+            []<bool flag = false>() {
+                static_assert(flag, "Reconstruction method not implemented");
+            }();
         }
     }
 }   // namespace simbi::base::stencils

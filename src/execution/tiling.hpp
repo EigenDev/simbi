@@ -41,6 +41,10 @@ namespace simbi::tiling {
     cpu_tile_size(std::size_t element_size = sizeof(real)) noexcept
         -> iarray<Dims>;
 
+    template <std::uint64_t Dims>
+        requires valid_dimension<Dims>
+    constexpr auto gpu_tile_size() noexcept -> iarray<Dims>;
+
     // hardware target selection
     enum class hardware_target {
         cpu_cache,
@@ -160,8 +164,8 @@ namespace simbi::tiling {
                     return;
                 }
 
-                for (std::int64_t i = 0; i < num_tiles[dim]; ++i) {
-                    tile_idx[dim] = i;
+                for (std::int64_t ii = 0; ii < num_tiles[dim]; ++ii) {
+                    tile_idx[dim] = ii;
                     generate_tiles(tile_idx, dim + 1);
                 }
             };

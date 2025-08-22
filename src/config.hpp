@@ -23,9 +23,6 @@ namespace simbi {
          *   }
          */
         namespace platform {
-            // avoid functions when possible - use constexpr variables instead
-            // they're easier to use and often lead to better compiler
-            // diagnostics
             inline constexpr bool is_gpu =
 #if GPU_ENABLED
                 true;
@@ -47,11 +44,8 @@ namespace simbi {
                 false;
 #endif
 
-            // compute at compile-time rather than runtime
             inline constexpr bool is_cpu = !is_gpu;
 
-            // avoid runtime checks for platform selection
-            // instead, use compile-time tag dispatching
             enum class type {
                 cpu,
                 cuda,
@@ -97,7 +91,6 @@ namespace simbi {
                 false;
 #endif
 
-            // logical combinations are best expressed in code, not preprocessor
             inline constexpr bool shared_memory =
 #if SHARED_MEMORY
                 platform::is_gpu;
@@ -128,7 +121,6 @@ namespace simbi {
          *   types::size_t size = 42;
          */
         namespace types {
-            // let the compiler figure out the type based on the configuration
             using real =
 #if FLOAT_PRECISION
                 float;
