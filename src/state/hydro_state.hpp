@@ -216,10 +216,9 @@ namespace simbi::state {
                     }
                 }
 
-                auto flux_field = field(make_domain(staggered_shape), [](auto) {
+                flux_vec[dir] = field(make_domain(staggered_shape), [](auto) {
                     return conserved_t{};
                 });
-                flux_vec[dir]   = flux_field;
 
                 if constexpr (is_mhd) {
                     bstaggs_vec[dir] = from_numpy_field(

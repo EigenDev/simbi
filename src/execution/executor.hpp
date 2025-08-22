@@ -594,7 +594,7 @@ namespace simbi::exec {
         adapter::stream_t<> stream_;
 
       public:
-        explicit gpu_executor_t(
+        constexpr explicit gpu_executor_t(
             mem::device_id_t device = mem::device_id_t::gpu_device(0)
         )
             : device_(device)
@@ -754,8 +754,6 @@ namespace simbi::exec {
     };
 
     // factory functions
-    inline auto cpu_executor() -> cpu_executor_t { return cpu_executor_t{}; }
-
     inline auto par_cpu_executor() -> par_cpu_executor_t
     {
         return par_cpu_executor_t{};
@@ -769,7 +767,7 @@ namespace simbi::exec {
     }
 
     template <bool OnGPU = global::on_gpu>
-    auto default_executor(std::size_t device_id = 0)
+    constexpr auto default_executor(std::size_t device_id = 0)
     {
         if constexpr (OnGPU) {
             return gpu_executor(device_id);

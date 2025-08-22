@@ -142,7 +142,6 @@ namespace simbi::mem {
                 }
             }
             else {
-                // regular types - standard parallel execution
                 executor
                     .for_each(
                         domain_,
@@ -152,6 +151,11 @@ namespace simbi::mem {
                     )
                     .wait();
             }
+        }
+        
+        template <typename ComputeField, typename Executor>
+        void try_commit(const ComputeField& computation, const Executor& executor){
+          
         }
 
         auto clone() const
