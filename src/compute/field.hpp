@@ -234,7 +234,7 @@ namespace simbi {
         insert(const compute_field_t<Dims, OtherComputation>& overlay) const
         {
             using namespace domain_algebra;
-            auto union_domain      = domain_union(domain_, overlay.domain_);
+            auto union_domain      = union_of(domain_, overlay.domain_);
             auto overlay_predicate = fp::contains_op(overlay.domain_);
             auto insert_computation =
                 fp::select(overlay_predicate, overlay.computation, computation);

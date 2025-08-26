@@ -26,8 +26,7 @@ namespace simbi::domain_algebra {
 
     // set union - needed for domain merging
     template <std::uint64_t Dims>
-    constexpr auto
-    domain_union(const domain_t<Dims>& a, const domain_t<Dims>& b)
+    constexpr auto union_of(const domain_t<Dims>& a, const domain_t<Dims>& b)
     {
         iarray<Dims> new_start, new_end;
         for (std::uint64_t ii = 0; ii < Dims; ++ii) {
