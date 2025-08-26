@@ -93,10 +93,12 @@ namespace simbi {
         auto operator=(const compute_field_t<Dims, OtherComputation>& source)
         {
             if constexpr (detail::is_accessor_v<Computation>) {
-                computation.commit(source, exec::default_executor());
                 if (domain_.empty()) {
-                    domain_ = source.domain_;
+                    domain_     = source.domain_;
+                    using cvt   = std::remove_cvref_t<value_type>;
+                    computation = accessor_t<cvt, Dims>{domain_};
                 }
+                mem::commit(computation, source, exec::default_executor());
             }
             else if constexpr (detail::returns_reference_v<Computation, Dims>) {
                 exec::default_executor()
@@ -250,17 +252,16 @@ namespace simbi {
                 return *this;
             }
             else {
-                auto result = accessor_t<value_type, Dims>{domain_};
-                result.commit(*this, executor);
+                auto acc = accessor_t<value_type, Dims>{domain_};
+                mem::commit(acc, *this, executor);
                 return compute_field_t<Dims, accessor_t<value_type, Dims>>{
-                  std::move(result),
+                  std::move(acc),
                   domain_
                 };
             }
         }
     };
 
-    // arithmetic operators using mathematical primitives
     template <std::uint64_t Dims, typename CompA, typename CompB>
     auto operator+(
         const compute_field_t<Dims, CompA>& a,
@@ -297,7 +298,6 @@ namespace simbi {
         return a.zip(b, fp::divide_op);
     }
 
-    // scalar operations using zip with constants
     template <std::uint64_t Dims, typename Computation, typename Scalar>
     auto
     operator*(const compute_field_t<Dims, Computation>& field, Scalar scalar)
@@ -382,7 +382,6 @@ namespace simbi {
         };
     }
 
-    // factory functions
     template <std::uint64_t Dims, typename F>
     auto field(const domain_t<Dims>& domain, F&& fn)
     {
@@ -390,9 +389,9 @@ namespace simbi {
     }
 
     template <typename T, std::uint64_t Dims>
-    auto from_numpy_field(T* numpy_data, const iarray<Dims>& shape)
+    auto from_data_field(T* data, const iarray<Dims>& shape)
     {
-        auto accessor = accessor_t<T, Dims>::from_numpy(numpy_data, shape);
+        auto accessor = from_data(data, shape);
         auto domain   = make_domain(shape);
         return compute_field_t{std::move(accessor), domain};
     }
