@@ -538,7 +538,7 @@ namespace simbi::cfd {
                     pr.rho
                 );
                 flux.mom = flux.mom - visc;
-                // flux.nrg = flux.nrg + vecops::dot(visc, pl.vel);
+                flux.nrg = flux.nrg + vecops::dot(visc, pl.vel);
             }
             return flux;
         }
