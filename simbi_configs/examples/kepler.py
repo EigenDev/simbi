@@ -1,20 +1,25 @@
 import math
+from pathlib import Path
+from typing import Any
+
+from pydantic import computed_field
 
 import simbi.expression as expr
 from simbi.core.config.base_config import SimbiBaseConfig
 from simbi.core.config.fields import SimbiField
+from simbi.core.types.bodies import BodyCapability, ImmersedBodyConfig
 from simbi.core.types.input import (
+    BoundaryCondition,
+    CellSpacing,
     CoordSystem,
     Regime,
-    CellSpacing,
     Solver,
-    BoundaryCondition,
 )
-from simbi.core.types.typing import GasStateGenerator, InitialStateType, ExpressionDict
-from simbi.core.types.bodies import ImmersedBodyConfig, BodyCapability
-from pydantic import computed_field
-from pathlib import Path
-from typing import Any
+from simbi.core.types.typing import (
+    ExpressionDict,
+    GasStateGenerator,
+    InitialStateType,
+)
 
 
 class KeplerianRingTest(SimbiBaseConfig):
@@ -33,7 +38,9 @@ class KeplerianRingTest(SimbiBaseConfig):
     )
 
     # Required fields from SimbiBaseConfig
-    resolution: tuple[int, int] = SimbiField((256, 256), description="Grid resolution")
+    resolution: tuple[int, int] = SimbiField(
+        (256, 256), description="Grid resolution"
+    )
 
     bounds: list[tuple[float, float]] = SimbiField(
         [(-2.0, 2.0), (-2.0, 2.0)], description="Domain boundaries"
@@ -45,7 +52,9 @@ class KeplerianRingTest(SimbiBaseConfig):
 
     regime: Regime = SimbiField(Regime.CLASSICAL, description="Physics regime")
 
-    adiabatic_index: float = SimbiField(1.0, description="Adiabatic index (isothermal)")
+    adiabatic_index: float = SimbiField(
+        1.0, description="Adiabatic index (isothermal)"
+    )
 
     # Optional fields with non-default values
     solver: Solver = SimbiField(Solver.HLLE, description="Numerical solver")
@@ -54,7 +63,7 @@ class KeplerianRingTest(SimbiBaseConfig):
         Path("data/kepler/"), description="Output data directory"
     )
 
-    cfl_number: float = SimbiField(0.05, description="CFL condition number")
+    cfl_number: float = SimbiField(0.5, description="CFL condition number")
 
     boundary_conditions: BoundaryCondition = SimbiField(
         BoundaryCondition.OUTFLOW, description="Boundary conditions"
@@ -218,7 +227,9 @@ class KeplerianRingTest(SimbiBaseConfig):
                         sigma_ring = sigma_min + sigma_peak * math.exp(
                             -((r - r0) ** 2) / (2 * dr**2)
                         )
-                        sigma = sigma_min + (sigma_ring - sigma_min) * (1.0 - damp)
+                        sigma = sigma_min + (sigma_ring - sigma_min) * (
+                            1.0 - damp
+                        )
 
                         # Keplerian velocity with buffer dampening
                         v_k = math.sqrt(G * M_0 / r) * (1.0 - damp)
@@ -290,7 +301,8 @@ class KeplerianRingTest(SimbiBaseConfig):
             rho_bg
             * cs_squared
             / expr.max_expr(
-                gamma - expr.constant(1.0, r.graph), expr.constant(1e-10, r.graph)
+                gamma - expr.constant(1.0, r.graph),
+                expr.constant(1e-10, r.graph),
             )
         )
 
@@ -301,7 +313,12 @@ class KeplerianRingTest(SimbiBaseConfig):
         my_source_final = expr.if_then_else(condition, zero, my_source)
         e_source_final = expr.if_then_else(condition, zero, e_source)
 
-        return [rho_source_final, mx_source_final, my_source_final, e_source_final]
+        return [
+            rho_source_final,
+            mx_source_final,
+            my_source_final,
+            e_source_final,
+        ]
 
     def _create_boundary_expression(self) -> ExpressionDict:
         """Create boundary expressions for buffer damping"""
