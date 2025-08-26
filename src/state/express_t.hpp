@@ -3,7 +3,7 @@
 
 #include "base/concepts.hpp"
 #include "config.hpp"
-#include "containers/ndarray.hpp"
+#include "containers/store.hpp"
 #include "containers/vector.hpp"
 #include "math/evaluator.hpp"
 #include "math/exp_load.hpp"
@@ -16,7 +16,6 @@
 #include <utility>
 
 namespace simbi::state {
-    using namespace nd;
 
     struct hydro_source_tag;
     struct gravity_source_tag;
@@ -25,11 +24,11 @@ namespace simbi::state {
     struct expression_t : public managed_t<platform::is_gpu> {
         bool enabled;
         std::int64_t register_count;
-        ndarray_t<expression::ExprNode> nodes;
-        ndarray_t<std::int64_t> output_indices;
-        ndarray_t<std::int64_t> output_indices_mapped;
-        ndarray_t<real> parameters;
-        ndarray_t<expression::LinearExprInstr> linear_instructions;
+        store_t<expression::ExprNode> nodes;
+        store_t<std::int64_t> output_indices;
+        store_t<std::int64_t> output_indices_mapped;
+        store_t<real> parameters;
+        store_t<expression::LinearExprInstr> linear_instructions;
 
         template <concepts::is_hydro_conserved_c conserved_t>
         DEV auto apply(
@@ -150,11 +149,11 @@ namespace simbi::state {
             expr.parameters            = std::move(params);
 
             if constexpr (platform::is_gpu) {
-                expr.nodes.move_to_gpu();
-                expr.output_indices.move_to_gpu();
-                expr.parameters.move_to_gpu();
-                expr.linear_instructions.move_to_gpu();
-                expr.output_indices_mapped.move_to_gpu();
+                expr.nodes.sync_to_all_devices();
+                expr.output_indices.sync_to_all_devices();
+                expr.parameters.sync_to_all_devices();
+                expr.linear_instructions.sync_to_all_devices();
+                expr.output_indices_mapped.sync_to_all_devices();
             }
 
             return expr;

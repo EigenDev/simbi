@@ -1,6 +1,6 @@
 #include "evaluator.hpp"
 #include "config.hpp"
-#include "containers/ndarray.hpp"
+#include "containers/store.hpp"
 #include "math/expression.hpp"
 #include "utility/helpers.hpp"
 
@@ -32,8 +32,7 @@ namespace simbi::expression {
         UNKNOWN_OPERATION
     };
 
-    std::int64_t
-    get_max_register(const ndarray_t<LinearExprInstr>& instructions)
+    std::int64_t get_max_register(const store_t<LinearExprInstr>& instructions)
     {
         std::int64_t max_reg = 4;   // start with input registers
 

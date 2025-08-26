@@ -2,7 +2,7 @@
 #define MEMORY_BLOCK_HPP
 
 #include "adapter/device_adapter_api.hpp"
-#include "device.hpp"
+#include "memory/device.hpp"
 
 #include <cstddef>
 #include <cstdlib>

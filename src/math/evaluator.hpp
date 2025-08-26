@@ -2,13 +2,12 @@
 #define EVALUATOR_HPP
 
 #include "config.hpp"
-#include "containers/ndarray.hpp"
+#include "containers/store.hpp"
 #include "math/expression.hpp"
 
 #include <cstdint>
 
 namespace simbi::expression {
-    using namespace nd;
     // main evaluation function with parameter support
     DEV real evaluate_expr(
         const ExprNode* nodes,
@@ -76,8 +75,7 @@ namespace simbi::expression {
         real* outputs
     );
 
-    std::int64_t
-    get_max_register(const nd::ndarray_t<LinearExprInstr>& instructions);
+    std::int64_t get_max_register(const store_t<LinearExprInstr>& instructions);
 
 }   // namespace simbi::expression
 

@@ -1,6 +1,6 @@
 #include "exp_load.hpp"
 #include "config.hpp"
-#include "containers/ndarray.hpp"
+#include "containers/store.hpp"
 #include "math/expression.hpp"
 #include "utility/config_dict.hpp"
 
@@ -13,7 +13,6 @@
 #include <vector>
 
 namespace simbi::expression {
-    using namespace nd;
     // convert a string operation to ExprOp enum
 
     ExprOp string_to_expr_op(const std::string& op_str)
@@ -85,9 +84,9 @@ namespace simbi::expression {
         return ExprOp::CONSTANT;
     }
 
-    ndarray_t<ExprNode> load_expressions(const config_dict_t& expr_data)
+    store_t<ExprNode> load_expressions(const config_dict_t& expr_data)
     {
-        ndarray_t<ExprNode> nodes;
+        store_t<ExprNode> nodes;
         std::vector<ExprNode> nodes_vec;
 
         // get the expressions array
@@ -149,53 +148,53 @@ namespace simbi::expression {
                     }
                 }
             }
-            nodes.push_back(node);
+            nodes.add(node);
         }
-        nodes.move_to_gpu();
+        nodes.sync_to_all_devices();
         return nodes;
     }
 
-    ndarray_t<std::int64_t> get_output_indices(const config_dict_t& expr_data)
+    store_t<std::int64_t> get_output_indices(const config_dict_t& expr_data)
     {
         if (!(expr_data.contains("output_indices") &&
               expr_data.at("output_indices").is_array_of_ints())) {
-            return ndarray_t<std::int64_t>{};
+            return store_t<std::int64_t>{};
         }
 
-        ndarray_t res(expr_data.at("output_indices")
-                          .template get<std::vector<std::int64_t>>());
-        res.move_to_gpu();
+        store_t res(expr_data.at("output_indices")
+                        .template get<std::vector<std::int64_t>>());
+        res.sync_to_all_devices();
         return res;
     }
 
-    ndarray_t<real> get_parameters(const config_dict_t& expr_data)
+    store_t<real> get_parameters(const config_dict_t& expr_data)
     {
         if (!(expr_data.contains("parameters") &&
               expr_data.at("parameters").is_array_of_floats())) {
-            return ndarray_t<real>{};
+            return store_t<real>{};
         }
 
-        ndarray_t res(
+        store_t res(
             expr_data.at("parameters").template get<std::vector<real>>()
         );
-        res.move_to_gpu();
+        res.sync_to_all_devices();
         return res;
     }
 
-    ndarray_t<real> get_parameter_range(const config_dict_t& expr_data)
+    store_t<real> get_parameter_range(const config_dict_t& expr_data)
     {
         if (!expr_data.contains("param_count")) {
-            return ndarray_t<real>{};
+            return store_t<real>{};
         }
 
-        auto res = ndarray_t<real>(
+        auto res = store_t<real>(
             expr_data.at("param_count").template get<std::int64_t>()
         );
-        res.move_to_gpu();
+        res.sync_to_all_devices();
         return res;
     }
 
-    std::tuple<ndarray_t<ExprNode>, ndarray_t<std::int64_t>, ndarray_t<real>>
+    std::tuple<store_t<ExprNode>, store_t<std::int64_t>, store_t<real>>
     load_expression_data(const config_dict_t& data)
     {
         return {

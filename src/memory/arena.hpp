@@ -1,7 +1,7 @@
 #ifndef ARENA_HPP
 #define ARENA_HPP
 
-#include "device.hpp"
+#include "memory/device.hpp"
 #include "memory/smart_ptr.hpp"
 #include "memory_block.hpp"
 

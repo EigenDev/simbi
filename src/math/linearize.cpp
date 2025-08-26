@@ -1,4 +1,4 @@
-#include "containers/ndarray.hpp"
+#include "containers/store.hpp"
 #include "expression.hpp"
 #include "linearizer.hpp"
 
@@ -14,7 +14,6 @@
 #include <vector>
 
 namespace simbi::expression {
-    using namespace nd;
 
     std::int64_t op2reg(ExprOp op)
     {
@@ -28,10 +27,10 @@ namespace simbi::expression {
         }
     }
 
-    std::pair<ndarray_t<LinearExprInstr>, ndarray_t<std::int64_t>>
+    std::pair<store_t<LinearExprInstr>, store_t<std::int64_t>>
     linearize_expression_tree(
-        const ndarray_t<ExprNode>& nodes,
-        const ndarray_t<std::int64_t>& output_indices
+        const store_t<ExprNode>& nodes,
+        const store_t<std::int64_t>& output_indices
     )
     {
         // first identify all nodes needed for output expressions
@@ -121,8 +120,8 @@ namespace simbi::expression {
         std::reverse(instructions.begin(), instructions.end());
 
         // create mapped output indices to match the register numbers
-        ndarray_t<std::int64_t> mapped_output_indices(output_indices.size());
-        ndarray_t<LinearExprInstr> result_instrs(instructions.size());
+        store_t<std::int64_t> mapped_output_indices(output_indices.size());
+        store_t<LinearExprInstr> result_instrs(instructions.size());
         for (size_t ii = 0; ii < output_indices.size(); ii++) {
             mapped_output_indices[ii] = node_to_reg[output_indices[ii]];
         }
@@ -134,8 +133,8 @@ namespace simbi::expression {
     }
 
     void topological_sort(
-        const ndarray_t<ExprNode>& nodes,
-        const ndarray_t<std::int64_t>& output_indices,
+        const store_t<ExprNode>& nodes,
+        const store_t<std::int64_t>& output_indices,
         std::vector<std::int64_t>& result
     )
     {

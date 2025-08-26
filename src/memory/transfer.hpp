@@ -5,9 +5,9 @@
 #include "adapter/device_adapter_api.hpp"
 #include "arena.hpp"
 #include "containers/vector.hpp"
-#include "device.hpp"
 #include "domain/algebra.hpp"
 #include "domain/domain.hpp"
+#include "memory/device.hpp"
 #include "memory_block.hpp"
 
 #include <algorithm>
@@ -17,7 +17,7 @@
 #include <stdexcept>
 #include <vector>
 
-namespace simbi::transfer {
+namespace simbi::mem {
     //==========================================================================
     // Low-level memory block transfers
     //==========================================================================
@@ -345,6 +345,6 @@ namespace simbi::transfer {
         }
     }
 
-}   // namespace simbi::transfer
+}   // namespace simbi::mem
 
 #endif   // TRANSFER_HPP

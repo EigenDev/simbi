@@ -9,7 +9,7 @@
 #include "execution/completion.hpp"
 #include "execution/future.hpp"
 #include "functional/fp.hpp"
-#include "new/device.hpp"
+#include "memory/device.hpp"
 #include "thread_pool.hpp"
 #include "tiling.hpp"
 
