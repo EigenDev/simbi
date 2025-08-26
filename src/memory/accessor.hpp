@@ -1,14 +1,11 @@
-#ifndef UNIFIED_ACCESSOR_HPP
-#define UNIFIED_ACCESSOR_HPP
+#ifndef ACCESSOR_HPP
+#define ACCESSOR_HPP
 
-#include "adapter/device_adapter_api.hpp"
 #include "arena.hpp"
 #include "config.hpp"
 #include "containers/vector.hpp"
 #include "domain/domain.hpp"
-#include "io/exceptions.hpp"
-#include "memory/device.hpp"
-#include "smart_ptr.hpp"
+#include "memory/smart_ptr.hpp"
 #include "traits/traits.hpp"
 
 #include <cstddef>
@@ -16,259 +13,259 @@
 #include <functional>
 #include <memory>
 #include <stdexcept>
-#include <utility>
 
 namespace simbi::mem {
-    /**
-     * accessor_t - host-device agnostic field storage
-     *
-     * srp: provide coordinate-based access to arena-backed memory
-     * works on both cpu and gpu via DUAL annotations
-     */
+    template <typename T, std::uint64_t Dims>
+    class accessor_t;
+
+    template <
+        typename T,
+        std::uint64_t Dims,
+        typename ComputeField,
+        typename Executor>
+    void commit(
+        accessor_t<T, Dims>& accessor,
+        ComputeField computation,
+        Executor executor
+    );
+    template <
+        typename T,
+        std::uint64_t Dims,
+        typename ComputeField,
+        typename Executor>
+    void direct_commit(
+        accessor_t<T, Dims>& accessor,
+        ComputeField computation,
+        Executor executor
+    );
+    template <
+        typename T,
+        std::uint64_t Dims,
+        typename ComputeField,
+        typename Executor>
+    void try_commit(
+        accessor_t<T, Dims>& accessor,
+        ComputeField computation,
+        Executor executor
+    );
+
     template <typename T, std::uint64_t Dims>
     class accessor_t
     {
+      private:
         mem::shared_ptr<T> data_;
         std::shared_ptr<arena_t<T>> arena_;
         domain_t<Dims> domain_;
         iarray<Dims> strides_;
-        device_id_t device_;
 
-      public:
-        using value_type                          = T;
-        static constexpr std::uint64_t dimensions = Dims;
-
-        // ctors
-        accessor_t() = default;
-
-        accessor_t(
-            domain_t<Dims> domain,
-            device_id_t device = device_id_t::cpu_device()
-        )
-            : arena_(get_arena_for_device<T>(device)),
-              domain_(domain),
-              strides_(compute_strides(domain.shape())),
-              device_(device)
+        static iarray<Dims> compute_strides(const iarray<Dims>& shape)
         {
-            data_ = arena_->get(domain_.size());
-        }
-
-        ~accessor_t() = default;
-        // copy / move semantics (cheap shallow copy)
-        accessor_t(const accessor_t& other)                = default;
-        accessor_t& operator=(const accessor_t& other)     = default;
-        accessor_t(accessor_t&& other) noexcept            = default;
-        accessor_t& operator=(accessor_t&& other) noexcept = default;
-
-        // host-device element access
-        DUAL const T& operator[](coordinate_t<Dims> coord) const
-        {
-            return data_.get()[compute_offset(coord)];
-        }
-
-        DUAL T& operator[](coordinate_t<Dims> coord)
-        {
-            return data_.get()[compute_offset(coord)];
-        }
-
-        DUAL const T& operator()(coordinate_t<Dims> coord) const
-        {
-            return (*this)[coord];
-        }
-
-        DUAL T& operator()(coordinate_t<Dims> coord) { return (*this)[coord]; }
-
-        // direct data access
-        DUAL const T* data() const { return data_.get(); }
-
-        DUAL T* data() { return data_.get(); }
-
-        // queries
-        device_id_t device() const { return device_; }
-        bool on_cpu() const { return device_.type == device_type_t::cpu; }
-        bool on_gpu() const { return device_.type == device_type_t::gpu; }
-        bool on_same_device(const accessor_t& other) const
-        {
-            return (device_ == other.device_) &&
-                   (device_.type == other.device_.type);
-        }
-        const domain_t<Dims>& domain() const { return domain_; }
-        std::size_t size() const { return domain_.size(); }
-        bool is_allocated() const { return static_cast<bool>(data_); }
-
-        // materialization interface for compute fields
-        template <typename ComputeField, typename Executor>
-        void commit(const ComputeField& computation, const Executor& executor)
-        {
-            // ensure we have a valid pool
-            if (!arena_) {
-                arena_ = global_arena<T>();
+            iarray<Dims> result;
+            result[Dims - 1] = 1;
+            for (std::int64_t ii = Dims - 2; ii >= 0; --ii) {
+                result[ii] = result[ii + 1] * shape[ii + 1];
             }
-
-            // ensure we have allocated memory
-            if (!is_allocated()) {
-                // allocate with same domain as computation
-                data_    = arena_->get(computation.domain().size());
-                domain_  = computation.domain();
-                strides_ = compute_strides(domain_.shape());
-            }
-
-            using source_result_t = ComputeField::value_type;
-
-            if constexpr (is_maybe_v<source_result_t>) {
-                // maybe types - use parallel execution with error counting
-                auto error_count =
-                    executor
-                        .reduce(
-                            domain_,
-                            std::size_t{0},
-                            [this, computation] DUAL(coordinate_t<Dims> coord)
-                                -> std::size_t {
-                                auto maybe_result = computation(coord);
-                                if (maybe_result.has_value()) {
-                                    (*this)[coord] = maybe_result.value();
-                                    return 0;   // no error
-                                }
-                                else {
-                                    return 1;   // error occurred
-                                }
-                            },
-                            std::plus{}
-                        )
-                        .wait();
-
-                if (error_count > 0) {
-                    throw exception::SimulationFailureException();
-                }
-            }
-            else {
-                executor
-                    .for_each(
-                        domain_,
-                        [this, computation] DUAL(coordinate_t<Dims> coord) {
-                            (*this)[coord] = computation(coord);
-                        }
-                    )
-                    .wait();
-            }
-        }
-        
-        template <typename ComputeField, typename Executor>
-        void try_commit(const ComputeField& computation, const Executor& executor){
-          
+            return result;
         }
 
-        auto clone() const
-        {
-            auto new_accessor = accessor_t{domain_, device_};
-            copy_data_to(new_accessor);
-            return new_accessor;
-        }
-
-        // factory methods
-        static auto zeros(
-            const iarray<Dims>& shape,
-            device_id_t device = device_id_t::cpu_device()
-        )
-        {
-            auto domain   = make_domain(shape);
-            auto accessor = accessor_t{domain, device};
-            accessor.zero_fill();
-            return accessor;
-        }
-
-        // static auto from_numpy(
-        //     T* numpy_data,
-        //     const iarray<Dims>& shape,
-        //     std::shared_ptr<arena_t<T>> pool = global_arena<T>()
-        // )
-        // {
-        //     auto domain   = make_domain(shape);
-        //     auto accessor = accessor_t{domain, std::move(pool)};
-
-        //     // copy from numpy
-        //     std::copy_n(numpy_data, domain.size(), accessor.data());
-
-        //     // deallocate the numpy array since we own the data now
-        //     numpy_data = nullptr;
-
-        //     return accessor;
-        // }
-        static auto from_numpy(
-            T* numpy_data,
-            const iarray<Dims>& shape,
-            device_id_t device = device_id_t::cpu_device()
-        )
-        {
-            auto domain   = make_domain(shape);
-            auto accessor = accessor_t{domain, device};
-
-            if (device.type == device_type_t::gpu) {
-                gpu::api::set_device(device.device_id);
-                gpu::api::copy_host_to_device(
-                    accessor.data_.get(),
-                    numpy_data,
-                    domain.size() * sizeof(T)
-                );
-            }
-            else {
-                std::copy_n(numpy_data, domain.size(), accessor.data_.get());
-            }
-
-            return accessor;
-        }
-
-      private:
-        DUAL std::size_t compute_offset(coordinate_t<Dims> coord) const
+        std::size_t compute_offset(const iarray<Dims>& coord) const
         {
             return vecops::dot(coord - domain_.start, strides_);
         }
 
-        static iarray<Dims> compute_strides(const iarray<Dims>& shape)
-        {
-            iarray<Dims> strides;
-            strides[Dims - 1] = 1;
-            for (std::int64_t i = Dims - 2; i >= 0; --i) {
-                strides[i] = strides[i + 1] * shape[i + 1];
-            }
-            return strides;
-        }
+      public:
+        accessor_t() = default;
 
-        void zero_fill()
+        accessor_t(
+            const domain_t<Dims>& domain,
+            std::shared_ptr<arena_t<T>> arena = cpu_arena<T>()
+        )
+            : arena_(arena),
+              domain_(domain),
+              strides_(compute_strides(domain.shape()))
         {
-            if (device_.type == device_type_t::gpu) {
-                gpu::api::set_device(device_.device_id);
-                gpu::api::memset(data_.get(), 0, domain_.size() * sizeof(T));
-            }
-            else {
-                std::fill_n(data_.get(), domain_.size(), T{});
+            if (arena_) {
+                data_ = arena_->get(domain.size());
             }
         }
 
-        void copy_data_to(const accessor_t& target) const
+        accessor_t(const domain_t<Dims>& domain, mem::shared_ptr<T> data)
+            : domain_(domain),
+              data_(data),
+              strides_(compute_strides(domain.shape()))
         {
-            if (!on_same_device(target)) {
+        }
+
+        DUAL T& operator()(const iarray<Dims>& coord)
+        {
+            return data_[compute_offset(coord)];
+        }
+
+        DUAL const T& operator()(const iarray<Dims>& coord) const
+        {
+            return data_[compute_offset(coord)];
+        }
+
+        DUAL T* data() { return data_.get(); }
+        DUAL const T* data() const { return data_.get(); }
+
+        const domain_t<Dims>& domain() const { return domain_; }
+        std::size_t size() const { return domain_.size(); }
+        bool is_allocated() const { return data_ != nullptr; }
+        std::shared_ptr<arena_t<T>> arena() const { return arena_; }
+
+        accessor_t<T, Dims>
+        clone(std::shared_ptr<arena_t<T>> target_arena = nullptr) const
+        {
+            if (!target_arena && arena_) {
+                target_arena = arena_;
+            }
+
+            if (!target_arena) {
                 throw std::runtime_error(
-                    "Cross-device copy not implemented yet - use explicit "
-                    "transfers"
+                    "Cannot clone accessor without a target arena"
                 );
             }
 
-            // same device copy
-            if (device_.type == device_type_t::gpu) {
-                gpu::api::set_device(device_.device_id);
-                gpu::api::copy_device_to_device(
-                    target.data_.get(),
-                    data_.get(),
-                    domain_.size() * sizeof(T)
-                );
+            accessor_t<T, Dims> result(domain_, target_arena);
+
+            if (is_allocated() && result.is_allocated()) {
+                std::copy_n(data_.get(), domain_.size(), result.data());
             }
-            else {
-                std::copy_n(data_.get(), domain_.size(), target.data_.get());
-            }
+
+            return result;
         }
+
+        // allow commit to access private members
+        template <typename U, std::uint64_t D, typename CF, typename E>
+        friend void
+        commit(accessor_t<U, D>& accessor, CF computation, E executor);
+        template <typename U, std::uint64_t D, typename CF, typename E>
+        friend void
+        direct_commit(accessor_t<U, D>& accessor, CF computation, E executor);
+        template <typename U, std::uint64_t D, typename CF, typename E>
+        friend void
+        try_commit(accessor_t<U, D>& accessor, CF computation, E executor);
     };
+
+    template <
+        typename T,
+        std::uint64_t Dims,
+        typename ComputeField,
+        typename Executor>
+    void direct_commit(
+        accessor_t<T, Dims>& accessor,
+        ComputeField computation,
+        Executor executor
+    )
+    {
+        if (!accessor.is_allocated() && !accessor.arena_) {
+            throw std::runtime_error(
+                "Cannot commit to accessor without memory"
+            );
+        }
+
+        if (!accessor.is_allocated()) {
+            accessor.domain_ = computation.domain();
+            accessor.strides_ =
+                accessor_t<T, Dims>::compute_strides(accessor.domain_.shape());
+            accessor.data_ = accessor.arena_->get(accessor.domain_.size());
+        }
+
+        executor
+            .for_each(
+                accessor.domain_,
+                [&accessor, &computation] DUAL(const auto& coord) {
+                    accessor(coord) = computation(coord);
+                }
+            )
+            .wait();
+    }
+
+    template <
+        typename T,
+        std::uint64_t Dims,
+        typename ComputeField,
+        typename Executor>
+    void try_commit(
+        accessor_t<T, Dims>& accessor,
+        ComputeField computation,
+        Executor executor
+    )
+    {
+        if (!accessor.is_allocated() && !accessor.arena_) {
+            throw std::runtime_error(
+                "Cannot commit to accessor without memory"
+            );
+        }
+
+        if (!accessor.is_allocated()) {
+            accessor.domain_ = computation.domain();
+            accessor.strides_ =
+                accessor_t<T, Dims>::compute_strides(accessor.domain_.shape());
+            accessor.data_ = accessor.arena_->get(accessor.domain_.size());
+        }
+
+        auto nerrors =
+            executor
+                .reduce(
+                    accessor.domain_,
+                    std::size_t{0},
+                    [&accessor, &computation] DUAL(const auto& coord) {
+                        auto value = computation(coord);
+                        if (value.has_value()) {
+                            accessor(coord) = value.value();
+                            return std::size_t{0};
+                        }
+                        else {
+                            return std::size_t{1};
+                        }
+                    },
+                    std::plus<std::size_t>{}
+                )
+                .wait();
+
+        if (nerrors > 0) {
+            throw std::runtime_error("Computation failed during commit");
+        }
+    }
+
+    template <
+        typename T,
+        std::uint64_t Dims,
+        typename ComputeField,
+        typename Executor>
+    void commit(
+        accessor_t<T, Dims>& accessor,
+        ComputeField computation,
+        Executor executor
+    )
+    {
+        if constexpr (is_maybe_v<typename ComputeField::value_type>) {
+            try_commit(accessor, computation, executor);
+        }
+        else {
+            direct_commit(accessor, computation, executor);
+        }
+    }
+
+    template <typename T, std::uint64_t Dims>
+    accessor_t<T, Dims> from_data(
+        const T* host_data,
+        const iarray<Dims>& shape,
+        std::shared_ptr<arena_t<T>> arena = cpu_arena<T>()
+    )
+    {
+        auto domain = make_domain(shape);
+        accessor_t<T, Dims> result(domain, arena);
+
+        if (result.is_allocated()) {
+            std::copy_n(host_data, domain.size(), result.data());
+        }
+
+        return result;
+    }
 
 }   // namespace simbi::mem
 
-#endif
+#endif   // ACCESSOR_HPP
