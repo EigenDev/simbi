@@ -131,7 +131,7 @@ namespace simbi::adapter {
         {
             // CPU backend reports a single "device"
             // [TODO]: update this for MPI later
-            *count = 1;
+            *count = 0;
         }
 
         void get_device_properties(
@@ -167,6 +167,11 @@ namespace simbi::adapter {
                         std::to_string(device)
                 );
             }
+        }
+
+        void get_device(std::int64_t* device)
+        {
+            *device = 0;   // only one device (CPU)
         }
 
         void device_synchronize()
@@ -259,6 +264,15 @@ namespace simbi::adapter {
         enable_peer_access(std::int64_t /*device*/, std::uint64_t /*flags*/ = 0)
         {
             // No-op for CPU
+        }
+
+        bool can_access_peer(
+            std::int64_t* /*can_access*/,
+            std::int64_t /*device1*/,
+            std::int64_t /*device2*/
+        )
+        {
+            return false;   // no peer access on CPU
         }
 
         void peer_copy_async(

@@ -207,6 +207,15 @@ namespace simbi::adapter {
             );
         }
 
+        void get_device(std::int64_t* device)
+        {
+            cudaError_t status = cudaGetDevice(std::bit_cast<int*>(device));
+            error::check_err(
+                cuda_error::check_cuda_error(status),
+                "CUDA get device failed"
+            );
+        }
+
         void device_synchronize()
         {
             cudaError_t status = cudaDeviceSynchronize();
@@ -350,6 +359,21 @@ namespace simbi::adapter {
                 cuda_error::check_cuda_error(status),
                 "CUDA enable peer access failed"
             );
+        }
+
+        bool can_access_peer(
+            std::int64_t* can_access,
+            std::std::int64_t device1,
+            std::int64_t device2
+        )
+        {
+            cudaError_t status =
+                cudaDeviceCanAccessPeer(&can_access, device1, device2);
+            error::check_err(
+                cuda_error::check_cuda_error(status),
+                "CUDA can access peer check failed"
+            );
+            return can_access != 0;
         }
 
         void peer_copy_async(
@@ -636,6 +660,11 @@ namespace simbi::adapter {
             not_supported("set_device");
         }
 
+        void get_device(std::int64_t* /*device*/)
+        {
+            not_supported("get_device");
+        }
+
         void device_synchronize() { not_supported("device_synchronize"); }
 
         // Stream operations
@@ -715,6 +744,16 @@ namespace simbi::adapter {
         enable_peer_access(std::int64_t /*device*/, std::uint64_t /*flags*/ = 0)
         {
             not_supported("enable_peer_access");
+        }
+
+        bool can_access_peer(
+            std::int64_t* /*can_access*/,
+            std::int64_t /*device1*/,
+            std::int64_t /*device2*/
+        )
+        {
+            not_supported("can_access_peer");
+            return false;   // Unreachable, but needed for compilation
         }
 
         void peer_copy_async(

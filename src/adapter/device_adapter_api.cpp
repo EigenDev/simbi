@@ -101,6 +101,11 @@ namespace simbi {
                 adapter::get_device_backend().set_device(device);
             }
 
+            void get_device(std::int64_t* device)
+            {
+                adapter::get_device_backend().get_device(device);
+            }
+
             void device_synch()
             {
                 adapter::get_device_backend().device_synchronize();
@@ -187,6 +192,16 @@ namespace simbi {
             void enable_peer_access(std::int64_t device, std::uint64_t flags)
             {
                 adapter::get_device_backend().enable_peer_access(device, flags);
+            }
+
+            bool can_access_peer(
+                std::int64_t* can_access,
+                std::int64_t device1,
+                std::int64_t device2
+            )
+            {
+                return adapter::get_device_backend()
+                    .can_access_peer(can_access, device1, device2);
             }
 
             void peer_copy_async(

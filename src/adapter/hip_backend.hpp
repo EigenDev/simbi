@@ -206,6 +206,15 @@ namespace simbi::adapter {
             );
         }
 
+        void get_device(std::int64_t* device)
+        {
+            hipError_t status = hipGetDevice(device);
+            error::check_err(
+                hip_error::check_hip_error(status),
+                "cuda get device failed"
+            );
+        }
+
         void device_synchronize()
         {
             hipError_t status = hipDeviceSynchronize();
@@ -339,6 +348,21 @@ namespace simbi::adapter {
                 hip_error::check_hip_error(status),
                 "cuda enable peer access failed"
             );
+        }
+
+        bool can_access_peer(
+            std::int64_t* can_access,
+            std::int64_t device1,
+            std::int64_t device2
+        )
+        {
+            hipError_t status =
+                hipDeviceCanAccessPeer(&can_access, device1, device2);
+            error::check_err(
+                hip_error::check_hip_error(status),
+                "cuda can access peer check failed"
+            );
+            return can_access != 0;
         }
 
         void peer_copy_async(
@@ -626,6 +650,11 @@ namespace simbi::adapter {
             not_supported("set_device");
         }
 
+        void get_device(std::int64_t* /*device*/)
+        {
+            not_supported("get_device");
+        }
+
         void device_synchronize() { not_supported("device_synchronize"); }
 
         // Stream operations
@@ -705,6 +734,16 @@ namespace simbi::adapter {
         enable_peer_access(std::int64_t /*device*/, std::uint64_t /*flags*/ = 0)
         {
             not_supported("enable_peer_access");
+        }
+
+        bool can_access_peer(
+            std::int64_t* /*can_access*/,
+            std::int64_t /*device1*/,
+            std::int64_t /*device2*/
+        )
+        {
+            not_supported("can_access_peer");
+            return false;   // Unreachable, but needed for compilation
         }
 
         void peer_copy_async(

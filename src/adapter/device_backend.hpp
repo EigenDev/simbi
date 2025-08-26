@@ -134,6 +134,7 @@ namespace simbi::adapter {
         void get_device_count(std::int64_t* count);
         void get_device_properties(void* props, std::int64_t device);
         void set_device(std::int64_t device);
+        void get_device(std::int64_t* device);
         void device_synchronize();
 
         // stream operations
@@ -173,6 +174,11 @@ namespace simbi::adapter {
 
         // peer operations
         void enable_peer_access(std::int64_t device, std::uint64_t flags = 0);
+        bool can_access_peer(
+            std::int64_t* can_access,
+            std::int64_t device1,
+            std::int64_t device2
+        );
         void peer_copy_async(
             void* dst,
             std::int64_t dst_device,
