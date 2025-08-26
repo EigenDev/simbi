@@ -647,8 +647,8 @@ namespace simbi::exec {
             try {
                 // create events for tracking completion on each device
                 std::vector<adapter::event_t<>> events(devices_.size());
-                for (std::size_t i = 0; i < devices_.size(); ++i) {
-                    gpu::api::event_create(&events[i]);
+                for (std::size_t ii = 0; ii < devices_.size(); ++ii) {
+                    gpu::api::event_create(&events[ii]);
                 }
 
                 for (std::size_t ii = 0; ii < devices_.size(); ++ii) {
@@ -714,9 +714,9 @@ namespace simbi::exec {
                     auto domain_size   = subdomain.size();
 
                     // stride loop for large domains
-                    for (auto i = global_idx; i < domain_size;
-                         i += total_threads) {
-                        auto coord = subdomain.linear_to_coord(i);
+                    for (auto ii = global_idx; ii < domain_size;
+                         ii += total_threads) {
+                        auto coord = subdomain.linear_to_coord(ii);
                         f(coord);
                     }
                 };
