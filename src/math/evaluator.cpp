@@ -130,7 +130,7 @@ namespace simbi::expression {
                     if (denominator == 0.0) {
                         printf(
                             "[ExprError] Division by zero in instruction "
-                            "%" PRIu64 "n",
+                            "%" PRIu64 "\n",
                             ii
                         );
                         registers[result_reg] = 0.0;   // handle gracefully
