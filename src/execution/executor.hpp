@@ -9,7 +9,7 @@
 #include "execution/completion.hpp"
 #include "execution/future.hpp"
 #include "functional/fp.hpp"
-#include "memory/device.hpp"
+#include "new/device.hpp"
 #include "thread_pool.hpp"
 #include "tiling.hpp"
 
@@ -586,65 +586,90 @@ namespace simbi::exec {
         }
     };
 
-    // gpu executor with dynamic grid sizing
     class gpu_executor_t : public executor_base_t<gpu_executor_t>
     {
       private:
-        mem::device_id_t device_;
-        adapter::stream_t<> stream_;
+        std::vector<mem::device_t> devices_;
+        std::vector<adapter::stream_t<>> streams_;
 
       public:
-        constexpr explicit gpu_executor_t(
-            mem::device_id_t device = mem::device_id_t::gpu_device(0)
+        constexpr gpu_executor_t(
+            const std::vector<std::int64_t>& device_ids = {}
         )
-            : device_(device)
         {
-            gpu::api::set_device(device.device_id);
-            gpu::api::stream_create(&stream_);
+            if (device_ids.empty()) {
+                std::int64_t device_count = 0;
+                gpu::api::get_device_count(&device_count);
+                for (std::int64_t ii = 0; ii < device_count; ++ii) {
+                    devices_.push_back(mem::device_t::gpu(ii));
+                    adapter::stream_t<> stream;
+                    gpu::api::stream_create(&stream);
+                    streams_.push_back(stream);
+                }
+            }
+            else {
+                for (auto id : device_ids) {
+                    devices_.push_back(mem::device_t::gpu(id));
+                    adapter::stream_t<> stream;
+                    gpu::api::stream_create(&stream);
+                    streams_.push_back(stream);
+                }
+            }
+
+            if (devices_.empty()) {
+                devices_.push_back(mem::device_t::gpu(0));
+                adapter::stream_t<> stream;
+                gpu::api::stream_create(&stream);
+                streams_.push_back(stream);
+            }
         }
 
         ~gpu_executor_t()
         {
-            if (stream_) {
-                gpu::api::stream_destroy(stream_);
+            for (auto& stream : streams_) {
+                gpu::api::stream_destroy(stream);
             }
         }
 
         gpu_executor_t(const gpu_executor_t&)            = delete;
         gpu_executor_t& operator=(const gpu_executor_t&) = delete;
-        gpu_executor_t(gpu_executor_t&& other) noexcept
-            : device_(other.device_), stream_(other.stream_)
-        {
-            other.stream_ = {};
-        }
+        gpu_executor_t(gpu_executor_t&&)                 = default;
+        gpu_executor_t& operator=(gpu_executor_t&&)      = default;
 
-        //  async implementation
-        template <typename Kernel, typename... Args>
-        auto async_impl(Kernel&& kernel, Args&&... args) const -> future_t<void>
+        template <typename Func, typename... Args>
+        auto async_impl(Func&& func, Args&&... args) const -> future_t<void>
         {
             auto state =
                 std::make_shared<typename future_t<void>::future_state_t>();
             state->completion_context =
-                completion_context_t::gpu_stream(stream_);
+                completion_context_t::gpu_stream(streams_[0]);
 
             try {
-                gpu::api::set_device(device_.device_id);
+                // create events for tracking completion on each device
+                std::vector<adapter::event_t<>> events(devices_.size());
+                for (std::size_t i = 0; i < devices_.size(); ++i) {
+                    gpu::api::event_create(&events[i]);
+                }
 
-                // basic grid config - will be enhanced for domain-aware
-                // sizing
-                auto total_threads = 256;
-                auto blocks        = 1;
-                auto threads       = total_threads;
+                for (std::size_t ii = 0; ii < devices_.size(); ++ii) {
+                    set_current_device(devices_[ii]);
 
-                auto launch_config = grid::config(blocks, threads);
-                grid::launch(
-                    std::forward<Kernel>(kernel),
-                    launch_config,
-                    std::forward<Args>(args)...
-                );
+                    std::forward<Func>(func)(
+                        ii,
+                        devices_.size(),
+                        std::forward<Args>(args)...
+                    );
 
-                gpu::api::event_create(&state->event);
-                gpu::api::event_record(state->event, stream_);
+                    gpu::api::event_record(events[ii], streams_[ii]);
+                }
+
+                // create a callback to wait for all devices to complete
+                state->set_ready_callback([events = std::move(events)]() {
+                    for (auto& event : events) {
+                        gpu::api::event_synchronize(event);
+                        gpu::api::event_destroy(event);
+                    }
+                });
             }
             catch (...) {
                 state->exception = std::current_exception();
@@ -652,104 +677,103 @@ namespace simbi::exec {
                 state->ready.store(true);
             }
 
-            return future_t<void>{std::move(state)};
+            return future_t<void>{state};
         }
 
-        // gpu for_each implementation with dynamic grid sizing
         template <std::uint64_t Dims, typename Func>
         auto for_each_impl(const domain_t<Dims>& domain, Func&& func) const
             -> future_t<void>
         {
-            auto state =
-                std::make_shared<typename future_t<void>::future_state_t>();
-            state->stream = stream_;
+            return async_impl([domain, f = std::forward<Func>(func), this](
+                                  std::size_t device_idx,
+                                  std::size_t device_count
+                              ) {
+                std::uint64_t partition_axis = 0;
+                auto shape                   = domain.shape();
+                for (std::uint64_t ii = 1; ii < Dims; ++ii) {
+                    if (shape[ii] > shape[partition_axis]) {
+                        partition_axis = ii;
+                    }
+                }
 
-            try {
-                gpu::api::set_device(device_.device_id);
+                auto subdomain =
+                    domain.partition(device_count, device_idx, partition_axis);
+                if (subdomain.empty()) {
+                    return;
+                }
 
-                auto [blocks, threads] = optimal_grid_size(domain);
+                // calculate grid and block sizes for this partition
+                auto [grid_size, block_size] =
+                    optimal_grid_size(subdomain.size());
 
-                auto kernel = [=] DEV() {
+                // launch kernel to process this partition
+                auto kernel = [subdomain, f] DEV() {
                     auto idx        = adapter::grid::execution_index::current();
                     auto global_idx = idx.global_thread_id();
                     auto total_threads = idx.total_threads();
-                    auto domain_size   = domain.size();
+                    auto domain_size   = subdomain.size();
 
                     // stride loop for large domains
-                    for (auto idx = global_idx; idx < domain_size;
-                         idx += total_threads) {
-                        auto coord = domain.linear_to_coord(idx);
-                        func(coord);
+                    for (auto i = global_idx; i < domain_size;
+                         i += total_threads) {
+                        auto coord = subdomain.linear_to_coord(i);
+                        f(coord);
                     }
                 };
 
-                auto launch_config = grid::config(blocks, threads);
+                auto launch_config = grid::config(grid_size, block_size);
                 grid::launch(kernel, launch_config);
-
-                gpu::api::event_create(&state->event);
-                gpu::api::event_record(state->event, stream_);
-            }
-            catch (...) {
-                state->exception = std::current_exception();
-                state->has_error.store(true);
-                state->ready.store(true);
-            }
-
-            return future_t<void>{std::move(state)};
+            });
         }
 
-        // gpu reduction implementation
         template <
             std::uint64_t Dims,
             typename T,
             typename Mapper,
             typename Reducer>
         auto reduce_impl(
-            const domain_t<Dims>& /*domain*/,
+            const domain_t<Dims>& domain,
             T init,
-            Mapper&& /*mapper*/,
-            Reducer&& /*reducer*/
+            Mapper&& mapper,
+            Reducer&& reducer
         ) const -> future_t<T>
         {
-            // for now, fallback to cpu for reductions - gpu reductions
-            // are complex could implement proper gpu reductions with
-            // shared memory later
-            return async_impl([=]() {
-                // transfer to cpu, reduce, transfer back
-                // this is a placeholder - proper gpu reduction would
-                // use shared memory + atomics
-                T accumulator = init;
-                // sequential fallback for now
-                return accumulator;
-            });
+            // This would need to be expanded to a full GPU reduction algorithm
+            // For now, we'll use a simple implementation that delegates to
+            // async_impl
+
+            return async_impl(
+                [domain,
+                 init,
+                 mapper = std::forward<Mapper>(mapper),
+                 reducer =
+                     std::forward<Reducer>(reducer)](std::size_t, std::size_t) {
+                    // Implementation would partition the domain and perform
+                    // reduction For now, this is a placeholder
+                }
+            );
         }
 
-        mem::device_id_t device() const { return device_; }
-        adapter::stream_t<> stream() const { return stream_; }
-        void synchronize() { gpu::api::stream_synchronize(stream_); }
-
-      private:
-        template <std::uint64_t Dims>
-        auto optimal_grid_size(const domain_t<Dims>& domain) const
+        void synchronize() const
         {
-            auto domain_size = domain.size();
+            for (auto& stream : streams_) {
+                gpu::api::stream_synchronize(stream);
+            }
+        }
 
-            // optimal thread count based on domain size
-            constexpr std::int64_t max_threads_per_block = 1024;
-            constexpr std::int64_t preferred_threads     = 256;
+        // calculate optimal grid size for kernel launch
+        template <typename SizeType>
+        auto optimal_grid_size(SizeType size) const
+        {
+            constexpr std::int64_t threads_per_block = 256;
+            std::int64_t grid_size =
+                (size + threads_per_block - 1) / threads_per_block;
 
-            std::int64_t threads = std::min(
-                static_cast<std::int64_t>(domain_size),
-                std::min(max_threads_per_block, preferred_threads)
-            );
-
-            std::int64_t blocks = (domain_size + threads - 1) / threads;
-
-            // limit blocks to reasonable number for memory bandwidth
+            // limit blocks to a reasonable number
             constexpr std::int64_t max_blocks = 65535;
-            blocks                            = std::min(blocks, max_blocks);
+            grid_size                         = std::min(grid_size, max_blocks);
 
-            return std::pair{blocks, threads};
+            return std::make_pair(grid_size, threads_per_block);
         }
     };
 
@@ -761,16 +785,13 @@ namespace simbi::exec {
 
     inline auto omp_executor() -> omp_executor_t { return omp_executor_t{}; }
 
-    inline auto gpu_executor(int device_id = 0) -> gpu_executor_t
-    {
-        return gpu_executor_t{mem::device_id_t::gpu_device(device_id)};
-    }
+    inline auto gpu_executor() -> gpu_executor_t { return gpu_executor_t{}; }
 
     template <bool OnGPU = global::on_gpu>
-    constexpr auto default_executor(std::size_t device_id = 0)
+    constexpr auto default_executor()
     {
         if constexpr (OnGPU) {
-            return gpu_executor(device_id);
+            return gpu_executor();
         }
         else {
             // if (global::use_omp) {

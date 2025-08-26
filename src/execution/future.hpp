@@ -9,6 +9,7 @@
 #include <condition_variable>
 #include <cstddef>
 #include <exception>
+#include <functional>
 #include <memory>
 #include <mutex>
 #include <utility>
@@ -26,16 +27,24 @@ namespace simbi::exec {
         struct future_state_t {
             std::atomic<bool> ready{false};
             std::atomic<bool> has_error{false};
-
             alignas(T) std::byte result_storage[sizeof(T)];
             std::exception_ptr exception;
-
             adapter::stream_t<> stream{};
             adapter::event_t<> event{};
-
             std::condition_variable cv;
             std::mutex mutex;
             completion_context_t completion_context;
+            std::function<void()> ready_callback;
+
+            void set_ready_callback(std::function<void()> callback)
+            {
+                ready_callback = std::move(callback);
+
+                // if we're ready, exec the callback immediately
+                if (ready.load() && ready_callback) {
+                    ready_callback();
+                }
+            }
 
             T& result() { return *reinterpret_cast<T*>(result_storage); }
 
@@ -113,8 +122,14 @@ namespace simbi::exec {
 
         void wait_impl() const
         {
-            state_->completion_context
-                .wait_fn(state_->ready, state_->mutex, state_->cv);
+            if (state_->ready_callback) {
+                state_->ready_callback();
+                state_->ready.store(true);
+            }
+            else {
+                state_->completion_context
+                    .wait_fn(state_->ready, state_->mutex, state_->cv);
+            }
         }
 
         bool check_completion() const
@@ -145,6 +160,17 @@ namespace simbi::exec {
             std::condition_variable cv;
             std::mutex mutex;
             completion_context_t completion_context;
+            std::function<void()> ready_callback;
+
+            void set_ready_callback(std::function<void()> callback)
+            {
+                ready_callback = std::move(callback);
+
+                // if we're ready, exec the callback immediately
+                if (ready.load() && ready_callback) {
+                    ready_callback();
+                }
+            }
 
             ~future_state_t()
             {
@@ -205,8 +231,14 @@ namespace simbi::exec {
 
         void wait_impl() const
         {
-            state_->completion_context
-                .wait_fn(state_->ready, state_->mutex, state_->cv);
+            if (state_->ready_callback) {
+                state_->ready_callback();
+                state_->ready.store(true);
+            }
+            else {
+                state_->completion_context
+                    .wait_fn(state_->ready, state_->mutex, state_->cv);
+            }
         }
     };
 
