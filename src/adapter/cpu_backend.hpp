@@ -70,14 +70,20 @@ namespace simbi::adapter {
             std::memcpy(to, from, bytes);
         }
 
-        void malloc(void** /*obj*/, std::size_t /*bytes*/)
+        void malloc(void** obj, std::size_t bytes)
         {
-            // no-op on CPU
+            *obj = std::malloc(bytes);
+            if (!*obj && bytes > 0) {
+                throw error::runtime_error(
+                    error::status_t::error,
+                    "CPU malloc failed for size: " + std::to_string(bytes)
+                );
+            }
         }
 
-        void malloc_managed(void**, std::size_t)
+        void malloc_managed(void** obj, std::size_t bytes)
         {
-            // no-op on CPU
+            malloc(obj, bytes);
         }
 
         void free(void* obj) { std::free(obj); }
