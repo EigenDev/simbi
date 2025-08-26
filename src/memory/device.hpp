@@ -23,12 +23,12 @@ namespace simbi::mem {
         device_type_t type;       // cpu or gpu
 
         // convenience constructors
-        static constexpr device_id_t cpu_device(int node = 0)
+        static constexpr device_id_t cpu_device(std::int64_t node = 0)
         {
             return {node, 0, device_type_t::cpu};
         }
 
-        static constexpr device_id_t gpu_device(int device, int node = 0)
+        static constexpr device_id_t gpu_device(std::int64_t device, std::int64_t node = 0)
         {
             return {node, device, device_type_t::gpu};
         }
