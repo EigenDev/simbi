@@ -2,12 +2,18 @@
 #define DOMAIN_HPP
 
 #include "containers/vector.hpp"
+#include "functional/fp.hpp"
 
 #include <cstddef>
 #include <cstdint>
 #include <ostream>
 
 namespace simbi {
+    template <std::uint64_t Dims>
+    struct domain_t;
+
+    template <std::uint64_t Dims>
+    auto subdivide(const domain_t<Dims>& domain, const iarray<Dims>& divisions);
 
     template <std::uint64_t Dims>
     struct domain_t {
@@ -60,6 +66,22 @@ namespace simbi {
                 }
             }
             return true;
+        }
+
+        constexpr domain_t partition(
+            std::uint64_t nparts,
+            std::uint64_t part,
+            std::uint64_t axis = 0
+        ) const
+        {
+            // for single-axis partition, create divisions array
+            auto divisions =
+                fp::range(Dims) |
+                fp::map([=](auto dim) { return (dim == axis) ? nparts : 1; }) |
+                fp::collect<iarray<Dims>>;
+
+            auto [subdomains, count] = subdivide(*this, divisions);
+            return (part < count) ? subdomains[part] : domain_t<Dims>{};
         }
     };
 
