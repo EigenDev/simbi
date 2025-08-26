@@ -179,19 +179,19 @@ namespace simbi::state {
 
       private:
         static auto setup_hydro_state(
-            void* cons_data,
-            void* prim_data,
-            vector_t<void*, 3> bstaggs,
+            const void* cons_data,
+            const void* prim_data,
+            const vector_t<void*, 3> bstaggs,
             const initial_conditions_t& init
         )
         {
             const auto full_shape = init.get_full_shape<dimensions>();
-            auto cons             = from_numpy_field(
+            auto cons             = from_data_field(
                 std::bit_cast<conserved_t*>(cons_data),
                 full_shape
             );
 
-            auto prims = from_numpy_field(
+            auto prims = from_data_field(
                 std::bit_cast<primitive_t*>(prim_data),
                 full_shape
             );
@@ -221,7 +221,7 @@ namespace simbi::state {
                 });
 
                 if constexpr (is_mhd) {
-                    bstaggs_vec[dir] = from_numpy_field(
+                    bstaggs_vec[dir] = from_data_field(
                         std::bit_cast<real*>(bstaggs[dir]),
                         staggered_shape
                     );
@@ -235,6 +235,7 @@ namespace simbi::state {
                 std::move(bstaggs_vec)
             );
         }
+
         /**
          * set up metadata from init conditions
          */
