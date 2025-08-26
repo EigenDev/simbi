@@ -22,6 +22,14 @@ namespace simbi {
 
     template <std::uint64_t Dims>
     struct domain_t;
+
+    // allow std::vector to be piped through custom FP toolkit
+    // funcs
+    template <typename T, typename Op>
+    constexpr auto operator|(const std::vector<T>& vec, Op&& op)
+    {
+        return std::forward<Op>(op)(vec);
+    }
 }   // namespace simbi
 
 namespace simbi::fp {
