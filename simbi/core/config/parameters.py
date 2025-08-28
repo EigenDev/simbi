@@ -4,19 +4,20 @@ CLI parameter handling for simbi configurations.
 This module provides the base model for CLI-configurable Pydantic models.
 """
 
-from pydantic import BaseModel, ConfigDict, ValidationError
-from typing import (
-    ClassVar,
-    Optional,
-    get_origin,
-    get_args,
-    Union,
-    Any,
-    cast,
-    TypedDict,
-)
 import argparse
 from pathlib import Path
+from typing import (
+    Any,
+    ClassVar,
+    Optional,
+    TypedDict,
+    Union,
+    cast,
+    get_args,
+    get_origin,
+)
+
+from pydantic import BaseModel, ConfigDict, ValidationError
 from typing_extensions import TypeAlias
 
 
@@ -86,7 +87,9 @@ class CLIConfigurableModel(BaseModel):
 
                 # Get CLI info if available
                 cli_info: Optional[CLIInfo] = None
-                extra = cast(Optional[dict[str, Any]], field_info.json_schema_extra)
+                extra = cast(
+                    Optional[dict[str, Any]], field_info.json_schema_extra
+                )
 
                 if extra and "cli_info" in extra:
                     cli_info = cast(CLIInfo, extra["cli_info"])
@@ -106,7 +109,10 @@ class CLIConfigurableModel(BaseModel):
                         kwargs["choices"] = cli_info["choices"]
 
                     # Set default if available
-                    if field_info.default is not None and field_info.default is not ...:
+                    if (
+                        field_info.default is not None
+                        and field_info.default is not ...
+                    ):
                         kwargs["default"] = field_info.default
 
                     # Handle different types
@@ -136,11 +142,8 @@ class CLIConfigurableModel(BaseModel):
             field_info: Field information from Pydantic model
         """
         # Handle boolean fields
-        if isinstance(field_info.annotation, bool):
-            default = field_info.default
-            if default is None or default is ...:
-                default = False
-            kwargs["action"] = "store_true" if not default else "store_false"
+        if field_info.annotation is bool:
+            kwargs["action"] = argparse.BooleanOptionalAction
             return
 
         # Handle simple types directly
@@ -151,11 +154,15 @@ class CLIConfigurableModel(BaseModel):
 
         if get_origin(field_info.annotation) in (tuple, list):
             # Custom converter for tuple/list types
-            element_type = get_args(field_info.annotation)[0]  # Get the element type
+            element_type = get_args(field_info.annotation)[
+                0
+            ]  # Get the element type
             kwargs["type"] = lambda x: tuple(
                 element_type(item) for item in x.split(",")
             )
-            kwargs["help"] = f"{kwargs.get('help', '')} (comma-separated values)"
+            kwargs["help"] = (
+                f"{kwargs.get('help', '')} (comma-separated values)"
+            )
             return
 
         # Handle Optional[T] - extract the inner type
@@ -181,7 +188,9 @@ class CLIConfigurableModel(BaseModel):
         cls.register_cli_parameters(subparser)
 
     @classmethod
-    def from_cli(cls, main_parser: argparse.ArgumentParser) -> "CLIConfigurableModel":
+    def from_cli(
+        cls, main_parser: argparse.ArgumentParser
+    ) -> "CLIConfigurableModel":
         """Create configuration from command line arguments.
 
         Args:
@@ -195,7 +204,9 @@ class CLIConfigurableModel(BaseModel):
         return cls.from_namespace(namespace)
 
     @classmethod
-    def from_namespace(cls, namespace: argparse.Namespace) -> "CLIConfigurableModel":
+    def from_namespace(
+        cls, namespace: argparse.Namespace
+    ) -> "CLIConfigurableModel":
         """Create instance from parsed namespace.
 
         Args:
@@ -222,4 +233,6 @@ class CLIConfigurableModel(BaseModel):
                 error_msgs.append(f"Error in {field}: {err['msg']}")
 
             error_summary = "\n".join(error_msgs)
-            raise ValueError(f"Invalid configuration values:\n{error_summary}") from e
+            raise ValueError(
+                f"Invalid configuration values:\n{error_summary}"
+            ) from e

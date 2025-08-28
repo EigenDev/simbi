@@ -5,42 +5,43 @@ This module provides the foundational configuration model that defines
 the structure and validation rules for simulation configurations.
 """
 
-from pydantic import computed_field, model_validator, PrivateAttr
-from typing import (
-    Any,
-    ClassVar,
-    Optional,
-    Union,
-    Sequence,
-    Callable,
-    get_args,
-    get_origin,
-    final,
-)
 import argparse
 import math
 from pathlib import Path
+from typing import (
+    Any,
+    Callable,
+    ClassVar,
+    Optional,
+    Sequence,
+    Union,
+    final,
+    get_args,
+    get_origin,
+)
+
 import numpy as np
 from numpy.typing import NDArray
+from pydantic import PrivateAttr, computed_field, model_validator
 
 from simbi.core.io.ib_load import load_immersed_bodies_or_body_system
 
-from ..types.typing import InitialStateType, ExpressionDict
-from ..types.input import (
-    CoordSystem,
-    Regime,
-    Reconstruction,
-    TimeStepping,
-    CellSpacing,
-    Solver,
-    BoundaryCondition,
-)
 from ..types.bodies import (
     BodySystemConfig,
     ImmersedBodyConfig,
 )
-from .parameters import CLIConfigurableModel
+from ..types.input import (
+    BoundaryCondition,
+    CellSpacing,
+    CoordSystem,
+    Reconstruction,
+    Regime,
+    Solver,
+    TimeStepping,
+)
+from ..types.typing import ExpressionDict, InitialStateType
 from .fields import SimbiField
+from .parameters import CLIConfigurableModel
 
 
 class SimbiBaseConfig(CLIConfigurableModel):
@@ -52,8 +53,12 @@ class SimbiBaseConfig(CLIConfigurableModel):
     """
 
     _from_checkpoint_called: ClassVar[bool] = False
-    _body_system: BodySystemConfig = PrivateAttr(default_factory=BodySystemConfig)
-    _immersed_bodies: list[ImmersedBodyConfig] = PrivateAttr(default_factory=list)
+    _body_system: BodySystemConfig = PrivateAttr(
+        default_factory=BodySystemConfig
+    )
+    _immersed_bodies: list[ImmersedBodyConfig] = PrivateAttr(
+        default_factory=list
+    )
 
     # Track CLI parser for global access
     cli_parser: ClassVar[Optional[argparse.ArgumentParser]] = None
@@ -67,7 +72,9 @@ class SimbiBaseConfig(CLIConfigurableModel):
 
     regime: Regime = SimbiField(..., description="Physics regime")
 
-    bounds: Sequence[Sequence[float]] = SimbiField(..., description="Domain boundaries")
+    bounds: Sequence[Sequence[float]] = SimbiField(
+        ..., description="Domain boundaries"
+    )
 
     adiabatic_index: float = SimbiField(..., description="Adiabatic index")
 
@@ -106,13 +113,17 @@ class SimbiBaseConfig(CLIConfigurableModel):
         CellSpacing.LINEAR, description="Spacing in x3 direction"
     )
 
-    use_quirk_smoothing: bool = SimbiField(False, description="Use Quirk smoothing")
+    use_quirk_smoothing: bool = SimbiField(
+        False, description="Use Quirk smoothing"
+    )
     use_fleischmann_limiter: bool = SimbiField(
         False,
         description="Use the Fleischmann et al. 2020 mechanism for low-Mach fixes tot eh HLLC solver",
     )
 
-    checkpoint_interval: float = SimbiField(0.1, description="Checkpoint interval")
+    checkpoint_interval: float = SimbiField(
+        0.1, description="Checkpoint interval"
+    )
     checkpoint_index: int = SimbiField(
         0, description="Checkpoint index for resuming simulations"
     )
@@ -121,9 +132,9 @@ class SimbiBaseConfig(CLIConfigurableModel):
         None, description="Checkpoint file to resume from"
     )
 
-    boundary_conditions: Union[BoundaryCondition, Sequence[BoundaryCondition]] = (
-        SimbiField("outflow", description="Boundary conditions")
-    )
+    boundary_conditions: Union[
+        BoundaryCondition, Sequence[BoundaryCondition]
+    ] = SimbiField("outflow", description="Boundary conditions")
 
     plm_theta: float = SimbiField(1.5, description="PLM theta parameter")
 
@@ -139,7 +150,8 @@ class SimbiBaseConfig(CLIConfigurableModel):
     log_output: bool = SimbiField(False, description="Enable logging to file")
 
     log_checkpoints_tuple: tuple[bool, int] = SimbiField(
-        (False, 0), description="Logarithmic output settings (enabled, num_outputs)"
+        (False, 0),
+        description="Logarithmic output settings (enabled, num_outputs)",
     )
 
     log_parameter_setup: bool = SimbiField(
@@ -255,17 +267,24 @@ class SimbiBaseConfig(CLIConfigurableModel):
     def set_body_system(self, body_system: BodySystemConfig) -> None:
         """Set the body system configuration from checkpoint data."""
         if not isinstance(body_system, BodySystemConfig):
-            raise TypeError("body_system must be an instance of BodySystemConfig")
+            raise TypeError(
+                "body_system must be an instance of BodySystemConfig"
+            )
         self._body_system = body_system
 
     def set_immersed_bodies(
-        self, immersed_bodies: Union[ImmersedBodyConfig, Sequence[ImmersedBodyConfig]]
+        self,
+        immersed_bodies: Union[
+            ImmersedBodyConfig, Sequence[ImmersedBodyConfig]
+        ],
     ) -> None:
         """Set the immersed bodies configuration from checkpoint data."""
         if isinstance(immersed_bodies, ImmersedBodyConfig):
             self._immersed_bodies = [immersed_bodies]
         elif isinstance(immersed_bodies, list):
-            if not all(isinstance(b, ImmersedBodyConfig) for b in immersed_bodies):
+            if not all(
+                isinstance(b, ImmersedBodyConfig) for b in immersed_bodies
+            ):
                 raise TypeError(
                     "All immersed bodies must be instances of ImmersedBodyConfig"
                 )
@@ -304,7 +323,9 @@ class SimbiBaseConfig(CLIConfigurableModel):
         """Get number of variables based on regime and dimensionality"""
         if self.is_mhd:
             return 9  # MHD has 9 primary variables
-        return self.dimensionality + 3  # Hydro has density, momentum components, energy
+        return (
+            self.dimensionality + 3
+        )  # Hydro has density, momentum components, energy
 
     @computed_field
     @property
@@ -495,7 +516,9 @@ class SimbiBaseConfig(CLIConfigurableModel):
         Raises:
             NotImplementedError: This method must be implemented by subclasses.
         """
-        raise NotImplementedError("Subclasses must implement initial_primitive_state")
+        raise NotImplementedError(
+            "Subclasses must implement initial_primitive_state"
+        )
 
     @model_validator(mode="before")
     @classmethod
