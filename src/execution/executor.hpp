@@ -21,13 +21,11 @@
 #include <exception>
 #include <memory>
 #include <mutex>
-#include <thread>
 #include <type_traits>
 #include <utility>
 #include <vector>
 
 namespace simbi::exec {
-    // executor base
     template <typename Derived>
     class executor_base_t
     {
@@ -39,7 +37,6 @@ namespace simbi::exec {
         }
 
       public:
-        // async interface
         template <typename Func, typename... Args>
         auto async(Func&& func, Args&&... args) const
             -> future_t<decltype(func(args...))>
@@ -57,83 +54,50 @@ namespace simbi::exec {
                 .wait();
         }
 
-        // domain-aware parallel iteration
         template <std::uint64_t Dims, typename Func>
-        auto for_each(const domain_t<Dims>& domain, Func&& func) const
-            -> future_t<void>
-        {
-            return derived().for_each_impl(domain, std::forward<Func>(func));
-        }
-
-        // generic reduction operation
-        template <
-            std::uint64_t Dims,
-            typename T,
-            typename Mapper,
-            typename Reducer>
-        auto reduce(
-            const domain_t<Dims>& domain,
-            T init,
-            Mapper&& mapper,
-            Reducer&& reducer
-        ) const -> future_t<T>
-        {
-            return derived().reduce_impl(
-                domain,
-                init,
-                std::forward<Mapper>(mapper),
-                std::forward<Reducer>(reducer)
-            );
-        }
-
-        // tiled domain-aware parallel iteration
-        template <std::uint64_t Dims, typename T, typename Func>
-        auto for_each_tiled(
+        auto for_each(
             const domain_t<Dims>& domain,
             Func&& func,
             const iarray<Dims>& tile_size = {-1}
         ) const -> future_t<void>
         {
-            return derived().for_each_tiled_impl(
+            return derived().for_each_impl(
                 domain,
                 std::forward<Func>(func),
-                tile_size[0] == -1 ? tiling::optimal_tile_size<Dims, T>()
+                tile_size[0] == -1 ? tiling::default_tile_size<Dims>()
                                    : tile_size
             );
         }
 
         template <
             std::uint64_t Dims,
-            typename T,   // type of the elements being processed
             typename U,
             typename Mapper,
             typename Reducer>
-        auto reduce_tiled(
+        auto reduce(
             const domain_t<Dims>& domain,
             U init,
             Mapper&& mapper,
             Reducer&& reducer,
             const iarray<Dims>& tile_size = {-1}
-        ) const -> future_t<T>
+        ) const -> future_t<U>
         {
-            return derived().reduce_tiled_impl(
+            return derived().reduce_impl(
                 domain,
                 init,
                 std::forward<Mapper>(mapper),
                 std::forward<Reducer>(reducer),
-                tile_size[0] == -1 ? tiling::optimal_tile_size<Dims, T>()
+                tile_size[0] == -1 ? tiling::default_tile_size<Dims>()
                                    : tile_size
             );
         }
     };
 
-    // cpu executor
     class cpu_executor_t : public executor_base_t<cpu_executor_t>
     {
       public:
         cpu_executor_t() = default;
 
-        //  async implementation
         template <typename Func, typename... Args>
         auto async_impl(Func&& func, Args&&... args) const
             -> future_t<decltype(func(args...))>
@@ -164,15 +128,24 @@ namespace simbi::exec {
             return future_t<result_t>{std::move(state)};
         }
 
-        // domain-aware for_each implementation
         template <std::uint64_t Dims, typename Func>
-        auto for_each_impl(const domain_t<Dims>& domain, Func&& func) const
-            -> future_t<void>
+        auto for_each_impl(
+            const domain_t<Dims>& domain,
+            Func&& func,
+            const iarray<Dims>& tile_size
+        ) const -> future_t<void>
         {
-            return async_impl([=, this]() { iterate_domain(domain, func); });
+            return async_impl([=, this]() {
+                tiling::for_each_tile(
+                    domain,
+                    [&](const auto& tile) {
+                        iterate_domain(tile.domain, func);
+                    },
+                    tile_size
+                );
+            });
         }
 
-        // reduction implementation
         template <
             std::uint64_t Dims,
             typename T,
@@ -182,57 +155,22 @@ namespace simbi::exec {
             const domain_t<Dims>& domain,
             T init,
             Mapper&& mapper,
-            Reducer&& reducer
-        ) const -> future_t<T>
-        {
-            return async_impl([=, this]() {
-                T accumulator = init;
-                iterate_domain(domain, [&](auto coord) {
-                    accumulator = reducer(accumulator, mapper(coord));
-                });
-                return accumulator;
-            });
-        }
-
-        template <std::uint64_t Dims, typename Func>
-        auto for_each_tiled_impl(
-            const domain_t<Dims>& domain,
-            Func&& func,
-            const iarray<Dims>& tile_size
-        ) const -> future_t<void>
-        {
-            return async_impl([=, this]() {
-                tiling::tile_range(domain, tile_size) |
-                    fp::for_each([&](const auto& tile) {
-                        iterate_domain(tile.domain, func);
-                    });
-            });
-        }
-
-        template <
-            std::uint64_t Dims,
-            typename T,
-            typename Mapper,
-            typename Reducer>
-        auto reduce_tiled_impl(
-            const domain_t<Dims>& domain,
-            T init,
-            Mapper&& mapper,
             Reducer&& reducer,
             const iarray<Dims>& tile_size
         ) const -> future_t<T>
         {
             return async_impl([=, this]() {
-                return tiling::tile_range(domain, tile_size) |
-                       fp::map([&](const auto& tile) {
-                           T tile_result = init;
-                           iterate_domain(tile.domain, [&](auto coord) {
-                               tile_result =
-                                   reducer(tile_result, mapper(coord));
-                           });
-                           return tile_result;
-                       }) |
-                       fp::reduce(reducer);
+                T accumulator = init;
+                tiling::for_each_tile(
+                    domain,
+                    [&](const auto& tile) {
+                        iterate_domain(tile.domain, [&](auto coord) {
+                            accumulator = reducer(accumulator, mapper(coord));
+                        });
+                    },
+                    tile_size
+                );
+                return accumulator;
             });
         }
 
@@ -265,7 +203,6 @@ namespace simbi::exec {
         }
     };
 
-    // parallel cpu executor
     class par_cpu_executor_t : public executor_base_t<par_cpu_executor_t>
     {
       private:
@@ -279,7 +216,6 @@ namespace simbi::exec {
         {
         }
 
-        //  async implementation
         template <typename Func, typename... Args>
         auto async_impl(Func&& func, Args&&... args) const
             -> future_t<decltype(func(args...))>
@@ -322,77 +258,15 @@ namespace simbi::exec {
             return future_t<result_t>{std::move(state)};
         }
 
-        // parallel for_each implementation
         template <std::uint64_t Dims, typename Func>
-        auto for_each_impl(const domain_t<Dims>& domain, Func&& func) const
-            -> future_t<void>
-        {
-            return async_impl([=, this]() { iterate_domain(domain, func); });
-        }
-
-        // parallel reduction implementation
-        template <
-            std::uint64_t Dims,
-            typename T,
-            typename Mapper,
-            typename Reducer>
-        auto reduce_impl(
-            const domain_t<Dims>& domain,
-            T init,
-            Mapper&& mapper,
-            Reducer&& reducer
-        ) const -> future_t<T>
-        {
-            return async_impl([=, this]() {
-                auto total_size = domain.size();
-                auto chunk_size = (total_size + nthreads_ - 1) / nthreads_;
-
-                std::vector<T> partial_results(nthreads_, init);
-                std::vector<std::thread> threads;
-
-                for (std::size_t t = 0; t < nthreads_; ++t) {
-                    auto start_idx = t * chunk_size;
-                    auto end_idx = std::min(start_idx + chunk_size, total_size);
-
-                    if (start_idx >= end_idx) {
-                        break;
-                    }
-
-                    threads.emplace_back([=, &partial_results, &domain]() {
-                        T local_accumulator = init;
-                        for (auto idx = start_idx; idx < end_idx; ++idx) {
-                            auto coord = domain.linear_to_coord(idx);
-                            local_accumulator =
-                                reducer(local_accumulator, mapper(coord));
-                        }
-                        partial_results[t] = local_accumulator;
-                    });
-                }
-
-                for (auto& thread : threads) {
-                    thread.join();
-                }
-
-                // combine partial results
-                T final_result = init;
-                for (const auto& partial : partial_results) {
-                    final_result = reducer(final_result, partial);
-                }
-
-                return final_result;
-            });
-        }
-
-        template <std::uint64_t Dims, typename Func>
-        auto for_each_tiled_impl(
+        auto for_each_impl(
             const domain_t<Dims>& domain,
             Func&& func,
             const iarray<Dims>& tile_size
         ) const -> future_t<void>
         {
             return async_impl([=, this]() {
-                auto tiles =
-                    tiling::tile_range(domain, tile_size) | fp::collect<>;
+                const auto tiles = tiling::make_tiles(domain, tile_size);
 
                 std::vector<future_t<void>> tile_futures;
                 tile_futures.reserve(tiles.size());
@@ -414,7 +288,7 @@ namespace simbi::exec {
             typename T,
             typename Mapper,
             typename Reducer>
-        auto reduce_tiled_impl(
+        auto reduce_impl(
             const domain_t<Dims>& domain,
             T init,
             Mapper&& mapper,
@@ -423,13 +297,11 @@ namespace simbi::exec {
         ) const -> future_t<T>
         {
             return async_impl([=, this]() {
-                auto tiles =
-                    tiling::tile_range(domain, tile_size) | fp::collect<>;
+                const auto tiles = tiling::make_tiles(domain, tile_size);
 
                 std::vector<future_t<T>> tile_futures;
                 tile_futures.reserve(tiles.size());
 
-                // process each tile in parallel
                 for (const auto& tile : tiles) {
                     tile_futures.push_back(async_impl([=, this]() {
                         T tile_result = init;
@@ -440,12 +312,10 @@ namespace simbi::exec {
                     }));
                 }
 
-                // collect and reduce tile results
                 T final_result = init;
                 for (auto& future : tile_futures) {
                     final_result = reducer(final_result, future.wait());
                 }
-
                 return final_result;
             });
         }
@@ -454,40 +324,36 @@ namespace simbi::exec {
         template <std::uint64_t Dims, typename Func>
         void iterate_domain(const domain_t<Dims>& domain, Func func) const
         {
-            auto total_size = domain.size();
-            auto chunk_size = (total_size + nthreads_ - 1) / nthreads_;
-
-            std::vector<future_t<void>> futures;
-
-            for (std::size_t tt = 0; tt < nthreads_; ++tt) {
-                auto start_idx = tt * chunk_size;
-                auto end_idx   = std::min(start_idx + chunk_size, total_size);
-
-                if (start_idx >= end_idx) {
-                    break;
+            if constexpr (Dims == 1) {
+                for (auto ii = domain.start[0]; ii < domain.end[0]; ++ii) {
+                    func(iarray<1>{ii});
                 }
-
-                futures.push_back(async_impl([=]() {
-                    for (auto idx = start_idx; idx < end_idx; ++idx) {
-                        auto coord = domain.linear_to_coord(idx);
-                        func(coord);
-                    }
-                }));
             }
-
-            for (auto& future : futures) {
-                future.wait();
+            else if constexpr (Dims == 2) {
+                for (auto ii = domain.start[0]; ii < domain.end[0]; ++ii) {
+                    for (auto jj = domain.start[1]; jj < domain.end[1]; ++jj) {
+                        func(iarray<2>{ii, jj});
+                    }
+                }
+            }
+            else if constexpr (Dims == 3) {
+                for (auto ii = domain.start[0]; ii < domain.end[0]; ++ii) {
+                    for (auto jj = domain.start[1]; jj < domain.end[1]; ++jj) {
+                        for (auto kk = domain.start[2]; kk < domain.end[2];
+                             ++kk) {
+                            func(iarray<3>{ii, jj, kk});
+                        }
+                    }
+                }
             }
         }
     };
 
-    // OpenMP executor
     class omp_executor_t : public executor_base_t<omp_executor_t>
     {
       public:
         omp_executor_t() = default;
 
-        //  async implementation
         template <typename Func, typename... Args>
         auto async_impl(Func&& func, Args&&... args) const
             -> future_t<decltype(func(args...))>
@@ -524,7 +390,6 @@ namespace simbi::exec {
             return future_t<result_t>{std::move(state)};
         }
 
-        // domain-aware for_each implementation
         template <std::uint64_t Dims, typename Func>
         auto for_each_impl(const domain_t<Dims>& domain, Func&& func) const
             -> future_t<void>
@@ -532,7 +397,6 @@ namespace simbi::exec {
             return async_impl([=, this]() { iterate_domain(domain, func); });
         }
 
-        // reduction implementation
         template <
             std::uint64_t Dims,
             typename T,
@@ -702,18 +566,16 @@ namespace simbi::exec {
                     return;
                 }
 
-                // calculate grid and block sizes for this partition
                 auto [grid_size, block_size] =
                     optimal_grid_size(subdomain.size());
 
-                // launch kernel to process this partition
                 auto kernel = [subdomain, f] DEV() {
                     auto idx        = adapter::grid::execution_index::current();
                     auto global_idx = idx.global_thread_id();
                     auto total_threads = idx.total_threads();
                     auto domain_size   = subdomain.size();
 
-                    // stride loop for large domains
+                    // grid-stride loop for large domains
                     for (auto ii = global_idx; ii < domain_size;
                          ii += total_threads) {
                         auto coord = subdomain.linear_to_coord(ii);
@@ -738,9 +600,10 @@ namespace simbi::exec {
             Reducer&& reducer
         ) const -> future_t<T>
         {
-            // This would need to be expanded to a full GPU reduction algorithm
-            // For now, we'll use a simple implementation that delegates to
-            // async_impl
+            // [TODO]: GPU reduction is non-trivial and requires careful
+            // handling of intermediate results and synchronization. This would
+            // need to be expanded to a full GPU reduction algorithm For now,
+            // we'll use a simple implementation that delegates to async_impl
 
             return async_impl(
                 [domain,
@@ -748,8 +611,8 @@ namespace simbi::exec {
                  mapper = std::forward<Mapper>(mapper),
                  reducer =
                      std::forward<Reducer>(reducer)](std::size_t, std::size_t) {
-                    // Implementation would partition the domain and perform
-                    // reduction For now, this is a placeholder
+                    // [TODO]: implementation would partition the domain and
+                    // perform reduction. For now, this is a placeholder
                 }
             );
         }
@@ -769,7 +632,9 @@ namespace simbi::exec {
             std::int64_t grid_size =
                 (size + threads_per_block - 1) / threads_per_block;
 
-            // limit blocks to a reasonable number
+            // number is from maximum number of blocks
+            // in y and z dimensions on GPUs. Why is that?
+            // No idea....
             constexpr std::int64_t max_blocks = 65535;
             grid_size                         = std::min(grid_size, max_blocks);
 
@@ -777,27 +642,18 @@ namespace simbi::exec {
         }
     };
 
-    // factory functions
-    inline auto par_cpu_executor() -> par_cpu_executor_t
-    {
-        return par_cpu_executor_t{};
-    }
-
-    inline auto omp_executor() -> omp_executor_t { return omp_executor_t{}; }
-
-    inline auto gpu_executor() -> gpu_executor_t { return gpu_executor_t{}; }
-
     template <bool OnGPU = global::on_gpu>
     constexpr auto default_executor()
     {
         if constexpr (OnGPU) {
-            return gpu_executor();
+            return gpu_executor_t{};
         }
         else {
             // if (global::use_omp) {
             //     return omp_executor();
             // }
-            return par_cpu_executor();
+            return par_cpu_executor_t{};
+            // return cpu_executor_t{};
         }
     }
 
