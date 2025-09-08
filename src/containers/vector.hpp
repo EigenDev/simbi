@@ -83,7 +83,8 @@ namespace simbi {
         DUAL constexpr auto cross(const Vec1& a, const Vec2& b)
             requires(Vec1::dimensions == 2 && Vec2::dimensions == 2)
         {
-            return a[0] * b[1] - a[1] * b[0];
+            using T = decltype(a[0] * b[0]);
+            return vector_t<T, 3>{T{0.0}, T{0.0}, a[0] * b[1] - b[0] * a[1]};
         }
 
         // cross product component
