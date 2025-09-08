@@ -1,6 +1,7 @@
-from ..core.types import ProcessedData, Array, Metadata, MeshConfig, Body
+from typing import Any
+
+from ..core.types import Array, Body, MeshConfig, Metadata, ProcessedData
 from .computation import create_computation_pipeline
-from typing import Iterable, Any
 
 
 class FieldAccessor:
@@ -9,6 +10,13 @@ class FieldAccessor:
 
     def __getitem__(self, key: str) -> Array:
         return self._sim_data[key]
+
+    def __contains__(self, key: str) -> bool:
+        try:
+            self._sim_data[key]
+            return True
+        except KeyError:
+            return False
 
 
 class SimData:
@@ -29,6 +37,10 @@ class SimData:
     @property
     def bodies(self) -> dict[str, Body] | None:
         return self._data.bodies
+
+    @property
+    def fields(self) -> FieldAccessor:
+        return FieldAccessor(self)
 
     def __getitem__(self, key: str) -> Array:
         if key in self._computing:
@@ -62,7 +74,7 @@ class SimData:
         return (FieldAccessor(self), self.metadata, self.mesh, self.bodies)
 
 
-class FieldDict(dict[str, Any]):
+class FieldDict(dict[str, Array]):
     """Dict-like wrapper that routes field access through SimData"""
 
     def __init__(self, lazy_fields: SimData):

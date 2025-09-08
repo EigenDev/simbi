@@ -1,8 +1,10 @@
+from typing import Optional
+
+from simbi.tools.visualization.styling.theme import ThemeConfig
+
+from .themes.dark import dark_theme
 from .themes.default import default_theme
 from .themes.scientific import scientific_theme
-from .themes.dark import dark_theme
-from .formatters import AxisFormatter, ColorbarFormatter
-from typing import Optional
 
 
 class ThemeManager:
@@ -17,7 +19,7 @@ class ThemeManager:
     _current_theme = "default"
 
     @classmethod
-    def get_theme(cls, theme_name=None):
+    def get_theme(cls, theme_name=None) -> ThemeConfig:
         """Get a theme by name or the current theme"""
         if theme_name is None:
             theme_name = cls._current_theme
@@ -51,20 +53,3 @@ class ThemeManager:
     def apply_current_theme(cls):
         """Apply the current theme"""
         cls._themes[cls._current_theme].apply()
-
-    @classmethod
-    def style_axis(cls, ax, theme_name=None):
-        """Style an axis with the specified or current theme"""
-        theme = cls.get_theme(theme_name)
-        theme.style_axis(ax)
-
-    @classmethod
-    def style_polar_axis(cls, ax, theme_name=None):
-        """Style a polar axis with the specified or current theme"""
-        theme = cls.get_theme(theme_name)
-        theme.style_polar_axis(ax)
-
-
-# Formatters
-axis_formatter = AxisFormatter()
-colorbar_formatter = ColorbarFormatter()

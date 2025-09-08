@@ -1,8 +1,10 @@
-from dataclasses import dataclass, asdict
-from numpy.typing import NDArray
+from dataclasses import asdict, dataclass
 from typing import Literal
-from ..core.types.bodies import BodyCapability
+
 import numpy as np
+from numpy.typing import NDArray
+
+from ..core.types.bodies import BodyCapability
 
 Array = NDArray[np.floating]
 
@@ -30,7 +32,7 @@ class GravitationalBody(BaseBody):
 
 @dataclass(frozen=True)
 class AccretionBody(BaseBody):
-    accretion_efficiency: float
+    sink_rate: float
     accretion_radius: float
     total_accreted_mass: float
     accretion_rate: float
@@ -59,7 +61,9 @@ class ElasticBody(BaseBody):
 
 
 # Union type for all body types
-Body = GravitationalBody | AccretionBody | RigidBody | DeformableBody | ElasticBody
+Body = (
+    GravitationalBody | AccretionBody | RigidBody | DeformableBody | ElasticBody
+)
 
 
 @dataclass(frozen=True)

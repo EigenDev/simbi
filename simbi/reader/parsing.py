@@ -1,26 +1,34 @@
 from dataclasses import asdict
 from typing import Any
 
+import numpy as np
+from numpy.typing import NDArray
+
 from simbi.core.types.bodies import BodyCapability
+
 from ..core.types import (
-    RawHDF5,
-    ProcessedData,
-    Metadata,
-    MeshConfig,
-    BodyDiagnostics,
-    Body,
-    GravitationalBody,
-    AccretionBody,
-    RigidBody,
-    DeformableBody,
-    ElasticBody,
+    AccretionProperties,
     BaseBody,
+    Body,
+    BodyDiagnostics,
+    DeformableProperties,
+    ElasticProperties,
+    GravitationalProperties,
+    MeshConfig,
+    Metadata,
+    ProcessedData,
+    RawHDF5,
+    RigidProperties,
 )
 from ..functional.result import Result
-from numpy.typing import NDArray
-import numpy as np
 
 Array = NDArray[np.floating]
+
+
+def has_capability(
+    body_capability: BodyCapability, capability: BodyCapability
+) -> bool:
+    return bool(body_capability & capability)
 
 
 def unpad_field(
@@ -85,69 +93,98 @@ def preprocess_fields(
 
 
 def parse_bodies(
-    bodies_group: dict[str, Any] | None, body_diagnostics: BodyDiagnostics | None = None
+    bodies_group: dict[str, Any] | None,
+    body_diagnostics: BodyDiagnostics | None = None,
 ) -> dict[str, Body] | None:
     """Parse body collection from HDF5 group data"""
-    if not bodies_group:
+    if not bodies_group or not body_diagnostics:
         return None
 
-    if not body_diagnostics:
-        return None
-
-    parsed_bodies: dict[str, Any] = {}
-
-    # Get body count from attributes
+    parsed_bodies: dict[str, Body] = {}
     body_count = bodies_group.get("body_count", 0)
 
     for i in range(body_count):
         body_key = f"body_{i}"
-        if body_key in bodies_group:
-            body_data = bodies_group[body_key]
+        if body_key not in bodies_group:
+            continue
 
-            bod = BaseBody(
-                mass=float(body_data["mass"]),
-                radius=float(body_data["radius"]),
-                position=tuple(body_data["position"]),
-                velocity=tuple(body_data["velocity"]),
-                capabilities=BodyCapability(int(body_data["capabilities"])),
+        body_data = bodies_group[body_key]
+        capabilities = BodyCapability(int(body_data["capabilities"]))
+
+        # Create base body
+        base = BaseBody(
+            mass=float(body_data["mass"]),
+            radius=float(body_data["radius"]),
+            position=tuple(body_data["position"]),
+            velocity=tuple(body_data["velocity"]),
+            capabilities=capabilities,
+        )
+
+        # Build capability-specific properties
+        gravitational = None
+        if (
+            has_capability(capabilities, BodyCapability.GRAVITATIONAL)
+            and "softening_length" in body_data
+        ):
+            gravitational = GravitationalProperties(
+                softening_length=float(body_data["softening_length"])
             )
 
-            if "softening_length" in body_data:
-                bod = GravitationalBody(
-                    **asdict(bod), softening_length=float(body_data["softening_length"])
-                )
+        accretion = None
+        if (
+            has_capability(capabilities, BodyCapability.ACCRETION)
+            and "sink_rate" in body_data
+        ):
+            accretion = AccretionProperties(
+                sink_rate=float(body_data["sink_rate"]),
+                accretion_radius=float(body_data["accretion_radius"]),
+                total_accreted_mass=float(
+                    body_diagnostics.cumulative_mass_delta[i]
+                ),
+                accretion_rate=float(body_diagnostics.accretion_rate[i]),
+            )
 
-            if "accretion_efficiency" in body_data:
-                bod = AccretionBody(
-                    **asdict(bod),
-                    accretion_efficiency=float(body_data["accretion_efficiency"]),
-                    accretion_radius=float(body_data["accretion_radius"]),
-                    total_accreted_mass=float(body_diagnostics.accreted_mass[i]),
-                    accretion_rate=float(body_diagnostics.accretion_rate[i]),
-                )
+        rigid = None
+        if (
+            has_capability(capabilities, BodyCapability.RIGID)
+            and "inertia" in body_data
+        ):
+            rigid = RigidProperties(
+                inertia=float(body_data["inertia"]),
+                apply_no_slip=bool(body_data["apply_no_slip"]),
+            )
 
-            if "inertia" in body_data:
-                bod = RigidBody(
-                    **asdict(bod),
-                    inertia=float(body_data["inertia"]),
-                    apply_no_slip=bool(body_data["apply_no_slip"]),
-                )
+        deformable = None
+        if (
+            has_capability(capabilities, BodyCapability.DEFORMABLE)
+            and "yield_stress" in body_data
+        ):
+            deformable = DeformableProperties(
+                yield_stress=float(body_data["yield_stress"]),
+                plastic_strain=float(body_data["plastic_strain"]),
+            )
 
-            if "yield_stress" in body_data:
-                bod = DeformableBody(
-                    **asdict(bod),
-                    yield_stress=float(body_data["yield_stress"]),
-                    plastic_strain=float(body_data["plastic_strain"]),
-                )
+        elastic = None
+        if (
+            has_capability(capabilities, BodyCapability.ELASTIC)
+            and "elastic_modulus" in body_data
+        ):
+            elastic = ElasticProperties(
+                elastic_modulus=float(body_data["elastic_modulus"]),
+                poisson_ratio=float(body_data["poisson_ratio"]),
+            )
 
-            if "elastic_modulus" in body_data:
-                bod = ElasticBody(
-                    **asdict(bod),
-                    elastic_modulus=float(body_data["elastic_modulus"]),
-                    poisson_ratio=float(body_data["poisson_ratio"]),
-                )
+        # Create the fused body
+        body = Body(
+            **asdict(base),
+            gravitational=gravitational,
+            accretion=accretion,
+            rigid=rigid,
+            deformable=deformable,
+            elastic=elastic,
+        )
 
-            parsed_bodies[body_key] = bod
+        parsed_bodies[body_key] = body
 
     return parsed_bodies
 
@@ -172,8 +209,9 @@ def parse_diagnostics(groups: dict[str, Any]) -> BodyDiagnostics | None:
             for key, value in diag_data.items()
             if key.startswith("torque_")
         },
-        total_mass=np.asarray(diag_data.get("total_mass", [])),
-        accreted_mass=np.asarray(diag_data.get("accreted_mass", [])),
+        cumulative_mass_delta=np.asarray(
+            diag_data.get("cumulative_mass_delta", [])
+        ),
         accretion_rate=np.asarray(diag_data.get("accretion_rate", [])),
     )
 
@@ -191,8 +229,12 @@ def parse_data(raw: RawHDF5) -> Result[ProcessedData]:
             adiabatic_index=float(attrs["adiabatic_index"]),
             is_mhd="mhd" in str(attrs["regime"]),
             coord_system=str(attrs["coord_system"]),
-            boundary_conditions=tuple(str(attrs["boundary_conditions"]).split(",")),
-            resolution=tuple(int(x) for x in str(attrs["resolution"]).split(",")),
+            boundary_conditions=tuple(
+                str(attrs["boundary_conditions"]).split(",")
+            ),
+            resolution=tuple(
+                int(x) for x in str(attrs["resolution"]).split(",")
+            ),
             cfl_number=float(attrs["cfl_number"]),
             end_time=float(attrs["end_time"]),
             reconstruction=str(attrs["reconstruction"]),
@@ -215,7 +257,9 @@ def parse_data(raw: RawHDF5) -> Result[ProcessedData]:
         diagnostics = parse_diagnostics(raw.groups)
         bodies = parse_bodies(raw.groups.get("bodies"), diagnostics)
         return Result.ok(
-            ProcessedData(fields=fields, metadata=metadata, mesh=mesh, bodies=bodies)
+            ProcessedData(
+                fields=fields, metadata=metadata, mesh=mesh, bodies=bodies
+            )
         )
     except Exception as e:
         return Result.err(e)

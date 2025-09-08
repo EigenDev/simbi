@@ -1,80 +1,197 @@
-from matplotlib.animation import FuncAnimation
-import matplotlib.pyplot as plt
-from typing import Sequence
-from ..state.core import VisualizationState
-from ..components.base import Component
-from ..bridge import SimbiDataBridge
+"""
+Animation controller for the visualization system.
+
+This module provides animation functionality for visualizations.
+"""
+
+from typing import Any, Callable, Optional, Sequence
+
+from matplotlib.animation import FFMpegWriter, FuncAnimation, PillowWriter
+from matplotlib.figure import Figure
+from rich.progress import (
+    BarColumn,
+    Progress,
+    SpinnerColumn,
+    TextColumn,
+    TimeRemainingColumn,
+)
+
+from simbi.tools.visualization.core.config import StyleConfig
+
+from ..components.interface import Component
+from ..core.state import PlotState, VisualizationState
 
 
 class AnimationController:
-    """Controls animation of visualization components"""
+    """Controls animation of visualization components."""
 
     def __init__(
         self,
         state: VisualizationState,
         components: Sequence[Component],
-        bridge: SimbiDataBridge,
-    ):
+    ) -> None:
+        """
+        Initialize the animation controller.
+
+        Args:
+            state: Visualization state
+            components: Visualization components to animate
+        """
         self.state = state
         self.components = components
-        self.bridge = bridge
         self.animation = None
+        self.fig = None
+        self._frame_handler = None
 
-    def update_frame(self, frame: int) -> tuple:
-        """Update all components for a new frame"""
-        try:
-            # Load data for this frame
-            self.state.current_frame = frame
-            data_file = self.state.data_files[frame]
+    def initialize(self, fig: Figure) -> None:
+        """
+        Initialize the animation controller with a figure.
 
-            # Load the data
-            data = self.bridge.load_file(data_file)
-            self.state.update_data(data)
+        Args:
+            fig: Matplotlib figure to animate
+        """
+        self.fig = fig
 
-            # Clear any existing titles to prevent overlap
-            # for ax in plt.gcf().axes:
-            #     ax.set_title("")
-            # if hasattr(plt.gcf(), "_suptitle"):
-            #     plt.gcf()._suptitle.set_text("")
+        # Update animation state
+        self.state.animation.playing = False
+        self.state.animation.frame_index = 0
 
-            # Update all components
-            frames = []
-            for component in self.components:
-                if component.is_initialized:
-                    frame_element = component.render()
-                    if frame_element:
-                        # If we get multiple artists (like list/tuple), add them all
-                        if isinstance(frame_element, (list, tuple)):
-                            frames.extend(frame_element)
-                        else:
-                            frames.append(frame_element)
+        # Set the state to initialized
+        self.state.plot_state = PlotState.INITIALIZED
 
-            # Ensure figure updates by drawing
-            self.components[0].fig.canvas.draw_idle()
+    def update_frame(self, frame_idx: int) -> tuple[Any, ...]:
+        """
+        Update all components for the given frame index.
 
-            # Return all frame elements for blitting
-            return tuple(frames)
-        except Exception as e:
-            print(f"Error updating frame {frame}: {e}")
-            # Return empty tuple to prevent animation from crashing
-            return ()
+        Args:
+            frame_idx: Frame index to update
 
-    def animate(self, frames: int = 0, interval: int = 33) -> FuncAnimation:
-        """Create animation across all components"""
+        Returns:
+            Tuple of artists that were updated
+        """
+        # import time
+
+        # start_time = time.time()
+        self.state.animation.frame_index = frame_idx
+        file_path = self.state.animation.data_files[frame_idx]
+
+        # Load data for this frame
+        if self._frame_handler:
+            plot_data = self._frame_handler(file_path)
+            self.state.update_data(plot_data)
+
+        # Collect artists from all components
+        artists = []
+
+        # Update each component
+        for component in self.components:
+            if not self.state.data:
+                continue
+            frame_element = component.render(self.state.data, self.style)
+            if frame_element:
+                # Handle different return types
+                if isinstance(frame_element, (list, tuple)):
+                    artists.extend(frame_element)
+                else:
+                    artists.append(frame_element)
+
+        # end_time = time.time()
+        # elapsed_time = end_time - start_time
+        # print(f"Elapsed time: {elapsed_time} seconds")
+        # Return tuple of artists for blitting
+        return tuple(artists)
+
+    def animate(
+        self,
+        files: Sequence[str],
+        style: StyleConfig,
+        interval: int = 33,
+        blit: bool = False,
+        frame_handler: Optional[Callable] = None,
+    ) -> FuncAnimation:
+        """
+        Create animation across all components.
+
+        Args:
+            files: Sequence of file paths to load for each frame
+            interval: Time interval between frames in milliseconds
+            blit: Whether to use blitting optimization
+            frame_handler: Optional function to handle frame loading
+
+        Returns:
+            Matplotlib FuncAnimation object
+        """
+        if not self.fig:
+            raise ValueError(
+                "Animation controller not initialized. Call initialize() first."
+            )
+
         if not self.components:
             raise ValueError("No components to animate")
 
-        # Determine number of frames
-        if frames == 0:
-            frames = len(self.state.data_files)
+        self.state.set_animation_files(files)
+        self._frame_handler = frame_handler
+        self.style = style
 
         # Create animation
         self.animation = FuncAnimation(
-            self.components[0].fig,  # Assume all components share the same figure
+            self.fig,
             self.update_frame,
-            frames=range(frames),
+            frames=range(len(files)),
             interval=interval,
-            blit=False,
+            blit=blit,
         )
 
+        # Update state
+        self.state.animation.playing = True
+        self.state.animation.frame_rate = int(1000 / interval)
+        self.state.plot_state = PlotState.ANIMATING
+
         return self.animation
+
+    def save(
+        self,
+        filename: str,
+        fps: int = 30,
+        dpi: int = 300,
+        **kwargs,
+    ) -> None:
+        """
+        Save the animation to a file.
+
+        Args:
+            filename: Output file path
+            writer: Animation writer ('ffmpeg', 'pillow', or a writer instance)
+            fps: Frames per second
+            dpi: Resolution in dots per inch
+            **kwargs: Additional arguments for the writer
+        """
+        if not self.animation:
+            raise ValueError("No animation to save")
+
+        output_str = filename.replace("-", "_")
+        extension = ""
+        if not output_str.endswith(".mp4"):
+            extension += ".mp4"
+
+        with Progress(
+            SpinnerColumn(),
+            TextColumn("[progress.description]{task.description}"),
+            BarColumn(),
+            TextColumn("[progress.description]{task.percentage:>3.0f}%"),
+            TimeRemainingColumn(),
+        ) as progress:
+            task_id = progress.add_task(
+                "[green] Saving animation...",
+                total=self.state.animation.total_frames,
+            )
+
+            def prog(frame: int, total_frames: int) -> None:
+                progress.update(task_id, advance=1)
+
+            self.animation.save(
+                output_str + extension,
+                dpi=dpi,
+                progress_callback=prog,
+            )
+        print(f"File saved as {output_str + extension}!")

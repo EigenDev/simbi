@@ -1,6 +1,6 @@
-from ..theme import Theme
+from ..theme import ThemeConfig
 
-default_theme = Theme(
+default_theme = ThemeConfig(
     # Text styling
     font_family="serif",
     font_size=12,

@@ -1,14 +1,15 @@
 from dataclasses import dataclass, field
-from typing import Any, Sequence, Optional
-import matplotlib as mpl
-import numpy as np
-import matplotlib.pyplot as plt
-from cycler import cycler
 from itertools import cycle
+from typing import Any, Optional, Sequence
+
+import matplotlib as mpl
+import matplotlib.pyplot as plt
+import numpy as np
+from cycler import cycler
 
 
 @dataclass
-class Theme:
+class ThemeConfig:
     """Central theme configuration for visualization styling"""
 
     # Text styling
@@ -20,13 +21,17 @@ class Theme:
     text_color: str = "black"
 
     # Line styling
-    line_styles: Sequence[str] = field(default_factory=lambda: ["-", "--", ":", "-."])
+    line_styles: Sequence[str] = field(
+        default_factory=lambda: ["-", "--", ":", "-."]
+    )
     line_width: float = 1.5
 
     # Color styling
     color_maps: Sequence[str] = field(default_factory=lambda: ["viridis"])
     color_cycle: Sequence[str] = field(
-        default_factory=lambda: np.array(mpl.cm.viridis(np.linspace(0, 1, 4))).tolist()
+        default_factory=lambda: np.array(
+            mpl.cm.viridis(np.linspace(0, 1, 4))
+        ).tolist()
     )
 
     # Axis styling
@@ -37,7 +42,7 @@ class Theme:
 
     # Figure styling
     fig_size: tuple[float, float] = (8, 6)
-    dpi: int = 100
+    dpi: int = 300
     transparent: bool = False
 
     # Special styling
@@ -59,17 +64,21 @@ class Theme:
         user_fig_size: Optional[tuple[float, float]] = None,
     ):
         """Apply theme to matplotlib global settings"""
-        plt.style.use("default")  # Reset to defaults
+        plt.style.use("default")
 
         colormap = plt.get_cmap(next(cycle(self.color_maps)))
         nlines = nfields
         nind_curves = nfields * nfiles
-        colors = np.array([colormap(k) for k in np.linspace(0.1, 0.9, nind_curves)])
-        linestyles = [x[0] for x in zip(cycle(["-", "--", ":", "-."]), range(nlines))]
+        colors = np.array(
+            [colormap(k) for k in np.linspace(0.1, 0.9, nind_curves)]
+        )
+        linestyles = [
+            x[0] for x in zip(cycle(["-", "--", ":", "-."]), range(nlines))
+        ]
         if len(colors) == len(linestyles):
-            default_cycler = cycler(color=colors) + (cycler(linestyle=linestyles))
+            default_cycler = cycler(linestyle=linestyles) + cycler(color=colors)
         else:
-            default_cycler = cycler(linestyle=linestyles) * cycler(color=colors)
+            default_cycler = cycler(color=colors) * cycler(linestyle=linestyles)
 
         plt.rcParams.update(
             {

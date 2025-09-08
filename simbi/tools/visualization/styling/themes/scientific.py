@@ -1,6 +1,6 @@
-from ..theme import Theme
+from ..theme import ThemeConfig
 
-scientific_theme = Theme(
+scientific_theme = ThemeConfig(
     # Text styling
     font_family="Times New Roman",
     font_size=10,

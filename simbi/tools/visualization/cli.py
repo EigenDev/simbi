@@ -1,12 +1,19 @@
 import argparse
+import warnings
 from itertools import cycle
 from typing import Any, Optional
 
+from typing_extensions import Sequence
+
 from . import api
-from .config.builder import ConfigBuilder
+from .core.conversion import config_from_args
+
+VALID_PLOT_TYPES = ["line", "multidim", "histogram", "temporal"]
 
 try:
-    import cmasher
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        import cmasher
 except ImportError:
     pass
 
@@ -23,7 +30,9 @@ class ParseKVAction(argparse.Action):
             the_dict = dict(map(lambda x: x.split("="), values))
         except ValueError as ex:
             message = "\nTraceback: {}".format(ex)
-            message += "\nError on '{}' || It should be 'key=value'".format(each)
+            message += "\nError on '{}' || It should be 'key=value'".format(
+                ",".join(values)
+            )
             raise argparse.ArgumentError(self, str(message))
         setattr(namespace, self.dest, the_dict)
 
@@ -47,7 +56,9 @@ class ParseKVActionToList(argparse.Action):
                 getattr(namespace, self.dest)[key] = value
             except ValueError as ex:
                 message = "\nTraceback: {}".format(ex)
-                message += "\nError on '{}' || It should be 'key=value'".format(each)
+                message += "\nError on '{}' || It should be 'key=value'".format(
+                    each
+                )
                 raise argparse.ArgumentError(self, str(message))
 
 
@@ -113,6 +124,16 @@ class PlotStyleAction(argparse.Action):
             setattr(namespace, self.dest, style)
 
 
+def pair_of_floats(values: Any) -> tuple[float, float]:
+    try:
+        a, b = map(float, values.split(","))
+        return (a, b)
+    except ValueError:
+        raise argparse.ArgumentTypeError(
+            "Values must be comma-separated pair of numeric types, e.g., '1,2'"
+        )
+
+
 class CycleAction(argparse.Action):
     """Custom action to turn list of items into cycle"""
 
@@ -147,36 +168,53 @@ def setup_parser(parser: argparse.ArgumentParser) -> None:
         choices=["default", "dark", "scientific"],
     )
     parser.add_argument("--save-as", help="Save output to file")
-    parser.add_argument("--no-show", action="store_true", help="Don't display the plot")
+    parser.add_argument(
+        "--no-show", action="store_true", help="Don't display the plot"
+    )
     parser.add_argument("--ndim", type=int, help="Number of dimensions")
     parser.add_argument("--log", action="store_true", help="Use log scale")
-    parser.add_argument("--semilogx", action="store_true", help="Log scale for x-axis")
-    parser.add_argument("--semilogy", action="store_true", help="Log scale for y-axis")
     parser.add_argument(
-        "--cmap",
-        nargs="+",
-        help="Colormap(s) to use",
-        default=cycle(["viridis"]),
-        action=CycleAction,
+        "--semilogx", action="store_true", help="Log scale for x-axis"
     )
     parser.add_argument(
-        "--fig-size", nargs=2, type=float, help="Figure dimensions (width height)"
+        "--semilogy", action="store_true", help="Log scale for y-axis"
+    )
+    parser.add_argument(
+        "--cmap", nargs="+", help="Colormap(s) to use", default=["viridis"]
+    )
+    parser.add_argument(
+        "--fig-size",
+        nargs=2,
+        type=float,
+        help="Figure dimensions (width height)",
     )
     parser.add_argument("--dpi", type=int, default=300, help="Output DPI")
     parser.add_argument(
         "--no-legend", dest="legend", action="store_false", help="Hide legend"
     )
     parser.add_argument("--legend-loc", help="Location of legend")
-    parser.add_argument("--labels", nargs="+", help="Labels for plots", default=[])
     parser.add_argument(
-        "--xlims", nargs=2, type=float, default=[None, None], help="X axis limits"
+        "--labels", nargs="+", help="Labels for plots", default=[]
     )
     parser.add_argument(
-        "--ylims", nargs=2, type=float, default=[None, None], help="Y axis limits"
+        "--xlims",
+        nargs=2,
+        type=float,
+        default=[None, None],
+        help="X axis limits",
+    )
+    parser.add_argument(
+        "--ylims",
+        nargs=2,
+        type=float,
+        default=[None, None],
+        help="Y axis limits",
     )
     parser.add_argument("--xlabel", default="x", help="X axis label")
     parser.add_argument("--ylabel", default="y", help="Y axis label")
-    parser.add_argument("--nplots", type=int, default=1, help="Number of subplots")
+    parser.add_argument(
+        "--nplots", type=int, default=1, help="Number of subplots"
+    )
     parser.add_argument(
         "--kind",
         choices=["snapshot", "movie"],
@@ -185,7 +223,9 @@ def setup_parser(parser: argparse.ArgumentParser) -> None:
     )
 
     # Animation
-    parser.add_argument("--animate", action="store_true", help="Create animation")
+    parser.add_argument(
+        "--animate", action="store_true", help="Create animation"
+    )
     parser.add_argument(
         "--frame-rate", type=int, default=10, help="Animation frame rate"
     )
@@ -214,12 +254,24 @@ def setup_parser(parser: argparse.ArgumentParser) -> None:
         type=tuple_arg,
         default=(1, 2, 3),
         help="Projection axes (x y z)",
-        choices=[(1, 2, 3), (1, 3, 2), (2, 1, 3), (2, 3, 1), (3, 1, 2), (3, 2, 1)],
+        choices=[
+            (1, 2, 3),
+            (1, 3, 2),
+            (2, 1, 3),
+            (2, 3, 1),
+            (3, 1, 2),
+            (3, 2, 1),
+        ],
     )
     parser.add_argument(
-        "--box-depth", type=float, help="Depth for 3D projection", default=0.0
+        "--slice-position",
+        type=float,
+        help="Depth for 3D projection",
+        default=0.0,
     )
-    parser.add_argument("--bipolar", action="store_true", help="Use bipolar plotting")
+    parser.add_argument(
+        "--bipolar", action="store_true", help="Use bipolar plotting"
+    )
     parser.add_argument(
         "--bbox-inches",
         type=nullable_string,
@@ -233,9 +285,8 @@ def setup_parser(parser: argparse.ArgumentParser) -> None:
         "--color-range",
         nargs="+",
         help="Color range(s) (min,max format)",
-        type=colorbar_limits,
-        default=cycle([(None, None)]),
-        action=CycleAction,
+        type=pair_of_floats,
+        default=[(None, None)],
     )
 
     # Style options
@@ -243,14 +294,22 @@ def setup_parser(parser: argparse.ArgumentParser) -> None:
         "--transparent", action="store_true", help="Transparent background"
     )
     parser.add_argument("--dbg", action="store_true", help="Dark background")
-    parser.add_argument("--use-tex", action="store_true", help="Use LaTeX for text")
+    parser.add_argument(
+        "--use-tex", action="store_true", help="Use LaTeX for text"
+    )
     parser.add_argument(
         "--print", action="store_true", help="Publication-quality style"
     )
-    parser.add_argument("--pictorial", action="store_true", help="Pictorial style")
-    parser.add_argument("--scale-downs", nargs="+", type=float, help="Scale factors")
+    parser.add_argument(
+        "--pictorial", action="store_true", help="Pictorial style"
+    )
+    parser.add_argument(
+        "--scale-downs", nargs="+", type=float, help="Scale factors"
+    )
     parser.add_argument("--time-modulus", type=float, help="Time modulus value")
-    parser.add_argument("--norm", action="store_true", help="Normalize plot axes")
+    parser.add_argument(
+        "--norm", action="store_true", help="Normalize plot axes"
+    )
     parser.add_argument("--font-color", default="black", help="Font color")
     parser.add_argument(
         "--cbar", action="store_true", default=True, help="Show colorbar"
@@ -281,7 +340,9 @@ def setup_parser(parser: argparse.ArgumentParser) -> None:
         help="Annotation location",
     )
     parser.add_argument("--annot-text", nargs="+", help="Annotation text")
-    parser.add_argument("--power", type=float, default=1.0, help="Power norm exponent")
+    parser.add_argument(
+        "--power", type=float, default=1.0, help="Power norm exponent"
+    )
     parser.add_argument(
         "--nlinestyles",
         type=int,
@@ -317,6 +378,7 @@ def setup_parser(parser: argparse.ArgumentParser) -> None:
         "--hist-type",
         choices=["kinetic", "enthalpy", "mass", "energy"],
         help="Histogram type",
+        default="kinetic",
     )
     parser.add_argument("--powerfit", action="store_true", help="Fit power law")
 
@@ -343,22 +405,21 @@ def main():
     setup_parser(parser)
     args = parser.parse_args()
 
-    # Build structured configuration
-    config = ConfigBuilder.from_args(args)
-
     # Determine if animation
     is_animation = args.animate or args.kind == "movie"
+
+    config = config_from_args(args)
 
     # Create visualization
     if is_animation:
         api.animate(
+            config,
             files=args.files,
-            plot_type=args.plot_type,
             fields=args.fields,
+            plot_type=args.plot_type,
             save_as=args.save_as,
             show=not args.no_show,
             frame_rate=args.frame_rate,
-            config=config,
         )
     else:
         plot_type = args.plot_type
@@ -371,19 +432,35 @@ def main():
 
         if plot_type == "line":
             api.plot_line(
-                args.files, args.fields, args.save_as, not args.no_show, config=config
+                config,
+                args.files,
+                args.fields,
+                args.save_as,
+                not args.no_show,
             )
         elif plot_type == "multidim":
             api.plot_multidim(
-                args.files, args.fields, args.save_as, not args.no_show, config=config
+                config,
+                args.files,
+                args.fields,
+                args.save_as,
+                not args.no_show,
             )
         elif plot_type == "histogram":
             api.plot_histogram(
-                args.files, args.fields, args.save_as, not args.no_show, config=config
+                config,
+                args.files,
+                args.fields,
+                args.save_as,
+                not args.no_show,
             )
         elif plot_type == "temporal":
             api.plot_temporal(
-                args.files, args.fields, args.save_as, not args.no_show, config=config
+                config,
+                args.files,
+                args.fields,
+                args.save_as,
+                not args.no_show,
             )
 
 

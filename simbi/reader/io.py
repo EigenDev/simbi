@@ -1,9 +1,10 @@
-from ..functional.result import Result
-from ..core.types import RawHDF5, Array
 from typing import Any
 
 import h5py
 import numpy as np
+
+from ..core.types import Array, RawHDF5
+from ..functional.result import Result
 
 
 def open_file(filename: str) -> Result[h5py.File]:
@@ -56,6 +57,8 @@ def read_raw_data(file: h5py.File) -> Result[RawHDF5]:
                     fields[key] = np.asarray(item[:])
             elif isinstance(item, h5py.Group):
                 groups[key] = read_group_recursively(item)
-        return Result.ok(RawHDF5(fields=fields, attributes=attributes, groups=groups))
+        return Result.ok(
+            RawHDF5(fields=fields, attributes=attributes, groups=groups)
+        )
     except Exception as e:
         return Result.err(e)

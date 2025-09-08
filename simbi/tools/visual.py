@@ -1,4 +1,5 @@
 from typing import Any
+
 from .visualization import api
 
 
@@ -33,19 +34,39 @@ def visualize(config: dict[str, Any]) -> None:
     if is_animation:
         if plot_type == "line":
             api.animate_line(
-                files, fields, save_as, True, animation_config["frame_rate"], **kwargs
+                files,
+                fields,
+                save_as,
+                True,
+                animation_config["frame_rate"],
+                **kwargs,
             )
         elif plot_type == "multidim":
             api.animate_multidim(
-                files, fields, save_as, True, animation_config["frame_rate"], **kwargs
+                files,
+                fields,
+                save_as,
+                True,
+                animation_config["frame_rate"],
+                **kwargs,
             )
         elif plot_type == "histogram":
             api.animate_histogram(
-                files, fields, save_as, True, animation_config["frame_rate"], **kwargs
+                files,
+                fields,
+                save_as,
+                True,
+                animation_config["frame_rate"],
+                **kwargs,
             )
         elif plot_type == "temporal":
             api.animate_temporal(
-                files, fields, save_as, True, animation_config["frame_rate"], **kwargs
+                files,
+                fields,
+                save_as,
+                True,
+                animation_config["frame_rate"],
+                **kwargs,
             )
     else:
         if plot_type == "line":
@@ -96,7 +117,7 @@ def _build_api_kwargs(
 
     # Multidim configuration
     kwargs["projection"] = multidim_config["projection"]
-    kwargs["box_depth"] = multidim_config["box_depth"]
+    kwargs["slice_position"] = multidim_config["slice_position"]
     kwargs["bipolar"] = multidim_config["bipolar"]
     kwargs["slice_along"] = multidim_config["slice_along"]
     kwargs["coords"] = multidim_config["coords"]

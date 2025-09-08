@@ -1,15 +1,17 @@
 # Utility functions for visualization scripts
-import h5py
-import astropy.constants as const
-import matplotlib
-import astropy.units as units
-import numpy as np
-import matplotlib.pyplot as plt
-from typing import Union, Any, Optional
-from numpy.typing import NDArray
-from ..functional.helpers import find_nearest
 from dataclasses import dataclass, field
 from enum import Enum
+from typing import Any, Optional, Union
+
+import astropy.constants as const
+import astropy.units as units
+import h5py
+import matplotlib
+import matplotlib.pyplot as plt
+import numpy as np
+from numpy.typing import NDArray
+
+from ..functional.helpers import find_nearest
 
 # FONT SIZES
 SMALL_SIZE = 6
@@ -81,9 +83,9 @@ FIELD_MAP: dict[str, str] = {
     "b1_mean": r"$B_1$",
     "b2_mean": r"$B_2$",
     "b3_mean": r"$B_3$",
-    "accretion_rate": r"$\dot{M}$",
+    "accretion_rate": r"$\dot{M} / \dot{M}_0$",
     "accreted_mass": r"$M_{\rm acc}$",
-    "mdot": r"$\dot{M}$",
+    "mdot": r"$\dot{M} / \dot{M_0}$",
     "maccr": r"$M_{\rm acc}$",
 }
 
@@ -102,24 +104,12 @@ class FieldMapper:
 
     def get_field_str(
         self,
-        fields: Union[str, list[str], dict[str, Any]],
+        field: str,
         units: bool = False,
         normalized: bool = True,
-    ) -> Union[str, list[str]]:
+    ) -> str:
         """Get LaTeX string for field(s)"""
-        field_list = self._normalize_fields(fields)
-        field_strings = [self._format_field(f, units, normalized) for f in field_list]
-        return field_strings[0] if len(field_strings) == 1 else field_strings
-
-    def _normalize_fields(
-        self, fields: Union[str, list[str], dict[str, Any]]
-    ) -> list[str]:
-        """Convert input to list of field names"""
-        if isinstance(fields, str):
-            return [fields]
-        if isinstance(fields, dict):
-            return list(fields.keys())
-        return fields
+        return self._format_field(field, units, normalized)
 
     def _format_field(self, field: str, units: bool, normalized: bool) -> str:
         """Format single field with optional units"""
@@ -163,10 +153,10 @@ class FieldMapper:
 
 # Usage remains the same
 def get_field_str(
-    fields: Union[str, list[str], dict[str, Any]],
+    fields: str,
     units: bool = False,
     normalized: bool = True,
-) -> Union[str, list[str]]:
+) -> str:
     """Get LaTeX string for field(s)"""
     mapper = FieldMapper()
     return mapper.get_field_str(fields, units, normalized)
@@ -197,7 +187,9 @@ def unpad(
     return arr[tuple(slices)]
 
 
-def flatten_fully(x: NDArray[np.floating[Any]]) -> NDArray[np.floating[Any]] | Any:
+def flatten_fully(
+    x: NDArray[np.floating[Any]],
+) -> NDArray[np.floating[Any]] | Any:
     if any(dim == 1 for dim in x.shape):
         x = np.vstack(x)  # type: ignore
         if len(x.shape) == 2 and x.shape[0] == 1:
@@ -285,14 +277,21 @@ def get_file_list(
 
     if multidir:
         files = {
-            key: sorted([str(f) for f in Path(fdir).glob("*.h5") if f.is_file()])
+            key: sorted(
+                [str(f) for f in Path(fdir).glob("*.h5") if f.is_file()]
+            )
             for key, fdir in enumerate(inputs)
         }
     else:
         files = []
         if dirs:
             files = sorted(
-                [str(f) for d in dirs for f in Path(d).glob("*.h5") if f.is_file()]
+                [
+                    str(f)
+                    for d in dirs
+                    for f in Path(d).glob("*.h5")
+                    if f.is_file()
+                ]
             )
         files += [file for file in filter(lambda x: x not in dirs, inputs)]
 

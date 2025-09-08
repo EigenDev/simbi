@@ -1,6 +1,6 @@
-from ..theme import Theme
+from ..theme import ThemeConfig
 
-dark_theme = Theme(
+dark_theme = ThemeConfig(
     # Text styling
     font_family="sans-serif",
     font_size=12,
@@ -29,7 +29,7 @@ dark_theme = Theme(
     grid=True,
     # Figure styling
     fig_size=(8, 6),
-    dpi=100,
+    dpi=300,
     # Background colors
     background_colors={
         "figure": "#1e1e1e",

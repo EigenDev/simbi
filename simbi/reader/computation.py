@@ -1,18 +1,20 @@
-from ..core.types import ProcessedData, Array
+from typing import Any, Callable
+
+import numpy as np
+
+from ..core.types import Array, ProcessedData
 from ..physics.calculations import (
     VectorComponent,
     enthalpy_density,
     four_velocity,
     labframe_energy_density,
     labframe_momentum,
-    spec_enthalpy,
     lorentz_factor,
-    magnetization,
-    total_pressure,
     magnetic_pressure,
+    magnetization,
+    spec_enthalpy,
+    total_pressure,
 )
-from typing import Callable, Any
-import numpy as np
 
 ComputeFunc = Callable[[dict[str, Array]], Array]
 
@@ -51,7 +53,9 @@ def create_computation_pipeline(data: ProcessedData) -> dict[str, ComputeFunc]:
         return v_mag * W
 
     # Four-velocity components
-    def compute_u_component(component: int) -> Callable[[dict[str, Array]], Array]:
+    def compute_u_component(
+        component: int,
+    ) -> Callable[[dict[str, Array]], Array]:
         def _compute(fields: dict[str, Array]) -> Array:
             return four_velocity(get_velocities(fields), regime, component)
 
@@ -74,7 +78,9 @@ def create_computation_pipeline(data: ProcessedData) -> dict[str, ComputeFunc]:
 
         return _compute
 
-    def compute_b_mean_component(component: int) -> Callable[[dict[str, Array]], Array]:
+    def compute_b_mean_component(
+        component: int,
+    ) -> Callable[[dict[str, Array]], Array]:
         def _compute(fields: dict[str, Array]) -> Array:
             field_name = f"b{component}"
             if field_name not in fields:
@@ -88,7 +94,9 @@ def create_computation_pipeline(data: ProcessedData) -> dict[str, ComputeFunc]:
             elif field_name == "b3":
                 return 0.5 * (view[1:, :, :] + view[:-1, :, :])
             else:
-                raise ValueError(f"Invalid magnetic field component: {field_name}")
+                raise ValueError(
+                    f"Invalid magnetic field component: {field_name}"
+                )
 
         return _compute
 
@@ -126,7 +134,9 @@ def create_computation_pipeline(data: ProcessedData) -> dict[str, ComputeFunc]:
         )
 
     def compute_magnetic_pressure(fields: dict[str, Array]) -> Array:
-        return magnetic_pressure(get_b_fields(fields), get_velocities(fields), regime)
+        return magnetic_pressure(
+            get_b_fields(fields), get_velocities(fields), regime
+        )
 
     # Mach number
     def compute_mach_number(fields: dict[str, Array]) -> Array:
