@@ -4,18 +4,18 @@ This script handles the building and installation of the Simbi cli code.
 """
 
 import argparse
+import dataclasses
 import json
 import logging
 import os
 import platform as platform_module
 import subprocess
 import sys
-import dataclasses
-from dataclasses import dataclass, asdict
+from collections.abc import Sequence
+from dataclasses import asdict, dataclass
 from functools import reduce, wraps
 from pathlib import Path
 from typing import Any, Callable, Final, Generic, Literal, TypeVar, override
-from collections.abc import Sequence
 
 # ======================================================================
 # Type definitions
@@ -79,7 +79,7 @@ FLAG_OVERRIDES: Final[dict[str, list[str]]] = {
 logger = logging.getLogger("simbi")
 
 # ======================================================================
-# Functional core utilities
+#  core utilities
 # ======================================================================
 
 
@@ -389,7 +389,9 @@ def read_cache() -> Result[dict[str, Any], str]:
 
         return Result.success(cached_vars)
     except json.JSONDecodeError:
-        logger.warning(f"Could not parse cache file {CACHE_FILE}, using defaults")
+        logger.warning(
+            f"Could not parse cache file {CACHE_FILE}, using defaults"
+        )
         return Result.failure("Invalid JSON in cache file")
 
 
@@ -415,7 +417,13 @@ def merge_with_cli_args(config: BuildConfig, cli_args: set[str]) -> BuildConfig:
     updates = {}
     for arg, default_value in DEFAULT_CONFIG.items():
         # Skip special args
-        if arg in ["verbose", "configure", "func", "cli_extras", "visual_extras"]:
+        if arg in [
+            "verbose",
+            "configure",
+            "func",
+            "cli_extras",
+            "visual_extras",
+        ]:
             continue
 
         # Only use cache if not specified in CLI and matches default
@@ -504,7 +512,11 @@ def run_subprocess(
 
         if capture:
             kwargs.update(
-                {"stdout": subprocess.PIPE, "stderr": subprocess.PIPE, "text": True}
+                {
+                    "stdout": subprocess.PIPE,
+                    "stderr": subprocess.PIPE,
+                    "text": True,
+                }
             )
 
         result = subprocess.run(cmd, **kwargs)
@@ -705,7 +717,12 @@ def find_gpu_runtime_dir() -> str:
 
     # Try strategies in sequence
     finder = try_sequentially(
-        [find_via_nvcc, find_via_nvidia_smi, find_via_hipconfig, find_via_common_rocm]
+        [
+            find_via_nvcc,
+            find_via_nvidia_smi,
+            find_via_hipconfig,
+            find_via_common_rocm,
+        ]
     )
 
     return finder() or ""
@@ -813,7 +830,9 @@ def check_minimal_dependencies(verbose: bool = False) -> Result[None, str]:
     }
 
     missing_sys_deps = [
-        f"{desc} ({tool})" for tool, desc in system_deps.items() if not is_tool(tool)
+        f"{desc} ({tool})"
+        for tool, desc in system_deps.items()
+        if not is_tool(tool)
     ]
 
     if missing_sys_deps:
@@ -866,9 +885,13 @@ def check_minimal_dependencies(verbose: bool = False) -> Result[None, str]:
                 )
 
             # Verify installation
-            still_missing = [dep for dep in missing_py_deps if not check_import(dep)]
+            still_missing = [
+                dep for dep in missing_py_deps if not check_import(dep)
+            ]
             if still_missing:
-                return Result.failure(f"Failed to install: {', '.join(still_missing)}")
+                return Result.failure(
+                    f"Failed to install: {', '.join(still_missing)}"
+                )
 
         except Exception as e:
             return Result.failure(f"Failed to install dependencies: {e}")
@@ -982,7 +1005,9 @@ def configure_build(
     # Check if we need to prompt for GPU architecture
     if config.gpu_compilation == "enabled" and not config.dev_arch:
         suggested_archs = suggest_gpu_architectures(config.gpu_platform)
-        logger.info(f"No GPU architecture specified, suggesting: {suggested_archs}")
+        logger.info(
+            f"No GPU architecture specified, suggesting: {suggested_archs}"
+        )
 
         if confirm(f"Use suggested architectures ({suggested_archs})?"):
             config = config.with_updates(dev_arch=suggested_archs)
@@ -1002,7 +1027,9 @@ def configure_build(
     # Generate arch flags if GPU compilation is enabled
     arch_flags = ""
     if config.gpu_compilation == "enabled" and config.dev_arch:
-        arch_flags = generate_gpu_arch_flags(config.dev_arch, config.gpu_platform)
+        arch_flags = generate_gpu_arch_flags(
+            config.dev_arch, config.gpu_platform
+        )
 
     # Create the meson command
     return [
@@ -1024,7 +1051,9 @@ def configure_build(
     ]
 
 
-def build_simbi(args: argparse.Namespace, install: bool = False) -> tuple[str, str]:
+def build_simbi(
+    args: argparse.Namespace, install: bool = False
+) -> tuple[str, str]:
     """Build the Simbi library."""
     # Convert args to typed config
     config = BuildConfig.from_namespace(args)
@@ -1038,7 +1067,9 @@ def build_simbi(args: argparse.Namespace, install: bool = False) -> tuple[str, s
     # Check dependencies
     dep_result = check_minimal_dependencies()
     if dep_result.is_failure():
-        logger.error(f"Dependency check failed: {dep_result.error_or('Unknown error')}")
+        logger.error(
+            f"Dependency check failed: {dep_result.error_or('Unknown error')}"
+        )
         sys.exit(1)
 
     # Validate configuration
@@ -1074,7 +1105,9 @@ def build_simbi(args: argparse.Namespace, install: bool = False) -> tuple[str, s
         return not (build_ninja.exists() and meson_info.exists())
 
     reconfigure_flag = (
-        "--reconfigure" if (needs_reconfigure(config) or args.force_reconfigure) else ""
+        "--reconfigure"
+        if (needs_reconfigure(config) or args.force_reconfigure)
+        else ""
     )
 
     # Set up environment
@@ -1102,7 +1135,10 @@ def build_simbi(args: argparse.Namespace, install: bool = False) -> tuple[str, s
     hdf5_include = find_hdf5_include()
 
     # Configure the build (if needed)
-    if not Path(config.build_dir).exists() or reconfigure_flag == "--reconfigure":
+    if (
+        not Path(config.build_dir).exists()
+        or reconfigure_flag == "--reconfigure"
+    ):
         config_command = configure_build(config, reconfigure_flag, hdf5_include)
         run_subprocess(config_command, env=simbi_env)
 
@@ -1169,7 +1205,9 @@ def install_simbi(args: argparse.Namespace) -> int:
         extras += "[cli]" if not extras else ",[cli]"
 
     install_mode = (
-        "." + extras if config.install_mode == "default" else "-e" + "." + extras
+        "." + extras
+        if config.install_mode == "default"
+        else "-e" + "." + extras
     )
 
     # Check if UV is available and use it for installation
@@ -1254,7 +1292,9 @@ def setup_virtual_environment(args: argparse.Namespace) -> int:
     venv_path = Path(config.venv_path).resolve()
 
     if venv_path.exists():
-        if not confirm(f"Virtual environment at {venv_path} already exists. Recreate?"):
+        if not confirm(
+            f"Virtual environment at {venv_path} already exists. Recreate?"
+        ):
             logger.info("Using existing virtual environment")
             return 0
 
@@ -1293,11 +1333,14 @@ def create_parser() -> argparse.ArgumentParser:
     )
 
     subparsers = parser.add_subparsers(
-        help="Commands for building, installing, or uninstalling simbi", dest="command"
+        help="Commands for building, installing, or uninstalling simbi",
+        dest="command",
     )
 
     # Build command
-    build_parser = subparsers.add_parser("build", help="Build the simbi library")
+    build_parser = subparsers.add_parser(
+        "build", help="Build the simbi library"
+    )
     _add_build_arguments(build_parser)
     build_parser.set_defaults(func=build_simbi)
 
@@ -1315,7 +1358,9 @@ def create_parser() -> argparse.ArgumentParser:
     uninstall_parser.set_defaults(func=uninstall_simbi)
 
     # Venv command
-    venv_parser = subparsers.add_parser("venv", help="Set up a virtual environment")
+    venv_parser = subparsers.add_parser(
+        "venv", help="Set up a virtual environment"
+    )
     venv_parser.set_defaults(func=setup_virtual_environment)
 
     # Global options
