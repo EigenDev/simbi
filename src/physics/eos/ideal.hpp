@@ -26,7 +26,7 @@ namespace simbi::eos {
             return 1.0 + gamma * pressure / (rho * (gamma - 1.0));
         }
 
-        DEV auto internal_energy(real rho, real pressure) const
+        DEV auto specific_internal_energy(real rho, real pressure) const
         {
             return pressure / (rho * (gamma - 1.0));
         }
