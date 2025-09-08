@@ -160,7 +160,6 @@ namespace simbi::boundary {
         const MeshType& mesh,
         const auto* bc_sources,
         real time,
-        real dt,
         const auto& field
     )
     {
@@ -184,7 +183,7 @@ namespace simbi::boundary {
         // evaluate dynamic expression
         const auto position = mesh::centroid(ghost_coord, mesh);
         auto current_cons   = field(ghost_coord);
-        return bc_expr.apply(position, current_cons, time, dt);
+        return bc_expr.apply(position, current_cons, time);
     }
 
     // BC transform creation for face ghosts
@@ -211,7 +210,6 @@ namespace simbi::boundary {
 
         // capture needed state by value
         const auto time        = state.metadata.time;
-        const auto dt          = state.metadata.dt;
         const auto* bc_sources = state.sources.bc_sources.data();
         const auto cons        = state.cons;
 
@@ -225,7 +223,6 @@ namespace simbi::boundary {
                     mesh,
                     bc_sources,
                     time,
-                    dt,
                     cons
                 );
             }
