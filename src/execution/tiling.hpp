@@ -8,6 +8,7 @@
 #include <algorithm>
 #include <cstddef>
 #include <cstdint>
+#include <cstdlib>
 #include <vector>
 
 namespace simbi::tiling {
@@ -33,7 +34,7 @@ namespace simbi::tiling {
             return iarray<2>{128, 128};
         }
         else if constexpr (Dims == 3) {
-            return iarray<3>{64, 64, 64};
+            return iarray<3>{16, 16, 16};
         }
     }
 

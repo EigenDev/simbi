@@ -362,21 +362,15 @@ namespace simbi::exec {
 
             auto state =
                 std::make_shared<typename future_t<result_t>::future_state_t>();
+            state->completion_context = completion_context_t::direct();
 
             try {
                 if constexpr (std::is_void_v<result_t>) {
-#pragma omp parallel
-                    {
-                        func(args...);
-                    }
+                    func(args...);
                     state->ready.store(true);
                 }
                 else {
-                    result_t result;
-#pragma omp parallel
-                    {
-                        result = func(args...);
-                    }
+                    auto result = func(args...);
                     state->construct_result(std::move(result));
                     state->ready.store(true);
                 }
@@ -391,10 +385,22 @@ namespace simbi::exec {
         }
 
         template <std::uint64_t Dims, typename Func>
-        auto for_each_impl(const domain_t<Dims>& domain, Func&& func) const
-            -> future_t<void>
+        auto for_each_impl(
+            const domain_t<Dims>& domain,
+            Func&& func,
+            const iarray<Dims>& tile_size
+        ) const -> future_t<void>
         {
-            return async_impl([=, this]() { iterate_domain(domain, func); });
+            return async_impl([=, this]() {
+                const auto tiles = tiling::make_tiles(domain, tile_size);
+
+#pragma omp parallel for schedule(dynamic)
+                for (std::size_t tile_idx = 0; tile_idx < tiles.size();
+                     ++tile_idx) {
+                    const auto& tile = tiles[tile_idx];
+                    iterate_domain_serial(tile.domain, func);
+                }
+            });
         }
 
         template <
@@ -406,30 +412,61 @@ namespace simbi::exec {
             const domain_t<Dims>& domain,
             T init,
             Mapper&& mapper,
-            Reducer&& reducer
+            Reducer&& reducer,
+            const iarray<Dims>& tile_size
         ) const -> future_t<T>
         {
             return async_impl([=, this]() {
-                T accumulator = init;
-                iterate_domain(domain, [&](auto coord) {
-                    accumulator = reducer(accumulator, mapper(coord));
-                });
-                return accumulator;
+                const auto tiles = tiling::make_tiles(domain, tile_size);
+
+                if constexpr (std::is_same_v<
+                                  std::decay_t<Reducer>,
+                                  std::plus<T>>) {
+                    T accumulator = init;
+#pragma omp parallel for schedule(dynamic) reduction(+ : accumulator)
+                    for (std::size_t tile_idx = 0; tile_idx < tiles.size();
+                         ++tile_idx) {
+                        const auto& tile = tiles[tile_idx];
+                        iterate_domain_serial(tile.domain, [&](auto coord) {
+                            accumulator += mapper(coord);
+                        });
+                    }
+                    return accumulator;
+                }
+                else {
+                    // Generic fallback - manual reduction
+                    std::vector<T> tile_results(tiles.size(), init);
+
+#pragma omp parallel for schedule(dynamic)
+                    for (std::size_t tile_idx = 0; tile_idx < tiles.size();
+                         ++tile_idx) {
+                        const auto& tile = tiles[tile_idx];
+                        iterate_domain_serial(tile.domain, [&](auto coord) {
+                            tile_results[tile_idx] =
+                                reducer(tile_results[tile_idx], mapper(coord));
+                        });
+                    }
+
+                    T final_result = init;
+                    for (const auto& tile_result : tile_results) {
+                        final_result = reducer(final_result, tile_result);
+                    }
+                    return final_result;
+                }
             });
         }
 
       private:
         template <std::uint64_t Dims, typename Func>
-        void iterate_domain(const domain_t<Dims>& domain, Func func) const
+        void
+        iterate_domain_serial(const domain_t<Dims>& domain, Func func) const
         {
             if constexpr (Dims == 1) {
-#pragma omp parallel for
                 for (auto ii = domain.start[0]; ii < domain.end[0]; ++ii) {
                     func(iarray<1>{ii});
                 }
             }
             else if constexpr (Dims == 2) {
-#pragma omp parallel for collapse(2)
                 for (auto ii = domain.start[0]; ii < domain.end[0]; ++ii) {
                     for (auto jj = domain.start[1]; jj < domain.end[1]; ++jj) {
                         func(iarray<2>{ii, jj});
@@ -437,7 +474,6 @@ namespace simbi::exec {
                 }
             }
             else if constexpr (Dims == 3) {
-#pragma omp parallel for collapse(3)
                 for (auto ii = domain.start[0]; ii < domain.end[0]; ++ii) {
                     for (auto jj = domain.start[1]; jj < domain.end[1]; ++jj) {
                         for (auto kk = domain.start[2]; kk < domain.end[2];
@@ -649,11 +685,8 @@ namespace simbi::exec {
             return gpu_executor_t{};
         }
         else {
-            // if (global::use_omp) {
-            //     return omp_executor();
-            // }
-            return par_cpu_executor_t{};
-            // return cpu_executor_t{};
+            return omp_executor_t{};
+            // return par_cpu_executor_t{};
         }
     }
 
