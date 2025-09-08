@@ -9,7 +9,6 @@
 
 #include <concepts>   // for std::same_as
 #include <cstddef>
-#include <iostream>
 
 namespace simbi::hydro {
     using namespace simbi::concepts;
@@ -197,6 +196,20 @@ namespace simbi::hydro {
     DEV constexpr auto labframe_density(const primitive_t& prim)
     {
         return prim.rho * lorentz_factor(prim);
+    }
+
+    template <is_hydro_primitive_c primitive_t>
+    DEV constexpr auto
+    specific_internal_energy(const primitive_t& prim, real gamma)
+    {
+        using eos_t = typename primitive_t::eos_t;
+        if constexpr (std::same_as<eos_t, isothermal_gas_eos_t>) {
+            return 0.0;
+        }
+        else {
+            const auto eos = eos_t{gamma};
+            return eos.specific_internal_energy(prim.rho, prim.pre);
+        }
     }
 
     template <is_hydro_primitive_c primitive_t>
