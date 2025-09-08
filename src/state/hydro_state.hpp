@@ -27,8 +27,7 @@ namespace simbi::state {
     using namespace body::factory;
 
     /**
-     * modern implementation of hydro_state_t using mesh abstractions
-     * for cell-face relationships and zero-copy with numpy arrays
+     * hydro_state_t --- the main simulation state structure
      */
     template <
         Regime R,
@@ -57,6 +56,7 @@ namespace simbi::state {
         // b_old is used only when we are using the
         // UCT CT algorithm from Mignone & DelZanna (2021)
         // https://www.sciencedirect.com/science/article/pii/S0021999120305222
+        // [TODO]: implement this fully
         vector_t<field_t<real, Dims>, Dims> b_old;
 
         // simulation metadata
@@ -144,8 +144,7 @@ namespace simbi::state {
         bool was_interrupted{false};
 
         /**
-         * create hydro_state from init conditions and numpy arrays with
-         * zero-copy
+         * create hydro_state from init conditions and numpy arrays
          */
         static hydro_state_t from_init(
             void* cons_data,
