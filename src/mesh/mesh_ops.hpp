@@ -543,6 +543,15 @@ namespace simbi::mesh {
     template <std::uint64_t Dims>
     DEV constexpr vector_t<real, Dims> from_cartesian(
         const vector_t<real, Dims>& vector,
+        const mesh_config_t<Dims, Geometry::SPHERICAL>&
+    )
+    {
+        return vecops::cartesian_to_spherical(vector);
+    }
+
+    template <std::uint64_t Dims>
+    DEV constexpr vector_t<real, Dims> from_cartesian(
+        const vector_t<real, Dims>& vector,
         const mesh_config_t<Dims, Geometry::CYLINDRICAL>&
     )
     {
