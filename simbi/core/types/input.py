@@ -1,9 +1,11 @@
+from dataclasses import dataclass
 from enum import Enum
 from typing import Any
-from dataclasses import dataclass
-from numpy.typing import NDArray
-from .bodies import Body
+
 import numpy as np
+from numpy.typing import NDArray
+
+from .bodies import Body
 
 Array = NDArray[np.floating]
 IArray = NDArray[np.signedinteger]
@@ -106,25 +108,37 @@ class MeshConfig:
     def x1v(self) -> Array:
         """Get x1 coordinates"""
         if self.spacing_types[0] == CellSpacing.LINEAR:
-            return np.linspace(self.bounds_min[0], self.bounds_max[0], self.shape[0])
+            return np.linspace(
+                self.bounds_min[0], self.bounds_max[0], self.shape[0]
+            )
         else:
-            return np.geomspace(self.bounds_min[0], self.bounds_max[0], self.shape[0])
+            return np.geomspace(
+                self.bounds_min[0], self.bounds_max[0], self.shape[0]
+            )
 
     @property
     def x2v(self) -> Array:
         """Get x2 coordinates"""
         if self.spacing_types[1] == CellSpacing.LINEAR:
-            return np.linspace(self.bounds_min[1], self.bounds_max[1], self.shape[1])
+            return np.linspace(
+                self.bounds_min[1], self.bounds_max[1], self.shape[1]
+            )
         else:
-            return np.geomspace(self.bounds_min[1], self.bounds_max[1], self.shape[1])
+            return np.geomspace(
+                self.bounds_min[1], self.bounds_max[1], self.shape[1]
+            )
 
     @property
     def x3v(self) -> Array:
         """Get x3 coordinates"""
         if self.spacing_types[2] == CellSpacing.LINEAR:
-            return np.linspace(self.bounds_min[2], self.bounds_max[2], self.shape[2])
+            return np.linspace(
+                self.bounds_min[2], self.bounds_max[2], self.shape[2]
+            )
         else:
-            return np.geomspace(self.bounds_min[2], self.bounds_max[2], self.shape[2])
+            return np.geomspace(
+                self.bounds_min[2], self.bounds_max[2], self.shape[2]
+            )
 
     def get(self, key: str, default: Any = None) -> Any:
         """Get coordinate array by key"""
