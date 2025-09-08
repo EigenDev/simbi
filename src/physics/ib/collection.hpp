@@ -252,13 +252,13 @@ namespace simbi::body {
         real radius2,
         real softening1,
         real softening2,
-        real accr_efficiency1 = 0.0,
-        real accr_efficiency2 = 0.0,
-        real accr_radius1     = 0.0,
-        real accr_radius2     = 0.0
+        real sink_rate1   = 0.0,
+        real sink_rate2   = 0.0,
+        real accr_radius1 = 0.0,
+        real accr_radius2 = 0.0
     )
     {
-        if (accr_efficiency1 > 0.0 && accr_efficiency2 > 0.0) {
+        if (sink_rate1 > 0.0 && sink_rate2 > 0.0) {
             // this is a binary black hole system
             return make_body_collection<Dims, MaxBodies>()
                 .add(
@@ -268,7 +268,7 @@ namespace simbi::body {
                         mass1,
                         radius1,
                         softening1,
-                        accr_efficiency1,
+                        sink_rate1,
                         accr_radius1
                     )
                 )
@@ -279,12 +279,12 @@ namespace simbi::body {
                         mass2,
                         radius2,
                         softening2,
-                        accr_efficiency2,
+                        sink_rate2,
                         accr_radius2
                     )
                 );
         }
-        else if (accr_efficiency1 <= 0.0 && accr_efficiency2 <= 0.0) {
+        else if (sink_rate1 <= 0.0 && sink_rate2 <= 0.0) {
             // this is a binary gravitational system
             return make_body_collection<Dims, MaxBodies>()
                 .add(
@@ -299,7 +299,7 @@ namespace simbi::body {
         else {
             // this is a mixed system with one gravitational and one
             // accretion body
-            if (accr_efficiency1 > 0.0) {
+            if (sink_rate1 > 0.0) {
                 return make_body_collection<Dims, MaxBodies>()
                     .add(
                         make_black_hole<Dims>(
@@ -308,7 +308,7 @@ namespace simbi::body {
                             mass1,
                             radius1,
                             softening1,
-                            accr_efficiency1,
+                            sink_rate1,
                             accr_radius1
                         )
                     )
@@ -330,7 +330,7 @@ namespace simbi::body {
                             mass2,
                             radius2,
                             softening2,
-                            accr_efficiency2,
+                            sink_rate2,
                             accr_radius2
                         )
                     );

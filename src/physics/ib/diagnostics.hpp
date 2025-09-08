@@ -29,9 +29,8 @@ namespace simbi::body {
         vector_t<std::atomic<real>, MaxBodies> torque_1{0};
         vector_t<std::atomic<real>, MaxBodies> torque_2{0};
         vector_t<std::atomic<real>, MaxBodies> torque_3{0};
-        vector_t<std::atomic<real>, MaxBodies> total_mass{0};
-        vector_t<std::atomic<real>, MaxBodies> accreted_mass{0};
-        vector_t<std::atomic<real>, MaxBodies> accretion_rate{0};
+        vector_t<std::atomic<real>, MaxBodies> mass{0};
+        vector_t<std::atomic<real>, MaxBodies> dmass{0};
 
         void accumulate_delta(const auto& body_delta)
         {
@@ -69,15 +68,27 @@ namespace simbi::body {
                 std::memory_order_relaxed
             );
 
-            total_mass[body_delta.idx].fetch_add(
+            mass[body_delta.idx].fetch_add(
                 body_delta.mass_delta,
                 std::memory_order_relaxed
             );
-
-            accretion_rate[body_delta.idx].fetch_add(
-                body_delta.accretion_rate_delta,
+            dmass[body_delta.idx].fetch_add(
+                body_delta.mass_delta,
                 std::memory_order_relaxed
             );
+        }
+
+        void flush()
+        {
+            for (std::uint64_t ii = 0; ii < MaxBodies; ++ii) {
+                force_1[ii].store(0, std::memory_order_relaxed);
+                force_2[ii].store(0, std::memory_order_relaxed);
+                force_3[ii].store(0, std::memory_order_relaxed);
+                torque_1[ii].store(0, std::memory_order_relaxed);
+                torque_2[ii].store(0, std::memory_order_relaxed);
+                torque_3[ii].store(0, std::memory_order_relaxed);
+                dmass[ii].store(0, std::memory_order_relaxed);
+            }
         }
     };
 }   // namespace simbi::body

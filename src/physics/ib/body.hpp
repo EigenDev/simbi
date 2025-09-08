@@ -89,7 +89,7 @@ namespace simbi::body {
 
     struct accretion_component_t {
         using tag_type = capabilities::accretion_tag;
-        real accretion_efficiency;
+        real sink_rate;
         real accretion_radius;
         real total_accreted_mass;
         real accretion_rate;
@@ -325,7 +325,7 @@ namespace simbi::body {
         real mass,
         real radius,
         real softening_length,
-        real accretion_efficiency,
+        real sink_rate,
         real accretion_radius,
         real accretion_rate      = 0.0,
         real total_accreted_mass = 0.0,
@@ -344,7 +344,7 @@ namespace simbi::body {
           std::make_tuple(
               grav_component_t{softening_length},
               accretion_component_t{
-                accretion_efficiency,
+                sink_rate,
                 accretion_radius,
                 total_accreted_mass,
                 accretion_rate
@@ -419,13 +419,6 @@ namespace simbi::body {
 
     // accretion properties
     template <has_accretion_capability_c Body>
-    DUAL constexpr auto accretion_efficiency(const Body& body) -> real
-    {
-        auto accr_cap = get_capabilities<capabilities::accretion_tag>(body);
-        return accr_cap.accretion_efficiency;
-    }
-
-    template <has_accretion_capability_c Body>
     DUAL constexpr auto accretion_radius(const Body& body) -> real
     {
         auto accr_cap = get_capabilities<capabilities::accretion_tag>(body);
@@ -447,13 +440,10 @@ namespace simbi::body {
     }
 
     template <has_accretion_capability_c Body>
-    DUAL constexpr auto sinking_rate(const Body& /*body*/) -> real
+    DUAL constexpr auto sink_rate(const Body& body) -> real
     {
-        // placeholder for sinking rate calculation
-        return 1e-3;
-        // auto accr_cap =
-        // get_capabilities<capabilities::accretion_tag>(body); return
-        // accr_cap.accretion_rate / body.mass;
+        auto accr_cap = get_capabilities<capabilities::accretion_tag>(body);
+        return accr_cap.sink_rate;
     }
 
     // rigid body properties

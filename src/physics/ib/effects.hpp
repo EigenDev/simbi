@@ -8,6 +8,7 @@
 #include "containers/vector.hpp"
 #include "mesh/mesh_ops.hpp"
 #include "physics/hydro/physics.hpp"
+#include "utility/enums.hpp"
 #include "utility/helpers.hpp"
 
 #include <cmath>
@@ -30,7 +31,7 @@ namespace simbi::body::expr {
         MeshConfig mesh_;
 
         template <typename Body, typename Coord>
-        constexpr auto operator()(const Body& body, Coord coord) const
+        constexpr DEV auto operator()(const Body& body, Coord coord) const
         {
             const auto cell_pos = mesh::to_cartesian(coord, mesh_);
             // gravitational physics
@@ -50,15 +51,13 @@ namespace simbi::body::expr {
             const auto dp_dt   = density * g_accel;
             const auto dE_dt   = vecops::dot(prim.vel, dp_dt);
 
-            // [TODO]: impl torque from gravity?
             return std::make_pair(
                 conserved_t{0.0, dp_dt, dE_dt},
                 body_delta_t<Dims>{
-                  .idx                  = body.idx,
-                  .force_delta          = -dp_dt * mesh::volume(coord, mesh_),
-                  .torque_delta         = {},
-                  .mass_delta           = 0.0,
-                  .accretion_rate_delta = 0.0
+                  .idx          = body.idx,
+                  .force_delta  = -dp_dt * mesh::volume(coord, mesh_),
+                  .torque_delta = {},
+                  .mass_delta   = 0.0
                 }
             );
         }
@@ -75,58 +74,81 @@ namespace simbi::body::expr {
         real gamma;
         real dt;
 
+        /**
+         * torque control described in Section 2.1 of Dittmann & Ryan (2021)
+         * https://ui.adsabs.harvard.edu/abs/2021ApJ...921...71D/abstract
+         * delta = 0 (torque-free)
+         * delta = 1 (standatd sink)
+         */
+        constexpr DEV auto apply_torque_control(
+            const vector_t<real, Dims>& r_hat,
+            const vector_t<real, Dims>& v_sink,
+            const vector_t<real, Dims>& v_parc,
+            real delta = 0.0
+        ) const
+        {
+            const auto gas_vel_cart = mesh::to_cartesian(v_parc, mesh_);
+            const auto v_rel_cart   = gas_vel_cart - v_sink;
+            const auto v_rad_comp   = vecops::dot(v_rel_cart, r_hat);
+            const auto v_rad_cart   = v_rad_comp * r_hat;
+            const auto v_angular    = v_rel_cart - v_rad_cart;
+            const auto v_star_cart  = v_rad_cart + delta * v_angular + v_sink;
+            return mesh::from_cartesian(v_star_cart, mesh_);
+        }
+
         template <typename Body, typename Coord>
-        constexpr auto operator()(const Body& body, Coord coord) const
+        constexpr DEV auto operator()(const Body& body, Coord coord) const
         {
             using namespace simbi::helpers;
-            const auto cell_pos = mesh::to_cartesian(coord, mesh_);
-            const auto r_vec    = cell_pos - body.position;
-            const auto r_mag    = r_vec.norm();
-
+            const auto cell_pos    = mesh::to_cartesian(coord, mesh_);
+            const auto r_vec       = cell_pos - body.position;
+            const auto r_mag       = r_vec.norm();
             const auto accr_radius = accretion_radius(body);
 
-            // skip if too far away
-            if (r_mag > 2.5 * accr_radius) {
-                return std::make_pair(
-                    conserved_t{},
-                    body_delta_t<Dims>{
-                      .idx                  = body.idx,
-                      .force_delta          = {},
-                      .torque_delta         = {},
-                      .mass_delta           = 0.0,
-                      .accretion_rate_delta = 0.0
-                    }
-                );
-            }
-
-            // accretion physics
-            const auto accr_eff            = accretion_efficiency(body);
-            const auto cell_size           = mesh::max_cell_width(coord, mesh_);
+            // physical timescales
+            const auto cell_size           = mesh::min_cell_width(coord, mesh_);
             const auto local_cs            = sound_speed(prim, gamma);
             const auto sound_crossing_time = cell_size / local_cs;
-            const auto stability_limit     = dt / sound_crossing_time;
-            const auto eps = my_min3(accr_eff, 0.5, stability_limit);
-            // for now, I will set the sink rate to the inverse of sound
-            // crossing time [TODO]: make this configurable
-            const auto sr = 1.0 / sound_crossing_time;
 
-            // calculate accreted quantities
-            const auto den_dot = eps * labframe_density(prim) * sr;
-            const auto mom_dot = eps * linear_momentum(prim, gamma) * sr;
-            const auto power   = eps * energy_density(prim, gamma) * sr;
+            // free-fall time to sink center (gravitational timescale)
+            const auto t_ff =
+                (r_mag > 1e-10)
+                    ? std::sqrt(r_mag * r_mag * r_mag / (2.0 * body.mass))
+                    : sound_crossing_time;   // fallback for r→0
 
-            const auto dv          = mesh::volume(coord, mesh_);
-            const auto force_delta = -mom_dot * dv;
-            auto torque_delta      = [&]() -> vector_t<real, 3> {
-                if constexpr (Dims == 3) {
+            // use the shorter of the two natural timescales
+            const auto t_natural = std::min(sound_crossing_time, t_ff);
+
+            // stability limits (maybe? TODO: revisit...)
+            const auto nat_rate = 1.0 / t_natural;   // [1/time] - physical rate
+            const auto sr_param = sink_rate(body);   // [1/time] - desired rate
+            const auto stability_rate = 1.0 / dt;    // [1/time] - max safe rate
+            const auto sr_base = my_min3(sr_param, nat_rate, stability_rate);
+
+            // torque-controled sink prescription from Dittmann & Ryan(2021)
+            // https://ui.adsabs.harvard.edu/abs/2021ApJ...921...71D/abstract
+            const auto r_norm         = r_mag / accr_radius;
+            const auto radial_profile = std::exp(-0.25 * std::pow(r_norm, 4));
+            const auto sr             = sr_base * radial_profile;
+
+            const auto v_star = apply_torque_control(
+                r_vec / r_mag,
+                body.velocity,
+                prim.vel,
+                0.0   // [TODO]: make configurable
+            );
+            const auto den_dot = labframe_density(prim) * sr;
+            const auto mom_dot = den_dot * v_star;
+            const auto ke_dot  = 0.5 * den_dot * vecops::dot(v_star, v_star);
+            const auto ie_dot = den_dot * specific_internal_energy(prim, gamma);
+            const auto nrg_dot = ke_dot + ie_dot;
+
+            // force and torque from momentum removal
+            const auto dv           = mesh::volume(coord, mesh_);
+            const auto force_delta  = -mom_dot * dv;
+            const auto torque_delta = [&]() -> vector_t<real, 3> {
+                if constexpr (Dims > 2) {
                     return vecops::cross(r_vec, force_delta);
-                }
-                else if constexpr (Dims == 2) {
-                    return vector_t<real, 3>{
-                      0,
-                      0,
-                      r_vec[0] * force_delta[1] - r_vec[1] * force_delta[0]
-                    };
                 }
                 else {
                     return vector_t<real, 3>{};
@@ -134,13 +156,12 @@ namespace simbi::body::expr {
             }();
 
             return std::make_pair(
-                conserved_t{-den_dot, -mom_dot, -power},
+                conserved_t{-den_dot, -mom_dot, -nrg_dot},
                 body_delta_t<Dims>{
-                  .idx                  = body.idx,
-                  .force_delta          = force_delta,
-                  .torque_delta         = std::move(torque_delta),
-                  .mass_delta           = den_dot * dv * dt,
-                  .accretion_rate_delta = den_dot * dv
+                  .idx          = body.idx,
+                  .force_delta  = std::move(force_delta),
+                  .torque_delta = std::move(torque_delta),
+                  .mass_delta   = den_dot * dv * dt
                 }
             );
         }
@@ -157,7 +178,7 @@ namespace simbi::body::expr {
         real gamma;
 
         template <typename Body, typename Coord>
-        constexpr auto operator()(const Body& body, Coord coord) const
+        constexpr DEV auto operator()(const Body& body, Coord coord) const
         {
             using namespace simbi::helpers;
             const auto cell_pos       = mesh::to_cartesian(coord, mesh_);
@@ -262,11 +283,10 @@ namespace simbi::body::expr {
             return std::make_pair(
                 conserved_t{0.0, dp_dt, dE_dt},
                 body_delta_t<Dims>{
-                  .idx                  = body.idx,
-                  .force_delta          = -dp_dt,
-                  .torque_delta         = std::move(torque),
-                  .mass_delta           = 0.0,
-                  .accretion_rate_delta = 0.0
+                  .idx          = body.idx,
+                  .force_delta  = -dp_dt,
+                  .torque_delta = std::move(torque),
+                  .mass_delta   = 0.0
                 }
             );
         }

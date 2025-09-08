@@ -62,20 +62,6 @@ namespace simbi::body {
         vector_t<real, Dims> force_delta{0};
         vector_t<real, 3> torque_delta{0};
         real mass_delta{0};
-        real accretion_rate_delta{0};
-
-        // combine two deltas affecting the same body
-        DUAL static body_delta_t
-        combine(const body_delta_t& a, const body_delta_t& b)
-        {
-            assert(a.idx == b.idx);
-            return {
-              a.idx,
-              a.force_delta + b.force_delta,
-              a.mass_delta + b.mass_delta,
-              b.accretion_rate_delta
-            };
-        }
 
         DEV body_delta_t& operator+=(const body_delta_t& other)
         {
@@ -83,7 +69,6 @@ namespace simbi::body {
             force_delta += other.force_delta;
             torque_delta += other.torque_delta;
             mass_delta += other.mass_delta;
-            accretion_rate_delta += other.accretion_rate_delta;
             return *this;
         }
     };
