@@ -101,7 +101,7 @@ namespace simbi::cfd {
         PrimField prims;
         MeshConfig mesh;
         real time;
-        real dt;
+        real gamma;
 
         DEV constexpr auto operator()(auto coord) const
         {
@@ -112,7 +112,7 @@ namespace simbi::cfd {
             const auto position  = mesh::centroid(coord, mesh);
             const auto primitive = prims[coord];
 
-            return gravity_source->apply(position, primitive, time, dt);
+            return gravity_source->apply(position, primitive, time, gamma);
         }
     };
 
@@ -129,7 +129,7 @@ namespace simbi::cfd {
             state.prim[mesh.domain],
             mesh,
             state.metadata.time,
-            state.metadata.dt
+            state.metadata.gamma
           },
           make_domain(mesh.domain.shape())
         };
@@ -143,7 +143,6 @@ namespace simbi::cfd {
         ConsField cons;
         MeshConfig mesh;
         real time;
-        real gamma;
 
         DEV constexpr auto operator()(auto coord) const
         {
@@ -154,7 +153,7 @@ namespace simbi::cfd {
             const auto position  = mesh::centroid(coord, mesh);
             const auto conserved = cons[coord];
 
-            return hydro_source->apply(position, conserved, time, gamma);
+            return hydro_source->apply(position, conserved, time);
         }
     };
 
@@ -170,8 +169,7 @@ namespace simbi::cfd {
             &state.sources.hydro_source,
             state.cons[mesh.domain],
             mesh,
-            state.metadata.time,
-            state.metadata.gamma
+            state.metadata.time
           },
           make_domain(mesh.domain.shape())
         };
@@ -244,11 +242,10 @@ namespace simbi::cfd {
             bodies->visit_all([&](const auto& body) {
                 using body_type = std::decay_t<decltype(body)>;
                 body_delta_t<Dims> delta{
-                  .idx                  = body.idx,
-                  .force_delta          = {},
-                  .torque_delta         = {},
-                  .mass_delta           = 0.0,
-                  .accretion_rate_delta = 0.0
+                  .idx          = body.idx,
+                  .force_delta  = {},
+                  .torque_delta = {},
+                  .mass_delta   = 0.0
                 };
 
                 if constexpr (has_gravitational_capability_c<body_type>) {
