@@ -59,6 +59,16 @@ namespace simbi::mesh {
         const mesh_config_t<Dims, G>& config
     );
 
+    template <std::uint64_t Dims, Geometry G, vector_like_c Vec>
+    DEV constexpr vector_t<real, Dims>
+    to_cartesian(const Vec& vec, const mesh_config_t<Dims, G>& config);
+
+    template <std::uint64_t Dims, Geometry G>
+    DEV constexpr vector_t<real, Dims> from_cartesian(
+        const vector_t<real, Dims>& vector,
+        const mesh_config_t<Dims, G>& config
+    );
+
     template <is_hydro_primitive_c prim_t, std::uint64_t Dims, Geometry G>
     DEV constexpr auto geometric_source_terms(
         const prim_t& prim,
@@ -437,6 +447,15 @@ namespace simbi::mesh {
         return cent;
     }
 
+    template <std::uint64_t Dims, vector_like_c Vec>
+    DEV constexpr vector_t<real, Dims> to_cartesian(
+        const Vec& vec,
+        const mesh_config_t<Dims, Geometry::CARTESIAN>&
+    )
+    {
+        return vec;
+    }
+
     template <std::uint64_t Dims>
     DEV constexpr vector_t<real, Dims> to_cartesian(
         const iarray<Dims>& coord,
@@ -446,6 +465,15 @@ namespace simbi::mesh {
         // need logical ordering instead of default array ordering
         const auto cent = centroid(coord, config).reverse();
         return vecops::cylindrical_to_cartesian(cent);
+    }
+
+    template <std::uint64_t Dims, vector_like_c Vec>
+    DEV constexpr vector_t<real, Dims> to_cartesian(
+        const Vec& vec,
+        const mesh_config_t<Dims, Geometry::CYLINDRICAL>&
+    )
+    {
+        return vecops::cylindrical_to_cartesian(vec);
     }
 
     template <std::uint64_t Dims>
@@ -458,6 +486,15 @@ namespace simbi::mesh {
         return vecops::cylindrical_to_cartesian(cent);
     }
 
+    template <std::uint64_t Dims, vector_like_c Vec>
+    DEV constexpr vector_t<real, Dims> to_cartesian(
+        const Vec& vec,
+        const mesh_config_t<Dims, Geometry::AXIS_CYLINDRICAL>&
+    )
+    {
+        return vecops::cylindrical_to_cartesian(vec);
+    }
+
     template <std::uint64_t Dims>
     DEV constexpr vector_t<real, Dims> to_cartesian(
         const iarray<Dims>& coord,
@@ -467,6 +504,15 @@ namespace simbi::mesh {
         return vecops::cylindrical_to_cartesian(centroid(coord, config));
     }
 
+    template <std::uint64_t Dims, vector_like_c Vec>
+    DEV constexpr vector_t<real, Dims> to_cartesian(
+        const Vec& vec,
+        const mesh_config_t<Dims, Geometry::PLANAR_CYLINDRICAL>&
+    )
+    {
+        return vecops::cylindrical_to_cartesian(vec);
+    }
+
     template <std::uint64_t Dims>
     DEV constexpr vector_t<real, Dims> to_cartesian(
         const iarray<Dims>& coord,
@@ -474,6 +520,51 @@ namespace simbi::mesh {
     )
     {
         return vecops::spherical_to_cartesian(centroid(coord, config));
+    }
+
+    template <std::uint64_t Dims, vector_like_c Vec>
+    DEV constexpr vector_t<real, Dims> to_cartesian(
+        const Vec& vec,
+        const mesh_config_t<Dims, Geometry::SPHERICAL>&
+    )
+    {
+        return vecops::spherical_to_cartesian(vec);
+    }
+
+    template <std::uint64_t Dims>
+    DEV constexpr vector_t<real, Dims> from_cartesian(
+        const vector_t<real, Dims>& vector,
+        const mesh_config_t<Dims, Geometry::CARTESIAN>&
+    )
+    {
+        return vector;
+    }
+
+    template <std::uint64_t Dims>
+    DEV constexpr vector_t<real, Dims> from_cartesian(
+        const vector_t<real, Dims>& vector,
+        const mesh_config_t<Dims, Geometry::CYLINDRICAL>&
+    )
+    {
+        return vecops::cartesian_to_cylindrical(vector);
+    }
+
+    template <std::uint64_t Dims>
+    DEV constexpr vector_t<real, Dims> from_cartesian(
+        const vector_t<real, Dims>& vector,
+        const mesh_config_t<Dims, Geometry::AXIS_CYLINDRICAL>&
+    )
+    {
+        return vecops::cartesian_to_cylindrical(vector);
+    }
+
+    template <std::uint64_t Dims>
+    DEV constexpr vector_t<real, Dims> from_cartesian(
+        const vector_t<real, Dims>& vector,
+        const mesh_config_t<Dims, Geometry::PLANAR_CYLINDRICAL>&
+    )
+    {
+        return vecops::cartesian_to_cylindrical(vector);
     }
 
     // =-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=
