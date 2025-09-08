@@ -7,10 +7,10 @@
 #include <cstdlib>
 #include <functional>
 #include <string>
+#include <vector>
 
 namespace simbi::mem {
 
-    // simple device identifier
     struct device_t {
         std::int64_t index;   // global device index
         bool is_gpu;          // true for gpu, false for cpu
@@ -22,7 +22,6 @@ namespace simbi::mem {
 
         // helper factory functions
         static device_t cpu() { return {0, false, 0}; }
-
         static device_t gpu(int id) { return {id + 1, true, id}; }
     };
 
@@ -31,21 +30,17 @@ namespace simbi::mem {
         thread_local device_t current_dev = device_t::cpu();
     }
 
-    // get current device
     inline device_t current_device() { return current_dev; }
 
-    // set current device
     inline void set_current_device(device_t dev)
     {
         current_dev = dev;
 
-        // update hardware state if it's a GPU
         if (dev.is_gpu) {
             gpu::api::set_device(dev.device_id);
         }
     }
 
-    // get count of available devices
     inline std::int64_t device_count()
     {
         std::int64_t count = 0;
@@ -74,7 +69,7 @@ namespace simbi::mem {
         devices.push_back(device_t::cpu());
 
         std::int64_t gpu_count = device_count() - 1;
-        for (int ii = 0; ii < gpu_count; ii++) {
+        for (std::int64_t ii = 0; ii < gpu_count; ii++) {
             devices.push_back(device_t::gpu(ii));
         }
 
