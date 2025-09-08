@@ -5,6 +5,7 @@
 #include "config.hpp"
 #include "containers/vector.hpp"
 #include "domain/domain.hpp"
+#include "io/exceptions.hpp"
 #include "memory/smart_ptr.hpp"
 #include "traits/traits.hpp"
 
@@ -226,7 +227,7 @@ namespace simbi::mem {
                 .wait();
 
         if (nerrors > 0) {
-            throw std::runtime_error("Computation failed during commit");
+            throw exception::SimulationFailureException();
         }
     }
 
