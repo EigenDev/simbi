@@ -50,13 +50,9 @@ namespace simbi::adapter {
 
       public:
         // Memory operations
-        void copy_host_to_device(
-            void* /*to*/,
-            const void* /*from*/,
-            std::size_t /*bytes*/
-        )
+        void copy_host_to_device(void* to, const void* from, std::size_t bytes)
         {
-            // no-op
+            std::memcpy(to, from, bytes);
         }
 
         void copy_device_to_host(void* to, const void* from, std::size_t bytes)
