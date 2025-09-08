@@ -4,6 +4,7 @@
 #include "compute/field.hpp"       // for field_t<T, Dims>
 #include "config.hpp"              // for real, DEV, etc
 #include "containers/vector.hpp"   // for simbi::vector_t
+#include "functional/fp.hpp"
 #include "io/tabulate/table.hpp"   // for tabulate::table_t
 #include "mesh/mesh_config.hpp"    // for mesh::mesh_config_t
 #include "physics/ib/body.hpp"   // for softening_length, accretion_efficienct, etc
@@ -15,6 +16,7 @@
 
 #include <H5Cpp.h>         // for HDF5 C++ API
 #include <concepts>        // for concepts
+#include <cstddef>         // for std::size_t
 #include <cstdint>         // for std::uint64_t
 #include <functional>      // for std::function
 #include <optional>        // for std::optional
@@ -1052,13 +1054,13 @@ namespace simbi::io {
             }
 
             if constexpr (has_accretion_capability_c<Body>) {
-                auto accr_eff_attr = group.createAttribute(
-                    "accretion_efficiency",
+                auto sink_rate_attr = group.createAttribute(
+                    "sink_rate",
                     H5::PredType::NATIVE_DOUBLE,
                     scalar_space
                 );
-                const auto eff = accretion_efficiency(body);
-                accr_eff_attr.write(H5::PredType::NATIVE_DOUBLE, &eff);
+                const auto eff = sink_rate(body);
+                sink_rate_attr.write(H5::PredType::NATIVE_DOUBLE, &eff);
 
                 auto accr_rad_attr = group.createAttribute(
                     "accretion_radius",
@@ -1152,12 +1154,17 @@ namespace simbi::io {
 
         static result_t<serialization_context_t> serialize(
             const body::body_diagnostics_t<Dims, MaxBodies>& diagnostics,
-            serialization_context_t ctx
+            serialization_context_t ctx,
+            real delta_time
         )
         {
             const auto dataset_name = "diagnostics/body_diagnostics";
 
             try {
+                // static auto last_mass =
+                //     diagnostics.mass |
+                //     fp::for_each([](const auto& v) { return v.load(); }) |
+                //     fp::collect<decltype>;
                 auto diag_group = ctx.file.createGroup("diagnostics");
                 auto body_diag_group =
                     diag_group.createGroup("body_diagnostics");
@@ -1203,19 +1210,27 @@ namespace simbi::io {
                 // serialize mass diagnostics
                 serialize_atomic_vector(
                     body_diag_group,
-                    "total_mass",
-                    diagnostics.total_mass
+                    "cumulative_mass_delta",
+                    diagnostics.mass
                 );
-                serialize_atomic_vector(
-                    body_diag_group,
-                    "accreted_mass",
-                    diagnostics.accreted_mass
-                );
-                serialize_atomic_vector(
-                    body_diag_group,
+
+                vector_t<real, MaxBodies> accr_rates{};
+                for (std::size_t ii = 0; ii < MaxBodies; ++ii) {
+                    const auto delta_mass =
+                        diagnostics.dmass[ii].load(std::memory_order_acquire);
+                    accr_rates[ii] =
+                        (delta_time > 0) ? delta_mass / delta_time : 0.0;
+                }
+
+                // serialize accretion rates
+                hsize_t dims[] = {MaxBodies};
+                auto dataspace = H5::DataSpace(1, dims);
+                auto dataset   = body_diag_group.createDataSet(
                     "accretion_rate",
-                    diagnostics.accretion_rate
+                    H5::PredType::NATIVE_DOUBLE,
+                    dataspace
                 );
+                dataset.write(accr_rates.data(), H5::PredType::NATIVE_DOUBLE);
             }
             catch (const H5::Exception& e) {
                 return result_t<serialization_context_t>::error(
@@ -1301,27 +1316,32 @@ namespace simbi::io {
         };
     }
 
-    auto serialize_body_diagnostics(const auto& diagnostics)
+    auto serialize_body_diagnostics(const auto& diagnostics, real time_since)
     {
-        return [&diagnostics](
+        return [&diagnostics, time_since](
                    serialization_context_t ctx
                ) -> result_t<serialization_context_t> {
             using diagnostics_type = std::decay_t<decltype(diagnostics)>;
             return serialization_trait_t<diagnostics_type>::serialize(
                 diagnostics,
-                ctx
+                ctx,
+                time_since
             );
         };
     }
 
     // convenience function for complete body system serialization
-    auto serialize_body_system(const auto& collection, const auto& diagnostics)
+    auto serialize_body_system(
+        const auto& collection,
+        const auto& diagnostics,
+        real time_since
+    )
     {
-        return [collection, &diagnostics](
+        return [collection, &diagnostics, time_since](
                    serialization_context_t ctx
                ) -> result_t<serialization_context_t> {
             return serialize_body_collection(collection)(ctx).and_then(
-                serialize_body_diagnostics(diagnostics)
+                serialize_body_diagnostics(diagnostics, time_since)
             );
         };
     }
@@ -1439,27 +1459,31 @@ namespace simbi::io {
 
     // main serialization function for hydro_state_t
     template <hydro_state_serializable_c HydroState, typename MeshConfig>
-    result_t<std::string> serialize_hydro_state(
+    void serialize_hydro_state(
         HydroState& state,
         const MeshConfig& mesh,
         const body::body_diagnostics_t<HydroState::dimensions>& bd,
         Table& table
-
     )
     {
-        const auto filename = compute_filename(state);
+        auto& meta                  = state.metadata;
+        static auto last_chkpt_time = meta.checkpoint_time;
+        const auto filename         = compute_filename(state);
         table.post_info("[Writing checkpoint to path: " + filename + "]");
         table.refresh();
-        state.metadata.update_checkpoint_time();
+        const auto delta_time = meta.checkpoint_time - last_chkpt_time;
 
         //  monadic pipeline
-        return create_file(filename)
+        create_file(filename)
             .and_then(serialize_field_components(state.prim, "primitives"))
             .and_then(serialize_magnetic_fields(state))
             .and_then(serialize_attributes(mesh, "mesh_config"))
-            .and_then(serialize_attributes(state.metadata))
-            .and_then(serialize_body_system(state.bodies, bd))
+            .and_then(serialize_attributes(meta))
+            .and_then(serialize_body_system(state.bodies, bd, delta_time))
             .and_then(close_file());
+
+        last_chkpt_time = meta.checkpoint_time;
+        meta.update_checkpoint_time();
     }
 
     // operator overloading for pipeline style (as backup)
