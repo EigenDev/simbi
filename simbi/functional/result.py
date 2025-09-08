@@ -1,5 +1,5 @@
-from typing import Generic, TypeVar, Callable, Self
 from dataclasses import dataclass
+from typing import Callable, Generic, Self, TypeVar
 
 T = TypeVar("T")
 U = TypeVar("U")
@@ -39,3 +39,10 @@ class Result(Generic[T]):
     @property
     def is_ok(self) -> bool:
         return self.error is None
+
+    def unwrap(self) -> T:
+        if self.error is not None:
+            raise self.error
+        if self.value is None:
+            raise ValueError("No value present")
+        return self.value
