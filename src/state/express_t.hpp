@@ -34,8 +34,7 @@ namespace simbi::state {
         DEV auto apply(
             const vector_t<real, Dims> coords,
             const conserved_t& cons,
-            real time = 0.0,
-            real dt   = 0.0
+            real time = 0.0
         ) const
         {
             if (!enabled) {
@@ -56,7 +55,6 @@ namespace simbi::state {
                 local_coords[1],
                 local_coords[2],
                 time,
-                dt,
                 cons.data(),
                 result.data()
             );
@@ -93,7 +91,6 @@ namespace simbi::state {
                 local_coords[1],
                 local_coords[2],
                 time,
-                0.0,   // dt not used for gravity sources
                 nullptr,
                 local_vector.data()
             );

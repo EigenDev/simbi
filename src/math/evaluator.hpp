@@ -16,7 +16,6 @@ namespace simbi::expression {
         real x2                = 0.0,
         real x3                = 0.0,
         real t                 = 0.0,
-        real dt                = 0.0,
         const real* parameters = nullptr
     );
 
@@ -28,7 +27,6 @@ namespace simbi::expression {
         real x2                = 0.0,
         real x3                = 0.0,
         real t                 = 0.0,
-        real dt                = 0.0,
         const real* parameters = nullptr
     );
 
@@ -40,7 +38,6 @@ namespace simbi::expression {
         const real* x2_values,
         const real* x3_values,
         real t,
-        real dt,
         const real* parameters,
         real* results,
         std::int64_t count
@@ -56,8 +53,7 @@ namespace simbi::expression {
         real x3,
         real t,
         const real* parameters,
-        real* results,
-        real dt = 0.0
+        real* results
     );
 
     DEV void evaluate_linear_expr(
@@ -70,7 +66,6 @@ namespace simbi::expression {
         real x2,
         real x3,
         real t,
-        real dt,
         const real* parameters,
         real* outputs
     );

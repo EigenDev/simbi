@@ -24,7 +24,6 @@ namespace simbi::expression {
           {"VARIABLE_X2", ExprOp::VARIABLE_X2},
           {"VARIABLE_X3", ExprOp::VARIABLE_X3},
           {"VARIABLE_T", ExprOp::VARIABLE_T},
-          {"VARIABLE_DT", ExprOp::VARIABLE_DT},
           {"PARAMETER", ExprOp::PARAMETER},
           {"ADD", ExprOp::ADD},
           {"SUBTRACT", ExprOp::SUBTRACT},

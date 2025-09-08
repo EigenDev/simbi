@@ -22,7 +22,6 @@ namespace simbi::expression {
             case ExprOp::VARIABLE_X2: return 1;
             case ExprOp::VARIABLE_X3: return 2;
             case ExprOp::VARIABLE_T: return 3;
-            case ExprOp::VARIABLE_DT: return 4;
             default: return -1;   // invalid operation
         }
     }
@@ -45,7 +44,6 @@ namespace simbi::expression {
         node_to_reg[-2] = 1;   // x2
         node_to_reg[-3] = 2;   // x3
         node_to_reg[-4] = 3;   // t
-        node_to_reg[-5] = 4;   // dt
 
         // start regular registers after input registers
         std::int64_t next_reg = 5;
@@ -74,7 +72,6 @@ namespace simbi::expression {
                 case ExprOp::VARIABLE_X2:
                 case ExprOp::VARIABLE_X3:
                 case ExprOp::VARIABLE_T:
-                case ExprOp::VARIABLE_DT:
                     // map variable to its input register
                     instr.register_operands.operand1 = op2reg(node.op);
                     break;
@@ -146,8 +143,8 @@ namespace simbi::expression {
         std::unordered_set<std::int64_t> needed_nodes;
         // first identify all nodes needed for evaluation
         std::stack<std::int64_t> to_process;
-        for (size_t i = 0; i < output_indices.size(); i++) {
-            to_process.push(output_indices[i]);
+        for (size_t ii = 0; ii < output_indices.size(); ii++) {
+            to_process.push(output_indices[ii]);
         }
 
         while (!to_process.empty()) {
@@ -175,7 +172,6 @@ namespace simbi::expression {
                 case ExprOp::VARIABLE_X2:
                 case ExprOp::VARIABLE_X3:
                 case ExprOp::VARIABLE_T:
-                case ExprOp::VARIABLE_DT:
                 case ExprOp::PARAMETER:
                     // no dependencies
                     break;
@@ -227,7 +223,6 @@ namespace simbi::expression {
                 case ExprOp::VARIABLE_X2:
                 case ExprOp::VARIABLE_X3:
                 case ExprOp::VARIABLE_T:
-                case ExprOp::VARIABLE_DT:
                 case ExprOp::PARAMETER:
                     // No dependencies
                     break;
