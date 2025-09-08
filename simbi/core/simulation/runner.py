@@ -7,16 +7,16 @@ This module provides components for running simulations with the Pybind11 backen
 import importlib
 import os
 from dataclasses import dataclass
-from typing import Sequence, Optional, cast
 from types import ModuleType
+from typing import Optional, Sequence, cast
 
 from simbi.functional.helpers import print_progress
 from simbi.io.summary import print_simulation_parameters
 
+from ...io.logging import logger
 from ..config.base_config import SimbiBaseConfig
 from ..serialization.executor import SimulationExecutor
 from .state_init import SimulationState, load_or_initialize_state
-from ...io.logging import logger
 
 
 @dataclass
@@ -86,11 +86,15 @@ class SimulationRunner:
         # Import the appropriate module
         lib_mode = "cpu" if compute_mode in ["cpu", "omp"] else "gpu"
         try:
-            simulation_module = importlib.import_module(f"simbi.libs.{lib_mode}_ext")
+            simulation_module = importlib.import_module(
+                f"simbi.libs.{lib_mode}_ext"
+            )
             return simulation_module, runtime_block_dims
         except ImportError as e:
             logger.info(f"Error loading simulation backend: {e}")
-            logger.info("Running in demo mode - no actual simulation will be executed")
+            logger.info(
+                "Running in demo mode - no actual simulation will be executed"
+            )
             return None, None
 
     def run(self, compute_mode: str = "cpu") -> None:
@@ -135,7 +139,9 @@ class SimulationRunner:
             a = self.config.scale_factor or (lambda t: 1.0)
             adot = self.config.scale_factor_derivative or (lambda t: 0.0)
             if self.state.staggered_bfields:
-                staggered_fields = [b.flat for b in self.state.staggered_bfields[::-1]]
+                staggered_fields = [
+                    b.flat for b in self.state.staggered_bfields[::-1]
+                ]
             else:
                 staggered_fields = []
 
