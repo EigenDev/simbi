@@ -212,10 +212,15 @@ namespace simbi {
                             body_diagnostics_,
                             table_
                         );
+                        // flush the body diagnostics at the end of the step
+                        diagnostics_reader_t<State::dimensions>::with_env(
+                            [](auto& diag) { diag.flush(); }
+                        );
                     }
 
                     iteration_++;
-                    // listen to kill signals
+
+                    // listen for kill signals
                     helpers::catch_signals();
                 }
                 catch (exception::InterruptException& e) {
