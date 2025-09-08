@@ -21,8 +21,7 @@ namespace simbi::body::factory {
         // check if config has accretion properties
         bool has_accretion_config(const config_dict_t& props)
         {
-            return config::try_read<real>(props, "accretion_efficiency")
-                       .has_value() ||
+            return config::try_read<real>(props, "sink_rate").has_value() ||
                    config::try_read<bool>(props, "is_an_accretor")
                        .unwrap_or(false);
         }

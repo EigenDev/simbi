@@ -120,8 +120,7 @@ namespace simbi::body::factory {
 
         if (body_type == "black_hole") {
             auto softening = try_read<real>(props, "softening_length").value();
-            auto accr_eff =
-                try_read<real>(props, "accretion_efficiency").value();
+            auto sink_rate = try_read<real>(props, "sink_rate").value();
             auto accr_radius =
                 try_read<real>(props, "accretion_radius").unwrap_or(radius);
             auto total_accreted =
@@ -134,7 +133,7 @@ namespace simbi::body::factory {
                 mass,
                 radius,
                 softening,
-                accr_eff,
+                sink_rate,
                 accr_radius,
                 real{0},
                 total_accreted,
