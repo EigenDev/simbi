@@ -4,37 +4,35 @@ Core type definitions for simbi.
 This module provides type definitions and constants used throughout the framework.
 """
 
+from .bodies import (
+    AccretionProperties,
+    BaseBody,
+    Body,
+    BodyCapability,
+    BodyData,
+    BodyDiagnostics,
+    DeformableProperties,
+    ElasticProperties,
+    GravitationalProperties,
+    RigidProperties,
+)
 from .input import (
-    Solver,
-    CellSpacing,
-    TimeStepping,
-    Reconstruction,
-    ProcessedData,
-    Metadata,
-    FieldData,
-    RawHDF5,
-    MeshConfig,
     Array,
+    CellSpacing,
+    FieldData,
     IArray,
+    MeshConfig,
+    Metadata,
+    ProcessedData,
+    RawHDF5,
+    Reconstruction,
+    Solver,
+    TimeStepping,
     UArray,
 )
-
-from .bodies import (
-    BodyCapability,
-    Body,
-    GravitationalBody,
-    AccretionBody,
-    RigidBody,
-    DeformableBody,
-    ElasticBody,
-    BodyDiagnostics,
-    BodyData,
-    BaseBody,
-)
-
 from .typing import (
-    InitialStateType,
     GasStateGenerator,
+    InitialStateType,
 )
 
 __all__ = [
@@ -53,11 +51,11 @@ __all__ = [
     "Array",
     "BodyCapability",
     "Body",
-    "GravitationalBody",
-    "AccretionBody",
-    "RigidBody",
-    "DeformableBody",
-    "ElasticBody",
+    "GravitationalProperties",
+    "AccretionProperties",
+    "RigidProperties",
+    "ElasticProperties",
+    "DeformableProperties",
     "BodyData",
     "BodyDiagnostics",
     "BaseBody",

@@ -1,8 +1,9 @@
-from typing import ClassVar, Optional, Sequence, Literal, Any
-from dataclasses import dataclass, field, asdict
+from dataclasses import asdict, dataclass, field
 from enum import IntFlag
-from numpy.typing import NDArray
+from typing import Any, ClassVar, Literal, Optional, Sequence
+
 import numpy as np
+from numpy.typing import NDArray
 
 Array = NDArray[np.floating]
 
@@ -16,7 +17,9 @@ class BodyCapability(IntFlag):
     RIGID = 1 << 4
 
 
-def has_capability(body_capability: BodyCapability, capability: BodyCapability) -> bool:
+def has_capability(
+    body_capability: BodyCapability, capability: BodyCapability
+) -> bool:
     return bool(body_capability & capability)
 
 
@@ -39,7 +42,7 @@ class BinaryComponentConfig:
     is_an_accretor: bool
     softening_length: float
     two_way_coupling: bool
-    accretion_efficiency: float
+    sink_rate: float
     accretion_radius: float
     position: Sequence[float] = field(default_factory=lambda: (0.0, 0.0, 0.0))
     velocity: Sequence[float] = field(default_factory=lambda: (0.0, 0.0, 0.0))
@@ -88,9 +91,39 @@ class BodyData:
 class BodyDiagnostics:
     force_components: dict[str, Array]  # force_1, force_2, force_3
     torque_components: dict[str, Array]  # torque_1, torque_2, torque_3
-    total_mass: Array
-    accreted_mass: Array
+    cumulative_mass_delta: Array
     accretion_rate: Array
+
+
+@dataclass(frozen=True)
+class GravitationalProperties:
+    softening_length: float
+
+
+@dataclass(frozen=True)
+class AccretionProperties:
+    sink_rate: float
+    accretion_radius: float
+    total_accreted_mass: float
+    accretion_rate: float
+
+
+@dataclass(frozen=True)
+class RigidProperties:
+    inertia: float
+    apply_no_slip: bool
+
+
+@dataclass(frozen=True)
+class DeformableProperties:
+    yield_stress: float
+    plastic_strain: float
+
+
+@dataclass(frozen=True)
+class ElasticProperties:
+    elastic_modulus: float
+    poisson_ratio: float
 
 
 @dataclass(frozen=True)
@@ -109,38 +142,13 @@ class BaseBody(Unionable):
 
 
 @dataclass(frozen=True)
-class GravitationalBody(BaseBody):
-    softening_length: float
+class Body(BaseBody):
+    gravitational: Optional[GravitationalProperties] = None
+    accretion: Optional[AccretionProperties] = None
+    rigid: Optional[RigidProperties] = None
+    deformable: Optional[DeformableProperties] = None
+    elastic: Optional[ElasticProperties] = None
 
-
-@dataclass(frozen=True)
-class AccretionBody(BaseBody):
-    accretion_efficiency: float
-    accretion_radius: float
-    total_accreted_mass: float
-    accretion_rate: float
-
-
-@dataclass(frozen=True)
-class RigidBody(BaseBody):
-    inertia: float
-    apply_no_slip: bool
-
-
-@dataclass(frozen=True)
-class DeformableBody(BaseBody):
-    yield_stress: float
-    plastic_strain: float
-
-
-@dataclass(frozen=True)
-class ElasticBody(BaseBody):
-    elastic_modulus: float
-    poisson_ratio: float
-
-
-# Union type for all body types
-Body = GravitationalBody | AccretionBody | RigidBody | DeformableBody | ElasticBody
 
 __all__ = [
     "ImmersedBodyConfig",
