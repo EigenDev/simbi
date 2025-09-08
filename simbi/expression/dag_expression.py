@@ -1,6 +1,7 @@
 from __future__ import annotations
-from typing import Any, Callable, Optional, Set, TypeVar, Union
+
 import math
+from typing import Any, Callable, Optional, Set, TypeVar, Union
 
 # type defs for clarity
 NodeId = int
@@ -108,14 +109,17 @@ class Expr:
     def __add__(self, other: Union[Expr, float, int]) -> Expr:
         other_expr = self._ensure_expr(other)
         return Expr(
-            self._graph, self._graph.add_node("add", self._node_id, other_expr._node_id)
+            self._graph,
+            self._graph.add_node("add", self._node_id, other_expr._node_id),
         )
 
     def __sub__(self, other: Union[Expr, float, int]) -> Expr:
         other_expr = self._ensure_expr(other)
         return Expr(
             self._graph,
-            self._graph.add_node("subtract", self._node_id, other_expr._node_id),
+            self._graph.add_node(
+                "subtract", self._node_id, other_expr._node_id
+            ),
         )
 
     def __radd__(self, other: Union[Expr, float, int]) -> Expr:
@@ -129,21 +133,27 @@ class Expr:
         other_expr = self._ensure_expr(other)
         return Expr(
             self._graph,
-            self._graph.add_node("subtract", other_expr._node_id, self._node_id),
+            self._graph.add_node(
+                "subtract", other_expr._node_id, self._node_id
+            ),
         )
 
     def __mul__(self, other: Union[Expr, float, int]) -> Expr:
         other_expr = self._ensure_expr(other)
         return Expr(
             self._graph,
-            self._graph.add_node("multiply", self._node_id, other_expr._node_id),
+            self._graph.add_node(
+                "multiply", self._node_id, other_expr._node_id
+            ),
         )
 
     def __rmul__(self, other: Union[Expr, float, int]) -> Expr:
         other_expr = self._ensure_expr(other)
         return Expr(
             self._graph,
-            self._graph.add_node("multiply", other_expr._node_id, self._node_id),
+            self._graph.add_node(
+                "multiply", other_expr._node_id, self._node_id
+            ),
         )
 
     def __truediv__(self, other: Union[Expr, float, int]) -> Expr:
@@ -181,31 +191,36 @@ class Expr:
     def __lt__(self, other: Union[Expr, float, int]) -> Expr:
         other_expr = self._ensure_expr(other)
         return Expr(
-            self._graph, self._graph.add_node("lt", self._node_id, other_expr._node_id)
+            self._graph,
+            self._graph.add_node("lt", self._node_id, other_expr._node_id),
         )
 
     def __gt__(self, other: Union[Expr, float, int]) -> Expr:
         other_expr = self._ensure_expr(other)
         return Expr(
-            self._graph, self._graph.add_node("gt", self._node_id, other_expr._node_id)
+            self._graph,
+            self._graph.add_node("gt", self._node_id, other_expr._node_id),
         )
 
     def __le__(self, other: Union[Expr, float, int]) -> Expr:
         other_expr = self._ensure_expr(other)
         return Expr(
-            self._graph, self._graph.add_node("le", self._node_id, other_expr._node_id)
+            self._graph,
+            self._graph.add_node("le", self._node_id, other_expr._node_id),
         )
 
     def __ge__(self, other: Union[Expr, float, int]) -> Expr:
         other_expr = self._ensure_expr(other)
         return Expr(
-            self._graph, self._graph.add_node("ge", self._node_id, other_expr._node_id)
+            self._graph,
+            self._graph.add_node("ge", self._node_id, other_expr._node_id),
         )
 
     def __mod__(self, other: Union[Expr, float, int]) -> Expr:
         other_expr = self._ensure_expr(other)
         return Expr(
-            self._graph, self._graph.add_node("mod", self._node_id, other_expr._node_id)
+            self._graph,
+            self._graph.add_node("mod", self._node_id, other_expr._node_id),
         )
 
     def _ensure_expr(self, value: Union[Expr, float, int]) -> Expr:
@@ -223,7 +238,8 @@ class Expr:
 
     # pattern matching
     def match(
-        self, patterns: dict[str, Callable[[Expr, tuple[NodeId, ...], NodeAttrs], T]]
+        self,
+        patterns: dict[str, Callable[[Expr, tuple[NodeId, ...], NodeAttrs], T]],
     ) -> Optional[T]:
         """Pattern match on node type."""
         node_def = self._graph.get_node(self._node_id)
@@ -310,7 +326,8 @@ def atan(expr: Expr) -> Expr:
 
 def atan2(expr1: Expr, expr2: Expr) -> Expr:
     return Expr(
-        expr1._graph, expr1._graph.add_node("atan2", expr1._node_id, expr2._node_id)
+        expr1._graph,
+        expr1._graph.add_node("atan2", expr1._node_id, expr2._node_id),
     )
 
 
@@ -346,14 +363,16 @@ def exp(expr: Expr) -> Expr:
 def max_expr(expr1: Expr, expr2: Expr) -> Expr:
     """Maximum of two expressions."""
     return Expr(
-        expr1._graph, expr1._graph.add_node("max", expr1._node_id, expr2._node_id)
+        expr1._graph,
+        expr1._graph.add_node("max", expr1._node_id, expr2._node_id),
     )
 
 
 def min_expr(expr1: Expr, expr2: Expr) -> Expr:
     """Minimum of two expressions."""
     return Expr(
-        expr1._graph, expr1._graph.add_node("min", expr1._node_id, expr2._node_id)
+        expr1._graph,
+        expr1._graph.add_node("min", expr1._node_id, expr2._node_id),
     )
 
 
@@ -385,14 +404,18 @@ def bitwise_not(expr: Expr) -> Expr:
 def bitwise_left_shift(expr1: Expr, expr2: Expr) -> Expr:
     return Expr(
         expr1._graph,
-        expr1._graph.add_node("bitwise_left_shift", expr1._node_id, expr2._node_id),
+        expr1._graph.add_node(
+            "bitwise_left_shift", expr1._node_id, expr2._node_id
+        ),
     )
 
 
 def bitwise_right_shift(expr1: Expr, expr2: Expr) -> Expr:
     return Expr(
         expr1._graph,
-        expr1._graph.add_node("bitwise_right_shift", expr1._node_id, expr2._node_id),
+        expr1._graph.add_node(
+            "bitwise_right_shift", expr1._node_id, expr2._node_id
+        ),
     )
 
 
@@ -405,7 +428,10 @@ def if_then_else(condition: Expr, true_case: Expr, false_case: Expr) -> Expr:
     return Expr(
         condition._graph,
         condition._graph.add_node(
-            "if_then_else", condition._node_id, true_case._node_id, false_case._node_id
+            "if_then_else",
+            condition._node_id,
+            true_case._node_id,
+            false_case._node_id,
         ),
     )
 
@@ -519,7 +545,9 @@ class CompiledExpr:
             if node_id in visited:
                 return
             if node_id in temp_visited:
-                raise ValueError("Cyclic dependency detected in expression graph")
+                raise ValueError(
+                    "Cyclic dependency detected in expression graph"
+                )
 
             temp_visited.add(node_id)
 
@@ -572,13 +600,21 @@ class CompiledExpr:
                 else:
                     values[node_id] = values[input_ids[0]] / denominator
             elif op == "le":
-                values[node_id] = float(values[input_ids[0]] <= values[input_ids[1]])
+                values[node_id] = float(
+                    values[input_ids[0]] <= values[input_ids[1]]
+                )
             elif op == "lt":
-                values[node_id] = float(values[input_ids[0]] < values[input_ids[1]])
+                values[node_id] = float(
+                    values[input_ids[0]] < values[input_ids[1]]
+                )
             elif op == "ge":
-                values[node_id] = float(values[input_ids[0]] >= values[input_ids[1]])
+                values[node_id] = float(
+                    values[input_ids[0]] >= values[input_ids[1]]
+                )
             elif op == "gt":
-                values[node_id] = float(values[input_ids[0]] > values[input_ids[1]])
+                values[node_id] = float(
+                    values[input_ids[0]] > values[input_ids[1]]
+                )
             elif op == "abs":
                 values[node_id] = abs(values[input_ids[0]])
             # math functions
@@ -625,29 +661,45 @@ class CompiledExpr:
             elif op == "atanh":
                 values[node_id] = math.atanh(values[input_ids[0]])
             elif op == "atan2":
-                values[node_id] = math.atan2(values[input_ids[0]], values[input_ids[1]])
+                values[node_id] = math.atan2(
+                    values[input_ids[0]], values[input_ids[1]]
+                )
             elif op == "floor":
                 values[node_id] = math.floor(values[input_ids[0]])
             elif op == "ceil":
                 values[node_id] = math.ceil(values[input_ids[0]])
             # binary ops
             elif op == "max":
-                values[node_id] = max(values[input_ids[0]], values[input_ids[1]])
+                values[node_id] = max(
+                    values[input_ids[0]], values[input_ids[1]]
+                )
             elif op == "min":
-                values[node_id] = min(values[input_ids[0]], values[input_ids[1]])
+                values[node_id] = min(
+                    values[input_ids[0]], values[input_ids[1]]
+                )
             # bitwise ops
             elif op == "bitwise_and":
-                values[node_id] = int(values[input_ids[0]]) & int(values[input_ids[1]])
+                values[node_id] = int(values[input_ids[0]]) & int(
+                    values[input_ids[1]]
+                )
             elif op == "bitwise_or":
-                values[node_id] = int(values[input_ids[0]]) | int(values[input_ids[1]])
+                values[node_id] = int(values[input_ids[0]]) | int(
+                    values[input_ids[1]]
+                )
             elif op == "bitwise_xor":
-                values[node_id] = int(values[input_ids[0]]) ^ int(values[input_ids[1]])
+                values[node_id] = int(values[input_ids[0]]) ^ int(
+                    values[input_ids[1]]
+                )
             elif op == "bitwise_not":
                 values[node_id] = ~int(values[input_ids[0]])
             elif op == "bitwise_left_shift":
-                values[node_id] = int(values[input_ids[0]]) << int(values[input_ids[1]])
+                values[node_id] = int(values[input_ids[0]]) << int(
+                    values[input_ids[1]]
+                )
             elif op == "bitwise_right_shift":
-                values[node_id] = int(values[input_ids[0]]) >> int(values[input_ids[1]])
+                values[node_id] = int(values[input_ids[0]]) >> int(
+                    values[input_ids[1]]
+                )
             elif op == "mod":
                 values[node_id] = values[input_ids[0]] % values[input_ids[1]]
             elif op == "if_then_else":
@@ -688,10 +740,10 @@ class CompiledExpr:
                     expressions.append({"op": "VARIABLE_X3"})
                 elif attrs["name"] == "t":
                     expressions.append({"op": "VARIABLE_T"})
-                elif attrs["name"] == "dt":
-                    expressions.append({"op": "VARIABLE_DT"})
             elif op == "parameter":
-                expressions.append({"op": "PARAMETER", "param_idx": attrs["param_idx"]})
+                expressions.append(
+                    {"op": "PARAMETER", "param_idx": attrs["param_idx"]}
+                )
             elif op == "add":
                 expressions.append(
                     {
@@ -898,7 +950,11 @@ class CompiledExpr:
                 )
             elif op == "bitwise_not":
                 expressions.append(
-                    {"op": "BITWISE_NOT", "left": node_map[input_ids[0]], "right": -1}
+                    {
+                        "op": "BITWISE_NOT",
+                        "left": node_map[input_ids[0]],
+                        "right": -1,
+                    }
                 )
             elif op == "bitwise_left_shift":
                 expressions.append(
@@ -951,7 +1007,11 @@ class CompiledExpr:
                 )
             elif op == "logical_not":
                 expressions.append(
-                    {"op": "LOGICAL_NOT", "left": node_map[input_ids[0]], "right": -1}
+                    {
+                        "op": "LOGICAL_NOT",
+                        "left": node_map[input_ids[0]],
+                        "right": -1,
+                    }
                 )
             elif op == "logical_xor":
                 expressions.append(
@@ -1004,7 +1064,9 @@ class CompiledExpr:
         for node_id in self._eval_order:
             node_def = self._graph.get_node(node_id)
             if node_def and node_def[0] == "parameter":
-                max_param_idx = max(max_param_idx, node_def[2].get("param_idx", -1))
+                max_param_idx = max(
+                    max_param_idx, node_def[2].get("param_idx", -1)
+                )
 
         return {
             "expressions": expressions,
