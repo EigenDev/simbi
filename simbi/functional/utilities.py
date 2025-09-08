@@ -1,7 +1,7 @@
-from typing import TypeVar, Callable, Any, Iterable, Hashable
-from functools import reduce, partial, lru_cache
 from collections import defaultdict
 from copy import deepcopy
+from functools import lru_cache, partial, reduce
+from typing import Any, Callable, Hashable, Iterable, TypeVar
 
 # Transform type - a function that transforms one type to another
 T = TypeVar("T")
@@ -56,17 +56,23 @@ def reduce_with_index(
     return result
 
 
-def curry(func: Callable[..., Any], *args: Any, **kwargs: Any) -> Callable[..., Any]:
+def curry(
+    func: Callable[..., Any], *args: Any, **kwargs: Any
+) -> Callable[..., Any]:
     """Partially apply arguments to a function"""
     return partial(func, *args, **kwargs)
 
 
-def zip_with(func: Callable[[T, U], V], xs: Iterable[T], ys: Iterable[U]) -> list[V]:
+def zip_with(
+    func: Callable[[T, U], V], xs: Iterable[T], ys: Iterable[U]
+) -> list[V]:
     """Combine two iterables using a function"""
     return [func(x, y) for x, y in zip(xs, ys)]
 
 
-def group_by(key_func: Callable[[T], K], items: Iterable[T]) -> dict[K, list[T]]:
+def group_by(
+    key_func: Callable[[T], K], items: Iterable[T]
+) -> dict[K, list[T]]:
     """Group items by a key function"""
     groups = defaultdict(list)
     for item in items:
