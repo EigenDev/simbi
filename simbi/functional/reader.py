@@ -1,10 +1,10 @@
+from types import TracebackType
+from typing import Any, Callable, Optional, Sequence, Union
+
 import h5py
 import numpy as np
-from types import TracebackType
-from typing import Any, Callable, Optional, Union, Sequence
 from numpy.typing import NDArray
 
-from ..reader import load_simulation_data
 from ..core.types.bodies import BodyCapability, has_capability
 from ..physics.calculations import (
     VectorComponent,
@@ -12,12 +12,13 @@ from ..physics.calculations import (
     four_velocity,
     labframe_energy_density,
     labframe_momentum,
-    spec_enthalpy,
     lorentz_factor,
-    magnetization,
-    total_pressure,
     magnetic_pressure,
+    magnetization,
+    spec_enthalpy,
+    total_pressure,
 )
+from ..reader import load_simulation_data
 
 Array = NDArray[np.floating[Any]]
 
@@ -26,7 +27,9 @@ def vector(ndim: int, name: str) -> Sequence[str]:
     return [f"{name}{i}" for i in range(1, ndim + 1)]
 
 
-def vec_from_dict(the_dict: dict[str, Any], ndim: int, name: str) -> Sequence[Array]:
+def vec_from_dict(
+    the_dict: dict[str, Any], ndim: int, name: str
+) -> Sequence[Array]:
     return [the_dict.get(f"{name}{i}", 0.0) for i in range(1, ndim + 1)]
 
 
@@ -108,7 +111,9 @@ class LazySimulationReader:
 
     def __next__(self) -> dict[str, Any]:
         """Return the next component during iteration."""
-        components: Sequence[Union[dict[str, Any], Callable[[], dict[str, Any]]]] = [
+        components: Sequence[
+            Union[dict[str, Any], Callable[[], dict[str, Any]]]
+        ] = [
             self._create_lazy_fields_dict,  # LazyFieldDict
             self.metadata,  # Metadata dictionary
             self.get_mesh,  # Mesh dictionary,
@@ -157,7 +162,9 @@ class LazySimulationReader:
             elif key in self.get_mesh():
                 return self.get_mesh()[key]
             else:
-                raise KeyError(f"Key '{key}' not found in fields, metadata, or mesh")
+                raise KeyError(
+                    f"Key '{key}' not found in fields, metadata, or mesh"
+                )
 
     def get_field_dict(self) -> dict[str, Array]:
         """
@@ -245,7 +252,9 @@ class LazySimulationReader:
             position = body_group["position"][:].tolist()
             velocity = body_group["velocity"][:].tolist()
             force = body_group["force"][:].tolist()
-            body_capability = BodyCapability(int(body_group.attrs["capabilities"]))
+            body_capability = BodyCapability(
+                int(body_group.attrs["capabilities"])
+            )
             # Check body type
             self._immersed_bodies_cache[f"body_{i}"] = {
                 "mass": mass,
@@ -260,27 +269,33 @@ class LazySimulationReader:
             if has_capability(body_capability, BodyCapability.GRAVITATIONAL):
                 self._immersed_bodies_cache[f"body_{i}"].update(
                     {
-                        "softening_length": body_group["softening_length"][()].item(),
+                        "softening_length": body_group["softening_length"][
+                            ()
+                        ].item(),
                     }
                 )
             if has_capability(body_capability, BodyCapability.ACCRETION):
                 self._immersed_bodies_cache[f"body_{i}"].update(
                     {
-                        "accretion_rate": body_group["accretion_rate"][()].item(),
-                        "accretion_radius": body_group["accretion_radius"][()].item(),
-                        "total_accreted_mass": body_group["total_accreted_mass"][
+                        "accretion_rate": body_group["accretion_rate"][
                             ()
                         ].item(),
-                        "accretion_efficiency": body_group["accretion_efficiency"][
+                        "accretion_radius": body_group["accretion_radius"][
                             ()
                         ].item(),
+                        "total_accreted_mass": body_group[
+                            "total_accreted_mass"
+                        ][()].item(),
+                        "sink_rate": body_group["sink_rate"][()].item(),
                     }
                 )
             if has_capability(body_capability, BodyCapability.RIGID):
                 self._immersed_bodies_cache[f"body_{i}"].update(
                     {
                         "inertia": body_group["inertia"][()].item(),
-                        "apply_no_slip": bool(body_group["apply_no_slip"][()].item()),
+                        "apply_no_slip": bool(
+                            body_group["apply_no_slip"][()].item()
+                        ),
                     }
                 )
 
@@ -288,15 +303,21 @@ class LazySimulationReader:
                 self._immersed_bodies_cache[f"body_{i}"].update(
                     {
                         "yield_stress": body_group["yield_stress"][()].item(),
-                        "plastic_strain": body_group["plastic_strain"][()].item(),
+                        "plastic_strain": body_group["plastic_strain"][
+                            ()
+                        ].item(),
                     }
                 )
 
             if has_capability(body_capability, BodyCapability.ELASTIC):
                 self._immersed_bodies_cache[f"body_{i}"].update(
                     {
-                        "elastic_modulus": body_group["elastic_modulus"][()].item(),
-                        "poisson_ration": body_group["poisson_ratio"][()].item(),
+                        "elastic_modulus": body_group["elastic_modulus"][
+                            ()
+                        ].item(),
+                        "poisson_ration": body_group["poisson_ratio"][
+                            ()
+                        ].item(),
                     }
                 )
 
@@ -400,7 +421,10 @@ class LazySimulationReader:
         )
         # any comma-separated strings should be split
         for key in self._mesh_cache:
-            if isinstance(self._mesh_cache[key], str) and "," in self._mesh_cache[key]:
+            if (
+                isinstance(self._mesh_cache[key], str)
+                and "," in self._mesh_cache[key]
+            ):
                 self._mesh_cache[key] = tuple(
                     x.strip() for x in self._mesh_cache[key].split(",")
                 )
@@ -462,7 +486,9 @@ class LazySimulationReader:
 
             mesh["effective_dimensions"] = effective_dimensions
             if self._metadata_cache is not None:
-                self._metadata_cache["effective_dimensions"] = effective_dimensions
+                self._metadata_cache["effective_dimensions"] = (
+                    effective_dimensions
+                )
 
             self.mesh = mesh
 
@@ -528,10 +554,15 @@ class LazySimulationReader:
             return res
 
     def _get_centered_fields(self, bfields: Sequence[Array]) -> Sequence[Array]:
-        return [self._average_field(d, f"b{i + 1}") for i, d in enumerate(bfields)]
+        return [
+            self._average_field(d, f"b{i + 1}") for i, d in enumerate(bfields)
+        ]
 
     def _load_field_data(
-        self, file_obj: h5py.File, field_name: str, indices: Optional[Any] = None
+        self,
+        file_obj: h5py.File,
+        field_name: str,
+        indices: Optional[Any] = None,
     ) -> Array:
         """
         Load field data from file, applying any necessary processing.
@@ -569,7 +600,9 @@ class LazySimulationReader:
             if inactive_dimensions > 0:
                 # get slice data for the dimensions are inactive
                 slices = tuple(
-                    slice(padwidth, -padwidth) if x == 1 + 2 * padwidth else slice(None)
+                    slice(padwidth, -padwidth)
+                    if x == 1 + 2 * padwidth
+                    else slice(None)
                     for x in data.shape
                 )
                 data = data[slices]
@@ -589,7 +622,9 @@ class LazySimulationReader:
                 data = data.reshape(tuple(s for s in data.shape if s != 1))
         return data
 
-    def _unpad(self, arr: Array, pad_width: tuple[tuple[int, int], ...]) -> Array:
+    def _unpad(
+        self, arr: Array, pad_width: tuple[tuple[int, int], ...]
+    ) -> Array:
         """Remove padding from array."""
         slices = []
         for c in pad_width:
@@ -625,7 +660,8 @@ class LazySimulationReader:
             "W",
             [f"v{i}" for i in range(1, ndim + 1)],
             lambda fields: lorentz_factor(
-                [fields[f"v{i}"] for i in range(1, ndim + 1)], metadata["regime"]
+                [fields[f"v{i}"] for i in range(1, ndim + 1)],
+                metadata["regime"],
             ),
         )
         pipeline["D"] = self.get_derived_field(
@@ -633,7 +669,8 @@ class LazySimulationReader:
             ["rho", *[f"v{i}" for i in range(1, ndim + 1)]],
             lambda fields: fields["rho"]
             * lorentz_factor(
-                [fields[f"v{i}"] for i in range(1, ndim + 1)], metadata["regime"]
+                [fields[f"v{i}"] for i in range(1, ndim + 1)],
+                metadata["regime"],
             ),
         )
         for i in range(1, ndim + 1):
@@ -660,7 +697,9 @@ class LazySimulationReader:
             pipeline[f"b{i}_mean"] = self.get_derived_field(
                 f"b{i}_mean",
                 [f"b{i}"],
-                lambda fields, i=i: self._average_field(fields[f"b{i}"], f"b{i}"),
+                lambda fields, i=i: self._average_field(
+                    fields[f"b{i}"], f"b{i}"
+                ),
             )
 
         pipeline["energy"] = self.get_derived_field(
@@ -734,7 +773,9 @@ class LazySimulationReader:
                         for i in range(1, metadata["dimensions"] + 1)
                     )
                 )
-                / np.sqrt((metadata["adiabatic_index"] * fields["p"] / fields["rho"]))
+                / np.sqrt(
+                    (metadata["adiabatic_index"] * fields["p"] / fields["rho"])
+                )
             ),
         )
         pipeline["chi_dens"] = self.get_derived_field(
@@ -742,7 +783,9 @@ class LazySimulationReader:
             ["rho", "chi", *vector(ndim, "v")],
             lambda fields: fields["rho"]
             * fields["chi"]
-            * lorentz_factor(vec_from_dict(fields, ndim, "v"), metadata["regime"]),
+            * lorentz_factor(
+                vec_from_dict(fields, ndim, "v"), metadata["regime"]
+            ),
         )
         return pipeline
 
@@ -777,7 +820,9 @@ class LazySimulationReader:
                         dep_data[dep] = self._load_field_data(f, dep, indices)
             else:
                 for dep in dependencies:
-                    dep_data[dep] = self._load_field_data(self.file, dep, indices)
+                    dep_data[dep] = self._load_field_data(
+                        self.file, dep, indices
+                    )
 
             # Compute derived field
             return compute_func(dep_data)
