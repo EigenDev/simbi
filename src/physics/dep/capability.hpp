@@ -79,7 +79,7 @@ namespace simbi::ibsystem {
     };
 
     struct accretion_component_t {
-        real accretion_efficiency;
+        real sink_rate;
         real accretion_radius;
         real total_accreted_mass;
         real accretion_rate;
