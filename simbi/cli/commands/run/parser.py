@@ -1,16 +1,20 @@
 from argparse import (
     ArgumentParser,
-    Namespace,
-    HelpFormatter,
     ArgumentTypeError,
     BooleanOptionalAction,
+    HelpFormatter,
+    Namespace,
 )
-from typing import Optional
-from ....detail import max_thread_count
-from ...actions import ComputeModeAction, RegisterGPUBlockDimensions
-from ....detail import bcolors
 from pathlib import Path
-from ...actions import print_available_configs, get_available_configs
+from typing import Optional
+
+from ....detail import bcolors, max_thread_count
+from ...actions import (
+    ComputeModeAction,
+    RegisterGPUBlockDimensions,
+    get_available_configs,
+    print_available_configs,
+)
 from ...utils.formatter import HelpFormatter
 
 
@@ -28,7 +32,9 @@ def validate_simbi_script(param):
                 param = file
 
         if not param:
-            available_configs = sorted([Path(conf).stem for conf in available_configs])
+            available_configs = sorted(
+                [Path(conf).stem for conf in available_configs]
+            )
             raise ArgumentTypeError(
                 "No configuration named {}{}{}. The valid configurations are:\n{}".format(
                     bcolors.OKCYAN,
@@ -53,7 +59,10 @@ def _add_global_args(parser: ArgumentParser) -> None:
         default=None,
     )
     parser.add_argument(
-        "--info", help="print setup-script usage", default=False, action="store_true"
+        "--info",
+        help="print setup-script usage",
+        default=False,
+        action="store_true",
     )
     parser.add_argument(
         "--type-check",
@@ -62,8 +71,8 @@ def _add_global_args(parser: ArgumentParser) -> None:
         action=BooleanOptionalAction,
     )
     parser.add_argument(
-        "--gpu-block-dims",
-        help="gpu dim3 thread block dimensions",
+        "--tile-block-dims",
+        help="tile dimensions",
         default=[],
         type=int,
         action=RegisterGPUBlockDimensions,
@@ -130,8 +139,8 @@ def setup_parser(subparsers) -> None:
 
 def execute(args: Namespace, argv: Optional[list] = None) -> None:
     """Execute run command"""
-    from .executor import run_simulation
     from .config import configure_state
+    from .executor import run_simulation
 
     states, state_docs = configure_state(args, argv)
     run_simulation(states, state_docs, args)

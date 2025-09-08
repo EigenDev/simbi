@@ -1,10 +1,12 @@
-from argparse import _SubParsersAction, Namespace
+import sys
+from argparse import Namespace, _SubParsersAction
 from typing import Optional
 
 from simbi.tools.utility import get_dimensionality
-from ..utils.formatter import HelpFormatter
+
 from ...tools.visualization.cli import setup_parser as setup_viz_parser
-import sys
+from ...tools.visualization.core.conversion import config_from_args
+from ..utils.formatter import HelpFormatter
 
 
 def setup_parser(subparsers: _SubParsersAction) -> None:
@@ -66,9 +68,11 @@ def execute(args: Namespace, argv: Optional[list] = None) -> None:
     else:
         plot_type = args.plot_type
 
+    config = config_from_args(args)
     # Call the appropriate API function
     if is_animation:
         api.animate(
+            config,
             files=files,
             plot_type=plot_type,
             fields=args.fields,
@@ -81,17 +85,41 @@ def execute(args: Namespace, argv: Optional[list] = None) -> None:
     else:
         if plot_type == "line":
             api.plot_line(
-                files, args.fields, args.save_as, setup=setup, theme=theme, **kwargs
+                config,
+                files,
+                args.fields,
+                args.save_as,
+                setup=setup,
+                theme=theme,
+                **kwargs,
             )
         elif plot_type == "multidim":
             api.plot_multidim(
-                files, args.fields, args.save_as, setup=setup, theme=theme, **kwargs
+                config,
+                files,
+                args.fields,
+                args.save_as,
+                setup=setup,
+                theme=theme,
+                **kwargs,
             )
         elif plot_type == "histogram":
             api.plot_histogram(
-                files, args.fields, args.save_as, setup=setup, theme=theme, **kwargs
+                config,
+                files,
+                args.fields,
+                args.save_as,
+                setup=setup,
+                theme=theme,
+                **kwargs,
             )
         elif plot_type == "temporal":
             api.plot_temporal(
-                files, args.fields, args.save_as, setup=setup, theme=theme, **kwargs
+                config,
+                files,
+                args.fields,
+                args.save_as,
+                setup=setup,
+                theme=theme,
+                **kwargs,
             )

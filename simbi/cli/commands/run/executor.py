@@ -1,8 +1,9 @@
 import os
-from typing import Sequence
 from argparse import Namespace
-from ....simulator import Hydro
+from typing import Sequence
+
 from .... import logger
+from ....simulator import Hydro
 
 
 def run_simulation(
@@ -29,5 +30,5 @@ def _configure_environment(args: Namespace) -> None:
     if args.compute_mode == "omp":
         os.environ["USE_OMP"] = "1"
 
-    for coord, block in zip(["X", "Y", "Z"], args.gpu_block_dims):
-        os.environ[f"GPU{coord}BLOCK_SIZE"] = str(block)
+    for coord, block in zip(["X", "Y", "Z"], args.tile_block_dims):
+        os.environ[f"SIMBI_{coord}_BLOCK_SIZE"] = str(block)
