@@ -1,10 +1,11 @@
-from ..types.bodies import (
-    ImmersedBodyConfig,
-    GravitationalSystemConfig,
-    BinaryConfig,
-    BinaryComponentConfig,
-)
 from typing import Any, Union
+
+from ..types.bodies import (
+    BinaryComponentConfig,
+    BinaryConfig,
+    GravitationalSystemConfig,
+    ImmersedBodyConfig,
+)
 
 
 def load_immersed_bodies_or_body_system(
@@ -39,7 +40,7 @@ def load_immersed_bodies_or_body_system(
                         ),
                         softening_length=body1["softening_length"],
                         two_way_coupling=False,
-                        accretion_efficiency=body1["accretion_efficiency"],
+                        sink_rate=body1["sink_rate"],
                         accretion_radius=body1["accretion_radius"],
                         total_accreted_mass=body1["total_accreted_mass"],
                         position=body1["position"],
@@ -54,7 +55,7 @@ def load_immersed_bodies_or_body_system(
                         ),
                         softening_length=body2["softening_length"],
                         two_way_coupling=False,
-                        accretion_efficiency=body2["accretion_efficiency"],
+                        sink_rate=body2["sink_rate"],
                         accretion_radius=body2["accretion_radius"],
                         total_accreted_mass=body2["total_accreted_mass"],
                         position=body2["position"],
