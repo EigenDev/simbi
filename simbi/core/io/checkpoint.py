@@ -7,8 +7,10 @@ the new SimulationState structure.
 
 import numpy as np
 
+from simbi.reader import read_simulation
+from simbi.reader.lazy import SimData
 
-from ...functional.reader import read_file, LazySimulationReader
+
 from ..config.base_config import SimbiBaseConfig
 from ..simulation.state_init import SimulationState
 from ...functional.maybe import Maybe
@@ -27,9 +29,11 @@ def load_checkpoint_to_state(default_config: SimbiBaseConfig) -> Maybe[Simulatio
     """
 
     def extract_fields(
-        reader: LazySimulationReader,
+        data: SimData,
     ) -> Maybe[SimulationState]:
-        fields, metadata, _, immersed_bodies = reader
+        fields = data.fields
+        metadata = data.metadata
+        immersed_bodies = data.bodies
         config = SimbiBaseConfig.from_checkpoint_and_default(
             default_config, metadata, immersed_bodies
         )
@@ -39,13 +43,10 @@ def load_checkpoint_to_state(default_config: SimbiBaseConfig) -> Maybe[Simulatio
                 primitive_state=np.array(
                     [
                         x["rho"],
-                        *[x[f"v{i}"] for i in range(1, metadata["dimensions"] + 1)],
+                        *[x[f"v{i}"] for i in range(1, metadata.dimensions + 1)],
                         *(
-                            [
-                                x[f"b{i}_mean"]
-                                for i in range(1, metadata["dimensions"] + 1)
-                            ]
-                            if "mhd" in metadata["regime"]
+                            [x[f"b{i}_mean"] for i in range(1, metadata.dimensions + 1)]
+                            if "mhd" in metadata.regime
                             else []
                         ),
                         x["p"],
@@ -56,14 +57,11 @@ def load_checkpoint_to_state(default_config: SimbiBaseConfig) -> Maybe[Simulatio
                 conserved_state=np.array(
                     [
                         x["D"],
-                        *[x[f"m{i}"] for i in range(1, metadata["dimensions"] + 1)],
+                        *[x[f"m{i}"] for i in range(1, metadata.dimensions + 1)],
                         x["energy"],
                         *(
-                            [
-                                x[f"b{i}_mean"]
-                                for i in range(1, metadata["dimensions"] + 1)
-                            ]
-                            if "mhd" in metadata["regime"]
+                            [x[f"b{i}_mean"] for i in range(1, metadata.dimensions + 1)]
+                            if "mhd" in metadata.regime
                             else []
                         ),
                         x["chi_dens"],
@@ -72,7 +70,7 @@ def load_checkpoint_to_state(default_config: SimbiBaseConfig) -> Maybe[Simulatio
                 ),
                 staggered_bfields=(
                     [fields[f"b{i}"] for i in range(1, 4)]
-                    if "mhd" in metadata["regime"]
+                    if "mhd" in metadata.regime
                     else []
                 ),
                 config=config,
@@ -81,6 +79,6 @@ def load_checkpoint_to_state(default_config: SimbiBaseConfig) -> Maybe[Simulatio
 
     return (
         Maybe.of(default_config.checkpoint_file)
-        .map(lambda p: read_file(str(p), unpad=False))
+        .map(lambda p: read_simulation(p or "", unpad=False))
         .bind(extract_fields)
     )

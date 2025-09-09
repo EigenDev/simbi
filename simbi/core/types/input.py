@@ -5,7 +5,7 @@ from typing import Any
 import numpy as np
 from numpy.typing import NDArray
 
-from .bodies import Body
+from .bodies import Body, BodySystemConfig, ImmersedBodyConfig
 
 Array = NDArray[np.floating]
 IArray = NDArray[np.signedinteger]
@@ -87,6 +87,14 @@ class Metadata:
     end_time: float
     reconstruction: str
     timestepping: str
+    plm_theta: float
+    solver: str
+    checkpoint_index: int
+    checkpoint_interval: float
+    x1_spacing: str
+    x2_spacing: str
+    x3_spacing: str
+    halo_radius: int
 
 
 @dataclass(frozen=True)
@@ -108,37 +116,25 @@ class MeshConfig:
     def x1v(self) -> Array:
         """Get x1 coordinates"""
         if self.spacing_types[0] == CellSpacing.LINEAR:
-            return np.linspace(
-                self.bounds_min[0], self.bounds_max[0], self.shape[0]
-            )
+            return np.linspace(self.bounds_min[0], self.bounds_max[0], self.shape[0])
         else:
-            return np.geomspace(
-                self.bounds_min[0], self.bounds_max[0], self.shape[0]
-            )
+            return np.geomspace(self.bounds_min[0], self.bounds_max[0], self.shape[0])
 
     @property
     def x2v(self) -> Array:
         """Get x2 coordinates"""
         if self.spacing_types[1] == CellSpacing.LINEAR:
-            return np.linspace(
-                self.bounds_min[1], self.bounds_max[1], self.shape[1]
-            )
+            return np.linspace(self.bounds_min[1], self.bounds_max[1], self.shape[1])
         else:
-            return np.geomspace(
-                self.bounds_min[1], self.bounds_max[1], self.shape[1]
-            )
+            return np.geomspace(self.bounds_min[1], self.bounds_max[1], self.shape[1])
 
     @property
     def x3v(self) -> Array:
         """Get x3 coordinates"""
         if self.spacing_types[2] == CellSpacing.LINEAR:
-            return np.linspace(
-                self.bounds_min[2], self.bounds_max[2], self.shape[2]
-            )
+            return np.linspace(self.bounds_min[2], self.bounds_max[2], self.shape[2])
         else:
-            return np.geomspace(
-                self.bounds_min[2], self.bounds_max[2], self.shape[2]
-            )
+            return np.geomspace(self.bounds_min[2], self.bounds_max[2], self.shape[2])
 
     def get(self, key: str, default: Any = None) -> Any:
         """Get coordinate array by key"""
@@ -159,7 +155,7 @@ class ProcessedData:
     fields: dict[str, Array]
     metadata: Metadata
     mesh: MeshConfig
-    bodies: dict[str, Body] | None = None
+    bodies: list[ImmersedBodyConfig] | BodySystemConfig | None = None
 
 
 @dataclass(frozen=True)

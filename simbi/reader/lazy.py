@@ -1,7 +1,11 @@
 from typing import Any
+from typing_extensions import Sequence
 
-from ..core.types import Array, Body, MeshConfig, Metadata, ProcessedData
+from ..core.types.bodies import BodySystemConfig, ImmersedBodyConfig
+from ..core.types import Array, MeshConfig, Metadata, ProcessedData
 from .computation import create_computation_pipeline
+
+body_system_t = Sequence[ImmersedBodyConfig] | BodySystemConfig | None
 
 
 class FieldAccessor:
@@ -35,7 +39,7 @@ class SimData:
         return self._data.mesh
 
     @property
-    def bodies(self) -> dict[str, Body] | None:
+    def bodies(self) -> body_system_t:
         return self._data.bodies
 
     @property
@@ -70,7 +74,7 @@ class SimData:
 
     def unpack(
         self,
-    ) -> tuple[FieldAccessor, Metadata, MeshConfig, dict[str, Body] | None]:
+    ) -> tuple[FieldAccessor, Metadata, MeshConfig, body_system_t]:
         return (FieldAccessor(self), self.metadata, self.mesh, self.bodies)
 
 

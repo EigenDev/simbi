@@ -1,5 +1,5 @@
 from dataclasses import dataclass
-from typing import Callable, Generic, Self, TypeVar
+from typing import Callable, Generic, Self, TypeVar, Any
 
 T = TypeVar("T")
 U = TypeVar("U")
@@ -18,7 +18,7 @@ class Result(Generic[T]):
     def err(cls, error: Exception) -> Self:
         return cls(error=error)
 
-    def and_then(self, f: Callable[[T], "Result[U]"]) -> "Result[U]":
+    def and_then(self, f: Callable[[T, *tuple[Any, ...]], "Result[U]"]) -> "Result[U]":
         if self.error is not None:
             return Result.err(self.error)
         else:
