@@ -2,9 +2,8 @@ import numpy as np
 import argparse
 import h5py
 from numpy.typing import NDArray
-from typing import Union
 from astropy.cosmology import FlatLambdaCDM
-from simbi import compute_num_polar_zones, get_dimensionality, read_file
+from simbi import compute_num_polar_zones, read_simulation
 from astropy import units
 
 cosmo = FlatLambdaCDM(
@@ -146,7 +145,7 @@ def generate_pseudo_mesh(
 
 def get_tbin_edges(
     args: argparse.Namespace,
-    files: Union[list[str], dict[int, list[str]]],
+    files: list[str],
     time_scale: float,
 ):
     """
@@ -161,12 +160,15 @@ def get_tbin_edges(
     tmin, tmax: tuple of time bins in units of days
     """
     at_pole = abs(np.cos(args.theta_obs)) == 1
-    ndim = get_dimensionality(files)
-    setup_init, mesh_init = read_file(files[+0])[1:]
-    setup_final, mesh_final = read_file(files[-1])[1:]
+    init = read_simulation(files[0])
+    final = read_simulation(files[-1])
+    setup_init = init.metadata
+    setup_final = final.metadata
+    mesh_init = init.mesh
+    mesh_final = final.mesh
 
-    t_beg = setup_init["time"] * time_scale
-    t_end = setup_final["time"] * time_scale
+    t_beg = setup_init.time * time_scale
+    t_end = setup_final.time * time_scale
 
     generate_pseudo_mesh(args, mesh_init, full_sphere=True, full_threed=not at_pole)
     generate_pseudo_mesh(args, mesh_final, full_sphere=True, full_threed=not at_pole)
