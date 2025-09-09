@@ -18,7 +18,6 @@ from .utilities import (
     update_with,
     memoize,
 )
-from .reader import LazySimulationReader, read_file
 
 __all__ = [
     "Maybe",
@@ -27,8 +26,6 @@ __all__ = [
     "is_dataclass_instance",
     "to_iterable",
     "to_tuple_of_tuples",
-    "LazySimulationReader",
-    "read_file",
     "get_memory_usage",
     "for_each",
     "map_with_index",
