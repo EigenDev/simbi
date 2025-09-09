@@ -6,11 +6,10 @@ from typing import (
     TypeVar,
 )
 
-import numpy as np
 from pydantic import BaseModel, field_validator
 from typing_extensions import Optional
 
-from simbi.core.types.bodies import Body
+from simbi.core.types.bodies import Body, BodySystemConfig, ImmersedBodyConfig
 
 from ....core.types import Array
 
@@ -18,6 +17,7 @@ from ....core.types import Array
 T = TypeVar("T")
 U = TypeVar("U")
 V = TypeVar("V")
+body_system_t = BodySystemConfig | Sequence[ImmersedBodyConfig] | None
 
 
 class CoordSystem(str, Enum):
@@ -82,7 +82,7 @@ class PlotData(BaseModel):
     """
 
     fields: Sequence[FieldData]
-    bodies: Optional[dict[str, Body]] = None
+    bodies: body_system_t = None
     time: Optional[float] = None
     dimensions: Optional[int] = None
     coord_system: Optional[CoordSystem] = None
