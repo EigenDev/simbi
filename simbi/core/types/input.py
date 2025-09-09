@@ -95,6 +95,7 @@ class Metadata:
     x2_spacing: str
     x3_spacing: str
     halo_radius: int
+    system_info: dict[str, str | float | int | bool | Array] | None = None
 
 
 @dataclass(frozen=True)
@@ -155,7 +156,8 @@ class ProcessedData:
     fields: dict[str, Array]
     metadata: Metadata
     mesh: MeshConfig
-    bodies: list[ImmersedBodyConfig] | BodySystemConfig | None = None
+    bodies: dict[str, Body] | None = None
+    body_system: BodySystemConfig | list[ImmersedBodyConfig] | None = None
 
 
 @dataclass(frozen=True)

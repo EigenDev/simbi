@@ -5,7 +5,6 @@ from typing import Any, Callable, Optional, Sequence, TypeVar
 import h5py
 import matplotlib.pyplot as plt
 import numpy as np
-from pydantic.fields import Field
 
 from ....core.types import ProcessedData
 from ....functional import curry
@@ -79,9 +78,7 @@ def create_slicer(
     return slicer
 
 
-def create_field_data(
-    name: str, values: Array, domain: Sequence[Array]
-) -> FieldData:
+def create_field_data(name: str, values: Array, domain: Sequence[Array]) -> FieldData:
     """Create a FieldData object from raw arrays."""
     return FieldData(name=name, values=values, domain=list(domain))
 
@@ -131,9 +128,7 @@ def create_plot_data(
     """Create plot data from simulation data"""
     ndim = get_effective_dimensions(data, config)
     slice_config = get_slice_config(config)
-    field_transform = curry(
-        transform_field, data, ndim=ndim, slice_config=slice_config
-    )
+    field_transform = curry(transform_field, data, ndim=ndim, slice_config=slice_config)
     field_data = [field_transform(name) for name in field_names]
     return PlotData(
         fields=field_data,
@@ -173,29 +168,18 @@ def create_time_series_data(
                     raise ValueError("No bodies in this run.")
 
                 if not any(v.accretion for _, v in sim_data.bodies.items()):
-                    raise ValueError(
-                        "This run did not include accreting bodies"
-                    )
-                prop = (
-                    "accretion_rate"
-                    if field == "mdot"
-                    else "total_accreted_mass"
-                )
+                    raise ValueError("This run did not include accreting bodies")
+                prop = "accretion_rate" if field == "mdot" else "total_accreted_mass"
 
                 field_values[field].append(
                     np.array(
-                        [
-                            getattr(v.accretion, prop)
-                            for _, v in sim_data.bodies.items()
-                        ]
+                        [getattr(v.accretion, prop) for _, v in sim_data.bodies.items()]
                     )
                 )
 
     return PlotData(
         fields=[
-            FieldData(
-                name=field, values=np.array(vals), domain=[np.array(times)]
-            )
+            FieldData(name=field, values=np.array(vals), domain=[np.array(times)])
             for field, vals in field_values.items()
         ]
     )

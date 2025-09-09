@@ -4,11 +4,7 @@ from typing import Any
 import numpy as np
 from numpy.typing import NDArray
 
-from simbi.core.types.bodies import (
-    BodyCapability,
-    GravitationalSystemConfig,
-    ImmersedBodyConfig,
-)
+from simbi.core.types.bodies import BodyCapability
 
 from ..core.types import (
     AccretionProperties,
@@ -189,88 +185,6 @@ def parse_bodies(
     return parsed_bodies
 
 
-def parse_body_system(
-    bodies_group: dict[str, Any] | None, bodies: dict[str, Body]
-) -> list[ImmersedBodyConfig] | GravitationalSystemConfig | None:
-    """Parse a body system configuration from a collection of bodies."""
-    from ..core.types.bodies import BinaryComponentConfig, BinaryConfig
-
-    if not bodies:
-        return None
-
-    if not bodies_group:
-        return None
-
-    system_name = bodies_group.get("system_name", "individual")
-    if "binary" in system_name:
-        binary_params = bodies_group["binary_params"]
-        body1 = bodies.get("body_0")
-        body2 = bodies.get("body_1")
-        if not body1 or not body2:
-            raise ValueError("Both bodies must be present for a binary system.")
-        if body1.accretion is None or body2.accretion is None:
-            raise ValueError("Both bodies in a binary must have accretion info.")
-        if body1.gravitational is None or body2.gravitational is None:
-            raise ValueError("Both bodies in a binary must have gravitational info.")
-
-        return GravitationalSystemConfig(
-            prescribed_motion=True,
-            reference_frame="inertial",
-            system_type="binary",
-            binary_config=BinaryConfig(
-                semi_major=binary_params["semi_major"],
-                eccentricity=binary_params["eccentricity"],
-                mass_ratio=body2.mass / body1.mass if body1.mass != 0 else 0.0,
-                total_mass=body1.mass + body2.mass,
-                components=[
-                    BinaryComponentConfig(
-                        mass=body1.mass,
-                        radius=body1.radius,
-                        is_an_accretor=has_capability(
-                            body1.capabilities, BodyCapability.ACCRETION
-                        ),
-                        softening_length=body1.gravitational.softening_length,
-                        two_way_coupling=False,
-                        sink_rate=body1.accretion.sink_rate,
-                        accretion_radius=body1.accretion.accretion_radius,
-                        total_accreted_mass=body1.accretion.total_accreted_mass,
-                        position=body1.position,
-                        velocity=body1.velocity,
-                    ),
-                    BinaryComponentConfig(
-                        mass=body2.mass,
-                        radius=body2.radius,
-                        is_an_accretor=has_capability(
-                            body2.capabilities, BodyCapability.ACCRETION
-                        ),
-                        softening_length=body2.gravitational.softening_length,
-                        two_way_coupling=False,
-                        sink_rate=body2.accretion.sink_rate,
-                        accretion_radius=body2.accretion.accretion_radius,
-                        total_accreted_mass=body2.accretion.total_accreted_mass,
-                        position=body2.position,
-                        velocity=body2.velocity,
-                    ),
-                ],
-            ),
-        )
-    else:
-        # Individual bodies
-        return [
-            ImmersedBodyConfig(
-                capability=body.capabilities,
-                mass=body.mass,
-                radius=body.radius,
-                position=body.position,
-                velocity=body.velocity,
-                two_way_coupling=False,
-                force=(0.0, 0.0, 0.0),
-                specifics={k: v for k, v in asdict(body).items() if v is not None},
-            )
-            for body in bodies.values()
-        ]
-
-
 def parse_diagnostics(groups: dict[str, Any]) -> BodyDiagnostics | None:
     """Parse body diagnostics from HDF5 groups"""
     if "diagnostics" not in groups:
@@ -323,6 +237,7 @@ def parse_data(raw: RawHDF5, unpad: bool = True) -> Result[ProcessedData]:
             solver=str(attrs["solver"]),
             checkpoint_interval=int(attrs["checkpoint_interval"]),
             halo_radius=int(attrs["halo_radius"]),
+            system_info=raw.groups.get("bodies"),
         )
 
         # Parse mesh config
@@ -339,11 +254,7 @@ def parse_data(raw: RawHDF5, unpad: bool = True) -> Result[ProcessedData]:
 
         # Bodies (if present)
         diagnostics = parse_diagnostics(raw.groups)
-        raw_bodies = parse_bodies(raw.groups.get("bodies"), diagnostics)
-        if raw_bodies is None:
-            bodies = None
-        else:
-            bodies = parse_body_system(raw.groups.get("bodies"), raw_bodies)
+        bodies = parse_bodies(raw.groups.get("bodies"), diagnostics)
         return Result.ok(
             ProcessedData(fields=fields, metadata=metadata, mesh=mesh, bodies=bodies)
         )

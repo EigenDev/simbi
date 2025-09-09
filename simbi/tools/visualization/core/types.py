@@ -82,7 +82,7 @@ class PlotData(BaseModel):
     """
 
     fields: Sequence[FieldData]
-    bodies: body_system_t = None
+    bodies: dict[str, Body] | None = None
     time: Optional[float] = None
     dimensions: Optional[int] = None
     coord_system: Optional[CoordSystem] = None
