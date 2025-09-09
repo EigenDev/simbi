@@ -1,16 +1,15 @@
+import math
+import time
+from typing import Any, Sequence
+
+from rich import box
 from rich.console import Console
+from rich.layout import Layout
 from rich.panel import Panel
+from rich.progress import BarColumn, Progress, SpinnerColumn, TextColumn
+from rich.style import Style
 from rich.table import Table
 from rich.text import Text
-from rich.layout import Layout
-from rich.progress import Progress, SpinnerColumn, TextColumn, BarColumn
-from rich.style import Style
-from rich import box
-from ..functional import get_memory_usage
-
-import time
-import math
-from typing import Any, Sequence
 
 from .summary import SimulationParameterSummary
 
@@ -87,7 +86,9 @@ class RichSimulationSummary:
             width=TABLE_WIDTH,
         )
 
-    def create_parameter_table(self, category: str, params: dict[str, Any]) -> Table:
+    def create_parameter_table(
+        self, category: str, params: dict[str, Any]
+    ) -> Table:
         """Create a rich table for a specific parameter category"""
         # get appropriate box style for this category or default to ROUNDED
         box_style = self.boxes.get(category, box.ROUNDED)
@@ -126,7 +127,9 @@ class RichSimulationSummary:
         )
 
         # add columns
-        table.add_column("Parameter", style=self.styles["param_name"], justify="right")
+        table.add_column(
+            "Parameter", style=self.styles["param_name"], justify="right"
+        )
         table.add_column("Value", style=self.styles["param_value"])
         table.add_column("Description", style="white", justify="left")
 
@@ -168,7 +171,9 @@ class RichSimulationSummary:
                 # format string arrays with quotes
                 # this is likely the boundary conditions
                 return str(
-                    tuple(tuple((x, y)) for x, y in zip(value[0::2], value[1::2]))
+                    tuple(
+                        tuple((x, y)) for x, y in zip(value[0::2], value[1::2])
+                    )
                 )
             else:
                 return str(value)
@@ -245,7 +250,9 @@ class RichSimulationSummary:
         # create a visual indicator for memory usage
         memory_usage_visual = self._create_memory_usage_bar(memory_gb)
 
-        stats_table.add_row("Estimated Memory Usage", memory_text, memory_usage_visual)
+        stats_table.add_row(
+            "Estimated Memory Usage", memory_text, memory_usage_visual
+        )
 
         # add cell metrics
         if "cells_per_dim" in stats:
@@ -259,7 +266,9 @@ class RichSimulationSummary:
         # add performance estimate if available
         if "performance_estimate" in stats:
             perf = stats["performance_estimate"]
-            stats_table.add_row("Estimated Performance", f"{perf} cell updates/s", "")
+            stats_table.add_row(
+                "Estimated Performance", f"{perf} cell updates/s", ""
+            )
 
         # add timestep info
         if "dt" in stats and "tmax" in stats:
@@ -292,7 +301,7 @@ class RichSimulationSummary:
         elif memory_gb < 8:
             color = "yellow"
         elif memory_gb < 32:
-            color = "orange"
+            color = "orange3"
         else:
             color = "red"
 
@@ -300,7 +309,8 @@ class RichSimulationSummary:
         filled = min(math.ceil(memory_gb / 64 * bar_length), bar_length)
         empty = bar_length - filled
 
-        bar = Text(f"[{color}]{'█' * filled}{'░' * empty}[/] ({memory_gb:.2f} GB)")
+        bar = Text(f"{'█' * filled}{'░' * empty}[/] ({memory_gb:.2f} GB)")
+        bar.stylize(color)
         return bar
 
     def generate_and_display(self, params: dict[str, Any]) -> None:
@@ -342,14 +352,27 @@ class RichSimulationSummary:
         tables = []
         for category, info in organized_params.items():
             if info["params"]:  # Only add if there are parameters
-                table = self.create_parameter_table(info["title"], info["params"])
+                table = self.create_parameter_table(
+                    info["title"], info["params"]
+                )
                 tables.append(table)
 
         # compute statistics
         stats: dict[str, int | float | Sequence[Any]] = {}
         ni, nj, nk = params["resolution"]
-        memory_bytes = float(get_memory_usage())
-        stats["estimated_memory_gb"] = memory_bytes / (1024**3)
+        nzones = math.prod(params["resolution"])
+        ncons = 1
+        nprims = 1
+        nfluxes = params["dimensionality"]
+        nvars = params["dimensionality"] + 3  # dens, vec, edens, chi
+        if params["is_mhd"]:
+            nvars = 9  # dens, vec(3), B(3), edens, chi
+
+        zbytes = 8 * nvars * nzones
+        memory_bytes = (ncons + nprims + nfluxes) * zbytes
+        if params["timestepping"] == "rk2":
+            memory_bytes += 2 * ncons * zbytes
+        stats["estimated_memory_gb"] = memory_bytes / 1024**3
         stats["cells_per_dim"] = (ni, nj, nk)
         if params["gpu_block_dims"] is not None:
             stats["gpu_block_dims"] = tuple(params["gpu_block_dims"])
@@ -368,7 +391,9 @@ class RichSimulationSummary:
             "End of Simulation Parameters", style=self.styles["subheader"]
         )
         footer_text.justify = "center"
-        footer_panel = Panel(footer_text, box=box.DOUBLE, border_style="bright_cyan")
+        footer_panel = Panel(
+            footer_text, box=box.DOUBLE, border_style="bright_cyan"
+        )
         self.console.print(footer_panel)
 
 
