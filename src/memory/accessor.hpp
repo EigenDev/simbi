@@ -36,7 +36,7 @@ namespace simbi::mem {
             return result;
         }
 
-        std::size_t compute_offset(const iarray<Dims>& coord) const
+        std::size_t DUAL compute_offset(const iarray<Dims>& coord) const
         {
             return vecops::dot(coord - domain_.start, strides_);
         }
