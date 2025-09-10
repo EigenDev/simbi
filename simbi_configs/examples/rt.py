@@ -1,11 +1,22 @@
 import math
+from pathlib import Path
+
+from pydantic import computed_field
+
+import simbi.expression as expr
 from simbi.core.config.base_config import SimbiBaseConfig
 from simbi.core.config.fields import SimbiField
-from simbi.core.types.input import BoundaryCondition, CoordSystem, Regime, Solver
-from simbi.core.types.typing import GasStateGenerator, InitialStateType, ExpressionDict
-from pydantic import computed_field
-from pathlib import Path
-import simbi.expression as expr
+from simbi.core.types.input import (
+    BoundaryCondition,
+    CoordSystem,
+    Regime,
+    Solver,
+)
+from simbi.core.types.typing import (
+    ExpressionDict,
+    GasStateGenerator,
+    InitialStateType,
+)
 
 
 class RayleighTaylor(SimbiBaseConfig):
@@ -27,7 +38,9 @@ class RayleighTaylor(SimbiBaseConfig):
     rhoD: float = SimbiField(1.0, description="Lower layer density")
     p0: float = SimbiField(2.5, description="Reference pressure")
     g0: float = SimbiField(0.1, description="Gravitational acceleration")
-    vamp: float = SimbiField(0.01, description="Velocity perturbation amplitude")
+    vamp: float = SimbiField(
+        0.01, description="Velocity perturbation amplitude"
+    )
 
     # Required fields from SimbiBaseConfig
     coord_system: CoordSystem = SimbiField(
@@ -36,7 +49,9 @@ class RayleighTaylor(SimbiBaseConfig):
 
     regime: Regime = SimbiField(Regime.CLASSICAL, description="Physics regime")
 
-    adiabatic_index: float = SimbiField(7.0 / 5.0, description="Adiabatic index")
+    adiabatic_index: float = SimbiField(
+        7.0 / 5.0, description="Adiabatic index"
+    )
 
     # Optional customizations
     boundary_conditions: list[BoundaryCondition] = SimbiField(
