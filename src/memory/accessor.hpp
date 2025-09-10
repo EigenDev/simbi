@@ -17,40 +17,6 @@
 
 namespace simbi::mem {
     template <typename T, std::uint64_t Dims>
-    class accessor_t;
-
-    template <
-        typename T,
-        std::uint64_t Dims,
-        typename ComputeField,
-        typename Executor>
-    void commit(
-        accessor_t<T, Dims>& accessor,
-        ComputeField computation,
-        Executor executor
-    );
-    template <
-        typename T,
-        std::uint64_t Dims,
-        typename ComputeField,
-        typename Executor>
-    void direct_commit(
-        accessor_t<T, Dims>& accessor,
-        ComputeField computation,
-        Executor executor
-    );
-    template <
-        typename T,
-        std::uint64_t Dims,
-        typename ComputeField,
-        typename Executor>
-    void try_commit(
-        accessor_t<T, Dims>& accessor,
-        ComputeField computation,
-        Executor executor
-    );
-
-    template <typename T, std::uint64_t Dims>
     class accessor_t
     {
       private:
@@ -137,118 +103,83 @@ namespace simbi::mem {
             return result;
         }
 
-        // allow commit to access private members
-        template <typename U, std::uint64_t D, typename CF, typename E>
-        friend void
-        commit(accessor_t<U, D>& accessor, CF computation, E executor);
-        template <typename U, std::uint64_t D, typename CF, typename E>
-        friend void
-        direct_commit(accessor_t<U, D>& accessor, CF computation, E executor);
-        template <typename U, std::uint64_t D, typename CF, typename E>
-        friend void
-        try_commit(accessor_t<U, D>& accessor, CF computation, E executor);
-    };
+        template <typename ComputeField, typename Executor>
+        void direct_commit(ComputeField computation, Executor executor)
+        {
+            if (!is_allocated() && !arena_) {
+                throw std::runtime_error(
+                    "Cannot commit to accessor without memory"
+                );
+            }
 
-    template <
-        typename T,
-        std::uint64_t Dims,
-        typename ComputeField,
-        typename Executor>
-    void direct_commit(
-        accessor_t<T, Dims>& accessor,
-        ComputeField computation,
-        Executor executor
-    )
-    {
-        if (!accessor.is_allocated() && !accessor.arena_) {
-            throw std::runtime_error(
-                "Cannot commit to accessor without memory"
-            );
-        }
+            if (!is_allocated()) {
+                domain_ = computation.domain();
+                strides_ =
+                    accessor_t<T, Dims>::compute_strides(domain_.shape());
+                data_ = arena_->get(domain_.size());
+            }
 
-        if (!accessor.is_allocated()) {
-            accessor.domain_ = computation.domain();
-            accessor.strides_ =
-                accessor_t<T, Dims>::compute_strides(accessor.domain_.shape());
-            accessor.data_ = accessor.arena_->get(accessor.domain_.size());
-        }
-
-        executor
-            .for_each(
-                accessor.domain_,
-                [&accessor, &computation] DUAL(const auto& coord) {
-                    accessor(coord) = computation(coord);
-                }
-            )
-            .wait();
-    }
-
-    template <
-        typename T,
-        std::uint64_t Dims,
-        typename ComputeField,
-        typename Executor>
-    void try_commit(
-        accessor_t<T, Dims>& accessor,
-        ComputeField computation,
-        Executor executor
-    )
-    {
-        if (!accessor.is_allocated() && !accessor.arena_) {
-            throw std::runtime_error(
-                "Cannot commit to accessor without memory"
-            );
-        }
-
-        if (!accessor.is_allocated()) {
-            accessor.domain_ = computation.domain();
-            accessor.strides_ =
-                accessor_t<T, Dims>::compute_strides(accessor.domain_.shape());
-            accessor.data_ = accessor.arena_->get(accessor.domain_.size());
-        }
-
-        auto nerrors =
             executor
-                .reduce(
-                    accessor.domain_,
-                    std::size_t{0},
-                    [&accessor, &computation] DUAL(const auto& coord) {
-                        auto value = computation(coord);
-                        if (value.has_value()) {
-                            accessor(coord) = value.value();
-                            return std::size_t{0};
-                        }
-                        else {
-                            return std::size_t{1};
-                        }
-                    },
-                    std::plus<std::size_t>{}
+                .for_each(
+                    domain_,
+                    [this, computation] DUAL(const auto& coord) {
+                        (*this)(coord) = computation(coord);
+                    }
                 )
                 .wait();
+        }
 
-        if (nerrors > 0) {
-            throw exception::SimulationFailureException();
-        }
-    }
+        template <typename ComputeField, typename Executor>
+        void try_commit(ComputeField computation, Executor executor)
+        {
+            if (!is_allocated() && !arena_) {
+                throw std::runtime_error(
+                    "Cannot commit to accessor without memory"
+                );
+            }
 
-    template <
-        typename T,
-        std::uint64_t Dims,
-        typename ComputeField,
-        typename Executor>
-    void commit(
-        accessor_t<T, Dims>& accessor,
-        ComputeField computation,
-        Executor executor
-    )
-    {
-        if constexpr (is_maybe_v<typename ComputeField::value_type>) {
-            try_commit(accessor, computation, executor);
+            if (!is_allocated()) {
+                domain_ = computation.domain();
+                strides_ =
+                    accessor_t<T, Dims>::compute_strides(domain_.shape());
+                data_ = arena_->get(domain_.size());
+            }
+
+            auto nerrors = executor
+                               .reduce(
+                                   domain_,
+                                   std::size_t{0},
+                                   [this, computation] DUAL(const auto& coord) {
+                                       auto value = computation(coord);
+                                       if (value.has_value()) {
+                                           (*this)(coord) = value.value();
+                                           return std::size_t{0};
+                                       }
+                                       else {
+                                           return std::size_t{1};
+                                       }
+                                   },
+                                   std::plus<std::size_t>{}
+                               )
+                               .wait();
+
+            if (nerrors > 0) {
+                throw exception::SimulationFailureException();
+            }
         }
-        else {
-            direct_commit(accessor, computation, executor);
+
+        template <typename ComputeField, typename Executor>
+        void commit(ComputeField computation, Executor executor)
+        {
+
+            if constexpr (is_maybe_v<typename ComputeField::value_type>) {
+                try_commit(computation, executor);
+            }
+            else {
+                direct_commit(computation, executor);
+            }
         }
-    }
+    };
 
     template <typename T, std::uint64_t Dims>
     accessor_t<T, Dims> from_data(

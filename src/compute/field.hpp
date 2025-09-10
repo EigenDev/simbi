@@ -98,7 +98,7 @@ namespace simbi {
                     using cvt   = std::remove_cvref_t<value_type>;
                     computation = accessor_t<cvt, Dims>{domain_};
                 }
-                mem::commit(computation, source, exec::default_executor());
+                computation.commit(source, exec::default_executor());
             }
             else if constexpr (detail::returns_reference_v<Computation, Dims>) {
                 exec::default_executor()
@@ -253,7 +253,7 @@ namespace simbi {
             }
             else {
                 auto acc = accessor_t<value_type, Dims>{domain_};
-                mem::commit(acc, *this, executor);
+                acc.commit(*this, executor);
                 return compute_field_t<Dims, accessor_t<value_type, Dims>>{
                   std::move(acc),
                   domain_

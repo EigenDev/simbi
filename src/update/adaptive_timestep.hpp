@@ -61,7 +61,8 @@ namespace simbi {
     }
 
     template <typename HydroState, typename MeshConfig>
-    auto compute_timestep(const HydroState& state, const MeshConfig& mesh)
+    exec::future_t<real>
+    compute_timestep(const HydroState& state, const MeshConfig& mesh)
     {
         auto timestep_at = create_timestep_field(state, mesh);
         auto executor    = exec::default_executor();
