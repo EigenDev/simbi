@@ -14,7 +14,6 @@ from simbi.functional.utilities import (
 )
 from simbi.tools.utility import get_field_str
 from simbi.tools.visualization.core.config import StyleConfig
-from simbi.tools.visualization.formatters.line import format_line_plot_axes
 
 from ..core.types import Array, FieldData, PlotData
 from .interface import Component, ComponentProps
@@ -78,8 +77,9 @@ def extract_y_data(field: FieldData, x_data: Array) -> Array:
         elif y_data.size == x_data.size:
             y_data = y_data.flatten()
         else:
-            # Take first slice as fallback
-            y_data = y_data[0] if y_data.ndim > 1 else y_data
+            # Take middle slice as fallback
+            y_size = y_data.shape[1] if y_data.ndim > 1 else 1
+            y_data = y_data[y_size // 2] if y_data.ndim > 1 else y_data
 
     return y_data
 
@@ -225,12 +225,12 @@ class LinePlotComponent(Component):
         if use_legend and len(data.fields) == 1:
             update_legend(ax, self._lines)
 
-        format_line_plot_axes(
-            ax,
-            data,
-            self.props.field_indices[0] if self.props.field_indices else 0,
-            style,
-        )
+        # format_line_plot_axes(
+        #     ax,
+        #     data,
+        #     self.props.field_indices[0] if self.props.field_indices else 0,
+        #     style,
+        # )
 
         return self._lines
 
