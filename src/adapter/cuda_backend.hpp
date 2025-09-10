@@ -363,12 +363,15 @@ namespace simbi::adapter {
 
         bool can_access_peer(
             std::int64_t* can_access,
-            std::std::int64_t device1,
+            std::int64_t device1,
             std::int64_t device2
         )
         {
-            cudaError_t status =
-                cudaDeviceCanAccessPeer(&can_access, device1, device2);
+            cudaError_t status = cudaDeviceCanAccessPeer(
+                &static_cast<int>(can_access),
+                device1,
+                device2
+            );
             error::check_err(
                 cuda_error::check_cuda_error(status),
                 "CUDA can access peer check failed"
