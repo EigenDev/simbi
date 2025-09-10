@@ -116,11 +116,14 @@ def extract_coordinate(coord_name: str) -> Callable[[SimData], Array | None]:
     return lambda data: getattr(data.mesh, coord_name, None)
 
 
-def get_domain_for_dimension(data: SimData, ndim: int) -> Sequence[Array]:
+def get_domain_for_dimension(
+    data: SimData, ndim: int, vertices: bool = True
+) -> Sequence[Array]:
     """Get coordinate arrays for the specified number of dimensions."""
     coords = []
+    suffix = "v" if vertices else "c"
     for i in range(1, ndim + 1):
-        coord = extract_coordinate(f"x{i}v")(data)
+        coord = extract_coordinate(f"x{i}{suffix}")(data)
         if coord is not None:
             coords.append(coord)
     return coords
@@ -168,8 +171,14 @@ def transform_field(
     slice_config: Optional[dict[str, Any]] = None,
 ) -> FieldData:
     """Transform a single field based on dimension and slicing configuration."""
+    if ndim in (2, 3):
+        vertices = True
+    elif slice_config and "orthogonal_ax" in slice_config:
+        vertices = False
+    else:
+        vertices = False
     values = extract_field(field_name)(data)
-    domain = get_domain_for_dimension(data, ndim)
+    domain = get_domain_for_dimension(data, ndim, vertices=vertices)
     if slice_config:
         slicer = create_slicer_from_config(slice_config)
         values, domain = slicer({"values": values, "domain": domain})

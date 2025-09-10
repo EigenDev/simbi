@@ -117,25 +117,61 @@ class MeshConfig:
     def x1v(self) -> Array:
         """Get x1 coordinates"""
         if self.spacing_types[0] == CellSpacing.LINEAR:
-            return np.linspace(self.bounds_min[0], self.bounds_max[0], self.shape[0])
+            return np.linspace(
+                self.bounds_min[0], self.bounds_max[0], self.shape[0] + 1
+            )
         else:
-            return np.geomspace(self.bounds_min[0], self.bounds_max[0], self.shape[0])
+            return np.geomspace(
+                self.bounds_min[0], self.bounds_max[0], self.shape[0] + 1
+            )
 
     @property
     def x2v(self) -> Array:
         """Get x2 coordinates"""
         if self.spacing_types[1] == CellSpacing.LINEAR:
-            return np.linspace(self.bounds_min[1], self.bounds_max[1], self.shape[1])
+            return np.linspace(
+                self.bounds_min[1], self.bounds_max[1], self.shape[1] + 1
+            )
         else:
-            return np.geomspace(self.bounds_min[1], self.bounds_max[1], self.shape[1])
+            return np.geomspace(
+                self.bounds_min[1], self.bounds_max[1], self.shape[1] + 1
+            )
 
     @property
     def x3v(self) -> Array:
         """Get x3 coordinates"""
         if self.spacing_types[2] == CellSpacing.LINEAR:
-            return np.linspace(self.bounds_min[2], self.bounds_max[2], self.shape[2])
+            return np.linspace(
+                self.bounds_min[2], self.bounds_max[2], self.shape[2] + 1
+            )
         else:
-            return np.geomspace(self.bounds_min[2], self.bounds_max[2], self.shape[2])
+            return np.geomspace(
+                self.bounds_min[2], self.bounds_max[2], self.shape[2] + 1
+            )
+
+    @property
+    def x1c(self) -> Array:
+        """Get x1 cell centers"""
+        if self.spacing_types[0] == CellSpacing.LINEAR:
+            return 0.5 * (self.x1v[:-1] + self.x1v[1:])
+        else:
+            return np.sqrt(self.x1v[:-1] * self.x1v[1:])
+
+    @property
+    def x2c(self) -> Array:
+        """Get x2 cell centers"""
+        if self.spacing_types[1] == CellSpacing.LINEAR:
+            return 0.5 * (self.x2v[:-1] + self.x2v[1:])
+        else:
+            return np.sqrt(self.x2v[:-1] * self.x2v[1:])
+
+    @property
+    def x3c(self) -> Array:
+        """Get x3 cell centers"""
+        if self.spacing_types[2] == CellSpacing.LINEAR:
+            return 0.5 * (self.x3v[:-1] + self.x3v[1:])
+        else:
+            return np.sqrt(self.x3v[:-1] * self.x3v[1:])
 
     def get(self, key: str, default: Any = None) -> Any:
         """Get coordinate array by key"""

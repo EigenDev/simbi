@@ -25,7 +25,9 @@ from ..functional.result import Result
 Array = NDArray[np.floating]
 
 
-def has_capability(body_capability: BodyCapability, capability: BodyCapability) -> bool:
+def has_capability(
+    body_capability: BodyCapability, capability: BodyCapability
+) -> bool:
     return bool(body_capability & capability)
 
 
@@ -81,7 +83,10 @@ def _is_gas_variable(name: str) -> bool:
 
 
 def preprocess_fields(
-    raw_fields: dict[str, Array], mesh: MeshConfig, metadata: Metadata, unpad: bool
+    raw_fields: dict[str, Array],
+    mesh: MeshConfig,
+    metadata: Metadata,
+    unpad: bool,
 ) -> dict[str, Array]:
     """Conditionally apply unpadding to all fields"""
     return {
@@ -136,7 +141,9 @@ def parse_bodies(
             accretion = AccretionProperties(
                 sink_rate=float(body_data["sink_rate"]),
                 accretion_radius=float(body_data["accretion_radius"]),
-                total_accreted_mass=float(body_diagnostics.cumulative_mass_delta[i]),
+                total_accreted_mass=float(
+                    body_diagnostics.cumulative_mass_delta[i]
+                ),
                 accretion_rate=float(body_diagnostics.accretion_rate[i]),
             )
 
@@ -205,7 +212,9 @@ def parse_diagnostics(groups: dict[str, Any]) -> BodyDiagnostics | None:
             for key, value in diag_data.items()
             if key.startswith("torque_")
         },
-        cumulative_mass_delta=np.asarray(diag_data.get("cumulative_mass_delta", [])),
+        cumulative_mass_delta=np.asarray(
+            diag_data.get("cumulative_mass_delta", [])
+        ),
         accretion_rate=np.asarray(diag_data.get("accretion_rate", [])),
     )
 
@@ -223,8 +232,12 @@ def parse_data(raw: RawHDF5, unpad: bool = True) -> Result[ProcessedData]:
             adiabatic_index=float(attrs["adiabatic_index"]),
             is_mhd="mhd" in str(attrs["regime"]),
             coord_system=str(attrs["coord_system"]),
-            boundary_conditions=tuple(str(attrs["boundary_conditions"]).split(",")),
-            resolution=tuple(int(x) for x in str(attrs["resolution"]).split(",")),
+            boundary_conditions=tuple(
+                str(attrs["boundary_conditions"]).split(",")
+            ),
+            resolution=tuple(
+                int(x) for x in str(attrs["resolution"]).split(",")
+            ),
             cfl_number=float(attrs["cfl_number"]),
             end_time=float(attrs["end_time"]),
             reconstruction=str(attrs["reconstruction"]),
@@ -242,12 +255,13 @@ def parse_data(raw: RawHDF5, unpad: bool = True) -> Result[ProcessedData]:
 
         # Parse mesh config
         mesh_data: dict[str, Any] = raw.groups.get("mesh_config", {})
+        # Reverse shape and bounds to match internal (x1, x2, x3) ordering
         mesh = MeshConfig(
-            shape=tuple(mesh_data["shape"]),
-            bounds_min=tuple(mesh_data["bounds_min"]),
-            bounds_max=tuple(mesh_data["bounds_max"]),
+            shape=tuple(mesh_data["shape"][::-1]),
+            bounds_min=tuple(mesh_data["bounds_min"][::-1]),
+            bounds_max=tuple(mesh_data["bounds_max"][::-1]),
             halo_radius=int(mesh_data["halo_radius"]),
-            spacing_types=tuple(mesh_data["spacing_types"].split(",")),
+            spacing_types=tuple(mesh_data["spacing_types"].split(",")[::-1]),
         )
 
         fields = preprocess_fields(raw.fields, mesh, metadata, unpad)
@@ -256,7 +270,9 @@ def parse_data(raw: RawHDF5, unpad: bool = True) -> Result[ProcessedData]:
         diagnostics = parse_diagnostics(raw.groups)
         bodies = parse_bodies(raw.groups.get("bodies"), diagnostics)
         return Result.ok(
-            ProcessedData(fields=fields, metadata=metadata, mesh=mesh, bodies=bodies)
+            ProcessedData(
+                fields=fields, metadata=metadata, mesh=mesh, bodies=bodies
+            )
         )
     except Exception as e:
         return Result.err(e)
