@@ -146,9 +146,9 @@ namespace simbi {
     std::ostream& operator<<(std::ostream& os, const domain_t<Dims>& d)
     {
         os << "Domain(";
-        for (std::uint64_t i = 0; i < Dims; ++i) {
-            os << d.start[i] << ":" << d.end[i];
-            if (i < Dims - 1) {
+        for (std::uint64_t ii = 0; ii < Dims; ++ii) {
+            os << d.start[ii] << ":" << d.end[ii];
+            if (ii < Dims - 1) {
                 os << ", ";
             }
         }
