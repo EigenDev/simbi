@@ -581,8 +581,11 @@ namespace simbi::exec {
         }
 
         template <std::uint64_t Dims, typename Func>
-        auto for_each_impl(const domain_t<Dims>& domain, Func&& func) const
-            -> future_t<void>
+        auto for_each_impl(
+            const domain_t<Dims>& domain,
+            Func&& func,
+            const iarray<Dims>& /*tile_size*/
+        ) const -> future_t<void>
         {
             return async_impl([domain, f = std::forward<Func>(func), this](
                                   std::size_t device_idx,

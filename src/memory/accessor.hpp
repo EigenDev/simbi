@@ -29,7 +29,8 @@ namespace simbi::mem {
         {
             iarray<Dims> result;
             result[Dims - 1] = 1;
-            for (std::int64_t ii = Dims - 2; ii >= 0; --ii) {
+            const auto end   = static_cast<std::int64_t>(Dims - 2);
+            for (std::int64_t ii = end; ii >= 0; --ii) {
                 result[ii] = result[ii + 1] * shape[ii + 1];
             }
             return result;
