@@ -4,6 +4,7 @@
 #include "compute/field.hpp"
 #include "config.hpp"
 #include "containers/vector.hpp"
+#include "functional/fp.hpp"
 #include "hydro_state_types.hpp"
 #include "io/exceptions.hpp"
 #include "memory/managed.hpp"
@@ -215,9 +216,10 @@ namespace simbi::state {
                     }
                 }
 
-                flux_vec[dir] = field(make_domain(staggered_shape), [](auto) {
-                    return conserved_t{};
-                });
+                flux_vec[dir] = field(
+                    make_domain(staggered_shape),
+                    fp::default_t<conserved_t>{}
+                );
 
                 if constexpr (is_mhd) {
                     bstaggs_vec[dir] = from_data_field(

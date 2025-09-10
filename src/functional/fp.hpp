@@ -289,6 +289,15 @@ namespace simbi::fp {
         return constant_t<T>{std::move(value)};
     }
 
+    template <typename T>
+    struct default_t {
+        template <typename Arg>
+        constexpr DUAL T operator()(Arg&&) const
+        {
+            return T{};
+        }
+    };
+
     // domain operations
     template <std::uint64_t Dims>
     struct contains_op_t {
