@@ -531,8 +531,8 @@ namespace simbi::exec {
             }
         }
 
-        gpu_executor_t(const gpu_executor_t&)            = delete;
-        gpu_executor_t& operator=(const gpu_executor_t&) = delete;
+        gpu_executor_t(const gpu_executor_t&)            = default;
+        gpu_executor_t& operator=(const gpu_executor_t&) = default;
         gpu_executor_t(gpu_executor_t&&)                 = default;
         gpu_executor_t& operator=(gpu_executor_t&&)      = default;
 
