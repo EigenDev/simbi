@@ -122,7 +122,7 @@ namespace simbi::mem {
             executor
                 .for_each(
                     domain_,
-                    [this, computation] DUAL(const auto& coord) {
+                    [this, computation] DUAL(coordinate_t<Dims> coord) {
                         (*this)(coord) = computation(coord);
                     }
                 )
@@ -145,23 +145,24 @@ namespace simbi::mem {
                 data_ = arena_->get(domain_.size());
             }
 
-            auto nerrors = executor
-                               .reduce(
-                                   domain_,
-                                   std::size_t{0},
-                                   [this, computation] DUAL(const auto& coord) {
-                                       auto value = computation(coord);
-                                       if (value.has_value()) {
-                                           (*this)(coord) = value.value();
-                                           return std::size_t{0};
-                                       }
-                                       else {
-                                           return std::size_t{1};
-                                       }
-                                   },
-                                   std::plus<std::size_t>{}
-                               )
-                               .wait();
+            auto nerrors =
+                executor
+                    .reduce(
+                        domain_,
+                        std::size_t{0},
+                        [this, computation] DUAL(coordinate_t<Dims> coord) {
+                            auto value = computation(coord);
+                            if (value.has_value()) {
+                                (*this)(coord) = value.value();
+                                return std::size_t{0};
+                            }
+                            else {
+                                return std::size_t{1};
+                            }
+                        },
+                        std::plus<std::size_t>{}
+                    )
+                    .wait();
 
             if (nerrors > 0) {
                 throw exception::SimulationFailureException();
