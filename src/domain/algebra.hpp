@@ -227,38 +227,40 @@ namespace simbi::domain_algebra {
         return result;
     }
 
-    template <std::uint64_t Dims>
-    auto subdivide(const domain_t<Dims>& domain, const iarray<Dims>& divisions)
-    {
-        // reasonable max for most cases
-        vector_t<domain_t<Dims>, 64> subdomains;
-        std::size_t count = 0;
+    // template <std::uint64_t Dims>
+    // auto subdivide(const domain_t<Dims>& domain, const iarray<Dims>&
+    // divisions)
+    // {
+    //     // reasonable max for most cases
+    //     vector_t<domain_t<Dims>, 64> subdomains;
+    //     std::size_t count = 0;
 
-        auto chunk_sizes = domain.shape();
-        for (std::uint64_t ii = 0; ii < Dims; ++ii) {
-            chunk_sizes[ii] =
-                (chunk_sizes[ii] + divisions[ii] - 1) / divisions[ii];
-        }
+    //     auto chunk_sizes = domain.shape();
+    //     for (std::uint64_t ii = 0; ii < Dims; ++ii) {
+    //         chunk_sizes[ii] =
+    //             (chunk_sizes[ii] + divisions[ii] - 1) / divisions[ii];
+    //     }
 
-        // generate all subdivision combinations
-        iarray<Dims> div_coord{};
-        do {
-            iarray<Dims> sub_start, sub_end;
-            for (std::uint64_t ii = 0; ii < Dims; ++ii) {
-                sub_start[ii] =
-                    domain.start[ii] + div_coord[ii] * chunk_sizes[ii];
-                sub_end[ii] =
-                    std::min(sub_start[ii] + chunk_sizes[ii], domain.end[ii]);
-            }
+    //     // generate all subdivision combinations
+    //     iarray<Dims> div_coord{};
+    //     do {
+    //         iarray<Dims> sub_start, sub_end;
+    //         for (std::uint64_t ii = 0; ii < Dims; ++ii) {
+    //             sub_start[ii] =
+    //                 domain.start[ii] + div_coord[ii] * chunk_sizes[ii];
+    //             sub_end[ii] =
+    //                 std::min(sub_start[ii] + chunk_sizes[ii],
+    //                 domain.end[ii]);
+    //         }
 
-            if (sub_start != sub_end) {   // non-empty subdomain
-                subdomains[count++] = domain_t<Dims>{sub_start, sub_end};
-            }
+    //         if (sub_start != sub_end) {   // non-empty subdomain
+    //             subdomains[count++] = domain_t<Dims>{sub_start, sub_end};
+    //         }
 
-        } while (increment_coord(div_coord, divisions));
+    //     } while (increment_coord(div_coord, divisions));
 
-        return std::pair{subdomains, count};
-    }
+    //     return std::pair{subdomains, count};
+    // }
 
 }   // namespace simbi::domain_algebra
 
