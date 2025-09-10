@@ -843,11 +843,14 @@ namespace simbi::fp {
                     }
                 }
                 else {
-                    static_assert(
-                        false,
-                        "Container must support push_back, insert, or indexing "
-                        "with size()"
-                    );
+                    []<bool success = false>() {
+                        static_assert(
+                            success,
+                            "Container must support push_back, insert, or "
+                            "indexing "
+                            "with size()"
+                        );
+                    }();
                 }
                 return result;
             }
