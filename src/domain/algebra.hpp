@@ -7,7 +7,6 @@
 
 #include <cstddef>
 #include <cstdint>
-#include <utility>
 
 namespace simbi::domain_algebra {
 

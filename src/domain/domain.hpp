@@ -7,6 +7,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <ostream>
+#include <utility>
 
 namespace simbi {
     template <std::uint64_t Dims>
