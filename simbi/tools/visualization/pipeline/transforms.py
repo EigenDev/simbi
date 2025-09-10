@@ -19,6 +19,7 @@ T = TypeVar("T")
 
 # Centralized axis mapping
 AXIS_MAP = {"x1": 2, "x2": 1, "x3": 0}
+AXIS_MAP_2D = {"x1": 1, "x2": 0}
 
 
 @dataclass
@@ -54,6 +55,9 @@ def plan_slice(
     # Determine remaining axes
     all_axes = set(range(len(domain)))
     remaining_axes = sorted(all_axes - set(slice_axes))
+
+    if len(positions) < 2:
+        slice_axes = [AXIS_MAP_2D[axis] for axis in axis_names]
 
     return SlicePlan(
         slice_indices=slice_indices,
@@ -149,7 +153,7 @@ def create_field_data(
 
 def create_slicer_from_config(slice_config: dict[str, Any]) -> Callable:
     """Create a slicer function from configuration dictionary."""
-    # Handle the old "axis" + "position" pattern (2D slice from 3D)
+    # Handle the "axis" + "position" pattern (2D slice from 3D)
     if "axis" in slice_config and "position" in slice_config:
         return slice_to_2d(slice_config["axis"], slice_config["position"])
 
@@ -171,10 +175,10 @@ def transform_field(
     slice_config: Optional[dict[str, Any]] = None,
 ) -> FieldData:
     """Transform a single field based on dimension and slicing configuration."""
-    if ndim in (2, 3):
-        vertices = True
-    elif slice_config and "orthogonal_ax" in slice_config:
+    if slice_config and "orthogonal_ax" in slice_config:
         vertices = False
+    elif ndim in (2, 3):
+        vertices = True
     else:
         vertices = False
     values = extract_field(field_name)(data)

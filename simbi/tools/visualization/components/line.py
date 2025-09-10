@@ -8,14 +8,14 @@ from matplotlib.figure import Figure
 from matplotlib.lines import Line2D
 from pydantic import Field, ValidationInfo, field_validator
 
-from simbi.functional.utilities import (
+from ....functional.utilities import (
     for_each,
     map_with_index,
 )
-from simbi.tools.utility import get_field_str
-from simbi.tools.visualization.core.config import StyleConfig
-
+from ...utility import get_field_str
+from ..core.config import StyleConfig
 from ..core.types import Array, FieldData, PlotData
+from ..formatters.line import format_line_plot_axes
 from .interface import Component, ComponentProps
 
 
@@ -225,12 +225,12 @@ class LinePlotComponent(Component):
         if use_legend and len(data.fields) == 1:
             update_legend(ax, self._lines)
 
-        # format_line_plot_axes(
-        #     ax,
-        #     data,
-        #     self.props.field_indices[0] if self.props.field_indices else 0,
-        #     style,
-        # )
+        format_line_plot_axes(
+            ax,
+            data,
+            self.props.field_indices[0] if self.props.field_indices else 0,
+            style,
+        )
 
         return self._lines
 
