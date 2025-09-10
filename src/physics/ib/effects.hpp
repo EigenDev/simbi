@@ -8,7 +8,6 @@
 #include "containers/vector.hpp"
 #include "mesh/mesh_ops.hpp"
 #include "physics/hydro/physics.hpp"
-#include "utility/enums.hpp"
 #include "utility/helpers.hpp"
 
 #include <cmath>
