@@ -343,6 +343,8 @@ namespace simbi::boundary {
             // apply momentum flip for reflecting BC
             if (bc_type == BoundaryCondition::REFLECTING) {
                 if constexpr (requires { source_value.mom; }) {
+                    // to satisfy nvcc
+                    constexpr auto Dims        = HydroState::dimensions;
                     auto modified              = source_value;
                     auto momentum_idx          = (Dims - 1) - contact_dim;
                     modified.mom[momentum_idx] = -modified.mom[momentum_idx];
