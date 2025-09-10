@@ -1,10 +1,10 @@
 from dataclasses import dataclass
+from typing import Iterator
 
 from simbi.core.config.base_config import SimbiBaseConfig
 from simbi.core.config.fields import SimbiField
-from simbi.core.types.input import CoordSystem, Regime, CellSpacing
+from simbi.core.types.input import CellSpacing, CoordSystem, Regime
 from simbi.core.types.typing import GasStateGenerator, InitialStateType
-from typing import Iterator
 
 
 @dataclass
@@ -30,7 +30,9 @@ class SodProblemQuad(SimbiBaseConfig):
     """
 
     # Required fields from SimbiBaseConfig
-    resolution: tuple[int, int] = SimbiField((256, 256), description="Grid resolution")
+    resolution: tuple[int, int] = SimbiField(
+        (256, 256), description="Grid resolution"
+    )
 
     bounds: list[tuple[float, float]] = SimbiField(
         [(0.0, 1.0), (0.0, 1.0)], description="Domain boundaries"
@@ -42,7 +44,9 @@ class SodProblemQuad(SimbiBaseConfig):
 
     regime: Regime = SimbiField(Regime.SRHD, description="Physics regime")
 
-    adiabatic_index: float = SimbiField(5.0 / 3.0, description="Adiabatic index")
+    adiabatic_index: float = SimbiField(
+        5.0 / 3.0, description="Adiabatic index"
+    )
 
     # Optional customizations
     x1_spacing: CellSpacing = SimbiField(
@@ -78,7 +82,9 @@ class SodProblemQuad(SimbiBaseConfig):
             bottom_right = ShockTubeState(
                 0.1, 0.0, 0.9, 1.0
             )  # Bottom-right: Upward velocity
-            top_right = ShockTubeState(0.1, 0.0, 0.0, 0.01)  # Top-right: Low pressure
+            top_right = ShockTubeState(
+                0.1, 0.0, 0.0, 0.01
+            )  # Top-right: Low pressure
 
             for j in range(nj):
                 y = ymin + (j + 0.5) * dy  # Cell center

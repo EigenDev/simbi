@@ -1,8 +1,9 @@
+from pathlib import Path
+
 from simbi.core.config.base_config import SimbiBaseConfig
 from simbi.core.config.fields import SimbiField
-from simbi.core.types.input import CoordSystem, Regime, CellSpacing, Solver
+from simbi.core.types.input import CellSpacing, CoordSystem, Regime, Solver
 from simbi.core.types.typing import GasStateGenerator, InitialStateType
-from pathlib import Path
 
 
 class StationaryWaveHLL(SimbiBaseConfig):
@@ -23,7 +24,9 @@ class StationaryWaveHLL(SimbiBaseConfig):
 
     regime: Regime = SimbiField(Regime.CLASSICAL, description="Physics regime")
 
-    adiabatic_index: float = SimbiField(5.0 / 3.0, description="Adiabatic index")
+    adiabatic_index: float = SimbiField(
+        5.0 / 3.0, description="Adiabatic index"
+    )
 
     # Optional customizations
     x1_spacing: CellSpacing = SimbiField(

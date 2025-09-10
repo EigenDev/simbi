@@ -3,7 +3,12 @@ from typing import Iterator
 
 from simbi.core.config.base_config import SimbiBaseConfig
 from simbi.core.config.fields import SimbiField
-from simbi.core.types.input import BoundaryCondition, CoordSystem, Regime, CellSpacing
+from simbi.core.types.input import (
+    BoundaryCondition,
+    CellSpacing,
+    CoordSystem,
+    Regime,
+)
 from simbi.core.types.typing import GasStateGenerator, InitialStateType
 
 
@@ -40,7 +45,9 @@ class Ram45(SimbiBaseConfig):
 
     regime: Regime = SimbiField(Regime.SRHD, description="Physics regime")
 
-    adiabatic_index: float = SimbiField(4.0 / 3.0, description="Adiabatic index")
+    adiabatic_index: float = SimbiField(
+        4.0 / 3.0, description="Adiabatic index"
+    )
 
     # Optional customizations
     x1_spacing: CellSpacing = SimbiField(

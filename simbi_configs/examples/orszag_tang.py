@@ -1,22 +1,23 @@
 import math
 from functools import partial
+from typing import Any
+
+from pydantic import computed_field
 
 from simbi.core.config.base_config import SimbiBaseConfig
 from simbi.core.config.fields import SimbiField
 from simbi.core.types.input import (
     BoundaryCondition,
+    CellSpacing,
     CoordSystem,
     Regime,
-    CellSpacing,
     Solver,
 )
 from simbi.core.types.typing import (
-    InitialStateType,
     GasStateGenerator,
+    InitialStateType,
     StaggeredBFieldGenerator,
 )
-from pydantic import computed_field
-from typing import Any
 
 # Domain constants
 XMIN = 0.0
@@ -45,7 +46,9 @@ class OrszagTang(SimbiBaseConfig):
 
     regime: Regime = SimbiField(Regime.SRMHD, description="Physics regime")
 
-    adiabatic_index: float = SimbiField(5.0 / 3.0, description="Adiabatic index")
+    adiabatic_index: float = SimbiField(
+        5.0 / 3.0, description="Adiabatic index"
+    )
 
     # Optional customizations with non-default values
     solver: Solver = SimbiField(Solver.HLLE, description="Numerical solver")

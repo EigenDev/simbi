@@ -1,17 +1,18 @@
 from dataclasses import dataclass
-from typing import Sequence, NamedTuple, Any, cast
 from functools import partial
+from typing import Any, NamedTuple, Sequence, cast
+
 import numpy as np
 from numpy.typing import NDArray
 
 from simbi.core.config.base_config import SimbiBaseConfig
 from simbi.core.config.fields import SimbiField
-from simbi.core.types.input import CoordSystem, Regime, CellSpacing, Solver
+from simbi.core.types.input import CellSpacing, CoordSystem, Regime, Solver
 from simbi.core.types.typing import (
-    InitialStateType,
     GasStateGenerator,
-    StaggeredBFieldGenerator,
+    InitialStateType,
     MHDStateGenerators,
+    StaggeredBFieldGenerator,
 )
 
 # Constants
@@ -53,7 +54,9 @@ class MHDProblemState:
         cls, left_vals: Sequence[float], right_vals: Sequence[float]
     ) -> "MHDProblemState":
         """Create problem state from raw values"""
-        return cls(left=ShockTubeState(*left_vals), right=ShockTubeState(*right_vals))
+        return cls(
+            left=ShockTubeState(*left_vals), right=ShockTubeState(*right_vals)
+        )
 
 
 class StaggeredMHDState(NamedTuple):
@@ -99,7 +102,9 @@ class MagneticShockTube(SimbiBaseConfig):
 
     regime: Regime = SimbiField(Regime.SRMHD, description="Physics regime")
 
-    adiabatic_index: float = SimbiField(4.0 / 3.0, description="Adiabatic index")
+    adiabatic_index: float = SimbiField(
+        4.0 / 3.0, description="Adiabatic index"
+    )
     solver: Solver = SimbiField(
         Solver.HLLD, description="Solver type for MHD equations"
     )
@@ -186,12 +191,40 @@ class MagneticShockTube(SimbiBaseConfig):
                 ),
             ),
             "alfven": MHDProblemState.create_state(
-                (1.0, *MHDProblemState.beta([0.0, 0.0, 0.0]), 1.0, 3.0, 3.0000, 0.0),
-                (1.0, *MHDProblemState.beta([3.70, 5.76, 0.0]), 1.0, 3.0, -6.857, 0.0),
+                (
+                    1.0,
+                    *MHDProblemState.beta([0.0, 0.0, 0.0]),
+                    1.0,
+                    3.0,
+                    3.0000,
+                    0.0,
+                ),
+                (
+                    1.0,
+                    *MHDProblemState.beta([3.70, 5.76, 0.0]),
+                    1.0,
+                    3.0,
+                    -6.857,
+                    0.0,
+                ),
             ),
             "compound": MHDProblemState.create_state(
-                (1.0, *MHDProblemState.beta([0.0, 0.0, 0.0]), 1.0, 3.0, +3.000, 0.0),
-                (1.0, *MHDProblemState.beta([3.70, 5.76, 0.0]), 1.0, 3.0, -6.857, 0.0),
+                (
+                    1.0,
+                    *MHDProblemState.beta([0.0, 0.0, 0.0]),
+                    1.0,
+                    3.0,
+                    +3.000,
+                    0.0,
+                ),
+                (
+                    1.0,
+                    *MHDProblemState.beta([3.70, 5.76, 0.0]),
+                    1.0,
+                    3.0,
+                    -6.857,
+                    0.0,
+                ),
             ),
             "st-1": MHDProblemState.create_state(
                 (1.0, 0.0, 0.0, 0.0, 1e3, 1.0, 0.0, 0.0),
@@ -202,8 +235,22 @@ class MagneticShockTube(SimbiBaseConfig):
                 (0.1, 0.0, 0.0, 0.0, 1.00, 0.0, 0.00, 0.0),
             ),
             "collision": MHDProblemState.create_state(
-                (1.0, *MHDProblemState.beta([+5.0, 0.0, 0.0]), 1.0, 10.0, +10.0, 0.0),
-                (1.0, *MHDProblemState.beta([-5.0, 0.0, 0.0]), 1.0, 10.0, -10.0, 0.0),
+                (
+                    1.0,
+                    *MHDProblemState.beta([+5.0, 0.0, 0.0]),
+                    1.0,
+                    10.0,
+                    +10.0,
+                    0.0,
+                ),
+                (
+                    1.0,
+                    *MHDProblemState.beta([-5.0, 0.0, 0.0]),
+                    1.0,
+                    10.0,
+                    -10.0,
+                    0.0,
+                ),
             ),
         }
 

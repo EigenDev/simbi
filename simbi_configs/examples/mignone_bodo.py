@@ -1,8 +1,9 @@
+from dataclasses import dataclass
+from typing import Any, Generator, Iterator
+
 from simbi import SimbiBaseConfig, SimbiField
 from simbi.core.types.input import CoordSystem, Regime
 from simbi.typing import InitialStateType
-from typing import Generator, Iterator, Any
-from dataclasses import dataclass
 
 
 @dataclass(frozen=True)
@@ -23,8 +24,12 @@ class MignoneBodo(SimbiBaseConfig):
     """
 
     resolution: int = SimbiField(1000, description="resolution of grid zones")
-    adiabatic_index: float = SimbiField(4.0 / 3.0, description="Adiabatic gas index")
-    problem: int = SimbiField(1, description="test problem to compute", choices=[1, 2])
+    adiabatic_index: float = SimbiField(
+        4.0 / 3.0, description="Adiabatic gas index"
+    )
+    problem: int = SimbiField(
+        1, description="test problem to compute", choices=[1, 2]
+    )
 
     bounds: list[tuple[float, float]] = SimbiField(
         [(0.0, 1.0)], description="Domain boundaries"

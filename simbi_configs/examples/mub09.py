@@ -1,13 +1,13 @@
-from functools import partial
 from dataclasses import dataclass
-from typing import Iterator, Any, cast
+from functools import partial
+from typing import Any, Iterator, cast
 
 from simbi.core.config.base_config import SimbiBaseConfig
 from simbi.core.config.fields import SimbiField
-from simbi.core.types.input import CoordSystem, Regime, CellSpacing, Solver
+from simbi.core.types.input import CellSpacing, CoordSystem, Regime, Solver
 from simbi.core.types.typing import (
-    InitialStateType,
     GasStateGenerator,
+    InitialStateType,
     MHDStateGenerators,
 )
 
@@ -37,7 +37,9 @@ class MagneticShockTube(SimbiBaseConfig):
     """
 
     # Configuration parameters
-    adiabatic_index: float = SimbiField(5.0 / 3.0, description="Adiabatic index")
+    adiabatic_index: float = SimbiField(
+        5.0 / 3.0, description="Adiabatic index"
+    )
 
     problem: str = SimbiField(
         "contact",
@@ -82,7 +84,16 @@ class MagneticShockTube(SimbiBaseConfig):
             ),
             "rotational": (
                 MHDState(1.0, 0.4, -0.3, 0.5, 1.0, 2.4, 1.0, -1.6),
-                MHDState(1.0, 0.377347, -0.482389, 0.424190, 1.0, 2.4, -0.1, -2.178213),
+                MHDState(
+                    1.0,
+                    0.377347,
+                    -0.482389,
+                    0.424190,
+                    1.0,
+                    2.4,
+                    -0.1,
+                    -2.178213,
+                ),
             ),
             "st-1": (
                 MHDState(1.000, 0.0, 0.0, 0.0, 1.0, 0.5, +1.0, 0.0),

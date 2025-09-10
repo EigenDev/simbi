@@ -24,7 +24,9 @@ class MartiMuller3D(SimbiBaseConfig):
 
     regime: Regime = SimbiField(Regime.SRHD, description="Physics regime")
 
-    adiabatic_index: float = SimbiField(4.0 / 3.0, description="Adiabatic index")
+    adiabatic_index: float = SimbiField(
+        4.0 / 3.0, description="Adiabatic index"
+    )
 
     def initial_primitive_state(self) -> InitialStateType:
         """Generate initial primitive state for 3D Marti & Muller shock tube.

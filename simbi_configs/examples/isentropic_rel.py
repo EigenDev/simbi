@@ -1,21 +1,28 @@
 from dataclasses import dataclass
-from typing import Callable, Sequence, Any
+from typing import Any, Callable, Sequence
+
 import numpy as np
 from numpy.typing import NDArray
+from pydantic import validator
 
 from simbi.core.config.base_config import SimbiBaseConfig
 from simbi.core.config.fields import SimbiField
-from simbi.core.types.input import CellSpacing, CoordSystem, Regime, BoundaryCondition
+from simbi.core.types.input import (
+    BoundaryCondition,
+    CellSpacing,
+    CoordSystem,
+    Regime,
+)
 from simbi.core.types.typing import GasStateGenerator, InitialStateType
-from pydantic import validator
-
 
 # Constants
 ALPHA_MAX = 2.0
 ALPHA_MIN = 1e-3
 
 
-def range_limited_float(min_val: float, max_val: float) -> Callable[[float], float]:
+def range_limited_float(
+    min_val: float, max_val: float
+) -> Callable[[float], float]:
     """Creates a validator function for float within range"""
 
     def validate_range(v: float) -> float:
@@ -59,12 +66,17 @@ class IsentropicState:
         self, rho: NDArray[np.float64] | float, p: NDArray[np.float64] | float
     ) -> NDArray[np.float64]:
         """Calculate sound speed"""
-        h = 1.0 + self.adiabatic_index * p / (rho * (self.adiabatic_index - 1.0))
+        h = 1.0 + self.adiabatic_index * p / (
+            rho * (self.adiabatic_index - 1.0)
+        )
         return np.sqrt(self.adiabatic_index * p / (rho * h))
 
     def pressure(self, rho: NDArray[np.float64]) -> NDArray[np.float64]:
         """Calculate pressure"""
-        return self.params.p_ref * (rho / self.params.rho_ref) ** self.adiabatic_index
+        return (
+            self.params.p_ref
+            * (rho / self.params.rho_ref) ** self.adiabatic_index
+        )
 
     def velocity(
         self, rho: NDArray[np.float64], p: NDArray[np.float64]
@@ -78,7 +90,9 @@ class IsentropicState:
 class IsentropicRelWave(SimbiBaseConfig):
     """Relativistic Isentropic Pulse in 1D, Entropy conserving"""
 
-    adiabatic_index: float = SimbiField(4.0 / 3.0, description="Adiabatic gas index")
+    adiabatic_index: float = SimbiField(
+        4.0 / 3.0, description="Adiabatic gas index"
+    )
 
     alpha: float = SimbiField(0.5, description="Wave amplitude")
 

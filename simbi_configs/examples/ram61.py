@@ -1,6 +1,6 @@
 from simbi.core.config.base_config import SimbiBaseConfig
 from simbi.core.config.fields import SimbiField
-from simbi.core.types.input import CoordSystem, Regime, CellSpacing
+from simbi.core.types.input import CellSpacing, CoordSystem, Regime
 from simbi.core.types.typing import GasStateGenerator, InitialStateType
 
 
@@ -11,7 +11,9 @@ class Ram61(SimbiBaseConfig):
     """
 
     # Required fields from SimbiBaseConfig
-    resolution: tuple[int, int] = SimbiField((400, 400), description="Grid resolution")
+    resolution: tuple[int, int] = SimbiField(
+        (400, 400), description="Grid resolution"
+    )
 
     bounds: list[tuple[float, float]] = SimbiField(
         [(0.0, 1.0), (0.0, 1.0)], description="Domain boundaries"
@@ -23,7 +25,9 @@ class Ram61(SimbiBaseConfig):
 
     regime: Regime = SimbiField(Regime.SRHD, description="Physics regime")
 
-    adiabatic_index: float = SimbiField(5.0 / 3.0, description="Adiabatic index")
+    adiabatic_index: float = SimbiField(
+        5.0 / 3.0, description="Adiabatic index"
+    )
 
     # Optional customizations
     x1_spacing: CellSpacing = SimbiField(

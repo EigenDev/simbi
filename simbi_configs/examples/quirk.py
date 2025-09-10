@@ -1,21 +1,21 @@
 import math
 import random
 from dataclasses import dataclass
-from typing import Iterator, Any
+from pathlib import Path
+from typing import Any, Iterator
+
+from pydantic import computed_field
 
 from simbi.core.config.base_config import SimbiBaseConfig
 from simbi.core.config.fields import SimbiField
 from simbi.core.types.input import (
     BoundaryCondition,
+    CellSpacing,
     CoordSystem,
     Regime,
-    CellSpacing,
     Solver,
 )
 from simbi.core.types.typing import GasStateGenerator, InitialStateType
-from pydantic import computed_field
-from pathlib import Path
-
 
 PERTURBATION_SCALE = 0.5e-3  # Scale for random perturbations
 
@@ -57,7 +57,9 @@ class Quirk(SimbiBaseConfig):
     """
 
     # Configuration parameters
-    resolution: tuple[int, int] = SimbiField((2400, 20), description="Grid resolution")
+    resolution: tuple[int, int] = SimbiField(
+        (2400, 20), description="Grid resolution"
+    )
 
     mach_mode: str = SimbiField(
         "low", description="Mach number regime", choices=["low", "high"]
@@ -75,7 +77,9 @@ class Quirk(SimbiBaseConfig):
 
     regime: Regime = SimbiField(Regime.CLASSICAL, description="Physics regime")
 
-    adiabatic_index: float = SimbiField(5.0 / 3.0, description="Adiabatic index")
+    adiabatic_index: float = SimbiField(
+        5.0 / 3.0, description="Adiabatic index"
+    )
 
     # Optional customizations with non-default values
     x1_spacing: CellSpacing = SimbiField(
@@ -88,7 +92,9 @@ class Quirk(SimbiBaseConfig):
 
     solver: Solver = SimbiField(Solver.HLLC, description="Numerical solver")
 
-    use_quirk_smoothing: bool = SimbiField(True, description="Enable Quirk smoothing")
+    use_quirk_smoothing: bool = SimbiField(
+        True, description="Enable Quirk smoothing"
+    )
 
     end_time: float = SimbiField(
         0.0, description="Simulation end time (calculated based on mach_mode)"
@@ -101,12 +107,17 @@ class Quirk(SimbiBaseConfig):
         self._problem_states = {
             "low": (
                 QuirkState(
-                    216.0 / 41.0, (35.0 / 36.0) * math.sqrt(35), 0.0, 251.0 / 6.0
+                    216.0 / 41.0,
+                    (35.0 / 36.0) * math.sqrt(35),
+                    0.0,
+                    251.0 / 6.0,
                 ),
                 QuirkState(1.0, 0.0, 0.0, 1.0),
             ),
             "high": (
-                QuirkState(160.0 / 27.0, (133.0 / 8.0) * math.sqrt(1.4), 0.0, 466.5),
+                QuirkState(
+                    160.0 / 27.0, (133.0 / 8.0) * math.sqrt(1.4), 0.0, 466.5
+                ),
                 QuirkState(1.0, 0.0, 0.0, 1.0),
             ),
         }
@@ -120,7 +131,9 @@ class Quirk(SimbiBaseConfig):
     def data_directory_setter(self) -> None:
         """Compute output data directory based on configuration"""
         smoothing_dir = "smoothing" if self.use_quirk_smoothing else "raw"
-        self.data_directory = Path(f"data/quirk/{smoothing_dir}/{self.mach_mode}_mach")
+        self.data_directory = Path(
+            f"data/quirk/{smoothing_dir}/{self.mach_mode}_mach"
+        )
 
     def initial_primitive_state(self) -> InitialStateType:
         """Generate initial primitive state for Quirk problem.

@@ -1,16 +1,17 @@
 import math
+from typing import Any
+
+from simbi import compute_num_polar_zones
 from simbi.core.config.base_config import SimbiBaseConfig
 from simbi.core.config.fields import SimbiField
 from simbi.core.types.input import (
+    BoundaryCondition,
+    CellSpacing,
     CoordSystem,
     Regime,
-    CellSpacing,
     Solver,
-    BoundaryCondition,
 )
 from simbi.core.types.typing import GasStateGenerator, InitialStateType
-from simbi import compute_num_polar_zones
-from typing import Any
 
 # Constants
 RHO_AMB = 1.0
@@ -50,7 +51,9 @@ class ThermalBomb3D(SimbiBaseConfig):
 
     regime: Regime = SimbiField(Regime.SRHD, description="Physics regime")
 
-    adiabatic_index: float = SimbiField(4.0 / 3.0, description="Adiabatic index")
+    adiabatic_index: float = SimbiField(
+        4.0 / 3.0, description="Adiabatic index"
+    )
 
     # Optional customizations
     x1_spacing: CellSpacing = SimbiField(

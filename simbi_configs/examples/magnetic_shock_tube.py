@@ -1,22 +1,23 @@
-from typing import Sequence, cast, Any
 from dataclasses import dataclass
 from functools import partial
+from typing import Any, Sequence, cast
+
+from pydantic import model_validator
 
 from simbi.core.config.base_config import SimbiBaseConfig
 from simbi.core.config.fields import SimbiField
 from simbi.core.types.input import (
+    CellSpacing,
     CoordSystem,
     Regime,
-    CellSpacing,
     Solver,
 )
 from simbi.core.types.typing import (
-    InitialStateType,
     GasStateGenerator,
-    StaggeredBFieldGenerator,
+    InitialStateType,
     MHDStateGenerators,
+    StaggeredBFieldGenerator,
 )
-from pydantic import model_validator
 
 
 @dataclass(frozen=True)
@@ -45,7 +46,9 @@ class MHDProblemState:
         cls, left_vals: Sequence[float], right_vals: Sequence[float]
     ) -> "MHDProblemState":
         """Create problem state from raw values"""
-        return cls(left=ShockTubeState(*left_vals), right=ShockTubeState(*right_vals))
+        return cls(
+            left=ShockTubeState(*left_vals), right=ShockTubeState(*right_vals)
+        )
 
 
 class MagneticShockTube(SimbiBaseConfig):
@@ -54,7 +57,9 @@ class MagneticShockTube(SimbiBaseConfig):
     """
 
     problem: int = SimbiField(
-        1, description="Problem number from Mignone & Bodo (2006)", choices=[1, 2, 3, 4]
+        1,
+        description="Problem number from Mignone & Bodo (2006)",
+        choices=[1, 2, 3, 4],
     )
 
     # Required fields from SimbiBaseConfig
@@ -77,7 +82,9 @@ class MagneticShockTube(SimbiBaseConfig):
 
     # Adiabatic index depends on problem, so we provide a default here
     # and use a validator to update it
-    adiabatic_index: float = SimbiField(5.0 / 3.0, description="Adiabatic index")
+    adiabatic_index: float = SimbiField(
+        5.0 / 3.0, description="Adiabatic index"
+    )
 
     # Optional customizations
     x1_spacing: CellSpacing = SimbiField(

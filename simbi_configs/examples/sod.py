@@ -1,4 +1,5 @@
 from typing import Sequence
+
 from simbi.core.config.base_config import SimbiBaseConfig
 from simbi.core.config.fields import SimbiField
 from simbi.core.types.input import CellSpacing, CoordSystem, Regime
@@ -11,7 +12,9 @@ class SodProblem(SimbiBaseConfig):
     """
 
     # Define basic configuration parameters
-    adiabatic_index: float = SimbiField(5.0 / 3.0, description="Adiabatic gas index")
+    adiabatic_index: float = SimbiField(
+        5.0 / 3.0, description="Adiabatic gas index"
+    )
 
     # Required fields that we need to implement
     resolution: int = SimbiField(1000, description="Grid resolution")

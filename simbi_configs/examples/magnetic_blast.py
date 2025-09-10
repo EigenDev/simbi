@@ -4,15 +4,15 @@ from functools import partial
 from simbi.core.config.base_config import SimbiBaseConfig
 from simbi.core.config.fields import SimbiField
 from simbi.core.types.input import (
-    CoordSystem,
     BoundaryCondition,
-    Regime,
     CellSpacing,
+    CoordSystem,
+    Regime,
     Solver,
 )
 from simbi.core.types.typing import (
-    InitialStateType,
     GasStateGenerator,
+    InitialStateType,
     StaggeredBFieldGenerator,
 )
 
@@ -36,7 +36,9 @@ class MagneticBomb(SimbiBaseConfig):
     b0: float = SimbiField(0.1, description="Magnetic field scale")
 
     # Required fields from SimbiBaseConfig
-    resolution: tuple[int, int] = SimbiField((256, 256), description="Grid resolution")
+    resolution: tuple[int, int] = SimbiField(
+        (256, 256), description="Grid resolution"
+    )
 
     bounds: list[tuple[float, float]] = SimbiField(
         [(XMIN, XMAX), (XMIN, XMAX)], description="Domain boundaries"
@@ -48,7 +50,9 @@ class MagneticBomb(SimbiBaseConfig):
 
     regime: Regime = SimbiField(Regime.SRMHD, description="Physics regime")
 
-    adiabatic_index: float = SimbiField(4.0 / 3.0, description="Adiabatic index")
+    adiabatic_index: float = SimbiField(
+        4.0 / 3.0, description="Adiabatic index"
+    )
 
     # Optional customizations with non-default values
     solver: Solver = SimbiField(Solver.HLLE, description="Numerical solver")

@@ -1,16 +1,17 @@
 import math
+from typing import Any
+
+from simbi import compute_num_polar_zones
 from simbi.core.config.base_config import SimbiBaseConfig
 from simbi.core.config.fields import SimbiField
 from simbi.core.types.input import (
     BoundaryCondition,
+    CellSpacing,
     CoordSystem,
     Regime,
-    CellSpacing,
     Solver,
 )
 from simbi.core.types.typing import GasStateGenerator, InitialStateType
-from simbi import compute_num_polar_zones
-from typing import Any
 
 # Constants
 RHO_AMB = 1.0
@@ -49,7 +50,9 @@ class SedovTaylor(SimbiBaseConfig):
 
     regime: Regime = SimbiField(Regime.CLASSICAL, description="Physics regime")
 
-    adiabatic_index: float = SimbiField(5.0 / 3.0, description="Adiabatic index")
+    adiabatic_index: float = SimbiField(
+        5.0 / 3.0, description="Adiabatic index"
+    )
 
     # Optional customizations
     x1_spacing: CellSpacing = SimbiField(
@@ -94,7 +97,10 @@ class SedovTaylor(SimbiBaseConfig):
 
         # Update resolution and bounds fields
         self.resolution = (self._nr, self._npolar)
-        self.bounds = [(self.rinit, self.rend), (self._theta_min, self._theta_max)]
+        self.bounds = [
+            (self.rinit, self.rend),
+            (self._theta_min, self._theta_max),
+        ]
 
     def initial_primitive_state(self) -> InitialStateType:
         """Generate initial primitive state for Sedov-Taylor explosion.
@@ -120,7 +126,11 @@ class SedovTaylor(SimbiBaseConfig):
                     if r <= explosion_radius:
                         # Energy deposition inside explosion radius
                         pre = (self.adiabatic_index - 1.0) * (
-                            3.0 * self.e0 / (NU + 1) / math.pi / explosion_radius**NU
+                            3.0
+                            * self.e0
+                            / (NU + 1)
+                            / math.pi
+                            / explosion_radius**NU
                         )
                     else:
                         # Ambient conditions outside explosion radius

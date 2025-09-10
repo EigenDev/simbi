@@ -1,10 +1,11 @@
-import simbi.expression as expr
+
 from simbi.core.config.base_config import SimbiBaseConfig
 from simbi.core.config.fields import SimbiField
-from simbi.core.types.input import CoordSystem, Regime, CellSpacing
-from simbi.core.types.typing import GasStateGenerator, InitialStateType, ExpressionDict
-from pydantic import computed_field
-from typing import Callable
+from simbi.core.types.input import CellSpacing, CoordSystem, Regime
+from simbi.core.types.typing import (
+    GasStateGenerator,
+    InitialStateType,
+)
 
 
 class MartiMuller(SimbiBaseConfig):
@@ -25,7 +26,9 @@ class MartiMuller(SimbiBaseConfig):
 
     regime: Regime = SimbiField(Regime.SRHD, description="Physics regime")
 
-    adiabatic_index: float = SimbiField(4.0 / 3.0, description="Adiabatic index")
+    adiabatic_index: float = SimbiField(
+        4.0 / 3.0, description="Adiabatic index"
+    )
 
     # Optional customizations
     x1_spacing: CellSpacing = SimbiField(
