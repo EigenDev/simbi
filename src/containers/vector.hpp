@@ -264,7 +264,7 @@ namespace simbi {
         // project some vector onto the mesh
         // using the mesh basis vectors
         template <vector_like_c Vec>
-        DEV auto centralize(const Vec& vec, Geometry mesh_geometry)
+        DEV constexpr auto centralize(const Vec& vec, Geometry mesh_geometry)
         {
             switch (mesh_geometry) {
                 case Geometry::SPHERICAL:
