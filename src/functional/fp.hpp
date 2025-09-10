@@ -945,78 +945,6 @@ namespace simbi::fp {
         }
     };
 
-    template <typename Domain, typename Func>
-    struct transform_domain_view_t {
-        Domain domain_;
-        Func func_;
-
-        class iterator
-        {
-            typename Domain::iterator domain_it_;
-            const Domain* domain_;
-            const Func* func_;
-
-          public:
-            using iterator_category = std::forward_iterator_tag;
-            using value_type        = std::pair<
-                       typename Domain::iterator::value_type,
-                       std::invoke_result_t<
-                           Func,
-                           typename Domain::iterator::value_type,
-                           Domain>>;
-            using difference_type = std::ptrdiff_t;
-            using reference       = value_type;
-
-            iterator() : domain_it_{}, domain_{nullptr}, func_{nullptr} {}
-            iterator(
-                typename Domain::iterator it,
-                const Domain* dom,
-                const Func* f
-            )
-                : domain_it_(it), domain_{dom}, func_(f)
-            {
-            }
-
-            value_type operator*() const noexcept
-            {
-                auto coord = *domain_it_;
-                return {coord, func_->apply(coord, *domain_)};
-            }
-
-            constexpr iterator& operator++()
-            {
-                ++domain_it_;
-                return *this;
-            }
-            constexpr iterator operator++(int)
-            {
-                auto tmp = *this;
-                ++(*this);
-                return tmp;
-            }
-            constexpr bool operator==(const iterator& other) const
-            {
-                return domain_it_ == other.domain_it_;
-            }
-            constexpr bool operator!=(const iterator& other) const
-            {
-                return !(*this == other);
-            }
-        };
-
-        auto begin() const
-        {
-            return iterator{domain_.begin(), &domain_, &func_};
-        }
-        auto end() const { return iterator{domain_.end(), &domain_, &func_}; }
-
-        template <typename Op>
-        auto operator|(Op&& op) const
-        {
-            return std::forward<Op>(op)(*this);
-        }
-    };
-
     // any_of, all_of, none_of
     template <typename Pred>
     struct any_of_fn_t {
@@ -1120,17 +1048,6 @@ namespace simbi::fp {
     // ========================================================================
     // factory functions
     // ========================================================================
-
-    template <typename Func>
-    auto transform_domain(Func&& func)
-    {
-        return [func = std::forward<Func>(func)](auto&& domain) {
-            return transform_domain_view_t<
-                std::decay_t<decltype(domain)>,
-                Func>(std::forward<decltype(domain)>(domain), func);
-        };
-    }
-
     constexpr auto range(std::uint64_t end)
     {
         return integer_range_t<std::uint64_t>{0, end, 1};
@@ -1180,25 +1097,25 @@ namespace simbi::fp {
     }
 
     template <typename Container = void>
-    constexpr auto collect = collect_t<Container>{};
+    constexpr DUAL auto collect = collect_t<Container>{};
 
-    constexpr auto sum     = sum_fn_t{};
-    constexpr auto product = product_fn_t{};
+    constexpr DUAL auto sum     = sum_fn_t{};
+    constexpr DUAL auto product = product_fn_t{};
 
     template <typename Pred>
-    constexpr auto any_of(Pred&& pred)
+    constexpr DUAL auto any_of(Pred&& pred)
     {
         return any_of_fn_t<std::decay_t<Pred>>(std::forward<Pred>(pred));
     }
 
     template <typename Pred>
-    constexpr auto all_of(Pred&& pred)
+    constexpr DUAL auto all_of(Pred&& pred)
     {
         return all_of_fn_t<std::decay_t<Pred>>(std::forward<Pred>(pred));
     }
 
     template <typename Pred>
-    constexpr auto none_of(Pred&& pred)
+    constexpr DUAL auto none_of(Pred&& pred)
     {
         return none_of_fn_t<std::decay_t<Pred>>(std::forward<Pred>(pred));
     }
@@ -1221,7 +1138,7 @@ namespace simbi::fp {
             if (begin == end) {
                 using value_type =
                     typename std::iterator_traits<decltype(begin)>::value_type;
-                // For empty range, return default-constructed value
+                // for empty range, return default-constructed value
                 return value_type{};
             }
 
@@ -1287,13 +1204,13 @@ namespace simbi::fp {
     // ========================================================================
 
     template <typename BinaryOp>
-    constexpr auto reduce(BinaryOp&& op)
+    constexpr DUAL auto reduce(BinaryOp&& op)
     {
         return reduce_fn_t<std::decay_t<BinaryOp>>(std::forward<BinaryOp>(op));
     }
 
     template <typename Executor>
-    constexpr auto execute_async(Executor&& executor)
+    constexpr DUAL auto execute_async(Executor&& executor)
     {
         return execute_async_fn_t<std::decay_t<Executor>>(
             std::forward<Executor>(executor)
@@ -1306,7 +1223,7 @@ namespace simbi::fp {
 
     // unpack_map for tuples/pairs
     template <typename F>
-    constexpr auto unpack_map(F&& func)
+    constexpr DUAL auto unpack_map(F&& func)
     {
         return map([func = std::forward<F>(func)](const auto& tuple) {
             return std::apply(func, tuple);
@@ -1315,7 +1232,7 @@ namespace simbi::fp {
 
     // binary zip for convenience
     template <iterable First, iterable Second>
-    constexpr auto zip(First&& first, Second&& second)
+    constexpr DUAL auto zip(First&& first, Second&& second)
     {
         return zip_view_t<std::decay_t<First>, std::decay_t<Second>>(
             std::forward<First>(first),
