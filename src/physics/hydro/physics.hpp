@@ -45,20 +45,18 @@ namespace simbi::hydro {
     template <is_hydro_primitive_c primitive_t>
     DEV constexpr auto sound_speed(const primitive_t& prim, real gamma)
     {
-        // using eos_t    = typename primitive_t::eos_t;
-        // const auto eos = eos_t{gamma};
-        // return eos.sound_speed(prim.rho, prim.pre);
-        return std::sqrt(gamma * prim.pre / prim.rho);
+        using eos_t    = typename primitive_t::eos_t;
+        const auto eos = eos_t{gamma};
+        return eos.sound_speed(prim.rho, prim.pre);
     }
 
     template <is_hydro_primitive_c primitive_t>
     DEV constexpr auto sound_speed_squared(const primitive_t& prim, real gamma)
     {
-        // using eos_t    = typename primitive_t::eos_t;
-        // const auto eos = eos_t{gamma};
-        // const auto cs  = eos.sound_speed(prim.rho, prim.pre);
-        // return cs * cs;
-        return gamma * prim.pre / prim.rho;
+        using eos_t    = typename primitive_t::eos_t;
+        const auto eos = eos_t{gamma};
+        const auto cs  = eos.sound_speed(prim.rho, prim.pre);
+        return cs * cs;
     }
 
     template <is_hydro_primitive_c primitive_t>
