@@ -213,7 +213,7 @@ namespace simbi::hydro::srhd {
         switch (comp_wave_speed) {
             case WaveSpeedEstimate::MIGNONE_AND_BODO_05: {
                 // get wave speeds based on Mignone & Bodo Eqs. (21.0 - 23)
-                const auto w = 1.0 / std::sqrt(1.0 - (vn * vn));
+                const auto w = 1.0 / std::sqrt(1.0 - vn * vn);
                 const auto s = cs * cs / (w * w * (1.0 - cs * cs));
                 // define temporaries to save computational cycles
                 const real qf  = 1.0 / (1.0 + s);
