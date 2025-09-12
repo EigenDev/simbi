@@ -1,8 +1,8 @@
-from matplotlib.collections import QuadMesh
+from typing import Any
+
 import matplotlib.pyplot as plt
 import numpy as np
-from typing import Any
-from numpy.typing import NDArray
+from matplotlib.collections import QuadMesh
 
 
 class AxisFormatter:
@@ -228,7 +228,9 @@ class ColorbarFormatter:
         else:
             # Center vertically to the right of the polar plot
             height = 0.8 / (2 if max_angle < np.pi else 1)
-            x = polar_pos.x0 + polar_pos.width + 0.05  # Right side with small padding
+            x = (
+                polar_pos.x0 + polar_pos.width + 0.05
+            )  # Right side with small padding
             y = polar_pos.y0 + (polar_pos.height - height) / 2
             cax = fig.add_axes([x, y, 0.03, height])
 
