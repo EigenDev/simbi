@@ -19,8 +19,8 @@ def set_axis_title(
     ax: Axes,
     title: Optional[str],
     time: Optional[float],
-    fig: Optional[Figure],
-    title_pos: Optional[float],
+    fig: Optional[Figure] = None,
+    title_pos: Optional[float] = None,
 ) -> None:
     """Set axis title if provided."""
     if title:
