@@ -3,8 +3,6 @@ import warnings
 from itertools import cycle
 from typing import Any, Optional
 
-from typing_extensions import Sequence
-
 from . import api
 from .core.conversion import config_from_args
 
@@ -304,7 +302,10 @@ def setup_parser(parser: argparse.ArgumentParser) -> None:
         "--pictorial", action="store_true", help="Pictorial style"
     )
     parser.add_argument(
-        "--scale-downs", nargs="+", type=float, help="Scale factors"
+        "--scale-values-by",
+        nargs="+",
+        type=float,
+        help="Scale factors for plotted fields",
     )
     parser.add_argument("--time-modulus", type=float, help="Time modulus value")
     parser.add_argument(

@@ -41,6 +41,7 @@ class StyleConfig(BaseModel):
     x_label: Optional[str] = None
     y_label: Optional[str] = None
     equal_aspect: bool = True
+    value_scale: Optional[Sequence[float]] = None
 
     model_config = {
         "frozen": True,  # Make instances immutable

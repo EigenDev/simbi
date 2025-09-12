@@ -98,6 +98,7 @@ def style_config_from_args(args: Namespace) -> StyleConfig:
         legend_loc=getattr(args, "legend_loc", "upper right"),
         semilogx=getattr(args, "semilogx", False),
         semilogy=getattr(args, "semilogy", False),
+        value_scale=getattr(args, "scale_values_by", None),
     )
 
 

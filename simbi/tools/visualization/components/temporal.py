@@ -10,13 +10,12 @@ from matplotlib.figure import Figure
 from matplotlib.lines import Line2D
 from pydantic import ValidationInfo, field_validator
 
-from simbi.tools.utility import get_field_str
-from simbi.tools.visualization.core.config import StyleConfig
-from simbi.tools.visualization.formatters.temporal import (
+from ...utility import get_field_str
+from ..core.config import StyleConfig
+from ..core.types import Array, FieldData, PlotData
+from ..formatters.temporal import (
     format_temporal_plot_axes,
 )
-
-from ..core.types import Array, FieldData, PlotData
 from .interface import Component, ComponentProps
 
 
@@ -258,7 +257,10 @@ class TemporalPlotComponent(Component):
                         for c in np.linspace(0.25, 0.75, field.values.ndim)
                     ]
                 )
-                SCALE = np.sqrt(2) * 0.5 if field.name == "mdot" else 1.0
+                if style.value_scale:
+                    SCALE = style.value_scale[0]
+                else:
+                    SCALE = 1.0
                 for vals in field.values.T:
                     self.ax.plot(
                         field.domain[idx],
