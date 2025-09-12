@@ -172,14 +172,22 @@ def plot_multidim(
     if isinstance(files, str):
         files = [files]
 
-    figure = prepare_figure(config, len(files))
     sim_data = load_data(files[0])
     plot_data = create_plot_data(sim_data, fields, config)
+    if sim_data.metadata.coord_system == "spherical":
+        plot_projection = "polar"
+    else:
+        plot_projection = "cartesian"
+    figure = prepare_figure(config, len(files), plot_projection)
 
     # Add multidim component for each field
     for i, field in enumerate(fields):
         props = multidim_props_from_args(
-            kwargs, i, next(config.style.cmap), next(config.style.color_range)
+            kwargs,
+            i,
+            next(config.style.cmap),
+            next(config.style.color_range),
+            plot_projection,
         )
         if figure.fig is None:
             raise ValueError("Figure not initialized properly")

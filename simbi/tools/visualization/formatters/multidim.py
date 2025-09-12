@@ -1,6 +1,5 @@
 """Formatting functions for multidimensional plots."""
 
-from dataclasses import dataclass
 from typing import Optional
 
 import numpy as np
@@ -9,19 +8,83 @@ from matplotlib.collections import QuadMesh
 from matplotlib.colorbar import Colorbar
 from matplotlib.figure import Figure
 
-from simbi.tools.utility import get_field_str
-from simbi.tools.visualization.core.config import StyleConfig
-
-from ..core.types import FieldData, PlotData
+from ...utility import get_field_str
+from ..core.config import StyleConfig
+from ..core.types import Bounds, FieldData, PlotData
 from .common import set_axis_title
 
 
-@dataclass
-class CBar:
-    color_bar: Optional[Colorbar] = None
+class ColorbarFormatter:
+    """Handles colorbar creation and formatting"""
 
+    initialized: bool = False
 
-cbar_state = CBar()
+    @staticmethod
+    def add_cartesian_colorbar(
+        fig: Figure,
+        ax: Axes,
+        mesh: QuadMesh,
+        field: FieldData,
+        position: str = "right",
+        size: str = "5%",
+        pad: float = 0.05,
+        label: Optional[str] = None,
+    ) -> Colorbar:
+        """Add a colorbar to the plot."""
+        from mpl_toolkits.axes_grid1 import make_axes_locatable
+
+        # Create axes for colorbar
+        divider = make_axes_locatable(ax)
+        cax = divider.append_axes(position, size=size, pad=pad)
+
+        # Create colorbar
+        cbar = fig.colorbar(mesh, cax=cax)
+
+        # Set label
+        if label:
+            cbar.set_label(label)
+        elif field.name:
+            cbar.set_label(get_field_str(field.name))
+        return cbar
+
+    @staticmethod
+    def add_polar_colorbar(
+        fig: Figure, ax: Axes, mesh: QuadMesh, data: PlotData
+    ) -> Colorbar:
+        """Add a colorbar to a polar plot"""
+        field = data.fields[0]
+        theta = field.domain[1]
+        # Get polar extent
+        max_angle = theta[-1]
+        half_sphere = max_angle == 0.5 * np.pi
+
+        # Determine orientation
+        orientation = "horizontal" if half_sphere else "vertical"
+
+        # Get the position of the current polar axis
+        polar_pos = ax.get_position()
+        nfields = len(data.fields)
+        # Position colorbar based on orientation
+        if orientation == "horizontal":
+            # Center horizontally under the polar plot
+            width = min(0.6, 0.78 / nfields)  # Cap width for better appearance
+            x = polar_pos.x0 + (polar_pos.width - width) / 2 - 0.01
+            cax = fig.add_axes([x, 0.2, width, 0.03])
+        else:
+            # Center vertically to the right of the polar plot
+            height = 0.8 / (2 if max_angle < np.pi else 1)
+            x = (
+                polar_pos.x0 + polar_pos.width + 0.05
+            )  # Right side with small padding
+            y = polar_pos.y0 + (polar_pos.height - height) / 2
+            cax = fig.add_axes([x, y, 0.03, height])
+
+        # Create colorbar
+        cbar = fig.colorbar(mesh, cax=cax, orientation=orientation)
+
+        field_label = get_field_str(field.name)
+        cbar.set_label(field_label)
+        return cbar
 
 
 def format_multidim_plot_axes(
@@ -31,15 +94,34 @@ def format_multidim_plot_axes(
     data: PlotData,
     field_index: int,
     style: StyleConfig,
+    is_polar: bool = False,
 ) -> None:
     """Format axes for a multidimensional plot."""
+    title_pos = None
+    if ax.name == "polar":
+        theta_max = data.fields[0].domain[1][-1]
+        title_pos = 0.95 if theta_max == np.pi else 0.92
+    set_axis_title(
+        ax,
+        style.setup,
+        data.time,
+        fig=fig,
+        title_pos=title_pos,
+    )
+    if is_polar:
+        format_polar_axes(ax, data, field_index, style.xlims)
+    else:
+        apply_labels(ax, data, style)
 
-    set_axis_title(ax, style.setup, data.time)
-    apply_labels(ax, data, style)
-    if not cbar_state.color_bar:
-        cbar_state.color_bar = add_colorbar(
-            fig, ax, mesh, data.fields[field_index]
-        )
+    if not ColorbarFormatter.initialized:
+        if is_polar:
+            ColorbarFormatter.add_polar_colorbar(fig, ax, mesh, data)
+            ColorbarFormatter.initialized = True
+        else:
+            ColorbarFormatter.add_cartesian_colorbar(
+                fig, ax, mesh, data.fields[0]
+            )
+            ColorbarFormatter.initialized = True
 
     # Set aspect ratio
     if style.equal_aspect:
@@ -113,26 +195,32 @@ def format_polar_axes(
     ax: Axes,
     data: PlotData,
     field_index: int,
-    r_label: Optional[str] = None,
-    theta_label: Optional[str] = None,
+    xmax: Optional[Bounds] = None,
 ) -> None:
     """Format axes for polar coordinate plots."""
-    # Set polar-specific properties
-    ax.grid(True)
+    field = data.fields[field_index]
+    r = field.domain[0]
+    theta = field.domain[1]
+    half_sphere = theta[-1] == np.pi * 0.5
+    if half_sphere:
+        theta_min = -90
+        theta_max = 90
+    else:
+        theta_min = 0
+        theta_max = 360
 
-    # Set labels if provided
-    if r_label:
-        ax.set_ylabel(r_label)
-
-    if theta_label:
-        ax.set_xlabel(theta_label)
-
-    # Set r-axis limits if needed
-    if data.fields and field_index < len(data.fields):
-        field = data.fields[field_index]
-        if field.domain and len(field.domain) >= 1:
-            r_max = float(np.max(field.domain[0]))
-            ax.set_ylim(0, r_max * 1.05)  # Add small margin
+    ax.set_theta_zero_location("N")
+    ax.set_theta_direction(-1)
+    # remove r labels
+    ax.set_thetamin(theta_min)
+    ax.set_thetamax(theta_max)
+    ax.set_yticklabels([])  # Remove radial labels
+    ax.set_xticklabels([])  # Remove angular labels
+    ax.set_rmin(r[0])
+    ax.set_rmax(xmax or r[-1])
+    ax.grid(False)
+    if half_sphere:
+        ax.set_position([0.1, -0.45, 0.8, 2])
 
 
 def apply_multidim_limits(

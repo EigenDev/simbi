@@ -1,7 +1,7 @@
 """Pure functions for transforming visualization data."""
 
 from dataclasses import dataclass
-from typing import Any, Callable, Optional, Sequence, TypeVar
+from typing import Any, Callable, Literal, Optional, Sequence, TypeVar
 
 import h5py
 import matplotlib.pyplot as plt
@@ -56,8 +56,8 @@ def plan_slice(
     all_axes = set(range(len(domain)))
     remaining_axes = sorted(all_axes - set(slice_axes))
 
-    if len(positions) < 2:
-        slice_axes = [AXIS_MAP_2D[axis] for axis in axis_names]
+    # if len(positions) < 2:
+    #     slice_axes = [AXIS_MAP_2D[axis] for axis in axis_names]
 
     return SlicePlan(
         slice_indices=slice_indices,
@@ -362,11 +362,24 @@ def load_data(file_path: str) -> SimData:
     return SimData(data)
 
 
-def prepare_figure(config: VisualizationConfig, nfiles: int = 1) -> Figure:
+def prepare_figure(
+    config: VisualizationConfig,
+    nfiles: int = 1,
+    projection: Literal["polar", "cartesian"] | None = None,
+) -> Figure:
     """Create and prepare a figure based on configuration."""
     config.theme.apply(nfields=len(config.plot.fields), nfiles=nfiles)
-    fig = plt.figure(figsize=config.style.fig_size)
-    ax = fig.add_subplot(111)
+    if projection == "polar":
+        fig, ax = plt.subplots(
+            1,
+            1,
+            figsize=config.style.fig_size,
+            subplot_kw={"projection": "polar"},
+            layout="constrained",
+        )
+    else:
+        fig = plt.figure(figsize=config.style.fig_size)
+        ax = fig.add_subplot(111)
 
     figure = Figure(config)
 

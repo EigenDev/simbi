@@ -5,6 +5,7 @@ from typing import Any, Optional
 import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib.axes import Axes
+from matplotlib.figure import Figure
 
 
 def apply_basic_style(ax: Axes) -> None:
@@ -15,16 +16,21 @@ def apply_basic_style(ax: Axes) -> None:
 
 
 def set_axis_title(
-    ax: Axes, title: Optional[str], time: Optional[float]
+    ax: Axes,
+    title: Optional[str],
+    time: Optional[float],
+    fig: Optional[Figure],
+    title_pos: Optional[float],
 ) -> None:
     """Set axis title if provided."""
     if title:
-        if time:
-            ax.set_title(f"{title} {time:.2f}")
-        else:
-            ax.set_title(f"{title}")
+        title = f"{title} {time:.2f}" if time else f"{title}"
     else:
-        ax.set_title(f"Untitled Simbi Simulation: {time:.2f}")
+        title = f"Untitled Simbi Simulation: {time:.2f}"
+    if ax.name == "polar" and fig:
+        fig.suptitle(title, y=title_pos)
+    else:
+        ax.set_title(title)
 
 
 def set_axis_grid(

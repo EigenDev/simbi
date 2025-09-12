@@ -117,7 +117,11 @@ def multidim_config_from_args(args: Namespace) -> MultidimConfig:
 
 
 def multidim_props_from_args(
-    args: dict[str, Any], field_index: int, cmap: str, color_range: ColorRange
+    args: dict[str, Any],
+    field_index: int,
+    cmap: str,
+    color_range: ColorRange,
+    plot_type: Literal["polar", "cartesian"] = "cartesian",
 ) -> MultidimPlotProps:
     return MultidimPlotProps(
         field_index=field_index,
@@ -128,6 +132,7 @@ def multidim_props_from_args(
         shading=args.get("shading", "auto"),
         alpha=args.get("alpha", 1.0),
         projection=args["projection"],
+        plot_type=plot_type,
     )
 
 

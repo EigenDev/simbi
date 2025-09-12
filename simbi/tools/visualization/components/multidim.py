@@ -66,6 +66,7 @@ class MultidimPlotProps(ComponentProps):
     shading: Literal["auto", "nearest", "gouraud", "flat"] = "auto"
     alpha: float = 1.0
     projection: tuple[int, int, int] = (1, 2, 3)
+    plot_type: Literal["polar", "cartesian"] = "cartesian"
 
     @field_validator("field_index")
     @classmethod
@@ -108,6 +109,7 @@ class MultidimPlotComponent(Component):
         """Initialize the multidimensional plot component."""
         self.props = props
         self._mesh: Optional[QuadMesh] = None
+        self._mirror_mesh: Optional[QuadMesh] = None
         self._initialized: bool = False
         self._linear_fields = [
             "velocity",
@@ -211,6 +213,11 @@ class MultidimPlotComponent(Component):
         cmap = self.props.cmap
         crange = self.props.color_range
 
+        values = field.values
+        if self.props.plot_type == "polar":
+            x, y = y, x
+            values = field.values.T
+
         # if data.bodies:
         # self.draw_bodies(data.bodies, self.props.projection)
         # Create or update mesh
@@ -219,14 +226,24 @@ class MultidimPlotComponent(Component):
             self._mesh = self.ax.pcolormesh(
                 x,
                 y,
-                field.values,
+                values,
                 cmap=cmap,
                 shading=self.props.shading,
                 alpha=self.props.alpha,
             )
+
+            if self.ax.name == "polar":
+                self._mirror_mesh = self.ax.pcolormesh(
+                    -x[::-1],
+                    y,
+                    values,
+                    cmap=cmap,
+                    shading=self.props.shading,
+                    alpha=self.props.alpha,
+                )
         else:
             # Update existing mesh
-            self._update_mesh(x, y, field.values)
+            self._update_mesh(x, y, values)
 
         # Apply color normalization
         norm = create_color_normalization(
@@ -237,9 +254,17 @@ class MultidimPlotComponent(Component):
             self._linear_fields,
         )
         self._mesh.set_norm(norm)
+        if self._mirror_mesh:
+            self._mirror_mesh.set_norm(norm)
 
         format_multidim_plot_axes(
-            self.ax, self.fig, self._mesh, data, self.props.field_index, style
+            self.ax,
+            self.fig,
+            self._mesh,
+            data,
+            self.props.field_index,
+            style,
+            self.props.plot_type == "polar",
         )
         self.last_x = x
         self.last_y = y
@@ -264,11 +289,23 @@ class MultidimPlotComponent(Component):
                 shading=self.props.shading,
                 alpha=self.props.alpha,
             )
+            if self.ax.name == "polar":
+                self._mirror_mesh = self.ax.pcolormesh(
+                    -x[::-1],
+                    y,
+                    values,
+                    cmap=self.props.cmap,
+                    shading=self.props.shading,
+                    alpha=self.props.alpha,
+                )
+
             self.last_x = x
             self.last_y = y
         else:
             # Just update the values if coordinates are the same
             self._mesh.set_array(values.ravel())
+            if self._mirror_mesh:
+                self._mirror_mesh.set_array(values.ravel())
 
     def cleanup(self) -> None:
         """Clean up resources."""
