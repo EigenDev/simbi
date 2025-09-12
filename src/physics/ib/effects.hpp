@@ -127,7 +127,7 @@ namespace simbi::body::expr {
             // torque-controled sink prescription from Dittmann & Ryan(2021)
             // https://ui.adsabs.harvard.edu/abs/2021ApJ...921...71D/abstract
             const auto r_norm         = r_mag / accr_radius;
-            const auto radial_profile = std::exp(-0.25 * std::pow(r_norm, 4));
+            const auto radial_profile = std::exp(-0.5 * r_norm * r_norm);
             const auto sr             = sr_base * radial_profile;
 
             const auto v_star = apply_torque_control(
