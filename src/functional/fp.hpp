@@ -1097,13 +1097,13 @@ namespace simbi::fp {
     }
 
     template <typename Container = void>
-    constexpr DUAL auto collect = collect_t<Container>{};
+    constexpr DEV auto collect = collect_t<Container>{};
 
-    constexpr DUAL auto sum     = sum_fn_t{};
-    constexpr DUAL auto product = product_fn_t{};
+    constexpr DEV auto sum     = sum_fn_t{};
+    constexpr DEV auto product = product_fn_t{};
 
     template <typename Pred>
-    constexpr DUAL auto any_of(Pred&& pred)
+    constexpr DEV auto any_of(Pred&& pred)
     {
         return any_of_fn_t<std::decay_t<Pred>>(std::forward<Pred>(pred));
     }
