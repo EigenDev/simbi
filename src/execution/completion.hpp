@@ -1,8 +1,7 @@
 #ifndef COMPLETION_HPP
 #define COMPLETION_HPP
 
-#include "adapter/device_adapter_api.hpp"
-#include "adapter/device_types.hpp"
+#include "hetero/adapter.hpp"
 #include "thread_pool.hpp"
 
 #include <atomic>
@@ -43,13 +42,11 @@ namespace simbi::exec {
         }
 
         // constructor for gpu streams
-        static completion_context_t gpu_stream(adapter::stream_t<> stream)
+        static completion_context_t gpu_stream(hetero::stream stream)
         {
             return {
-              [stream](const auto& /*ready*/, auto& /*mutex*/, auto& /*cv*/) {
-                  if (stream) {
-                      gpu::api::stream_synchronize(stream);
-                  }
+              [&stream](const auto& /*ready*/, auto& /*mutex*/, auto& /*cv*/) {
+                  stream.synchronize();
               }
             };
         }

@@ -56,6 +56,12 @@ namespace simbi::hetero {
         template <typename T>
         static vector_type<T> allocate_vector(std::size_t count);
 
+        template <typename T>
+        static vector_type<T> allocate_managed_vector(std::size_t count);
+
+        static void
+        prefetch_to_device(const void* ptr, std::size_t bytes, int device_id);
+
         static stream_type create_stream();
 
         static event_type create_event();

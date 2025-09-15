@@ -197,7 +197,7 @@ namespace simbi::hetero {
         }
     }   // namespace grid
 
-    namespace device {
+    namespace api {
         DEV inline void sync_threads()
         {
 #if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
@@ -249,7 +249,7 @@ namespace simbi::hetero {
             return old;
 #endif
         }
-    }   // namespace device
+    }   // namespace api
 }   // namespace simbi::hetero
 
 #endif

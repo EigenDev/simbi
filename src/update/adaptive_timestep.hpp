@@ -12,7 +12,6 @@
 
 #include <algorithm>
 #include <cstdint>
-#include <ctime>
 #include <limits>
 
 namespace simbi {
@@ -38,17 +37,17 @@ namespace simbi {
         return min_dt;
     }
 
-    template <typename HydroState, typename MeshConfig>
+    template <typename PrimField, typename MeshConfig>
     struct timestep_op_t {
-        HydroState state;
+        PrimField prims;
+        real gamma;
+        real cfl;
         MeshConfig mesh;
 
         DEV constexpr auto
-        operator()(coordinate_t<HydroState::dimensions> coord) const
+        operator()(coordinate_t<PrimField::dimensions> coord) const
         {
-            const auto gamma  = state.metadata.gamma;
-            const auto cfl    = state.metadata.cfl;
-            const auto prim   = state.prim[coord];
+            const auto prim   = prims[coord];
             const auto widths = mesh::cell_widths(coord, mesh);
             return compute_local_timestep(prim, widths, gamma, cfl);
         }
@@ -57,7 +56,15 @@ namespace simbi {
     template <typename HydroState, typename MeshConfig>
     auto create_timestep_field(const HydroState& state, const MeshConfig& mesh)
     {
-        return compute_field_t{timestep_op_t{state, mesh}, mesh.full_domain};
+        return compute_field_t{
+          timestep_op_t{
+            state.prim,
+            state.metadata.gamma,
+            state.metadata.cfl,
+            mesh
+          },
+          mesh.full_domain
+        };
     }
 
     template <typename HydroState, typename MeshConfig>

@@ -324,6 +324,26 @@ namespace simbi::hetero {
             return vector_type<T>(count);
         }
 
+        template <typename T>
+        static vector_type<T> allocate_managed_vector(std::size_t count)
+        {
+            return vector_type<T>(count, true);
+        }
+
+        static void
+        prefetch_to_device(const void* ptr, std::size_t bytes, int device_id)
+        {
+            int device = device_id;
+            check_error<cuda_backend_t>(
+                cudaGetDevice(&device),
+                "get current device for prefetch"
+            );
+            check_error<cuda_backend_t>(
+                cudaMemPrefetchAsync(ptr, bytes, device, 0),
+                "prefetch to device"
+            );
+        }
+
         static stream_type create_stream() { return stream_type(); }
 
         static event_type create_event() { return event_type(); }

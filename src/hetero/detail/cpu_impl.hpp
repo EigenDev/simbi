@@ -8,9 +8,11 @@
 #include "../device/execution_context.hpp"
 #include "adapter_impl.hpp"
 
+#include <chrono>
 #include <cstdint>
 #include <cstdlib>
 #include <cstring>
+#include <ratio>
 
 namespace simbi::hetero {
 
@@ -60,7 +62,7 @@ namespace simbi::hetero {
     class event_t<cpu_backend_t>
     {
         using native_event = event_handle<cpu_backend_t>;
-        native_event handle_;
+        std::chrono::high_resolution_clock::time_point timestamp_;
         bool owns_resource_;
 
       public:
@@ -72,7 +74,7 @@ namespace simbi::hetero {
         event_t& operator=(const event_t&) = delete;
 
         event_t(event_t&& other) noexcept
-            : handle_(other.handle_), owns_resource_(other.owns_resource_)
+            : timestamp_(other.timestamp_), owns_resource_(other.owns_resource_)
         {
             other.owns_resource_ = false;
         }
@@ -81,20 +83,33 @@ namespace simbi::hetero {
         {
             if (this != &other) {
                 destroy();
-                handle_              = other.handle_;
+                timestamp_           = other.timestamp_;
                 owns_resource_       = other.owns_resource_;
                 other.owns_resource_ = false;
             }
             return *this;
         }
 
-        native_event native_handle() const noexcept { return handle_; }
+        native_event native_handle() const noexcept
+        {
+            return native_event{};   // dummy handle for CPU
+        }
 
-        void record(const stream_t<cpu_backend_t>&) {}
+        void record(const stream_t<cpu_backend_t>&)
+        {
+            timestamp_ = std::chrono::high_resolution_clock::now();
+        }
 
-        void synchronize() {}
+        void synchronize()
+        {
+            // no-op for CPU since operations are synchronous
+        }
 
-        float elapsed_time_ms(const event_t<cpu_backend_t>&) { return 0.0f; }
+        double elapsed_time_ms(const event_t<cpu_backend_t>& start_event)
+        {
+            auto duration = timestamp_ - start_event.timestamp_;
+            return std::chrono::duration<double, std::milli>(duration).count();
+        }
 
       private:
         void destroy() { owns_resource_ = false; }
@@ -206,6 +221,14 @@ namespace simbi::hetero {
         {
             return vector_type<T>(count);
         }
+
+        template <typename T>
+        static vector_type<T> allocate_managed_vector(size_t count)
+        {
+            return vector_type<T>(count, true);
+        }
+
+        static void prefetch_to_device(const void*, size_t, int) {}
 
         static stream_type create_stream() { return stream_type(); }
 

@@ -153,7 +153,7 @@ namespace simbi::adapter {
 
         void event_record(event_t event, stream_t stream = 0)
         {
-            cudaError_t status = cudaEventRecord(event);
+            cudaError_t status = cudaEventRecord(event, stream);
             error::check_err(
                 cuda_error::check_cuda_error(status),
                 "CUDA event recording failed"

@@ -22,6 +22,8 @@ namespace simbi::hetero {
     using stream = stream_t<default_backend_t>;
     using event  = event_t<default_backend_t>;
     using memory = device_memory_t<default_backend_t>;
+    template <typename T>
+    using managed_vector = device_vector_t<default_backend_t, T>;
 
     template <typename T>
     using vector = device_vector_t<default_backend_t, T>;
