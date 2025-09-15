@@ -1,11 +1,10 @@
 #ifndef CONTEXT_HPP
 #define CONTEXT_HPP
 
-#include "adapter/device_adapter_api.hpp"
-#include "adapter/device_types.hpp"
 #include "config.hpp"
 #include "containers/vector.hpp"
 #include "functional/monad/serializer.hpp"
+#include "hetero/adapter.hpp"
 #include "io/console/printb.hpp"
 #include "io/console/statistics.hpp"
 #include "io/exceptions.hpp"
@@ -21,7 +20,6 @@
 #include <iostream>
 #include <sstream>
 #include <string>
-#include <type_traits>
 #include <utility>
 #include <vector>
 
@@ -30,79 +28,26 @@ using namespace std::chrono;
 namespace simbi {
     class timer_t
     {
-        using time_type = std::conditional_t<
-            platform::is_gpu,
-            adapter::event_t<>,
-            high_resolution_clock::time_point>;
-        using duration_type =
-            std::conditional_t<platform::is_gpu, float, double>;
-        time_type tstart, tstop;
-        duration_type duration;
+        hetero::event start_event_;
+        hetero::event stop_event_;
+        hetero::stream stream_;   // need a stream for GPU event recording
 
       public:
         timer_t()
+            : start_event_(hetero::device::create_event()),
+              stop_event_(hetero::device::create_event()),
+              stream_(hetero::device::create_stream())
         {
-            create_event(tstart);
-            create_event(tstop);
         }
 
-        ~timer_t()
-        {
-            destroy_event(tstart);
-            destroy_event(tstop);
-        }
+        void start_timer() { start_event_.record(stream_); }
 
-        void start_timer() { record_event(tstart); }
-
-        template <global::Platform P = global::BuildPlatform, typename T>
-        void create_event(T& stamp)
+        double get_duration()
         {
-            if constexpr (P == global::Platform::GPU) {
-                gpu::api::event_create(&stamp);
-            }
-        }
-
-        template <global::Platform P = global::BuildPlatform, typename T>
-        void destroy_event(T& stamp)
-        {
-            if constexpr (P == global::Platform::GPU) {
-                gpu::api::event_destroy(stamp);
-            }
-        }
-
-        template <typename T>
-        void record_event(T& stamp)
-        {
-            if constexpr (std::
-                              is_same_v<T, high_resolution_clock::time_point>) {
-                stamp = high_resolution_clock::now();
-            }
-            else {
-                gpu::api::event_record(stamp);
-            }
-        }
-
-        template <typename T, typename U>
-        void record_duration(T& dt, U t1, U t2)
-        {
-            if constexpr (std::
-                              is_same_v<U, high_resolution_clock::time_point>) {
-                dt = static_cast<std::chrono::duration<real>>(t2 - t1).count();
-            }
-            else {
-                gpu::api::event_synchronize(t2);
-                gpu::api::event_elapsed_time(&dt, t1, t2);
-                // time output from GPU automatically in ms so convert to
-                // seconds
-                dt *= 1e-3;
-            }
-        }
-
-        duration_type get_duration()
-        {
-            record_event(tstop);
-            record_duration(duration, tstart, tstop);
-            return duration;
+            stop_event_.record(stream_);
+            // this will be GPU time on GPU backends, wall-clock time on CPU
+            double ms = stop_event_.elapsed_time_ms(start_event_);
+            return ms * 1e-3;   // convert to seconds
         }
     };
 
