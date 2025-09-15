@@ -705,7 +705,7 @@ namespace simbi {
 
     // overload ostream operator for printing vectors
     template <typename T, std::uint64_t Dims>
-    DUAL std::ostream& operator<<(std::ostream& os, const vector_t<T, Dims>& v)
+    std::ostream& operator<<(std::ostream& os, const vector_t<T, Dims>& v)
     {
         os << "[";
         for (std::uint64_t i = 0; i < Dims; ++i) {
