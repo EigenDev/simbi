@@ -1,7 +1,7 @@
-#ifndef NEW_DEVICE_HPP
-#define NEW_DEVICE_HPP
+#ifndef MEM_DEVICE_HPP
+#define MEM_DEVICE_HPP
 
-#include "adapter/device_adapter_api.hpp"
+#include "hetero/adapter.hpp"
 
 #include <cstdint>
 #include <cstdlib>
@@ -37,16 +37,13 @@ namespace simbi::mem {
         current_dev = dev;
 
         if (dev.is_gpu) {
-            gpu::api::set_device(dev.device_id);
+            hetero::device::set_device(dev.device_id);
         }
     }
 
     inline std::int64_t device_count()
     {
-        std::int64_t count = 0;
-
-        gpu::api::get_device_count(&count);
-
+        auto count = hetero::device::get_device_count();
         if (char* user_count = std::getenv("SIMBI_NUM_DEVICES")) {
             try {
                 int requested = std::stoi(user_count);

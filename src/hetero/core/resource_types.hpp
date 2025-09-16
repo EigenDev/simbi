@@ -42,6 +42,7 @@ namespace simbi::hetero {
 
         void synchronize();
         bool query_complete();
+        operator bool() const noexcept;
 
       private:
         void destroy();

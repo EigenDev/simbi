@@ -13,6 +13,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <ratio>
+#include <thread>
 
 namespace simbi::hetero {
 
@@ -53,6 +54,8 @@ namespace simbi::hetero {
         void synchronize() {}
 
         bool query_complete() { return true; }
+
+        operator bool() const noexcept { return owns_resource_; }
 
       private:
         void destroy() { owns_resource_ = false; }
@@ -212,6 +215,41 @@ namespace simbi::hetero {
         )
         {
             copy(dst, src, bytes, kind);
+        }
+
+        static void peer_copy_async(
+            void* dst,
+            int dst_device_id,
+            const void* src,
+            int src_device_id,
+            size_t bytes,
+            const stream_type&
+        )
+        {
+            if (dst_device_id != 0 || src_device_id != 0) {
+                throw compute_error(
+                    status_t::invalid_argument,
+                    "cpu backend only supports device 0"
+                );
+            }
+            copy(dst, src, bytes, memory_kind_t::device_to_device);
+        }
+
+        static void peer_copy(
+            void* dst,
+            int dst_device_id,
+            const void* src,
+            int src_device_id,
+            size_t bytes
+        )
+        {
+            if (dst_device_id != 0 || src_device_id != 0) {
+                throw compute_error(
+                    status_t::invalid_argument,
+                    "cpu backend only supports device 0"
+                );
+            }
+            copy(dst, src, bytes, memory_kind_t::device_to_device);
         }
 
         static memory_type allocate(size_t bytes) { return memory_type(bytes); }
@@ -389,6 +427,14 @@ namespace simbi::hetero {
         static constexpr bool supports_async_operations() { return false; }
 
         static constexpr bool supports_peer_access() { return false; }
+
+        static device_props<cpu_backend_t> get_device_properties(std::int64_t)
+        {
+            device_props<cpu_backend_t> props;
+            props.core_count   = std::thread::hardware_concurrency();
+            props.memory_bytes = static_cast<std::size_t>(-1);   // Unknown
+            return props;
+        }
     };
 
 }   // namespace simbi::hetero

@@ -49,12 +49,12 @@
 #ifndef COLLECTOR_HPP
 #define COLLECTOR_HPP
 
-#include "adapter/device_adapter_api.hpp"
 #include "body_delta.hpp"
 #include "component_body_system.hpp"   // for ComponentBodySystem
 #include "compute/field.hpp"
 #include "config.hpp"
 #include "containers/vector.hpp"
+#include "hetero/adapter.hpp"
 #include "memory/managed.hpp"   // for Managed
 #include "util/parallel/exec_policy.hpp"
 #include "util/parallel/parallel_for.hpp"

@@ -1,9 +1,9 @@
 #ifndef ARENA_HPP
 #define ARENA_HPP
 
+#include "hetero/adapter.hpp"
 #include "memory/device.hpp"
 #include "memory/smart_ptr.hpp"
-#include "memory_block.hpp"
 
 #include <algorithm>
 #include <cstddef>
@@ -32,11 +32,11 @@ namespace simbi::mem {
 
         // storage for each bucket size
         struct bucket_entry_t {
-            memory_block_t block;
-            T* typed_ptr;
+            hetero::memory memory_;
+            device_t device;
 
-            bucket_entry_t(memory_block_t&& b)
-                : block(std::move(b)), typed_ptr(static_cast<T*>(block.data))
+            bucket_entry_t(hetero::memory&& mem, device_t dev)
+                : memory_(std::move(mem)), device(dev)
             {
             }
 
@@ -46,20 +46,21 @@ namespace simbi::mem {
 
             // move only
             bucket_entry_t(bucket_entry_t&& other) noexcept
-                : block(std::move(other.block)), typed_ptr(other.typed_ptr)
+                : memory_(std::move(other.memory_)), device(other.device)
             {
-                other.typed_ptr = nullptr;
             }
 
             bucket_entry_t& operator=(bucket_entry_t&& other) noexcept
             {
                 if (this != &other) {
-                    block           = std::move(other.block);
-                    typed_ptr       = other.typed_ptr;
-                    other.typed_ptr = nullptr;
+                    memory_ = std::move(other.memory_);
+                    device  = other.device;
                 }
                 return *this;
             }
+
+            void* data() const { return memory_.data(); }
+            size_t size() const { return memory_.size(); }
         };
 
         std::vector<bucket_entry_t> buckets[MAX_BUCKETS];
@@ -109,66 +110,71 @@ namespace simbi::mem {
                 auto& bucket_pool = buckets[bucket];
 
                 if (!bucket_pool.empty()) {
-                    T* ptr = bucket_pool.back().typed_ptr;
+                    // extract the memory from bucket entry
+                    auto entry = std::move(bucket_pool.back());
                     bucket_pool.pop_back();
+
+                    T* ptr = static_cast<T*>(entry.data());
 
                     // create shared_ptr with custom deleter that returns to
                     // arena
                     auto self = this->shared_from_this();
-                    return mem::shared_ptr(ptr, [self, bucket, bytes](T* ptr) {
-                        if (!ptr) {
-                            return;
-                        }
+                    return mem::shared_ptr<T>(
+                        ptr,
+                        [self,
+                         bucket,
+                         entry = std::move(entry)](T* ptr) mutable {
+                            if (!ptr) {
+                                return;
+                            }
 
-                        try {
-                            std::lock_guard<std::mutex> lock(self->mutex);
+                            try {
+                                std::lock_guard<std::mutex> lock(self->mutex);
 
-                            // create memory block from pointer
-                            memory_block_t block(ptr, bytes, self->dev_);
-
-                            // add to bucket
-                            self->buckets[bucket].emplace_back(
-                                std::move(block)
-                            );
+                                // return the entry back to the bucket
+                                self->buckets[bucket].emplace_back(
+                                    std::move(entry)
+                                );
+                            }
+                            catch (...) {
+                                // if bucket return fails, entry destructor will
+                                // clean up
+                            }
                         }
-                        catch (...) {
-                            // fallback: just delete if bucket return fails
-                            memory_block_t block(ptr, bytes, self->dev_);
-                            // block destructor will free memory
-                        }
-                    });
+                    );
                 }
             }
 
-            memory_block_t block = memory_block_t::allocate(bytes, dev_);
-            T* typed_ptr         = static_cast<T*>(block.data);
+            // allocate new memory using the hetero adapter
+            if (dev_.is_gpu) {
+                hetero::device::set_device(dev_.device_id);
+            }
 
-            // detach block from RAII to prevent double-free
-            block.data = nullptr;
-            block.size = 0;
+            auto memory  = hetero::device::allocate(bytes);
+            T* typed_ptr = static_cast<T*>(memory.data());
 
-            // return with custom deleter
+            // move memory ownership to the deleter
             auto self = this->shared_from_this();
-            return mem::shared_ptr(typed_ptr, [self, bucket, bytes](T* ptr) {
-                if (!ptr) {
-                    return;
-                }
+            return mem::shared_ptr<T>(
+                typed_ptr,
+                [self, bucket, memory = std::move(memory)](T* ptr) mutable {
+                    if (!ptr) {
+                        return;
+                    }
 
-                try {
-                    std::lock_guard<std::mutex> lock(self->mutex);
+                    try {
+                        std::lock_guard<std::mutex> lock(self->mutex);
 
-                    // create memory block from pointer
-                    memory_block_t block(ptr, bytes, self->dev_);
-
-                    // add to bucket
-                    self->buckets[bucket].emplace_back(std::move(block));
+                        // create bucket entry and add to pool
+                        bucket_entry_t entry(std::move(memory), self->dev_);
+                        self->buckets[bucket].emplace_back(std::move(entry));
+                    }
+                    catch (...) {
+                        // if bucket return fails, memory destructor will clean
+                        // up
+                    }
                 }
-                catch (...) {
-                    // fallback: just delete if bucket return fails
-                    memory_block_t block(ptr, bytes, self->dev_);
-                    // block destructor will free memory
-                }
-            });
+            );
         }
 
         // clear all pooled memory

@@ -2,11 +2,12 @@
 #define TRANSFER_HPP
 
 #include "accessor.hpp"
-#include "adapter/device_adapter_api.hpp"
 #include "arena.hpp"
 #include "containers/vector.hpp"
 #include "domain/algebra.hpp"
 #include "domain/domain.hpp"
+#include "hetero/adapter.hpp"
+#include "hetero/core/common_types.hpp"
 #include "memory/device.hpp"
 #include "memory_block.hpp"
 
@@ -25,47 +26,62 @@ namespace simbi::mem {
     inline void
     copy(const memory_block_t& src, memory_block_t& dst, size_t bytes)
     {
-        if (!src.data || !dst.data) {
+        if (!src.data() || !dst.data()) {
             return;
         }
 
-        bytes = std::min({bytes, src.size, dst.size});
+        bytes = std::min({bytes, src.size(), dst.size()});
         if (bytes == 0) {
             return;
         }
 
         // choose appropriate transfer method based on device types
-        if (src.dev.is_gpu && dst.dev.is_gpu) {
-            if (src.dev.device_id == dst.dev.device_id) {
+        if (src.device().is_gpu && dst.device().is_gpu) {
+            if (src.device().device_id == dst.device().device_id) {
                 // same GPU to GPU
-                gpu::api::set_device(src.dev.device_id);
-                gpu::api::copy_device_to_device(dst.data, src.data, bytes);
+                hetero::device::set_device(src.device().device_id);
+                hetero::device::copy(
+                    dst.data(),
+                    src.data(),
+                    bytes,
+                    hetero::memory_kind_t::device_to_device
+                );
             }
             else {
                 // peer GPU to GPU
-                gpu::api::peer_copy_async(
-                    dst.data,
-                    dst.dev.device_id,
-                    src.data,
-                    src.dev.device_id,
+                hetero::device::peer_copy_async(
+                    dst.data(),
+                    dst.device().device_id,
+                    src.data(),
+                    src.device().device_id,
                     bytes,
-                    {}
+                    hetero::stream{}
                 );   // default stream
             }
         }
-        else if (src.dev.is_gpu && !dst.dev.is_gpu) {
+        else if (src.device().is_gpu && !dst.device().is_gpu) {
             // GPU to CPU
-            gpu::api::set_device(src.dev.device_id);
-            gpu::api::copy_device_to_host(dst.data, src.data, bytes);
+            hetero::device::set_device(src.device().device_id);
+            hetero::device::copy(
+                dst.data(),
+                src.data(),
+                bytes,
+                hetero::memory_kind_t::device_to_host
+            );
         }
-        else if (!src.dev.is_gpu && dst.dev.is_gpu) {
+        else if (!src.device().is_gpu && dst.device().is_gpu) {
             // CPU to GPU
-            gpu::api::set_device(dst.dev.device_id);
-            gpu::api::copy_host_to_device(dst.data, src.data, bytes);
+            hetero::device::set_device(dst.device().device_id);
+            hetero::device::copy(
+                dst.data(),
+                src.data(),
+                bytes,
+                hetero::memory_kind_t::host_to_device
+            );
         }
         else {
             // CPU to CPU
-            std::memcpy(dst.data, src.data, bytes);
+            std::memcpy(dst.data(), src.data(), bytes);
         }
     }
 
@@ -80,42 +96,52 @@ namespace simbi::mem {
     template <typename T>
     void to_host(const memory_block_t& src, T* host_ptr, size_t count)
     {
-        if (!src.data || !host_ptr) {
+        if (!src.data() || !host_ptr) {
             return;
         }
 
         const size_t bytes = count * sizeof(T);
-        if (bytes > src.size) {
+        if (bytes > src.size()) {
             return;
         }
 
-        if (src.dev.is_gpu) {
-            gpu::api::set_device(src.dev.device_id);
-            gpu::api::copy_device_to_host(host_ptr, src.data, bytes);
+        if (src.device().is_gpu) {
+            hetero::device::set_device(src.device().device_id);
+            hetero::device::copy(
+                host_ptr,
+                src.data(),
+                bytes,
+                hetero::memory_kind_t::device_to_host
+            );
         }
         else {
-            std::memcpy(host_ptr, src.data, bytes);
+            std::memcpy(host_ptr, src.data(), bytes);
         }
     }
 
     template <typename T>
     void to_device(const T* host_ptr, memory_block_t& dst, size_t count)
     {
-        if (!host_ptr || !dst.data) {
+        if (!host_ptr || !dst.data()) {
             return;
         }
 
         const size_t bytes = count * sizeof(T);
-        if (bytes > dst.size) {
+        if (bytes > dst.size()) {
             return;
         }
 
-        if (dst.dev.is_gpu) {
-            gpu::api::set_device(dst.dev.device_id);
-            gpu::api::copy_host_to_device(dst.data, host_ptr, bytes);
+        if (dst.device().is_gpu) {
+            hetero::device::set_device(dst.device().device_id);
+            hetero::device::copy(
+                dst.data(),
+                host_ptr,
+                bytes,
+                hetero::memory_kind_t::host_to_device
+            );
         }
         else {
-            std::memcpy(dst.data, host_ptr, bytes);
+            std::memcpy(dst.data(), host_ptr, bytes);
         }
     }
 
@@ -159,8 +185,8 @@ namespace simbi::mem {
         copy(src_block, dst_block, src.size() * sizeof(T));
 
         // prevent double-free when blocks go out of scope
-        src_block.data = nullptr;
-        dst_block.data = nullptr;
+        // src_block.data = nullptr;
+        // dst_block.data = nullptr;
     }
 
     // copy a specific domain region
@@ -234,8 +260,8 @@ namespace simbi::mem {
             copy(src_block, dst_block, elem_count * sizeof(T));
 
             // prevent double-free
-            src_block.data = nullptr;
-            dst_block.data = nullptr;
+            // src_block.data = nullptr;
+            // dst_block.data = nullptr;
         }
     }
 

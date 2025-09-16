@@ -1,9 +1,8 @@
 #ifndef FUTURE_HPP
 #define FUTURE_HPP
 
-#include "adapter/device_adapter_api.hpp"
-#include "adapter/device_types.hpp"
 #include "completion.hpp"
+#include "hetero/adapter.hpp"
 
 #include <atomic>
 #include <condition_variable>
@@ -29,8 +28,8 @@ namespace simbi::exec {
             std::atomic<bool> has_error{false};
             alignas(T) std::byte result_storage[sizeof(T)];
             std::exception_ptr exception;
-            adapter::stream_t<> stream{};
-            adapter::event_t<> event{};
+            hetero::stream stream{};
+            hetero::event event{};
             std::condition_variable cv;
             std::mutex mutex;
             completion_context_t completion_context;
@@ -66,13 +65,7 @@ namespace simbi::exec {
                 }
             }
 
-            ~future_state_t()
-            {
-                destroy_result();
-                if (event) {
-                    gpu::api::event_destroy(event);
-                }
-            }
+            ~future_state_t() { destroy_result(); }
         };
         std::shared_ptr<future_state_t> state_;
 
@@ -135,9 +128,7 @@ namespace simbi::exec {
         bool check_completion() const
         {
             if (state_->stream) {
-                int status;
-                gpu::api::stream_query(state_->stream, &status);
-                if (status == 0) {
+                if (state_->stream.query_complete()) {
                     bool expected = false;
                     state_->ready.compare_exchange_strong(expected, true);
                     return true;
@@ -155,8 +146,8 @@ namespace simbi::exec {
             std::atomic<bool> ready{false};
             std::atomic<bool> has_error{false};
             std::exception_ptr exception;
-            adapter::stream_t<> stream{};
-            adapter::event_t<> event{};
+            hetero::stream stream{};
+            hetero::event event{};
             std::condition_variable cv;
             std::mutex mutex;
             completion_context_t completion_context;
@@ -172,12 +163,7 @@ namespace simbi::exec {
                 }
             }
 
-            ~future_state_t()
-            {
-                if (event) {
-                    gpu::api::event_destroy(event);
-                }
-            }
+            ~future_state_t() = default;
         };
         std::shared_ptr<future_state_t> state_;
 
@@ -213,9 +199,7 @@ namespace simbi::exec {
             }
 
             if (state_->stream) {
-                int status;
-                gpu::api::stream_query(state_->stream, &status);
-                if (status == 0) {
+                if (state_->stream.query_complete()) {
                     state_->ready.store(true);
                     return true;
                 }

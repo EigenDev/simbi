@@ -3,6 +3,7 @@
 
 #include "../core/common_types.hpp"
 #include "../core/resource_types.hpp"
+#include "hetero/core/backend_traits.hpp"
 #include "hetero/device/execution_context.hpp"
 
 #include <cstddef>
@@ -49,6 +50,23 @@ namespace simbi::hetero {
             std::size_t bytes,
             memory_kind_t kind,
             const stream_type& stream
+        );
+
+        static void peer_copy_async(
+            void* dst,
+            int dst_device_id,
+            const void* src,
+            int src_device_id,
+            std::size_t bytes,
+            const stream_type& stream
+        );
+
+        static void peer_copy(
+            void* dst,
+            int dst_device_id,
+            const void* src,
+            int src_device_id,
+            std::size_t bytes
         );
 
         static memory_type allocate(std::size_t bytes);
@@ -145,6 +163,9 @@ namespace simbi::hetero {
         {
             return backend_info_t<backend_t>::supports_peer_access;
         }
+
+        static device_props<backend_t>
+        get_device_properties(std::int64_t device_id);
     };
 
 }   // namespace simbi::hetero

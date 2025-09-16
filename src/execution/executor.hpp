@@ -1,14 +1,14 @@
 #ifndef EXECUTOR_HPP
 #define EXECUTOR_HPP
 
-#include "adapter/device_adapter_api.hpp"
-#include "adapter/device_types.hpp"
 #include "config.hpp"
 #include "containers/vector.hpp"
 #include "domain/domain.hpp"
 #include "execution/completion.hpp"
 #include "execution/future.hpp"
 #include "functional/fp.hpp"
+#include "hetero/adapter.hpp"
+#include "hetero/device/execution_context.hpp"
 #include "memory/device.hpp"
 #include "thread_pool.hpp"
 #include "tiling.hpp"
@@ -19,6 +19,7 @@
 #include <cstdint>
 #include <cstdlib>
 #include <exception>
+#include <functional>
 #include <memory>
 #include <mutex>
 #include <type_traits>
@@ -490,7 +491,7 @@ namespace simbi::exec {
     {
       private:
         std::vector<mem::device_t> devices_;
-        std::vector<adapter::stream_t<>> streams_;
+        std::vector<hetero::stream> streams_;
 
       public:
         constexpr gpu_executor_t(
@@ -498,38 +499,26 @@ namespace simbi::exec {
         )
         {
             if (device_ids.empty()) {
-                std::int64_t device_count = 0;
-                gpu::api::get_device_count(&device_count);
+                auto device_count = hetero::device::get_device_count();
                 for (std::int64_t ii = 0; ii < device_count; ++ii) {
                     devices_.push_back(mem::device_t::gpu(ii));
-                    adapter::stream_t<> stream;
-                    gpu::api::stream_create(&stream);
-                    streams_.push_back(stream);
+                    streams_.emplace_back(hetero::device::create_stream());
                 }
             }
             else {
                 for (auto id : device_ids) {
                     devices_.push_back(mem::device_t::gpu(id));
-                    adapter::stream_t<> stream;
-                    gpu::api::stream_create(&stream);
-                    streams_.push_back(stream);
+                    streams_.emplace_back(hetero::device::create_stream());
                 }
             }
 
             if (devices_.empty()) {
                 devices_.push_back(mem::device_t::gpu(0));
-                adapter::stream_t<> stream;
-                gpu::api::stream_create(&stream);
-                streams_.push_back(stream);
+                streams_.emplace_back(hetero::device::create_stream());
             }
         }
 
-        ~gpu_executor_t()
-        {
-            for (auto& stream : streams_) {
-                gpu::api::stream_destroy(stream);
-            }
-        }
+        ~gpu_executor_t() = default;
 
         gpu_executor_t(const gpu_executor_t&)            = default;
         gpu_executor_t& operator=(const gpu_executor_t&) = default;
@@ -541,14 +530,15 @@ namespace simbi::exec {
         {
             auto state =
                 std::make_shared<typename future_t<void>::future_state_t>();
+            auto completion_stream = hetero::device::create_stream();
             state->completion_context =
-                completion_context_t::gpu_stream(streams_[0]);
+                completion_context_t::gpu_stream(std::move(completion_stream));
 
             try {
                 // create events for tracking completion on each device
-                std::vector<adapter::event_t<>> events(devices_.size());
+                std::vector<hetero::event> events;
                 for (std::size_t ii = 0; ii < devices_.size(); ++ii) {
-                    gpu::api::event_create(&events[ii]);
+                    events.emplace_back(hetero::device::create_event());
                 }
 
                 for (std::size_t ii = 0; ii < devices_.size(); ++ii) {
@@ -560,14 +550,14 @@ namespace simbi::exec {
                         std::forward<Args>(args)...
                     );
 
-                    gpu::api::event_record(events[ii], streams_[ii]);
+                    events[ii].record(streams_[ii]);
                 }
 
                 // create a callback to wait for all devices to complete
-                state->set_ready_callback([events = std::move(events)]() {
+                state->set_ready_callback([events =
+                                               std::move(events)]() mutable {
                     for (auto& event : events) {
-                        gpu::api::event_synchronize(event);
-                        gpu::api::event_destroy(event);
+                        event.synchronize();
                     }
                 });
             }
@@ -609,8 +599,8 @@ namespace simbi::exec {
                     optimal_grid_size(subdomain.size());
 
                 auto kernel = [subdomain, f] DEV() {
-                    auto idx        = adapter::grid::execution_index::current();
-                    auto global_idx = idx.global_thread_id();
+                    auto idx           = hetero::grid::idx();
+                    auto global_idx    = idx.global_thread_id();
                     auto total_threads = idx.total_threads();
                     auto domain_size   = subdomain.size();
 
@@ -622,8 +612,9 @@ namespace simbi::exec {
                     }
                 };
 
-                auto launch_config = grid::config(grid_size, block_size);
-                grid::launch(kernel, launch_config);
+                auto launch_config =
+                    hetero::grid::config(grid_size, block_size);
+                hetero::device::launch(kernel, launch_config);
             });
         }
 
@@ -641,7 +632,7 @@ namespace simbi::exec {
         {
             // [TODO]: GPU reduction is non-trivial and requires careful
             // handling of intermediate results and synchronization. This would
-            // need to be expanded to a full GPU reduction algorithm For now,
+            // need to be expanded to a full GPU reduction algorithm. For now,
             // we'll use a simple implementation that delegates to async_impl
 
             return async_impl(
@@ -656,10 +647,10 @@ namespace simbi::exec {
             );
         }
 
-        void synchronize() const
+        void synchronize()
         {
             for (auto& stream : streams_) {
-                gpu::api::stream_synchronize(stream);
+                stream.synchronize();
             }
         }
 

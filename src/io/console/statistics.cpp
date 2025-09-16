@@ -8,12 +8,11 @@
 #include <iostream>
 #include <sstream>
 #include <string>
-// #include <sys/sysctl.h>
 #include <thread>
 #include <vector>
 
 #if GPU_ENABLED
-#include "adapter/device_adapter_api.hpp"
+#include "hetero/adapter.hpp"
 real gpu_theoretical_bw = 1.0;
 #endif
 
@@ -511,8 +510,7 @@ namespace simbi {
                 auto gpu_table = io::TableFactory::create_system_info_table();
                 gpu_table.set_title("GPU Information");
 
-                std::int64_t dev_count;
-                gpu::api::get_device_count(&dev_count);
+                auto dev_count = hetero::device::get_device_count();
 
                 if (dev_count == 0) {
                     // set table header for no GPU case
@@ -527,10 +525,8 @@ namespace simbi {
                     gpu_table.set_column_alignment(0, io::Alignment::Left);
                     gpu_table.set_column_alignment(1, io::Alignment::Left);
 
-                    // we'll show info for the first GPU (can be extended to
-                    // multiple)
-                    adapter::device_properties_t<> props;
-                    gpu::api::get_device_properties(&props, 0);
+                    // we'll show info for the first GPU
+                    auto props = hetero::device::get_device_properties(0);
 
                     // add GPU details
                     gpu_table.add_row({"Device Name", props.name});
@@ -589,7 +585,7 @@ namespace simbi {
 
                 gpu_table.set_minimum_width(SYSTEM_INFO_TABLE_WIDTH);
 
-                // prstd::int64_t the GPU table
+                // print the GPU table
                 gpu_table.print();
             }
 #endif

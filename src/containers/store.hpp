@@ -24,7 +24,8 @@ namespace simbi {
                 return;
             }
 
-            std::uint64_t new_capacity = std::max(required, data_.size() * 2);
+            std::uint64_t new_capacity =
+                std::max<std::uint64_t>(required, data_.size() * 2);
             if (data_.size() == 0) {
                 new_capacity = std::max(required, std::uint64_t(16));
             }

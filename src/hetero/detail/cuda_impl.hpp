@@ -73,6 +73,8 @@ namespace simbi::hetero {
             return false;
         }
 
+        operator bool() const noexcept { return handle_ != nullptr; }
+
       private:
         void destroy()
         {
@@ -313,6 +315,41 @@ namespace simbi::hetero {
             );
         }
 
+        static void peer_copy_async(
+            void* dst,
+            int dst_device_id,
+            const void* src,
+            int src_device_id,
+            std::size_t bytes const stream_type& stream
+        )
+        {
+            check_error<cuda_backend_t>(
+                cudaMemcpyPeerAsync(
+                    dst,
+                    dst_device_id,
+                    src,
+                    src_device_id,
+                    bytes,
+                    stream.native_handle()
+                ),
+                "async peer memory copy"
+            );
+        }
+
+        static void peer_copy(
+            void* dst,
+            int dst_device_id,
+            const void* src,
+            int src_device_id,
+            std::size_t bytes
+        )
+        {
+            check_error<cuda_backend_t>(
+                cudaMemcpyPeer(dst, dst_device_id, src, src_device_id, bytes),
+                "peer memory copy"
+            );
+        }
+
         static memory_type allocate(std::size_t bytes)
         {
             return memory_type(bytes);
@@ -548,6 +585,17 @@ namespace simbi::hetero {
         static constexpr bool supports_async_operations() { return true; }
 
         static constexpr bool supports_peer_access() { return true; }
+
+        static device_props<cuda_backend_t>
+        get_device_properties(std::int64_t device_id)
+        {
+            cudaDeviceProp props;
+            check_error<cuda_backend_t>(
+                cudaGetDeviceProperties(&props, static_cast<int>(device_id)),
+                "get device properties"
+            );
+            return props;
+        }
     };
 
 }   // namespace simbi::hetero

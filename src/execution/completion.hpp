@@ -7,7 +7,9 @@
 #include <atomic>
 #include <condition_variable>
 #include <functional>
+#include <memory>
 #include <mutex>
+#include <utility>
 
 namespace simbi::exec {
     /**
@@ -44,11 +46,13 @@ namespace simbi::exec {
         // constructor for gpu streams
         static completion_context_t gpu_stream(hetero::stream stream)
         {
-            return {
-              [&stream](const auto& /*ready*/, auto& /*mutex*/, auto& /*cv*/) {
-                  stream.synchronize();
-              }
-            };
+            auto shared_stream =
+                std::make_shared<hetero::stream>(std::move(stream));
+            return {[shared_stream](
+                        const auto& /*ready*/,
+                        auto& /*mutex*/,
+                        auto& /*cv*/
+                    ) { shared_stream->synchronize(); }};
         }
     };
 
