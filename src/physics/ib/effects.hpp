@@ -124,10 +124,10 @@ namespace simbi::body::expr {
             const auto stability_rate = 1.0 / dt;    // [1/time] - max safe rate
             const auto sr_base = my_min3(sr_param, nat_rate, stability_rate);
 
-            // torque-controled sink prescription from Dittmann & Ryan(2021)
+            // torque-controlled sink prescription from Dittmann & Ryan(2021)
             // https://ui.adsabs.harvard.edu/abs/2021ApJ...921...71D/abstract
             const auto r_norm         = r_mag / accr_radius;
-            const auto radial_profile = std::exp(-0.5 * r_norm * r_norm);
+            const auto radial_profile = std::exp(-0.25 * std::pow(r_norm, 4));
             const auto sr             = sr_base * radial_profile;
 
             const auto v_star = apply_torque_control(
