@@ -145,6 +145,7 @@ def parse_bodies(
                     body_diagnostics.cumulative_mass_delta[i]
                 ),
                 accretion_rate=float(body_diagnostics.accretion_rate[i]),
+                sink_delta=float(body_data.get("sink_delta", 1.0)),
             )
 
         rigid = None

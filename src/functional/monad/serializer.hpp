@@ -1062,6 +1062,14 @@ namespace simbi::io {
                 const auto eff = sink_rate(body);
                 sink_rate_attr.write(H5::PredType::NATIVE_DOUBLE, &eff);
 
+                auto sink_delta_attr = group.createAttribute(
+                    "sink_delta",
+                    H5::PredType::NATIVE_DOUBLE,
+                    scalar_space
+                );
+                const auto sdelta = sink_delta(body);
+                sink_delta_attr.write(H5::PredType::NATIVE_DOUBLE, &sdelta);
+
                 auto accr_rad_attr = group.createAttribute(
                     "accretion_radius",
                     H5::PredType::NATIVE_DOUBLE,

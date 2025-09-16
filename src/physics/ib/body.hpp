@@ -93,6 +93,7 @@ namespace simbi::body {
         real accretion_radius;
         real total_accreted_mass;
         real accretion_rate;
+        real sink_delta;   // 0 = torque-free, 1 = standard
     };
 
     struct elastic_component_t {
@@ -326,6 +327,7 @@ namespace simbi::body {
         real radius,
         real softening_length,
         real sink_rate,
+        real sink_delta,
         real accretion_radius,
         real accretion_rate      = 0.0,
         real total_accreted_mass = 0.0,
@@ -347,7 +349,8 @@ namespace simbi::body {
                 sink_rate,
                 accretion_radius,
                 total_accreted_mass,
-                accretion_rate
+                accretion_rate,
+                sink_delta
               }
           )
         };
@@ -444,6 +447,13 @@ namespace simbi::body {
     {
         auto accr_cap = get_capabilities<capabilities::accretion_tag>(body);
         return accr_cap.sink_rate;
+    }
+
+    template <has_accretion_capability_c Body>
+    DUAL constexpr auto sink_delta(const Body& body) -> real
+    {
+        auto accr_cap = get_capabilities<capabilities::accretion_tag>(body);
+        return accr_cap.sink_delta;
     }
 
     // rigid body properties

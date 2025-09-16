@@ -1,6 +1,6 @@
 from dataclasses import asdict, dataclass, field
 from enum import IntFlag
-from typing import Any, ClassVar, Literal, Optional, Sequence
+from typing import Any, Optional, Sequence
 
 import numpy as np
 from numpy.typing import NDArray
@@ -44,6 +44,7 @@ class BinaryComponentConfig:
     two_way_coupling: bool
     sink_rate: float
     accretion_radius: float
+    sink_delta: float = 1.0  # 1 is standard, 0 is torque-free
     position: Sequence[float] = field(default_factory=lambda: (0.0, 0.0, 0.0))
     velocity: Sequence[float] = field(default_factory=lambda: (0.0, 0.0, 0.0))
     force: Sequence[float] = field(default_factory=lambda: (0.0, 0.0, 0.0))
@@ -106,6 +107,7 @@ class AccretionProperties:
     accretion_radius: float
     total_accreted_mass: float
     accretion_rate: float
+    sink_delta: float  # 1 is standard, 0 is torque-free
 
 
 @dataclass(frozen=True)

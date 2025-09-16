@@ -5,23 +5,26 @@ This module adapts the existing checkpoint loading functionality to work with
 the new SimulationState structure.
 """
 
-import numpy as np
 from dataclasses import asdict
-
 from typing import Any
+
+import numpy as np
+
 from ...core.types.bodies import (
     Body,
     BodyCapability,
     GravitationalSystemConfig,
     ImmersedBodyConfig,
 )
-from ...reader import read_simulation, SimData
+from ...functional.maybe import Maybe
+from ...reader import SimData, read_simulation
 from ..config.base_config import SimbiBaseConfig
 from ..simulation.state_init import SimulationState
-from ...functional.maybe import Maybe
 
 
-def has_capability(body_capability: BodyCapability, capability: BodyCapability) -> bool:
+def has_capability(
+    body_capability: BodyCapability, capability: BodyCapability
+) -> bool:
     return bool(body_capability & capability)
 
 
@@ -45,9 +48,13 @@ def to_system(
         if not body1 or not body2:
             raise ValueError("Both bodies must be present for a binary system.")
         if body1.accretion is None or body2.accretion is None:
-            raise ValueError("Both bodies in a binary must have accretion info.")
+            raise ValueError(
+                "Both bodies in a binary must have accretion info."
+            )
         if body1.gravitational is None or body2.gravitational is None:
-            raise ValueError("Both bodies in a binary must have gravitational info.")
+            raise ValueError(
+                "Both bodies in a binary must have gravitational info."
+            )
 
         return GravitationalSystemConfig(
             prescribed_motion=True,
@@ -68,6 +75,7 @@ def to_system(
                         softening_length=body1.gravitational.softening_length,
                         two_way_coupling=False,
                         sink_rate=body1.accretion.sink_rate,
+                        sink_delta=body1.accretion.sink_delta,
                         accretion_radius=body1.accretion.accretion_radius,
                         total_accreted_mass=body1.accretion.total_accreted_mass,
                         position=body1.position,
@@ -82,6 +90,7 @@ def to_system(
                         softening_length=body2.gravitational.softening_length,
                         two_way_coupling=False,
                         sink_rate=body2.accretion.sink_rate,
+                        sink_delta=body2.accretion.sink_delta,
                         accretion_radius=body2.accretion.accretion_radius,
                         total_accreted_mass=body2.accretion.total_accreted_mass,
                         position=body2.position,
@@ -101,13 +110,17 @@ def to_system(
                 velocity=body.velocity,
                 two_way_coupling=False,
                 force=(0.0, 0.0, 0.0),
-                specifics={k: v for k, v in asdict(body).items() if v is not None},
+                specifics={
+                    k: v for k, v in asdict(body).items() if v is not None
+                },
             )
             for body in bodies.values()
         ]
 
 
-def load_checkpoint_to_state(default_config: SimbiBaseConfig) -> Maybe[SimulationState]:
+def load_checkpoint_to_state(
+    default_config: SimbiBaseConfig,
+) -> Maybe[SimulationState]:
     """
     Load a checkpoint file into a SimulationState object using existing checkpoint loader.
 
@@ -134,9 +147,15 @@ def load_checkpoint_to_state(default_config: SimbiBaseConfig) -> Maybe[Simulatio
                 primitive_state=np.array(
                     [
                         x["rho"],
-                        *[x[f"v{i}"] for i in range(1, metadata.dimensions + 1)],
+                        *[
+                            x[f"v{i}"]
+                            for i in range(1, metadata.dimensions + 1)
+                        ],
                         *(
-                            [x[f"b{i}_mean"] for i in range(1, metadata.dimensions + 1)]
+                            [
+                                x[f"b{i}_mean"]
+                                for i in range(1, metadata.dimensions + 1)
+                            ]
                             if "mhd" in metadata.regime
                             else []
                         ),
@@ -148,10 +167,16 @@ def load_checkpoint_to_state(default_config: SimbiBaseConfig) -> Maybe[Simulatio
                 conserved_state=np.array(
                     [
                         x["D"],
-                        *[x[f"m{i}"] for i in range(1, metadata.dimensions + 1)],
+                        *[
+                            x[f"m{i}"]
+                            for i in range(1, metadata.dimensions + 1)
+                        ],
                         x["energy"],
                         *(
-                            [x[f"b{i}_mean"] for i in range(1, metadata.dimensions + 1)]
+                            [
+                                x[f"b{i}_mean"]
+                                for i in range(1, metadata.dimensions + 1)
+                            ]
                             if "mhd" in metadata.regime
                             else []
                         ),

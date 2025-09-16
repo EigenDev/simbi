@@ -12,6 +12,7 @@
 
 #include <cmath>
 #include <cstdint>
+#include <iostream>
 
 namespace simbi::body::expr {
     using namespace simbi::hydro;
@@ -134,7 +135,7 @@ namespace simbi::body::expr {
                 r_vec / r_mag,
                 body.velocity,
                 prim.vel,
-                0.0   // [TODO]: make configurable
+                sink_delta(body)
             );
             const auto den_dot = labframe_density(prim) * sr;
             const auto mom_dot = den_dot * v_star;

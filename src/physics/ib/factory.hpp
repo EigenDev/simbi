@@ -10,7 +10,6 @@
 
 #include <cmath>
 #include <cstdint>
-#include <iostream>
 #include <list>
 #include <optional>
 #include <stdexcept>
@@ -119,8 +118,9 @@ namespace simbi::body::factory {
         auto body_type = detail::determine_body_type(props);
 
         if (body_type == "black_hole") {
-            auto softening = try_read<real>(props, "softening_length").value();
-            auto sink_rate = try_read<real>(props, "sink_rate").value();
+            auto softening  = try_read<real>(props, "softening_length").value();
+            auto sink_rate  = try_read<real>(props, "sink_rate").value();
+            auto sink_delta = try_read<real>(props, "sink_delta").value();
             auto accr_radius =
                 try_read<real>(props, "accretion_radius").unwrap_or(radius);
             auto total_accreted =
@@ -134,8 +134,9 @@ namespace simbi::body::factory {
                 radius,
                 softening,
                 sink_rate,
+                sink_delta,
                 accr_radius,
-                real{0},
+                real{0},   // accretion rate
                 total_accreted,
                 two_way
             );

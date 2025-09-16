@@ -255,7 +255,9 @@ namespace simbi::body {
         real sink_rate1   = 0.0,
         real sink_rate2   = 0.0,
         real accr_radius1 = 0.0,
-        real accr_radius2 = 0.0
+        real accr_radius2 = 0.0,
+        real sink_delta1  = 1.0,
+        real sink_delta2  = 1.0
     )
     {
         if (sink_rate1 > 0.0 && sink_rate2 > 0.0) {
@@ -269,6 +271,7 @@ namespace simbi::body {
                         radius1,
                         softening1,
                         sink_rate1,
+                        sink_delta1,
                         accr_radius1
                     )
                 )
@@ -280,6 +283,7 @@ namespace simbi::body {
                         radius2,
                         softening2,
                         sink_rate2,
+                        sink_delta2,
                         accr_radius2
                     )
                 );
@@ -309,6 +313,7 @@ namespace simbi::body {
                             radius1,
                             softening1,
                             sink_rate1,
+                            sink_delta1,
                             accr_radius1
                         )
                     )
@@ -331,6 +336,7 @@ namespace simbi::body {
                             radius2,
                             softening2,
                             sink_rate2,
+                            sink_delta2,
                             accr_radius2
                         )
                     );
