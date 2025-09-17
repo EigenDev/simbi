@@ -395,7 +395,7 @@ namespace simbi::exec {
             return async_impl([=, this]() {
                 const auto tiles = tiling::make_tiles(domain, tile_size);
 
-#pragma omp parallel for schedule(dynamic)
+#pragma omp parallel for schedule(static)
                 for (std::size_t tile_idx = 0; tile_idx < tiles.size();
                      ++tile_idx) {
                     const auto& tile = tiles[tile_idx];
@@ -424,7 +424,7 @@ namespace simbi::exec {
                                   std::decay_t<Reducer>,
                                   std::plus<T>>) {
                     T accumulator = init;
-#pragma omp parallel for schedule(dynamic) reduction(+ : accumulator)
+#pragma omp parallel for schedule(static) reduction(+ : accumulator)
                     for (std::size_t tile_idx = 0; tile_idx < tiles.size();
                          ++tile_idx) {
                         const auto& tile = tiles[tile_idx];
@@ -438,7 +438,7 @@ namespace simbi::exec {
                     // Generic fallback - manual reduction
                     std::vector<T> tile_results(tiles.size(), init);
 
-#pragma omp parallel for schedule(dynamic)
+#pragma omp parallel for schedule(static)
                     for (std::size_t tile_idx = 0; tile_idx < tiles.size();
                          ++tile_idx) {
                         const auto& tile = tiles[tile_idx];
