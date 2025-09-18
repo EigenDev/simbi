@@ -5,13 +5,13 @@
 
 namespace simbi::hetero {
 
-#ifdef USE_CUDA
+#ifdef CUDA_ENABLED
     using default_backend_t = cuda_backend_t;
-#elif defined(USE_HIP)
+#elif defined(HIP_ENABLED)
     using default_backend_t = hip_backend_t;
-#elif defined(USE_SYCL)
+#elif defined(SYCL_ENABLED)
     using default_backend_t = sycl_backend_t;
-#elif defined(USE_METAL)
+#elif defined(METAL_ENABLED)
     using default_backend_t = metal_backend_t;
 #else
     using default_backend_t = cpu_backend_t;

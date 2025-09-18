@@ -3,19 +3,23 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <type_traits>
 
 // include backend-specific headers conditionally
-#ifdef USE_CUDA
+#ifdef CUDA_ENABLED
 #include <cuda.h>
 #include <cuda_runtime.h>
 #endif
 
-#ifdef USE_HIP
+#ifdef HIP_ENABLED
 #include <hip/hip_runtime.h>
 #endif
 
 // [TODO] re-add SYCL, Metal headers later
 
+template <class...>
+struct False : std::bool_constant<false> {
+};
 namespace simbi::hetero {
     // backend tag types - empty structs for compile-time dispatch
     // I think this is called tag dispatching?
@@ -32,7 +36,7 @@ namespace simbi::hetero {
 
     template <typename backend_t>
     struct backend_traits_t {
-        static_assert(false, "unsupported backend type");
+        static_assert(False<backend_t>{}, "unsupported backend type");
     };
 
     // cpu backend traits
@@ -46,6 +50,7 @@ namespace simbi::hetero {
         struct device_props_t {
             std::int64_t core_count;
             std::size_t memory_bytes;
+            // properties that act as stubs for compatibility
         };
 
         using stream_t            = stream_handle_t;
@@ -53,7 +58,7 @@ namespace simbi::hetero {
         using device_properties_t = device_props_t;
     };
 
-#ifdef USE_CUDA
+#ifdef CUDA_ENABLED
     // cuda backend traits
     template <>
     struct backend_traits_t<cuda_backend_t> {
@@ -70,7 +75,7 @@ namespace simbi::hetero {
     };
 #endif
 
-#ifdef USE_HIP
+#ifdef HIP_ENABLED
     // hip backend traits
     template <>
     struct backend_traits_t<hip_backend_t> {

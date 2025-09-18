@@ -31,7 +31,10 @@ namespace simbi::hetero {
 
     template <typename backend_t>
     struct error_translator_t {
-        static_assert(false, "error translation not implemented for backend");
+        static_assert(
+            False<backend_t>{},
+            "error translation not implemented for backend"
+        );
     };
 
     template <>
@@ -44,7 +47,7 @@ namespace simbi::hetero {
         }
     };
 
-#ifdef USE_CUDA
+#ifdef CUDA_ENABLED
     template <>
     struct error_translator_t<cuda_backend_t> {
         static status_t translate(cudaError_t error)
@@ -57,7 +60,7 @@ namespace simbi::hetero {
                 case cudaErrorInvalidConfiguration:
                     return status_t::invalid_argument;
                 case cudaErrorDeviceUninitialized:
-                case cudaErrorDeinitialized: return status_t::device_error;
+                    return status_t::device_error;
                 default: return status_t::runtime_error;
             }
         }
@@ -74,7 +77,7 @@ namespace simbi::hetero {
     };
 #endif
 
-#ifdef USE_HIP
+#ifdef HIP_ENABLED
     template <>
     struct error_translator_t<hip_backend_t> {
         static status_t translate(hipError_t error)

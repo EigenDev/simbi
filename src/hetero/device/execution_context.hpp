@@ -136,7 +136,7 @@ namespace simbi::hetero {
             std::size_t shared_memory_;
 
           public:
-            DEV launch_config_t(
+            launch_config_t(
                 dim3_t grid               = {1, 1, 1},
                 dim3_t block              = {1, 1, 1},
                 std::size_t shared_memory = 0
@@ -145,9 +145,9 @@ namespace simbi::hetero {
             {
             }
 
-            DEV const dim3_t& grid() const { return grid_; }
-            DEV const dim3_t& block() const { return block_; }
-            DEV std::size_t shared_memory() const { return shared_memory_; }
+            const dim3_t& grid() const { return grid_; }
+            const dim3_t& block() const { return block_; }
+            std::size_t shared_memory() const { return shared_memory_; }
         };
 
         DEV inline execution_index_t<default_backend_t> idx()
@@ -155,13 +155,13 @@ namespace simbi::hetero {
             return execution_index_t<default_backend_t>::current();
         }
 
-        DEV inline launch_config_t
+        inline launch_config_t
         config(std::uint32_t blocks, std::uint32_t threads)
         {
             return launch_config_t({blocks, 1, 1}, {threads, 1, 1});
         }
 
-        DEV inline launch_config_t
+        inline launch_config_t
         config(dim3_t grid, dim3_t block, std::size_t shared_memory = 0)
         {
             return launch_config_t(grid, block, shared_memory);

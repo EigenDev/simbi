@@ -536,9 +536,11 @@ namespace simbi::exec {
 
             try {
                 // create events for tracking completion on each device
-                std::vector<hetero::event> events;
+                state->completion_events.reserve(devices_.size());
                 for (std::size_t ii = 0; ii < devices_.size(); ++ii) {
-                    events.emplace_back(hetero::device::create_event());
+                    state->completion_events.emplace_back(
+                        hetero::device::create_event()
+                    );
                 }
 
                 for (std::size_t ii = 0; ii < devices_.size(); ++ii) {
@@ -550,16 +552,8 @@ namespace simbi::exec {
                         std::forward<Args>(args)...
                     );
 
-                    events[ii].record(streams_[ii]);
+                    state->completion_events[ii].record(streams_[ii]);
                 }
-
-                // create a callback to wait for all devices to complete
-                state->set_ready_callback([events =
-                                               std::move(events)]() mutable {
-                    for (auto& event : events) {
-                        event.synchronize();
-                    }
-                });
             }
             catch (...) {
                 state->exception = std::current_exception();

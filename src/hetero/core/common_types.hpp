@@ -42,7 +42,7 @@ namespace simbi::hetero {
 
     template <typename backend_t>
     struct backend_info_t {
-        static_assert(false, "backend info not specialized");
+        static_assert(False<backend_t>{}, "backend info not specialized");
     };
 
     template <>
@@ -53,7 +53,7 @@ namespace simbi::hetero {
         static constexpr bool supports_peer_access = false;
     };
 
-#ifdef USE_CUDA
+#ifdef CUDA_ENABLED
     template <>
     struct backend_info_t<cuda_backend_t> {
         static constexpr device_type_t device_type = device_type_t::cuda_gpu;
@@ -63,7 +63,7 @@ namespace simbi::hetero {
     };
 #endif
 
-#ifdef USE_HIP
+#ifdef HIP_ENABLED
     template <>
     struct backend_info_t<hip_backend_t> {
         static constexpr device_type_t device_type = device_type_t::hip_gpu;

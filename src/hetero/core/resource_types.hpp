@@ -2,6 +2,7 @@
 #define HETERO_CORE_RESOURCE_TYPES_HPP
 
 #include "backend_traits.hpp"
+#include "config.hpp"
 
 #include <cstddef>
 
@@ -129,12 +130,12 @@ namespace simbi::hetero {
             return *this;
         }
 
-        void* data() const noexcept { return ptr_; }
+        DUAL void* data() const noexcept { return ptr_; }
         std::size_t size() const noexcept { return size_; }
         bool is_managed() const noexcept { return is_managed_; }
 
         template <typename T>
-        T* as() const noexcept
+        DUAL T* as() const noexcept
         {
             return static_cast<T*>(ptr_);
         }
@@ -161,17 +162,17 @@ namespace simbi::hetero {
         }
 
         void* data() const noexcept { return memory_.data(); }
-        T* typed_data() const noexcept { return memory_.template as<T>(); }
+        DUAL T* typed_data() const noexcept { return memory_.template as<T>(); }
         std::size_t size() const noexcept { return count_; }
         std::size_t size_bytes() const noexcept { return count_ * sizeof(T); }
         bool is_managed() const noexcept { return memory_.is_managed(); }
 
-        T& operator[](std::size_t index) noexcept
+        DUAL T& operator[](std::size_t index) noexcept
         {
             return typed_data()[index];
         }
 
-        const T& operator[](std::size_t index) const noexcept
+        DUAL const T& operator[](std::size_t index) const noexcept
         {
             return typed_data()[index];
         }

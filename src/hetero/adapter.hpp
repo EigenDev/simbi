@@ -4,13 +4,13 @@
 #include "config.hpp"
 #include "core/resource_types.hpp"
 
-#ifdef USE_CUDA
+#ifdef CUDA_ENABLED
 #include "detail/cuda_impl.hpp"
-#elif defined(USE_HIP)
+#elif defined(HIP_ENABLED)
 #include "detail/hip_impl.hpp"
-#elif defined(USE_SYCL)
+#elif defined(SYCL_ENABLED)
 #include "detail/sycl_impl.hpp"
-#elif defined(USE_METAL)
+#elif defined(METAL_ENABLED)
 #include "detail/metal_impl.hpp"
 #else
 #include "detail/cpu_impl.hpp"
