@@ -1,16 +1,26 @@
 #ifndef HETERO_DETAIL_CUDA_IMPL_HPP
 #define HETERO_DETAIL_CUDA_IMPL_HPP
 
-#ifdef USE_CUDA
+#ifdef CUDA_ENABLED
 
 #include "../core/backend_traits.hpp"
+#include "../core/common_types.hpp"
 #include "../core/error_handling.hpp"
 #include "../core/resource_types.hpp"
+#include "../device/execution_context.hpp"
+#include "adapter_impl.hpp"
+#include "config.hpp"
 
 #include <cstddef>
 #include <cuda_runtime.h>
 
 namespace simbi::hetero {
+
+    template <typename Func, typename... Args>
+    KERNEL void generic_kernel(Func func, Args... args)
+    {
+        func(args...);
+    }
 
     template <>
     class stream_t<cuda_backend_t>
@@ -229,7 +239,7 @@ namespace simbi::hetero {
         bool is_managed() const noexcept { return is_managed_; }
 
         template <typename T>
-        T* as() const noexcept
+        DUAL T* as() const noexcept
         {
             return static_cast<T*>(ptr_);
         }
@@ -320,7 +330,8 @@ namespace simbi::hetero {
             int dst_device_id,
             const void* src,
             int src_device_id,
-            std::size_t bytes const stream_type& stream
+            std::size_t bytes,
+            const stream_type& stream
         )
         {
             check_error<cuda_backend_t>(
@@ -464,7 +475,10 @@ namespace simbi::hetero {
         {
             dim3 cuda_grid(grid.x, grid.y, grid.z);
             dim3 cuda_block(block.x, block.y, block.z);
-            kernel<<<cuda_grid, cuda_block>>>(args...);
+            generic_kernel<<<cuda_grid, cuda_block>>>(
+                kernel,
+                std::forward<args_t>(args)...
+            );
             check_error<cuda_backend_t>(cudaGetLastError(), "kernel launch");
         }
 
@@ -479,8 +493,13 @@ namespace simbi::hetero {
         {
             dim3 cuda_grid(grid.x, grid.y, grid.z);
             dim3 cuda_block(block.x, block.y, block.z);
-            kernel<<<cuda_grid, cuda_block, 0, stream.native_handle()>>>(
-                args...
+            generic_kernel<<<
+                cuda_grid,
+                cuda_block,
+                0,
+                stream.native_handle()>>>(
+                kernel,
+                std::forward<args_t>(args)...
             );
             check_error<cuda_backend_t>(
                 cudaGetLastError(),
@@ -499,7 +518,7 @@ namespace simbi::hetero {
                 kernel,
                 launch_config.grid(),
                 launch_config.block(),
-                args...
+                std::forward<args_t>(args)...
             );
         }
 
@@ -600,5 +619,5 @@ namespace simbi::hetero {
 
 }   // namespace simbi::hetero
 
-#endif   // USE_CUDA
+#endif   // CUDA_ENABLED
 #endif   // HETERO_DETAIL_CUDA_IMPL_HPP

@@ -12,6 +12,7 @@
 #include <memory>
 #include <mutex>
 #include <utility>
+#include <vector>
 
 namespace simbi::exec {
     // forward declarations
@@ -33,17 +34,7 @@ namespace simbi::exec {
             std::condition_variable cv;
             std::mutex mutex;
             completion_context_t completion_context;
-            std::function<void()> ready_callback;
-
-            void set_ready_callback(std::function<void()> callback)
-            {
-                ready_callback = std::move(callback);
-
-                // if we're ready, exec the callback immediately
-                if (ready.load() && ready_callback) {
-                    ready_callback();
-                }
-            }
+            std::vector<hetero::event> completion_events;
 
             T& result() { return *reinterpret_cast<T*>(result_storage); }
 
@@ -115,8 +106,10 @@ namespace simbi::exec {
 
         void wait_impl() const
         {
-            if (state_->ready_callback) {
-                state_->ready_callback();
+            if (!state_->completion_events.empty()) {
+                for (auto& event : state_->completion_events) {
+                    event.synchronize();
+                }
                 state_->ready.store(true);
             }
             else {
@@ -151,17 +144,7 @@ namespace simbi::exec {
             std::condition_variable cv;
             std::mutex mutex;
             completion_context_t completion_context;
-            std::function<void()> ready_callback;
-
-            void set_ready_callback(std::function<void()> callback)
-            {
-                ready_callback = std::move(callback);
-
-                // if we're ready, exec the callback immediately
-                if (ready.load() && ready_callback) {
-                    ready_callback();
-                }
-            }
+            std::vector<hetero::event> completion_events;
 
             ~future_state_t() = default;
         };
@@ -215,8 +198,10 @@ namespace simbi::exec {
 
         void wait_impl() const
         {
-            if (state_->ready_callback) {
-                state_->ready_callback();
+            if (!state_->completion_events.empty()) {
+                for (auto& event : state_->completion_events) {
+                    event.synchronize();
+                }
                 state_->ready.store(true);
             }
             else {

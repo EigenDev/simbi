@@ -105,7 +105,7 @@ namespace simbi::mem {
         }
 
         template <typename ComputeField, typename Executor>
-        void direct_commit(ComputeField computation, Executor executor)
+        void direct_commit(ComputeField computation, const Executor& executor)
         {
             if (!is_allocated() && !arena_) {
                 throw std::runtime_error(
@@ -131,7 +131,7 @@ namespace simbi::mem {
         }
 
         template <typename ComputeField, typename Executor>
-        void try_commit(ComputeField computation, Executor executor)
+        void try_commit(ComputeField computation, const Executor& executor)
         {
             if (!is_allocated() && !arena_) {
                 throw std::runtime_error(
@@ -171,7 +171,7 @@ namespace simbi::mem {
         }
 
         template <typename ComputeField, typename Executor>
-        void commit(ComputeField computation, Executor executor)
+        void commit(ComputeField computation, const Executor& executor)
         {
 
             if constexpr (is_maybe_v<typename ComputeField::value_type>) {

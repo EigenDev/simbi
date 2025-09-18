@@ -1,11 +1,11 @@
 /**
- * config.hpp - Modern configuration system for SIMBI
+ * compat.hpp - configuration system for SIMBI
  *
  * This file provides a type-safe, compile-time configuration system
  *
  */
-#ifndef CONFIG_HPP
-#define CONFIG_HPP
+#ifndef COMPAT_HPP
+#define COMPAT_HPP
 
 #include "build_options.hpp"   // include the Meson-generated configuration
 #include <cstdint>             // for fixed-width integer types
