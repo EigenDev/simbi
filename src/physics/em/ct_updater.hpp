@@ -222,22 +222,19 @@ namespace simbi::em {
     // ========================================================================
     // CT MAGNETIC UPDATE
     // ========================================================================
-    template <typename HydroState, typename MeshConfig, magnetic_comp_t MagComp>
+    template <
+        magnetic_comp_t MagComp,
+        typename FluxField,
+        typename PrimField,
+        typename MeshConfig>
     struct ct_magnetic_update_op_t {
-        const HydroState& state;
-        const MeshConfig& mesh;
+        FluxField fluxes;
+        PrimField prims;
+        real dt;
+        MeshConfig mesh;
 
         DEV auto operator()(auto face_coord) const
         {
-            const auto dt = state.metadata.dt;
-
-            const auto fluxes = vector_t{
-              state.flux[0][mesh.face_domain[0]],
-              state.flux[1][mesh.face_domain[1]],
-              state.flux[2][mesh.face_domain[2]]
-            };
-            const auto prim = state.prim[mesh.domain];
-
             constexpr auto perm_list = permutation_list<MagComp>();
 
             const auto emf_computer = [&]<typename Perm>(Perm) {
@@ -246,7 +243,7 @@ namespace simbi::em {
                     auto prim_coords = prim_stencil<Perm>(edge_coord);
 
                     auto ef    = face_efields<Perm>(fluxes, flux_coords);
-                    auto ec    = center_efields<Perm>(prim, prim_coords);
+                    auto ec    = center_efields<Perm>(prims, prim_coords);
                     auto densf = den_fluxes<Perm>(fluxes, flux_coords);
 
                     return ct_contact_formula(ef, ec, densf);
@@ -267,12 +264,43 @@ namespace simbi::em {
         }
     };
 
+    template <magnetic_comp_t MagComp>
+    auto make_ct_magnetic_update_op(
+        auto&& fluxes,
+        auto&& prims,
+        real dt,
+        auto&& mesh
+    )
+    {
+        return ct_magnetic_update_op_t<
+            MagComp,
+            std::decay_t<decltype(fluxes)>,
+            std::decay_t<decltype(prims)>,
+            std::decay_t<decltype(mesh)>>{
+          std::forward<decltype(fluxes)>(fluxes),
+          std::forward<decltype(prims)>(prims),
+          dt,
+          std::forward<decltype(mesh)>(mesh)
+        };
+    }
+
     template <magnetic_comp_t MagComp, typename HydroState, typename MeshConfig>
     auto ct_magnetic_update(const HydroState& state, const MeshConfig& mesh)
     {
         constexpr auto comp = static_cast<std::uint64_t>(MagComp);
+        const auto fluxes   = vector_t{
+          state.flux[0][mesh.face_domain[0]],
+          state.flux[1][mesh.face_domain[1]],
+          state.flux[2][mesh.face_domain[2]]
+        };
+
         return compute_field_t{
-          ct_magnetic_update_op_t<HydroState, MeshConfig, MagComp>{state, mesh},
+          make_ct_magnetic_update_op<MagComp>(
+              fluxes,
+              state.prim[mesh.domain],
+              state.metadata.dt,
+              mesh
+          ),
           make_domain(mesh.face_domain[comp].shape())
         };
     }
@@ -280,35 +308,33 @@ namespace simbi::em {
     // ========================================================================
     // INTERPOLATION FIELDS
     // ========================================================================
-    template <typename HydroState, typename MeshConfig>
+    template <typename Bfield, typename MeshConfig>
     struct interpolate_magnetic_op_t {
-        const HydroState& state;
+        Bfield b1;
+        Bfield b2;
+        Bfield b3;
         const MeshConfig& mesh;
+
+        DEV auto get_face_avg(const auto& bface, auto cminus, int dir) const
+        {
+            const auto cplus = cminus + array_offset<3>(dir);
+            if constexpr (MeshConfig::geometry == Geometry::CARTESIAN) {
+                return 0.5 * (bface[cminus] + bface[cplus]);
+            }
+            else {
+                // volume-average for non-Cartesian geometries
+                auto al = mesh::face_area(cminus, dir, Dir::W, mesh);
+                auto ar = mesh::face_area(cplus, dir, Dir::E, mesh);
+                return (bface[cminus] * al + bface[cplus] * ar) / (al + ar);
+            }
+        }
 
         DEV auto operator()(auto coord) const
         {
-            const auto bz = state.bstaggs[0][mesh.face_domain[0]];
-            const auto by = state.bstaggs[1][mesh.face_domain[1]];
-            const auto bx = state.bstaggs[2][mesh.face_domain[2]];
-
-            auto get_face_avg = [this](const auto& bface, auto cm, int dir) {
-                const auto cp = cm + array_offset<3>(dir);
-                if constexpr (MeshConfig::geometry == Geometry::CARTESIAN) {
-                    (void) mesh;   // unused in Cartesian case
-                    return 0.5 * (bface[cm] + bface[cp]);
-                }
-                else {
-                    // volume-average for non-Cartesian geometries
-                    auto al = mesh::face_area(cm, dir, Dir::E, mesh);
-                    auto ar = mesh::face_area(cp, dir, Dir::W, mesh);
-                    return (bface[cm] * al + bface[cp] * ar) / (al + ar);
-                }
-            };
-
             return vector_t<real, 3>{
-              get_face_avg(bx, coord, 2),   // x1-component
-              get_face_avg(by, coord, 1),   // x2-component
-              get_face_avg(bz, coord, 0)    // x3-component
+              get_face_avg(b1, coord, 2),   // x1-component
+              get_face_avg(b2, coord, 1),   // x2-component
+              get_face_avg(b3, coord, 0)    // x3-component
             };
         }
     };
@@ -320,7 +346,12 @@ namespace simbi::em {
     )
     {
         return compute_field_t{
-          interpolate_magnetic_op_t<HydroState, MeshConfig>{state, mesh},
+          interpolate_magnetic_op_t{
+            state.bstaggs[2][mesh.face_domain[2]],
+            state.bstaggs[1][mesh.face_domain[1]],
+            state.bstaggs[0][mesh.face_domain[0]],
+            mesh
+          },
           make_domain(mesh.domain.shape())
         };
     }
@@ -361,12 +392,10 @@ namespace simbi::em {
     template <magnetic_comp_t MagComp, typename HydroState, typename MeshConfig>
     void update_magnetic_component(HydroState& state, const MeshConfig& mesh)
     {
-        constexpr auto comp    = static_cast<std::uint64_t>(MagComp);
-        const auto face_domain = mesh.face_domain[comp];
-
-        auto db     = ct_magnetic_update<MagComp>(state, mesh);
-        auto bfield = state.bstaggs[comp][face_domain];
-        bfield      = bfield.enum_map([db](auto coord, auto b_old) {
+        constexpr auto comp = static_cast<std::uint64_t>(MagComp);
+        auto db             = ct_magnetic_update<MagComp>(state, mesh);
+        auto bfield         = state.bstaggs[comp][mesh.face_domain[comp]];
+        bfield              = bfield.enum_map([db](auto coord, auto b_old) {
             return b_old + db(coord);
         });
     }
