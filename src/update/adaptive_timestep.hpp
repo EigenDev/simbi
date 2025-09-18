@@ -58,12 +58,12 @@ namespace simbi {
     {
         return compute_field_t{
           timestep_op_t{
-            state.prim,
+            state.prim[mesh.domain],
             state.metadata.gamma,
             state.metadata.cfl,
             mesh
           },
-          mesh.full_domain
+          mesh.domain
         };
     }
 

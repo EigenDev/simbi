@@ -115,7 +115,7 @@ namespace simbi::hydro::rmhd {
 
         //==================================================================
         // ATTEMPT TO RECOVER PRIMITIVES USING KASTAUN ET AL. 2021
-        // Jim Stone of the Institute for Advanced Study references this
+        // Jim Stone of the Institute for Advanced Study referenced this
         // paper to me. I'm thankful for that.
         //==================================================================
 
