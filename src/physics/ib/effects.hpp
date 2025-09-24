@@ -12,7 +12,6 @@
 
 #include <cmath>
 #include <cstdint>
-#include <iostream>
 
 namespace simbi::body::expr {
     using namespace simbi::hydro;
