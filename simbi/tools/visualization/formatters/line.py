@@ -56,6 +56,12 @@ def apply_labels(
         else:
             ax.legend(loc=style.legend_loc)
 
+    if style.semilogx:
+        ax.set_xscale("log")
+
+    if style.semilogy:
+        ax.set_yscale("log")
+
 
 def auto_scale_line_axes(ax: Axes, data: PlotData, field_index: int) -> None:
     """Auto-scale axes for line plot."""
