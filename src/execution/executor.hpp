@@ -389,18 +389,21 @@ namespace simbi::exec {
         auto for_each_impl(
             const domain_t<Dims>& domain,
             Func&& func,
-            const iarray<Dims>& tile_size
+            const iarray<Dims>& /*tile_size*/
         ) const -> future_t<void>
         {
             return async_impl([=, this]() {
-                const auto tiles = tiling::make_tiles(domain, tile_size);
+                iterate_domain_parallel(domain, func);
+                //                 const auto tiles = tiling::make_tiles(domain,
+                //                 tile_size);
 
-#pragma omp parallel for schedule(static)
-                for (std::size_t tile_idx = 0; tile_idx < tiles.size();
-                     ++tile_idx) {
-                    const auto& tile = tiles[tile_idx];
-                    iterate_domain_serial(tile.domain, func);
-                }
+                // #pragma omp parallel for schedule(static)
+                //                 for (std::size_t tile_idx = 0; tile_idx <
+                //                 tiles.size();
+                //                      ++tile_idx) {
+                //                     const auto& tile = tiles[tile_idx];
+                //                     iterate_domain_serial(tile.domain, func);
+                //                 }
             });
         }
 
@@ -483,6 +486,40 @@ namespace simbi::exec {
                         }
                     }
                 }
+            }
+        }
+
+        template <std::uint64_t Dims, typename Func>
+        void
+        iterate_domain_parallel(const domain_t<Dims>& domain, Func func) const
+        {
+            if constexpr (Dims == 1) {
+#pragma omp parallel for schedule(static)
+                for (auto ii = domain.start[0]; ii < domain.end[0]; ++ii) {
+                    func(iarray<1>{ii});
+                }
+            }
+            else if constexpr (Dims == 2) {
+#pragma omp parallel for collapse(2) schedule(static)
+                for (auto ii = domain.start[0]; ii < domain.end[0]; ++ii) {
+                    for (auto jj = domain.start[1]; jj < domain.end[1]; ++jj) {
+                        func(iarray<2>{ii, jj});
+                    }
+                }
+            }
+            else if constexpr (Dims == 3) {
+#pragma omp parallel for collapse(3) schedule(static)
+                for (auto ii = domain.start[0]; ii < domain.end[0]; ++ii) {
+                    for (auto jj = domain.start[1]; jj < domain.end[1]; ++jj) {
+                        for (auto kk = domain.start[2]; kk < domain.end[2];
+                             ++kk) {
+                            func(iarray<3>{ii, jj, kk});
+                        }
+                    }
+                }
+            }
+            else {
+                static_assert(Dims <= 3, "Dims must be <= 3");
             }
         }
     };
