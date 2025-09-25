@@ -6,12 +6,12 @@
 #include <atomic>
 #include <cmath>
 #include <csignal>
+#include <cstdint>
 #include <iomanip>
 #include <ios>
 #include <sstream>
 #include <string>
 #include <sys/signal.h>
-#include <thread>
 #include <tuple>
 
 //==================================
@@ -208,15 +208,15 @@ namespace simbi {
         {
             constexpr real h0 = 1.0;
 
-            // If r < h0, we can use 1/h0 as upper bound
+            // if r < h0, we can use 1/h0 as upper bound
             if (r < h0) {
-                return 1.0 / h0;   // Since h0 = 1.0, this is just 1.0
+                return 1.0 / h0;   // since h0 = 1.0, this is just 1.0
             }
 
             // otherwise, we need to find \mu^\plus where fa(\mu^\plus) = 0
             // here, we'll start with a reasonably large upper bound
             real mu_lower = 0.0;
-            real mu_upper = 2.0;   // Start with a guess
+            real mu_upper = 1.0;   // start with a guess
 
             // ensure upper bound gives positive fa
             real f_upper = kkc_fmu49(mu_upper, beesq, rsbsq, r);
