@@ -16,7 +16,7 @@ namespace simbi::body {
      * this is useful for debugging and for post-processing
      * simulations where we want to know how much force was applied
      * to each body, how much torque was applied, how much mass
-     * was accreted, and how much accretion rate was applied.
+     * was accreted, and the instantaneous accretion rate.
      *
      *
      * srp: get the body diagnostics
