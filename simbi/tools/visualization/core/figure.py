@@ -6,7 +6,6 @@ from matplotlib.axes import Axes
 from matplotlib.figure import Figure as MplFigure
 
 from simbi.tools.visualization.components.multidim import MultidimPlotComponent
-from simbi.tools.visualization.components.temporal import TemporalPlotComponent
 
 from ..animation import AnimationController
 from ..components.interface import Component
@@ -86,8 +85,10 @@ class Figure:
                 extension += ".pdf"
 
             output_str += extension
-            self.fig.savefig(output_str, bbox_inches="tight")
-            print(f"Saved figure to {filename}")
+            self.fig.savefig(
+                output_str, bbox_inches="tight", dpi=self.config.style.dpi
+            )
+            print(f"Saved figure to {output_str}")
 
     def show(self) -> None:
         """Display the figure"""
