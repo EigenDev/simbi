@@ -24,9 +24,10 @@ def set_axis_title(
 ) -> None:
     """Set axis title if provided."""
     if title:
-        title = f"{title} {time:.2f}" if time else f"{title}"
+        title = f"{title} {time:.2f}" if time is not None else f"{title}"
     else:
         title = f"Untitled Simbi Simulation: {time:.2f}"
+
     if ax.name == "polar" and fig:
         fig.suptitle(title, y=title_pos)
     else:
