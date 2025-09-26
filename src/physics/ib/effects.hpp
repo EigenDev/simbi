@@ -96,7 +96,8 @@ namespace simbi::body::expr {
         }
 
         template <typename Body, typename Coord>
-        constexpr DEV auto operator()(const Body& body, Coord coord) const
+        constexpr DEV auto
+        operator()(const Body& body, Coord coord, bool is_binary) const
         {
             using namespace simbi::helpers;
             const auto cell_pos    = mesh::to_cartesian(coord, mesh_);
@@ -127,8 +128,13 @@ namespace simbi::body::expr {
             // torque-controlled sink prescription from Dittmann & Ryan(2021)
             // https://ui.adsabs.harvard.edu/abs/2021ApJ...921...71D/abstract
             const auto r_norm         = r_mag / accr_radius;
-            const auto radial_profile = std::exp(-0.25 * std::pow(r_norm, 4));
-            const auto sr             = sr_base * radial_profile;
+            const auto radial_profile = [is_binary, r_norm]() {
+                if (is_binary) {
+                    return std::exp(-0.25 * std::pow(r_norm, 4));
+                }
+                return std::exp(-0.5 * r_norm * r_norm);
+            }();
+            const auto sr = sr_base * radial_profile;
 
             const auto v_star = apply_torque_control(
                 r_vec / r_mag,
