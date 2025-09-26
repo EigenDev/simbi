@@ -10,6 +10,7 @@
 #include "memory/managed.hpp"
 #include "physics/eos/isothermal.hpp"
 #include "physics/ib/collection.hpp"
+#include "physics/ib/diagnostics.hpp"
 #include "physics/ib/factory.hpp"
 #include "state/express_t.hpp"
 #include "utility/bimap.hpp"
@@ -20,6 +21,7 @@
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
+#include <memory>
 #include <optional>
 #include <string>
 #include <vector>
@@ -139,6 +141,7 @@ namespace simbi::state {
 
         // immersed body stuff
         std::optional<body::body_collection_t<Dims>> bodies;
+        std::unique_ptr<body::body_diagnostics_t<Dims>> diagnostics;
 
         // error handling
         bool in_failure_state{false};
@@ -159,21 +162,23 @@ namespace simbi::state {
             auto [cons, prims, flux_vec, bstaggs] =
                 setup_hydro_state(cons_data, prim_data, bfield_data, init);
 
-            auto bodies = create_body_collection_from_init<Dims>(init);
+            auto bodies      = create_body_collection_from_init<Dims>(init);
+            auto diagnostics = body::create_diagnostics_accumulator<Dims>();
 
             if (uct_ct) {
                 bstaggs_clone = bstaggs;
             }
 
             return hydro_state_t{
-              .cons     = std::move(cons),
-              .prim     = std::move(prims),
-              .flux     = {std::move(flux_vec)},
-              .bstaggs  = {std::move(bstaggs)},
-              .b_old    = {std::move(bstaggs_clone)},
-              .metadata = setup_metadata(init),
-              .sources  = setup_sources(init),
-              .bodies   = std::move(bodies),
+              .cons        = std::move(cons),
+              .prim        = std::move(prims),
+              .flux        = {std::move(flux_vec)},
+              .bstaggs     = {std::move(bstaggs)},
+              .b_old       = {std::move(bstaggs_clone)},
+              .metadata    = setup_metadata(init),
+              .sources     = setup_sources(init),
+              .bodies      = std::move(bodies),
+              .diagnostics = std::move(diagnostics),
             };
         }
 
