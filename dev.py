@@ -211,7 +211,7 @@ def compose(*funcs: Callable[[Any], Any]) -> Callable[[Any], Any]:
     return composed_function
 
 
-def pipe(value: T, *funcs: Callable[[Any], Any]) -> Any:
+def pipe(value: object, *funcs: Callable[[Any], Any]) -> Any:
     """Pipe a value through a series of functions from left to right."""
     return reduce(lambda acc, f: f(acc), funcs, value)
 
@@ -1554,7 +1554,8 @@ def main() -> int:
         _, args = parse_arguments()
 
         # Execute the appropriate function
-        return args.func(args)
+        args.func(args)
+        return 0
     except KeyboardInterrupt:
         logger.error("Operation cancelled by user")
         return 130
