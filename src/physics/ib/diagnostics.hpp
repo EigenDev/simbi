@@ -3,7 +3,6 @@
 
 #include "body_delta.hpp"
 #include "containers/vector.hpp"
-#include "functional/monad/reader.hpp"
 
 #include <cstdint>
 #include <memory>

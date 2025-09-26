@@ -11,7 +11,6 @@
 #include "physics/em/ct_updater.hpp"
 #include "physics/ib/body.hpp"
 #include "physics/ib/body_delta.hpp"
-#include "physics/ib/diagnostics.hpp"
 #include "physics/ib/effects.hpp"
 #include "update/adaptive_timestep.hpp"
 #include "update/bcs.hpp"

@@ -11,7 +11,6 @@
 #include "io/tabulate/table.hpp"
 #include "mesh/mesh_ops.hpp"
 #include "physics/hydro/conversion.hpp"
-#include "physics/ib/diagnostics.hpp"
 #include "utility/helpers.hpp"
 
 #include <chrono>
