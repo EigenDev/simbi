@@ -1201,6 +1201,12 @@ namespace simbi::io {
             const auto dataset_name = "diagnostics/body_diagnostics";
 
             try {
+                static auto prev_masses =
+                    diagnostics | fp::map([](const auto& body) -> real {
+                        return body.mass_delta;
+                    }) |
+                    fp::collect<vector_t<real, MaxBodies>>;
+
                 auto diag_group = ctx.file.createGroup("diagnostics");
                 auto body_diag_group =
                     diag_group.createGroup("body_diagnostics");
@@ -1209,6 +1215,7 @@ namespace simbi::io {
                 for (std::uint64_t body_idx = 0; body_idx < MaxBodies;
                      ++body_idx) {
                     const auto& delta = diagnostics[body_idx];
+                    const auto& pmass = prev_masses[body_idx];
 
                     // serialize force components for this body
                     serialize_vector_component(
@@ -1227,17 +1234,19 @@ namespace simbi::io {
                     // serialize mass delta
                     serialize_scalar(
                         body_diag_group,
-                        "cumulative_mass_delta" + std::to_string(body_idx),
+                        "cumulative_mass_delta_" + std::to_string(body_idx),
                         delta.mass_delta
                     );
 
-                    auto accr_rate = (dt > 0) ? delta.mass_delta / dt : 0.0;
+                    const auto mdot =
+                        (dt > 0) ? (delta.mass_delta - pmass) / dt : 0.0;
 
                     serialize_scalar(
                         body_diag_group,
                         "accretion_rate_" + std::to_string(body_idx),
-                        accr_rate
+                        mdot
                     );
+                    prev_masses[body_idx] = delta.mass_delta;
                 }
 
                 return result_t<serialization_context_t>::ok(

@@ -49,6 +49,9 @@ namespace simbi::body {
             // register this thread's data on first use
             if (!registered) {
                 std::lock_guard lock(registration_mutex);
+                for (std::uint64_t ii = 0; ii < MaxBodies; ++ii) {
+                    thread_data[ii].idx = ii;
+                }
                 registered_accumulators.push_back(&thread_data);
                 registered = true;
             }
@@ -60,6 +63,10 @@ namespace simbi::body {
         {
             std::lock_guard lock(registration_mutex);
             vector_t<body_delta_t<Dims>, MaxBodies> total{};
+
+            for (std::uint64_t ii = 0; ii < MaxBodies; ++ii) {
+                total[ii].idx = ii;
+            }
 
             for (auto* acc : registered_accumulators) {
                 for (std::uint64_t ii = 0; ii < MaxBodies; ++ii) {
@@ -73,7 +80,11 @@ namespace simbi::body {
         {
             std::lock_guard lock(registration_mutex);
             for (auto* acc : registered_accumulators) {
-                *acc = {};   // reset each thread's accumulator
+                // reset each thread's accumulator
+                *acc = {};
+                for (std::uint64_t ii = 0; ii < MaxBodies; ++ii) {
+                    (*acc)[ii].idx = ii;
+                }
             }
         }
     };
