@@ -167,7 +167,7 @@ namespace simbi::body {
         vector_t<real, Dims> position;
         vector_t<real, Dims> velocity;
         vector_t<real, Dims> force;
-        vector_t<real, Dims> torque;
+        vector_t<real, 3> torque;
         real mass;
         real radius;
         bool two_way_coupling;
@@ -222,7 +222,7 @@ namespace simbi::body {
     template <std::uint64_t Dims, typename... Caps>
     DUAL constexpr auto with_torque(
         const body_t<Dims, Caps...>& body,
-        const vector_t<real, Dims>& new_torque
+        const vector_t<real, 3>& new_torque
     )
     {
         auto result   = body;
@@ -310,7 +310,7 @@ namespace simbi::body {
           position,
           velocity,
           vector_t<real, Dims>{},
-          vector_t<real, Dims>{},
+          vector_t<real, 3>{},
           mass,
           radius,
           two_way_coupling,
@@ -339,7 +339,7 @@ namespace simbi::body {
           position,
           velocity,
           vector_t<real, Dims>{},
-          vector_t<real, Dims>{},
+          vector_t<real, 3>{},
           mass,
           radius,
           two_way_coupling,
@@ -373,7 +373,7 @@ namespace simbi::body {
           position,
           velocity,
           vector_t<real, Dims>{},
-          vector_t<real, Dims>{},
+          vector_t<real, 3>{},
           mass,
           radius,
           two_way_coupling,
@@ -403,7 +403,7 @@ namespace simbi::body {
           position,
           velocity,
           vector_t<real, Dims>{},
-          vector_t<real, Dims>{},
+          vector_t<real, 3>{},
           mass,
           radius,
           two_way_coupling,
