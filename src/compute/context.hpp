@@ -113,6 +113,7 @@ namespace simbi {
                     }
                     io::serialize_hydro_state(state_, mesh_, table_);
                 }
+                meta.update_checkpoint_time();
             }
             catch (exception::SimulationFailureException& e) {
                 emit_exception(e);
@@ -142,6 +143,7 @@ namespace simbi {
                             )
                         );
                         io::serialize_hydro_state(state_, mesh_, table_);
+                        meta.update_checkpoint_time();
                     }
 
                     iteration_++;
