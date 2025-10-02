@@ -230,7 +230,6 @@ class RichSimulationSummary:
             "bx3_outer_expressions": "User-defined outer boundary conditions for outer x3 boundary",
             "gravity_source_expressions": "Gravity source term expressions",
             "hydro_source_expressions": "Hydrodynamic source term expressions",
-            "local_sound_speed_expressions": "Local sound speed expressions",
         }
         return descriptions.get(param_name, "")
 

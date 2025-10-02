@@ -57,6 +57,7 @@ def read_raw_data(file: h5py.File) -> Result[RawHDF5]:
                     fields[key] = np.asarray(item[:])
             elif isinstance(item, h5py.Group):
                 groups[key] = read_group_recursively(item)
+
         return Result.ok(
             RawHDF5(fields=fields, attributes=attributes, groups=groups)
         )

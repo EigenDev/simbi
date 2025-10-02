@@ -7,9 +7,8 @@ a format suitable for passing to the Pybind11/C++ backend.
 
 import dataclasses
 from dataclasses import dataclass
-from typing import Any, Sequence, Union
 from pathlib import Path
-
+from typing import Any, Sequence, Union
 
 from ..config.base_config import SimbiBaseConfig
 from ..types.input import BoundaryCondition
@@ -64,16 +63,37 @@ class SimulationExecutor:
             "mesh_motion",
             "is_homologous",
             "dlogt",
-            "_immersed_bodes",  # might be loaded from checkpoint
+            "_immersed_bodies",  # might be loaded from checkpoint
             "_body_system",  # might be loaded from checkpoint
         ]
 
         for field in computed_fields:
             if hasattr(config, field):
+                key = field
+                if key == "_immersed_bodies" and getattr(config, key):
+                    key = key[1:]
+                elif key == "_body_system" and dataclasses.asdict(
+                    getattr(config, field)
+                ):
+                    key = key[1:]
+
                 if dataclasses.is_dataclass(getattr(config, field)):
-                    model_dict[field] = dataclasses.asdict(getattr(config, field))
+                    model_dict[key] = dataclasses.asdict(getattr(config, field))
+                # list of dataclasses?
+                elif (
+                    isinstance(getattr(config, field), (list, tuple))
+                    and len(getattr(config, field)) > 0
+                    and dataclasses.is_dataclass(getattr(config, field)[0])
+                ):
+                    model_dict[key] = [
+                        dataclasses.asdict(item)
+                        for item in getattr(config, field)
+                    ]
                 else:
-                    model_dict[field] = getattr(config, field)
+                    model_dict[key] = getattr(config, field)
+
+        if not model_dict["body_system"]:
+            model_dict.pop("body_system", None)
 
         # Process bounds to separate x1, x2, x3 bounds
         bounds = config.bounds

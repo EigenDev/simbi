@@ -6,9 +6,11 @@ simulation parameters in a visually appealing way (imo).
 """
 
 from typing import Any, Optional, Sequence
+
 import numpy as np
+
+from ..functional.helpers import to_tuple_of_pairs, tuple_of_tuples
 from .logging import logger
-from ..functional.helpers import tuple_of_tuples, to_tuple_of_pairs
 
 
 class ParameterFormatter:
@@ -20,7 +22,8 @@ class ParameterFormatter:
         if tuple_of_tuples(param):
             formatted = tuple(
                 tuple(
-                    f"{x:.3f}" if isinstance(x, float) else str(x) for x in inner_tuple
+                    f"{x:.3f}" if isinstance(x, float) else str(x)
+                    for x in inner_tuple
                 )
                 for inner_tuple in param
             )
@@ -58,9 +61,15 @@ class ParameterFormatter:
             nz = ParameterFormatter.format_param(values.get("nz", "N/A"))
             return f"({nx} x {ny} x {nz})"
         elif group_name == "spacing":
-            dx = ParameterFormatter.format_param(values.get("x1_spacing", "N/A"))
-            dy = ParameterFormatter.format_param(values.get("x2_spacing", "N/A"))
-            dz = ParameterFormatter.format_param(values.get("x3_spacing", "N/A"))
+            dx = ParameterFormatter.format_param(
+                values.get("x1_spacing", "N/A")
+            )
+            dy = ParameterFormatter.format_param(
+                values.get("x2_spacing", "N/A")
+            )
+            dz = ParameterFormatter.format_param(
+                values.get("x3_spacing", "N/A")
+            )
             return f"(dx1, dx2, dx3) = ({dx}, {dy}, {dz})"
         elif group_name == "domain":
             x1 = ParameterFormatter.format_param(values.get("x1bounds", "N/A"))
@@ -69,7 +78,8 @@ class ParameterFormatter:
             return f"X1: {x1}, X2: {x2}, X3: {x3}"
         else:
             return ", ".join(
-                f"{p}={ParameterFormatter.format_param(v)}" for p, v in values.items()
+                f"{p}={ParameterFormatter.format_param(v)}"
+                for p, v in values.items()
             )
 
 
@@ -141,7 +151,9 @@ class SummaryStatistics:
         elif "is_mhd" in sim_state and sim_state["is_mhd"]:
             nvars = 9  # MHD + passive scalar
         else:
-            nvars = sim_state["dimensionality"] + 3  # hydro var + passive scalar
+            nvars = (
+                sim_state["dimensionality"] + 3
+            )  # hydro var + passive scalar
 
         # alc memory (8 bytes per double)
         cells = nx * ny * nz
@@ -192,7 +204,9 @@ class SummaryStatistics:
             aspect_x = dx / max_spacing
             aspect_y = dy / max_spacing
             aspect_z = dz / max_spacing
-            metrics["aspect_ratio"] = f"{aspect_x:.1f}:{aspect_y:.1f}:{aspect_z:.1f}"
+            metrics["aspect_ratio"] = (
+                f"{aspect_x:.1f}:{aspect_y:.1f}:{aspect_z:.1f}"
+            )
 
         # min/max cell size
         min_spacing = min(s for s in [dx, dy, dz] if s > 0)
@@ -260,7 +274,12 @@ class SimulationParameterSummary:
         self.art_generator = AsciiArtGenerator()
         self.stats = SummaryStatistics()
         self.renderer = CategoryRenderer(self.formatter)
-        self.excluded_params = ["bfield", "staggered_bfields", "bodies", "body_system"]
+        self.excluded_params = [
+            "bfield",
+            "staggered_bfields",
+            "bodies",
+            "body_system",
+        ]
 
     def define_categories(self) -> dict[str, dict[str, Any]]:
         """Define parameter categories and their organization"""
@@ -367,12 +386,13 @@ class SimulationParameterSummary:
                     "bx3_outer_expressions",
                     "gravity_source_expressions",
                     "hydro_source_expressions",
-                    "local_sound_speed_expressions",
                 ],
             },
         }
 
-    def generate_summary_statistics(self, sim_state: dict[str, Any]) -> dict[str, str]:
+    def generate_summary_statistics(
+        self, sim_state: dict[str, Any]
+    ) -> dict[str, str]:
         """Generate summary statistics for the simulation"""
         summary = {}
 
@@ -387,7 +407,9 @@ class SimulationParameterSummary:
             summary["Total cells"] = f"{total_cells:,}"
 
         # add memory usage estimate
-        summary["Est. memory usage"] = self.stats.estimate_memory_usage(sim_state)
+        summary["Est. memory usage"] = self.stats.estimate_memory_usage(
+            sim_state
+        )
 
         x1_bounds = sim_state.get("x1bounds", (0, 1))
         x2_bounds = sim_state.get("x2bounds", (0, 1))
@@ -412,11 +434,15 @@ class SimulationParameterSummary:
                 f"{cell_metrics['min_cell']} / {cell_metrics['max_cell']}"
             )
         if "dt_estimate" in cell_metrics:
-            summary["CFL timestep est."] = f"~{cell_metrics['dt_estimate']} time units"
+            summary["CFL timestep est."] = (
+                f"~{cell_metrics['dt_estimate']} time units"
+            )
 
         return summary
 
-    def generate_parameter_summary(self, sim_state: dict[str, Any]) -> dict[str, Any]:
+    def generate_parameter_summary(
+        self, sim_state: dict[str, Any]
+    ) -> dict[str, Any]:
         """
         Generate and print a beautifully formatted summary of simulation parameters,
         grouped by logical categories with enhanced visual presentation.
@@ -458,7 +484,9 @@ class SimulationParameterSummary:
                     sim_state["dimensionality"]
                 )
             elif category == "Physics" and "regime" in sim_state:
-                ascii_art = self.art_generator.get_physics_art(sim_state["regime"])
+                ascii_art = self.art_generator.get_physics_art(
+                    sim_state["regime"]
+                )
 
             # print category header
             self.renderer.render_category_header(info["title"], ascii_art)
@@ -473,7 +501,9 @@ class SimulationParameterSummary:
                             group_values[param] = sim_state[param]
 
                     if group_values:
-                        self.renderer.render_parameter_group(group_name, group_values)
+                        self.renderer.render_parameter_group(
+                            group_name, group_values
+                        )
 
                         # remove processed parameters from the list
                         for param in group_params:
@@ -494,7 +524,8 @@ class SimulationParameterSummary:
 
         # handle expression parameters separately
         has_expressions = any(
-            param in sim_state and sim_state[param] for param in expression_params
+            param in sim_state and sim_state[param]
+            for param in expression_params
         )
 
         if has_expressions:

@@ -1,9 +1,10 @@
-from .io import open_file, read_raw_data
-from .parsing import parse_data
-from .lazy import SimData
+from functools import partial
+
 from ..core.types import ProcessedData
 from ..functional.result import Result
-from functools import partial
+from .io import open_file, read_raw_data
+from .lazy import SimData
+from .parsing import parse_data
 
 
 def load_simulation(filename: str, unpad: bool) -> Result[SimData]:
@@ -17,20 +18,13 @@ def load_simulation(filename: str, unpad: bool) -> Result[SimData]:
     """
     partial_parse = partial(parse_data, unpad=unpad)
     return (
-        open_file(filename).and_then(read_raw_data).and_then(partial_parse).map(SimData)
+        open_file(filename)
+        .and_then(read_raw_data)
+        .and_then(partial_parse)
+        .map(SimData)
     )
 
 
-def load_simulation_data(filename: str) -> Result[ProcessedData]:
-    """
-    Load parsed simulation data without lazy evaluation.
-
-    Returns structured data with metadata, mesh, bodies, etc.
-    """
-    return open_file(filename).and_then(read_raw_data).and_then(parse_data)
-
-
-# Convenience function for quick access (throws on error)
 def read_simulation(filename: str, unpad: bool = True) -> SimData:
     """
     Convenience function that loads simulation or raises exception.
@@ -49,7 +43,6 @@ def read_simulation(filename: str, unpad: bool = True) -> SimData:
 
 __all__ = [
     "load_simulation",
-    "load_simulation_data",
     "read_simulation",
     "SimData",
     "ProcessedData",
