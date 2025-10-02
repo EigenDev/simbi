@@ -9,6 +9,8 @@
 #include "io/exceptions.hpp"
 #include "memory/managed.hpp"
 #include "physics/eos/isothermal.hpp"
+#include "physics/ib/body.hpp"
+#include "physics/ib/body_delta.hpp"
 #include "physics/ib/collection.hpp"
 #include "physics/ib/diagnostics.hpp"
 #include "physics/ib/factory.hpp"
@@ -21,9 +23,11 @@
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
+#include <iostream>
 #include <memory>
 #include <optional>
 #include <string>
+#include <type_traits>
 #include <vector>
 
 namespace simbi::state {
@@ -75,6 +79,7 @@ namespace simbi::state {
             real dlogt;
             real checkpoint_interval;
             real checkpoint_time;
+            real prev_checkpoint_time;
 
             // int tracking
             std::uint64_t iteration;
@@ -130,6 +135,7 @@ namespace simbi::state {
                         checkpoint_interval +
                         std::floor(time * round_place + 0.5) / round_place;
                 }
+                checkpoint_index += 1;
             }
         } metadata;
 
@@ -164,6 +170,23 @@ namespace simbi::state {
 
             auto bodies      = create_body_collection_from_init<Dims>(init);
             auto diagnostics = body::create_diagnostics_accumulator<Dims>();
+            // if there are bodies, load in their properties into diagnostics
+            if (bodies) {
+                bodies->visit_all([&](const auto& body) {
+                    using body_type = std::decay_t<decltype(body)>;
+                    auto delta      = body::body_delta_t<Dims>{
+                           .idx          = body.idx,
+                           .force_delta  = body.force,
+                           .torque_delta = body.torque,
+                           .mass_delta   = 0.0
+                    };
+                    if constexpr (body::has_accretion_capability_c<body_type>) {
+                        delta.prev_mass_delta = body::total_accreted_mass(body);
+                        delta.mass_delta      = delta.prev_mass_delta;
+                    }
+                    diagnostics->accumulate_delta(delta);
+                });
+            }
 
             if (uct_ct) {
                 bstaggs_clone = bstaggs;
@@ -248,27 +271,28 @@ namespace simbi::state {
         static auto setup_metadata(const initial_conditions_t& init)
         {
             meta_data_t metadata = {
-              .gamma               = init.gamma,
-              .plm_theta           = init.plm_theta,
-              .viscosity           = init.viscosity,
-              .cfl                 = init.cfl,
-              .time                = init.time,
-              .tend                = init.tend,
-              .dt                  = 0.0,
-              .dlogt               = init.dlogt,
-              .checkpoint_interval = init.checkpoint_interval,
-              .checkpoint_time     = init.time,
-              .iteration           = 0,
-              .halo_radius         = init.halo_radius,
-              .checkpoint_index    = init.checkpoint_index,
-              .checkpoint_zones    = init.checkpoint_zones(),
-              .regime              = deserialize<Regime>(init.regime),
-              .shock_smoother      = get_shock_smoother(init),
-              .solver              = deserialize<Solver>(init.solver),
-              .x1_spacing          = deserialize<Cellspacing>(init.x1_spacing),
-              .x2_spacing          = deserialize<Cellspacing>(init.x2_spacing),
-              .x3_spacing          = deserialize<Cellspacing>(init.x3_spacing),
-              .coord_system        = deserialize<Geometry>(init.coord_system),
+              .gamma                = init.gamma,
+              .plm_theta            = init.plm_theta,
+              .viscosity            = init.viscosity,
+              .cfl                  = init.cfl,
+              .time                 = init.time,
+              .tend                 = init.tend,
+              .dt                   = 0.0,
+              .dlogt                = init.dlogt,
+              .checkpoint_interval  = init.checkpoint_interval,
+              .checkpoint_time      = init.time,
+              .prev_checkpoint_time = init.time,
+              .iteration            = 0,
+              .halo_radius          = init.halo_radius,
+              .checkpoint_index     = init.checkpoint_index,
+              .checkpoint_zones     = init.checkpoint_zones(),
+              .regime               = deserialize<Regime>(init.regime),
+              .shock_smoother       = get_shock_smoother(init),
+              .solver               = deserialize<Solver>(init.solver),
+              .x1_spacing           = deserialize<Cellspacing>(init.x1_spacing),
+              .x2_spacing           = deserialize<Cellspacing>(init.x2_spacing),
+              .x3_spacing           = deserialize<Cellspacing>(init.x3_spacing),
+              .coord_system         = deserialize<Geometry>(init.coord_system),
               .reconstruction = deserialize<Reconstruction>(init.reconstruct),
               .timestepping   = deserialize<Timestepping>(init.timestepping),
               .boundary_conditions = vector_t<BoundaryCondition, 2 * Dims>{},
