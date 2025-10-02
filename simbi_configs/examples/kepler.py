@@ -7,7 +7,11 @@ from pydantic import computed_field
 import simbi.expression as expr
 from simbi.core.config.base_config import SimbiBaseConfig
 from simbi.core.config.fields import SimbiField
-from simbi.core.types.bodies import BodyCapability, ImmersedBodyConfig
+from simbi.core.types.bodies import (
+    BodyCapability,
+    GravitationalProperties,
+    ImmersedBodyConfig,
+)
 from simbi.core.types.input import (
     BoundaryCondition,
     CellSpacing,
@@ -132,9 +136,9 @@ class KeplerianRingTest(SimbiBaseConfig):
                 radius=0.01,
                 position=(0.0, 0.0),
                 velocity=(0.0, 0.0),
-                specifics={
-                    "softening_length": softening_length,
-                },
+                gravitational=GravitationalProperties(
+                    softening_length=softening_length
+                ),
             )
         ]
 
@@ -258,9 +262,9 @@ class KeplerianRingTest(SimbiBaseConfig):
         # Radius calculation
         r = expr.sqrt(x1 * x1 + x2 * x2) + 1e-10  # Avoid division by zero
 
-        # Zero source terms for regions inside buffer
+        # Zero source terms for regions outside buffer
         zero = expr.constant(0.0, r.graph)
-        condition = r <= r_buffer
+        inside_buffer = r >= r_buffer
 
         # Calculate damping strength (0 inside buffer, increasing outward)
         s = (r - r_buffer) / (r_outer - r_buffer)
@@ -308,10 +312,10 @@ class KeplerianRingTest(SimbiBaseConfig):
 
         e_source = damping_rate * (current[3] - e_int_bg)
 
-        rho_source_final = expr.if_then_else(condition, zero, rho_source)
-        mx_source_final = expr.if_then_else(condition, zero, mx_source)
-        my_source_final = expr.if_then_else(condition, zero, my_source)
-        e_source_final = expr.if_then_else(condition, zero, e_source)
+        rho_source_final = expr.if_then_else(inside_buffer, zero, rho_source)
+        mx_source_final = expr.if_then_else(inside_buffer, zero, mx_source)
+        my_source_final = expr.if_then_else(inside_buffer, zero, my_source)
+        e_source_final = expr.if_then_else(inside_buffer, zero, e_source)
 
         return [
             rho_source_final,
@@ -320,8 +324,10 @@ class KeplerianRingTest(SimbiBaseConfig):
             e_source_final,
         ]
 
-    def _create_boundary_expression(self) -> ExpressionDict:
-        """Create boundary expressions for buffer damping"""
+    @computed_field
+    @property
+    def hydro_source_expressions(self) -> ExpressionDict:
+        """Buffer damping expressions"""
         import simbi.expression as expr
 
         graph = expr.ExprGraph()
@@ -349,9 +355,3 @@ class KeplerianRingTest(SimbiBaseConfig):
 
         compiled_exp = graph.compile(source_terms)
         return compiled_exp.serialize()
-
-    @computed_field
-    @property
-    def hydro_source_expressions(self) -> ExpressionDict:
-        """Buffer damping expressions"""
-        return self._create_boundary_expression()
