@@ -23,7 +23,6 @@ def format_temporal_plot_axes(
     data: PlotData,
     field_index: int,
     style: StyleConfig,
-    time_units: Optional[str] = None,
     value_units: Optional[str] = None,
 ) -> None:
     """Format axes for a temporal plot."""
@@ -35,11 +34,12 @@ def format_temporal_plot_axes(
         field_index,
         style.x_label,
         style.y_label,
-        time_units,
+        style.time_units,
         value_units,
     )
 
     set_axis_scales(ax, log_x=style.semilogy, log_y=style.semilogy)
+    ax.legend()
 
     if style.xlims or style.ylims:
         if style.xlims:

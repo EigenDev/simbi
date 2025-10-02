@@ -99,6 +99,9 @@ def style_config_from_args(args: Namespace) -> StyleConfig:
         semilogx=getattr(args, "semilogx", False),
         semilogy=getattr(args, "semilogy", False),
         value_scale=getattr(args, "scale_values_by", None),
+        draw_bodies=getattr(args, "draw_bodies", False),
+        time_scale=getattr(args, "time_scale", None),
+        time_units=getattr(args, "time_units", ""),
     )
 
 

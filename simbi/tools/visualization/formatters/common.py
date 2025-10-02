@@ -21,12 +21,18 @@ def set_axis_title(
     time: Optional[float],
     fig: Optional[Figure] = None,
     title_pos: Optional[float] = None,
+    time_scale: Optional[float] = None,
+    time_units: str = "",
 ) -> None:
     """Set axis title if provided."""
-    if title:
-        title = f"{title} {time:.2f}" if time is not None else f"{title}"
-    else:
-        title = f"Untitled Simbi Simulation: {time:.2f}"
+    title_time = time
+    if time_scale and title_time:
+        title_time /= time_scale
+    title = (
+        f"{title}, t={title_time:.2f} {time_units}"
+        if title_time is not None
+        else f"{title}"
+    )
 
     if ax.name == "polar" and fig:
         fig.suptitle(title, y=title_pos)

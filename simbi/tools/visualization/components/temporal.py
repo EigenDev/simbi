@@ -261,11 +261,20 @@ class TemporalPlotComponent(Component):
                     SCALE = style.value_scale[0]
                 else:
                     SCALE = 1.0
-                for vals in field.values.T:
+
+                for vidx, vals in enumerate(field.values.T):
+                    if field.name in ["mdot", "maccr"]:
+                        label = f"$M_{vidx + 1}$"
+                    else:
+                        label = get_field_str(field.name)
+
+                    times = field.domain[idx].copy()
+                    if style.time_scale:
+                        times /= style.time_scale
                     self.ax.plot(
-                        field.domain[idx],
+                        times,
                         vals / SCALE,
-                        label=get_field_str(field.name),
+                        label=label,
                         linestyle=next(ls),
                         color=next(colors),
                     )
