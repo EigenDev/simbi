@@ -54,6 +54,7 @@
 #include "config_dict.hpp"
 #include "init_conditions_visitor.hpp"
 #include "utility/enums.hpp"
+
 #include <cmath>
 #include <cstdint>
 #include <list>
@@ -222,8 +223,7 @@ namespace simbi {
             config_dict_t& bx3_inner_expressions,
             config_dict_t& bx3_outer_expressions,
             config_dict_t& hydro_source_expressions,
-            config_dict_t& gravity_source_expressions,
-            config_dict_t& local_sound_speed_expressions
+            config_dict_t& gravity_source_expressions
         ) override
         {
             if (dict.at("bx1_inner_expressions").is_dict()) {
@@ -258,11 +258,6 @@ namespace simbi {
                 gravity_source_expressions =
                     dict.at("gravity_source_expressions").get<config_dict_t>();
             }
-            if (dict.at("local_sound_speed_expressions").is_dict()) {
-                local_sound_speed_expressions =
-                    dict.at("local_sound_speed_expressions")
-                        .get<config_dict_t>();
-            }
         }
 
         void visit_immersed_bodies(
@@ -291,25 +286,53 @@ namespace simbi {
                     add_scalar_property(body_dict, "radius", props);
                     add_boolean_property(body_dict, "two_way_coupling", props);
                     add_body_property(body_dict, "capability", props);
+                    add_body_property(body_dict, "force", props);
+                    add_body_property(body_dict, "torque", props);
 
                     // add specifics/extra properties
                     // this is a dictionary of properties that are specific to
                     // the body type
-                    if (body_dict.contains("specifics") &&
-                        body_dict.at("specifics").is_dict()) {
-                        const auto& specifics =
-                            body_dict.at("specifics")
-                                .template get<simbi::config_dict_t>();
-                        for (const auto& [key, value] : specifics) {
+                    if (body_dict.contains("gravitational") &&
+                        body_dict.at("gravitational").is_dict()) {
+                        const auto& grav_props =
+                            body_dict.at("gravitational")
+                                .get<simbi::config_dict_t>();
+                        for (const auto& [key, value] : grav_props) {
                             add_property(key, value, props);
                         }
                     }
-
-                    // add other properties (not in specifics)
-                    for (const auto& [key, value] : body_dict) {
-                        if (key != "capability" && key != "position" &&
-                            key != "velocity" && key != "mass" &&
-                            key != "radius" && key != "specifics") {
+                    if (body_dict.contains("accretion") &&
+                        body_dict.at("accretion").is_dict()) {
+                        const auto& accr_props =
+                            body_dict.at("accretion")
+                                .get<simbi::config_dict_t>();
+                        for (const auto& [key, value] : accr_props) {
+                            add_property(key, value, props);
+                        }
+                    }
+                    if (body_dict.contains("rigid") &&
+                        body_dict.at("rigid").is_dict()) {
+                        const auto& rigid_props =
+                            body_dict.at("rigid").get<simbi::config_dict_t>();
+                        for (const auto& [key, value] : rigid_props) {
+                            add_property(key, value, props);
+                        }
+                    }
+                    if (body_dict.contains("elastic") &&
+                        body_dict.at("elastic").is_dict()) {
+                        const auto& elastic_props =
+                            body_dict.at("elastics")
+                                .get<simbi::config_dict_t>();
+                        for (const auto& [key, value] : elastic_props) {
+                            add_property(key, value, props);
+                        }
+                    }
+                    if (body_dict.contains("deformable") &&
+                        body_dict.at("deformable").is_dict()) {
+                        const auto& deformable_props =
+                            body_dict.at("deformable")
+                                .get<simbi::config_dict_t>();
+                        for (const auto& [key, value] : deformable_props) {
                             add_property(key, value, props);
                         }
                     }
@@ -361,6 +384,23 @@ namespace simbi {
             }
             else if (value.is_bool()) {
                 props[name] = value.get<bool>();
+            }
+            else if (value.is_dict()) {
+                props[name] = value.get<simbi::config_dict_t>();
+            }
+            else if (value.is_body_cap()) {
+                props[name] = value.get<simbi::BodyCapability>();
+            }
+            else if (value.is_string()) {
+                props[name] = value.get<std::string>();
+            }
+            else if (value.is_int()) {
+                props[name] = value.get<std::int64_t>();
+            }
+            else {
+                throw std::runtime_error(
+                    "Unsupported property type for key: " + name
+                );
             }
         }
 
@@ -524,8 +564,7 @@ namespace simbi {
             config_dict_t& bx3_inner_expressions,
             config_dict_t& bx3_outer_expressions,
             config_dict_t& hydro_source_expressions,
-            config_dict_t& gravity_source_expressions,
-            config_dict_t& local_sound_speed_expressions
+            config_dict_t& gravity_source_expressions
         ) override
         {
             bx1_inner_expressions.clear();
@@ -536,7 +575,6 @@ namespace simbi {
             bx3_outer_expressions.clear();
             hydro_source_expressions.clear();
             gravity_source_expressions.clear();
-            local_sound_speed_expressions.clear();
         }
 
         void visit_immersed_bodies(
@@ -726,7 +764,6 @@ namespace simbi {
         }
 
         void visit_source_expressions(
-            config_dict_t&,
             config_dict_t&,
             config_dict_t&,
             config_dict_t&,
