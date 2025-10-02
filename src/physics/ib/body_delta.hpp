@@ -62,6 +62,7 @@ namespace simbi::body {
         vector_t<real, Dims> force_delta{0};
         vector_t<real, 3> torque_delta{0};
         real mass_delta{0};
+        real prev_mass_delta{0};
 
         DEV body_delta_t& operator+=(const body_delta_t& other)
         {
