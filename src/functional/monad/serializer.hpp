@@ -8,12 +8,11 @@
 #include "io/tabulate/table.hpp"   // for tabulate::table_t
 #include "mesh/mesh_config.hpp"    // for mesh::mesh_config_t
 #include "physics/ib/body.hpp"   // for softening_length, accretion_efficienct, etc
-#include "physics/ib/body_delta.hpp"
-#include "physics/ib/collection.hpp"    // for ib::body_collection_t
-#include "physics/ib/diagnostics.hpp"   // for ib::body_diagnostics_t
-#include "result.hpp"                   // for result_t<T> monad
-#include "utility/enums.hpp"            // for Regime, Geometry, etc
-#include "utility/helpers.hpp"          // for simbi::helpers::serialize
+#include "physics/ib/body_delta.hpp"   // for body_delta_t
+#include "physics/ib/collection.hpp"   // for ib::body_collection_t
+#include "result.hpp"                  // for result_t<T> monad
+#include "utility/enums.hpp"           // for Regime, Geometry, etc
+#include "utility/helpers.hpp"         // for simbi::helpers::serialize
 
 #include <H5Cpp.h>         // for HDF5 C++ API
 #include <concepts>        // for concepts
@@ -984,6 +983,20 @@ namespace simbi::io {
                 group.createAttribute("system_name", name_type, scalar_space);
             name_attr.write(name_type, collection.name().c_str());
 
+            auto ref_frame_type = H5::StrType(
+                H5::PredType::C_S1,
+                collection.reference_frame().size()
+            );
+            auto ref_frame_attr = group.createAttribute(
+                "reference_frame",
+                ref_frame_type,
+                scalar_space
+            );
+            ref_frame_attr.write(
+                ref_frame_type,
+                collection.reference_frame().c_str()
+            );
+
             // serialize binary parameters if present
             if (collection.binary_params_) {
                 auto binary_group  = group.createGroup("binary_params");
@@ -1203,7 +1216,7 @@ namespace simbi::io {
             try {
                 static auto prev_masses =
                     diagnostics | fp::map([](const auto& body) -> real {
-                        return body.mass_delta;
+                        return body.prev_mass_delta;
                     }) |
                     fp::collect<vector_t<real, MaxBodies>>;
 
@@ -1461,13 +1474,13 @@ namespace simbi::io {
     )
     {
         auto& meta                  = state.metadata;
-        static auto last_chkpt_time = meta.checkpoint_time;
+        static auto last_chkpt_time = meta.prev_checkpoint_time;
         const auto filename         = compute_filename(state);
+        const auto delta_time       = meta.checkpoint_time - last_chkpt_time;
+        const auto diagnostics      = state.diagnostics->consolidate();
+
         table.post_info("[Writing checkpoint to path: " + filename + "]");
         table.refresh();
-        const auto delta_time  = meta.checkpoint_time - last_chkpt_time;
-        const auto diagnostics = state.diagnostics->consolidate();
-
         //  monadic pipeline
         create_file(filename)
             .and_then(serialize_field_components(state.prim, "primitives"))
@@ -1480,7 +1493,6 @@ namespace simbi::io {
             .and_then(close_file());
 
         last_chkpt_time = meta.checkpoint_time;
-        meta.update_checkpoint_time();
     }
 
     // operator overloading for pipeline style (as backup)
