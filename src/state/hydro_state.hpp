@@ -7,7 +7,6 @@
 #include "functional/fp.hpp"
 #include "hydro_state_types.hpp"
 #include "io/exceptions.hpp"
-#include "memory/accessor.hpp"
 #include "memory/managed.hpp"
 #include "physics/eos/isothermal.hpp"
 #include "physics/ib/body.hpp"
@@ -23,7 +22,6 @@
 #include <bit>
 #include <cmath>
 #include <cstdint>
-#include <iostream>
 #include <memory>
 #include <optional>
 #include <string>

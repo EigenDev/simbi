@@ -1,7 +1,6 @@
 #ifndef BODY_DIAGNOSTICS_HPP
 #define BODY_DIAGNOSTICS_HPP
 
-#include "compat.hpp"
 #include "body_delta.hpp"
 #include "containers/vector.hpp"
 
