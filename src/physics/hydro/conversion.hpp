@@ -137,30 +137,29 @@ namespace simbi::hydro::rmhd {
         const auto rpsq  = vecops::dot(rperp, rperp);
 
         // We use the false position method to solve for the roots
-        auto mu_lower = 0.0;
-        auto mu_upper = find_mu_plus(beesq, rdbsq, rmag);
-        auto f_lower =
-            kkc_fmu44(mu_lower, rmag, rpsq, beesq, rdbsq, q, d, gamma);
-        auto f_upper =
-            kkc_fmu44(mu_upper, rmag, rpsq, beesq, rdbsq, q, d, gamma);
+        auto mul = 0.0;
+        // good upper bound since h_0 = 1 is the enthalpy limit
+        // auto muu = 1.0;
+        auto muu     = find_mu_plus(beesq, rdbsq, rmag);
+        auto f_lower = kkc_fmu44(mul, rmag, rpsq, beesq, rdbsq, q, d, gamma);
+        auto f_upper = kkc_fmu44(muu, rmag, rpsq, beesq, rdbsq, q, d, gamma);
 
         std::uint64_t iter = 0.0;
         real mu, ff;
         do {
-            mu =
-                (mu_lower * f_upper - mu_upper * f_lower) / (f_upper - f_lower);
+            mu = (mul * f_upper - muu * f_lower) / (f_upper - f_lower);
             ff = kkc_fmu44(mu, rmag, rpsq, beesq, rdbsq, q, d, gamma);
             if (ff * f_upper < 0.0) {
-                mu_lower = mu_upper;
-                f_lower  = f_upper;
-                mu_upper = mu;
-                f_upper  = ff;
+                mul     = muu;
+                f_lower = f_upper;
+                muu     = mu;
+                f_upper = ff;
             }
             else {
                 // use Illinois algorithm to avoid stagnation
-                f_lower  = 0.5 * f_lower;
-                mu_upper = mu;
-                f_upper  = ff;
+                f_lower = 0.5 * f_lower;
+                muu     = mu;
+                f_upper = ff;
             }
             if (iter >= constants::max_iterations || !std::isfinite(ff)) {
                 return simbi::None([iter]() -> ErrorCode {
@@ -173,7 +172,7 @@ namespace simbi::hydro::rmhd {
                 }());
             }
             iter++;
-        } while (std::abs(mu_lower - mu_upper) > global::epsilon &&
+        } while (std::abs(mul - muu) > global::epsilon &&
                  std::abs(ff) > global::epsilon);
 
         if (!std::isfinite(mu)) {

@@ -11,7 +11,6 @@
 #include "physics/em/ct_updater.hpp"
 #include "physics/ib/body.hpp"
 #include "physics/ib/body_delta.hpp"
-#include "physics/ib/diagnostics.hpp"
 #include "physics/ib/effects.hpp"
 #include "update/adaptive_timestep.hpp"
 #include "update/bcs.hpp"
@@ -219,7 +218,11 @@ namespace simbi::cfd {
         };
     }
 
-    template <typename Bodies, typename PrimField, typename MeshConfig>
+    template <
+        typename Bodies,
+        typename PrimField,
+        typename MeshConfig,
+        typename BodyDiagnostics>
     struct body_effects_op_t {
         using prim_t      = std::remove_cvref_t<typename PrimField::value_type>;
         using conserved_t = prim_t::counterpart_t;
@@ -228,6 +231,7 @@ namespace simbi::cfd {
         Bodies bodies;
         PrimField prims;
         MeshConfig mesh;
+        BodyDiagnostics* diagnostics;
         real gamma;
         real dt;
 
@@ -238,7 +242,8 @@ namespace simbi::cfd {
             }
             conserved_t total_effect{};
 
-            const auto prim = prims[coord];
+            const auto prim      = prims[coord];
+            const bool is_binary = (bodies->size() == 2);
             bodies->visit_all([&](const auto& body) {
                 using body_type = std::decay_t<decltype(body)>;
                 body_delta_t<Dims> delta{
@@ -257,7 +262,7 @@ namespace simbi::cfd {
 
                 if constexpr (has_accretion_capability_c<body_type>) {
                     auto accr_op = accretion_op_t{prim, mesh, gamma, dt};
-                    auto [effect, a_delta] = accr_op(body, coord);
+                    auto [effect, a_delta] = accr_op(body, coord, is_binary);
                     total_effect = total_effect | structs::add_gas(effect);
                     delta += a_delta;
                 }
@@ -269,9 +274,9 @@ namespace simbi::cfd {
                     delta += r_delta;
                 }
 
-                diagnostics_reader_t<Dims>::with_env([&](auto& diag) {
-                    diag.accumulate_delta(delta);
-                });
+                if (diagnostics) {
+                    diagnostics->accumulate_delta(delta);
+                }
             });
 
             return total_effect;
@@ -290,6 +295,7 @@ namespace simbi::cfd {
             state.bodies,
             state.prim[mesh.domain],
             mesh,
+            state.diagnostics.get(),
             state.metadata.gamma,
             state.metadata.dt
           },

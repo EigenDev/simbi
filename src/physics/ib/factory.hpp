@@ -224,6 +224,8 @@ namespace simbi::body::factory {
 
         const auto& binary_config =
             sys_props.at("binary_config").template get<config_dict_t>();
+        const auto reference_frame =
+            sys_props.at("reference_frame").template get<std::string>();
         auto binary_params = binary_parameters_t::from_config(binary_config);
 
         // get prescribed motion setting
@@ -307,6 +309,7 @@ namespace simbi::body::factory {
             .add(body1)
             .add(body2)
             .with_name("binary_system")
+            .with_reference_frame(reference_frame)
             .with_system_config(binary_params);
     }
 

@@ -54,6 +54,7 @@
 #include "config_dict.hpp"
 #include "config_dict_visitor.hpp"
 #include "io/exceptions.hpp"
+#include "physics/ib/diagnostics.hpp"
 #include <algorithm>
 #include <cstdint>
 #include <sstream>
@@ -122,7 +123,6 @@ namespace simbi {
         config_dict_t bx3_inner_expressions;
         config_dict_t hydro_source_expressions;
         config_dict_t gravity_source_expressions;
-        config_dict_t local_sound_speed_expressions;
 
         // gpu-related fields
         bool enable_peer_access{true};
@@ -173,8 +173,7 @@ namespace simbi {
                 bx3_inner_expressions,
                 bx3_outer_expressions,
                 hydro_source_expressions,
-                gravity_source_expressions,
-                local_sound_speed_expressions
+                gravity_source_expressions
             );
             visitor.visit_immersed_bodies(immersed_bodies);
             visitor.visit_output_settings(data_directory, checkpoint_index);

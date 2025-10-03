@@ -11,7 +11,6 @@
 #include "io/tabulate/table.hpp"
 #include "mesh/mesh_ops.hpp"
 #include "physics/hydro/conversion.hpp"
-#include "physics/ib/diagnostics.hpp"
 #include "utility/helpers.hpp"
 
 #include <chrono>
@@ -55,8 +54,6 @@ namespace simbi {
     struct simulation_context_t {
         State& state_;
         Mesh& mesh_;
-        body::body_diagnostics_t<State::dimensions> body_diagnostics_;
-        diagnostics_reader_t<State::dimensions>::scope_t diagnostic_scope_;
         real end_time_;
         std::uint64_t iteration_ = 0;
         timer_t timer_;
@@ -75,8 +72,6 @@ namespace simbi {
         )
             : state_(state),
               mesh_(mesh),
-              body_diagnostics_{},
-              diagnostic_scope_(body_diagnostics_),
               end_time_(end_time),
               table_(
                   io::TableFactory::create_elegant_table(
@@ -116,13 +111,9 @@ namespace simbi {
                     if (state_.in_failure_state) {
                         throw exception::SimulationFailureException();
                     }
-                    io::serialize_hydro_state(
-                        state_,
-                        mesh_,
-                        body_diagnostics_,
-                        table_
-                    );
+                    io::serialize_hydro_state(state_, mesh_, table_);
                 }
+                meta.update_checkpoint_time();
             }
             catch (exception::SimulationFailureException& e) {
                 emit_exception(e);
@@ -151,16 +142,8 @@ namespace simbi {
                                 (meta.time / meta.tend) * 100.0
                             )
                         );
-                        io::serialize_hydro_state(
-                            state_,
-                            mesh_,
-                            body_diagnostics_,
-                            table_
-                        );
-                        // flush the body diagnostics at the end of the step
-                        diagnostics_reader_t<State::dimensions>::with_env(
-                            [](auto& diag) { diag.flush(); }
-                        );
+                        io::serialize_hydro_state(state_, mesh_, table_);
+                        meta.update_checkpoint_time();
                     }
 
                     iteration_++;
@@ -232,7 +215,7 @@ namespace simbi {
             table_.post_error(std::string("Exception: ") + err.what());
             // state_.sync_to_host();
             state_.in_failure_state = true;
-            io::serialize_hydro_state(state_, mesh_, body_diagnostics_, table_);
+            io::serialize_hydro_state(state_, mesh_, table_);
             emit_troubled_cells();
         }
 

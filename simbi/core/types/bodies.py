@@ -24,18 +24,6 @@ def has_capability(
 
 
 @dataclass(frozen=True)
-class ImmersedBodyConfig:
-    capability: BodyCapability
-    mass: float
-    velocity: Sequence[float]
-    position: Sequence[float]
-    radius: float
-    two_way_coupling: bool = field(default=False)
-    force: Sequence[float] = field(default_factory=lambda: (0.0, 0.0, 0.0))
-    specifics: Optional[dict[str, float | int | bool]] = None
-
-
-@dataclass(frozen=True)
 class BinaryComponentConfig:
     mass: float
     radius: float
@@ -44,7 +32,7 @@ class BinaryComponentConfig:
     two_way_coupling: bool
     sink_rate: float
     accretion_radius: float
-    sink_delta: float = 1.0  # 1 is standard, 0 is torque-free
+    sink_delta: float = 1.0  # 1 is standard sink, 0 is torque-free
     position: Sequence[float] = field(default_factory=lambda: (0.0, 0.0, 0.0))
     velocity: Sequence[float] = field(default_factory=lambda: (0.0, 0.0, 0.0))
     force: Sequence[float] = field(default_factory=lambda: (0.0, 0.0, 0.0))
@@ -107,7 +95,7 @@ class AccretionProperties:
     accretion_radius: float
     total_accreted_mass: float
     accretion_rate: float
-    sink_delta: float  # 1 is standard, 0 is torque-free
+    sink_delta: float  # 1 is standard sink, 0 is torque-free
 
 
 @dataclass(frozen=True)
@@ -145,6 +133,22 @@ class BaseBody(Unionable):
 
 @dataclass(frozen=True)
 class Body(BaseBody):
+    gravitational: Optional[GravitationalProperties] = None
+    accretion: Optional[AccretionProperties] = None
+    rigid: Optional[RigidProperties] = None
+    deformable: Optional[DeformableProperties] = None
+    elastic: Optional[ElasticProperties] = None
+
+
+@dataclass(frozen=True)
+class ImmersedBodyConfig:
+    capability: BodyCapability
+    mass: float
+    velocity: Sequence[float]
+    position: Sequence[float]
+    radius: float
+    two_way_coupling: bool = field(default=False)
+    force: Sequence[float] = field(default_factory=lambda: (0.0, 0.0, 0.0))
     gravitational: Optional[GravitationalProperties] = None
     accretion: Optional[AccretionProperties] = None
     rigid: Optional[RigidProperties] = None

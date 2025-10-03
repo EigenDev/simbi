@@ -88,6 +88,43 @@ def nullable_string(val: str) -> Optional[str]:
     return val
 
 
+def time_scale_converter(val: str) -> Optional[float]:
+    """
+    If a user passes a float, return the float. if they pass a float with something
+    like "pi" or "e" in it, evaluate it as a python expression. so if they pass in 4pi,
+    it will return 4 * 3.14159...
+    """
+    if not val:
+        return None
+    try:
+        return float(val)
+    except ValueError:
+        try:
+            # here we need to split the string into parts that are numbers and parts
+            # that are not numbers. we can do this by iterating through the string and
+            # checking if each character is a number or not. For the parts that are not
+            # numbers we check if they are wither 'pi' or 'e' and replace them
+            # with their numerical values. then we join the parts back together and
+            # evaluate the expression using eval. we then return the new float value.
+            import math
+            import re
+
+            parts = re.findall(r"[\d\.]+|[^\d\.]+", val)
+            for i, part in enumerate(parts):
+                if part == "pi":
+                    parts[i] = math.pi
+                elif part == "e":
+                    parts[i] = math.exp(1)
+                else:
+                    parts[i] = float(part)
+            return math.prod(parts)
+
+        except Exception as e:
+            raise argparse.ArgumentTypeError(
+                f"Could not convert {val} to float: {e}"
+            )
+
+
 class PlotStyleAction(argparse.Action):
     """Custom action to set plot style from flag or direct argument"""
 
@@ -170,7 +207,12 @@ def setup_parser(parser: argparse.ArgumentParser) -> None:
         "--no-show", action="store_true", help="Don't display the plot"
     )
     parser.add_argument("--ndim", type=int, help="Number of dimensions")
-    parser.add_argument("--log", action="store_true", help="Use log scale")
+    parser.add_argument(
+        "--log",
+        action=argparse.BooleanOptionalAction,
+        default=False,
+        help="Use log scale",
+    )
     parser.add_argument(
         "--semilogx", action="store_true", help="Log scale for x-axis"
     )
@@ -277,7 +319,10 @@ def setup_parser(parser: argparse.ArgumentParser) -> None:
         help="Bounding box in inches",
     )
     parser.add_argument(
-        "--draw-bodies", action="store_true", help="Draw immersed bodies"
+        "--draw-bodies",
+        action=argparse.BooleanOptionalAction,
+        default=False,
+        help="Toggle the drawing of immersed bodies",
     )
     parser.add_argument(
         "--color-range",
@@ -307,7 +352,14 @@ def setup_parser(parser: argparse.ArgumentParser) -> None:
         type=float,
         help="Scale factors for plotted fields",
     )
-    parser.add_argument("--time-modulus", type=float, help="Time modulus value")
+    parser.add_argument(
+        "--time-scale",
+        type=time_scale_converter,
+        help="Characteristics time scale",
+    )
+    parser.add_argument(
+        "--time-units", type=str, default="", help="Time units string"
+    )
     parser.add_argument(
         "--norm", action="store_true", help="Normalize plot axes"
     )

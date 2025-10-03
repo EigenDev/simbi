@@ -10,6 +10,7 @@
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
+#include <iostream>
 #include <numbers>
 #include <optional>
 #include <stdexcept>
@@ -77,8 +78,9 @@ namespace simbi::body {
 
         vector_t<body_variant_t<Dims>, MaxBodies> bodies_;
         std::optional<binary_parameters_t> binary_params_;
-        std::size_t size_        = 0;
-        std::string system_name_ = "Untitled";
+        std::size_t size_            = 0;
+        std::string system_name_     = "Untitled";
+        std::string reference_frame_ = "inertial";   // or "corotating"
 
         template <typename Body>
         constexpr auto add(Body&& body) &&
@@ -111,6 +113,21 @@ namespace simbi::body {
             return std::move(result).with_name(name);
         }
 
+        constexpr auto with_reference_frame(std::string frame) &&
+        {
+            if (frame != "inertial" && frame != "corotating") {
+                throw std::runtime_error("Invalid reference frame: " + frame);
+            }
+            reference_frame_ = std::move(frame);
+            return std::move(*this);
+        }
+
+        constexpr auto with_reference_frame(const std::string& frame) const&
+        {
+            auto result = *this;
+            return std::move(result).with_reference_frame(frame);
+        }
+
         constexpr auto with_system_config(const binary_parameters_t& params) &&
         {
             binary_params_ = params;
@@ -129,6 +146,10 @@ namespace simbi::body {
         constexpr bool empty() const { return size_ == 0; }
         constexpr bool full() const { return size_ == MaxBodies; }
         constexpr const std::string& name() const { return system_name_; }
+        constexpr const std::string& reference_frame() const
+        {
+            return reference_frame_;
+        }
         constexpr auto binary_params() const
         {
             if (!binary_params_) {

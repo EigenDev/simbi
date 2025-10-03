@@ -218,8 +218,8 @@ class MultidimPlotComponent(Component):
             x, y = y, x
             values = field.values.T
 
-        # if data.bodies:
-        # self.draw_bodies(data.bodies, self.props.projection)
+        if data.bodies and style.draw_bodies:
+            self.draw_bodies(data.bodies, self.props.projection)
         # Create or update mesh
         if self._mesh is None:
             # Create new mesh

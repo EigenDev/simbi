@@ -1,8 +1,15 @@
 #include "../src/rad_units.hpp"
+
+#include <algorithm>
+#include <cstdint>
 #include <map>
+#include <pybind11/buffer_info.h>
+#include <pybind11/cast.h>
 #include <pybind11/numpy.h>
 #include <pybind11/pybind11.h>
+#include <pybind11/pytypes.h>
 #include <pybind11/stl.h>
+#include <string>
 #include <vector>
 
 namespace py = pybind11;

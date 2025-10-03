@@ -5,7 +5,6 @@ This module adapts the existing checkpoint loading functionality to work with
 the new SimulationState structure.
 """
 
-from dataclasses import asdict
 from typing import Any
 
 import numpy as np
@@ -58,7 +57,7 @@ def to_system(
 
         return GravitationalSystemConfig(
             prescribed_motion=True,
-            reference_frame="inertial",
+            reference_frame=bodies_group["reference_frame"],
             system_type="binary",
             binary_config=BinaryConfig(
                 semi_major=binary_params["semi_major"],
@@ -101,7 +100,7 @@ def to_system(
         )
     else:
         # Individual bodies
-        return [
+        x = [
             ImmersedBodyConfig(
                 capability=body.capabilities,
                 mass=body.mass,
@@ -110,12 +109,15 @@ def to_system(
                 velocity=body.velocity,
                 two_way_coupling=False,
                 force=(0.0, 0.0, 0.0),
-                specifics={
-                    k: v for k, v in asdict(body).items() if v is not None
-                },
+                gravitational=body.gravitational,
+                accretion=body.accretion,
+                elastic=body.elastic,
+                deformable=body.deformable,
+                rigid=body.rigid,
             )
             for body in bodies.values()
         ]
+        return x
 
 
 def load_checkpoint_to_state(

@@ -17,7 +17,7 @@ namespace simbi {
     template <typename Environment>
     class reader_t
     {
-        thread_local static Environment* current_env;
+        static Environment* current_env;
 
       public:
         class scope_t
@@ -58,13 +58,13 @@ namespace simbi {
         )
         {
             if (auto* env = ask()) {
-                func(*env);
+                std::forward<F>(func)(*env);
             }
         }
     };
 
     template <typename Environment>
-    thread_local Environment* reader_t<Environment>::current_env = nullptr;
+    Environment* reader_t<Environment>::current_env = nullptr;
 
 }   // namespace simbi
 #endif

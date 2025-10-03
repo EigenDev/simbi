@@ -6,6 +6,7 @@
 
 #include <cmath>
 #include <cstddef>
+#include <iostream>
 
 namespace simbi::body {
     template <typename HydroState>
@@ -19,6 +20,10 @@ namespace simbi::body {
             if (!state.bodies || state.bodies->empty() ||
                 state.bodies->name() != "binary_system") {
                 return;
+            }
+
+            if (state.bodies->reference_frame() == "corotating") {
+                return;   // nothing to do, already in rotating frame
             }
 
             const auto binary_params = state.bodies->binary_params();

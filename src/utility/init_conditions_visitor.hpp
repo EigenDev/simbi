@@ -140,8 +140,7 @@ namespace simbi {
             config_dict_t& bx3_inner_expressions,
             config_dict_t& bx3_outer_expressions,
             config_dict_t& hydro_source_expressions,
-            config_dict_t& gravity_source_expressions,
-            config_dict_t& local_sound_speed_expressions
+            config_dict_t& gravity_source_expressions
         ) = 0;
 
         // Immersed bodies

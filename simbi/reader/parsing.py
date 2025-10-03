@@ -214,9 +214,19 @@ def parse_diagnostics(groups: dict[str, Any]) -> BodyDiagnostics | None:
             if key.startswith("torque_")
         },
         cumulative_mass_delta=np.asarray(
-            diag_data.get("cumulative_mass_delta", [])
+            [
+                value
+                for key, value in diag_data.items()
+                if key.startswith("cumulative_mass_delta")
+            ]
         ),
-        accretion_rate=np.asarray(diag_data.get("accretion_rate", [])),
+        accretion_rate=np.asarray(
+            [
+                value
+                for key, value in diag_data.items()
+                if key.startswith("accretion_rate")
+            ]
+        ),
     )
 
 

@@ -2,11 +2,13 @@
 #define BODY_DIAGNOSTICS_HPP
 
 #include "compat.hpp"
+#include "body_delta.hpp"
 #include "containers/vector.hpp"
-#include "functional/monad/reader.hpp"
 
-#include <atomic>
 #include <cstdint>
+#include <memory>
+#include <mutex>
+#include <vector>
 
 namespace simbi::body {
     /**
@@ -16,87 +18,93 @@ namespace simbi::body {
      * this is useful for debugging and for post-processing
      * simulations where we want to know how much force was applied
      * to each body, how much torque was applied, how much mass
-     * was accreted, and how much accretion rate was applied.
+     * was accreted, and the instantaneous accretion rate.
      *
      *
      * srp: get the body diagnostics
      */
     template <std::uint64_t Dims, std::uint64_t MaxBodies = 2>
-    struct body_diagnostics_t {
-        vector_t<std::atomic<real>, MaxBodies> force_1{0};
-        vector_t<std::atomic<real>, MaxBodies> force_2{0};
-        vector_t<std::atomic<real>, MaxBodies> force_3{0};
-        vector_t<std::atomic<real>, MaxBodies> torque_1{0};
-        vector_t<std::atomic<real>, MaxBodies> torque_2{0};
-        vector_t<std::atomic<real>, MaxBodies> torque_3{0};
-        vector_t<std::atomic<real>, MaxBodies> mass{0};
-        vector_t<std::atomic<real>, MaxBodies> dmass{0};
+    class body_diagnostics_t
+    {
+      public:
+        // platform-agnostic interface
+        virtual ~body_diagnostics_t() = default;
+        virtual void accumulate_delta(const body_delta_t<Dims>& delta) = 0;
+        virtual vector_t<body_delta_t<Dims>, MaxBodies> consolidate()  = 0;
+        virtual void reset()                                           = 0;
+    };
 
-        void accumulate_delta(const auto& body_delta)
+    template <std::uint64_t Dims, std::uint64_t MaxBodies = 2>
+    class cpu_diagnostics_t : public body_diagnostics_t<Dims, MaxBodies>
+    {
+        mutable std::vector<vector_t<body_delta_t<Dims>, MaxBodies>*>
+            registered_accumulators;
+        mutable std::mutex registration_mutex;
+
+        thread_local static vector_t<body_delta_t<Dims>, MaxBodies> thread_data;
+        thread_local static bool registered;
+
+      public:
+        void accumulate_delta(const body_delta_t<Dims>& delta) override
         {
-            force_1[body_delta.idx].fetch_add(
-                body_delta.force_delta[0],
-                std::memory_order_relaxed
-            );
-            if constexpr (Dims > 1) {
-                force_2[body_delta.idx].fetch_add(
-                    body_delta.force_delta[1],
-                    std::memory_order_relaxed
-                );
-            }
-            if constexpr (Dims > 2) {
-                force_3[body_delta.idx].fetch_add(
-                    body_delta.force_delta[2],
-                    std::memory_order_relaxed
-                );
+            // register this thread's data on first use
+            if (!registered) {
+                std::lock_guard lock(registration_mutex);
+                for (std::uint64_t ii = 0; ii < MaxBodies; ++ii) {
+                    thread_data[ii].idx = ii;
+                }
+                registered_accumulators.push_back(&thread_data);
+                registered = true;
             }
 
-            // toeque vector is always 3D
-            // where it is 0 for 1D, it points
-            // along the z-index in 2D, and
-            // works the usual way for 3D
-            torque_1[body_delta.idx].fetch_add(
-                body_delta.torque_delta[0],
-                std::memory_order_relaxed
-            );
-            torque_2[body_delta.idx].fetch_add(
-                body_delta.torque_delta[1],
-                std::memory_order_relaxed
-            );
-            torque_3[body_delta.idx].fetch_add(
-                body_delta.torque_delta[2],
-                std::memory_order_relaxed
-            );
-
-            mass[body_delta.idx].fetch_add(
-                body_delta.mass_delta,
-                std::memory_order_relaxed
-            );
-            dmass[body_delta.idx].fetch_add(
-                body_delta.mass_delta,
-                std::memory_order_relaxed
-            );
+            thread_data[delta.idx] += delta;
         }
 
-        void flush()
+        vector_t<body_delta_t<Dims>, MaxBodies> consolidate() override
         {
+            std::lock_guard lock(registration_mutex);
+            vector_t<body_delta_t<Dims>, MaxBodies> total{};
+
             for (std::uint64_t ii = 0; ii < MaxBodies; ++ii) {
-                force_1[ii].store(0, std::memory_order_relaxed);
-                force_2[ii].store(0, std::memory_order_relaxed);
-                force_3[ii].store(0, std::memory_order_relaxed);
-                torque_1[ii].store(0, std::memory_order_relaxed);
-                torque_2[ii].store(0, std::memory_order_relaxed);
-                torque_3[ii].store(0, std::memory_order_relaxed);
-                dmass[ii].store(0, std::memory_order_relaxed);
+                total[ii].idx = ii;
+            }
+
+            for (auto* acc : registered_accumulators) {
+                for (std::uint64_t ii = 0; ii < MaxBodies; ++ii) {
+                    total[ii] += (*acc)[ii];
+                }
+            }
+            return total;
+        }
+
+        void reset() override
+        {
+            std::lock_guard lock(registration_mutex);
+            for (auto* acc : registered_accumulators) {
+                // reset each thread's accumulator
+                *acc = {};
+                for (std::uint64_t ii = 0; ii < MaxBodies; ++ii) {
+                    (*acc)[ii].idx = ii;
+                }
             }
         }
     };
-}   // namespace simbi::body
 
-namespace simbi {
-    // diagnostics reader for body diagnostics
+    template <std::uint64_t Dims, std::uint64_t MaxBodies>
+    thread_local vector_t<body_delta_t<Dims>, MaxBodies>
+        cpu_diagnostics_t<Dims, MaxBodies>::thread_data{};
+
+    template <std::uint64_t Dims, std::uint64_t MaxBodies>
+    thread_local bool cpu_diagnostics_t<Dims, MaxBodies>::registered = false;
+
+    // [TODO]: impl the gpu diagnostics accumulator
+
     template <std::uint64_t Dims>
-    using diagnostics_reader_t = reader_t<body::body_diagnostics_t<Dims>>;
-}   // namespace simbi
+    auto create_diagnostics_accumulator()
+        -> std::unique_ptr<body_diagnostics_t<Dims>>
+    {
+        return std::make_unique<cpu_diagnostics_t<Dims>>();
+    }
+}   // namespace simbi::body
 
 #endif

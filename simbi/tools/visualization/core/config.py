@@ -42,6 +42,9 @@ class StyleConfig(BaseModel):
     y_label: Optional[str] = None
     equal_aspect: bool = True
     value_scale: Optional[Sequence[float]] = None
+    draw_bodies: bool = False
+    time_scale: Optional[float] = None
+    time_units: str = ""
 
     model_config = {
         "frozen": True,  # Make instances immutable
