@@ -1,7 +1,7 @@
 #ifndef FIELD_HPP
 #define FIELD_HPP
 
-#include "config.hpp"
+#include "compat.hpp"
 #include "containers/vector.hpp"
 #include "domain/algebra.hpp"
 #include "domain/domain.hpp"
@@ -389,7 +389,7 @@ namespace simbi {
     }
 
     template <typename T, std::uint64_t Dims>
-    auto from_data_field(T* data, const iarray<Dims>& shape)
+    auto from_data_field(const T* data, const iarray<Dims>& shape)
     {
         auto accessor = from_data(data, shape);
         auto domain   = make_domain(shape);
