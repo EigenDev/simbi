@@ -1,6 +1,7 @@
 #ifndef ARENA_HPP
 #define ARENA_HPP
 
+#include "compat.hpp"
 #include "hetero/adapter.hpp"
 #include "memory/device.hpp"
 #include "memory/smart_ptr.hpp"
@@ -228,6 +229,17 @@ namespace simbi::mem {
     std::shared_ptr<arena_t<T>> gpu_arena(int device_id)
     {
         return arena<T>(device_t::gpu(device_id));
+    }
+
+    template <typename T>
+    std::shared_ptr<arena_t<T>> default_arena()
+    {
+        if constexpr (platform::is_gpu) {
+            return gpu_arena<T>(0);
+        }
+        else {
+            return cpu_arena<T>();
+        }
     }
 
 }   // namespace simbi::mem
