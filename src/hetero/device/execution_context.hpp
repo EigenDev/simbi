@@ -4,10 +4,11 @@
 #include "../config.hpp"
 #include "../core/backend_traits.hpp"
 #include "../core/common_types.hpp"
-#include "config.hpp"
+#include "compat.hpp"
 
 #include <cstddef>
 #include <cstdint>
+#include <utility>
 
 namespace simbi::hetero {
 
@@ -45,12 +46,14 @@ namespace simbi::hetero {
 
         DEV std::uint64_t global_thread_id() const
         {
-            return (block_z() * block_dim_z() + thread_z()) *
-                       (block_dim_x() * grid_dim_x() * block_dim_y() *
-                        grid_dim_y()) +
-                   (block_y() * block_dim_y() + thread_y()) *
-                       (block_dim_x() * grid_dim_x()) +
-                   block_x() * block_dim_x() + thread_x();
+            const auto block_size   = threads_per_block();
+            const auto block_idx_1d = block_z() * grid_dim_x() * grid_dim_y() +
+                                      block_y() * grid_dim_x() + block_x();
+            const auto thread_idx_1d =
+                thread_z() * block_dim_x() * block_dim_y() +
+                thread_y() * block_dim_x() + thread_x();
+
+            return block_idx_1d * block_size + thread_idx_1d;
         }
 
         DEV std::uint64_t thread_id() const

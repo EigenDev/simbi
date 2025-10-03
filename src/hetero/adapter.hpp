@@ -1,7 +1,7 @@
 #ifndef HETERO_ADAPTER_HPP
 #define HETERO_ADAPTER_HPP
 
-#include "config.hpp"
+#include "compat.hpp"
 #include "core/resource_types.hpp"
 
 #ifdef CUDA_ENABLED
@@ -18,10 +18,11 @@
 
 namespace simbi::hetero {
 
-    using device = device_adapter_t<default_backend_t>;
-    using stream = stream_t<default_backend_t>;
-    using event  = event_t<default_backend_t>;
-    using memory = device_memory_t<default_backend_t>;
+    using device        = device_adapter_t<default_backend_t>;
+    using device_memory = device_memory_t<default_backend_t>;
+    using stream        = stream_t<default_backend_t>;
+    using event         = event_t<default_backend_t>;
+    using memory        = device_memory_t<default_backend_t>;
     template <typename T>
     using managed_vector = device_vector_t<default_backend_t, T>;
 

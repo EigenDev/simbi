@@ -9,7 +9,7 @@
 #include "../core/resource_types.hpp"
 #include "../device/execution_context.hpp"
 #include "adapter_impl.hpp"
-#include "config.hpp"
+#include "compat.hpp"
 
 #include <cstddef>
 #include <cuda_runtime.h>
@@ -47,6 +47,7 @@ namespace simbi::hetero {
             : handle_(other.handle_), owns_resource_(other.owns_resource_)
         {
             other.owns_resource_ = false;
+            other.handle_        = nullptr;
         }
 
         stream_t& operator=(stream_t&& other) noexcept
@@ -56,6 +57,7 @@ namespace simbi::hetero {
                 handle_              = other.handle_;
                 owns_resource_       = other.owns_resource_;
                 other.owns_resource_ = false;
+                other.handle_        = nullptr;
             }
             return *this;
         }
@@ -88,9 +90,10 @@ namespace simbi::hetero {
       private:
         void destroy()
         {
-            if (owns_resource_) {
+            if (owns_resource_ && handle_) {
                 cudaStreamDestroy(handle_);
             }
+            handle_        = nullptr;
             owns_resource_ = false;
         }
     };
@@ -120,6 +123,7 @@ namespace simbi::hetero {
             : handle_(other.handle_), owns_resource_(other.owns_resource_)
         {
             other.owns_resource_ = false;
+            other.handle_        = nullptr;
         }
 
         event_t& operator=(event_t&& other) noexcept
@@ -129,6 +133,7 @@ namespace simbi::hetero {
                 handle_              = other.handle_;
                 owns_resource_       = other.owns_resource_;
                 other.owns_resource_ = false;
+                other.handle_        = nullptr;
             }
             return *this;
         }
@@ -178,24 +183,33 @@ namespace simbi::hetero {
         std::size_t size_;
         bool owns_resource_;
         bool is_managed_;
+        bool is_host_memory_ = false;
 
       public:
+        enum class alloc_type {
+            device,
+            host
+        };
+
         device_memory_t(std::size_t bytes)
-            : size_(bytes), owns_resource_(true), is_managed_(false)
+            : device_memory_t(bytes, alloc_type::device)
         {
-            check_error<cuda_backend_t>(
-                cudaMalloc(&ptr_, bytes),
-                "device malloc"
-            );
+        }
+        device_memory_t(std::size_t bytes, bool managed)
+            : device_memory_t(bytes, managed, alloc_type::device)
+        {
         }
 
-        device_memory_t(std::size_t bytes, bool managed)
-            : size_(bytes), owns_resource_(true), is_managed_(managed)
+        device_memory_t(std::size_t bytes, alloc_type type)
+            : size_(bytes), owns_resource_(true), is_managed_(false)
         {
-            if (managed) {
+            is_host_memory_ = (type == alloc_type::host);
+
+            if (type == alloc_type::host) {
+                // use pinned host memory for better transfer performance
                 check_error<cuda_backend_t>(
-                    cudaMallocManaged(&ptr_, bytes),
-                    "managed malloc"
+                    cudaMallocHost(&ptr_, bytes),
+                    "pinned host malloc"
                 );
             }
             else {
@@ -203,6 +217,43 @@ namespace simbi::hetero {
                     cudaMalloc(&ptr_, bytes),
                     "device malloc"
                 );
+            }
+        }
+
+        device_memory_t(std::size_t bytes, bool managed, alloc_type type)
+            : size_(bytes), owns_resource_(true), is_managed_(managed)
+        {
+            is_host_memory_ = (type == alloc_type::host);
+
+            if (type == alloc_type::host) {
+                if (managed) {
+                    // managed memory is accessible from both host and device
+                    check_error<cuda_backend_t>(
+                        cudaMallocManaged(&ptr_, bytes),
+                        "managed malloc"
+                    );
+                }
+                else {
+                    check_error<cuda_backend_t>(
+                        cudaMallocHost(&ptr_, bytes),
+                        "pinned host malloc"
+                    );
+                }
+            }
+            else {
+                // Device allocation
+                if (managed) {
+                    check_error<cuda_backend_t>(
+                        cudaMallocManaged(&ptr_, bytes),
+                        "managed malloc"
+                    );
+                }
+                else {
+                    check_error<cuda_backend_t>(
+                        cudaMalloc(&ptr_, bytes),
+                        "device malloc"
+                    );
+                }
             }
         }
 
@@ -214,7 +265,8 @@ namespace simbi::hetero {
             : ptr_(other.ptr_),
               size_(other.size_),
               owns_resource_(other.owns_resource_),
-              is_managed_(other.is_managed_)
+              is_managed_(other.is_managed_),
+              is_host_memory_(other.is_host_memory_)
         {
             other.ptr_           = nullptr;
             other.owns_resource_ = false;
@@ -224,12 +276,14 @@ namespace simbi::hetero {
         {
             if (this != &other) {
                 destroy();
-                ptr_                 = other.ptr_;
-                size_                = other.size_;
-                owns_resource_       = other.owns_resource_;
+                ptr_            = other.ptr_;
+                size_           = other.size_;
+                owns_resource_  = other.owns_resource_;
+                is_managed_     = other.is_managed_;
+                is_host_memory_ = other.is_host_memory_;
+
                 other.ptr_           = nullptr;
                 other.owns_resource_ = false;
-                other.is_managed_    = false;
             }
             return *this;
         }
@@ -237,6 +291,7 @@ namespace simbi::hetero {
         void* data() const noexcept { return ptr_; }
         std::size_t size() const noexcept { return size_; }
         bool is_managed() const noexcept { return is_managed_; }
+        bool is_host_memory() const noexcept { return is_host_memory_; }
 
         template <typename T>
         DUAL T* as() const noexcept
@@ -248,7 +303,13 @@ namespace simbi::hetero {
         void destroy()
         {
             if (owns_resource_ && ptr_) {
-                cudaFree(ptr_);
+                if (is_host_memory_ && !is_managed_) {
+                    cudaFreeHost(ptr_);
+                }
+                else {
+                    // works for both device and managed memory
+                    cudaFree(ptr_);
+                }
                 ptr_ = nullptr;
             }
             owns_resource_ = false;
@@ -378,10 +439,13 @@ namespace simbi::hetero {
             return vector_type<T>(count, true);
         }
 
-        static void
-        prefetch_to_device(const void* ptr, std::size_t bytes, int device_id)
+        static void prefetch_to_device(
+            const void* ptr,
+            std::size_t bytes,
+            std::int64_t device_id = 0
+        )
         {
-            int device = device_id;
+            int device = static_cast<int>(device_id);
             check_error<cuda_backend_t>(
                 cudaGetDevice(&device),
                 "get current device for prefetch"
@@ -518,6 +582,23 @@ namespace simbi::hetero {
                 kernel,
                 launch_config.grid(),
                 launch_config.block(),
+                std::forward<args_t>(args)...
+            );
+        }
+
+        template <typename kernel_t, typename... args_t>
+        static void launch_async(
+            kernel_t kernel,
+            grid::launch_config_t& launch_config,
+            const stream_type& stream,
+            args_t... args
+        )
+        {
+            launch_kernel_async(
+                kernel,
+                launch_config.grid(),
+                launch_config.block(),
+                stream,
                 std::forward<args_t>(args)...
             );
         }

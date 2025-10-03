@@ -49,7 +49,7 @@
 #ifndef DEVICE_BACKEND_HPP
 #define DEVICE_BACKEND_HPP
 
-#include "config.hpp"
+#include "compat.hpp"
 #include "device_types.hpp"   // for types::dim3
 #include <cstddef>
 #include <stdexcept>

@@ -1,7 +1,7 @@
 #ifndef KERNEL_HPP
 #define KERNEL_HPP
 
-#include "config.hpp"
+#include "compat.hpp"
 
 namespace simbi::adapter {
     template <typename Func, typename... Args>

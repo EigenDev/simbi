@@ -25,7 +25,7 @@
 #ifndef DEVICE_TYPES_HPP
 #define DEVICE_TYPES_HPP
 
-#include "config.hpp"
+#include "compat.hpp"
 #include "kernel.hpp"
 
 #include <atomic>

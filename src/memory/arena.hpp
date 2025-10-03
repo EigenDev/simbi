@@ -58,6 +58,7 @@ namespace simbi::mem {
                 }
                 return *this;
             }
+            ~bucket_entry_t() = default;
 
             void* data() const { return memory_.data(); }
             size_t size() const { return memory_.size(); }
@@ -150,7 +151,17 @@ namespace simbi::mem {
                 hetero::device::set_device(dev_.device_id);
             }
 
-            auto memory  = hetero::device::allocate(bytes);
+            auto memory = [this, bytes]() {
+                using alloc_type = hetero::device_memory::alloc_type;
+
+                if (dev_.is_gpu) {
+                    hetero::device::set_device(dev_.device_id);
+                    return hetero::device_memory(bytes, alloc_type::device);
+                }
+                else {
+                    return hetero::device_memory(bytes, alloc_type::host);
+                }
+            }();
             T* typed_ptr = static_cast<T*>(memory.data());
 
             // move memory ownership to the deleter

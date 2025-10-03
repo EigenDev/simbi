@@ -124,11 +124,26 @@ namespace simbi::hetero {
         void* ptr_;
         size_t size_;
         bool owns_resource_;
-        bool is_managed_ = false;
+        bool is_managed_     = false;
+        bool is_host_memory_ = true;
 
       public:
-        device_memory_t(size_t bytes) : size_(bytes), owns_resource_(true)
+        enum class alloc_type {
+            host,
+            device,
+        };
+        device_memory_t(size_t bytes) : device_memory_t(bytes, alloc_type::host)
         {
+        }
+        device_memory_t(size_t bytes, bool)
+            : device_memory_t(bytes, alloc_type::host)
+        {
+        }
+
+        device_memory_t(size_t bytes, alloc_type)
+            : size_(bytes), owns_resource_(true), is_host_memory_(true)
+        {
+            // CPU backend ignores type - always allocates host memory
             ptr_ = std::malloc(bytes);
             if (!ptr_ && bytes > 0) {
                 throw compute_error(
@@ -137,7 +152,12 @@ namespace simbi::hetero {
                 );
             }
         }
-        device_memory_t(size_t bytes, bool) : device_memory_t(bytes) {}
+
+        device_memory_t(size_t bytes, bool managed, alloc_type type)
+            : device_memory_t(bytes, type)
+        {
+            is_managed_ = managed;   // just store the flag
+        }
 
         ~device_memory_t() { destroy(); }
 
@@ -171,6 +191,7 @@ namespace simbi::hetero {
         void* data() const noexcept { return ptr_; }
         size_t size() const noexcept { return size_; }
         bool is_managed() const noexcept { return is_managed_; }
+        bool is_host_memory() const noexcept { return is_host_memory_; }
 
         template <typename T>
         T* as() const noexcept
@@ -354,6 +375,22 @@ namespace simbi::hetero {
         static void launch(
             kernel_t kernel,
             grid::launch_config_t& launch_config,
+            args_t... args
+        )
+        {
+            launch_kernel(
+                kernel,
+                launch_config.grid(),
+                launch_config.block(),
+                args...
+            );
+        }
+
+        template <typename kernel_t, typename... args_t>
+        static void launch_async(
+            kernel_t kernel,
+            grid::launch_config_t& launch_config,
+            const stream_type&,
             args_t... args
         )
         {

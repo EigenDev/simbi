@@ -2,7 +2,7 @@
 #define HETERO_CORE_RESOURCE_TYPES_HPP
 
 #include "backend_traits.hpp"
-#include "config.hpp"
+#include "compat.hpp"
 
 #include <cstddef>
 
@@ -97,10 +97,17 @@ namespace simbi::hetero {
         std::size_t size_;
         bool owns_resource_;
         bool is_managed_;
+        bool is_host_memory_ = false;
 
       public:
+        enum class alloc_type {
+            device,
+            host,
+        };
         device_memory_t(std::size_t bytes);
         device_memory_t(std::size_t bytes, bool managed);
+        device_memory_t(std::size_t bytes, alloc_type type);
+        device_memory_t(std::size_t bytes, bool managed, alloc_type type);
         ~device_memory_t();
 
         device_memory_t(const device_memory_t&)            = delete;
@@ -133,6 +140,7 @@ namespace simbi::hetero {
         DUAL void* data() const noexcept { return ptr_; }
         std::size_t size() const noexcept { return size_; }
         bool is_managed() const noexcept { return is_managed_; }
+        bool is_host_memory() const noexcept { return is_host_memory_; }
 
         template <typename T>
         DUAL T* as() const noexcept

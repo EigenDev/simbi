@@ -25,7 +25,7 @@
 #ifndef DEVICE_ADAPTER_API_HPP
 #define DEVICE_ADAPTER_API_HPP
 
-#include "config.hpp"
+#include "compat.hpp"
 #include "cpu_backend.hpp"
 #include "cuda_backend.hpp"
 #include "device_backend.hpp"

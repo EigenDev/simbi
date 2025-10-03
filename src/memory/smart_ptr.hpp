@@ -1,7 +1,7 @@
 #ifndef SMART_PTR_HPP
 #define SMART_PTR_HPP
 
-#include "config.hpp"
+#include "compat.hpp"
 
 #include <atomic>
 #include <cstddef>
@@ -16,9 +16,6 @@ namespace simbi::mem {
 
     /**
      * default_delete - lightweight deleter for array types
-     *
-     * srp: provide default deletion strategy without overhead
-     * zero cost abstraction - compiles to direct delete[] call
      */
     template <typename T>
     struct default_delete {
@@ -38,10 +35,119 @@ namespace simbi::mem {
     };
 
     /**
+     * control_block_base - polymorphic base for type erasure
+     */
+    template <typename T>
+    class control_block_base
+    {
+      public:
+        virtual ~control_block_base() = default;
+
+        virtual void add_shared() noexcept                = 0;
+        virtual bool release_shared() noexcept            = 0;
+        virtual void add_weak() noexcept                  = 0;
+        virtual bool release_weak() noexcept              = 0;
+        virtual std::size_t shared_count() const noexcept = 0;
+        virtual std::size_t weak_count() const noexcept   = 0;
+        virtual bool expired() const noexcept             = 0;
+        virtual T* get() const noexcept                   = 0;
+        virtual bool try_add_shared() noexcept            = 0;
+    };
+
+    /**
+     * control_block - concrete implementation with custom deleter
+     */
+    template <typename T, typename Deleter>
+    class control_block : public control_block_base<T>
+    {
+        std::atomic<std::size_t> shared_count_;
+        std::atomic<std::size_t> weak_count_;
+        T* ptr_;
+        [[no_unique_address]] Deleter deleter_;
+
+      public:
+        explicit control_block(T* ptr, Deleter deleter) noexcept
+            : shared_count_(1),
+              weak_count_(1),
+              ptr_(ptr),
+              deleter_(std::move(deleter))
+        {
+        }
+
+        control_block(const control_block&)            = delete;
+        control_block& operator=(const control_block&) = delete;
+
+        void add_shared() noexcept override
+        {
+            shared_count_.fetch_add(1, std::memory_order_relaxed);
+        }
+
+        bool release_shared() noexcept override
+        {
+            if (shared_count_.fetch_sub(1, std::memory_order_acq_rel) == 1) {
+                destroy_object();
+                release_weak();
+                return true;
+            }
+            return false;
+        }
+
+        void add_weak() noexcept override
+        {
+            weak_count_.fetch_add(1, std::memory_order_relaxed);
+        }
+
+        bool release_weak() noexcept override
+        {
+            if (weak_count_.fetch_sub(1, std::memory_order_acq_rel) == 1) {
+                delete this;
+                return true;
+            }
+            return false;
+        }
+
+        std::size_t shared_count() const noexcept override
+        {
+            return shared_count_.load(std::memory_order_acquire);
+        }
+
+        std::size_t weak_count() const noexcept override
+        {
+            return weak_count_.load(std::memory_order_acquire) - 1;
+        }
+
+        bool expired() const noexcept override { return shared_count() == 0; }
+
+        T* get() const noexcept override { return ptr_; }
+
+        bool try_add_shared() noexcept override
+        {
+            std::size_t count = shared_count_.load(std::memory_order_relaxed);
+            do {
+                if (count == 0) {
+                    return false;
+                }
+            } while (!shared_count_.compare_exchange_weak(
+                count,
+                count + 1,
+                std::memory_order_acq_rel,
+                std::memory_order_relaxed
+            ));
+            return true;
+        }
+
+      private:
+        void destroy_object() noexcept
+        {
+            if (ptr_) {
+                deleter_(ptr_);
+                ptr_ = nullptr;
+            }
+        }
+    };
+
+    /**
      * unique_ptr - device-callable unique ownership
-     *
-     * srp: exclusive ownership of memory with device-safe access
-     * zero overhead in device code - compiles to raw pointer
      */
     template <typename T, typename Deleter = default_delete<T>>
     class unique_ptr
@@ -59,14 +165,11 @@ namespace simbi::mem {
         using deleter_type = Deleter;
         using pointer      = T*;
 
-        // construction
         constexpr unique_ptr() noexcept : ptr_(nullptr), deleter_() {}
-
         constexpr unique_ptr(std::nullptr_t) noexcept
             : ptr_(nullptr), deleter_()
         {
         }
-
         explicit unique_ptr(pointer ptr) noexcept : ptr_(ptr), deleter_() {}
 
         template <typename CustomDeleter>
@@ -75,7 +178,6 @@ namespace simbi::mem {
         {
         }
 
-        // move-only semantics
         unique_ptr(const unique_ptr&)            = delete;
         unique_ptr& operator=(const unique_ptr&) = delete;
 
@@ -130,14 +232,12 @@ namespace simbi::mem {
             }
         }
 
-        // device-callable access (zero overhead)
         DUAL pointer get() const noexcept { return ptr_; }
         DUAL T& operator*() const noexcept { return *ptr_; }
         DUAL pointer operator->() const noexcept { return ptr_; }
         DUAL T& operator[](std::size_t i) const noexcept { return ptr_[i]; }
         DUAL explicit operator bool() const noexcept { return ptr_ != nullptr; }
 
-        // host-only management
         pointer release() noexcept { return std::exchange(ptr_, nullptr); }
 
         void reset(pointer ptr = nullptr) noexcept
@@ -165,110 +265,7 @@ namespace simbi::mem {
     unique_ptr(T*) -> unique_ptr<T, default_delete<T>>;
 
     /**
-     * control_block - shared ownership metadata with strong exception safety
-     *
-     * srp: manage reference counting and cleanup for shared pointers
-     * thread-safe ref counting, exception-safe construction
-     */
-    template <typename T, typename Deleter>
-    class control_block
-    {
-        std::atomic<std::size_t> shared_count_;
-        std::atomic<std::size_t> weak_count_;
-        T* ptr_;
-        [[no_unique_address]] Deleter deleter_;
-
-      public:
-        explicit control_block(T* ptr, Deleter deleter) noexcept
-            : shared_count_(1),
-              weak_count_(1),
-              ptr_(ptr),
-              deleter_(std::move(deleter))
-        {
-        }
-
-        // non-copyable, non-movable
-        control_block(const control_block&)            = delete;
-        control_block& operator=(const control_block&) = delete;
-
-        void add_shared() noexcept
-        {
-            shared_count_.fetch_add(1, std::memory_order_relaxed);
-        }
-
-        bool release_shared() noexcept
-        {
-            if (shared_count_.fetch_sub(1, std::memory_order_acq_rel) == 1) {
-                // last shared reference - destroy object
-                destroy_object();
-                release_weak();
-                return true;
-            }
-            return false;
-        }
-
-        void add_weak() noexcept
-        {
-            weak_count_.fetch_add(1, std::memory_order_relaxed);
-        }
-
-        bool release_weak() noexcept
-        {
-            if (weak_count_.fetch_sub(1, std::memory_order_acq_rel) == 1) {
-                // last weak reference - destroy control block
-                delete this;
-                return true;
-            }
-            return false;
-        }
-
-        std::size_t shared_count() const noexcept
-        {
-            return shared_count_.load(std::memory_order_acquire);
-        }
-
-        std::size_t weak_count() const noexcept
-        {
-            return weak_count_.load(std::memory_order_acquire) -
-                   1;   // subtract the shared count
-        }
-
-        bool expired() const noexcept { return shared_count() == 0; }
-
-        T* get() const noexcept { return ptr_; }
-
-        // attempt to lock weak reference to shared
-        bool try_add_shared() noexcept
-        {
-            std::size_t count = shared_count_.load(std::memory_order_relaxed);
-            do {
-                if (count == 0) {
-                    return false;   // expired
-                }
-            } while (!shared_count_.compare_exchange_weak(
-                count,
-                count + 1,
-                std::memory_order_acq_rel,
-                std::memory_order_relaxed
-            ));
-            return true;
-        }
-
-      private:
-        void destroy_object() noexcept
-        {
-            if (ptr_) {
-                deleter_(ptr_);
-                ptr_ = nullptr;
-            }
-        }
-    };
-
-    /**
-     * shared_ptr - device-callable shared ownership
-     *
-     * srp: shared ownership of memory with device-safe access
-     * thread-safe reference counting, exception-safe construction
+     * shared_ptr - device-callable shared ownership with type-erased deleters
      */
     template <typename T>
     class shared_ptr
@@ -279,17 +276,11 @@ namespace simbi::mem {
         friend class weak_ptr;
 
         T* ptr_;
-        control_block<T, default_delete<T>>* control_;
+        control_block_base<T>* control_;
 
-        // private constructor for internal use
-        template <typename Deleter>
-        shared_ptr(T* ptr, control_block<T, Deleter>* control) noexcept
-            : ptr_(ptr),
-              control_(
-                  reinterpret_cast<control_block<T, default_delete<T>>*>(
-                      control
-                  )
-              )
+        // private constructor for internal use (from weak_ptr::lock)
+        shared_ptr(T* ptr, control_block_base<T>* control) noexcept
+            : ptr_(ptr), control_(control)
         {
         }
 
@@ -299,29 +290,22 @@ namespace simbi::mem {
 
         // construction
         constexpr shared_ptr() noexcept : ptr_(nullptr), control_(nullptr) {}
-
         constexpr shared_ptr(std::nullptr_t) noexcept
             : ptr_(nullptr), control_(nullptr)
         {
         }
 
-        template <typename Deleter>
-        explicit shared_ptr(T* ptr, Deleter deleter)
+        template <typename Deleter = default_delete<T>>
+        explicit shared_ptr(T* ptr, Deleter deleter = Deleter{})
             : ptr_(ptr), control_(nullptr)
         {
             if (ptr) {
                 try {
-                    // create control block with actual deleter type
-                    auto* typed_control =
-                        new control_block<T, Deleter>(ptr, std::move(deleter));
-                    // store as base type for this shared_ptr instance
                     control_ =
-                        reinterpret_cast<control_block<T, default_delete<T>>*>(
-                            typed_control
-                        );
+                        new control_block<T, Deleter>(ptr, std::move(deleter));
                 }
                 catch (...) {
-                    deleter(ptr);   // cleanup on failure
+                    deleter(ptr);
                     throw;
                 }
             }
@@ -330,19 +314,14 @@ namespace simbi::mem {
         // aliasing constructor
         template <typename U>
         shared_ptr(const shared_ptr<U>& other, T* ptr) noexcept
-            : ptr_(ptr),
-              control_(
-                  reinterpret_cast<control_block<T, default_delete<T>>*>(
-                      other.control_
-                  )
-              )
+            : ptr_(ptr), control_(other.control_)
         {
             if (control_) {
                 control_->add_shared();
             }
         }
 
-        // copy semantics (host-only)
+        // copy semantics
         shared_ptr(const shared_ptr& other) noexcept
             : ptr_(other.ptr_), control_(other.control_)
         {
@@ -354,12 +333,7 @@ namespace simbi::mem {
         template <typename U>
         shared_ptr(const shared_ptr<U>& other) noexcept
             requires std::is_convertible_v<U*, T*>
-            : ptr_(other.ptr_),
-              control_(
-                  reinterpret_cast<control_block<T, default_delete<T>>*>(
-                      other.control_
-                  )
-              )
+            : ptr_(other.ptr_), control_(other.control_)
         {
             if (control_) {
                 control_->add_shared();
@@ -391,11 +365,7 @@ namespace simbi::mem {
         shared_ptr(shared_ptr<U>&& other) noexcept
             requires std::is_convertible_v<U*, T*>
             : ptr_(std::exchange(other.ptr_, nullptr)),
-              control_(
-                  reinterpret_cast<control_block<T, default_delete<T>>*>(
-                      std::exchange(other.control_, nullptr)
-                  )
-              )
+              control_(std::exchange(other.control_, nullptr))
         {
         }
 
@@ -423,16 +393,12 @@ namespace simbi::mem {
         {
             if (ptr_) {
                 try {
-                    control_ =
-                        reinterpret_cast<control_block<T, default_delete<T>>*>(
-                            new control_block<U, Deleter>(
-                                other.release(),
-                                std::move(other.get_deleter())
-                            )
-                        );
+                    control_ = new control_block<T, Deleter>(
+                        static_cast<T*>(other.release()),
+                        std::move(other.get_deleter())
+                    );
                 }
                 catch (...) {
-                    // restore unique_ptr state on failure
                     other.reset(ptr_);
                     throw;
                 }
@@ -484,9 +450,6 @@ namespace simbi::mem {
 
     /**
      * weak_ptr - non-owning observer of shared objects
-     *
-     * srp: observe shared objects without affecting lifetime
-     * break circular dependencies, safe observation
      */
     template <typename T>
     class weak_ptr
@@ -495,12 +458,11 @@ namespace simbi::mem {
         friend class weak_ptr;
 
         T* ptr_;
-        control_block<T, default_delete<T>>* control_;
+        control_block_base<T>* control_;
 
       public:
         using element_type = T;
 
-        // construction
         constexpr weak_ptr() noexcept : ptr_(nullptr), control_(nullptr) {}
 
         weak_ptr(const shared_ptr<T>& shared) noexcept
@@ -514,19 +476,13 @@ namespace simbi::mem {
         template <typename U>
         weak_ptr(const shared_ptr<U>& shared) noexcept
             requires std::is_convertible_v<U*, T*>
-            : ptr_(shared.ptr_),
-              control_(
-                  reinterpret_cast<control_block<T, default_delete<T>>*>(
-                      shared.control_
-                  )
-              )
+            : ptr_(shared.ptr_), control_(shared.control_)
         {
             if (control_) {
                 control_->add_weak();
             }
         }
 
-        // copy semantics
         weak_ptr(const weak_ptr& other) noexcept
             : ptr_(other.ptr_), control_(other.control_)
         {
@@ -538,12 +494,7 @@ namespace simbi::mem {
         template <typename U>
         weak_ptr(const weak_ptr<U>& other) noexcept
             requires std::is_convertible_v<U*, T*>
-            : ptr_(other.ptr_),
-              control_(
-                  reinterpret_cast<control_block<T, default_delete<T>>*>(
-                      other.control_
-                  )
-              )
+            : ptr_(other.ptr_), control_(other.control_)
         {
             if (control_) {
                 control_->add_weak();
@@ -562,7 +513,6 @@ namespace simbi::mem {
             return *this;
         }
 
-        // move semantics
         weak_ptr(weak_ptr&& other) noexcept
             : ptr_(std::exchange(other.ptr_, nullptr)),
               control_(std::exchange(other.control_, nullptr))
@@ -582,7 +532,6 @@ namespace simbi::mem {
             }
         }
 
-        // observation
         std::size_t use_count() const noexcept
         {
             return control_ ? control_->shared_count() : 0;
@@ -692,4 +641,4 @@ namespace simbi::mem {
 
 }   // namespace simbi::mem
 
-#endif   // PTR_HPP
+#endif
