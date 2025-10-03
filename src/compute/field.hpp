@@ -8,6 +8,7 @@
 #include "execution/executor.hpp"
 #include "functional/fp.hpp"
 #include "memory/accessor.hpp"
+#include "memory/arena.hpp"
 
 #include <cstdint>
 #include <type_traits>
@@ -94,9 +95,10 @@ namespace simbi {
         {
             if constexpr (detail::is_accessor_v<Computation>) {
                 if (domain_.empty()) {
-                    domain_     = source.domain_;
-                    using cvt   = std::remove_cvref_t<value_type>;
-                    computation = accessor_t<cvt, Dims>{domain_};
+                    domain_   = source.domain_;
+                    using cvt = std::remove_cvref_t<value_type>;
+                    computation =
+                        accessor_t<cvt, Dims>{domain_, default_arena<cvt>()};
                 }
                 computation.commit(source, exec::default_executor());
             }
