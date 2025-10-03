@@ -4,7 +4,6 @@ from typing import Any
 
 from pydantic import computed_field
 
-import simbi.expression as expr
 from simbi.core.config.base_config import SimbiBaseConfig
 from simbi.core.config.fields import SimbiField
 from simbi.core.types.bodies import (
@@ -20,7 +19,6 @@ from simbi.core.types.input import (
     Solver,
 )
 from simbi.core.types.typing import (
-    ExpressionDict,
     GasStateGenerator,
     InitialStateType,
 )
@@ -67,7 +65,7 @@ class KeplerianRingTest(SimbiBaseConfig):
         Path("data/kepler/"), description="Output data directory"
     )
 
-    cfl_number: float = SimbiField(0.5, description="CFL condition number")
+    cfl_number: float = SimbiField(0.25, description="CFL condition number")
 
     boundary_conditions: BoundaryCondition = SimbiField(
         BoundaryCondition.OUTFLOW, description="Boundary conditions"
@@ -196,162 +194,16 @@ class KeplerianRingTest(SimbiBaseConfig):
                         p = sigma * cs_squared
                         yield (sigma, vx, vy, p)
 
-                    # Calculate density profile
-                    if r <= r_buffer:
-                        # Normal ring profile inside buffer
-                        sigma = sigma_min + sigma_peak * math.exp(
-                            -((r - r0) ** 2) / (2 * dr**2)
-                        )
-
-                        # Calculate base Keplerian velocity
-                        v_k_base = math.sqrt(G * M_0 / r)
-
-                        # Calculate pressure gradient correction
-                        # For a Gaussian ring with isothermal equation of state:
-                        # The correction term is approximately: cs^2*(r-r0)/dr^2
-                        # if (
-                        #     sigma > sigma_min * 1.1
-                        # ):  # Only apply correction where density is significant
-                        #     # Pressure gradient term (negative inside r0, positive outside)
-                        #     pressure_correction = cs_squared * (r - r0) / (dr * dr)
-
-                        #     # Total velocity squared with pressure correction
-                        #     v_k_squared = v_k_base * v_k_base - r * pressure_correction
-
-                        #     v_k = math.sqrt(v_k_squared)
-                        # else:
-                        # Use standard Keplerian for very low density regions
-                        v_k = v_k_base
-                    else:
-                        # Smooth transition in buffer zone
-                        s = (r - r_buffer) / (r_outer - r_buffer)
-                        damp = s * s
-
-                        # Calculate ring density with buffer transition
-                        sigma_ring = sigma_min + sigma_peak * math.exp(
-                            -((r - r0) ** 2) / (2 * dr**2)
-                        )
-                        sigma = sigma_min + (sigma_ring - sigma_min) * (
-                            1.0 - damp
-                        )
-
-                        # Keplerian velocity with buffer dampening
-                        v_k = math.sqrt(G * M_0 / r) * (1.0 - damp)
-
+                    sigma = sigma_min + sigma_peak * math.exp(
+                        -((r - r0) ** 2) / (2 * dr**2)
+                    )
+                    v_k = math.sqrt(G * M_0 / r)
                     vx = -v_k * (y / r)
                     vy = +v_k * (x / r)
+
                     # Isothermal pressure (cs = constant)
                     p = sigma * cs_squared
 
                     yield (sigma, vx, vy, p)
 
         return gas_state
-
-    def apply_buffer_damping(
-        self,
-        x1: "expr.Expr",
-        x2: "expr.Expr",
-        t: "expr.Expr",
-        dt: "expr.Expr",
-        current: list["expr.Expr"],
-        r_buffer: "expr.Expr",
-        r_outer: "expr.Expr",
-        tau: "expr.Expr",
-    ) -> list["expr.Expr"]:
-        """Calculate buffer damping source terms for fluid variables."""
-        # Radius calculation
-        r = expr.sqrt(x1 * x1 + x2 * x2) + 1e-10  # Avoid division by zero
-
-        # Zero source terms for regions outside buffer
-        zero = expr.constant(0.0, r.graph)
-        inside_buffer = r >= r_buffer
-
-        # Calculate damping strength (0 inside buffer, increasing outward)
-        s = (r - r_buffer) / (r_outer - r_buffer)
-        alpha = s * s  # quadratic smoothing
-
-        # Calculate target state (background state)
-        rho_bg = expr.constant(1e-8, r.graph)  # Background density
-        vk = expr.sqrt(1.0 / r)  # Keplerian velocity
-        vx_bg = -vk * (x2 / r)  # Background velocity x
-        vy_bg = vk * (x1 / r)  # Background velocity y
-
-        # Calculate damping rate
-        damping_rate = -alpha / tau
-
-        # Density source term (rate of change)
-        rho_source = damping_rate * (current[0] - rho_bg)
-
-        # Velocity components for momentum sources
-        vx = current[1] / current[0]  # mx/rho
-        vy = current[2] / current[0]  # my/rho
-
-        # Apply damping to velocities
-        vx_source = damping_rate * (vx - vx_bg)
-        vy_source = damping_rate * (vy - vy_bg)
-
-        # Convert to momentum source terms
-        mx_source = current[0] * vx_source
-        my_source = current[0] * vy_source
-
-        # Energy source term
-        # For isothermal gas, the internal energy target is e_int = rho*cs^2/(gamma-1)
-        gamma = expr.constant(self.adiabatic_index, r.graph)
-        cs_squared = expr.constant(self.ambient_sound_speed**2, r.graph)
-
-        # For gamma=1 (isothermal), we need to handle specially to avoid division by zero
-        # Use a small epsilon in the denominator for safety
-        e_int_bg = (
-            rho_bg
-            * cs_squared
-            / expr.max_expr(
-                gamma - expr.constant(1.0, r.graph),
-                expr.constant(1e-10, r.graph),
-            )
-        )
-
-        e_source = damping_rate * (current[3] - e_int_bg)
-
-        rho_source_final = expr.if_then_else(inside_buffer, zero, rho_source)
-        mx_source_final = expr.if_then_else(inside_buffer, zero, mx_source)
-        my_source_final = expr.if_then_else(inside_buffer, zero, my_source)
-        e_source_final = expr.if_then_else(inside_buffer, zero, e_source)
-
-        return [
-            rho_source_final,
-            mx_source_final,
-            my_source_final,
-            e_source_final,
-        ]
-
-    @computed_field
-    @property
-    def hydro_source_expressions(self) -> ExpressionDict:
-        """Buffer damping expressions"""
-        import simbi.expression as expr
-
-        graph = expr.ExprGraph()
-        x1 = expr.variable("x1", graph)
-        x2 = expr.variable("x2", graph)
-        t = expr.variable("t", graph)
-        dt = expr.variable("dt", graph)
-
-        # current state values
-        current = [
-            expr.parameter(0, graph),  # density
-            expr.parameter(1, graph),  # momentum x
-            expr.parameter(2, graph),  # momentum y
-            expr.parameter(3, graph),  # energy
-        ]
-
-        # buffer parameters as constants
-        r_buffer = expr.constant(self._buffer_parameters["r_buffer"], graph)
-        r_outer = expr.constant(self._buffer_parameters["r_outer"], graph)
-        tau = expr.constant(self._buffer_parameters["damp_time"], graph)
-
-        source_terms = self.apply_buffer_damping(
-            x1, x2, t, dt, current, r_buffer, r_outer, tau
-        )
-
-        compiled_exp = graph.compile(source_terms)
-        return compiled_exp.serialize()
