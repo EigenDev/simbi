@@ -1,8 +1,8 @@
 #ifndef ADAPTIVE_TIMESTEP_HPP
 #define ADAPTIVE_TIMESTEP_HPP
 
+#include "compat.hpp"
 #include "compute/field.hpp"
-#include "config.hpp"
 #include "containers/vector.hpp"
 #include "execution/executor.hpp"
 #include "execution/future.hpp"
@@ -72,9 +72,8 @@ namespace simbi {
     compute_timestep(const HydroState& state, const MeshConfig& mesh)
     {
         auto timestep_at = create_timestep_field(state, mesh);
-        auto executor    = exec::default_executor();
 
-        return executor.reduce(
+        return exec::default_executor().reduce(
             timestep_at.domain(),
             std::numeric_limits<real>::max(),
             [timestep_at] DEV(auto coord) { return timestep_at(coord); },
