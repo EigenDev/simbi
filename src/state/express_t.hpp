@@ -2,7 +2,7 @@
 #define STATE_EXPRESSION_HPP
 
 #include "base/concepts.hpp"
-#include "config.hpp"
+#include "compat.hpp"
 #include "containers/store.hpp"
 #include "containers/vector.hpp"
 #include "math/evaluator.hpp"

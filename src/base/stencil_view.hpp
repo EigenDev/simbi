@@ -2,7 +2,7 @@
 #define STENCIL_VIEW_HPP
 
 #include "base/stencil.hpp"
-#include "config.hpp"
+#include "compat.hpp"
 #include "containers/vector.hpp"
 #include "utility/enums.hpp"
 #include "utility/helpers.hpp"

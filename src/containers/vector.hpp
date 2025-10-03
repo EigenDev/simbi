@@ -2,7 +2,7 @@
 #define VECTOR_HPP
 
 #include "base/concepts.hpp"
-#include "config.hpp"
+#include "compat.hpp"
 #include "functional/fp.hpp"
 #include "functional/monad/maybe.hpp"
 #include "utility/enums.hpp"
@@ -593,8 +593,8 @@ namespace simbi {
         requires(std::is_arithmetic_v<U>)
     {
         using result_t = detail::promote_t<typename Vec::value_type, U>;
-        for (size_t i = 0; i < Vec::dimensions; ++i) {
-            vec[i] *= static_cast<result_t>(scalar);
+        for (size_t ii = 0; ii < Vec::dimensions; ++ii) {
+            vec[ii] *= static_cast<result_t>(scalar);
         }
         return vec;
     }
@@ -605,8 +605,8 @@ namespace simbi {
         requires(std::is_arithmetic_v<U>)
     {
         using result_t = detail::promote_t<typename Vec::value_type, U>;
-        for (size_t i = 0; i < Vec::dimensions; ++i) {
-            vec[i] /= static_cast<result_t>(scalar);
+        for (size_t ii = 0; ii < Vec::dimensions; ++ii) {
+            vec[ii] /= static_cast<result_t>(scalar);
         }
         return vec;
     }
@@ -621,9 +621,9 @@ namespace simbi {
         constexpr std::uint64_t Dims = Vec1::dimensions;
 
         vector_t<result_t, Dims> result;
-        for (size_t i = 0; i < Dims; ++i) {
-            result[i] =
-                static_cast<result_t>(lhs[i]) + static_cast<result_t>(rhs[i]);
+        for (size_t ii = 0; ii < Dims; ++ii) {
+            result[ii] =
+                static_cast<result_t>(lhs[ii]) + static_cast<result_t>(rhs[ii]);
         }
         return result;
     }
@@ -638,9 +638,9 @@ namespace simbi {
         constexpr std::uint64_t Dims = Vec1::dimensions;
 
         vector_t<result_t, Dims> result;
-        for (size_t i = 0; i < Dims; ++i) {
-            result[i] =
-                static_cast<result_t>(lhs[i]) - static_cast<result_t>(rhs[i]);
+        for (size_t ii = 0; ii < Dims; ++ii) {
+            result[ii] =
+                static_cast<result_t>(lhs[ii]) - static_cast<result_t>(rhs[ii]);
         }
         return result;
     }
@@ -708,10 +708,12 @@ namespace simbi {
     std::ostream& operator<<(std::ostream& os, const vector_t<T, Dims>& v)
     {
         os << "[";
-        for (std::uint64_t i = 0; i < Dims; ++i) {
-            os << v[i];
-            if (i < Dims - 1) {
-                os << ", ";
+        for (std::uint64_t ii = 0; ii < Dims; ++ii) {
+            os << v[ii];
+            if constexpr (Dims >= 2) {
+                if (ii > 0 && ii < Dims - 1) {
+                    os << ", ";
+                }
             }
         }
         os << "]";

@@ -1,8 +1,8 @@
 #ifndef STATE_HYDRO_STATE_HPP
 #define STATE_HYDRO_STATE_HPP
 
+#include "compat.hpp"
 #include "compute/field.hpp"
-#include "config.hpp"
 #include "containers/vector.hpp"
 #include "functional/fp.hpp"
 #include "hydro_state_types.hpp"
@@ -21,9 +21,7 @@
 
 #include <bit>
 #include <cmath>
-#include <cstddef>
 #include <cstdint>
-#include <iostream>
 #include <memory>
 #include <optional>
 #include <string>
@@ -214,7 +212,8 @@ namespace simbi::state {
         )
         {
             const auto full_shape = init.get_full_shape<dimensions>();
-            auto cons             = from_data_field(
+
+            auto cons = from_data_field(
                 std::bit_cast<conserved_t*>(cons_data),
                 full_shape
             );

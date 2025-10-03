@@ -2,7 +2,7 @@
 #define PHYSICS_WAVE_SPEEDS_HPP
 
 #include "base/concepts.hpp"
-#include "config.hpp"               // for DEV, real, global
+#include "compat.hpp"               // for DEV, real, global
 #include "contact_properties.hpp"   // for wave_speeds_t
 #include "containers/vector.hpp"    // for unit_vector_t
 #include "physics/hydro/physics.hpp"   // for is_hydro_primitive_c, is_mhd_primitive_c, is_rmhd_c, is_srhd_c

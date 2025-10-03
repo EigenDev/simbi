@@ -50,7 +50,7 @@
 #ifndef INIT_CONDITIONS_VISITOR_HPP
 #define INIT_CONDITIONS_VISITOR_HPP
 
-#include "config.hpp"        // for real, std::int64_t types
+#include "compat.hpp"        // for real, std::int64_t types
 #include "config_dict.hpp"   // for config_dict_t
 #include <cstdint>
 #include <string>

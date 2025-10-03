@@ -1,5 +1,5 @@
 #include "utility/helpers.hpp"
-#include "config.hpp"
+#include "compat.hpp"
 #include "io/exceptions.hpp"
 #include "utility/enums.hpp"
 #include <algorithm>

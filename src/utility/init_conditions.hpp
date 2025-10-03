@@ -50,7 +50,7 @@
 #ifndef INIT_CONDITIONS_HPP
 #define INIT_CONDITIONS_HPP
 
-#include "config.hpp"
+#include "compat.hpp"
 #include "config_dict.hpp"
 #include "config_dict_visitor.hpp"
 #include "io/exceptions.hpp"

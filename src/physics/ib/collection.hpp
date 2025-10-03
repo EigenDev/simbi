@@ -2,7 +2,7 @@
 #define BODY_COLLECTION_HPP
 
 #include "body.hpp"
-#include "config.hpp"
+#include "compat.hpp"
 #include "containers/vector.hpp"
 #include "utility/config_dict.hpp"
 

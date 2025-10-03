@@ -1,7 +1,7 @@
 #ifndef BOUNDARY_CONDITIONS_HPP
 #define BOUNDARY_CONDITIONS_HPP
 
-#include "config.hpp"
+#include "compat.hpp"
 #include "containers/vector.hpp"
 #include "domain/domain.hpp"
 #include "domain/ghost.hpp"

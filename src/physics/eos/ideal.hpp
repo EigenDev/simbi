@@ -1,7 +1,7 @@
 #ifndef EOS_IDEAL_HPP
 #define EOS_IDEAL_HPP
 
-#include "config.hpp"
+#include "compat.hpp"
 #include "utility/enums.hpp"
 
 #include <cmath>   // for std::sqrt

@@ -1,7 +1,7 @@
 #ifndef PRIM_RECOVERY_HPP
 #define PRIM_RECOVERY_HPP
 
-#include "config.hpp"
+#include "compat.hpp"
 #include "physics/hydro/conversion.hpp"
 
 namespace simbi::hydro {

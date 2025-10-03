@@ -1,6 +1,6 @@
 #include "contact.hpp"
 #include "base/concepts.hpp"
-#include "config.hpp"
+#include "compat.hpp"
 #include "containers/vector.hpp"
 
 namespace simbi::em {

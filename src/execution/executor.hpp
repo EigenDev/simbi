@@ -1,7 +1,7 @@
 #ifndef EXECUTOR_HPP
 #define EXECUTOR_HPP
 
-#include "config.hpp"
+#include "compat.hpp"
 #include "containers/vector.hpp"
 #include "domain/domain.hpp"
 #include "execution/completion.hpp"
@@ -17,6 +17,7 @@
 #include <atomic>
 #include <cstddef>
 #include <cstdint>
+#include <cstdio>
 #include <cstdlib>
 #include <exception>
 #include <functional>
@@ -33,6 +34,7 @@ namespace simbi::exec {
       protected:
         Derived& derived() { return static_cast<Derived&>(*this); }
         const Derived& derived() const
+
         {
             return static_cast<const Derived&>(*this);
         }
@@ -557,8 +559,8 @@ namespace simbi::exec {
 
         ~gpu_executor_t() = default;
 
-        gpu_executor_t(const gpu_executor_t&)            = default;
-        gpu_executor_t& operator=(const gpu_executor_t&) = default;
+        gpu_executor_t(const gpu_executor_t&)            = delete;
+        gpu_executor_t& operator=(const gpu_executor_t&) = delete;
         gpu_executor_t(gpu_executor_t&&)                 = default;
         gpu_executor_t& operator=(gpu_executor_t&&)      = default;
 
@@ -588,7 +590,6 @@ namespace simbi::exec {
                         devices_.size(),
                         std::forward<Args>(args)...
                     );
-
                     state->completion_events[ii].record(streams_[ii]);
                 }
             }
@@ -630,22 +631,26 @@ namespace simbi::exec {
                     optimal_grid_size(subdomain.size());
 
                 auto kernel = [subdomain, f] DEV() {
-                    auto idx           = hetero::grid::idx();
-                    auto global_idx    = idx.global_thread_id();
-                    auto total_threads = idx.total_threads();
-                    auto domain_size   = subdomain.size();
+                    const auto idx           = hetero::grid::idx();
+                    const auto global_idx    = idx.global_thread_id();
+                    const auto total_threads = idx.total_threads();
+                    const auto domain_size   = subdomain.size();
 
                     // grid-stride loop for large domains
                     for (auto ii = global_idx; ii < domain_size;
                          ii += total_threads) {
-                        auto coord = subdomain.linear_to_coord(ii);
+                        const auto coord = subdomain.linear_to_coord(ii);
                         f(coord);
                     }
                 };
 
                 auto launch_config =
                     hetero::grid::config(grid_size, block_size);
-                hetero::device::launch(kernel, launch_config);
+                hetero::device::launch_async(
+                    kernel,
+                    launch_config,
+                    streams_[device_idx]
+                );
             });
         }
 
@@ -701,17 +706,18 @@ namespace simbi::exec {
 
             return std::make_pair(grid_size, threads_per_block);
         }
-    };
+    };   // namespace simbi::exec
 
     template <bool OnGPU = global::on_gpu>
-    constexpr auto default_executor()
+    auto& default_executor()
     {
         if constexpr (OnGPU) {
-            return gpu_executor_t{};
+            static gpu_executor_t executor{};
+            return executor;
         }
         else {
-            return omp_executor_t{};
-            // return par_cpu_executor_t{};
+            static omp_executor_t executor{};
+            return executor;
         }
     }
 

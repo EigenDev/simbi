@@ -1,7 +1,7 @@
 #ifndef FP_TOOKKIT_HPP
 #define FP_TOOKKIT_HPP
 
-#include "config.hpp"
+#include "compat.hpp"
 
 #include <algorithm>
 #include <cstddef>

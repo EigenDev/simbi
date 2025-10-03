@@ -118,6 +118,13 @@ namespace simbi::hetero {
         static void
         launch(kernel_t kernel, grid::launch_config_t& launch_config);
 
+        template <typename kernel_t>
+        static void launch_async(
+            kernel_t kernel,
+            grid::launch_config_t& launch_config,
+            const stream_type& stream
+        );
+
         static void memset(void* ptr, int value, std::size_t bytes);
 
         static void memset_async(

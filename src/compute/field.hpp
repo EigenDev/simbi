@@ -1,13 +1,14 @@
 #ifndef FIELD_HPP
 #define FIELD_HPP
 
-#include "config.hpp"
+#include "compat.hpp"
 #include "containers/vector.hpp"
 #include "domain/algebra.hpp"
 #include "domain/domain.hpp"
 #include "execution/executor.hpp"
 #include "functional/fp.hpp"
 #include "memory/accessor.hpp"
+#include "memory/arena.hpp"
 
 #include <cstdint>
 #include <type_traits>
@@ -94,9 +95,10 @@ namespace simbi {
         {
             if constexpr (detail::is_accessor_v<Computation>) {
                 if (domain_.empty()) {
-                    domain_     = source.domain_;
-                    using cvt   = std::remove_cvref_t<value_type>;
-                    computation = accessor_t<cvt, Dims>{domain_};
+                    domain_   = source.domain_;
+                    using cvt = std::remove_cvref_t<value_type>;
+                    computation =
+                        accessor_t<cvt, Dims>{domain_, default_arena<cvt>()};
                 }
                 computation.commit(source, exec::default_executor());
             }
@@ -389,7 +391,7 @@ namespace simbi {
     }
 
     template <typename T, std::uint64_t Dims>
-    auto from_data_field(T* data, const iarray<Dims>& shape)
+    auto from_data_field(const T* data, const iarray<Dims>& shape)
     {
         auto accessor = from_data(data, shape);
         auto domain   = make_domain(shape);

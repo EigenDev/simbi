@@ -50,7 +50,7 @@
 #ifndef CONFIG_DICT_VISITOR_HPP
 #define CONFIG_DICT_VISITOR_HPP
 
-#include "config.hpp"
+#include "compat.hpp"
 #include "config_dict.hpp"
 #include "init_conditions_visitor.hpp"
 #include "utility/enums.hpp"

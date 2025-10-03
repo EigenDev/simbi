@@ -2,8 +2,8 @@
 #define CFD_OPS_HPP
 
 #include "base/stencil_view.hpp"
+#include "compat.hpp"
 #include "compute/field.hpp"
-#include "config.hpp"
 #include "containers/state_ops.hpp"
 #include "containers/vector.hpp"
 #include "domain/domain.hpp"

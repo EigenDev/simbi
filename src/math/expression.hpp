@@ -1,7 +1,7 @@
 #ifndef EXPRESSION_HPP
 #define EXPRESSION_HPP
 
-#include "config.hpp"
+#include "compat.hpp"
 
 #include <cstdint>
 

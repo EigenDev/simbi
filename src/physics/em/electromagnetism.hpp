@@ -2,7 +2,7 @@
 #define PHYSICS_EM_HPP
 
 #include "base/concepts.hpp"
-#include "config.hpp"
+#include "compat.hpp"
 
 #include "containers/vector.hpp"
 #include <cstdint>

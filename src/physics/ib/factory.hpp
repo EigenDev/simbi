@@ -3,7 +3,7 @@
 
 #include "body.hpp"
 #include "collection.hpp"
-#include "config.hpp"
+#include "compat.hpp"
 #include "containers/vector.hpp"
 #include "utility/config_dict.hpp"
 #include "utility/init_conditions.hpp"

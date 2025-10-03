@@ -2,7 +2,7 @@
 #define HYDRO_HLLD_HPP
 
 #include "base/concepts.hpp"   // for is_hydro_primitive_c, is_mhd_primitive_c
-#include "config.hpp"          // for global::epsilon
+#include "compat.hpp"          // for global::epsilon
 #include "containers/vector.hpp"             // for vector_t
 #include "physics/em/electromagnetism.hpp"   // for to_flux, to_conserved, to_primitive
 #include "physics/hydro/conversion.hpp"

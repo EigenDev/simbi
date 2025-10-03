@@ -1,7 +1,7 @@
 #ifndef STATE_STRUCTS_HPP
 #define STATE_STRUCTS_HPP
 
-#include "config.hpp"
+#include "compat.hpp"
 #include "containers/vector.hpp"
 #include "state_ops.hpp"
 #include "utility/enums.hpp"

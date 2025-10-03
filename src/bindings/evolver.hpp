@@ -1,7 +1,7 @@
 #ifndef BINDINGS_STATE_HPP
 #define BINDINGS_STATE_HPP
 
-#include "config.hpp"
+#include "compat.hpp"
 
 #include <functional>
 #include <pybind11/buffer_info.h>

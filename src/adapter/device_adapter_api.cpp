@@ -1,5 +1,5 @@
 #include "device_adapter_api.hpp"
-#include "config.hpp"
+#include "compat.hpp"
 #include "device_backend.hpp"
 #include "device_types.hpp"
 #include <cstddef>

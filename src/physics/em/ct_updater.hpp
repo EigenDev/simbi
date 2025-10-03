@@ -2,7 +2,7 @@
 #define MHD_LOGIC_HPP
 
 #include "compute/field.hpp"
-#include "config.hpp"
+#include "compat.hpp"
 #include "contact.hpp"
 #include "containers/vector.hpp"
 #include "ct_geom.hpp"

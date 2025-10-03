@@ -1,7 +1,7 @@
 #ifndef GEOMETRY_CT_EXTENSIONS_HPP
 #define GEOMETRY_CT_EXTENSIONS_HPP
 
-#include "config.hpp"
+#include "compat.hpp"
 #include "containers/vector.hpp"
 #include "mesh/mesh_config.hpp"
 #include "mesh/mesh_ops.hpp"

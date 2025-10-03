@@ -1,7 +1,7 @@
 #ifndef CONCEPTS_HPP
 #define CONCEPTS_HPP
 
-#include "config.hpp"
+#include "compat.hpp"
 #include "utility/enums.hpp"
 
 #include <array>

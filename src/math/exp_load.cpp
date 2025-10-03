@@ -1,5 +1,5 @@
 #include "exp_load.hpp"
-#include "config.hpp"
+#include "compat.hpp"
 #include "containers/store.hpp"
 #include "math/expression.hpp"
 #include "utility/config_dict.hpp"

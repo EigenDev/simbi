@@ -1,7 +1,7 @@
 #ifndef SIMIB_MESH_MESH_CONFIG_HPP
 #define SIMIB_MESH_MESH_CONFIG_HPP
 
-#include "config.hpp"   // for real, DUAL, DEV, global::using_four_velocity
+#include "compat.hpp"   // for real, DUAL, DEV, global::using_four_velocity
 #include "containers/vector.hpp"   // for vector_t
 #include "domain/algebra.hpp"
 #include "domain/domain.hpp"

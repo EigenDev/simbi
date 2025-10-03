@@ -50,7 +50,7 @@
 #ifndef BODY_DELTA_HPP
 #define BODY_DELTA_HPP
 
-#include "config.hpp"
+#include "compat.hpp"
 #include "containers/vector.hpp"   // for vector_t
 #include <cassert>
 #include <cstdint>

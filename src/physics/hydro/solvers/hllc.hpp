@@ -2,7 +2,7 @@
 #define HYDRO_HLLC_HPP
 
 #include "base/concepts.hpp"                 // for is_hydro_primitive_c
-#include "config.hpp"                        // for DEV macro
+#include "compat.hpp"                        // for DEV macro
 #include "containers/vector.hpp"             // for vector_like_c
 #include "physics/em/electromagnetism.hpp"   // for shift_electric_field
 #include "physics/hydro/solvers/hlle.hpp"    // for hlle_flux
