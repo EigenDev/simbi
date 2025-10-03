@@ -1,5 +1,5 @@
 #include "zero.hpp"
-#include "config.hpp"
+#include "compat.hpp"
 #include "containers/vector.hpp"
 
 namespace simbi::em {

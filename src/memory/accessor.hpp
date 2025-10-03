@@ -2,7 +2,7 @@
 #define ACCESSOR_HPP
 
 #include "arena.hpp"
-#include "config.hpp"
+#include "compat.hpp"
 #include "containers/vector.hpp"
 #include "domain/domain.hpp"
 #include "io/exceptions.hpp"
@@ -74,8 +74,8 @@ namespace simbi::mem {
             return data_[compute_offset(coord)];
         }
 
-        DUAL T* data() { return data_.get(); }
-        DUAL const T* data() const { return data_.get(); }
+        T* data() { return data_.get(); }
+        const T* data() const { return data_.get(); }
 
         const domain_t<Dims>& domain() const { return domain_; }
         std::size_t size() const { return domain_.size(); }
@@ -195,7 +195,7 @@ namespace simbi::mem {
 
         if (result.is_allocated()) {
             std::copy_n(host_data, domain.size(), result.data());
-        }
+        };
 
         return result;
     }

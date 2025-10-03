@@ -1,7 +1,7 @@
 #ifndef CT_ZERO_HPP
 #define CT_ZERO_HPP
 
-#include "config.hpp"
+#include "compat.hpp"
 #include "containers/vector.hpp"
 
 namespace simbi::em {

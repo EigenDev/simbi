@@ -4,7 +4,7 @@
 #include "base/concepts.hpp"
 #include "body.hpp"
 #include "body_delta.hpp"
-#include "config.hpp"
+#include "compat.hpp"
 #include "containers/vector.hpp"
 #include "mesh/mesh_ops.hpp"
 #include "physics/hydro/physics.hpp"

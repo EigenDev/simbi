@@ -2,7 +2,7 @@
 #define STATE_OPS_HPP
 
 #include "base/concepts.hpp"
-#include "config.hpp"
+#include "compat.hpp"
 #include "physics/eos/isothermal.hpp"
 
 #include <concepts>

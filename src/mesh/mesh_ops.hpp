@@ -2,7 +2,7 @@
 #define MESH_OPS_HPP
 
 #include "base/concepts.hpp"
-#include "config.hpp"
+#include "compat.hpp"
 #include "containers/vector.hpp"
 #include "functional/fp.hpp"
 #include "mesh_config.hpp"

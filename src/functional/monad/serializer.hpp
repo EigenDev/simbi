@@ -1,8 +1,8 @@
 #ifndef SERIALIZATION_HPP
 #define SERIALIZATION_HPP
 
+#include "compat.hpp"              // for real, DEV, etc
 #include "compute/field.hpp"       // for field_t<T, Dims>
-#include "config.hpp"              // for real, DEV, etc
 #include "containers/vector.hpp"   // for simbi::vector_t
 #include "functional/fp.hpp"
 #include "io/tabulate/table.hpp"   // for tabulate::table_t

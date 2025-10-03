@@ -1,7 +1,7 @@
 #ifndef DRIVER_HPP
 #define DRIVER_HPP
 
-#include "config.hpp"
+#include "compat.hpp"
 
 #include <pybind11/functional.h>
 #include <pybind11/numpy.h>

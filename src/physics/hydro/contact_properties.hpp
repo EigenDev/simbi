@@ -2,7 +2,7 @@
 #define PHYSICS_CONTACT_PROPERTIES
 
 #include "base/concepts.hpp"   // for is_hydro_primitive_c, is_hydro_conserved_c, is_srhd_c, is_relativistic_c
-#include "config.hpp"              // for real, DEV
+#include "compat.hpp"              // for real, DEV
 #include "containers/vector.hpp"   // for vector_t
 #include "utility/helpers.hpp"     // for sgn
 

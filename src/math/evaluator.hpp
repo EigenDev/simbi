@@ -1,7 +1,7 @@
 #ifndef EVALUATOR_HPP
 #define EVALUATOR_HPP
 
-#include "config.hpp"
+#include "compat.hpp"
 #include "containers/store.hpp"
 #include "math/expression.hpp"
 

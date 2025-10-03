@@ -1,5 +1,5 @@
 #include "factory.hpp"
-#include "config.hpp"
+#include "compat.hpp"
 #include "utility/config_dict.hpp"
 #include <stdexcept>
 #include <string>

@@ -1,7 +1,7 @@
 #include "evolver.hpp"
+#include "compat.hpp"
 #include "compute/cfd.hpp"
 #include "compute/context.hpp"
-#include "config.hpp"
 #include "containers/vector.hpp"
 #include "dispatch.hpp"
 #include "functional/monad/computation.hpp"

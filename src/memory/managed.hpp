@@ -49,7 +49,7 @@
 #ifndef MANAGED_HPP
 #define MANAGED_HPP
 
-#include "config.hpp"   // for global::managed_memory
+#include "compat.hpp"   // for global::managed_memory
 #include "hetero/adapter.hpp"
 #include <cstddef>   // for size_t
 #include <cstdint>   // for int64_t, uint64_t

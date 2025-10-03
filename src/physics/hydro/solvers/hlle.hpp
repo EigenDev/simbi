@@ -3,7 +3,7 @@
 
 // HLLE is the same for all regimes, so it can be defined here
 #include "base/concepts.hpp"
-#include "config.hpp"
+#include "compat.hpp"
 #include "containers/vector.hpp"
 #include "physics/em/electromagnetism.hpp"
 #include "physics/hydro/physics.hpp"

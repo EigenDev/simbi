@@ -1,7 +1,7 @@
 #ifndef ISOTHERMAL_HPP
 #define ISOTHERMAL_HPP
 
-#include "config.hpp"
+#include "compat.hpp"
 
 #include <cmath>   // for std::sqrt
 

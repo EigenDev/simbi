@@ -1,7 +1,7 @@
 #ifndef STORE_HPP
 #define STORE_HPP
 
-#include "config.hpp"
+#include "compat.hpp"
 #include "hetero/adapter.hpp"
 #include "hetero/core/common_types.hpp"
 

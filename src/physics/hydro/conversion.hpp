@@ -2,7 +2,7 @@
 #define PHYSICS_CONVERSION_HPP
 
 #include "base/concepts.hpp"            // for is_hydro_conserved_c
-#include "config.hpp"                   // for global::epsilon
+#include "compat.hpp"                   // for global::epsilon
 #include "functional/monad/maybe.hpp"   // for maybe_t, None
 #include "io/exceptions.hpp"            // for ErrorCode
 #include "physics/eos/ideal.hpp"        // for ideal_gas_eos_t

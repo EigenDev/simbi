@@ -50,7 +50,7 @@
 #define HELPERS_HIP_HPP
 
 #include "base/concepts.hpp"
-#include "config.hpp"              // for real, STATIC, std::uint64_t, sint
+#include "compat.hpp"              // for real, STATIC, std::uint64_t, sint
 #include "containers/vector.hpp"   // for vector_t
 #include "io/exceptions.hpp"       // for ErrorCode
 #include "utility/enums.hpp"       // for Geometry, BoundaryCondition, Solver

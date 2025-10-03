@@ -1,7 +1,7 @@
 #ifndef HYDRO_DISPATCH_HPP
 #define HYDRO_DISPATCH_HPP
 
-#include "config.hpp"
+#include "compat.hpp"
 #include "containers/vector.hpp"
 #include "mesh/mesh_config.hpp"
 #include "physics/eos/ideal.hpp"

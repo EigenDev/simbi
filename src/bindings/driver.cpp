@@ -1,5 +1,5 @@
 #include "driver.hpp"
-#include "config.hpp"
+#include "compat.hpp"
 #include "config_converter.hpp"
 #include "evolver.hpp"
 #include "utility/init_conditions.hpp"

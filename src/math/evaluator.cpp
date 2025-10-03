@@ -1,5 +1,5 @@
 #include "evaluator.hpp"
-#include "config.hpp"
+#include "compat.hpp"
 #include "containers/store.hpp"
 #include "math/expression.hpp"
 #include "utility/helpers.hpp"

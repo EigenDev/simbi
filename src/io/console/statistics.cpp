@@ -1,5 +1,5 @@
 #include "io/console/statistics.hpp"
-#include "config.hpp"
+#include "compat.hpp"
 #include "io/tabulate/table.hpp"
 
 #include <cstddef>

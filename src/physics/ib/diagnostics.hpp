@@ -1,7 +1,7 @@
 #ifndef BODY_DIAGNOSTICS_HPP
 #define BODY_DIAGNOSTICS_HPP
 
-#include "config.hpp"
+#include "compat.hpp"
 #include "containers/vector.hpp"
 #include "functional/monad/reader.hpp"
 

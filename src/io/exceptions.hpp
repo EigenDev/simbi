@@ -50,7 +50,7 @@
 #define EXCEPTIONS_HPP
 
 #include "base/concepts.hpp"
-#include "config.hpp"
+#include "compat.hpp"
 
 #include <atomic>
 #include <cstdint>

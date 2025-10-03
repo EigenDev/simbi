@@ -2,7 +2,7 @@
 #define CFD_OPERATIONS_HPP
 
 #include "base/stencil_view.hpp"
-#include "config.hpp"
+#include "compat.hpp"
 #include "containers/vector.hpp"
 #include "physics/hydro/solvers/hllc.hpp"
 #include "physics/hydro/solvers/hlld.hpp"
