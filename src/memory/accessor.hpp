@@ -36,7 +36,7 @@ namespace simbi::mem {
             return result;
         }
 
-        std::size_t DUAL compute_offset(const iarray<Dims>& coord) const
+        DUAL std::size_t compute_offset(const iarray<Dims>& coord) const
         {
             return vecops::dot(coord - domain_.start, strides_);
         }
@@ -104,6 +104,23 @@ namespace simbi::mem {
             return result;
         }
 
+        struct device_accessor_t {
+            T* raw_data;
+            iarray<Dims> strides;
+            iarray<Dims> start;
+
+            DUAL T& operator()(const iarray<Dims>& coord) const
+            {
+                auto offset = vecops::dot(coord - start, strides);
+                return raw_data[offset];
+            }
+        };
+
+        device_accessor_t device_accessor() const
+        {
+            return device_accessor_t{data_.get(), strides_, domain_.start};
+        }
+
         template <typename ComputeField, typename Executor>
         void direct_commit(ComputeField computation, const Executor& executor)
         {
@@ -120,11 +137,13 @@ namespace simbi::mem {
                 data_ = arena_->get(domain_.size());
             }
 
+            auto device_acc = device_accessor();
+
             executor
                 .for_each(
                     domain_,
-                    [this, computation] DUAL(coordinate_t<Dims> coord) {
-                        (*this)(coord) = computation(coord);
+                    [device_acc, computation] DUAL(coordinate_t<Dims> coord) {
+                        device_acc(coord) = computation(coord);
                     }
                 )
                 .wait();
@@ -146,15 +165,18 @@ namespace simbi::mem {
                 data_ = arena_->get(domain_.size());
             }
 
+            auto device_acc = device_accessor();
+
             auto nerrors =
                 executor
                     .reduce(
                         domain_,
                         std::size_t{0},
-                        [this, computation] DUAL(coordinate_t<Dims> coord) {
+                        [device_acc,
+                         computation] DUAL(coordinate_t<Dims> coord) {
                             auto value = computation(coord);
                             if (value.has_value()) {
-                                (*this)(coord) = value.value();
+                                device_acc(coord) = value.value();
                                 return std::size_t{0};
                             }
                             else {
