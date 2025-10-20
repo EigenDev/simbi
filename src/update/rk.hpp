@@ -5,6 +5,7 @@
 #include "containers/state_ops.hpp"
 #include "flux.hpp"
 #include "physics/em/ct_updater.hpp"
+#include "physics/ib/collection.hpp"
 #include "prim_recovery.hpp"
 
 namespace simbi::cfd {
@@ -20,6 +21,7 @@ namespace simbi::rk {
     rk2_step(HydroState& workspace, const MeshConfig& mesh, const CfdOps& ops)
     {
         const auto dt = workspace.metadata.dt;
+        body::update_sink_cache(workspace, mesh);
         update_staggered_fields(workspace, ops, mesh);
 
         // === initial state u_n ===
@@ -44,6 +46,7 @@ namespace simbi::rk {
 
         // === k2 evaluation ===
         hydro::recover_primitives(workspace);
+        body::update_sink_cache(workspace, mesh);
         update_staggered_fields(
             workspace,
             ops,

@@ -88,7 +88,7 @@ namespace simbi {
         virtual void visit_physics_parameters(
             real& gamma,
             real& cfl,
-            real& sound_speed_squared,
+            real& ambient_sound_speed,
             real& viscosity,
             real& shakura_sunyaev_alpha
         ) = 0;

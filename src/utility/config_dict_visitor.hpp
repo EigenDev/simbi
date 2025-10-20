@@ -133,16 +133,15 @@ namespace simbi {
         void visit_physics_parameters(
             real& gamma,
             real& cfl,
-            real& sound_speed_squared,
+            real& ambeint_sound_speed,
             real& viscosity,
             real& shakura_sunyaev_alpha
         ) override
         {
-            gamma = dict.at("adiabatic_index").get<real>();
-            cfl   = dict.at("cfl_number").get<real>();
-            sound_speed_squared =
-                std::pow(dict.at("ambient_sound_speed").get<real>(), 2);
-            viscosity = dict.at("viscosity").get<real>();
+            gamma               = dict.at("adiabatic_index").get<real>();
+            cfl                 = dict.at("cfl_number").get<real>();
+            ambeint_sound_speed = dict.at("ambient_sound_speed").get<real>();
+            viscosity           = dict.at("viscosity").get<real>();
             shakura_sunyaev_alpha =
                 dict.at("shakura_sunyaev_alpha").get<real>();
         }
@@ -483,14 +482,14 @@ namespace simbi {
         void visit_physics_parameters(
             real& gamma,
             real& cfl,
-            real& sound_speed_squared,
+            real& ambeint_sound_speed,
             real& viscosity,
             real& shakura_sunyaev_alpha
         ) override
         {
             gamma                 = 1.4;
             cfl                   = 0.5;
-            sound_speed_squared   = 1.0;
+            ambeint_sound_speed   = 1.0;
             viscosity             = 0.0;
             shakura_sunyaev_alpha = 0.0;
         }
@@ -653,7 +652,7 @@ namespace simbi {
         void visit_physics_parameters(
             real& gamma,
             real& cfl,
-            real& sound_speed_squared,
+            real& ambeint_sound_speed,
             real& viscosity,
             real& shakura_sunyaev_alpha
         ) override
@@ -672,7 +671,7 @@ namespace simbi {
             if (viscosity < 0.0) {
                 throw std::runtime_error("Viscosity must be non-negative");
             }
-            if (sound_speed_squared < 0.0) {
+            if (ambeint_sound_speed < 0.0) {
                 throw std::runtime_error(
                     "Sound speed squared must be positive"
                 );

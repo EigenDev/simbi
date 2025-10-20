@@ -77,7 +77,7 @@ namespace simbi {
         real gamma;
         real cfl;
         real tend;
-        real sound_speed_squared;
+        real ambient_sound_speed;
         real shakura_sunyaev_alpha;
 
         std::int64_t nx;
@@ -139,7 +139,7 @@ namespace simbi {
             visitor.visit_physics_parameters(
                 gamma,
                 cfl,
-                sound_speed_squared,
+                ambient_sound_speed,
                 viscosity,
                 shakura_sunyaev_alpha
             );

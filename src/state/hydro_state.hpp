@@ -78,6 +78,7 @@ namespace simbi::state {
             real checkpoint_interval;
             real checkpoint_time;
             real prev_checkpoint_time;
+            real ambient_sound_speed;
 
             // int tracking
             std::uint64_t iteration;
@@ -180,7 +181,6 @@ namespace simbi::state {
                     };
                     if constexpr (body::has_accretion_capability_c<body_type>) {
                         delta.prev_mass_delta = body::total_accreted_mass(body);
-                        delta.mass_delta      = delta.prev_mass_delta;
                     }
                     diagnostics->accumulate_delta(delta);
                 });
@@ -281,6 +281,7 @@ namespace simbi::state {
               .checkpoint_interval  = init.checkpoint_interval,
               .checkpoint_time      = init.time,
               .prev_checkpoint_time = init.time,
+              .ambient_sound_speed  = init.ambient_sound_speed,
               .iteration            = 0,
               .halo_radius          = init.halo_radius,
               .checkpoint_index     = init.checkpoint_index,
@@ -370,7 +371,7 @@ namespace simbi::state {
                        : (init.quirk_smoothing ? ShockWaveLimiter::QUIRK
                                                : ShockWaveLimiter::NONE);
         }
-    };
+    };   // namespace simbi::state
 }   // namespace simbi::state
 
 #endif   // STATE_HYDRO_STATE_HPP

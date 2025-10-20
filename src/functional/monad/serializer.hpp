@@ -1251,8 +1251,8 @@ namespace simbi::io {
                         delta.mass_delta
                     );
 
-                    const auto mdot =
-                        (dt > 0) ? (delta.mass_delta - pmass) / dt : 0.0;
+                    const auto dm   = delta.mass_delta - pmass;
+                    const auto mdot = (dt > 0) ? dm / dt : 0.0;
 
                     serialize_scalar(
                         body_diag_group,

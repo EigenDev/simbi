@@ -11,6 +11,7 @@
 #include "physics/em/ct_updater.hpp"
 #include "physics/ib/body.hpp"
 #include "physics/ib/body_delta.hpp"
+#include "physics/ib/collection.hpp"
 #include "physics/ib/effects.hpp"
 #include "update/adaptive_timestep.hpp"
 #include "update/bcs.hpp"
@@ -242,8 +243,9 @@ namespace simbi::cfd {
             }
             conserved_t total_effect{};
 
-            const auto prim      = prims[coord];
-            const bool is_binary = (bodies->size() == 2);
+            const auto prim       = prims[coord];
+            const bool is_binary  = (bodies->size() == 2);
+            const auto sink_cache = bodies->sink_cache;
             bodies->visit_all([&](const auto& body) {
                 using body_type = std::decay_t<decltype(body)>;
                 body_delta_t<Dims> delta{
@@ -261,8 +263,26 @@ namespace simbi::cfd {
                 }
 
                 if constexpr (has_accretion_capability_c<body_type>) {
-                    auto accr_op = accretion_op_t{prim, mesh, gamma, dt};
-                    auto [effect, a_delta] = accr_op(body, coord, is_binary);
+                    auto accr_op     = accretion_op_t{prim, mesh, gamma, dt};
+                    real mdot_target = 0.0;
+                    real w_total     = 0.0;
+                    real r_bh        = 0.0;
+
+                    if (sink_cache && !sink_cache->empty()) {
+                        const auto& props = (*sink_cache)[body.idx];
+                        mdot_target       = props.mdot;
+                        w_total           = props.total_weight;
+                        r_bh              = props.r_bh;
+                    }
+
+                    auto [effect, a_delta] = accr_op(
+                        body,
+                        coord,
+                        is_binary,
+                        mdot_target,
+                        w_total,
+                        r_bh
+                    );
                     total_effect = total_effect | structs::add_gas(effect);
                     delta += a_delta;
                 }
@@ -598,6 +618,7 @@ namespace simbi::cfd {
         // where L(u) is the godunov operator
         if (state.metadata.timestepping == Timestepping::EULER) {
             const auto dt = state.metadata.dt;
+            update_sink_cache(state, mesh);
             update_staggered_fields(state, ops, mesh);
 
             const auto ell = godunov_op(state, mesh) * dt;
