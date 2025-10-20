@@ -197,7 +197,7 @@ def format_polar_axes(
     ax: Axes,
     data: PlotData,
     field_index: int,
-    xmax: Optional[Bounds] = None,
+    xlims: Optional[Bounds] = None,
 ) -> None:
     """Format axes for polar coordinate plots."""
     field = data.fields[field_index]
@@ -210,6 +210,11 @@ def format_polar_axes(
     else:
         theta_min = 0
         theta_max = 360
+
+    if xlims:
+        xmax = xlims.max
+    else:
+        xmax = None
 
     ax.set_theta_zero_location("N")
     ax.set_theta_direction(-1)

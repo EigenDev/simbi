@@ -195,7 +195,6 @@ class MultidimPlotComponent(Component):
                 alpha=0.5,
             )
 
-            # Add to plot
             self.ax.add_patch(circle)
 
     def render(self, data: PlotData, style: StyleConfig) -> Optional[QuadMesh]:
@@ -220,6 +219,7 @@ class MultidimPlotComponent(Component):
 
         if data.bodies and style.draw_bodies:
             self.draw_bodies(data.bodies, self.props.projection)
+
         # Create or update mesh
         if self._mesh is None:
             # Create new mesh
