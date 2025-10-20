@@ -33,6 +33,33 @@ namespace simbi {
 }   // namespace simbi
 
 namespace simbi::fp {
+    namespace detail {
+        template <typename T>
+        struct is_callable {
+            template <typename U>
+            static auto test(int)
+                -> decltype(std::declval<U>()(), std::true_type{});
+
+            template <typename>
+            static auto test(...) -> std::false_type;
+
+            static constexpr bool value = decltype(test<T>(0))::value;
+        };
+
+        template <typename T>
+        struct is_unary_callable {
+            template <typename U>
+            static auto test(
+                int
+            ) -> decltype(std::declval<U>()(std::declval<void*>()), std::true_type{});
+
+            template <typename>
+            static auto test(...) -> std::false_type;
+
+            static constexpr bool value = decltype(test<T>(0))::value;
+        };
+    }   // namespace detail
+
     // ========================================================================
     // core concepts
     // ========================================================================
@@ -101,17 +128,36 @@ namespace simbi::fp {
     // ========================================================================
     // selection: pred(x) ? a(x) : b(x)
     // ========================================================================
+    template <typename Pred>
+    struct predicate_wrapper_t {
+        Pred pred;
+
+        // handle no-arg callable
+        template <typename Arg>
+        DUAL bool operator()(Arg&& arg) const
+        {
+            if constexpr (std::is_same_v<std::decay_t<Pred>, bool>) {
+                return pred;
+            }
+            else if constexpr (std::is_invocable_v<Pred>) {
+                return pred();
+            }
+            else {
+                return pred(std::forward<Arg>(arg));
+            }
+        }
+    };
 
     template <typename Pred, typename A, typename B>
     struct select_t {
-        Pred pred;
+        predicate_wrapper_t<Pred> pred;
         A a;
         B b;
 
         template <typename Arg>
         constexpr DUAL auto operator()(Arg&& arg) const
         {
-            if (pred(arg)) {
+            if (pred(std::forward<Arg>(arg))) {
                 return a(std::forward<Arg>(arg));
             }
             else {
@@ -124,7 +170,7 @@ namespace simbi::fp {
     constexpr auto select(Pred pred, A a, B b)
     {
         return select_t<Pred, A, B>{
-          std::move(pred),
+          predicate_wrapper_t<Pred>{std::move(pred)},
           std::move(a),
           std::move(b)
         };
