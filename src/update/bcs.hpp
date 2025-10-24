@@ -91,9 +91,9 @@ namespace simbi::boundary {
             }
             else {
                 reflected[ctx.contact_dim] =
-                    ctx.active_region.end[ctx.contact_dim] -
+                    ctx.active_region.fin[ctx.contact_dim] -
                     (ghost_coord[ctx.contact_dim] -
-                     ctx.active_region.end[ctx.contact_dim]) -
+                     ctx.active_region.fin[ctx.contact_dim]) -
                     1;
             }
 
@@ -143,7 +143,7 @@ namespace simbi::boundary {
             }
             else {
                 clamped[ctx.contact_dim] =
-                    ctx.active_region.end[ctx.contact_dim] - 1;
+                    ctx.active_region.fin[ctx.contact_dim] - 1;
             }
             return ctx.field(clamped);
         }
@@ -163,11 +163,11 @@ namespace simbi::boundary {
                 auto offset = ctx.active_region.start[ctx.contact_dim] -
                               ghost_coord[ctx.contact_dim];
                 wrapped[ctx.contact_dim] =
-                    ctx.active_region.end[ctx.contact_dim] - offset;
+                    ctx.active_region.fin[ctx.contact_dim] - offset;
             }
             else {
                 auto offset = ghost_coord[ctx.contact_dim] -
-                              ctx.active_region.end[ctx.contact_dim] + 1;
+                              ctx.active_region.fin[ctx.contact_dim] + 1;
                 wrapped[ctx.contact_dim] =
                     ctx.active_region.start[ctx.contact_dim] + offset - 1;
             }
@@ -221,9 +221,34 @@ namespace simbi::boundary {
         auto contracted = domain;
         for (auto thin_dim : thin_dims) {
             contracted.start[thin_dim] += halo_radius;
-            contracted.end[thin_dim] -= halo_radius;
+            contracted.fin[thin_dim] -= halo_radius;
         }
         return contracted;
+    }
+
+    template <typename T, std::uint64_t Dims, typename MeshConfig>
+    auto make_bc_transform(const bc_context_t<T, Dims, MeshConfig>& ctx)
+    {
+        // create stateless transforms
+        auto reflecting = reflecting_transform_t<T>{};
+        auto outflow    = outflow_transform_t<T>{};
+        auto periodic   = periodic_transform_t<T>{};
+        auto dynamic    = dynamic_transform_t<T>{};
+
+        // compose using fp toolkit
+        return fp::select(
+            [=]() { return ctx.bc_type == BoundaryCondition::REFLECTING; },
+            fp::partial(reflecting, ctx),
+            fp::select(
+                [=]() { return ctx.bc_type == BoundaryCondition::PERIODIC; },
+                fp::partial(periodic, ctx),
+                fp::select(
+                    [=]() { return ctx.bc_type == BoundaryCondition::DYNAMIC; },
+                    fp::partial(dynamic, ctx),
+                    fp::partial(outflow, ctx)
+                )
+            )
+        );
     }
 
     // flux boundary transform
@@ -313,55 +338,30 @@ namespace simbi::boundary {
         auto interior_domain =
             contract_in_thin_dims(full_domain, thin_dims, mesh.halo_radius);
 
-        auto cons = state.cons;
-        // create thin dimension transform
-        auto transform =
-            [interior_domain, thin_dims, cons](coordinate_t<Dims> coord) {
-                if (interior_domain.contains(coord)) {
-                    return cons(coord);   // interior cell
-                }
+        vector_t<std::uint64_t, Dims> dev_thin_dims;
+        for (std::uint64_t ii = 0; ii < thin_dims.size(); ++ii) {
+            dev_thin_dims[ii] = thin_dims[ii];
+        }
 
-                // project to interior
-                auto interior_coord = coord;
-                for (auto thin_dim : thin_dims) {
-                    interior_coord[thin_dim] = interior_domain.start[thin_dim];
-                }
+        auto cons      = state.cons;
+        auto transform = [interior_domain,
+                          dev_thin_dims,
+                          cons] DEV(coordinate_t<Dims> coord) {
+            if (interior_domain.contains(coord)) {
+                return cons(coord);   // interior cell
+            }
 
-                return cons(interior_coord);
-            };
+            // project to interior
+            auto interior_coord = coord;
+            for (auto thin_dim : dev_thin_dims) {
+                interior_coord[thin_dim] = interior_domain.start[thin_dim];
+            }
+
+            return cons(interior_coord);
+        };
 
         // apply transform
         state.cons = state.cons.insert(field(full_domain, transform));
-    }
-
-    // bc transform factory using fp composition
-    template <typename T, std::uint64_t Dims, typename MeshConfig>
-    auto make_bc_transform(const bc_context_t<T, Dims, MeshConfig>& ctx)
-    {
-        // create stateless transforms
-        auto reflecting = reflecting_transform_t<T>{};
-        auto outflow    = outflow_transform_t<T>{};
-        auto periodic   = periodic_transform_t<T>{};
-        auto dynamic    = dynamic_transform_t<T>{};
-
-        // compose using fp toolkit
-        return fp::select(
-            [=](auto) { return ctx.bc_type == BoundaryCondition::REFLECTING; },
-            fp::partial(reflecting, ctx),
-            fp::select(
-                [=](auto) {
-                    return ctx.bc_type == BoundaryCondition::PERIODIC;
-                },
-                fp::partial(periodic, ctx),
-                fp::select(
-                    [=](auto) {
-                        return ctx.bc_type == BoundaryCondition::DYNAMIC;
-                    },
-                    fp::partial(dynamic, ctx),
-                    fp::partial(outflow, ctx)
-                )
-            )
-        );
     }
 
     // helper to find contact dimension and direction
@@ -376,13 +376,11 @@ namespace simbi::boundary {
         return std::make_pair(static_cast<std::uint64_t>(0), face_side_t::none);
     }
 
-    // helper to get bc index from contact info
     inline auto get_bc_index(std::uint64_t contact_dim, face_side_t contact_dir)
     {
         return contact_dim * 2 + (contact_dir == face_side_t::plus);
     }
 
-    // main bc application for face ghosts
     template <typename HydroState, typename MeshConfig>
     void face_bc_transform(
         const ghost_region_t<HydroState::dimensions>& ghost,
@@ -395,7 +393,6 @@ namespace simbi::boundary {
         auto bc_index     = get_bc_index(contact_dim, contact_dir);
         const auto x2_max = mesh.current_bounds_max()[Dims - 2];
 
-        // create context
         auto ctx =
             bc_context_t<typename HydroState::conserved_t, Dims, MeshConfig>{
               .field         = state.cons,
@@ -410,14 +407,53 @@ namespace simbi::boundary {
               .mesh_info     = {MeshConfig::geometry, x2_max, mesh}
             };
 
-        // create and apply transform
         auto transform =
             make_bc_transform<typename HydroState::conserved_t, Dims>(ctx);
 
         state.cons = state.cons.insert(field(ghost.domain, transform));
     }
 
-    // corner ghost application
+    template <typename SimState>
+    void face_bc_transform(
+        const ghost_region_t<SimState::dimensions>& ghost,
+        SimState& sim
+    )
+    {
+        using mesh_type = std::remove_cvref_t<decltype(sim.mesh(0))>;
+        printf("loading mesh\n");
+        const auto& mesh = sim.mesh(0);
+        printf("loading metadta\n");
+        const auto& meta = sim.metadata();
+        printf("loading sources\n");
+        const auto& bc_sources = sim.sources().bc_sources;
+        printf("loading cons\n");
+        auto& cons = sim.hydro(0).cons;
+
+        constexpr auto Dims             = SimState::dimensions;
+        auto [contact_dim, contact_dir] = find_contact_info(ghost.directions);
+        auto bc_index     = get_bc_index(contact_dim, contact_dir);
+        const auto x2_max = mesh.current_bounds_max()[Dims - 2];
+
+        auto ctx =
+            bc_context_t<typename SimState::conserved_t, Dims, mesh_type>{
+              .field         = cons,
+              .ghost_region  = ghost.domain,
+              .active_region = mesh.domain,
+              .contact_dim   = contact_dim,
+              .contact_dir   = contact_dir,
+              .bc_index      = bc_index,
+              .bc_type       = meta.boundary_conditions[bc_index],
+              .time          = meta.time,
+              .bc_expr       = bc_sources.data(),
+              .mesh_info     = {mesh_type::geometry, x2_max, mesh}
+            };
+
+        auto transform =
+            make_bc_transform<typename SimState::conserved_t, Dims>(ctx);
+
+        cons = cons.insert(field(ghost.domain, transform));
+    }
+
     template <typename HydroState, typename MeshConfig>
     void corner_bc_transform(
         const ghost_region_t<HydroState::dimensions>& ghost,
@@ -428,7 +464,6 @@ namespace simbi::boundary {
         constexpr auto Dims = HydroState::dimensions;
         const auto x2_max   = mesh.current_bounds_max()[Dims - 2];
 
-        // create multi-direction context
         auto ctx =
             bc_context_t<typename HydroState::conserved_t, Dims, MeshConfig>{
               .field         = state.cons,
@@ -440,23 +475,23 @@ namespace simbi::boundary {
         auto& meta = state.metadata;
         auto cons  = state.cons;
         // handle multiple reflecting boundaries
-        auto transform = [=](coordinate_t<Dims> coord) {
+        auto transform = [=] DEV(coordinate_t<Dims> coord) {
             auto interior_coord = coord;
 
-            // First map to interior
+            // first map to interior
             for (std::uint64_t dd = 0; dd < Dims; ++dd) {
                 if (ghost.directions[dd] != face_side_t::none) {
                     interior_coord[dd] =
                         (ghost.directions[dd] == face_side_t::minus)
                             ? ctx.active_region.start[dd]
-                            : ctx.active_region.end[dd] - 1;
+                            : ctx.active_region.fin[dd] - 1;
                 }
             }
 
-            // Get base value from interior
+            // get base value from interior
             auto value = cons(interior_coord);
 
-            // Then apply any needed reflections
+            //  apply any needed reflections
             for (std::uint64_t dd = 0; dd < Dims; ++dd) {
                 if (ghost.directions[dd] != face_side_t::none) {
                     auto bc_index = get_bc_index(dd, ghost.directions[dd]);
@@ -495,6 +530,27 @@ namespace simbi::boundary {
         }
 
         apply_thin_dimension_bcs(state, mesh);
+    }
+
+    template <typename SimState>
+    void apply_boundary_conditions(SimState& sim)
+    {
+        // bcs only act on level 0
+        const auto& mesh   = sim.mesh(0);
+        auto full_domain   = mesh.full_domain;
+        auto active_domain = mesh.domain;
+        auto ghost_info    = analyze_ghost_regions(full_domain, active_domain);
+
+        for (auto ghost : ghost_info) {
+            if (ghost.type == ghost_type_t::face) {
+                face_bc_transform(ghost, sim);
+            }
+            // if constexpr (SimState::is_mhd) {
+            //     if (ghost.type == ghost_type_t::corner) {
+            //         corner_bc_transform(ghost, state, mesh);
+            //     }
+            // }
+        }
     }
 
 }   // namespace simbi::boundary

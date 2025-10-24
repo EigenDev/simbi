@@ -16,7 +16,7 @@ namespace simbi::mem {
 
       public:
         memory_block_t(hetero::memory&& mem, device_t device)
-            : memory_(std::move(mem)), dev_(device), owns_memory_(true)
+            : memory_(std::move(mem)), dev_(device)
         {
         }
 

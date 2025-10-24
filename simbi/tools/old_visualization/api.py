@@ -8,7 +8,7 @@ from .bridge import SimbiDataBridge
 from .components.histogram_plot import HistogramComponent
 from .components.line_plot import LinePlotComponent
 from .components.multidim_plot import MultidimPlotComponent
-from .components.temporal_plot import TemporalPlotComponent
+from .components.time_series_plot import time_seriesPlotComponent
 from .components.title import TitleComponent
 from .config.builder import ConfigBuilder
 from .figure import Figure
@@ -241,7 +241,7 @@ def plot_histogram(
     return fig
 
 
-def plot_temporal(
+def plot_time_series(
     files: Sequence[str],
     fields: Sequence[str] = ["rho"],
     save_as: Optional[str] = None,
@@ -250,14 +250,14 @@ def plot_temporal(
     config: Optional[dict[str, Any]] = None,
     **kwargs,
 ) -> Figure:
-    """Create a temporal plot visualization"""
-    # For temporal plots, we need multiple files
+    """Create a time_series plot visualization"""
+    # For time_series plots, we need multiple files
     if len(files) < 2 and not kwargs.get("single_file_mode", False):
-        print("Warning: Temporal plots typically need multiple files.")
+        print("Warning: time_series plots typically need multiple files.")
 
     if config is None:
         config = ConfigBuilder.create_config(
-            "temporal", files, fields, **kwargs
+            "time_series", files, fields, **kwargs
         )
     else:
         # If config directly provided, merge with kwargs
@@ -355,15 +355,15 @@ def plot_temporal(
 
     # Add component for each field or body
     if is_accretion_data:
-        # For accretion data, create a temporal plot for each body
+        # For accretion data, create a time_series plot for each body
         field = fields[0]
         body_id = kwargs.get("body_id")
 
         if body_id and body_id in body_data:
             # Plot specific body
             fig.add(
-                TemporalPlotComponent,
-                "temporal_0",
+                time_seriesPlotComponent,
+                "time_series_0",
                 field=field,
                 label=kwargs.get("label", f"Body {body_id}"),
                 color=kwargs.get("color", "blue"),
@@ -379,8 +379,8 @@ def plot_temporal(
                     continue
 
                 fig.add(
-                    TemporalPlotComponent,
-                    f"temporal_{i}",
+                    time_seriesPlotComponent,
+                    f"time_series_{i}",
                     field=field,
                     label=rf"$ M_{i + 1} $",
                     color=f"C{i}",
@@ -390,7 +390,7 @@ def plot_temporal(
                     auto_scale=True,
                 )
     else:
-        # For regular fields, create a temporal plot for each field
+        # For regular fields, create a time_series plot for each field
         for i, field in enumerate(fields):
             if not field_values[field]:
                 continue
@@ -402,8 +402,8 @@ def plot_temporal(
             )
 
             fig.add(
-                TemporalPlotComponent,
-                f"temporal_{i}",
+                time_seriesPlotComponent,
+                f"time_series_{i}",
                 field=field,
                 label=label,
                 color=f"C{i}",
@@ -441,7 +441,7 @@ def animate(
 
     Args:
         files: Sequence of data files to animate
-        plot_type: Type of plot ("line", "multidim", "histogram", "temporal")
+        plot_type: Type of plot ("line", "multidim", "histogram", "time_series")
         fields: Sequence of fields to visualize
         save_as: Output file path
         show: Whether to display the animation
@@ -462,13 +462,13 @@ def animate(
         fig = plot_histogram(
             files[:1], fields, None, False, theme=theme, **kwargs
         )
-    elif plot_type == "temporal":
-        fig = plot_temporal(
+    elif plot_type == "time_series":
+        fig = plot_time_series(
             files[:1], fields, None, False, theme=theme, **kwargs
         )
     else:
         raise ValueError(
-            f"Unknown plot type: {plot_type}. Must be one of: line, multidim, histogram, temporal"
+            f"Unknown plot type: {plot_type}. Must be one of: line, multidim, histogram, time_series"
         )
 
     # Create animation

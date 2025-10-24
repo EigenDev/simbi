@@ -391,6 +391,13 @@ namespace simbi {
     }
 
     template <typename T, std::uint64_t Dims>
+    auto stored_field(const domain_t<Dims>& domain)
+    {
+        auto accessor = accessor_t<T, Dims>{domain, default_arena<T>()};
+        return compute_field_t{std::move(accessor), domain};
+    }
+
+    template <typename T, std::uint64_t Dims>
     auto from_data_field(const T* data, const iarray<Dims>& shape)
     {
         auto accessor = from_data(data, shape);

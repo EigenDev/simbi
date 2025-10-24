@@ -9,7 +9,7 @@ class PlotType(Enum):
     LINE = "line"
     MULTIDIM = "multidim"
     HISTOGRAM = "hist"
-    TEMPORAL = "temporal"
+    time_series = "time_series"
 
 
 @dataclass

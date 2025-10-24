@@ -431,7 +431,6 @@ namespace simbi::body {
     void update_sink_cache(HydroState& state, const MeshConfig& mesh)
     {
         if (!state.bodies.has_value() || state.bodies->accretion_count() == 0) {
-            state.bodies->sink_cache = std::nullopt;
             return;
         }
 

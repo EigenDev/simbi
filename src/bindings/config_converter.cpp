@@ -1,7 +1,19 @@
 #include "config_converter.hpp"
+#include "compat.hpp"
+#include "utility/config_dict.hpp"
+#include "utility/enums.hpp"
+
+#include <cstddef>
+#include <cstdint>
+#include <list>
+#include <pybind11/cast.h>
+#include <pybind11/detail/common.h>
 #include <pybind11/numpy.h>
 #include <pybind11/pytypes.h>
 #include <pybind11/stl.h>
+#include <string>
+#include <utility>
+#include <vector>
 
 namespace simbi {
     namespace py = pybind11;
@@ -31,6 +43,8 @@ namespace simbi {
         if (py::len(collection) == 0) {
             return config_value_t(std::vector<real>());
         }
+
+        py::module_ np = py::module_::import("numpy");
 
         // check first item to determine collection type
         py::object first_item = get_item(collection, 0);
@@ -76,8 +90,19 @@ namespace simbi {
 
         // sequence of same type
         else {
-            // Integer list
-            if (py::isinstance<py::int_>(first_item)) {
+            // unsigned integer list
+            if (py::isinstance(first_item, np.attr("uint64"))) {
+                std::vector<std::uint64_t> uint_vec;
+                for (size_t i = 0; i < py::len(collection); ++i) {
+                    uint_vec.push_back(
+                        py::cast<std::uint64_t>(get_item(collection, i))
+                    );
+                }
+                return config_value_t(std::move(uint_vec));
+            }
+
+            // signed integer list
+            else if (py::isinstance<py::int_>(first_item)) {
                 std::vector<std::int64_t> int_vec;
                 for (size_t i = 0; i < py::len(collection); ++i) {
                     int_vec.push_back(
@@ -145,13 +170,12 @@ namespace simbi {
         }
     }
 
-    // Main dictionary conversion function
     config_dict_t dict_to_config(const py::dict& dict)
     {
         config_dict_t result;
 
         for (auto item : dict) {
-            // Get key as string
+            // get key as string
             std::string key  = py::cast<std::string>(py::str(item.first));
             py::object value = py::reinterpret_borrow<py::object>(item.second);
 
@@ -160,12 +184,12 @@ namespace simbi {
                 continue;
             }
 
-            // Handle common vector keys specially
+            // handle common vector keys specially
             if ((key == "position" || key == "velocity" || key == "force") &&
                 py::isinstance<py::sequence>(value)) {
                 result[key] = convert_to_vector_of_doubles(value);
             }
-            // Basic scalar types
+            // basic scalar types
             else if (py::isinstance<py::bool_>(value)) {
                 result[key] = config_value_t(py::cast<bool>(value));
             }

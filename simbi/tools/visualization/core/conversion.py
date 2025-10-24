@@ -16,8 +16,8 @@ from .config import (
     MultidimConfig,
     PlotConfig,
     StyleConfig,
-    TemporalConfig,
     VisualizationConfig,
+    time_seriesConfig,
 )
 from .types import Bounds, ColorRange
 
@@ -48,7 +48,7 @@ def first_from_cycle(value):
 
 def validate_plot_type(
     plot_type: str | None, files: list[str]
-) -> Literal["line", "multidim", "temporal", "histogram"]:
+) -> Literal["line", "multidim", "time_series", "histogram"]:
     """Validate and auto-detect plot type if not specified."""
     if plot_type:
         return plot_type  # type: ignore[return-value]
@@ -149,9 +149,9 @@ def histogram_config_from_args(args: Namespace) -> HistogramConfig:
     )
 
 
-def temporal_config_from_args(args: Namespace) -> TemporalConfig:
-    """Build TemporalConfig from command line arguments."""
-    return TemporalConfig(
+def time_series_config_from_args(args: Namespace) -> time_seriesConfig:
+    """Build time_seriesConfig from command line arguments."""
+    return time_seriesConfig(
         weight=getattr(args, "weight", None),
         body_id=getattr(args, "body_id", None),
         single_file_mode=getattr(args, "single_file_mode", False),
@@ -178,7 +178,7 @@ def config_from_args(args: Namespace) -> VisualizationConfig:
         style=style_config_from_args(args),
         multidim=multidim_config_from_args(args),
         histogram=histogram_config_from_args(args),
-        temporal=temporal_config_from_args(args),
+        time_series=time_series_config_from_args(args),
         animation=animation_config_from_args(args),
         theme=theme_config_from_args(args),
     )

@@ -41,8 +41,8 @@ class AxisFormatter:
             self._format_multidim_plot(ax, setup, config, field_info)
         elif plot_type == "histogram":
             self._format_histogram_plot(ax, setup, config, field_info)
-        elif plot_type == "temporal":
-            self._format_temporal_plot(ax, setup, config, field_info)
+        elif plot_type == "time_series":
+            self._format_time_series_plot(ax, setup, config, field_info)
         else:
             raise ValueError(f"Unknown plot type: {plot_type}")
 
@@ -137,8 +137,8 @@ class AxisFormatter:
         if any(ylims):
             ax.set_ylim(ylims)
 
-    def _format_temporal_plot(self, ax, setup, config, field_info):
-        """Format a temporal plot axis"""
+    def _format_time_series_plot(self, ax, setup, config, field_info):
+        """Format a time_series plot axis"""
         # Set labels
         ax.set_xlabel(f"${config.get('style', {}).get('xlabel', 'x')}$")
         ax.set_ylabel(f"${config.get('style', {}).get('ylabel', 'y')}$")

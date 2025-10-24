@@ -113,8 +113,8 @@ def execute(args: Namespace, argv: Optional[list] = None) -> None:
                 theme=theme,
                 **kwargs,
             )
-        elif plot_type == "temporal":
-            api.plot_temporal(
+        elif plot_type == "time_series":
+            api.plot_time_series(
                 config,
                 files,
                 args.fields,

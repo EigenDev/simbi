@@ -8,6 +8,7 @@
 #include "physics/eos/isothermal.hpp"
 #include "state/cfd_ops.hpp"
 #include "state/hydro_state.hpp"
+#include "system/factory.hpp"
 #include "utility/bimap.hpp"
 #include "utility/enums.hpp"
 #include "utility/init_conditions.hpp"
@@ -116,22 +117,32 @@ namespace simbi::dispatch {
             const initial_conditions_t& init
         ) -> std::enable_if_t<valid_combination<R, D, G, S, Rec>, void>
         {
-            auto state = state::hydro_state_t<R, D, EoS>::from_init(
+            const auto ops = cfd::cfd_operations_t<R, D, S, Rec, EoS>{};
+            // auto base_mesh = mesh::mesh_config_t<D, G>::from_init_conditions(
+            //     init,
+            //     scale_factor,
+            //     scale_factor_derivative
+            // );
+
+            // auto state = state::hydro_state_t<R, D, EoS>::from_init(
+            //     cons_data,
+            //     prim_data,
+            //     bfield_data,
+            //     base_mesh,
+            //     init
+            // );
+
+            auto sim = ecs::create_simulation<R, D, G, EoS>(
+                init,
                 cons_data,
                 prim_data,
                 bfield_data,
-                init
-            );
-
-            auto ops  = cfd::cfd_operations_t<R, D, S, Rec, EoS>{};
-            auto mesh = mesh::mesh_config_t<D, G>::from_init_conditions(
-                init,
                 scale_factor,
                 scale_factor_derivative
             );
 
             // call visitor
-            visitor(state, ops, mesh);
+            visitor(sim, ops);
         }
 
         // fallback for invalid combinations

@@ -20,7 +20,7 @@ namespace simbi::tiling {
 
         constexpr auto size() const noexcept { return domain.size(); }
         constexpr auto start() const noexcept { return domain.start; }
-        constexpr auto end() const noexcept { return domain.end; }
+        constexpr auto end() const noexcept { return domain.fin; }
     };
 
     template <std::uint64_t Dims>
@@ -50,7 +50,7 @@ namespace simbi::tiling {
 
         for (std::size_t dd = 0; dd < Dims; ++dd) {
             start[dd] = domain.start[dd] + tile_index[dd] * tile_size[dd];
-            end[dd]   = std::min(start[dd] + tile_size[dd], domain.end[dd]);
+            end[dd]   = std::min(start[dd] + tile_size[dd], domain.fin[dd]);
         }
 
         return domain_t<Dims>{start, end};
@@ -65,7 +65,7 @@ namespace simbi::tiling {
     {
         iarray<Dims> num_tiles;
         for (std::size_t dd = 0; dd < Dims; ++dd) {
-            const auto extent = domain.end[dd] - domain.start[dd];
+            const auto extent = domain.fin[dd] - domain.start[dd];
             num_tiles[dd]     = (extent + tile_size[dd] - 1) / tile_size[dd];
         }
 
@@ -150,7 +150,7 @@ namespace simbi::tiling {
                 );
                 ghost_end[dd] = std::min(
                     tile.end()[dd] + halo_width[dd],
-                    global_domain.end[dd]
+                    global_domain.fin[dd]
                 );
             }
 

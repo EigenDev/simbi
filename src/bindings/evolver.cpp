@@ -58,25 +58,30 @@ namespace simbi::hydrostate {
             scale_factor,
             scale_factor_derivative,
             init,
-            [](auto& state, auto& ops, auto& mesh) {
+            [](auto& sim, const auto& ops) {
                 // initialize timestep
-                boundary::apply_boundary_conditions(state, mesh);
-                hydro::recover_primitives(state);
-                update_timestep(state, mesh);
+                // boundary::apply_boundary_conditions(state, mesh);
+                // hydro::recover_primitives(state);
+                // update_timestep(state, mesh);
 
-                // rev up those engines
-                with_simulation(state, mesh, [&](auto& sim) {
-                    sim.evolve([&](auto& ctx) {
-                        compute(ctx)
-                            .then([&](auto& s) { cfd::step(s, mesh, ops); })
-                            .then([&](auto& s) {
-                                if (s.bodies) {
-                                    body::evolve_bodies(s);
-                                }
-                            })
-                            .run();
-                    });
-                });
+                boundary::apply_boundary_conditions(sim);
+                hydro::recover_primitives(sim, 0);
+                update_timestep(sim, 0);
+                std::cout << "Initial timestep: " << sim.metadata().dt << "\n";
+
+                // rev up those fryers
+                // with_simulation(state, mesh, [&](auto& sim) {
+                //     sim.evolve([&](auto& ctx) {
+                //         compute(ctx)
+                //             .then([&](auto& s) { cfd::step(s, mesh, ops); })
+                //             .then([&](auto& s) {
+                //                 if (s.bodies) {
+                //                     body::evolve_bodies(s);
+                //                 }
+                //             })
+                //             .run();
+                //     });
+                // });
             }
         );
     }

@@ -11,7 +11,10 @@ import matplotlib.pyplot as plt
 from .components.histogram import HistogramPlotComponent, HistogramPlotProps
 from .components.line import LinePlotComponent, LinePlotProps
 from .components.multidim import MultidimPlotComponent
-from .components.temporal import TemporalPlotComponent, TemporalPlotProps
+from .components.time_series import (
+    time_seriesPlotComponent,
+    time_seriesPlotProps,
+)
 from .core.config import (
     VisualizationConfig,
 )
@@ -208,7 +211,7 @@ def plot_multidim(
     return figure
 
 
-def plot_temporal(
+def plot_time_series(
     config: VisualizationConfig,
     files: Sequence[str],
     fields: Sequence[str] = ["rho"],
@@ -217,7 +220,7 @@ def plot_temporal(
     **kwargs,
 ) -> Figure:
     """
-    Create a temporal plot visualization.
+    Create a time_series plot visualization.
 
     Args:
         files: Sequence of file paths to visualize (chronological order)
@@ -230,13 +233,13 @@ def plot_temporal(
         Figure object
     """
     if len(files) < 2:
-        raise ValueError("Temporal plots require at least two files")
+        raise ValueError("time_series plots require at least two files")
 
     figure = prepare_figure(config, len(files))
     time_series = create_time_series_data(files, fields)
 
     for i, field in enumerate(fields):
-        props = TemporalPlotProps(
+        props = time_seriesPlotProps(
             field_index=i,
             color=kwargs.get("color"),
             linewidth=kwargs.get("linewidth", 2.0),
@@ -250,7 +253,7 @@ def plot_temporal(
             trend_degree=kwargs.get("trend_degree", 1),
         )
 
-        component = TemporalPlotComponent(props=props)
+        component = time_seriesPlotComponent(props=props)
         if figure.fig is None:
             raise ValueError("Figure not initialized properly")
 
@@ -298,9 +301,9 @@ def animate(
         figure = plot_multidim(config, files[0], fields, None, False, **kwargs)
     elif plot_type == "histogram":
         figure = plot_histogram(config, files[0], fields, None, False, **kwargs)
-    elif plot_type == "temporal":
-        # Temporal doesn't make sense to animate
-        raise ValueError("Temporal plots cannot be animated")
+    elif plot_type == "time_series":
+        # time_series doesn't make sense to animate
+        raise ValueError("time_series plots cannot be animated")
     else:
         raise ValueError(f"Unknown plot type: {plot_type}")
 

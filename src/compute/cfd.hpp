@@ -51,7 +51,7 @@ namespace simbi::cfd {
 
             // compute divergence using pre-computed fluxes
             for (std::uint64_t dir = 0; dir < dims; ++dir) {
-                const auto offset     = unit_vectors::logical_offset<dims>(dir);
+                const auto offset     = unit_vectors::array_offset<dims>(dir);
                 const auto coord_plus = coord + offset;
 
                 // flux values at left and right faces
@@ -345,7 +345,7 @@ namespace simbi::cfd {
 
         for (std::uint64_t dd = 0; dd < dims; ++dd) {
             const auto ldd    = dims - 1 - dd;   // logical dimension
-            const auto offset = unit_vectors::logical_offset<dims>(ldd);
+            const auto offset = unit_vectors::array_offset<dims>(ldd);
             const real dx     = widths[ldd];
 
             const auto v_plus  = prims[coord + offset].vel;
@@ -407,7 +407,7 @@ namespace simbi::cfd {
 
             for (std::uint64_t dd = 0; dd < dims; ++dd) {
                 const auto ldd    = dims - 1 - dd;   // logical dimension
-                const auto offset = unit_vectors::logical_offset<dims>(ldd);
+                const auto offset = unit_vectors::array_offset<dims>(ldd);
                 const real dxi    = widths[ldd];
 
                 const auto v_plus  = prims[coord + offset].vel;
@@ -499,7 +499,7 @@ namespace simbi::cfd {
         constexpr auto dims = PrimField::dimensions;
 
         // get cells on either side of interface
-        const auto offset     = unit_vectors::logical_offset<dims>(dir);
+        const auto offset     = unit_vectors::array_offset<dims>(dir);
         const auto left_cell  = coord - offset;
         const auto right_cell = coord;
 

@@ -66,7 +66,7 @@ namespace simbi {
      * fields. Concrete visitors implement this interface to populate, validate,
      * or process the initial_conditions_t in different ways.
      */
-    class initial_conditions_tVisitor
+    class initial_conditions_visitor_t
     {
       public:
         // Time-related fields
@@ -162,8 +162,18 @@ namespace simbi {
             std::uint64_t& halo_radius
         ) = 0;
 
+        virtual void visit_fmr_parameters(
+            bool& fmr_enabled,
+            std::uint64_t& fmr_max_levels,
+            std::uint64_t& fmr_buffer_size,
+            bool& fmr_conservative_interpolation,
+            bool& fmr_output_all_levels,
+            std::vector<std::vector<real>>& fmr_regions,
+            std::vector<std::uint64_t>& fmr_ratios
+        ) = 0;
+
         // Allow for proper polymorphic destruction
-        virtual ~initial_conditions_tVisitor() = default;
+        virtual ~initial_conditions_visitor_t() = default;
     };
 
 }   // namespace simbi

@@ -101,7 +101,7 @@ class PlotConfig(BaseModel):
         ndim: Number of dimensions to visualize
     """
 
-    plot_type: Literal["line", "multidim", "histogram", "temporal"]
+    plot_type: Literal["line", "multidim", "histogram", "time_series"]
     fields: Sequence[str]
     ndim: int = 1
 
@@ -147,9 +147,9 @@ class HistogramConfig(BaseModel):
         return v
 
 
-class TemporalConfig(BaseModel):
+class time_seriesConfig(BaseModel):
     """
-    Configuration for temporal plots.
+    Configuration for time_series plots.
 
     Attributes:
         weight: Field to use for weighting
@@ -202,7 +202,7 @@ class VisualizationConfig(BaseModel):
         style: Styling configuration
         multidim: Multidimensional plot configuration
         histogram: Histogram configuration
-        temporal: Temporal plot configuration
+        time_series: time_series plot configuration
         animation: Animation configuration
     """
 
@@ -210,7 +210,7 @@ class VisualizationConfig(BaseModel):
     style: StyleConfig = Field(default_factory=StyleConfig)
     multidim: MultidimConfig = Field(default_factory=MultidimConfig)
     histogram: HistogramConfig = Field(default_factory=HistogramConfig)
-    temporal: TemporalConfig = Field(default_factory=TemporalConfig)
+    time_series: time_seriesConfig = Field(default_factory=time_seriesConfig)
     animation: AnimationConfig = Field(default_factory=AnimationConfig)
     theme: ThemeConfig = Field(default_factory=ThemeConfig)
 

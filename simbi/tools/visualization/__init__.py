@@ -10,13 +10,13 @@ from .api import (
     plot_histogram,
     plot_line,
     plot_multidim,
-    plot_temporal,
+    plot_time_series,
 )
 
 __all__ = [
     "plot_line",
     "plot_histogram",
     "plot_multidim",
-    "plot_temporal",
+    "plot_time_series",
     "animate",
 ]

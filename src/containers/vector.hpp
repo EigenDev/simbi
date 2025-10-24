@@ -690,11 +690,11 @@ namespace simbi {
         }
 
         // generate offset vector for logical dimension (0=x, 1=y, 2=z)
-        template <std::uint64_t Dims>
-        DEV constexpr auto logical_offset(std::uint64_t logical_dim)
-        {
-            return array_offset<Dims>(logical_dim);
-        }
+        // template <std::uint64_t Dims>
+        // DEV constexpr auto logical_offset(std::uint64_t logical_dim)
+        // {
+        //     return array_offset<Dims>(logical_dim);
+        // }
 
         template <std::uint64_t Dims>
         DEV constexpr auto ehat(std::uint64_t array_dim)

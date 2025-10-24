@@ -17,7 +17,9 @@ class ParseKVAction(argparse.Action):
                 getattr(namespace, self.dest)[key] = value
             except ValueError as ex:
                 message = "\nTraceback: {}".format(ex)
-                message += "\nError on '{}' || It should be 'key=value'".format(each)
+                message += "\nError on '{}' || It should be 'key=value'".format(
+                    each
+                )
                 raise argparse.ArgumentError(self, str(message))
 
 

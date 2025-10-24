@@ -8,7 +8,7 @@ class PlotConfig(TypedDict):
 
     files: Sequence[str]
     fields: Sequence[str]
-    plot_type: Literal["line", "multidim", "histogram", "temporal"]
+    plot_type: Literal["line", "multidim", "histogram", "time_series"]
     setup: str
     ndim: int
 

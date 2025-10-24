@@ -5,8 +5,10 @@
 #include "containers/vector.hpp"   // for vector_t
 #include "enums.hpp"
 #include "functional/monad/maybe.hpp"
+
 #include <cstdint>
 #include <exception>
+#include <iostream>
 #include <list>
 #include <stdexcept>
 #include <string>
@@ -28,20 +30,23 @@ namespace simbi {
         // The variant type that can hold various data types including nested
         // dictionary
         using ValueType = std::variant<
-            std::monostate,                   // For empty/null values
-            bool,                             // For boolean values
-            std::int64_t,                     // For integer values
-            std::uint64_t,                    // For unsigned integer values
-            real,                             // For floating point
-            std::string,                      // For string values
-            std::vector<real>,                // For numeric arrays
+            std::monostate,      // For empty/null values
+            bool,                // For boolean values
+            std::int64_t,        // For integer values
+            std::uint64_t,       // For unsigned integer values
+            std::uint32_t,       // For unsigned 32-bit integer values
+            real,                // For floating point
+            std::string,         // For string values
+            std::vector<real>,   // For numeric arrays
             std::vector<std::vector<real>>,   // For 2D arrays
             std::vector<std::string>,         // For string arrays
             std::vector<std::int64_t>,        // For integer arrays
-            std::pair<real, real>,            // For pairs of real values
-            config_dict_t,                    // For nested dictionaries
-            std::list<config_dict_t>,         // For list of dictionaries
-            BodyCapability                    // For BodyCapabilities
+            std::vector<std::uint64_t>,       // For unsigned integer arrays
+            std::vector<std::uint32_t>,   // For unsigned 32-bit integer arrays
+            std::pair<real, real>,        // For pairs of real values
+            config_dict_t,                // For nested dictionaries
+            std::list<config_dict_t>,     // For list of dictionaries
+            BodyCapability                // For BodyCapabilities
             >;
 
         ValueType value;
@@ -53,12 +58,15 @@ namespace simbi {
         config_value_t(bool v) : value(v) {}
         config_value_t(std::int64_t v) : value(v) {}
         config_value_t(std::uint64_t v) : value(v) {}
+        config_value_t(std::uint32_t v) : value(v) {}
         config_value_t(real v) : value(v) {}
         config_value_t(const char* v) : value(std::string(v)) {}
         config_value_t(std::string v) : value(std::move(v)) {}
         config_value_t(std::vector<real> v) : value(std::move(v)) {}
         config_value_t(std::vector<std::string> v) : value(std::move(v)) {}
         config_value_t(std::vector<std::int64_t> v) : value(std::move(v)) {}
+        config_value_t(std::vector<std::uint64_t> v) : value(std::move(v)) {}
+        config_value_t(std::vector<std::uint32_t> v) : value(std::move(v)) {}
         config_value_t(std::vector<std::vector<real>> v) : value(std::move(v))
         {
         }
@@ -92,6 +100,10 @@ namespace simbi {
         {
             return std::holds_alternative<std::uint64_t>(value);
         }
+        bool is_uint32() const
+        {
+            return std::holds_alternative<std::uint32_t>(value);
+        }
         bool is_real_number() const
         {
             return std::holds_alternative<real>(value);
@@ -105,11 +117,23 @@ namespace simbi {
         {
             return std::holds_alternative<std::vector<real>>(value);
         }
+        bool is_array_of_uint32() const
+        {
+            return std::holds_alternative<std::vector<std::uint32_t>>(value);
+        }
+        bool is_array_of_uint() const
+        {
+            return std::holds_alternative<std::vector<std::uint64_t>>(value);
+        }
         bool is_nested_array_of_floats() const
         {
             return std::holds_alternative<std::vector<std::vector<real>>>(
                 value
             );
+        }
+        bool is_nested_array_of_uints() const
+        {
+            return std::holds_alternative<std::vector<std::uint64_t>>(value);
         }
         bool is_dict() const
         {
@@ -214,6 +238,24 @@ namespace simbi {
                     throw std::runtime_error("Not a nested array of floats");
                 }
                 return std::get<std::vector<std::vector<real>>>(value);
+            }
+            else if constexpr (std::is_same_v<T, std::uint32_t>) {
+                if (!is_uint32()) {
+                    throw std::runtime_error("Not a uint32_t value");
+                }
+                return std::get<std::uint32_t>(value);
+            }
+            else if constexpr (std::is_same_v<T, std::vector<std::uint32_t>>) {
+                if (!is_array_of_uint32()) {
+                    throw std::runtime_error("Not an array of uint32_t values");
+                }
+                return std::get<std::vector<std::uint32_t>>(value);
+            }
+            else if constexpr (std::is_same_v<T, std::vector<std::uint64_t>>) {
+                if (!is_array_of_uint()) {
+                    throw std::runtime_error("Not an array of uint64_t values");
+                }
+                return std::get<std::vector<std::uint64_t>>(value);
             }
             else if constexpr (std::is_same_v<T, std::uint64_t>) {
                 if (is_uint()) {

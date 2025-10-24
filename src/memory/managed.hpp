@@ -53,7 +53,6 @@
 #include "hetero/adapter.hpp"
 #include <cstddef>   // for size_t
 #include <cstdint>   // for int64_t, uint64_t
-#include <new>       // for new, delete
 
 namespace simbi {
     // ===============================================================================

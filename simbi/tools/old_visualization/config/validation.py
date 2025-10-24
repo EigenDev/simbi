@@ -60,7 +60,7 @@ def create_default_config(plot_type: str) -> dict[str, Any]:
     elif plot_type == "histogram":
         config["plot"]["hist_type"] = "kinetic"
         config["style"]["log"] = True
-    elif plot_type == "temporal":
+    elif plot_type == "time_series":
         config["plot"]["weight"] = None
 
     # Add animation defaults if needed

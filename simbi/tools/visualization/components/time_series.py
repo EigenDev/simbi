@@ -1,4 +1,4 @@
-"""Temporal plot component for visualization."""
+"""time_series plot component for visualization."""
 
 from itertools import cycle
 from typing import Any, Dict, List, Optional
@@ -13,8 +13,8 @@ from pydantic import ValidationInfo, field_validator
 from ...utility import get_field_str
 from ..core.config import StyleConfig
 from ..core.types import Array, FieldData, PlotData
-from ..formatters.temporal import (
-    format_temporal_plot_axes,
+from ..formatters.time_series import (
+    format_time_series_plot_axes,
 )
 from .interface import Component, ComponentProps
 
@@ -22,7 +22,7 @@ from .interface import Component, ComponentProps
 def extract_time_data(field: FieldData) -> Array:
     """Extract time data from field.
 
-    For temporal plots, we expect the x-axis domain to represent time.
+    For time_series plots, we expect the x-axis domain to represent time.
     """
     # Use first domain array as time coordinates
     if field.domain:
@@ -73,7 +73,7 @@ def calculate_trend(times: Array, values: Array, degree: int = 1) -> Array:
     return np.polyval(coeffs, times)
 
 
-def create_temporal_style(
+def create_time_series_style(
     linewidth: float,
     alpha: float,
     color: Optional[str],
@@ -81,7 +81,7 @@ def create_temporal_style(
     marker: Optional[str],
     marker_size: float,
 ) -> Dict[str, Any]:
-    """Create styling for a temporal line."""
+    """Create styling for a time_series line."""
     style = {"linewidth": linewidth, "alpha": alpha, "linestyle": linestyle}
 
     # Add color if specified
@@ -96,8 +96,8 @@ def create_temporal_style(
     return style
 
 
-class TemporalPlotProps(ComponentProps):
-    """Properties for temporal plot component."""
+class time_seriesPlotProps(ComponentProps):
+    """Properties for time_series plot component."""
 
     field_index: int = 0
     color: Optional[str] = None
@@ -139,11 +139,11 @@ class TemporalPlotProps(ComponentProps):
         return v
 
 
-class TemporalPlotComponent(Component):
-    """Temporal plot visualization component."""
+class time_seriesPlotComponent(Component):
+    """time_series plot visualization component."""
 
-    def __init__(self, props: TemporalPlotProps):
-        """Initialize the temporal plot component."""
+    def __init__(self, props: time_seriesPlotProps):
+        """Initialize the time_series plot component."""
         self.props = props
         self.times = np.array([])
         self.values = np.array([])
@@ -165,7 +165,7 @@ class TemporalPlotComponent(Component):
         # self._main_line = self.ax.plot(
         #     empty_data,
         #     empty_data,
-        #     **create_temporal_style(
+        #     **create_time_series_style(
         #         self.props.linewidth,
         #         self.props.alpha,
         #         self.props.color,
@@ -205,7 +205,7 @@ class TemporalPlotComponent(Component):
         """Check if component is initialized."""
         return self._initialized
 
-    def update(self, props: TemporalPlotProps) -> None:
+    def update(self, props: time_seriesPlotProps) -> None:
         """Update component properties."""
         prev_props = self.props
         self.props = props
@@ -221,7 +221,7 @@ class TemporalPlotComponent(Component):
         else:
             # Update existing lines
             if self._main_line:
-                style = create_temporal_style(
+                style = create_time_series_style(
                     props.linewidth,
                     props.alpha,
                     props.color,
@@ -240,7 +240,7 @@ class TemporalPlotComponent(Component):
                     self._main_line.set_label(props.label)
 
     def render(self, data: PlotData, style: StyleConfig) -> None:
-        """Render the temporal plot with data."""
+        """Render the time_series plot with data."""
         if not self._initialized or not hasattr(self, "ax"):
             raise RuntimeError(
                 "Component not initialized. Call initialize() first."
@@ -278,6 +278,49 @@ class TemporalPlotComponent(Component):
                         linestyle=next(ls),
                         color=next(colors),
                     )
+
+                def compute_orbital_averages(time, mdot, time_scale):
+                    """Compute averages over orbital periods.
+
+                    Args:
+                        time: array of time values
+                        mdot: array of mdot values
+                        time_scale: orbital period (e.g. 2π)
+
+                    Returns:
+                        t_bins: array of time bin centers
+                        mdot_avg: array of averaged mdot values
+                    """
+                    n_orbits = (time[-1] - time[0]) / time_scale
+                    bins = np.linspace(time[0], time[-1], int(n_orbits) + 1)
+                    t_bins = (bins[1:] + bins[:-1]) / 2  # bin centers
+                    mdot_avg = np.array(
+                        [
+                            np.mean(
+                                mdot[(time >= bins[i]) & (time < bins[i + 1])]
+                            )
+                            for i in range(len(bins) - 1)
+                        ]
+                    )
+                    return t_bins / time_scale, mdot_avg
+
+                if field.name == "mdot":
+                    ma_times, ma_total_mdot = compute_orbital_averages(
+                        field.domain[idx],
+                        np.sum(field.values, axis=1),
+                        time_scale=style.time_scale or 2 * np.pi,
+                    )
+                    print(ma_times)
+
+                    self.ax.plot(
+                        ma_times,
+                        ma_total_mdot / SCALE,
+                        label=r"$M_{\rm total}$ (Orbital Average)",
+                        linestyle="solid",
+                        color="black",
+                        linewidth=1.5,
+                        marker="o",
+                    )
             else:
                 self.ax.plot(
                     field.domain, field.values, label=get_field_str(field.name)
@@ -312,7 +355,9 @@ class TemporalPlotComponent(Component):
         # ):
         #     self.ax.legend()
 
-        format_temporal_plot_axes(self.ax, data, self.props.field_index, style)
+        format_time_series_plot_axes(
+            self.ax, data, self.props.field_index, style
+        )
         # return self._get_active_lines()
 
     def _get_active_lines(self) -> List[Line2D]:

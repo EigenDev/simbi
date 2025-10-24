@@ -54,8 +54,8 @@ namespace simbi::boundary {
     {
         std::uint64_t contact_count = 0;
         for (std::uint64_t dim = 0; dim < Dims; ++dim) {
-            if (ghost.start[dim] == active.end[dim] ||
-                ghost.end[dim] == active.start[dim]) {
+            if (ghost.start[dim] == active.fin[dim] ||
+                ghost.fin[dim] == active.start[dim]) {
                 contact_count++;
             }
         }
@@ -76,10 +76,10 @@ namespace simbi::boundary {
     {
         vector_t<face_side_t, Dims> directions;
         for (std::uint64_t dim = 0; dim < Dims; ++dim) {
-            if (ghost.end[dim] == active.start[dim]) {
+            if (ghost.fin[dim] == active.start[dim]) {
                 directions[dim] = face_side_t::minus;
             }
-            else if (ghost.start[dim] == active.end[dim]) {
+            else if (ghost.start[dim] == active.fin[dim]) {
                 directions[dim] = face_side_t::plus;
             }
             else {
