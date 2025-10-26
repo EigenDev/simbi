@@ -9,7 +9,6 @@
 #include "mesh/mesh_config.hpp"
 #include "mesh/mesh_ops.hpp"
 #include "state/express_t.hpp"
-#include "utility/bimap.hpp"
 #include "utility/enums.hpp"
 #include "utility/helpers.hpp"
 
@@ -374,26 +373,20 @@ namespace simbi::boundary {
         auto interior_domain =
             contract_in_thin_dims(full_domain, thin_dims, mesh.halo_radius);
 
-        vector_t<std::uint64_t, Dims> dev_thin_dims;
-        for (std::uint64_t ii = 0; ii < thin_dims.size(); ++ii) {
-            dev_thin_dims[ii] = thin_dims[ii];
-        }
+        auto transform =
+            [interior_domain, thin_dims, cons] DEV(coordinate_t<Dims> coord) {
+                if (interior_domain.contains(coord)) {
+                    return cons(coord);   // interior cell
+                }
 
-        auto transform = [interior_domain,
-                          dev_thin_dims,
-                          cons] DEV(coordinate_t<Dims> coord) {
-            if (interior_domain.contains(coord)) {
-                return cons(coord);   // interior cell
-            }
+                // project to interior
+                auto interior_coord = coord;
+                for (auto thin_dim : thin_dims) {
+                    interior_coord[thin_dim] = interior_domain.start[thin_dim];
+                }
 
-            // project to interior
-            auto interior_coord = coord;
-            for (auto thin_dim : dev_thin_dims) {
-                interior_coord[thin_dim] = interior_domain.start[thin_dim];
-            }
-
-            return cons(interior_coord);
-        };
+                return cons(interior_coord);
+            };
 
         // apply transform
         cons = cons.insert(field(full_domain, transform));
