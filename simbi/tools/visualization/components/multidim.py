@@ -234,7 +234,7 @@ class MultidimPlotComponent(Component):
 
             if self.ax.name == "polar":
                 self._mirror_mesh = self.ax.pcolormesh(
-                    -x[::-1],
+                    -x,
                     y,
                     values,
                     cmap=cmap,
