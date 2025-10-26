@@ -158,12 +158,11 @@ namespace simbi::ecs {
             auto& meta    = sim.metadata();
             auto& sources = sim.sources();
 
-            // flux computation
             sink_cache_t{}(sim);
             staggered_fields_system_t{}(sim, ops, lvl);
 
             // base Godunov operator
-            const auto ell = godunov_op(hydro, mesh, meta, sources);
+            auto ell = godunov_op(hydro, mesh, meta, sources);
 
             // optional body effects
             auto be = body_effects_system_t<Sim::dimensions>{}(sim, lvl);

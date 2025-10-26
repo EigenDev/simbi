@@ -361,6 +361,7 @@ def load_data(file_path: str) -> SimData:
     with h5py.File(file_path, "r") as file:
         raw_data = read_raw_data(file).unwrap()
         data = parse_data(raw_data).unwrap()
+
     return SimData(data)
 
 

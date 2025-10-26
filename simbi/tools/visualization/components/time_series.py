@@ -304,13 +304,12 @@ class time_seriesPlotComponent(Component):
                     )
                     return t_bins / time_scale, mdot_avg
 
-                if field.name == "mdot":
+                if field.name == "mdot" and field.values.shape[1] > 1:
                     ma_times, ma_total_mdot = compute_orbital_averages(
                         field.domain[idx],
                         np.sum(field.values, axis=1),
                         time_scale=style.time_scale or 2 * np.pi,
                     )
-                    print(ma_times)
 
                     self.ax.plot(
                         ma_times,

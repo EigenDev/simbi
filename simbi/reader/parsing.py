@@ -195,10 +195,10 @@ def parse_bodies(
 
 def parse_diagnostics(groups: dict[str, Any]) -> BodyDiagnostics | None:
     """Parse body diagnostics from HDF5 groups"""
-    if "diagnostics" not in groups:
+    if "diagnostics" not in groups["bodies"]:
         return None
 
-    diag_data = groups["diagnostics"].get("body_diagnostics", {})
+    diag_data = groups["bodies"]["diagnostics"]
     if not diag_data:
         return None
 

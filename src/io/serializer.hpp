@@ -12,7 +12,6 @@
 #include <H5Cpp.h>
 #include <cstddef>
 #include <cstdint>
-#include <iostream>
 #include <string>
 #include <type_traits>
 #include <vector>
@@ -130,14 +129,13 @@ namespace simbi::io {
         write_integer(H5::Group& group, const std::string& name, const T& value)
         {
             try {
-
                 auto scalar_space = H5::DataSpace(H5S_SCALAR);
                 auto attr         = group.createAttribute(
                     name,
-                    H5::PredType::NATIVE_INT64,
+                    H5::PredType::NATIVE_INT,
                     scalar_space
                 );
-                attr.write(H5::PredType::NATIVE_INT64, &value);
+                attr.write(H5::PredType::NATIVE_INT, &value);
                 return result_t<void>::ok();
             }
             catch (const H5::Exception& e) {
@@ -543,9 +541,18 @@ namespace simbi::io {
                 const auto& pmass = prev_masses[body_idx];
 
                 // serialize force components for this body
-                h5::write_array(group, "force", delta.force_delta);
+                h5::write_array(
+                    group,
+                    "force_" + std::to_string(body_idx),
+                    delta.force_delta
+                );
+
                 // serialize torque
-                h5::write_array(group, "torque", delta.torque_delta);
+                h5::write_array(
+                    group,
+                    "torque_" + std::to_string(body_idx),
+                    delta.torque_delta
+                );
 
                 // serialize mass delta
                 h5::write_scalar(
@@ -586,7 +593,7 @@ namespace simbi::io {
             auto diag_group         = group.createGroup("diagnostics");
             write_diagnostics(diag_group, diagnostics, delta_time);
 
-            h5::write_scalar(group, "body_count", bodies.size());
+            h5::write_integer(group, "body_count", bodies.size());
             h5::write_string(group, "system_name", bodies.name());
             h5::write_string(
                 group,
@@ -613,7 +620,7 @@ namespace simbi::io {
                 );
                 h5::write_boolean(
                     binary_group,
-                    "is_prograde_orbit",
+                    "is_circular_orbit",
                     params.is_circular_orbit
                 );
             }
@@ -631,7 +638,7 @@ namespace simbi::io {
 
                 // capabilities
                 auto caps = body.caps();
-                h5::write_scalar(body_group, "capabilities", caps);
+                h5::write_integer(body_group, "capabilities", caps);
 
                 if constexpr (body::has_gravitational_capability_c<body_t>) {
                     h5::write_scalar(
@@ -655,7 +662,6 @@ namespace simbi::io {
                     );
                 }
             });
-
             return result_t<void>::ok();
         }
         catch (const H5::Exception& e) {
@@ -663,7 +669,6 @@ namespace simbi::io {
         }
     }
 
-    // main entry point
     template <typename Sim>
     result_t<void> serialize_sim_state(Sim& sim, const std::string& filename)
     {

@@ -183,7 +183,7 @@ namespace simbi::ecs {
         // add bodies if enabled
         if (bodies) {
             sim.registry.add(
-                level_0,
+                sim.global,
                 immersed_bodies_t<Dims>{.bodies = std::move(bodies.value())}
             );
 
@@ -202,7 +202,7 @@ namespace simbi::ecs {
             });
 
             sim.registry.add(
-                level_0,
+                sim.global,
                 body_info_t<Dims>{.diagnostics = std::move(diagnostics)}
             );
         }
