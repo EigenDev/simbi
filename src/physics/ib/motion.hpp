@@ -6,48 +6,46 @@
 
 #include <cmath>
 #include <cstddef>
-#include <iostream>
 
 namespace simbi::body {
-    template <typename HydroState>
-    void evolve_bodies(HydroState& state)
+    template <typename SimState>
+    void evolve_bodies(SimState& state)
     {
-        if constexpr (HydroState::dimensions < 2) {
+        if constexpr (SimState::dimensions < 2) {
             return;
         }
         else {
-            constexpr auto Dims = HydroState::dimensions;
-            if (!state.bodies || state.bodies->empty() ||
-                state.bodies->name() != "binary_system") {
+            constexpr auto Dims = SimState::dimensions;
+            auto& bodies        = state.bodies();
+            if (bodies.name() != "binary_system") {
                 return;
             }
 
-            if (state.bodies->reference_frame() == "corotating") {
+            if (bodies.reference_frame() == "corotating") {
                 return;   // nothing to do, already in rotating frame
             }
 
-            const auto binary_params = state.bodies->binary_params();
+            const auto binary_params = bodies.binary_params();
             const auto total_mass    = binary_params.total_mass;
             const auto a             = binary_params.semi_major;
             const auto omega         = std::sqrt(total_mass / (a * a * a));
-            const auto dt            = state.metadata.dt;
+            const auto dt            = state.metadata().dt;
 
             // the new collection to hold updated bodies
             auto new_coll = make_body_collection<Dims>();
 
-            if (state.bodies->binary_params_) {
+            if (bodies.binary_params_) {
                 new_coll = std::move(new_coll).with_system_config(
-                    state.bodies->binary_params()
+                    bodies.binary_params()
                 );
             }
 
-            if (!state.bodies->system_name_.empty()) {
-                new_coll =
-                    std::move(new_coll).with_name(state.bodies->system_name_);
+            if (!bodies.system_name_.empty()) {
+                new_coll = std::move(new_coll).with_name(bodies.system_name_);
             }
 
             auto updated_body_variants =
-                *state.bodies |
+                bodies |
                 collection_ops::map_bodies(
                     [omega, dt](const auto& body) -> body_variant_t<Dims> {
                         auto pos = vecops::rotate(body.position, omega * dt);
@@ -56,11 +54,11 @@ namespace simbi::body {
                     }
                 );
 
-            for (std::size_t ii = 0; ii < state.bodies->size(); ++ii) {
+            for (std::size_t ii = 0; ii < bodies.size(); ++ii) {
                 new_coll = std::move(new_coll).add(updated_body_variants[ii]);
             }
 
-            state.bodies = std::move(new_coll);
+            bodies = std::move(new_coll);
         }
     }
 }   // namespace simbi::body

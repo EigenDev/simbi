@@ -53,20 +53,6 @@ namespace simbi {
         }
     };
 
-    template <typename HydroState, typename MeshConfig>
-    auto create_timestep_field(const HydroState& state, const MeshConfig& mesh)
-    {
-        return compute_field_t{
-          timestep_op_t{
-            state.prim[mesh.domain],
-            state.metadata.gamma,
-            state.metadata.cfl,
-            mesh
-          },
-          mesh.domain
-        };
-    }
-
     template <typename PrimField, typename MeshConfig>
     auto create_timestep_field(
         const PrimField& prim,
@@ -80,20 +66,6 @@ namespace simbi {
           mesh.domain
         };
     }
-
-    // template <typename HydroState, typename MeshConfig>
-    // exec::future_t<real>
-    // compute_timestep(const HydroState& state, const MeshConfig& mesh)
-    // {
-    //     auto timestep_at = create_timestep_field(state, mesh);
-
-    //     return exec::default_executor().reduce(
-    //         timestep_at.domain(),
-    //         std::numeric_limits<real>::max(),
-    //         [timestep_at] DEV(auto coord) { return timestep_at(coord); },
-    //         [](real a, real b) { return std::min(a, b); }
-    //     );
-    // }
 
     template <typename PrimField, typename MeshConfig>
     exec::future_t<real> compute_timestep(
@@ -112,13 +84,6 @@ namespace simbi {
             [](real a, real b) { return std::min(a, b); }
         );
     }
-
-    // template <typename HydroState, typename MeshConfig>
-    // void update_timestep(HydroState& state, const MeshConfig& mesh)
-    // {
-    //     auto dt_future    = compute_timestep(state, mesh);
-    //     state.metadata.dt = dt_future.wait();
-    // }
 
     template <typename SimState>
     void update_timestep(SimState& sim, std::uint64_t level_id)

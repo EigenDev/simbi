@@ -6,9 +6,12 @@
 #include "ecs/components.hpp"
 #include "mesh/fmr/flux_correction.hpp"
 #include "mesh/fmr/transfer.hpp"
+#include "physics/em/ct_updater.hpp"
 #include "physics/ib/collection.hpp"
 #include "physics/ib/diagnostics.hpp"
+#include "update/adaptive_timestep.hpp"
 #include "update/bcs.hpp"
+#include "update/prim_recovery.hpp"
 #include "utility/enums.hpp"
 
 #include <cstdint>

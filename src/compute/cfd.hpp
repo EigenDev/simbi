@@ -7,24 +7,14 @@
 #include "containers/state_ops.hpp"
 #include "containers/vector.hpp"
 #include "domain/domain.hpp"
-#include "mesh/fmr/ghost_fill.hpp"
 #include "mesh/mesh_ops.hpp"
-#include "physics/em/ct_updater.hpp"
 #include "physics/ib/body.hpp"
 #include "physics/ib/body_delta.hpp"
-#include "physics/ib/collection.hpp"
 #include "physics/ib/effects.hpp"
-#include "update/adaptive_timestep.hpp"
-#include "update/bcs.hpp"
-#include "update/flux.hpp"
-#include "update/prim_recovery.hpp"
-#include "update/rk.hpp"
 #include "utility/enums.hpp"
 
 #include <cmath>
 #include <cstdint>
-#include <stdexcept>
-#include <string>
 #include <type_traits>
 
 namespace simbi::cfd {
@@ -75,23 +65,6 @@ namespace simbi::cfd {
      * flux divergence using pre-computed interface fluxes
      * returns: conservative update from flux divergence
      */
-    // template <typename HydroState, typename MeshConfig>
-    // auto flux_divergence(const HydroState& state, const MeshConfig& mesh)
-    // {
-    //     vector_t<
-    //         decltype(state.flux[0][mesh.face_domain[0]]),
-    //         HydroState::dimensions>
-    //         flux_views;
-
-    //     for (std::uint64_t dir = 0; dir < HydroState::dimensions; ++dir) {
-    //         flux_views[dir] = state.flux[dir][mesh.face_domain[dir]];
-    //     }
-    //     return compute_field_t{
-    //       flux_divergence_op_t{flux_views, mesh},
-    //       make_domain(mesh.domain.shape())
-    //     };
-    // }
-
     template <typename FluxField, typename MeshConfig>
     auto flux_divergence(const FluxField& flux, const MeshConfig& mesh)
     {
@@ -222,18 +195,6 @@ namespace simbi::cfd {
      * geometric source terms for non-Cartesian coordinates
      * returns: conservative update from geometric effects
      */
-    // template <typename HydroState, typename MeshConfig>
-    // auto geometric_sources(const HydroState& state, const MeshConfig& mesh)
-    // {
-    //     return compute_field_t{
-    //       geometric_source_op_t{
-    //         state.prim[mesh.domain],
-    //         mesh,
-    //         state.metadata.gamma
-    //       },
-    //       make_domain(mesh.domain.shape())
-    //     };
-    // }
     template <typename PrimField, typename MeshConfig>
     auto geometric_sources(
         const PrimField& prims,
@@ -335,21 +296,6 @@ namespace simbi::cfd {
      * immersed body effects
      * returns: conservative update from body forces/sources
      */
-    // template <typename HydroState, typename MeshConfig>
-    // auto body_effects(const HydroState& state, const MeshConfig& mesh)
-    // {
-    //     return compute_field_t{
-    //       body_effects_op_t{
-    //         state.bodies,
-    //         state.prim[mesh.domain],
-    //         mesh,
-    //         state.diagnostics.get(),
-    //         state.metadata.gamma,
-    //         state.metadata.dt
-    //       },
-    //       make_domain(mesh.domain.shape())
-    //     };
-    // }
     template <
         typename PrimField,
         typename MeshConfig,
@@ -618,26 +564,6 @@ namespace simbi::cfd {
      * compute interface fluxes using Riemann solvers
      * returns: flux field for a specific direction
      */
-    // template <typename HydroState, typename CfdOps, typename MeshConfig>
-    // auto compute_fluxes(
-    //     const HydroState& state,
-    //     const MeshConfig& mesh,
-    //     const CfdOps& ops,
-    //     std::uint64_t dir
-    // )
-    // {
-    //     return compute_field_t{
-    //       compute_fluxes_op_t{
-    //         state.prim[mesh.domain],
-    //         state.metadata,
-    //         mesh,
-    //         ops,
-    //         dir
-    //       },
-    //       make_domain(mesh.face_domain[dir].shape())
-    //     };
-    // }
-
     template <
         typename PrimField,
         typename MeshConfig,

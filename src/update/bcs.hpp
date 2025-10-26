@@ -312,49 +312,6 @@ namespace simbi::boundary {
         }
     }
 
-    // handle thin dimension boundary conditions
-    template <typename HydroState, typename MeshConfig>
-    void apply_thin_dimension_bcs(HydroState& state, const MeshConfig& mesh)
-    {
-        constexpr auto Dims = HydroState::dimensions;
-
-        // get thin dimensions from mesh
-        auto thin_dims = get_thin_dimensions(mesh);
-        if (thin_dims.empty()) {
-            return;
-        }
-
-        // contract domain in thin dimensions
-        auto full_domain = state.cons.domain();
-        auto interior_domain =
-            contract_in_thin_dims(full_domain, thin_dims, mesh.halo_radius);
-
-        vector_t<std::uint64_t, Dims> dev_thin_dims;
-        for (std::uint64_t ii = 0; ii < thin_dims.size(); ++ii) {
-            dev_thin_dims[ii] = thin_dims[ii];
-        }
-
-        auto cons      = state.cons;
-        auto transform = [interior_domain,
-                          dev_thin_dims,
-                          cons] DEV(coordinate_t<Dims> coord) {
-            if (interior_domain.contains(coord)) {
-                return cons(coord);   // interior cell
-            }
-
-            // project to interior
-            auto interior_coord = coord;
-            for (auto thin_dim : dev_thin_dims) {
-                interior_coord[thin_dim] = interior_domain.start[thin_dim];
-            }
-
-            return cons(interior_coord);
-        };
-
-        // apply transform
-        state.cons = state.cons.insert(field(full_domain, transform));
-    }
-
     template <typename SimState>
     void apply_thin_dimension_bcs(SimState& sim)
     {
@@ -409,35 +366,6 @@ namespace simbi::boundary {
         return contact_dim * 2 + (contact_dir == face_side_t::plus);
     }
 
-    template <typename HydroState, typename MeshConfig>
-    void face_bc_transform(
-        const ghost_region_t<HydroState::dimensions>& ghost,
-        HydroState& state,
-        const MeshConfig& mesh
-    )
-    {
-        constexpr auto Dims             = HydroState::dimensions;
-        auto [contact_dim, contact_dir] = find_contact_info(ghost.directions);
-        auto bc_index = get_bc_index(contact_dim, contact_dir);
-
-        auto ctx = bc_context_t{
-          .field         = state.cons,
-          .ghost_region  = ghost.domain,
-          .active_region = mesh.domain,
-          .mesh          = mesh,
-          .contact_dim   = contact_dim,
-          .contact_dir   = contact_dir,
-          .bc_index      = bc_index,
-          .bc_type       = state.metadata.boundary_conditions[bc_index],
-          .time          = state.metadata.time,
-          .bc_expr       = state.sources.bc_sources.data()
-        };
-
-        auto transform = make_bc_transform(ctx);
-
-        state.cons = state.cons.insert(field(ghost.domain, transform));
-    }
-
     template <typename SimState>
     void face_bc_transform(
         const ghost_region_t<SimState::dimensions>& ghost,
@@ -468,60 +396,6 @@ namespace simbi::boundary {
         auto transform = make_bc_transform(ctx);
 
         cons = cons.insert(field(ghost.domain, transform));
-    }
-
-    template <typename HydroState, typename MeshConfig>
-    void corner_bc_transform(
-        const ghost_region_t<HydroState::dimensions>& ghost,
-        HydroState& state,
-        const MeshConfig& mesh
-    )
-    {
-        constexpr auto Dims = HydroState::dimensions;
-
-        auto ctx = bc_context_t{
-          .field         = state.cons,
-          .ghost_region  = ghost.domain,
-          .active_region = mesh.domain,
-          .mesh          = mesh
-        };
-
-        auto& meta = state.metadata;
-        auto cons  = state.cons;
-        // handle multiple reflecting boundaries
-        auto transform = [=] DEV(coordinate_t<Dims> coord) {
-            auto interior_coord = coord;
-
-            // first map to interior
-            for (std::uint64_t dd = 0; dd < Dims; ++dd) {
-                if (ghost.directions[dd] != face_side_t::none) {
-                    interior_coord[dd] =
-                        (ghost.directions[dd] == face_side_t::minus)
-                            ? ctx.active_region.start[dd]
-                            : ctx.active_region.fin[dd] - 1;
-                }
-            }
-
-            // get base value from interior
-            auto value = cons(interior_coord);
-
-            //  apply any needed reflections
-            for (std::uint64_t dd = 0; dd < Dims; ++dd) {
-                if (ghost.directions[dd] != face_side_t::none) {
-                    auto bc_index = get_bc_index(dd, ghost.directions[dd]);
-                    if (meta.boundary_conditions[bc_index] ==
-                        BoundaryCondition::REFLECTING) {
-                        if constexpr (requires { value.mom; }) {
-                            auto momentum_idx       = (Dims - 1) - dd;
-                            value.mom[momentum_idx] = -value.mom[momentum_idx];
-                        }
-                    }
-                }
-            }
-            return value;
-        };
-
-        state.cons = state.cons.insert(field(ghost.domain, transform));
     }
 
     template <typename SimState>
@@ -580,27 +454,6 @@ namespace simbi::boundary {
     }
 
     // apply all boundary conditions
-    template <typename HydroState, typename MeshConfig>
-    void apply_boundary_conditions(HydroState& state, const MeshConfig& mesh)
-    {
-        auto full_domain   = mesh.full_domain;
-        auto active_domain = mesh.domain;
-        auto ghost_info    = analyze_ghost_regions(full_domain, active_domain);
-
-        for (auto ghost : ghost_info) {
-            if (ghost.type == ghost_type_t::face) {
-                face_bc_transform(ghost, state, mesh);
-            }
-            if constexpr (HydroState::is_mhd) {
-                if (ghost.type == ghost_type_t::corner) {
-                    corner_bc_transform(ghost, state, mesh);
-                }
-            }
-        }
-
-        apply_thin_dimension_bcs(state, mesh);
-    }
-
     template <typename SimState>
     void apply_boundary_conditions(SimState& sim)
     {

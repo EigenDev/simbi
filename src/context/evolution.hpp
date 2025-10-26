@@ -8,6 +8,7 @@
 #include "functional/fp.hpp"
 #include "io/console/printb.hpp"
 #include "io/exceptions.hpp"
+#include "physics/ib/motion.hpp"
 #include "progress.hpp"
 #include "timing.hpp"
 #include "utility/helpers.hpp"
@@ -131,21 +132,26 @@ namespace simbi::evolution {
         Sim& sim;
         const Ops& ops;
 
+        void configure(std::uint64_t lvl) const
+        {
+            ecs::ghost_fill_system_t{}(sim, lvl);
+            ecs::c2p_system_t{}(sim, lvl);
+            ecs::timestep_system_t{}(sim, lvl);
+        }
+
         // single level step
         void step_level(std::uint64_t lvl) const
         {
             // pipeline of systems
-            ecs::ghost_fill_system_t{}(sim, lvl);
-            ecs::c2p_system_t{}(sim, lvl);
-            ecs::timestep_system_t{}(sim, lvl);
+            configure(lvl);
             ecs::integration_system_t{}(sim, lvl, ops);
             sim.metadata().time += sim.metadata().dt;
         }
 
-        // all levels with subcycling
+        // all levels (TODO: subcycling)
         void step_all(
             const std::vector<ecs::entity_t>& levels,
-            ecs::registry_t& registry
+            const ecs::registry_t& registry
         ) const
         {
             for (std::size_t lvl = 0; lvl < levels.size(); ++lvl) {
@@ -158,6 +164,9 @@ namespace simbi::evolution {
             }
 
             ecs::flux_correction_system_t{}(sim);
+            if (sim.has_bodies()) {
+                body::evolve_bodies(sim);
+            }
         }
     };
 

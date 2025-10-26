@@ -59,6 +59,9 @@ namespace simbi::hydrostate {
                 // rev up those fryers
                 auto evo_state = initialize(sim, "Cool Simulation [TM]");
                 auto pipeline  = evolution::hydro_pipeline_t{sim, ops};
+                for (std::uint64_t lvl = 0; lvl < sim.num_levels(); ++lvl) {
+                    pipeline.configure(lvl);
+                }
                 evolution::run(
                     sim,
                     [&](auto& s) { pipeline.step_all(s.levels, s.registry); },
