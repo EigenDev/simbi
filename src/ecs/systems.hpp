@@ -13,6 +13,7 @@
 
 #include <cstdint>
 #include <memory>
+#include <stdexcept>
 
 namespace simbi::ecs {
     using namespace simbi::cfd;
@@ -89,7 +90,6 @@ namespace simbi::ecs {
                 return;
             }
             update_timestep(sim, lvl);
-            sim.metadata().time += sim.metadata().dt;
         }
     };
 
