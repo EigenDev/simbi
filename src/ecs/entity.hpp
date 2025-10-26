@@ -1,8 +1,8 @@
 #ifndef ENTITY_HPP
 #define ENTITY_HPP
 
-#include <any>             // for std::any
 #include <cstdint>         // for std::uint64_t
+#include <memory>          // for std::any
 #include <tuple>           // for std::tuple
 #include <typeindex>       // for std::type_index
 #include <unordered_map>   // for std::unordered_map
@@ -22,15 +22,14 @@ namespace simbi::ecs {
 
     using entity_t = std::uint64_t;
 
-    // minimal registry: stores components by type
     class registry_t
     {
         std::uint64_t next_id_{0};
 
-        // type_index -> (entity_id -> component)
+        // type_index -> (entity_id -> shared_ptr<void>)
         std::unordered_map<
             std::type_index,
-            std::unordered_map<entity_t, std::any>>
+            std::unordered_map<entity_t, std::shared_ptr<void>>>
             storage_;
 
       public:
@@ -39,22 +38,29 @@ namespace simbi::ecs {
         template <typename T>
         void add(entity_t entity, T component)
         {
-            auto type              = std::type_index(typeid(T));
-            storage_[type][entity] = std::move(component);
+            auto type = std::type_index(typeid(T));
+
+            // shared_ptr with custom deleter that knows the real type
+            storage_[type][entity] = std::shared_ptr<void>(
+                new T(std::move(component)),
+                [](void* ptr) { delete static_cast<T*>(ptr); }
+            );
         }
 
         template <typename T>
         T& get(entity_t entity)
         {
             auto type = std::type_index(typeid(T));
-            return std::any_cast<T&>(storage_[type].at(entity));
+            void* ptr = storage_[type].at(entity).get();
+            return *static_cast<T*>(ptr);
         }
 
         template <typename T>
         const T& get(entity_t entity) const
         {
             auto type = std::type_index(typeid(T));
-            return std::any_cast<const T&>(storage_.at(type).at(entity));
+            void* ptr = storage_.at(type).at(entity).get();
+            return *static_cast<const T*>(ptr);
         }
 
         template <typename T>
@@ -75,7 +81,6 @@ namespace simbi::ecs {
             storage_[type].erase(entity);
         }
 
-        // iterate over entities with component T
         template <typename T>
         auto view()
         {
@@ -83,18 +88,14 @@ namespace simbi::ecs {
             std::vector<std::pair<entity_t, T*>> result;
 
             if (storage_.contains(type)) {
-                for (auto& [entity, component_any] : storage_[type]) {
-                    result.emplace_back(
-                        entity,
-                        &std::any_cast<T&>(component_any)
-                    );
+                for (auto& [entity, ptr] : storage_[type]) {
+                    result.emplace_back(entity, static_cast<T*>(ptr.get()));
                 }
             }
 
             return result;
         }
 
-        // iterate over entities with components T and U
         template <typename T, typename U>
         auto view()
         {

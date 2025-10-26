@@ -1,6 +1,7 @@
 #ifndef INTERPOLATION_HPP
 #define INTERPOLATION_HPP
 
+#include "base/concepts.hpp"
 #include "compat.hpp"              // for real type
 #include "compute/field.hpp"       // for field_t
 #include "containers/vector.hpp"   // for vector_t, coordinate_t, unit_vectors
@@ -8,18 +9,18 @@
 #include "functional/fp.hpp"       // for fp::partial
 #include "utility/helpers.hpp"
 
+#include <cmath>       // for std::abs
 #include <cstdint>     // for std::uint64_t
 #include <stdexcept>   // for std::runtime_error
 
-namespace simbi::mesh::refinement {
-
-    // context for interpolation operations
+namespace simbi::mesh::fmr {
     template <typename T, std::uint64_t Dims>
     struct interpolation_context_t {
         const field_t<T, Dims>& coarse_field;   // source field
         domain_t<Dims> coarse_domain;           // domain in coarse coordinates
         domain_t<Dims> fine_domain;             // domain in fine coordinates
-        vector_t<real, Dims> ref_ratio;   // refinement ratios per dimension
+        // refinement ratios per dimension
+        std::uint64_t ref_ratio;
 
         iarray<Dims> coarse_offset;   // coarse domain origin
         iarray<Dims> fine_offset;     // fine domain origin
@@ -31,7 +32,7 @@ namespace simbi::mesh::refinement {
                 return false;
             }
             for (std::uint64_t ii = 0; ii < Dims; ++ii) {
-                if (ref_ratio[ii] <= 0) {
+                if (ref_ratio <= 0) {
                     return false;
                 }
             }
@@ -49,7 +50,7 @@ namespace simbi::mesh::refinement {
                 auto fine_local = fine_coord[ii] - fine_offset[ii];
                 coarse_coord[ii] =
                     coarse_offset[ii] +
-                    fine_local / static_cast<std::int64_t>(ref_ratio[ii]);
+                    fine_local / static_cast<std::int64_t>(ref_ratio);
             }
             return coarse_coord;
         }
@@ -61,8 +62,7 @@ namespace simbi::mesh::refinement {
             coordinate_t<Dims> offset;
             for (std::uint64_t ii = 0; ii < Dims; ++ii) {
                 auto fine_local = fine_coord[ii] - fine_offset[ii];
-                offset[ii] =
-                    fine_local % static_cast<std::int64_t>(ref_ratio[ii]);
+                offset[ii] = fine_local % static_cast<std::int64_t>(ref_ratio);
             }
             return offset;
         }
@@ -83,7 +83,7 @@ namespace simbi::mesh::refinement {
 
             if constexpr (Dims == 1) {
                 // 1D linear interpolation
-                const real x  = static_cast<real>(offset[0]) / ctx.ref_ratio[0];
+                const real x  = static_cast<real>(offset[0]) / ctx.ref_ratio;
                 const auto vL = ctx.coarse_field(coarse_coord);
                 const auto vR = ctx.coarse_field(
                     coarse_coord + unit_vectors::array_offset<Dims>(0)
@@ -93,8 +93,8 @@ namespace simbi::mesh::refinement {
             else if constexpr (Dims == 2) {
                 // bilinear interpolation using tensor product
                 const vector_t<real, Dims> t{
-                  static_cast<real>(offset[0]) / ctx.ref_ratio[0],
-                  static_cast<real>(offset[1]) / ctx.ref_ratio[1]
+                  static_cast<real>(offset[0]) / ctx.ref_ratio,
+                  static_cast<real>(offset[1]) / ctx.ref_ratio
                 };
 
                 // get corner values
@@ -118,9 +118,9 @@ namespace simbi::mesh::refinement {
             else if constexpr (Dims == 3) {
                 // trilinear interpolation
                 const vector_t<real, Dims> t{
-                  static_cast<real>(offset[0]) / ctx.ref_ratio[0],
-                  static_cast<real>(offset[1]) / ctx.ref_ratio[1],
-                  static_cast<real>(offset[2]) / ctx.ref_ratio[2]
+                  static_cast<real>(offset[0]) / ctx.ref_ratio,
+                  static_cast<real>(offset[1]) / ctx.ref_ratio,
+                  static_cast<real>(offset[2]) / ctx.ref_ratio
                 };
 
                 // get corner values (using your unit vector utilities)
@@ -194,7 +194,7 @@ namespace simbi::mesh::refinement {
                 const auto slope   = limit_slope(slope_l, slope_r);
 
                 // compute conservatively interpolated value
-                const real dx = 1.0 / ctx.ref_ratio[0];
+                const real dx = 1.0 / ctx.ref_ratio;
                 const real x =
                     (offset[0] + 0.5) * dx - 0.5;   // cell center offset
                 return v0 + x * slope;
@@ -224,8 +224,8 @@ namespace simbi::mesh::refinement {
 
                 // compute offsets from coarse cell center
                 const vector_t<real, Dims> dx{
-                  1.0 / ctx.ref_ratio[0],
-                  1.0 / ctx.ref_ratio[1]
+                  1.0 / ctx.ref_ratio,
+                  1.0 / ctx.ref_ratio
                 };
 
                 const vector_t<real, Dims> x{
@@ -267,9 +267,9 @@ namespace simbi::mesh::refinement {
 
                 // compute offsets
                 const vector_t<real, Dims> dx{
-                  1.0 / ctx.ref_ratio[0],
-                  1.0 / ctx.ref_ratio[1],
-                  1.0 / ctx.ref_ratio[2]
+                  1.0 / ctx.ref_ratio,
+                  1.0 / ctx.ref_ratio,
+                  1.0 / ctx.ref_ratio
                 };
 
                 const vector_t<real, Dims> x{
@@ -284,17 +284,17 @@ namespace simbi::mesh::refinement {
         }
 
       private:
-        // slope limiter to prevent oscillations
-        DUAL static T limit_slope(const T& slope_l, const T& slope_r)
+        DUAL static real limit_slope_component(real slope_l, real slope_r)
         {
             using namespace simbi::helpers;
             // [TODO]: make theta configurable
             constexpr real theta = 2.0;   // van Leer limiter parameter
+
             const auto r =
                 (std::abs(slope_l) < global::epsilon) ? 1.0 : slope_r / slope_l;
 
             if (r <= 0) {
-                return T{0};   // opposite signs - return zero slope
+                return real{0};   // opposite signs - return zero slope
             }
 
             // van Leer limiter with theta parameter
@@ -304,13 +304,22 @@ namespace simbi::mesh::refinement {
                        my_min(theta * r, my_min((1.0 + r) * 0.5, theta))
                    );
         }
+        // slope limiter to prevent oscillations
+        DUAL static T limit_slope(const T& slope_l, const T& slope_r)
+        {
+            T new_slope;
+            for (std::uint64_t ii = 0; ii << T::nmem; ++ii) {
+                new_slope[ii] = limit_slope_component(slope_l[ii], slope_r[ii]);
+            }
+            return new_slope;
+        }
     };
 
     // create interpolation field from context
     template <typename T, std::uint64_t Dims>
     auto make_interpolation_field(
         const interpolation_context_t<T, Dims>& ctx,
-        bool conservative = true
+        bool /*conservative*/ = true
     )
     {
         if (!ctx.is_valid()) {
@@ -331,6 +340,6 @@ namespace simbi::mesh::refinement {
         return field(ctx.fine_domain, fp::partial(transform, ctx));
     }
 
-}   // namespace simbi::mesh::refinement
+}   // namespace simbi::mesh::fmr
 
 #endif   // INTERPOLATION_HPP

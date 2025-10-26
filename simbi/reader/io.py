@@ -29,7 +29,7 @@ def read_group_recursively(group: h5py.Group) -> dict[str, Any]:
     for key in group.keys():
         item = group[key]
         if isinstance(item, h5py.Dataset):
-            result[key] = np.asarray(item[:])
+            result[key] = np.asarray(item[...])
         elif isinstance(item, h5py.Group):
             result[key] = read_group_recursively(item)
 
@@ -42,21 +42,53 @@ def read_raw_data(file: h5py.File) -> Result[RawHDF5]:
         attributes: dict[str, str | float | int | bool] = {}
         groups: dict[str, dict[str, str | float | int | bool | Array]] = {}
 
-        for key in file.keys():
-            item = file[key]
-            if isinstance(item, h5py.Dataset):
-                if key == "sim_info":
-                    # Read metadata attributes
-                    for attr_key, attr_value in item.attrs.items():
-                        if isinstance(attr_value, bytes):
-                            attributes[attr_key] = attr_value.decode("utf-8")
-                        else:
-                            attributes[attr_key] = attr_value
+        #  read metadata group
+        if "metadata" in file:
+            metadata_group = file["metadata"]
+            for key, value in metadata_group.attrs.items():
+                if isinstance(value, bytes):
+                    attributes[key] = value.decode("utf-8")
                 else:
-                    # Regular field data
-                    fields[key] = np.asarray(item[:])
-            elif isinstance(item, h5py.Group):
-                groups[key] = read_group_recursively(item)
+                    attributes[key] = value
+
+        # read level_0 group for fields
+        if "level_0" in file:
+            level_group = file["level_0"]
+            for key in level_group.keys():
+                if key in [
+                    "rho",
+                    "v1",
+                    "v2",
+                    "v3",
+                    "p",
+                    "chi",
+                    "b1",
+                    "b2",
+                    "b3",
+                ]:
+                    fields[key] = np.asarray(level_group[key][...])
+                # add mesh data to groups['mesh']
+                elif key == "mesh":
+                    groups["mesh_config"] = {}
+                    for mkey, value in level_group["mesh"].attrs.items():
+                        if isinstance(value, bytes):
+                            groups["mesh_config"][mkey] = value.decode("utf-8")
+                        else:
+                            groups["mesh_config"][mkey] = value
+
+        # read hierarchy info if present (for FMR)
+        if "hierarchy" in file:
+            groups["hierarchy"] = read_group_recursively(file["hierarchy"])
+            # Read additional levels
+            level = 1
+            while f"level_{level}" in file:
+                level_group = file[f"level_{level}"]
+                level_data = read_group_recursively(level_group)
+                groups[f"level_{level}"] = level_data
+                level += 1
+
+        if "bodies" in file:
+            groups["bodies"] = read_group_recursively(file["bodies"])
 
         return Result.ok(
             RawHDF5(fields=fields, attributes=attributes, groups=groups)

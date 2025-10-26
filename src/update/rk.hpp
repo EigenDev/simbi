@@ -62,17 +62,11 @@ namespace simbi::rk {
             }
         );
 
-        // final update
         workspace.cons = un.map([](auto u) { return u; });
         if constexpr (HydroState::is_mhd) {
             // correct energy density from CT algorithm
             em::update_energy_density(workspace, mesh);
         }
-        boundary::apply_boundary_conditions(workspace, mesh);
-        hydro::recover_primitives(workspace);
-        update_timestep(workspace, mesh);
-
-        workspace.metadata.time += dt;
     }
 }   // namespace simbi::rk
 #endif

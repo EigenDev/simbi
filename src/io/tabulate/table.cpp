@@ -611,16 +611,61 @@ namespace simbi {
             title             = std::move(other.title);
             subtitle          = std::move(other.subtitle);
             footer            = std::move(other.footer);
-            // copy other members...
+
+            // Add these missing members
+            messages            = std::move(other.messages);
+            message_board_title = std::move(other.message_board_title);
+            max_messages        = other.max_messages;
+            show_message_board  = other.show_message_board;
+            show_timestamps     = other.show_timestamps;
+            compact_messages    = other.compact_messages;
+
+            // Progress tracking
+            progress_percent         = other.progress_percent;
+            show_progress            = other.show_progress;
+            progress_style           = other.progress_style;
+            progress_description     = std::move(other.progress_description);
+            progress_units           = std::move(other.progress_units);
+            progress_speed           = other.progress_speed;
+            estimated_time_remaining = other.estimated_time_remaining;
+
+            // Advanced features
+            auto_resize_columns_ = other.auto_resize_columns_;
+            wrap_text            = other.wrap_text;
+            zebra_striping       = other.zebra_striping;
+            max_table_width      = other.max_table_width;
+            center_table_        = other.center_table_;
         }
 
         Table& Table::operator=(Table&& other) noexcept
         {
             if (this != &other) {
-                table_data        = std::move(other.table_data);
-                column_alignments = std::move(other.column_alignments);
-                column_widths     = std::move(other.column_widths);
-                // copy other members...
+                table_data           = std::move(other.table_data);
+                column_alignments    = std::move(other.column_alignments);
+                column_widths        = std::move(other.column_widths);
+                min_column_widths    = std::move(other.min_column_widths);
+                max_column_widths    = std::move(other.max_column_widths);
+                has_header           = other.has_header;
+                current_theme        = other.current_theme;
+                theme_config         = other.theme_config;
+                border_chars         = other.border_chars;
+                display_mode         = other.display_mode;
+                title                = std::move(other.title);
+                subtitle             = std::move(other.subtitle);
+                footer               = std::move(other.footer);
+                messages             = std::move(other.messages);
+                message_board_title  = std::move(other.message_board_title);
+                max_messages         = other.max_messages;
+                show_message_board   = other.show_message_board;
+                show_timestamps      = other.show_timestamps;
+                compact_messages     = other.compact_messages;
+                progress_percent     = other.progress_percent;
+                show_progress        = other.show_progress;
+                progress_style       = other.progress_style;
+                progress_description = std::move(other.progress_description);
+                progress_units       = std::move(other.progress_units);
+                progress_speed       = other.progress_speed;
+                estimated_time_remaining = other.estimated_time_remaining;
             }
             return *this;
         }
@@ -1871,7 +1916,7 @@ namespace simbi {
 
         void Table::refresh()
         {
-            // for dynamic tables, just call prstd::int64_t which handles screen
+            // for dynamic tables, just call print which handles screen
             // clearing
             print();
         }

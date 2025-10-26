@@ -1,18 +1,17 @@
 #ifndef FMR_FLUX_CORRECTION_HPP
 #define FMR_FLUX_CORRECTION_HPP
 
-#include "compat.hpp"
 #include "compute/field.hpp"
 #include "containers/vector.hpp"
 #include "domain/algebra.hpp"
 #include "domain/domain.hpp"
 #include "hierarchy.hpp"
 #include "level_descriptor.hpp"
-#include "mesh/refinement/transfer.hpp"
+#include "mesh/fmr/transfer.hpp"
 
 #include <cstdint>
 
-namespace simbi::mesh::refinement::fmr {
+namespace simbi::mesh::fmr {
 
     // map fine domain to coarse index space
     template <std::uint64_t Dims>
@@ -116,12 +115,9 @@ namespace simbi::mesh::refinement::fmr {
                     static_cast<std::int64_t>(ratio);
         }
 
-        auto fine_interface = domain_t<Dims>{fine_start, fine_end};
+        // auto fine_interface = domain_t<Dims>{fine_start, fine_end};
 
-        // restrict fine fluxes to coarse resolution
-        auto ratio_vec = ones<Dims, real>() * static_cast<real>(ratio);
-
-        auto restricted = make_restriction(fine_flux, interface, ratio_vec);
+        auto restricted = make_restriction(fine_flux, interface, ratio);
 
         // replace coarse fluxes with restricted fine fluxes
         for (const auto& coord : interface) {
@@ -175,6 +171,6 @@ namespace simbi::mesh::refinement::fmr {
         }
     }
 
-}   // namespace simbi::mesh::refinement::fmr
+}   // namespace simbi::mesh::fmr
 
 #endif

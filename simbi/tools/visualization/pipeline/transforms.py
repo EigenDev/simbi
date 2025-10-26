@@ -11,6 +11,7 @@ from ....core.types import ProcessedData
 from ....functional import curry
 from ....reader import SimData, parse_data, read_raw_data
 from ..core.config import VisualizationConfig
+from ..core.constants import FIELD_ALIASES
 from ..core.figure import Figure
 from ..core.types import Array, CoordSystem, FieldData, PlotData
 
@@ -112,7 +113,7 @@ def slice_to_1d(axis_names: set[str], positions: Sequence[float]) -> Callable:
 
 def extract_field(field_name: str) -> Callable[[SimData], Array]:
     """Extract a named field from simulation data."""
-    return lambda data: data[field_name]
+    return lambda data: data[FIELD_ALIASES.get(field_name, field_name)]
 
 
 def extract_coordinate(coord_name: str) -> Callable[[SimData], Array | None]:
@@ -171,19 +172,19 @@ def create_slicer_from_config(slice_config: dict[str, Any]) -> Callable:
 def transform_field(
     data: SimData,
     field_name: str,
-    ndim: int,
+    effective_dim: int,
     slice_config: Optional[dict[str, Any]] = None,
 ) -> FieldData:
     """Transform a single field based on dimension and slicing configuration."""
     if slice_config and "orthogonal_ax" in slice_config:
         vertices = False
-    elif ndim in (2, 3):
+    elif effective_dim in (2, 3):
         vertices = True
     else:
         vertices = False
     values = extract_field(field_name)(data)
-    domain = get_domain_for_dimension(data, ndim, vertices=vertices)
-    if slice_config:
+    domain = get_domain_for_dimension(data, effective_dim, vertices=vertices)
+    if slice_config and effective_dim >= 2:
         slicer = create_slicer_from_config(slice_config)
         values, domain = slicer({"values": values, "domain": domain})
 
@@ -192,7 +193,8 @@ def transform_field(
 
 def get_effective_dimensions(data: SimData, config: VisualizationConfig) -> int:
     """Determine the effective number of dimensions to use based on data and config."""
-    return min(config.plot.ndim, data.metadata.dimensions)
+    x = sum(r > 1 for r in data.mesh.shape)
+    return min(config.plot.ndim, x)
 
 
 def get_slice_config(config: VisualizationConfig) -> Optional[dict[str, Any]]:
@@ -276,7 +278,7 @@ def create_plot_data(
     ndim = get_effective_dimensions(data, config)
     slice_config = get_slice_config(config)
     field_transform = curry(
-        transform_field, data, ndim=ndim, slice_config=slice_config
+        transform_field, data, effective_dim=ndim, slice_config=slice_config
     )
     field_data = [field_transform(name) for name in field_names]
     return PlotData(

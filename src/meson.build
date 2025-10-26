@@ -3,7 +3,8 @@ sources = files(
   'bindings/config_converter.cpp',
   'bindings/driver.cpp',
   'bindings/evolver.cpp',
-  'functional/monad/serializer.cpp',
+  'context/progress.cpp',
+  # 'functional/monad/serializer.cpp',
   'io/console/statistics.cpp',
   'io/exceptions.cpp',
   'io/tabulate/table.cpp',
@@ -12,6 +13,5 @@ sources = files(
   'math/linearize.cpp',
   'physics/em/contact.cpp',
   'physics/ib/factory.cpp',
-  # 'physics/ib/system_serialization.cpp',
   'utility/helpers.cpp',
 )

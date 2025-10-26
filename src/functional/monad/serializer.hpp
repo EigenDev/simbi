@@ -938,24 +938,276 @@ namespace simbi::io {
     };
 
     // body collection serialization trait
+    // template <std::uint64_t Dims, std::uint64_t MaxBodies>
+    // struct serialization_trait_t<
+    //     std::optional<body::body_collection_t<Dims, MaxBodies>>> {
+    //     constexpr static bool serializable = true;
+
+    //     static result_t<serialization_context_t> serialize(
+    //         const std::optional<body::body_collection_t<Dims, MaxBodies>>&
+    //             optional_collection,
+    //         serialization_context_t ctx
+    //     )
+    //     {
+    //         if (!optional_collection.has_value()) {
+    //             return result_t<serialization_context_t>::error(
+    //                 "no body collection to serialize"
+    //             );
+    //         }
+
+    //         const auto& collection = optional_collection.value();
+    //         if (collection.empty()) {
+    //             return result_t<serialization_context_t>::error(
+    //                 "body collection is empty, nothing to serialize"
+    //             );
+    //         }
+
+    //         const auto dataset_name = "bodies/" + collection.name();
+
+    //         // serialize body count and metadata
+    //         auto scalar_space = H5::DataSpace(H5S_SCALAR);
+    //         auto group        = ctx.file.createGroup("bodies");
+
+    //         // basic collection info
+    //         auto size_attr = group.createAttribute(
+    //             "body_count",
+    //             H5::PredType::NATIVE_UINT64,
+    //             scalar_space
+    //         );
+    //         const auto size = collection.size();
+    //         size_attr.write(H5::PredType::NATIVE_UINT64, &size);
+
+    //         auto name_type =
+    //             H5::StrType(H5::PredType::C_S1, collection.name().size());
+    //         auto name_attr =
+    //             group.createAttribute("system_name", name_type,
+    //             scalar_space);
+    //         name_attr.write(name_type, collection.name().c_str());
+
+    //         auto ref_frame_type = H5::StrType(
+    //             H5::PredType::C_S1,
+    //             collection.reference_frame().size()
+    //         );
+    //         auto ref_frame_attr = group.createAttribute(
+    //             "reference_frame",
+    //             ref_frame_type,
+    //             scalar_space
+    //         );
+    //         ref_frame_attr.write(
+    //             ref_frame_type,
+    //             collection.reference_frame().c_str()
+    //         );
+
+    //         // serialize binary parameters if present
+    //         if (collection.binary_params_) {
+    //             auto binary_group  = group.createGroup("binary_params");
+    //             const auto& params = collection.binary_params();
+
+    //             auto write_param = [&](const char* name, real value) {
+    //                 auto attr = binary_group.createAttribute(
+    //                     name,
+    //                     H5::PredType::NATIVE_DOUBLE,
+    //                     scalar_space
+    //                 );
+    //                 attr.write(H5::PredType::NATIVE_DOUBLE, &value);
+    //             };
+
+    //             write_param("total_mass", params.total_mass);
+    //             write_param("semi_major", params.semi_major);
+    //             write_param("eccentricity", params.eccentricity);
+    //             write_param("mass_ratio", params.mass_ratio);
+    //             write_param("orbital_period", params.orbital_period);
+
+    //             auto bool_attr = binary_group.createAttribute(
+    //                 "is_circular_orbit",
+    //                 H5::PredType::NATIVE_HBOOL,
+    //                 scalar_space
+    //             );
+    //             bool_attr.write(
+    //                 H5::PredType::NATIVE_HBOOL,
+    //                 &params.is_circular_orbit
+    //             );
+    //         }
+
+    //         // serialize individual bodies
+    //         collection.visit_all([&](const auto& body) {
+    //             auto bg = group.createGroup("body_" +
+    //             std::to_string(body.idx)); serialize_body(body, bg);
+    //         });
+
+    //         return result_t<serialization_context_t>::ok(
+    //             ctx.with_dataset(dataset_name)
+    //         );
+    //     }
+
+    //   private:
+    //     template <typename Body>
+    //     static void serialize_body(const Body& body, H5::Group& group)
+    //     {
+    //         using namespace simbi::body;
+    //         auto scalar_space = H5::DataSpace(H5S_SCALAR);
+
+    //         // common properties
+    //         auto mass_attr = group.createAttribute(
+    //             "mass",
+    //             H5::PredType::NATIVE_DOUBLE,
+    //             scalar_space
+    //         );
+    //         mass_attr.write(H5::PredType::NATIVE_DOUBLE, &body.mass);
+
+    //         auto radius_attr = group.createAttribute(
+    //             "radius",
+    //             H5::PredType::NATIVE_DOUBLE,
+    //             scalar_space
+    //         );
+    //         radius_attr.write(H5::PredType::NATIVE_DOUBLE, &body.radius);
+
+    //         // position and velocity arrays
+    //         hsize_t vec_dims[] = {Dims};
+    //         auto vec_space     = H5::DataSpace(1, vec_dims);
+
+    //         auto pos_dataset = group.createDataSet(
+    //             "position",
+    //             H5::PredType::NATIVE_DOUBLE,
+    //             vec_space
+    //         );
+    //         pos_dataset.write(
+    //             body.position.data(),
+    //             H5::PredType::NATIVE_DOUBLE
+    //         );
+
+    //         auto vel_dataset = group.createDataSet(
+    //             "velocity",
+    //             H5::PredType::NATIVE_DOUBLE,
+    //             vec_space
+    //         );
+    //         vel_dataset.write(
+    //             body.velocity.data(),
+    //             H5::PredType::NATIVE_DOUBLE
+    //         );
+
+    //         // type-specific properties
+    //         if constexpr (has_gravitational_capability_c<Body>) {
+    //             auto soft_attr = group.createAttribute(
+    //                 "softening_length",
+    //                 H5::PredType::NATIVE_DOUBLE,
+    //                 scalar_space
+    //             );
+
+    //             const auto soft = softening_length(body);
+    //             soft_attr.write(H5::PredType::NATIVE_DOUBLE, &soft);
+    //         }
+
+    //         if constexpr (has_accretion_capability_c<Body>) {
+    //             auto sink_rate_attr = group.createAttribute(
+    //                 "sink_rate",
+    //                 H5::PredType::NATIVE_DOUBLE,
+    //                 scalar_space
+    //             );
+    //             const auto eff = sink_rate(body);
+    //             sink_rate_attr.write(H5::PredType::NATIVE_DOUBLE, &eff);
+
+    //             auto sink_delta_attr = group.createAttribute(
+    //                 "sink_delta",
+    //                 H5::PredType::NATIVE_DOUBLE,
+    //                 scalar_space
+    //             );
+    //             const auto sdelta = sink_delta(body);
+    //             sink_delta_attr.write(H5::PredType::NATIVE_DOUBLE, &sdelta);
+
+    //             auto accr_rad_attr = group.createAttribute(
+    //                 "accretion_radius",
+    //                 H5::PredType::NATIVE_DOUBLE,
+    //                 scalar_space
+    //             );
+    //             const auto rad = accretion_radius(body);
+    //             accr_rad_attr.write(H5::PredType::NATIVE_DOUBLE, &rad);
+    //         }
+
+    //         if constexpr (has_rigid_capability_c<Body>) {
+    //             auto inertia_attr = group.createAttribute(
+    //                 "inertia",
+    //                 H5::PredType::NATIVE_DOUBLE,
+    //                 scalar_space
+    //             );
+    //             const auto inert = inertia(body);
+    //             inertia_attr.write(H5::PredType::NATIVE_DOUBLE, &inert);
+
+    //             auto apply_no_slip_attr = group.createAttribute(
+    //                 "apply_no_slip",
+    //                 H5::PredType::NATIVE_HBOOL,
+    //                 scalar_space
+    //             );
+    //             const auto ans = apply_no_slip(body);
+    //             apply_no_slip_attr.write(H5::PredType::NATIVE_HBOOL, &ans);
+    //         }
+
+    //         // if constexpr (has_elastic_capability_c<Body>) {
+    //         //     auto elastic_mod_attr = group.createAttribute(
+    //         //         "elastic_modulus",
+    //         //         H5::PredType::NATIVE_DOUBLE,
+    //         //         scalar_space
+    //         //     );
+    //         //     const auto elastic_mod = body.elastic_modulus();
+    //         //     elastic_mod_attr.write(
+    //         //         H5::PredType::NATIVE_DOUBLE,
+    //         //         &elastic_mod
+    //         //     );
+
+    //         //     auto poisson_ratio_attr = group.createAttribute(
+    //         //         "poisson_ratio",
+    //         //         H5::PredType::NATIVE_DOUBLE,
+    //         //         scalar_space
+    //         //     );
+    //         //     const auto poisson_ratio = poisson_ratio(body);
+    //         //     poisson_ratio_attr.write(
+    //         //         H5::PredType::NATIVE_DOUBLE,
+    //         //         &poisson_ratio
+    //         //     );
+    //         // }
+
+    //         // if constexpr (has_deformable_capability_c<Body>) {
+    //         //     auto yield_stress_attr = group.createAttribute(
+    //         //         "yield_stress",
+    //         //         H5::PredType::NATIVE_DOUBLE,
+    //         //         scalar_space
+    //         //     );
+    //         //     const auto yield_stress = body.yield_stress();
+    //         //     yield_stress_attr.write(
+    //         //         H5::PredType::NATIVE_DOUBLE,
+    //         //         &yield_stress
+    //         //     );
+
+    //         //     auto plastic_strain_attr = group.createAttribute(
+    //         //         "plastic_strain",
+    //         //         H5::PredType::NATIVE_DOUBLE,
+    //         //         scalar_space
+    //         //     );
+    //         //     const auto plastic_strain = plastic_strain(body);
+    //         //     plastic_strain_attr.write(
+    //         //         H5::PredType::NATIVE_DOUBLE,
+    //         //         &plastic_strain
+    //         //     );
+    //         // }
+
+    //         auto cap_attr = group.createAttribute(
+    //             "capabilities",
+    //             H5::PredType::NATIVE_INT,
+    //             scalar_space
+    //         );
+    //         auto caps = body.caps();
+    //         cap_attr.write(H5::PredType::NATIVE_INT, &caps);
+    //     }
+    // };
     template <std::uint64_t Dims, std::uint64_t MaxBodies>
-    struct serialization_trait_t<
-        std::optional<body::body_collection_t<Dims, MaxBodies>>> {
+    struct serialization_trait_t<body::body_collection_t<Dims, MaxBodies>> {
         constexpr static bool serializable = true;
 
         static result_t<serialization_context_t> serialize(
-            const std::optional<body::body_collection_t<Dims, MaxBodies>>&
-                optional_collection,
+            const body::body_collection_t<Dims, MaxBodies>& collection,
             serialization_context_t ctx
         )
         {
-            if (!optional_collection.has_value()) {
-                return result_t<serialization_context_t>::error(
-                    "no body collection to serialize"
-                );
-            }
-
-            const auto& collection = optional_collection.value();
             if (collection.empty()) {
                 return result_t<serialization_context_t>::error(
                     "body collection is empty, nothing to serialize"
@@ -1354,6 +1606,31 @@ namespace simbi::io {
         };
     }
 
+    // Unified convenience function for complete body system serialization
+    auto serialize_body_system(const auto& sim, real time_since)
+    {
+        return [&sim, time_since](
+                   serialization_context_t ctx
+               ) -> result_t<serialization_context_t> {
+            // if no bodies, just pass through the context
+            if (!sim.has_bodies()) {
+                return result_t<serialization_context_t>::ok(ctx);
+            }
+
+            // otherwise serialize both collection and diagnostics
+            const auto& collection  = sim.bodies();
+            const auto& diagnostics = sim.diagnostics()->consolidate();
+
+            return serialize_body_collection(collection)(ctx).and_then(
+                [&diagnostics, time_since](auto inner_ctx) {
+                    return serialize_body_diagnostics(diagnostics, time_since)(
+                        inner_ctx
+                    );
+                }
+            );
+        };
+    }
+
     auto create_file(const std::string& filename)
         -> result_t<serialization_context_t>;
 
@@ -1406,19 +1683,19 @@ namespace simbi::io {
         };
     }
 
-    template <typename HydroState>
-    auto serialize_magnetic_fields(const HydroState& state)
+    template <Regime R, typename BFields>
+    auto serialize_magnetic_fields(const BFields& bfield)
     {
-        return [&state](
+        return [&bfield](
                    serialization_context_t ctx
                ) -> result_t<serialization_context_t> {
-            if constexpr (HydroState::is_mhd) {
-                return serialize_scalar_field(state.bstaggs[2], "b1")(ctx)
-                    .and_then(serialize_scalar_field(state.bstaggs[1], "b2"))
-                    .and_then(serialize_scalar_field(state.bstaggs[0], "b3"));
+            if constexpr (R == Regime::MHD || R == Regime::RMHD) {
+                return serialize_scalar_field(bfield[2], "b1")(ctx)
+                    .and_then(serialize_scalar_field(bfield[1], "b2"))
+                    .and_then(serialize_scalar_field(bfield[0], "b3"));
             }
             else {
-                (void) state;   // suppress unused warning
+                (void) bfield;
                 return result_t<serialization_context_t>::ok(ctx);
             }
         };
@@ -1427,12 +1704,12 @@ namespace simbi::io {
     auto close_file()
         -> std::function<result_t<std::string>(serialization_context_t)>;
 
-    template <typename HydroState>
-    auto compute_filename(const HydroState& state)
+    template <typename SimState>
+    auto compute_filename(const SimState& sim)
     {
         static std::int64_t tchunk_order_of_mag = 2;
 
-        const auto meta                = state.metadata;
+        const auto meta                = sim.metadata();
         const auto data_directory      = meta.data_dir;
         const auto step                = meta.checkpoint_index;
         const auto timestepping_of_mag = std::floor(std::log10(meta.time));
@@ -1449,11 +1726,11 @@ namespace simbi::io {
             }
             tnow = format_real(step);
         }
-        else if (!state.in_failure_state) {
+        else if (!sim.in_failure_state) {
             tnow = format_real(meta.checkpoint_identifier());
         }
         else {
-            if (state.was_interrupted) {
+            if (sim.was_interrupted) {
                 tnow = "interrupted";
             }
             else {
@@ -1465,7 +1742,6 @@ namespace simbi::io {
                string_format("%d.chkpt." + tnow + ".h5", meta.checkpoint_zones);
     }
 
-    // main serialization function for hydro_state_t
     template <hydro_state_serializable_c HydroState, typename MeshConfig>
     void serialize_hydro_state(
         HydroState& state,
@@ -1492,6 +1768,86 @@ namespace simbi::io {
             )
             .and_then(close_file());
 
+        last_chkpt_time = meta.checkpoint_time;
+    }
+
+    // New function to replace serialize_hydro_state
+    template <typename Sim>
+    void serialize_sim_state(Sim& sim, Table& table)
+    {
+        auto& meta                  = sim.metadata();
+        static auto last_chkpt_time = meta.prev_checkpoint_time;
+        const auto filename         = compute_filename(sim);
+        const auto delta_time       = meta.checkpoint_time - last_chkpt_time;
+
+        table.post_info("[Writing checkpoint to path: " + filename + "]");
+        table.refresh();
+
+        if (!sim.has_refinement()) {
+            // single level case, use default serialization
+            auto& hydro = sim.hydro(0);
+            auto& mesh  = sim.mesh(0);
+
+            create_file(filename)
+                .and_then(serialize_field_components(hydro.prim, "primitives"))
+                .and_then(
+                    serialize_magnetic_fields<Sim::regime_t>(hydro.bfield)
+                )
+                .and_then(serialize_attributes(mesh, "mesh_config"))
+                .and_then(serialize_attributes(meta))
+                .and_then(serialize_body_system(sim, delta_time))
+                .and_then(close_file());
+        }
+        else {
+            // FMR case - create level subdirectories
+            create_file(filename)
+                // first serialize global metadata
+                .and_then(serialize_attributes(meta))
+                .and_then(
+                    serialize_attributes(sim.hierarchy(), "fmr_hierarchy")
+                )
+                // then serialize each level
+                .and_then([&](auto ctx) -> result_t<serialization_context_t> {
+                    for (std::uint64_t lvl = 0; lvl < sim.num_levels(); ++lvl) {
+                        const auto level_group = "level_" + std::to_string(lvl);
+                        auto& hydro            = sim.hydro(lvl);
+                        auto& mesh             = sim.mesh(lvl);
+
+                        // create group for this level
+                        auto group = ctx.file.createGroup(level_group);
+
+                        std::cout << "Serializing level " << lvl << " to group "
+                                  << level_group << std::endl;
+                        std::cin.get();
+
+                        // serialize level data
+                        auto result =
+                            serialize_field_components(hydro.prim, level_group + "/primitives")(
+                                ctx
+                            );
+                        // .and_then(
+                        //     serialize_magnetic_fields<Sim::regime_t>(
+                        //         hydro.bfield
+                        //     )
+                        // )
+                        // .and_then(serialize_attributes(
+                        //     mesh,
+                        //     level_group + "/mesh_config"
+                        // ))
+                        // .and_then(serialize_attributes(
+                        //     sim.level_info(lvl),
+                        //     level_group + "/level_info"
+                        // ));
+
+                        if (!result.is_ok()) {
+                            return result;
+                        }
+                    }
+                    return result_t<serialization_context_t>::ok(ctx);
+                })
+                .and_then(serialize_body_system(sim, delta_time))
+                .and_then(close_file());
+        }
         last_chkpt_time = meta.checkpoint_time;
     }
 

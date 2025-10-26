@@ -11,8 +11,7 @@
 #include <stdexcept>   // for std::runtime_error
 #include <vector>      // for std::vector
 
-namespace simbi::mesh::refinement::fmr {
-
+namespace simbi::mesh::fmr {
     // helper: convert physical region to index space at a given refinement
     // level
     template <std::uint64_t Dims>
@@ -102,15 +101,6 @@ namespace simbi::mesh::refinement::fmr {
         for (std::uint64_t lvl = 1; lvl < hierarchy.num_levels; ++lvl) {
             cumulative_ratio *= config.refine_ratios[lvl - 1];
 
-            // convert physical region to index space at this refinement
-            auto refined_domain = to_index_space_at_level(
-                config.refine_regions[lvl - 1],
-                config.bounds_min,
-                config.bounds_max,
-                config.base_resolution,
-                cumulative_ratio
-            );
-
             // compute parent coverage (in parent's index space)
             auto parent_coverage = to_index_space_at_level(
                 config.refine_regions[lvl - 1],
@@ -120,12 +110,22 @@ namespace simbi::mesh::refinement::fmr {
                 cumulative_ratio / config.refine_ratios[lvl - 1]
             );
 
+            // fine domain in its own local coordinate system
+            // size = parent_size * refinement_ratio
+            iarray<Dims> fine_size;
+            for (std::uint64_t d = 0; d < Dims; ++d) {
+                fine_size[d] =
+                    (parent_coverage.fin[d] - parent_coverage.start[d]) *
+                    config.refine_ratios[lvl - 1];
+            }
+            auto refined_domain = make_domain(fine_size);
+
             hierarchy.levels[lvl] = {
               .level_id    = lvl,
               .domain      = refined_domain,
-              .full_domain = domain_algebra::expand(
+              .full_domain = domain_algebra::expand_end(
                   refined_domain,
-                  ones<Dims, std::int64_t>() *
+                  ones<Dims, std::int64_t>() * 2 *
                       static_cast<std::int64_t>(config.halo_radius)
               ),
               .ref_ratio = cumulative_ratio,
@@ -138,6 +138,6 @@ namespace simbi::mesh::refinement::fmr {
         return hierarchy;
     }
 
-}   // namespace simbi::mesh::refinement::fmr
+}   // namespace simbi::mesh::fmr
 
 #endif

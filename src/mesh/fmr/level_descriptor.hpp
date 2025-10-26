@@ -7,7 +7,7 @@
 
 #include <cstdint>   // for std::uint64_t
 
-namespace simbi::mesh::refinement {
+namespace simbi::mesh::fmr {
 
     template <std::uint64_t Dims>
     struct level_descriptor_t {
@@ -22,6 +22,6 @@ namespace simbi::mesh::refinement {
         domain_t<Dims> parent_coverage;   // which region of parent we refine
     };
 
-}   // namespace simbi::mesh::refinement
+}   // namespace simbi::mesh::fmr
 
 #endif

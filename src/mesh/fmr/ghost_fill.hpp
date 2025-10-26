@@ -1,17 +1,17 @@
 #ifndef FMR_GHOST_FILL_HPP
 #define FMR_GHOST_FILL_HPP
 
-#include "compat.hpp"                     // for real type
-#include "compute/field.hpp"              // for field_t
-#include "containers/vector.hpp"          // for iarray
-#include "domain/algebra.hpp"             // for domain_algebra
-#include "hierarchy.hpp"                  // for mesh_hierarchy_t
-#include "level_descriptor.hpp"           // for level_descriptor_t
-#include "mesh/refinement/transfer.hpp"   // for make_prolongation
+#include "compat.hpp"              // for real type
+#include "compute/field.hpp"       // for field_t
+#include "containers/vector.hpp"   // for iarray
+#include "domain/algebra.hpp"      // for domain_algebra
+#include "hierarchy.hpp"           // for mesh_hierarchy_t
+#include "level_descriptor.hpp"    // for level_descriptor_t
+#include "mesh/fmr/transfer.hpp"   // for make_prolongation
 
 #include <cstdint>   // for std::uint64_t
 
-namespace simbi::mesh::refinement::fmr {
+namespace simbi::mesh::fmr {
 
     // coordinate mapping: fine level → parent level
     template <std::uint64_t Dims>
@@ -90,8 +90,7 @@ namespace simbi::mesh::refinement::fmr {
         }
 
         // refinement ratio between levels
-        auto ratio     = fine_level.ref_ratio / parent_level.ref_ratio;
-        auto ratio_vec = ones<Dims, real>() * static_cast<real>(ratio);
+        auto ratio = fine_level.ref_ratio / parent_level.ref_ratio;
 
         // fill each ghost region
         for (const auto& ghost_region : ghost_regions) {
@@ -99,7 +98,8 @@ namespace simbi::mesh::refinement::fmr {
             auto prolonged = make_prolongation(
                 parent_field,
                 ghost_region,
-                ratio_vec,
+                parent_field.domain(),
+                ratio,
                 conservative
             );
 
@@ -138,6 +138,6 @@ namespace simbi::mesh::refinement::fmr {
         );
     }
 
-}   // namespace simbi::mesh::refinement::fmr
+}   // namespace simbi::mesh::fmr
 
 #endif

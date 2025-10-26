@@ -67,7 +67,7 @@ class StaggeredMHDState(NamedTuple):
     staggered_bfields: list[list[float]]
 
 
-class MagneticShockTube(SimbiBaseConfig):
+class K99(SimbiBaseConfig):
     """Komissarov (1999), 1D SRMHD test problems."""
 
     # Configuration parameters with choices

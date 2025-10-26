@@ -25,10 +25,31 @@ namespace simbi::ecs {
         std::vector<entity_t> levels;
         entity_t global;
 
+        bool in_failure_state{false};
+        bool was_interrupted{false};
+
         // query interface
         std::uint64_t num_levels() const { return levels.size(); }
 
         bool has_refinement() const { return num_levels() > 1; }
+
+        auto& level_info(std::uint64_t lvl)
+        {
+            return registry.get<level_info_t>(levels[lvl]);
+        }
+        auto& level_info(std::uint64_t lvl) const
+        {
+            return registry.get<level_info_t>(levels[lvl]);
+        }
+
+        auto& refinement(std::uint64_t lvl)
+        {
+            return registry.get<refinement_child_t<Dims>>(levels[lvl]);
+        }
+        auto& refinement(std::uint64_t lvl) const
+        {
+            return registry.get<refinement_child_t<Dims>>(levels[lvl]);
+        }
 
         auto& metadata()
         {
@@ -50,11 +71,53 @@ namespace simbi::ecs {
                 levels[level_id]
             );
         }
+        const auto& hydro(std::uint64_t level_id) const
+        {
+            return registry.get<hydro_fields_t<conserved_t, primitive_t, Dims>>(
+                levels[level_id]
+            );
+        }
 
         auto& mesh(std::uint64_t level_id)
         {
             return registry.get<mesh_geometry_t<Dims, G>>(levels[level_id])
                 .config;
+        }
+        const auto& mesh(std::uint64_t level_id) const
+        {
+            return registry.get<mesh_geometry_t<Dims, G>>(levels[level_id])
+                .config;
+        }
+
+        bool has_bodies() const
+        {
+            return registry.has<immersed_bodies_t<Dims>>(global);
+        }
+
+        auto& bodies()
+        {
+            return registry.get<immersed_bodies_t<Dims>>(global).bodies;
+        }
+        const auto& bodies() const
+        {
+            return registry.get<immersed_bodies_t<Dims>>(global).bodies;
+        }
+        auto& diagnostics()
+        {
+            return registry.get<body_info_t<Dims>>(global).diagnostics;
+        }
+        const auto& diagnostics() const
+        {
+            return registry.get<body_info_t<Dims>>(global).diagnostics;
+        }
+
+        auto& hierarchy()
+        {
+            return registry.get<fmr_hierarchy_t<Dims>>(global).hierarchy;
+        }
+        const auto& hierarchy() const
+        {
+            return registry.get<fmr_hierarchy_t<Dims>>(global).hierarchy;
         }
     };
 

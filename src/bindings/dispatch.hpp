@@ -3,12 +3,10 @@
 
 #include "compat.hpp"
 #include "containers/vector.hpp"
-#include "mesh/mesh_config.hpp"
+#include "ecs/factory.hpp"
 #include "physics/eos/ideal.hpp"
 #include "physics/eos/isothermal.hpp"
 #include "state/cfd_ops.hpp"
-#include "state/hydro_state.hpp"
-#include "system/factory.hpp"
 #include "utility/bimap.hpp"
 #include "utility/enums.hpp"
 #include "utility/init_conditions.hpp"

@@ -5,11 +5,12 @@ from typing import Any, Optional, Union
 
 import astropy.constants as const
 import astropy.units as units
-import h5py
 import matplotlib
 import matplotlib.pyplot as plt
 import numpy as np
 from numpy.typing import NDArray
+
+from simbi.reader.io import read_raw_data
 
 from ..functional.helpers import find_nearest
 
@@ -200,6 +201,8 @@ def flatten_fully(
 
 
 def get_dimensionality(files: Union[list[str], dict[int, list[str]]]) -> int:
+    import h5py
+
     dims = []
 
     def all_equal(x: list[int]) -> bool:
@@ -214,15 +217,16 @@ def get_dimensionality(files: Union[list[str], dict[int, list[str]]]) -> int:
     files = list(filter(bool, files))
     for file in files:
         with h5py.File(file, "r") as hf:
-            ds = dict(hf["sim_info"].attrs)
-            mesh = dict(hf["mesh_config"].attrs)
-            inactive_dims = sum(x == 1 for x in mesh["shape"])
-            ndim = ds["dimensions"] - inactive_dims
-            dims += [ndim]
-            if not all_equal(dims):
-                raise ValueError(
-                    "All simulation files require identical dimensionality"
-                )
+            dat = read_raw_data(hf)
+            if dat.is_ok:
+                raw = dat.unwrap()
+                shape = np.array(raw.groups["mesh_config"]["shape"], dtype=int)
+                dims.append(sum(int(r) > 1 for r in shape))
+
+    if dims and all_equal(dims):
+        ndim = dims[0]
+    else:
+        raise ValueError("Inconsistent dimensionality across files.")
 
     return ndim
 
@@ -269,7 +273,6 @@ def get_file_list(
     inputs: str, sort: bool = False
 ) -> Union[tuple[list[str], int], tuple[dict[int, list[str]], bool]]:
     from pathlib import Path
-    from typing import cast
 
     files: Union[list[str], dict[int, list[str]]]
     dirs = list(filter(lambda x: Path(x).is_dir(), inputs))

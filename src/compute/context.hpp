@@ -63,7 +63,6 @@ namespace simbi {
         real speed_{0.0};
         std::uint64_t nemits_{0};
 
-        // RAII constructor - sets up the "with" context
         simulation_context_t(
             State& state,
             Mesh& mesh,
@@ -93,7 +92,6 @@ namespace simbi {
             start_time_ = steady_clock::now();
         }
 
-        // RAII destructor - cleanup
         ~simulation_context_t()
         {
             table_.set_progress(100);
@@ -291,7 +289,9 @@ namespace simbi {
                     auto [x3, x2, x1] = mesh::centroid(coord, mesh_);
                     oss << "location: (" << x1 << ", " << x2 << ", " << x3
                         << "): \n";
-                    oss << "indices: [" << coord[2] << ", " << coord[1] << ", "
+                    oss << "indices: [" << coord[2] << ", " << coord[1]
+                        << ",
+                           "
                         << coord[0] << "]\n";
                 }
             }
@@ -316,6 +316,13 @@ namespace simbi {
     void with_simulation(State& state, Mesh& mesh, F&& computation)
     {
         simulation_context_t context{state, mesh, state.metadata.tend};
+        computation(context);
+    }
+
+    template <typename SimState, typename F>
+    void with_simulation(SimState& sim, F&& computation)
+    {
+        simulation_context_t context{sim};
         computation(context);
     }
 }   // namespace simbi

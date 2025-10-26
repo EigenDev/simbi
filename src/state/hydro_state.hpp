@@ -32,7 +32,7 @@
 
 namespace simbi::state {
     using namespace body::factory;
-    using namespace mesh::refinement::fmr;
+    using namespace mesh::fmr;
 
     /**
      * hydro_state_t --- the main simulation state structure

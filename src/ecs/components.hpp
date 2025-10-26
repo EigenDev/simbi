@@ -1,18 +1,20 @@
 #ifndef COMPONENTS_HPP
 #define COMPONENTS_HPP
 
-#include "compat.hpp"                  // for real type
-#include "compute/field.hpp"           // for field_t
-#include "containers/vector.hpp"       // for vector_t
-#include "domain/domain.hpp"           // for domain_t
-#include "entity.hpp"                  // for entity_t
-#include "mesh/mesh_config.hpp"        // for mesh_config_t
-#include "physics/ib/collection.hpp"   // for body_collection_t
+#include "compat.hpp"              // for real type
+#include "compute/field.hpp"       // for field_t
+#include "containers/vector.hpp"   // for vector_t
+#include "domain/domain.hpp"       // for domain_t
+#include "entity.hpp"              // for entity_t
+#include "mesh/fmr/hierarchy.hpp"
+#include "mesh/mesh_config.hpp"         // for mesh_config_t
+#include "physics/ib/collection.hpp"    // for body_collection_t
+#include "physics/ib/diagnostics.hpp"   // for body_diagnostics_t
 #include "state/express_t.hpp"
 #include "utility/enums.hpp"   // for Geometry
 
-#include <cmath>     // for std::pow, std::floor
 #include <cstdint>   // for std::uint64_t
+#include <memory>    // for std::unique_ptr
 #include <string>    // for std::string
 
 namespace simbi::ecs {
@@ -54,6 +56,11 @@ namespace simbi::ecs {
     template <std::uint64_t Dims>
     struct immersed_bodies_t {
         body::body_collection_t<Dims> bodies;
+    };
+
+    template <std::uint64_t Dims>
+    struct body_info_t {
+        std::unique_ptr<body::body_diagnostics_t<Dims>> diagnostics;
     };
 
     // global simulation state
@@ -101,32 +108,16 @@ namespace simbi::ecs {
         std::string data_dir;
 
         // queries
-        auto checkpoint_identifier() const
+
+        void advance_schedule(auto schedule)
         {
-            return dlogt != 0.0 ? checkpoint_index : checkpoint_time;
+            checkpoint_time  = schedule.checkpoint_time;
+            checkpoint_index = schedule.checkpoint_index;
         }
 
-        void update_checkpoint_time()
+        real checkpoint_identifier() const
         {
-            // Set the initial time interval
-            // based on the current time, advanced
-            // by the checkpoint interval to the nearest
-            // place in the log10 scale. If dlogt is 0
-            // then the interval is set to the current time
-            // shifted towards the nearest checkpoint interval
-            // if the checkpoint interval is 0 then the interval
-            // is set to the current time
-            if (dlogt != 0) {
-                checkpoint_time =
-                    time * std::pow(10.0, std::floor(std::log10(time) + dlogt));
-            }
-            else {
-                static auto round_place = 1.0 / checkpoint_interval;
-                checkpoint_time =
-                    checkpoint_interval +
-                    std::floor(time * round_place + 0.5) / round_place;
-            }
-            checkpoint_index += 1;
+            return dlogt != 0.0 ? checkpoint_index : checkpoint_time;
         }
     };
 
@@ -136,6 +127,11 @@ namespace simbi::ecs {
         state::expression_t<Dims> hydro_source;
         state::expression_t<Dims> gravity_source;
         vector_t<state::expression_t<Dims>, 2 * Dims> bc_sources;
+    };
+
+    template <std::uint64_t Dims>
+    struct fmr_hierarchy_t {
+        mesh::fmr::mesh_hierarchy_t<Dims> hierarchy;
     };
 
 }   // namespace simbi::ecs

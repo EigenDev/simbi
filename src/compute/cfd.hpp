@@ -7,6 +7,7 @@
 #include "containers/state_ops.hpp"
 #include "containers/vector.hpp"
 #include "domain/domain.hpp"
+#include "mesh/fmr/ghost_fill.hpp"
 #include "mesh/mesh_ops.hpp"
 #include "physics/em/ct_updater.hpp"
 #include "physics/ib/body.hpp"
@@ -74,16 +75,31 @@ namespace simbi::cfd {
      * flux divergence using pre-computed interface fluxes
      * returns: conservative update from flux divergence
      */
-    template <typename HydroState, typename MeshConfig>
-    auto flux_divergence(const HydroState& state, const MeshConfig& mesh)
+    // template <typename HydroState, typename MeshConfig>
+    // auto flux_divergence(const HydroState& state, const MeshConfig& mesh)
+    // {
+    //     vector_t<
+    //         decltype(state.flux[0][mesh.face_domain[0]]),
+    //         HydroState::dimensions>
+    //         flux_views;
+
+    //     for (std::uint64_t dir = 0; dir < HydroState::dimensions; ++dir) {
+    //         flux_views[dir] = state.flux[dir][mesh.face_domain[dir]];
+    //     }
+    //     return compute_field_t{
+    //       flux_divergence_op_t{flux_views, mesh},
+    //       make_domain(mesh.domain.shape())
+    //     };
+    // }
+
+    template <typename FluxField, typename MeshConfig>
+    auto flux_divergence(const FluxField& flux, const MeshConfig& mesh)
     {
-        vector_t<
-            decltype(state.flux[0][mesh.face_domain[0]]),
-            HydroState::dimensions>
+        vector_t<decltype(flux[0][mesh.face_domain[0]]), FluxField::dimensions>
             flux_views;
 
-        for (std::uint64_t dir = 0; dir < HydroState::dimensions; ++dir) {
-            flux_views[dir] = state.flux[dir][mesh.face_domain[dir]];
+        for (std::uint64_t dir = 0; dir < FluxField::dimensions; ++dir) {
+            flux_views[dir] = flux[dir][mesh.face_domain[dir]];
         }
         return compute_field_t{
           flux_divergence_op_t{flux_views, mesh},
@@ -120,17 +136,17 @@ namespace simbi::cfd {
      * gravity source terms
      * returns: conservative update from gravitational acceleration
      */
-    template <typename HydroState, typename MeshConfig>
-    auto gravity_sources(const HydroState& state, const MeshConfig& mesh)
+    template <typename MeshConfig, typename PrimField, typename T>
+    auto gravity_sources(
+        const PrimField& prims,
+        const MeshConfig& mesh,
+        const T* gravity_source,
+        real time,
+        real gamma
+    )
     {
         return compute_field_t{
-          gravity_source_op_t{
-            &state.sources.gravity_source,
-            state.prim[mesh.domain],
-            mesh,
-            state.metadata.time,
-            state.metadata.gamma
-          },
+          gravity_source_op_t{gravity_source, prims, mesh, time, gamma},
           make_domain(mesh.domain.shape())
         };
     }
@@ -161,16 +177,16 @@ namespace simbi::cfd {
      * hydro source terms (cooling, heating, etc.)
      * returns: conservative update from hydro sources
      */
-    template <typename HydroState, typename MeshConfig>
-    auto hydro_sources(const HydroState& state, const MeshConfig& mesh)
+    template <typename ConsField, typename MeshConfig, typename HydroSource>
+    auto hydro_sources(
+        const ConsField& cons,
+        const MeshConfig& mesh,
+        const HydroSource* source,
+        real time
+    )
     {
         return compute_field_t{
-          hydro_sources_op_t{
-            &state.sources.hydro_source,
-            state.cons[mesh.domain],
-            mesh,
-            state.metadata.time
-          },
+          hydro_sources_op_t{source, cons, mesh, time},
           make_domain(mesh.domain.shape())
         };
     }
@@ -206,15 +222,27 @@ namespace simbi::cfd {
      * geometric source terms for non-Cartesian coordinates
      * returns: conservative update from geometric effects
      */
-    template <typename HydroState, typename MeshConfig>
-    auto geometric_sources(const HydroState& state, const MeshConfig& mesh)
+    // template <typename HydroState, typename MeshConfig>
+    // auto geometric_sources(const HydroState& state, const MeshConfig& mesh)
+    // {
+    //     return compute_field_t{
+    //       geometric_source_op_t{
+    //         state.prim[mesh.domain],
+    //         mesh,
+    //         state.metadata.gamma
+    //       },
+    //       make_domain(mesh.domain.shape())
+    //     };
+    // }
+    template <typename PrimField, typename MeshConfig>
+    auto geometric_sources(
+        const PrimField& prims,
+        const MeshConfig& mesh,
+        real gamma
+    )
     {
         return compute_field_t{
-          geometric_source_op_t{
-            state.prim[mesh.domain],
-            mesh,
-            state.metadata.gamma
-          },
+          geometric_source_op_t{prims, mesh, gamma},
           make_domain(mesh.domain.shape())
         };
     }
@@ -238,15 +266,15 @@ namespace simbi::cfd {
 
         DEV constexpr auto operator()(auto coord) const
         {
-            if (!bodies.has_value() || bodies->empty()) {
-                return conserved_t{};
-            }
             conserved_t total_effect{};
+            if (bodies.empty()) {
+                return total_effect;
+            }
 
             const auto prim       = prims[coord];
-            const bool is_binary  = (bodies->size() == 2);
-            const auto sink_cache = bodies->sink_cache;
-            bodies->visit_all([&](const auto& body) {
+            const bool is_binary  = (bodies.size() == 2);
+            const auto sink_cache = bodies.sink_cache;
+            bodies.visit_all([&](const auto& body) {
                 using body_type = std::decay_t<decltype(body)>;
                 body_delta_t<Dims> delta{
                   .idx          = body.idx,
@@ -307,18 +335,37 @@ namespace simbi::cfd {
      * immersed body effects
      * returns: conservative update from body forces/sources
      */
-    template <typename HydroState, typename MeshConfig>
-    auto body_effects(const HydroState& state, const MeshConfig& mesh)
+    // template <typename HydroState, typename MeshConfig>
+    // auto body_effects(const HydroState& state, const MeshConfig& mesh)
+    // {
+    //     return compute_field_t{
+    //       body_effects_op_t{
+    //         state.bodies,
+    //         state.prim[mesh.domain],
+    //         mesh,
+    //         state.diagnostics.get(),
+    //         state.metadata.gamma,
+    //         state.metadata.dt
+    //       },
+    //       make_domain(mesh.domain.shape())
+    //     };
+    // }
+    template <
+        typename PrimField,
+        typename MeshConfig,
+        typename Bodies,
+        typename Diagnostics>
+    auto body_effects(
+        const PrimField& prims,
+        const MeshConfig& mesh,
+        const Bodies& bodies,
+        const Diagnostics& diagnostics,
+        real gamma,
+        real dt
+    )
     {
         return compute_field_t{
-          body_effects_op_t{
-            state.bodies,
-            state.prim[mesh.domain],
-            mesh,
-            state.diagnostics.get(),
-            state.metadata.gamma,
-            state.metadata.dt
-          },
+          body_effects_op_t{bodies, prims, mesh, diagnostics.get(), gamma, dt},
           make_domain(mesh.domain.shape())
         };
     }
@@ -571,22 +618,41 @@ namespace simbi::cfd {
      * compute interface fluxes using Riemann solvers
      * returns: flux field for a specific direction
      */
-    template <typename HydroState, typename CfdOps, typename MeshConfig>
+    // template <typename HydroState, typename CfdOps, typename MeshConfig>
+    // auto compute_fluxes(
+    //     const HydroState& state,
+    //     const MeshConfig& mesh,
+    //     const CfdOps& ops,
+    //     std::uint64_t dir
+    // )
+    // {
+    //     return compute_field_t{
+    //       compute_fluxes_op_t{
+    //         state.prim[mesh.domain],
+    //         state.metadata,
+    //         mesh,
+    //         ops,
+    //         dir
+    //       },
+    //       make_domain(mesh.face_domain[dir].shape())
+    //     };
+    // }
+
+    template <
+        typename PrimField,
+        typename MeshConfig,
+        typename CfdOps,
+        typename Metadata>
     auto compute_fluxes(
-        const HydroState& state,
+        const PrimField& prims,
         const MeshConfig& mesh,
         const CfdOps& ops,
+        const Metadata& metadata,
         std::uint64_t dir
     )
     {
         return compute_field_t{
-          compute_fluxes_op_t{
-            state.prim[mesh.domain],
-            state.metadata,
-            mesh,
-            ops,
-            dir
-          },
+          compute_fluxes_op_t{prims, metadata, mesh, ops, dir},
           make_domain(mesh.face_domain[dir].shape())
         };
     }
@@ -599,55 +665,33 @@ namespace simbi::cfd {
      * complete RHS for conservative update
      * returns: fused field of all source terms
      */
-    template <typename HydroState, typename MeshConfig>
-    auto godunov_op(const HydroState& state, const MeshConfig& mesh)
+    template <
+        typename HydroState,
+        typename MeshConfig,
+        typename Sources,
+        typename MetaData>
+    auto godunov_op(
+        const HydroState& state,
+        const MeshConfig& mesh,
+        const MetaData& meta,
+        const Sources& sources
+    )
     {
-        return flux_divergence(state, mesh) + gravity_sources(state, mesh) +
-               hydro_sources(state, mesh) + geometric_sources(state, mesh) +
-               body_effects(state, mesh);
-    }
-
-    /**
-     * time step update with CFL condition
-     * returns: new conservative state
-     */
-    template <typename HydroState, typename MeshConfig, typename CfdOps>
-    auto step(HydroState& state, const MeshConfig& mesh, const CfdOps& ops)
-    {
-        // u' = u + L(u)
-        // where L(u) is the godunov operator
-        if (state.metadata.timestepping == Timestepping::EULER) {
-            const auto dt = state.metadata.dt;
-            update_sink_cache(state, mesh);
-            update_staggered_fields(state, ops, mesh);
-
-            const auto ell = godunov_op(state, mesh) * dt;
-            auto u_p       = state.cons[mesh.domain];
-            u_p            = u_p.enum_map([=](auto coord, auto u) {
-                return u | structs::add_gas(ell(coord));
-            });
-
-            if constexpr (HydroState::is_mhd) {
-                // correct energy density from CT algorithm
-                em::update_energy_density(state, mesh);
-            }
-
-            boundary::apply_boundary_conditions(state, mesh);
-            hydro::recover_primitives(state);
-            update_timestep(state, mesh);
-            state.metadata.time += dt;
-        }
-        else if (state.metadata.timestepping == Timestepping::RK2) {
-            rk::rk2_step(state, mesh, ops);
-        }
-        else {
-            throw std::runtime_error(
-                "Unsupported timestepping method: " +
-                std::to_string(
-                    static_cast<std::uint64_t>(state.metadata.timestepping)
-                )
-            );
-        }
+        return flux_divergence(state.flux, mesh) +
+               gravity_sources(
+                   state.prim[mesh.domain],
+                   mesh,
+                   &sources.gravity_source,
+                   meta.time,
+                   meta.gamma
+               ) +
+               hydro_sources(
+                   state.cons[mesh.domain],
+                   mesh,
+                   &sources.hydro_source,
+                   meta.time
+               ) +
+               geometric_sources(state.prim[mesh.domain], mesh, meta.gamma);
     }
 }   // namespace simbi::cfd
 
