@@ -134,7 +134,7 @@ namespace simbi::ecs {
             }
 
             // now we can safely use
-            auto effects = body_effects(
+            return body_effects(
                 hydro.prim[mesh.domain],
                 mesh,
                 sim.bodies(),
@@ -142,7 +142,6 @@ namespace simbi::ecs {
                 meta.gamma,
                 meta.dt
             );
-            return effects;
         }
     };
 

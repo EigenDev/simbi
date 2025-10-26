@@ -534,27 +534,6 @@ namespace simbi::body {
         return props;
     }
 
-    template <typename HydroState, typename MeshConfig>
-    void update_sink_cache(HydroState& state, const MeshConfig& mesh)
-    {
-        if (!state.bodies.has_value() || state.bodies->accretion_count() == 0) {
-            return;
-        }
-
-        constexpr auto Dims      = MeshConfig::dimensions;
-        constexpr auto MaxBodies = 2;
-
-        if (!state.bodies->sink_cache.has_value()) {
-            state.bodies->sink_cache = sink_cache_t<Dims, MaxBodies>{};
-        }
-
-        state.bodies->visit_accretion([&](const auto& body) {
-            auto props = compute_sink_properties(body, state, mesh);
-            (*state.bodies->sink_cache)[body.idx] = props;
-            (*state.bodies->sink_cache).count++;
-        });
-    }
-
     template <typename SimState>
     void update_sink_cache(SimState& sim)
     {

@@ -56,10 +56,13 @@ namespace simbi::evolution {
         // initial checkpoint
         state.progress.table.refresh();
         if (meta.time == 0.0 || meta.checkpoint_index == 0) {
+            if (sim.in_failure_state) {
+                throw exception::SimulationFailureException();
+            }
             checkpoint::save(sim, state.progress);
-            state.schedule.advance(meta.time);
-            meta.advance_schedule(state.schedule);
         }
+        state.schedule.advance(meta.time);
+        meta.advance_schedule(state.schedule);
         while (meta.time < meta.tend && !state.should_stop) {
             try {
                 state.timer.start();

@@ -662,6 +662,7 @@ namespace simbi::io {
                     );
                 }
             });
+            last_chkpt_time = meta.checkpoint_time;
             return result_t<void>::ok();
         }
         catch (const H5::Exception& e) {
