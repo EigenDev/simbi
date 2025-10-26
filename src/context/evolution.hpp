@@ -97,14 +97,16 @@ namespace simbi::evolution {
                 helpers::catch_signals();
             }
             catch (exception::InterruptException& e) {
-                state.should_stop = true;
+                sim.was_interrupted = true;
+                state.should_stop   = true;
                 state.progress.table.post_error(
                     std::string("Interrupted: ") + e.what()
                 );
                 checkpoint::save(sim, state.progress);
             }
             catch (exception::SimulationFailureException& e) {
-                state.should_stop = true;
+                sim.in_failure_state = true;
+                state.should_stop    = true;
                 state.progress.table.post_error(
                     std::string("Failed: ") + e.what()
                 );
@@ -137,6 +139,7 @@ namespace simbi::evolution {
             ecs::c2p_system_t{}(sim, lvl);
             ecs::timestep_system_t{}(sim, lvl);
             ecs::integration_system_t{}(sim, lvl, ops);
+            sim.metadata().time += sim.metadata().dt;
         }
 
         // all levels with subcycling
