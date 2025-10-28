@@ -17,6 +17,7 @@ from ..core.config import StyleConfig
 from ..core.types import Array, FieldData, PlotData
 from ..formatters.line import format_line_plot_axes
 from .interface import Component, ComponentProps
+from .line_refinement import compose_line_segments
 
 
 def create_line_style(
@@ -129,11 +130,13 @@ def should_use_legend(show_legend: Optional[bool], field_count: int) -> bool:
 
 def update_legend(ax: Axes, lines: list[Line2D]) -> None:
     """Update legend if any lines have labels."""
-    if any(
-        line.get_label() and not str(line.get_label()).startswith("_")
-        for line in lines
-    ):
-        ax.legend()
+    print(lines)
+    ...
+    # if any(
+    #     line.get_label() and not str(line.get_label()).startswith("_")
+    #     for line in lines
+    # ):
+    #     ax.legend()
 
 
 class LinePlotProps(ComponentProps):
@@ -146,6 +149,11 @@ class LinePlotProps(ComponentProps):
     show_legend: Optional[bool] = None
     marker_size: float = 6.0
     alpha: float = 1.0
+
+    # refinment options
+    show_all_levels: bool = True
+    boundary_markers: bool = True
+    boundary_marker_style: str = "o"
 
     @field_validator("field_indices")
     @classmethod
@@ -256,6 +264,48 @@ class LinePlotComponent(Component):
             )
         self._lines = []
 
+    def _render_refined_line(
+        self, field: FieldData, style: dict[str, Any], label: Optional[str]
+    ) -> list[Line2D]:
+        """Render line data with refinement awareness."""
+        if not hasattr(self, "ax"):
+            raise RuntimeError("Component not initialized")
+
+        # Process data into refined segments
+        refined_data = compose_line_segments(
+            field, show_all_levels=self.props.show_all_levels
+        )
+
+        lines = []
+        # Plot each refinement level
+        for level, (x_data, y_data) in enumerate(refined_data.level_data):
+            level_label = ""
+            # if "_L" in field name, change the label to latex format
+            if label:
+                if "_L" in label:
+                    b = label.split("_")
+                    level_label = get_field_str(b[0]) + "$_{{{0}}}$".format(
+                        b[1]
+                    )
+                else:
+                    level_label = get_field_str(label)
+
+            line = self.ax.plot(x_data, y_data, label=level_label, **style)[0]
+            lines.append(line)
+
+        # Add boundary markers if enabled
+        if self.props.boundary_markers and refined_data.boundaries:
+            x_bounds, y_bounds = zip(*refined_data.boundaries)
+            self.ax.plot(
+                x_bounds,
+                y_bounds,
+                self.props.boundary_marker_style,
+                markersize=self.props.marker_size,
+                label="_boundary_markers",  # Hide from legend
+            )
+
+        return lines
+
     def _process_fields(
         self, data: PlotData, use_legend: bool
     ) -> list[Optional[Line2D]]:
@@ -289,10 +339,5 @@ class LinePlotComponent(Component):
 
         label = get_line_label(field, line_idx, self.props.labels, use_legend)
 
-        # Create or update line
-        if line_idx < len(self._lines):
-            # Update existing line
-            return update_line(self._lines[line_idx], field, style, label)
-        else:
-            # Create new line
-            return create_line(self.ax, field, style, label)
+        # Use refinement-aware rendering
+        return self._render_refined_line(field, style, label)

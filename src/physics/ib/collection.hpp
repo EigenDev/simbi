@@ -542,7 +542,6 @@ namespace simbi::body {
         }
 
         auto& bodies = sim.bodies();
-
         if (bodies.accretion_count() == 0) {
             return;
         }
@@ -554,11 +553,10 @@ namespace simbi::body {
             bodies.sink_cache = sink_cache_t<Dims, MaxBodies>{};
         }
 
+        auto finest_level = sim.num_levels() - 1;
         bodies.visit_accretion([&](const auto& body) {
-            for (std::uint64_t lvl = 0; lvl < sim.num_levels(); lvl++) {
-                auto props = compute_sink_properties(body, sim, lvl);
-                (*bodies.sink_cache)[body.idx] = props;
-            }
+            auto props = compute_sink_properties(body, sim, finest_level);
+            (*bodies.sink_cache)[body.idx] = props;
             bodies.sink_cache->count++;
         });
     }

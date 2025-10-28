@@ -20,7 +20,7 @@ from .core.config import (
 )
 from .core.conversion import multidim_props_from_args
 from .core.figure import Figure
-from .pipeline.transforms import (
+from .pipeline import (
     create_plot_data,
     create_time_series_data,
     load_data,
@@ -53,14 +53,21 @@ def plot_line(
     if isinstance(files, str):
         files = [files]
 
-    figure = prepare_figure(config, len(files))
     sim_data = load_data(files[0])
+    nlvls = sim_data.hierarchy().num_levels if sim_data.hierarchy else 1
+    figure = prepare_figure(config, len(files), nlvls=nlvls)
     plot_data = create_plot_data(sim_data, fields, config)
 
     # Add line component for each field
     for i, field in enumerate(fields):
+        if sim_data.hierarchy is not None:
+            # we make a list over all levels with "_L" in their name
+            n = sim_data.hierarchy().num_levels
+            indices = [n * i + j for j in range(n)]
+        else:
+            indices = [i]
         props = LinePlotProps(
-            field_indices=[i],
+            field_indices=indices,
             labels=kwargs.get("labels", [field]),
             linewidth=kwargs.get("linewidth", 2.0),
             markers=kwargs.get("markers", []),

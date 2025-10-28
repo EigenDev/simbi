@@ -14,7 +14,7 @@
 #include <cstdint>   // for std::uint64_t
 
 namespace simbi::hydro::newtonian {
-    using namespace simbi::eos;
+    using namespace eos;
 
     template <
         concepts::is_hydro_conserved_c conserved_t,
@@ -28,7 +28,7 @@ namespace simbi::hydro::newtonian {
         prim.vel = cons.mom / cons.den;
         prim.pre = pressure_from_conserved(cons, gamma);
 
-        if (prim.pre < 0.0 || !std::isfinite(prim.pre)) {
+        if (prim.pre <= 0.0 || !std::isfinite(prim.pre)) {
             return None(
                 ErrorCode::NEGATIVE_PRESSURE | ErrorCode::NON_FINITE_PRESSURE
             );
@@ -64,7 +64,7 @@ namespace simbi::hydro::srhd {
         real dp;
         do {
             // compute x_[k+1]
-            const auto [f, g] = newton_fg(gamma, tau, d, smag, peq);
+            const auto [f, g] = helpers::newton_fg(gamma, tau, d, smag, peq);
             dp                = f / g;
             peq -= dp;
 

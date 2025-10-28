@@ -1,153 +1,186 @@
 #ifndef FMR_FLUX_CORRECTION_HPP
 #define FMR_FLUX_CORRECTION_HPP
 
+#include "compat.hpp"
 #include "compute/field.hpp"
 #include "containers/vector.hpp"
-#include "domain/algebra.hpp"
 #include "domain/domain.hpp"
 #include "hierarchy.hpp"
-#include "level_descriptor.hpp"
-#include "mesh/fmr/transfer.hpp"
+#include "level_mapping.hpp"
 
 #include <cstdint>
 
 namespace simbi::mesh::fmr {
 
-    // map fine domain to coarse index space
+    // returns the coarse-fine interface faces for flux correction
     template <std::uint64_t Dims>
-    domain_t<Dims> map_fine_to_coarse_domain(
-        const domain_t<Dims>& fine_domain,
-        const level_descriptor_t<Dims>& fine_level,
-        const level_descriptor_t<Dims>& coarse_level
-    )
-    {
-        auto ratio = fine_level.ref_ratio / coarse_level.ref_ratio;
+    struct flux_interface_t {
+        domain_t<Dims> coarse_face;   // face in coarse coordinates
+        domain_t<Dims> fine_face;     // corresponding face in fine coordinates
+        bool is_valid;
+    };
 
-        iarray<Dims> coarse_start, coarse_end;
-        for (std::uint64_t d = 0; d < Dims; ++d) {
-            // translate to fine level origin, scale, translate to coarse
-            coarse_start[d] =
-                fine_level.parent_coverage.start[d] +
-                (fine_domain.start[d] - fine_level.domain.start[d]) /
-                    static_cast<std::int64_t>(ratio);
-
-            coarse_end[d] = fine_level.parent_coverage.start[d] +
-                            (fine_domain.fin[d] - fine_level.domain.start[d]) /
-                                static_cast<std::int64_t>(ratio);
-        }
-
-        return domain_t<Dims>{coarse_start, coarse_end};
-    }
-
-    // find coarse-fine interface for flux correction
+    // get lower and upper interface faces in a given direction
     template <std::uint64_t Dims>
-    domain_t<Dims> find_flux_interface(
-        const level_descriptor_t<Dims>& fine_level,
-        const level_descriptor_t<Dims>& coarse_level,
+    vector_t<flux_interface_t<Dims>, 2> get_flux_interfaces(
+        const level_mapping_t<Dims>& map,
         std::uint64_t flux_direction
     )
     {
-        // flux interfaces are at the boundaries of the fine level's parent
-        // coverage we need the face-centered flux domain, which extends one
-        // cell beyond
+        vector_t<flux_interface_t<Dims>, 2> interfaces;
+        const auto& coverage = map.coarse_coverage;
 
-        // get parent coverage in coarse index space
-        auto coverage = fine_level.parent_coverage;
+        // lower interface (at coverage.start in flux_direction)
+        {
+            auto& lower = interfaces[0];
+            lower.is_valid =
+                (coverage.start[flux_direction] >
+                 map.coarse_full.start[flux_direction]);
 
-        // for face-centered fluxes, the interface is the face at the boundary
-        // check lower boundary
-        auto lower_face =
-            domain_algebra::get_lower_boundary(coverage, flux_direction, 1);
+            if (lower.is_valid) {
+                // coarse face at the boundary
+                lower.coarse_face = coverage;
+                lower.coarse_face.start[flux_direction] =
+                    coverage.start[flux_direction];
+                lower.coarse_face.fin[flux_direction] =
+                    coverage.start[flux_direction] + 1;
 
-        // check upper boundary
-        auto upper_face =
-            domain_algebra::get_upper_boundary(coverage, flux_direction, 1);
+                // corresponding fine face
+                auto fine_base =
+                    map.coarse_to_fine_base(lower.coarse_face.start);
+                auto fine_end = map.coarse_to_fine_base(lower.coarse_face.fin);
 
-        // determine which boundary is actually an interface
-        // (touches coarse level but not another fine region)
-
-        // for now, return lower face if it's at the start of coverage
-        // this is simplified - you may need more logic for complex hierarchies
-        if (coverage.start[flux_direction] >
-            coarse_level.domain.start[flux_direction]) {
-            return lower_face;
+                lower.fine_face = domain_t<Dims>{fine_base, fine_end};
+            }
         }
 
-        if (coverage.fin[flux_direction] <
-            coarse_level.domain.fin[flux_direction]) {
-            return upper_face;
+        // upper interface (at coverage.fin in flux_direction)
+        {
+            auto& upper = interfaces[1];
+            upper.is_valid =
+                (coverage.fin[flux_direction] <
+                 map.coarse_full.fin[flux_direction]);
+
+            if (upper.is_valid) {
+                // coarse face at the boundary
+                upper.coarse_face = coverage;
+                upper.coarse_face.start[flux_direction] =
+                    coverage.fin[flux_direction];
+                upper.coarse_face.fin[flux_direction] =
+                    coverage.fin[flux_direction] + 1;
+
+                // corresponding fine face
+                auto fine_base =
+                    map.coarse_to_fine_base(upper.coarse_face.start);
+                auto fine_end = map.coarse_to_fine_base(upper.coarse_face.fin);
+
+                upper.fine_face = domain_t<Dims>{fine_base, fine_end};
+            }
         }
 
-        return domain_t<Dims>{};   // no interface
+        return interfaces;
     }
 
-    // correct coarse fluxes using fine fluxes at interface
+    // correct fluxes at a single coarse-fine interface
     template <typename T, std::uint64_t Dims>
-    void correct_interface_flux(
+    void correct_interface_fluxes(
         field_t<T, Dims>& coarse_flux,
         const field_t<T, Dims>& fine_flux,
-        const level_descriptor_t<Dims>& fine_level,
-        const level_descriptor_t<Dims>& coarse_level,
-        std::uint64_t flux_direction
+        const flux_interface_t<Dims>& interface,
+        const level_mapping_t<Dims>& map
     )
     {
-        // find interface in coarse coordinates
-        auto interface =
-            find_flux_interface(fine_level, coarse_level, flux_direction);
-
-        if (interface.empty()) {
-            return;   // no interface in this direction
+        if (!interface.is_valid) {
+            return;
         }
 
-        // map interface to fine index space to get fine flux domain
-        auto ratio = fine_level.ref_ratio / coarse_level.ref_ratio;
+        // for each coarse flux face, average the corresponding fine fluxes
+        // auto cf = coarse_flux[interface.coarse_face];
+        // cf      = cf.coord_map([fine_flux, map](auto coarse_coord) {
+        //     // get the fine flux faces that correspond to this coarse face
+        //     auto fine_children = map.fine_children(coarse_coord);
 
-        iarray<Dims> fine_start, fine_end;
-        for (std::uint64_t d = 0; d < Dims; ++d) {
-            fine_start[d] =
-                fine_level.domain.start[d] +
-                (interface.start[d] - fine_level.parent_coverage.start[d]) *
-                    static_cast<std::int64_t>(ratio);
+        //     // average fine fluxes (conservative restriction)
+        //     T sum{};
+        //     real volume = 0;
+        //     bool first  = true;
 
-            fine_end[d] =
-                fine_level.domain.start[d] +
-                (interface.fin[d] - fine_level.parent_coverage.start[d]) *
-                    static_cast<std::int64_t>(ratio);
-        }
+        //     for (const auto& fine_coord : fine_children) {
+        //         if (fine_flux.domain().contains(fine_coord)) {
+        //             if (first) {
+        //                 sum   = fine_flux(fine_coord);
+        //                 first = false;
+        //             }
+        //             else {
+        //                 sum = sum | add_gas(fine_flux(fine_coord));
+        //             }
+        //             volume += 1.0;
+        //         }
+        //     }
 
-        // auto fine_interface = domain_t<Dims>{fine_start, fine_end};
+        //     if (volume > 0) {
+        //         return sum / volume;
+        //     }
+        // });
 
-        auto restricted = make_restriction(fine_flux, interface, ratio);
+        for (const auto& coarse_coord : interface.coarse_face) {
+            // get the fine flux faces that correspond to this coarse face
+            auto fine_children = map.fine_children(coarse_coord);
 
-        // replace coarse fluxes with restricted fine fluxes
-        for (const auto& coord : interface) {
-            coarse_flux(coord) = restricted(coord);
+            // average fine fluxes (conservative restriction)
+            T sum{};
+            real volume = 0;
+            bool first  = true;
+
+            for (const auto& fine_coord : fine_children) {
+                if (fine_flux.domain().contains(fine_coord)) {
+                    if (first) {
+                        sum   = fine_flux(fine_coord);
+                        first = false;
+                    }
+                    else {
+                        sum = sum | add_gas(fine_flux(fine_coord));
+                    }
+                    volume += 1.0;
+                }
+            }
+
+            if (volume > 0) {
+                coarse_flux(coarse_coord) = sum / volume;
+            }
         }
     }
 
-    // correct all flux interfaces for a single fine level
+    // correct fluxes in one direction for a level
+    template <typename T, std::uint64_t Dims>
+    void correct_fluxes_direction(
+        field_t<T, Dims>& coarse_flux,
+        const field_t<T, Dims>& fine_flux,
+        const level_mapping_t<Dims>& map,
+        std::uint64_t flux_direction
+    )
+    {
+        auto interfaces = get_flux_interfaces(map, flux_direction);
+
+        for (const auto& interface : interfaces) {
+            correct_interface_fluxes(coarse_flux, fine_flux, interface, map);
+        }
+    }
+
+    // correct all fluxes (all directions) for a level
     template <typename T, std::uint64_t Dims>
     void correct_level_fluxes(
         vector_t<field_t<T, Dims>, Dims>& coarse_fluxes,
         const vector_t<field_t<T, Dims>, Dims>& fine_fluxes,
-        const mesh_hierarchy_t<Dims>& hierarchy,
-        std::uint64_t fine_level_id
+        const level_mapping_t<Dims>& map
     )
     {
-        if (fine_level_id == 0) {
-            return;   // no coarser level to correct
-        }
-
-        const auto& fine_level   = hierarchy[fine_level_id];
-        const auto& coarse_level = hierarchy[fine_level.parent_level_id];
-
         // correct fluxes in each coordinate direction
         for (std::uint64_t dir = 0; dir < Dims; ++dir) {
-            correct_interface_flux(
+            correct_fluxes_direction(
                 coarse_fluxes[dir],
                 fine_fluxes[dir],
-                fine_level,
-                coarse_level,
+                map,
                 dir
             );
         }
@@ -162,12 +195,12 @@ namespace simbi::mesh::fmr {
     {
         // work from finest to coarsest
         for (std::uint64_t lvl = hierarchy.num_levels - 1; lvl > 0; --lvl) {
-            correct_level_fluxes(
-                level_fluxes[lvl - 1],
-                level_fluxes[lvl],
-                hierarchy,
-                lvl
-            );
+
+            // create mapping for this level
+            auto map = create_level_mapping(hierarchy, lvl);
+
+            // correct fluxes
+            correct_level_fluxes(level_fluxes[lvl - 1], level_fluxes[lvl], map);
         }
     }
 

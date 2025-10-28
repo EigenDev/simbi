@@ -53,23 +53,21 @@ namespace simbi::io {
             }
 
             std::string tnow;
-            if (meta.dlogt != 0) {
+            if (sim.was_interrupted) {
+                tnow = "interrupted";
+            }
+            else if (sim.in_failure_state) {
+                tnow = "crashed";
+            }
+            else if (meta.dlogt != 0) {
                 const auto timestepping_of_mag = std::floor(std::log10(step));
                 if (timestepping_of_mag > tchunk_order_of_mag) {
                     tchunk_order_of_mag += 1;
                 }
                 tnow = format_real(step);
             }
-            else if (!sim.in_failure_state) {
-                tnow = format_real(meta.checkpoint_identifier());
-            }
             else {
-                if (sim.was_interrupted) {
-                    tnow = "interrupted";
-                }
-                else {
-                    tnow = "crashed";
-                }
+                tnow = format_real(meta.checkpoint_identifier());
             }
 
             return data_directory + string_format(

@@ -450,6 +450,39 @@ def setup_parser(parser: argparse.ArgumentParser) -> None:
         default=None,
         metavar="KEY=VALUE",
     )
+    # fmr-specific
+    parser.add_argument(
+        "--active-levels",
+        nargs="+",
+        type=int,
+        help="Active FMR levels to display",
+        default=None,
+    )
+    parser.add_argument(
+        "--composite-view",
+        action=argparse.BooleanOptionalAction,
+        help="Use composite view for FMR data",
+        default=False,
+    )
+    parser.add_argument(
+        "--show-refinement-bounds",
+        action=argparse.BooleanOptionalAction,
+        help="Show refinement bounds in multidim plots",
+        default=False,
+    )
+    parser.add_argument(
+        "--show-grid",
+        action=argparse.BooleanOptionalAction,
+        help="Show refinment cells",
+        default=False,
+    )
+    parser.add_argument(
+        "--render-mode",
+        help="Show refinment cells",
+        type=str,
+        default="pcolormesh",
+        choices=["pcolormesh", "polygons"],
+    )
 
 
 def main():

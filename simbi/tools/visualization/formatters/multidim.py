@@ -86,6 +86,77 @@ class ColorbarFormatter:
         cbar.set_label(field_label)
         return cbar
 
+    def get_global_field_range(data: PlotData) -> tuple[float, float]:
+        """Get global min/max across all fields/levels for consistent coloring"""
+        global_min = float("inf")
+        global_max = float("-inf")
+
+        # Iterate through all fields to find global range
+        for field in data.fields:
+            field_min = np.min(field.data)
+            field_max = np.max(field.data)
+            global_min = min(global_min, field_min)
+            global_max = max(global_max, field_max)
+
+        return global_min, global_max
+
+    @staticmethod
+    def add_linked_colorbars(
+        fig: Figure,
+        axes: list[Axes],
+        meshes: list[QuadMesh],
+        data: PlotData,
+        link_range: bool = True,
+    ) -> list[Colorbar]:
+        """Add linked colorbars for multi-level plots"""
+        colorbars = []
+
+        if link_range:
+            vmin, vmax = ColorbarFormatter.get_global_field_range(data)
+            for ax, mesh in zip(axes, meshes):
+                mesh.set_clim(vmin, vmax)
+                cbar = ColorbarFormatter.add_cartesian_colorbar(
+                    fig, ax, mesh, data.fields[0]
+                )
+                colorbars.append(cbar)
+        else:
+            # Independent ranges per level
+            for ax, mesh in zip(axes, meshes):
+                cbar = ColorbarFormatter.add_cartesian_colorbar(
+                    fig, ax, mesh, data.fields[0]
+                )
+                colorbars.append(cbar)
+
+        return colorbars
+
+    @staticmethod
+    def add_composite_colorbar(
+        fig: Figure,
+        ax: Axes,
+        mesh: QuadMesh,
+        data: PlotData,
+        show_level_ranges: bool = True,
+    ) -> Colorbar:
+        """Add enhanced colorbar for composite FMR views"""
+        cbar = ColorbarFormatter.add_cartesian_colorbar(
+            fig, ax, mesh, data.fields[0]
+        )
+
+        if show_level_ranges:
+            # Add level range indicators on the colorbar
+            for i, field in enumerate(data.fields):
+                level_min = np.min(field.data)
+                level_max = np.max(field.data)
+                # Add small markers or lines to show per-level ranges
+                cbar.ax.axhline(
+                    y=level_min, color=f"C{i}", linestyle="--", alpha=0.5
+                )
+                cbar.ax.axhline(
+                    y=level_max, color=f"C{i}", linestyle="--", alpha=0.5
+                )
+
+        return cbar
+
 
 def format_multidim_plot_axes(
     ax: Axes,

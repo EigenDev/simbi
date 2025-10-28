@@ -55,7 +55,6 @@ namespace simbi::ecs {
         {
             return registry.get<simulation_metadata_t<Dims>>(global);
         }
-
         const auto& metadata() const
         {
             return registry.get<simulation_metadata_t<Dims>>(global);
@@ -118,6 +117,38 @@ namespace simbi::ecs {
         const auto& hierarchy() const
         {
             return registry.get<fmr_hierarchy_t<Dims>>(global).hierarchy;
+        }
+
+        // RK workspace management
+        bool has_rk_workspace(std::uint64_t lvl) const
+        {
+            return registry.has<rk_workspace_component_t<simulation_t>>(
+                levels[lvl]
+            );
+        }
+
+        void create_rk_workspace(std::uint64_t lvl)
+        {
+            if (!has_rk_workspace(lvl)) {
+                registry.add<rk_workspace_component_t<simulation_t>>(
+                    levels[lvl],
+                    rk_workspace_component_t<simulation_t>{*this, lvl}
+                );
+            }
+        }
+
+        auto& rk_workspace(std::uint64_t lvl)
+        {
+            return registry.get<rk_workspace_component_t<simulation_t>>(
+                levels[lvl]
+            );
+        }
+
+        const auto& rk_workspace(std::uint64_t lvl) const
+        {
+            return registry.get<rk_workspace_component_t<simulation_t>>(
+                levels[lvl]
+            );
         }
     };
 

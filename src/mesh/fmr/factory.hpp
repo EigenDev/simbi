@@ -78,17 +78,9 @@ namespace simbi::mesh::fmr {
             }
         }
 
-        // compute physical bounds for this level
-        // (map index domain back to physical space)
-        auto phys_region = to_physical_space(
-            level_desc.domain,
-            base_mesh.bounds_min,
-            base_mesh.bounds_max,
-            base_mesh.shape
-        );
-
-        level_mesh.bounds_min = phys_region.min;
-        level_mesh.bounds_max = phys_region.max;
+        // use the physical bounds from the level descriptor
+        level_mesh.bounds_min = level_desc.physical_min;
+        level_mesh.bounds_max = level_desc.physical_max;
 
         // inherit time-dependent properties from base
         level_mesh.homologous       = base_mesh.homologous;

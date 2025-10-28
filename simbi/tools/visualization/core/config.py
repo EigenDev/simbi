@@ -68,6 +68,8 @@ class MultidimConfig(BaseModel):
     projection: tuple[int, int, int] = (1, 2, 3)
     bipolar: bool = False
     coords: dict[str, list[float]] = Field(default_factory=dict)
+    composite_view: bool = False
+    active_levels: Optional[set[int]] = None
 
     model_config = {
         "frozen": True,  # Make instances immutable
@@ -87,6 +89,21 @@ class MultidimConfig(BaseModel):
                 )
         if len(set(v)) != 3:
             raise ValueError(f"Projection indices must be unique, got {v}")
+        return v
+
+    @field_validator("composite_view", "active_levels")
+    @classmethod
+    def validate_composite_and_levels(cls, v, info: ValidationInfo):
+        """Validate that active_levels is set if composite_view is True."""
+        composite_view = info.data.get("composite_view", False)
+        active_levels = info.data.get("active_levels", None)
+
+        if composite_view and (
+            active_levels is None or len(active_levels) == 0
+        ):
+            raise ValueError(
+                "active_levels must be set and non-empty when composite_view is True"
+            )
         return v
 
 

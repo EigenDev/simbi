@@ -197,7 +197,7 @@ class SimbiBaseConfig(CLIConfigurableModel):
     )
 
     # Refinement ratios for each level (relative to its parent)
-    fmr_ratios: list[int] = SimbiField(
+    fmr_ratios: list[int] | list[np.uint64] = SimbiField(
         [], description="Refinement ratio for each level relative to its parent"
     )
 
@@ -212,7 +212,6 @@ class SimbiBaseConfig(CLIConfigurableModel):
 
     @field_validator("fmr_ratios")
     def validate_ratios(cls, v: list[int]) -> list[np.uint64]:
-
         """Validate refinement ratios are positive integers within uint64 range."""
         try:
             return [np.uint64(r) for r in v]

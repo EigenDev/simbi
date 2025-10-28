@@ -8,8 +8,9 @@
 #include "containers/vector.hpp"   // for vector_t
 #include "functional/fp.hpp"       // for fp::transform, fp::collect, fp::range
 #include "mesh/fmr/factory.hpp"    // for fmr::build_hierarchy_from_init
-#include "mesh/mesh_config.hpp"    // for mesh_config_t
-#include "physics/ib/body.hpp"     // for body_t
+#include "mesh/fmr/prolongation.hpp"     // for fmr::prolongate_conserved
+#include "mesh/mesh_config.hpp"          // for mesh_config_t
+#include "physics/ib/body.hpp"           // for body_t
 #include "physics/ib/body_delta.hpp"     // for body_delta_t
 #include "physics/ib/factory.hpp"        // for from_data_body_collection
 #include "simulation.hpp"                // for simulation_t
@@ -318,7 +319,12 @@ namespace simbi::ecs {
                     }
                 );
 
-                prolongate_level_data(sim, lvl);
+                const auto map = create_level_mapping(hierarchy, lvl);
+                prolongate_conservative(
+                    sim.hydro(lvl - 1).cons,
+                    sim.hydro(lvl).cons,
+                    map
+                );
             }
             sim.registry.add(
                 sim.global,

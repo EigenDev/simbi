@@ -2,7 +2,6 @@
 #define EVOLUTION_HPP
 
 #include "checkpoint.hpp"
-#include "ecs/components.hpp"
 #include "ecs/entity.hpp"
 #include "ecs/systems.hpp"
 #include "functional/fp.hpp"
@@ -11,10 +10,12 @@
 #include "physics/ib/motion.hpp"
 #include "progress.hpp"
 #include "timing.hpp"
+#include "utility/enums.hpp"
 #include "utility/helpers.hpp"
 
 #include <cstddef>
 #include <cstdint>
+#include <stdexcept>
 #include <string>
 #include <vector>
 
@@ -142,33 +143,145 @@ namespace simbi::evolution {
             ecs::timestep_system_t{}(sim, lvl);
         }
 
-        // single level step
-        void step_level(std::uint64_t lvl) const
+        void step_all_rk2(
+            const std::vector<ecs::entity_t>& levels,
+            const ecs::registry_t&
+        ) const
         {
-            // pipeline of systems
-            configure(lvl);
-            ecs::integration_system_t{}(sim, lvl, ops);
-            sim.metadata().time += sim.metadata().dt;
+            auto& meta = sim.metadata();
+
+            // ========== STAGE 1 SETUP ==========
+            ecs::ghost_fill_system_t{}(sim, 0);
+            for (std::size_t lvl = 1; lvl < levels.size(); ++lvl) {
+                ecs::ghost_fill_system_t{}(sim, lvl);
+            }
+
+            for (std::size_t lvl = 0; lvl < levels.size(); ++lvl) {
+                ecs::c2p_system_t{}(sim, lvl);
+            }
+
+            // calc timestep (only at finest level)
+            ecs::timestep_system_t{}(sim, levels.size() - 1);
+
+            ecs::sink_cache_system_t{}(sim);
+
+            // calc fluxes for u^n
+            for (std::size_t lvl = 0; lvl < levels.size(); ++lvl) {
+                ecs::staggered_fields_system_t{}(sim, ops, lvl);
+            }
+
+            // flux correction for Stage 1
+            ecs::flux_correction_system_t{}(sim);
+
+            // advance to u^* using Stage 1
+            for (std::size_t lvl = 0; lvl < levels.size(); ++lvl) {
+                ecs::rk2_stage1_system_t{ops}(sim, lvl);
+            }
+
+            // fill ghosts for u^*
+            ecs::ghost_fill_system_t{}(sim, 0);
+            for (std::size_t lvl = 1; lvl < levels.size(); ++lvl) {
+                ecs::ghost_fill_system_t{}(sim, lvl);
+            }
+
+            // recover primitives for u^*
+            for (std::size_t lvl = 0; lvl < levels.size(); ++lvl) {
+                ecs::c2p_system_t{}(sim, lvl);
+            }
+
+            // updatre sink cache for u^*
+            ecs::sink_cache_system_t{}(sim);
+
+            // calc fluxes for u^*
+            for (std::size_t lvl = 0; lvl < levels.size(); ++lvl) {
+                ecs::staggered_fields_system_t{
+                  .advance_bfields = false
+                }(sim, ops, lvl);
+            }
+
+            ecs::flux_correction_system_t{}(sim);
+
+            // calc final u^(n+1) using Stage 2
+            for (std::size_t lvl = 0; lvl < levels.size(); ++lvl) {
+                ecs::rk2_stage2_system_t{ops}(sim, lvl);
+            }
+
+            // restriction: copy fine solution to coarse
+            for (std::size_t lvl = levels.size() - 1; lvl > 0; --lvl) {
+                ecs::restriction_system_t{}(sim, lvl);
+            }
+
+            meta.time += meta.dt;
+
+            if (sim.has_bodies()) {
+                body::evolve_bodies(sim);
+            }
         }
 
-        // all levels (TODO: subcycling)
+        void step_all_euler(
+            const std::vector<ecs::entity_t>& levels,
+            const ecs::registry_t&
+        ) const
+        {
+            auto& meta = sim.metadata();
+
+            // apply boundary conditions on base level
+            ecs::ghost_fill_system_t{}(sim, 0);
+
+            // prolongation: fill fine ghost zones from coarse
+            for (std::size_t lvl = 1; lvl < levels.size(); ++lvl) {
+                ecs::ghost_fill_system_t{}(sim, lvl);
+            }
+
+            // recover primitives on all levels
+            for (std::size_t lvl = 0; lvl < levels.size(); ++lvl) {
+                ecs::c2p_system_t{}(sim, lvl);
+            }
+
+            // compute timestep (only at finest level)
+            ecs::timestep_system_t{}(sim, levels.size() - 1);
+
+            // sink cache houses the body properties (like R_BH and Mdot_target)
+            ecs::sink_cache_system_t{}(sim);
+
+            // compute fluxes
+            for (std::size_t lvl = 0; lvl < levels.size(); ++lvl) {
+                ecs::staggered_fields_system_t{}(sim, ops, lvl);
+            }
+            ecs::flux_correction_system_t{}(sim);
+
+            // advance all levels by the same dt
+            for (std::size_t lvl = 0; lvl < levels.size(); ++lvl) {
+                ecs::euler_system_t{ops}(sim, lvl);
+            }
+
+            // restriction: copy fine solution to coarse (finest to coarsest)
+            for (std::size_t lvl = levels.size() - 1; lvl > 0; --lvl) {
+                ecs::restriction_system_t{}(sim, lvl);
+            }
+
+            meta.time += meta.dt;
+
+            if (sim.has_bodies()) {
+                body::evolve_bodies(sim);
+            }
+        }
+
         void step_all(
             const std::vector<ecs::entity_t>& levels,
             const ecs::registry_t& registry
         ) const
         {
-            for (std::size_t lvl = 0; lvl < levels.size(); ++lvl) {
-                auto& level_info = registry.get<ecs::level_info_t>(levels[lvl]);
-                auto nsteps      = level_info.refinement_ratio;
-
-                for (std::uint64_t substep = 0; substep < nsteps; ++substep) {
-                    step_level(lvl);
-                }
+            if (sim.metadata().timestepping == Timestepping::RK2) {
+                step_all_rk2(levels, registry);
             }
-
-            ecs::flux_correction_system_t{}(sim);
-            if (sim.has_bodies()) {
-                body::evolve_bodies(sim);
+            else if (sim.metadata().timestepping == Timestepping::EULER) {
+                step_all_euler(levels, registry);
+            }
+            else {
+                throw std::runtime_error(
+                    "That timestepping method is not implemented."
+                );
             }
         }
     };

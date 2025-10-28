@@ -20,6 +20,9 @@ namespace simbi::mesh::fmr {
         // parent relationship
         std::uint64_t parent_level_id;
         domain_t<Dims> parent_coverage;   // which region of parent we refine
+
+        vector_t<real, Dims> physical_min;
+        vector_t<real, Dims> physical_max;
     };
 
 }   // namespace simbi::mesh::fmr

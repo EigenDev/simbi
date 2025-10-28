@@ -236,8 +236,8 @@ namespace simbi {
                 }
                 physical_region_t<Dims> region;
                 for (std::uint64_t d = 0; d < Dims; ++d) {
-                    region.min[d] = region_vec[d];
-                    region.max[d] = region_vec[d + Dims];
+                    region.min[d] = region_vec[2 * d];
+                    region.max[d] = region_vec[2 * d + 1];
                 }
                 regions.push_back(region);
             }

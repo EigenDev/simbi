@@ -710,10 +710,8 @@ namespace simbi {
         os << "[";
         for (std::uint64_t ii = 0; ii < Dims; ++ii) {
             os << v[ii];
-            if constexpr (Dims >= 2) {
-                if (ii > 0 && ii < Dims - 1) {
-                    os << ", ";
-                }
+            if (ii < Dims - 1) {
+                os << ", ";
             }
         }
         os << "]";

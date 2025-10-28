@@ -16,6 +16,7 @@
 #include <cstdint>   // for std::uint64_t
 #include <memory>    // for std::unique_ptr
 #include <string>    // for std::string
+#include <vector>    // for std::vector
 
 namespace simbi::ecs {
     /**
@@ -132,6 +133,21 @@ namespace simbi::ecs {
     template <std::uint64_t Dims>
     struct fmr_hierarchy_t {
         mesh::fmr::mesh_hierarchy_t<Dims> hierarchy;
+    };
+
+    template <typename Sim>
+    struct rk_workspace_component_t {
+        using cons_field_t = decltype(std::declval<Sim>().hydro(0).cons);
+
+        cons_field_t u_n;      // init state
+        cons_field_t u_star;   // intermediate state
+
+        rk_workspace_component_t() = default;
+
+        rk_workspace_component_t(const Sim& sim, std::uint64_t lvl)
+            : u_n(sim.hydro(lvl).cons.clone())
+        {
+        }
     };
 
 }   // namespace simbi::ecs

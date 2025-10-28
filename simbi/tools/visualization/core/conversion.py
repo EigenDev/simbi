@@ -117,6 +117,8 @@ def multidim_config_from_args(args: Namespace) -> MultidimConfig:
         projection=getattr(args, "projection", (1, 2, 3)),
         bipolar=getattr(args, "bipolar", False),
         coords=coords,
+        composite_view=getattr(args, "composite_view", False),
+        active_levels=getattr(args, "active_levels", None),
     )
 
 
@@ -137,6 +139,8 @@ def multidim_props_from_args(
         alpha=args.get("alpha", 1.0),
         projection=args["projection"],
         plot_type=plot_type,
+        render_mode=args["render_mode"],
+        show_mesh_grid=args["show_grid"],
     )
 
 

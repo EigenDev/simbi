@@ -9,9 +9,13 @@ from typing import (
 from pydantic import BaseModel, field_validator
 from typing_extensions import Optional
 
-from simbi.core.types.bodies import Body, BodySystemConfig, ImmersedBodyConfig
+from simbi.core.types.bodies import (
+    Body,
+    BodySystemConfig,
+    ImmersedBodyConfig,
+)
 
-from ....core.types import Array
+from ....core.types import Array, HierarchyData
 
 # Type variables for generic functions
 T = TypeVar("T")
@@ -86,10 +90,7 @@ class PlotData(BaseModel):
     time: Optional[float] = None
     dimensions: Optional[int] = None
     coord_system: Optional[CoordSystem] = None
-    model_config = {
-        "arbitrary_types_allowed": True,  # Allow arbitrary types like CoordSystem
-        "frozen": True,  # Make instances immutable
-    }
+    hierarchy: Optional[HierarchyData] = None
 
     @field_validator("dimensions")
     @classmethod
@@ -98,6 +99,23 @@ class PlotData(BaseModel):
         if v < 1 or v > 3:
             raise ValueError(f"Dimensions must be between 1 and 3, got {v}")
         return v
+
+    def has_fmr(self) -> bool:
+        """Check if this plot data contains FMR levels"""
+        return self.hierarchy is not None
+
+    def get_level_fields(self, level: int) -> list[FieldData]:
+        """Get all fields for a specific level"""
+        return [f for f in self.fields if f.name.endswith(f"_L{level}")]
+
+    def get_base_fields(self) -> list[FieldData]:
+        """Get all base level fields"""
+        return [f for f in self.fields if "_L" not in f.name]
+
+    model_config = {
+        "arbitrary_types_allowed": True,  # Allow arbitrary types like CoordSystem
+        "frozen": True,  # Make instances immutable
+    }
 
 
 class Bounds(BaseModel):

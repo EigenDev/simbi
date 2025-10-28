@@ -46,7 +46,7 @@ namespace simbi::cfd {
                 const auto coord_plus = coord + offset;
 
                 // flux values at left and right faces
-                const auto fl = fluxes[dir][coord];
+                const auto fl = fluxes[dir][coord /***/];
                 const auto fr = fluxes[dir][coord_plus];
 
                 // geometric face areas
