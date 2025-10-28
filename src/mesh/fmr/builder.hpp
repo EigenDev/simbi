@@ -6,12 +6,14 @@
 #include "domain/algebra.hpp"      // for domain_algebra
 #include "domain/domain.hpp"       // for domain_t, physical_region_t
 #include "hierarchy.hpp"           // for mesh_hierarchy_t
+#include "level_mapping.hpp"       // for level_mapping_t
 
 #include <cstdint>     // for std::uint64_t
 #include <stdexcept>   // for std::runtime_error
 #include <vector>      // for std::vector
 
 namespace simbi::mesh::fmr {
+    void test_ref();
     // helper: convert physical region to index space at a given refinement
     // level
     template <std::uint64_t Dims>
@@ -93,25 +95,42 @@ namespace simbi::mesh::fmr {
           .ref_ratio       = 1,
           .dx              = config.base_dx,
           .parent_level_id = 0,
-          .parent_coverage = config.base_domain
+          .parent_coverage = config.base_domain,
+          .physical_min    = config.bounds_min,
+          .physical_max    = config.bounds_max
         };
 
         // build refined levels
-        std::uint64_t cumulative_ratio = 1;
+        std::uint64_t cumulative_ratio       = 1;
+        vector_t<real, Dims> parent_phys_min = config.bounds_min;
+        vector_t<real, Dims> parent_phys_max = config.bounds_max;
+
         for (std::uint64_t lvl = 1; lvl < hierarchy.num_levels; ++lvl) {
             cumulative_ratio *= config.refine_ratios[lvl - 1];
 
-            // compute parent coverage (in parent's index space)
+            // get parent level's resolution
+            iarray<Dims> parent_resolution;
+            if (lvl == 1) {
+                parent_resolution = config.base_resolution;
+            }
+            else {
+                for (std::uint64_t d = 0; d < Dims; ++d) {
+                    parent_resolution[d] =
+                        hierarchy.levels[lvl - 1].domain.fin[d] -
+                        hierarchy.levels[lvl - 1].domain.start[d];
+                }
+            }
+
+            // compute parent coverage in parent's index space
             auto parent_coverage = to_index_space_at_level(
                 config.refine_regions[lvl - 1],
-                config.bounds_min,
-                config.bounds_max,
-                config.base_resolution,
-                cumulative_ratio / config.refine_ratios[lvl - 1]
+                parent_phys_min,   // use parent's physical bounds
+                parent_phys_max,
+                parent_resolution,
+                1   // already in parent's resolution
             );
 
             // fine domain in its own local coordinate system
-            // size = parent_size * refinement_ratio
             iarray<Dims> fine_size;
             for (std::uint64_t d = 0; d < Dims; ++d) {
                 fine_size[d] =
@@ -119,23 +138,58 @@ namespace simbi::mesh::fmr {
                     config.refine_ratios[lvl - 1];
             }
             auto refined_domain = make_domain(fine_size);
+            // shift the refined domain to the active region
+            for (std::uint64_t d = 0; d < Dims; ++d) {
+                refined_domain.start[d] += config.halo_radius;
+                refined_domain.fin[d] += config.halo_radius;
+                parent_coverage.start[d] += config.halo_radius;
+                parent_coverage.fin[d] += config.halo_radius;
+            }
+
+            // update parent bounds for next level
+            parent_phys_min = config.refine_regions[lvl - 1].min;
+            parent_phys_max = config.refine_regions[lvl - 1].max;
 
             hierarchy.levels[lvl] = {
               .level_id    = lvl,
               .domain      = refined_domain,
-              .full_domain = domain_algebra::expand_end(
+              .full_domain = domain_algebra::expand(
                   refined_domain,
-                  ones<Dims, std::int64_t>() * 2 *
+                  ones<Dims, std::int64_t>() *
                       static_cast<std::int64_t>(config.halo_radius)
               ),
               .ref_ratio = cumulative_ratio,
               .dx        = config.base_dx / static_cast<real>(cumulative_ratio),
               .parent_level_id = lvl - 1,
-              .parent_coverage = parent_coverage
+              .parent_coverage = parent_coverage,
+              .physical_min    = config.refine_regions[lvl - 1].min,
+              .physical_max    = config.refine_regions[lvl - 1].max
             };
         }
 
         return hierarchy;
+    }
+
+    template <std::uint64_t Dims>
+    level_mapping_t<Dims> create_level_mapping(
+        const mesh_hierarchy_t<Dims>& hierarchy,
+        std::uint64_t fine_level_id
+    )
+    {
+        if (fine_level_id == 0) {
+            throw std::runtime_error("Cannot create mapping for base level");
+        }
+
+        const auto& fine_level   = hierarchy[fine_level_id];
+        const auto& coarse_level = hierarchy[fine_level.parent_level_id];
+
+        return level_mapping_t<Dims>{
+          .fine_full       = fine_level.full_domain,
+          .fine_active     = fine_level.domain,
+          .coarse_full     = coarse_level.full_domain,
+          .coarse_coverage = fine_level.parent_coverage,
+          .ratio           = fine_level.ref_ratio / coarse_level.ref_ratio
+        };
     }
 
 }   // namespace simbi::mesh::fmr
