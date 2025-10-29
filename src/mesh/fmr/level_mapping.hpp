@@ -17,8 +17,6 @@ namespace simbi::mesh::fmr {
         domain_t<Dims> coarse_coverage;
         std::uint64_t ratio;
 
-        // === FIXED: Direct coordinate mappings with proper offsets ===
-
         constexpr DUAL coordinate_t<Dims>
         fine_to_coarse(const coordinate_t<Dims>& fine_coord) const
         {
