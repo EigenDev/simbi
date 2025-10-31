@@ -1,6 +1,6 @@
+import queue
 from threading import Thread
 from typing import Any, Callable
-import queue
 
 
 def release_memory(func: Callable[..., Any]) -> Callable[..., Any]:

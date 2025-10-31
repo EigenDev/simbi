@@ -6,7 +6,7 @@ from typing import Any, Optional
 from . import api
 from .core.conversion import config_from_args
 
-VALID_PLOT_TYPES = ["line", "multidim", "histogram", "temporal"]
+VALID_PLOT_TYPES = ["line", "multidim", "histogram", "time_series"]
 
 try:
     with warnings.catch_warnings():
@@ -192,7 +192,7 @@ def setup_parser(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--setup", default="Simulation", help="Setup name")
     parser.add_argument(
         "--plot-type",
-        choices=["line", "multidim", "histogram", "temporal"],
+        choices=["line", "multidim", "histogram", "time_series"],
         default=None,
         help="Type of plot to create",
     )
@@ -435,8 +435,8 @@ def setup_parser(parser: argparse.ArgumentParser) -> None:
     )
     parser.add_argument("--powerfit", action="store_true", help="Fit power law")
 
-    # Temporal options
-    parser.add_argument("--weight", help="Weight field for temporal average")
+    # time_series options
+    parser.add_argument("--weight", help="Weight field for time_series average")
     parser.add_argument(
         "--orbital-params",
         nargs="+",
@@ -449,6 +449,39 @@ def setup_parser(parser: argparse.ArgumentParser) -> None:
         help="Inset plot parameters (key=value format)",
         default=None,
         metavar="KEY=VALUE",
+    )
+    # fmr-specific
+    parser.add_argument(
+        "--active-levels",
+        nargs="+",
+        type=int,
+        help="Active FMR levels to display",
+        default=None,
+    )
+    parser.add_argument(
+        "--composite-view",
+        action=argparse.BooleanOptionalAction,
+        help="Use composite view for FMR data",
+        default=False,
+    )
+    parser.add_argument(
+        "--show-refinement-bounds",
+        action=argparse.BooleanOptionalAction,
+        help="Show refinement bounds in multidim plots",
+        default=False,
+    )
+    parser.add_argument(
+        "--show-grid",
+        action=argparse.BooleanOptionalAction,
+        help="Show refinment cells",
+        default=False,
+    )
+    parser.add_argument(
+        "--render-mode",
+        help="Show refinment cells",
+        type=str,
+        default="pcolormesh",
+        choices=["pcolormesh", "polygons"],
     )
 
 
@@ -507,8 +540,8 @@ def main():
                 args.save_as,
                 not args.no_show,
             )
-        elif plot_type == "temporal":
-            api.plot_temporal(
+        elif plot_type == "time_series":
+            api.plot_time_series(
                 config,
                 args.files,
                 args.fields,

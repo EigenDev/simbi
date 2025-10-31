@@ -145,7 +145,6 @@ class SimulationRunner:
             else:
                 staggered_fields = []
 
-            # Execute the simulation
             backend.run_simulation(
                 cons_array=cons_contig,
                 prim_array=prim_contig,

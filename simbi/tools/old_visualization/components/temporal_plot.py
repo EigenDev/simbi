@@ -1,11 +1,14 @@
-from typing import Any, Sequence
 from dataclasses import dataclass
+from typing import Any, Sequence
+
 import numpy as np
 from matplotlib.lines import Line2D
+
 from simbi.tools.visualization.constants.alias import FIELD_ALIASES
 from simbi.tools.visualization.state.core import VisualizationState
-from .base import Component
+
 from ..bridge import SimbiDataBridge
+from .base import Component
 
 
 @dataclass
@@ -49,8 +52,8 @@ class TimeSeriesData:
         return np.array(self.times), np.array(self.values)
 
 
-class TemporalPlotComponent(Component):
-    """Temporal plot visualization component"""
+class time_seriesPlotComponent(Component):
+    """time_series plot visualization component"""
 
     def __init__(self, state: VisualizationState, id: str):
         super().__init__(state, id)
@@ -59,7 +62,7 @@ class TemporalPlotComponent(Component):
         self.is_initialized = False
 
     def setup(self) -> None:
-        """Initialize temporal plot resources"""
+        """Initialize time_series plot resources"""
         # Setup axis style
         self.ax.spines["top"].set_visible(False)
         self.ax.spines["right"].set_visible(False)
@@ -77,7 +80,7 @@ class TemporalPlotComponent(Component):
         self.is_accretion_data = False
 
     def render(self) -> Any:
-        """Render the temporal plot with current data"""
+        """Render the time_series plot with current data"""
         if not self.state.data:
             return self.line
 
@@ -218,7 +221,9 @@ class TemporalPlotComponent(Component):
         if weight:
             weight_str = self.bridge.get_field_label(weight)
             field_str = self.bridge.get_field_label(field)
-            self.ax.set_ylabel(f"$\\langle$ {field_str} $\\rangle_{{{weight_str}}}$")
+            self.ax.set_ylabel(
+                f"$\\langle$ {field_str} $\\rangle_{{{weight_str}}}$"
+            )
         else:
             field_str = self.bridge.get_field_label(field)
             self.ax.set_ylabel(f"$\\langle$ {field_str} $\\rangle$")
@@ -304,7 +309,9 @@ class TemporalPlotComponent(Component):
         coords = [mesh.get(f"x{i + 1}v") for i in range(ndim)]
         coord_system = self.state.data.setup.get("coord_system", "cartesian")
 
-        return calc_cell_volume(coords=coords, coord_system=coord_system, vertices=True)
+        return calc_cell_volume(
+            coords=coords, coord_system=coord_system, vertices=True
+        )
 
     def _compute_weighted_mean(
         self, var: np.ndarray, weights: np.ndarray, dV: np.ndarray
@@ -332,7 +339,9 @@ class TemporalPlotComponent(Component):
         if not any(xlims):
             if len(x_data) > 1:
                 margin = 0.05 * (np.max(x_data) - np.min(x_data))
-                self.ax.set_xlim(np.min(x_data) - margin, np.max(x_data) + margin)
+                self.ax.set_xlim(
+                    np.min(x_data) - margin, np.max(x_data) + margin
+                )
         else:
             self.ax.set_xlim(xlims)
 
@@ -340,7 +349,9 @@ class TemporalPlotComponent(Component):
         if not any(ylims):
             if len(y_data) > 1:
                 margin = 0.05 * (np.max(y_data) - np.min(y_data))
-                self.ax.set_ylim(np.min(y_data) - margin, np.max(y_data) + margin)
+                self.ax.set_ylim(
+                    np.min(y_data) - margin, np.max(y_data) + margin
+                )
         else:
             self.ax.set_ylim(ylims)
 

@@ -55,7 +55,6 @@
 #include "init_conditions_visitor.hpp"
 #include "utility/enums.hpp"
 
-#include <cmath>
 #include <cstdint>
 #include <list>
 #include <stdexcept>
@@ -67,13 +66,13 @@ namespace simbi {
     /**
      * @brief Visitor that populates initial_conditions_t from a config_dict_t
      */
-    class config_dict_tVisitor : public initial_conditions_tVisitor
+    class config_dict_visitor_t : public initial_conditions_visitor_t
     {
       private:
         const config_dict_t& dict;
 
       public:
-        explicit config_dict_tVisitor(const config_dict_t& config)
+        explicit config_dict_visitor_t(const config_dict_t& config)
             : dict(config)
         {
         }
@@ -133,16 +132,15 @@ namespace simbi {
         void visit_physics_parameters(
             real& gamma,
             real& cfl,
-            real& sound_speed_squared,
+            real& ambeint_sound_speed,
             real& viscosity,
             real& shakura_sunyaev_alpha
         ) override
         {
-            gamma = dict.at("adiabatic_index").get<real>();
-            cfl   = dict.at("cfl_number").get<real>();
-            sound_speed_squared =
-                std::pow(dict.at("ambient_sound_speed").get<real>(), 2);
-            viscosity = dict.at("viscosity").get<real>();
+            gamma               = dict.at("adiabatic_index").get<real>();
+            cfl                 = dict.at("cfl_number").get<real>();
+            ambeint_sound_speed = dict.at("ambient_sound_speed").get<real>();
+            viscosity           = dict.at("viscosity").get<real>();
             shakura_sunyaev_alpha =
                 dict.at("shakura_sunyaev_alpha").get<real>();
         }
@@ -370,6 +368,32 @@ namespace simbi {
                 1 + (dict.at("reconstruction").get<std::string>() == "plm");
         }
 
+        void visit_fmr_parameters(
+            bool& fmr_enabled,
+            std::uint64_t& fmr_max_levels,
+            std::uint64_t& fmr_buffer_size,
+            bool& fmr_conservative_interpolation,
+            bool& fmr_output_all_levels,
+            std::vector<std::vector<real>>& fmr_regions,
+            std::vector<std::uint64_t>& fmr_ratios
+        ) override
+        {
+            fmr_enabled = dict.at("fmr_enabled").get<bool>();
+            if (fmr_enabled) {
+                fmr_max_levels = dict.at("fmr_max_levels").get<std::uint64_t>();
+                fmr_buffer_size =
+                    dict.at("fmr_buffer_size").get<std::uint64_t>();
+                fmr_conservative_interpolation =
+                    dict.at("fmr_conservative_interpolation").get<bool>();
+                fmr_output_all_levels =
+                    dict.at("fmr_output_all_levels").get<bool>();
+                fmr_regions = dict.at("fmr_regions")
+                                  .get<std::vector<std::vector<real>>>();
+                fmr_ratios =
+                    dict.at("fmr_ratios").get<std::vector<std::uint64_t>>();
+            }
+        }
+
         static void add_property(
             const std::string& name,
             const simbi::config_value_t& value,
@@ -451,7 +475,7 @@ namespace simbi {
     /**
      * @brief Visitor that applies default values to initial_conditions_t
      */
-    class DefaultsVisitor : public initial_conditions_tVisitor
+    class DefaultsVisitor : public initial_conditions_visitor_t
     {
       public:
         // Time-related fields
@@ -483,14 +507,14 @@ namespace simbi {
         void visit_physics_parameters(
             real& gamma,
             real& cfl,
-            real& sound_speed_squared,
+            real& ambeint_sound_speed,
             real& viscosity,
             real& shakura_sunyaev_alpha
         ) override
         {
             gamma                 = 1.4;
             cfl                   = 0.5;
-            sound_speed_squared   = 1.0;
+            ambeint_sound_speed   = 1.0;
             viscosity             = 0.0;
             shakura_sunyaev_alpha = 0.0;
         }
@@ -607,12 +631,31 @@ namespace simbi {
             nvars           = 5;   // Default number of variables
             halo_radius     = 1;   // Default halo radius
         }
+
+        void visit_fmr_parameters(
+            bool& fmr_enabled,
+            std::uint64_t& fmr_max_levels,
+            std::uint64_t& fmr_buffer_size,
+            bool& fmr_conservative_interpolation,
+            bool& fmr_output_all_levels,
+            std::vector<std::vector<real>>& fmr_regions,
+            std::vector<std::uint64_t>& fmr_ratios
+        ) override
+        {
+            fmr_enabled                    = false;
+            fmr_max_levels                 = 1;
+            fmr_buffer_size                = 2;
+            fmr_conservative_interpolation = true;
+            fmr_output_all_levels          = false;
+            fmr_regions.clear();
+            fmr_ratios.clear();
+        }
     };
 
     /**
      * @brief Visitor that validates initial_conditions_t values
      */
-    class ValidationVisitor : public initial_conditions_tVisitor
+    class ValidationVisitor : public initial_conditions_visitor_t
     {
       public:
         // Time-related fields
@@ -653,7 +696,7 @@ namespace simbi {
         void visit_physics_parameters(
             real& gamma,
             real& cfl,
-            real& sound_speed_squared,
+            real& ambeint_sound_speed,
             real& viscosity,
             real& shakura_sunyaev_alpha
         ) override
@@ -672,7 +715,7 @@ namespace simbi {
             if (viscosity < 0.0) {
                 throw std::runtime_error("Viscosity must be non-negative");
             }
-            if (sound_speed_squared < 0.0) {
+            if (ambeint_sound_speed < 0.0) {
                 throw std::runtime_error(
                     "Sound speed squared must be positive"
                 );
@@ -744,7 +787,7 @@ namespace simbi {
                 throw std::runtime_error("Spatial order cannot be empty");
             }
             if (timestepping.empty()) {
-                throw std::runtime_error("Temporal order cannot be empty");
+                throw std::runtime_error("time_series order cannot be empty");
             }
             if (regime.empty()) {
                 throw std::runtime_error("Regime cannot be empty");
@@ -806,6 +849,19 @@ namespace simbi {
             if (nvars == 0) {
                 throw std::runtime_error("Number of variables cannot be zero");
             }
+        }
+
+        void visit_fmr_parameters(
+            bool&,
+            std::uint64_t&,
+            std::uint64_t&,
+            bool&,
+            bool&,
+            std::vector<std::vector<real>>&,
+            std::vector<std::uint64_t>&
+        ) override
+        {
+            // [TODO]: implement FMR validation
         }
     };
 

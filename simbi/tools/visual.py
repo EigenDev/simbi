@@ -59,8 +59,8 @@ def visualize(config: dict[str, Any]) -> None:
                 animation_config["frame_rate"],
                 **kwargs,
             )
-        elif plot_type == "temporal":
-            api.animate_temporal(
+        elif plot_type == "time_series":
+            api.animate_time_series(
                 files,
                 fields,
                 save_as,
@@ -75,8 +75,8 @@ def visualize(config: dict[str, Any]) -> None:
             api.plot_multidim(files, fields, save_as, True, **kwargs)
         elif plot_type == "histogram":
             api.plot_histogram(files, fields, save_as, True, **kwargs)
-        elif plot_type == "temporal":
-            api.plot_temporal(files, fields, save_as, True, **kwargs)
+        elif plot_type == "time_series":
+            api.plot_time_series(files, fields, save_as, True, **kwargs)
 
 
 def _build_api_kwargs(

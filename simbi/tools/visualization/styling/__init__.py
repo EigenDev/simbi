@@ -31,16 +31,12 @@ class ThemeManager:
 
     @classmethod
     def set_theme(
-        cls,
-        theme_name: str,
-        nfiles: int = 1,
-        nfields: int = 1,
-        user_fig_size: Optional[tuple[float, float]] = None,
+        cls, theme_name: str, nfiles: int = 1, nfields: int = 1
     ) -> bool:
         """Set the current theme"""
         if theme_name in cls._themes:
             cls._current_theme = theme_name
-            cls._themes[theme_name].apply(nfiles, nfields, user_fig_size)
+            cls._themes[theme_name].apply(nfiles, nfields)
             return True
         return False
 

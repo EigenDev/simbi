@@ -1,6 +1,6 @@
 from dataclasses import dataclass, field
 from itertools import cycle
-from typing import Any, Optional, Sequence
+from typing import Any, Sequence
 
 import matplotlib as mpl
 import matplotlib.pyplot as plt
@@ -57,18 +57,13 @@ class ThemeConfig:
         }
     )
 
-    def apply(
-        self,
-        nfiles: int = 1,
-        nfields: int = 1,
-        user_fig_size: Optional[tuple[float, float]] = None,
-    ):
+    def apply(self, nfiles: int = 1, nfields: int = 1):
         """Apply theme to matplotlib global settings"""
         plt.style.use("default")
 
         colormap = plt.get_cmap(next(cycle(self.color_maps)))
         nlines = nfields
-        nind_curves = nfields * nfiles
+        nind_curves = nlines * nfiles
         colors = np.array(
             [colormap(k) for k in np.linspace(0.1, 0.9, nind_curves)]
         )

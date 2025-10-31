@@ -2,10 +2,10 @@
 #define SIMIB_MESH_MESH_CONFIG_HPP
 
 #include "compat.hpp"   // for real, DUAL, DEV, global::using_four_velocity
-#include "containers/vector.hpp"   // for vector_t
-#include "domain/algebra.hpp"
-#include "domain/domain.hpp"
-#include "functional/fp.hpp"
+#include "containers/vector.hpp"         // for vector_t
+#include "domain/algebra.hpp"            // for domain_algebra
+#include "domain/domain.hpp"             // for domain_t, make_domain
+#include "functional/fp.hpp"             // for fp::product
 #include "utility/bimap.hpp"             // for deserialize
 #include "utility/enums.hpp"             // for Cellspacing enum
 #include "utility/init_conditions.hpp"   // for initial_conditions_t
@@ -13,6 +13,8 @@
 #include <cstddef>      // for std::size_t
 #include <cstdint>      // for std::int64_t
 #include <functional>   // for std::function
+#include <limits>
+#include <utility>   // for std::pair
 
 namespace simbi::mesh {
     template <std::uint64_t Dims, Geometry G>
@@ -31,6 +33,7 @@ namespace simbi::mesh {
         vector_t<real, Dims> bounds_max;   // x1max, x2max, x3max
         // linear vs log per direction
         vector_t<Cellspacing, Dims> spacing_types;
+        vector_t<real, Dims> dx;   // grid spacing per direction
 
         // time-dependent state
         bool homologous{false};
@@ -112,9 +115,9 @@ namespace simbi::mesh {
                     // we roll by 1 in the perpendicular directions
                     // to account for ghosts needed for CT algorithm
                     config.face_domain[ii].start[(ii + 1) % Dims] += 1;
-                    config.face_domain[ii].end[(ii + 1) % Dims] += 1;
+                    config.face_domain[ii].fin[(ii + 1) % Dims] += 1;
                     config.face_domain[ii].start[(ii + 2) % Dims] += 1;
-                    config.face_domain[ii].end[(ii + 2) % Dims] += 1;
+                    config.face_domain[ii].fin[(ii + 2) % Dims] += 1;
                 }
             }
 
@@ -171,6 +174,22 @@ namespace simbi::mesh {
             config.sf               = init.mesh_motion ? a : nullptr;
             config.sf_derivative    = init.mesh_motion ? adot : nullptr;
 
+            // grid spacing (initial)
+            for (std::uint64_t ii = 0; ii < Dims; ii++) {
+                if (config.spacing_types[ii] == Cellspacing::LINEAR) {
+                    config.dx[ii] =
+                        (config.bounds_max[ii] - config.bounds_min[ii]) /
+                        static_cast<real>(config.shape[ii]);
+                }
+                else {
+                    config.dx[ii] =
+                        std::log10(
+                            config.bounds_max[ii] / config.bounds_min[ii]
+                        ) /
+                        static_cast<real>(config.shape[ii]);
+                }
+            }
+
             return config;
         }
     };
@@ -192,6 +211,7 @@ namespace simbi::mesh {
         new_c.bounds_max = new_c.current_bounds_max();
         return new_c;
     }
+
 }   // namespace simbi::mesh
 
-#endif   // MESH_MESH_CONFIG_HPP
+#endif   // MESH_CONFIG_HPP

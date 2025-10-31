@@ -11,13 +11,16 @@ import matplotlib.pyplot as plt
 from .components.histogram import HistogramPlotComponent, HistogramPlotProps
 from .components.line import LinePlotComponent, LinePlotProps
 from .components.multidim import MultidimPlotComponent
-from .components.temporal import TemporalPlotComponent, TemporalPlotProps
+from .components.time_series import (
+    time_seriesPlotComponent,
+    time_seriesPlotProps,
+)
 from .core.config import (
     VisualizationConfig,
 )
 from .core.conversion import multidim_props_from_args
 from .core.figure import Figure
-from .pipeline.transforms import (
+from .pipeline import (
     create_plot_data,
     create_time_series_data,
     load_data,
@@ -50,14 +53,21 @@ def plot_line(
     if isinstance(files, str):
         files = [files]
 
-    figure = prepare_figure(config, len(files))
     sim_data = load_data(files[0])
+    nlvls = sim_data.hierarchy().num_levels if sim_data.hierarchy else 1
+    figure = prepare_figure(config, len(files), nlvls=nlvls)
     plot_data = create_plot_data(sim_data, fields, config)
 
     # Add line component for each field
     for i, field in enumerate(fields):
+        if sim_data.hierarchy is not None:
+            # we make a list over all levels with "_L" in their name
+            n = sim_data.hierarchy().num_levels
+            indices = [n * i + j for j in range(n)]
+        else:
+            indices = [i]
         props = LinePlotProps(
-            field_indices=[i],
+            field_indices=indices,
             labels=kwargs.get("labels", [field]),
             linewidth=kwargs.get("linewidth", 2.0),
             markers=kwargs.get("markers", []),
@@ -208,7 +218,7 @@ def plot_multidim(
     return figure
 
 
-def plot_temporal(
+def plot_time_series(
     config: VisualizationConfig,
     files: Sequence[str],
     fields: Sequence[str] = ["rho"],
@@ -217,7 +227,7 @@ def plot_temporal(
     **kwargs,
 ) -> Figure:
     """
-    Create a temporal plot visualization.
+    Create a time_series plot visualization.
 
     Args:
         files: Sequence of file paths to visualize (chronological order)
@@ -230,13 +240,13 @@ def plot_temporal(
         Figure object
     """
     if len(files) < 2:
-        raise ValueError("Temporal plots require at least two files")
+        raise ValueError("time_series plots require at least two files")
 
     figure = prepare_figure(config, len(files))
     time_series = create_time_series_data(files, fields)
 
     for i, field in enumerate(fields):
-        props = TemporalPlotProps(
+        props = time_seriesPlotProps(
             field_index=i,
             color=kwargs.get("color"),
             linewidth=kwargs.get("linewidth", 2.0),
@@ -250,7 +260,7 @@ def plot_temporal(
             trend_degree=kwargs.get("trend_degree", 1),
         )
 
-        component = TemporalPlotComponent(props=props)
+        component = time_seriesPlotComponent(props=props)
         if figure.fig is None:
             raise ValueError("Figure not initialized properly")
 
@@ -298,9 +308,9 @@ def animate(
         figure = plot_multidim(config, files[0], fields, None, False, **kwargs)
     elif plot_type == "histogram":
         figure = plot_histogram(config, files[0], fields, None, False, **kwargs)
-    elif plot_type == "temporal":
-        # Temporal doesn't make sense to animate
-        raise ValueError("Temporal plots cannot be animated")
+    elif plot_type == "time_series":
+        # time_series doesn't make sense to animate
+        raise ValueError("time_series plots cannot be animated")
     else:
         raise ValueError(f"Unknown plot type: {plot_type}")
 

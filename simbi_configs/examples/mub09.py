@@ -31,7 +31,7 @@ class MHDState:
         yield self.p
 
 
-class MagneticShockTube(SimbiBaseConfig):
+class MUB09(SimbiBaseConfig):
     """
     Mignone, Ugliano, & Bodo (2009), 1D SRMHD test problems.
     """

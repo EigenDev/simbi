@@ -68,6 +68,8 @@ class MultidimConfig(BaseModel):
     projection: tuple[int, int, int] = (1, 2, 3)
     bipolar: bool = False
     coords: dict[str, list[float]] = Field(default_factory=dict)
+    composite_view: bool = False
+    active_levels: Optional[set[int]] = None
 
     model_config = {
         "frozen": True,  # Make instances immutable
@@ -89,6 +91,21 @@ class MultidimConfig(BaseModel):
             raise ValueError(f"Projection indices must be unique, got {v}")
         return v
 
+    @field_validator("composite_view", "active_levels")
+    @classmethod
+    def validate_composite_and_levels(cls, v, info: ValidationInfo):
+        """Validate that active_levels is set if composite_view is True."""
+        composite_view = info.data.get("composite_view", False)
+        active_levels = info.data.get("active_levels", None)
+
+        if composite_view and (
+            active_levels is None or len(active_levels) == 0
+        ):
+            raise ValueError(
+                "active_levels must be set and non-empty when composite_view is True"
+            )
+        return v
+
 
 class PlotConfig(BaseModel):
     """
@@ -101,7 +118,7 @@ class PlotConfig(BaseModel):
         ndim: Number of dimensions to visualize
     """
 
-    plot_type: Literal["line", "multidim", "histogram", "temporal"]
+    plot_type: Literal["line", "multidim", "histogram", "time_series"]
     fields: Sequence[str]
     ndim: int = 1
 
@@ -147,9 +164,9 @@ class HistogramConfig(BaseModel):
         return v
 
 
-class TemporalConfig(BaseModel):
+class time_seriesConfig(BaseModel):
     """
-    Configuration for temporal plots.
+    Configuration for time_series plots.
 
     Attributes:
         weight: Field to use for weighting
@@ -202,7 +219,7 @@ class VisualizationConfig(BaseModel):
         style: Styling configuration
         multidim: Multidimensional plot configuration
         histogram: Histogram configuration
-        temporal: Temporal plot configuration
+        time_series: time_series plot configuration
         animation: Animation configuration
     """
 
@@ -210,7 +227,7 @@ class VisualizationConfig(BaseModel):
     style: StyleConfig = Field(default_factory=StyleConfig)
     multidim: MultidimConfig = Field(default_factory=MultidimConfig)
     histogram: HistogramConfig = Field(default_factory=HistogramConfig)
-    temporal: TemporalConfig = Field(default_factory=TemporalConfig)
+    time_series: time_seriesConfig = Field(default_factory=time_seriesConfig)
     animation: AnimationConfig = Field(default_factory=AnimationConfig)
     theme: ThemeConfig = Field(default_factory=ThemeConfig)
 

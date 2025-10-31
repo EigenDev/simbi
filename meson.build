@@ -54,6 +54,8 @@ configure_file(
 openmp_dep = dependency('openmp', language: 'cpp', required: true)
 hdf5_dep = dependency('hdf5', language: 'cpp', required: true)
 
+all_inc = include_directories('src')
+
 #Include Subdirectories
 subdir('src')
 subdir('simbi/afterglow')
@@ -64,7 +66,7 @@ general_dependencies = [
   py3.dependency(),
   pybind11_dep,
 ]
-all_inc = include_directories('src')
+
 #CPU Extension Module
 py3.extension_module(
   'cpu_ext',

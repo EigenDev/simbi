@@ -1,8 +1,8 @@
 #ifndef MHD_LOGIC_HPP
 #define MHD_LOGIC_HPP
 
-#include "compute/field.hpp"
 #include "compat.hpp"
+#include "compute/field.hpp"
 #include "contact.hpp"
 #include "containers/vector.hpp"
 #include "ct_geom.hpp"
@@ -285,7 +285,8 @@ namespace simbi::em {
     }
 
     template <magnetic_comp_t MagComp, typename HydroState, typename MeshConfig>
-    auto ct_magnetic_update(const HydroState& state, const MeshConfig& mesh)
+    auto
+    ct_magnetic_update(const HydroState& state, const MeshConfig& mesh, real dt)
     {
         constexpr auto comp = static_cast<std::uint64_t>(MagComp);
         const auto fluxes   = vector_t{
@@ -298,7 +299,7 @@ namespace simbi::em {
           make_ct_magnetic_update_op<MagComp>(
               fluxes,
               state.prim[mesh.domain],
-              state.metadata.dt,
+              dt,
               mesh
           ),
           make_domain(mesh.face_domain[comp].shape())
@@ -339,17 +340,34 @@ namespace simbi::em {
         }
     };
 
-    template <typename HydroState, typename MeshConfig>
+    // template <typename HydroState, typename MeshConfig>
+    // auto interpolate_face_to_cell_magnetic(
+    //     const HydroState& state,
+    //     const MeshConfig& mesh
+    // )
+    // {
+    //     return compute_field_t{
+    //       interpolate_magnetic_op_t{
+    //         state.bstaggs[2][mesh.face_domain[2]],
+    //         state.bstaggs[1][mesh.face_domain[1]],
+    //         state.bstaggs[0][mesh.face_domain[0]],
+    //         mesh
+    //       },
+    //       make_domain(mesh.domain.shape())
+    //     };
+    // }
+
+    template <typename BField, typename MeshConfig>
     auto interpolate_face_to_cell_magnetic(
-        const HydroState& state,
+        const BField& bfield,
         const MeshConfig& mesh
     )
     {
         return compute_field_t{
           interpolate_magnetic_op_t{
-            state.bstaggs[2][mesh.face_domain[2]],
-            state.bstaggs[1][mesh.face_domain[1]],
-            state.bstaggs[0][mesh.face_domain[0]],
+            bfield[2][mesh.face_domain[2]],
+            bfield[1][mesh.face_domain[1]],
+            bfield[0][mesh.face_domain[0]],
             mesh
           },
           make_domain(mesh.domain.shape())
@@ -359,12 +377,15 @@ namespace simbi::em {
     // ========================================================================
     // HIGH-LEVEL INTERFACE
     // ========================================================================
-
-    template <typename HydroState, typename MeshConfig>
-    void update_energy_density(HydroState& state, const MeshConfig& mesh)
+    template <typename ConsField, typename BField, typename MeshConfig>
+    void update_energy_density(
+        ConsField& cons,
+        const BField& bfields,
+        const MeshConfig& mesh
+    )
     {
-        auto bavg = interpolate_face_to_cell_magnetic(state, mesh);
-        auto u_p  = state.cons[mesh.domain];
+        auto bavg = interpolate_face_to_cell_magnetic(bfields, mesh);
+        auto u_p  = cons[mesh.domain];
 
         u_p = u_p.enum_map([bavg](auto coord, auto u) {
             const auto b_interp = bavg(coord);
@@ -379,7 +400,7 @@ namespace simbi::em {
     template <typename HydroState, typename MeshConfig>
     void interpolate_magnetic_fields(HydroState& state, const MeshConfig& mesh)
     {
-        auto bavg = interpolate_face_to_cell_magnetic(state, mesh);
+        auto bavg = interpolate_face_to_cell_magnetic(state.bfield, mesh);
         auto u_p  = state.cons[mesh.domain];
 
         u_p = u_p.enum_map([bavg](auto coord, auto u) {
@@ -390,22 +411,27 @@ namespace simbi::em {
     }
 
     template <magnetic_comp_t MagComp, typename HydroState, typename MeshConfig>
-    void update_magnetic_component(HydroState& state, const MeshConfig& mesh)
+    void update_magnetic_component(
+        HydroState& state,
+        const MeshConfig& mesh,
+        real dt
+    )
     {
         constexpr auto comp = static_cast<std::uint64_t>(MagComp);
-        auto db             = ct_magnetic_update<MagComp>(state, mesh);
-        auto bfield         = state.bstaggs[comp][mesh.face_domain[comp]];
+        auto db             = ct_magnetic_update<MagComp>(state, mesh, dt);
+        auto bfield         = state.bfield[comp][mesh.face_domain[comp]];
         bfield              = bfield.enum_map([db](auto coord, auto b_old) {
             return b_old + db(coord);
         });
     }
 
     template <typename HydroState, typename MeshConfig>
-    void update_magnetic_fields(HydroState& state, const MeshConfig& mesh)
+    void
+    update_magnetic_fields(HydroState& state, const MeshConfig& mesh, real dt)
     {
-        update_magnetic_component<magnetic_comp_t::I>(state, mesh);
-        update_magnetic_component<magnetic_comp_t::J>(state, mesh);
-        update_magnetic_component<magnetic_comp_t::K>(state, mesh);
+        update_magnetic_component<magnetic_comp_t::I>(state, mesh, dt);
+        update_magnetic_component<magnetic_comp_t::J>(state, mesh, dt);
+        update_magnetic_component<magnetic_comp_t::K>(state, mesh, dt);
         interpolate_magnetic_fields(state, mesh);
     }
 

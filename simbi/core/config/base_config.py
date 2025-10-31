@@ -22,7 +22,12 @@ from typing import (
 
 import numpy as np
 from numpy.typing import NDArray
-from pydantic import PrivateAttr, computed_field, model_validator
+from pydantic import (
+    PrivateAttr,
+    computed_field,
+    field_validator,
+    model_validator,
+)
 
 from ..types.bodies import (
     BodySystemConfig,
@@ -156,6 +161,62 @@ class SimbiBaseConfig(CLIConfigurableModel):
     log_parameter_setup: bool = SimbiField(
         True, description="Log parameter setup information"
     )
+
+    # FMR-specific fields
+    fmr_enabled: bool = SimbiField(
+        False, description="Enable fixed mesh refinement"
+    )
+
+    fmr_max_levels: int = SimbiField(
+        1,
+        description="Maximum number of refinement levels",
+        json_schema_extra={
+            "cli_info": {"choices": [1, 2, 3]}
+        },  # Limit reasonable choices
+    )
+
+    fmr_buffer_size: int = SimbiField(
+        1, description="Number of buffer cells around refinement regions"
+    )
+
+    # List of refinement regions for each level
+    # Format: List of (xmin, xmax) for 1D, (xmin, xmax, ymin, ymax) for 2D, etc.
+    fmr_regions: list[list[float]] = SimbiField(
+        [],
+        description="List of refinement regions for each level",
+        json_schema_extra={
+            "examples": [
+                # 1D example
+                [[0.4, 0.6]],  # Single region from x=0.4 to x=0.6
+                # 2D example
+                [[0.4, 0.6, 0.4, 0.6]],  # Square region [xmin,xmax,ymin,ymax]
+                # Multiple levels example
+                [[0.3, 0.7], [0.4, 0.6]],  # Two nested regions
+            ]
+        },
+    )
+
+    # Refinement ratios for each level (relative to its parent)
+    fmr_ratios: list[int] | list[np.uint64] = SimbiField(
+        [], description="Refinement ratio for each level relative to its parent"
+    )
+
+    fmr_conservative_interpolation: bool = SimbiField(
+        True, description="Use conservative interpolation between levels"
+    )
+
+    # Control output of refined levels
+    fmr_output_all_levels: bool = SimbiField(
+        True, description="Output data from all refinement levels"
+    )
+
+    @field_validator("fmr_ratios")
+    def validate_ratios(cls, v: list[int]) -> list[np.uint64]:
+        """Validate refinement ratios are positive integers within uint64 range."""
+        try:
+            return [np.uint64(r) for r in v]
+        except (ValueError, TypeError) as e:
+            raise ValueError(f"Invalid refinement ratio: {e}")
 
     # Isothermal physics
     @computed_field
@@ -550,6 +611,56 @@ class SimbiBaseConfig(CLIConfigurableModel):
                             continue
 
         return data
+
+    @model_validator(mode="after")
+    def validate_fmr_config(self) -> "SimbiBaseConfig":
+        """Validate FMR configuration if enabled."""
+        if self.fmr_enabled:
+            # Must have at least one region if FMR is enabled
+            if not self.fmr_regions:
+                raise ValueError(
+                    "FMR regions must be specified when FMR is enabled"
+                )
+
+            # Number of regions must match number of levels - 1
+            if len(self.fmr_regions) != self.fmr_max_levels - 1:
+                raise ValueError(
+                    f"Expected {self.fmr_max_levels - 1} FMR regions, got {len(self.fmr_regions)}"
+                )
+
+            # Number of ratios must match number of levels - 1
+            if len(self.fmr_ratios) != self.fmr_max_levels - 1:
+                raise ValueError(
+                    f"Expected {self.fmr_max_levels - 1} refinement ratios, got {len(self.fmr_ratios)}"
+                )
+
+            # Validate region dimensions match problem dimensionality
+            expected_coords = (
+                2 * self.dimensionality
+            )  # min/max for each dimension
+            for level, region in enumerate(self.fmr_regions):
+                if len(region) != expected_coords:
+                    raise ValueError(
+                        f"FMR region at level {level + 1} has {len(region)} coordinates, "
+                        f"expected {expected_coords} for {self.dimensionality}D problem"
+                    )
+
+            # Enforce minimum buffer size
+            if self.fmr_buffer_size < 1:
+                raise ValueError("FMR buffer size must be at least 1")
+
+            # Warn if buffer might be too small for interpolation order
+            if (
+                self.reconstruction == Reconstruction.PLM
+                and self.fmr_buffer_size < 2
+            ):
+                import warnings
+
+                warnings.warn(
+                    "Buffer size < 2 might be insufficient for PLM reconstruction"
+                )
+
+        return self
 
     @final
     def merge_with_checkpoint(

@@ -12,6 +12,7 @@
 
 #include <cmath>
 #include <cstdint>
+#include <iostream>
 
 namespace simbi::body::expr {
     using namespace simbi::hydro;
@@ -96,60 +97,115 @@ namespace simbi::body::expr {
         }
 
         template <typename Body, typename Coord>
-        constexpr DEV auto
-        operator()(const Body& body, Coord coord, bool is_binary) const
+        constexpr DEV auto operator()(
+            const Body& body,
+            Coord coord,
+            bool is_binary,
+            real mdot_target = 0.0,
+            real w_total     = 0.0,
+            real /*r_bh */   = 0.0
+        ) const
         {
             using namespace simbi::helpers;
-            const auto cell_pos    = mesh::to_cartesian(coord, mesh_);
-            const auto r_vec       = cell_pos - body.position;
-            const auto r_mag       = r_vec.norm();
-            const auto accr_radius = accretion_radius(body);
+            const auto cell_pos = mesh::to_cartesian(coord, mesh_);
+            const auto r_vec    = cell_pos - body.position;
+            const auto r_mag    = r_vec.norm();
+            const auto r_acc    = accretion_radius(body);
+            const auto sr_param = sink_rate(body);
+            const auto dv       = mesh::volume(coord, mesh_);
 
-            // physical timescales
-            const auto cell_size           = mesh::min_cell_width(coord, mesh_);
-            const auto local_cs            = sound_speed(prim, gamma);
-            const auto sound_crossing_time = cell_size / local_cs;
+            // quick exit if outside accretion radius
+            if (r_mag > 4.0 * r_acc) {
+                return std::make_pair(
+                    conserved_t{},
+                    body_delta_t<Dims>{
+                      .idx          = body.idx,
+                      .force_delta  = {},
+                      .torque_delta = {},
+                      .mass_delta   = 0.0
+                    }
+                );
+            }
 
-            // free-fall time to sink center (gravitational timescale)
-            const auto t_ff =
-                (r_mag > 1e-10)
-                    ? std::sqrt(r_mag * r_mag * r_mag / (2.0 * body.mass))
-                    : sound_crossing_time;   // fallback for r→0
+            real den_dot;
+            if (std::abs(sr_param) != 0.0) {
+                const auto weight = [is_binary, r_mag, r_acc]() {
+                    if (is_binary) {
+                        const auto r_norm = r_mag / r_acc;
+                        return std::exp(-0.25 * std::pow(r_norm, 4));
+                    }
+                    const auto r_kernel = 0.5 * r_acc;
+                    const auto r_norm   = r_mag / r_kernel;
+                    return std::exp(-r_norm * r_norm);
+                }();
+                // physical timescales
+                const auto cell_size = mesh::min_cell_width(coord, mesh_);
+                const auto local_cs  = sound_speed(prim, gamma);
+                const auto sound_crossing_time = cell_size / local_cs;
 
-            // use the shorter of the two natural timescales
-            const auto t_natural = std::min(sound_crossing_time, t_ff);
+                // free-fall time to sink center (gravitational timescale)
+                const auto t_ff =
+                    (r_mag > 1e-10)
+                        ? std::sqrt(r_mag * r_mag * r_mag / (2.0 * body.mass))
+                        : sound_crossing_time;   // fallback for r→0
 
-            // stability limits (maybe? TODO: revisit...)
-            const auto nat_rate = 1.0 / t_natural;   // [1/time] - physical rate
-            const auto sr_param = sink_rate(body);   // [1/time] - desired rate
-            const auto stability_rate = 1.0 / dt;    // [1/time] - max safe rate
-            const auto sr_base = my_min3(sr_param, nat_rate, stability_rate);
+                // use the shorter of the two natural timescales
+                const auto t_natural = std::min(sound_crossing_time, t_ff);
+                // stability limits (maybe? TODO: revisit...)
+                // [1/time] - physical rate
+                const auto nat_rate = 1.0 / t_natural;
+                // [1/time] - max safe rate
+                const auto stab_rate = 1.0 / dt;
+                const auto sr_base   = my_min3(sr_param, nat_rate, stab_rate);
 
-            // torque-controlled sink prescription from Dittmann & Ryan(2021)
-            // https://ui.adsabs.harvard.edu/abs/2021ApJ...921...71D/abstract
-            const auto r_norm         = r_mag / accr_radius;
-            const auto radial_profile = [is_binary, r_norm]() {
-                if (is_binary) {
-                    return std::exp(-0.25 * std::pow(r_norm, 4));
+                const auto sr = sr_base * weight;
+                den_dot       = labframe_density(prim) * sr;
+            }
+            else {
+                // const auto r_kernel = [=, this]() {
+                //     const auto dx = mesh::min_cell_width(coord, mesh_);
+                //     if (r_bh < 0.25 * dx) {
+                //         return 0.25 * dx;
+                //     }
+                //     else if ((r_bh <= 0.25 * dx) && (r_bh <= 0.5 * r_acc)) {
+                //         return r_bh;
+                //     }
+                //     else {
+                //         return 0.5 * r_acc;
+                //     }
+                // }();
+                const auto r_kernel = 0.5 * r_acc;
+                const auto r_norm   = r_mag / r_kernel;
+                const auto weight   = std::exp(-r_norm * r_norm);
+                // from Krumholz et al. (2004) sink prescription
+                const auto norm_weight = weight / w_total;
+                den_dot                = mdot_target * (norm_weight / dv);
+
+                // no mass reduced by more than 25% per timestep
+                if (den_dot > 0.0) {
+                    const auto rho_n         = labframe_density(prim);
+                    const auto delta_rho     = den_dot * dt;
+                    const auto delta_rho_lim = my_min(delta_rho, 0.25 * rho_n);
+                    const auto eta           = delta_rho_lim / delta_rho;
+                    den_dot                  = den_dot * eta;
                 }
-                return std::exp(-0.5 * r_norm * r_norm);
-            }();
-            const auto sr = sr_base * radial_profile;
+            }
 
+            // torque-controlled sink prescription from Dittmann &
+            // Ryan(2021)
+            // https://ui.adsabs.harvard.edu/abs/2021ApJ...921...71D/abstract
             const auto v_star = apply_torque_control(
                 r_vec / r_mag,
                 body.velocity,
                 prim.vel,
                 sink_delta(body)
             );
-            const auto den_dot = labframe_density(prim) * sr;
             const auto mom_dot = den_dot * v_star;
             const auto ke_dot  = 0.5 * den_dot * vecops::dot(v_star, v_star);
             const auto ie_dot = den_dot * specific_internal_energy(prim, gamma);
             const auto nrg_dot = ke_dot + ie_dot;
 
             // force and torque from momentum removal
-            const auto dv           = mesh::volume(coord, mesh_);
             const auto force_delta  = -mom_dot * dv;
             const auto torque_delta = [&]() -> vector_t<real, 3> {
                 if constexpr (Dims > 2) {

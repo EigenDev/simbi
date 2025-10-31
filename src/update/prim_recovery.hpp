@@ -8,13 +8,11 @@ namespace simbi::hydro {
     /**
      *
      */
-    template <typename HydroState>
-    void recover_primitives(HydroState& state)
+    template <typename ConsField, typename PrimField>
+    void recover_primitives(PrimField& prim, const ConsField& cons, real gamma)
     {
-        const auto gamma = state.metadata.gamma;
-
-        state.prim = state.cons.map([gamma] DEV(const auto& cons) {
-            return to_primitive(cons, gamma);
+        prim = cons.map([gamma] DEV(const auto& c) {
+            return to_primitive(c, gamma);
         });
     }
 }   // namespace simbi::hydro

@@ -216,7 +216,7 @@ class RichSimulationSummary:
             "use_fleischmann_limiter": "Use Fleischmann et al. (2020) low-Mach HLLC fix (True / False)",
             "solver": "Riemann solver used",
             "reconstruction": "Spatial reconstruction schemes",
-            "timestepping": "temporal integration scheme",
+            "timestepping": "time_series integration scheme",
             "plm_theta": "PLM theta parameter",
             "boundary_conditions": "Boundary conditions (periodic, reflective, etc.)",
             "data_directory": "Directory for input/output data",

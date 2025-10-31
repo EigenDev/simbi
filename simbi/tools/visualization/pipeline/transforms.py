@@ -8,11 +8,11 @@ import matplotlib.pyplot as plt
 import numpy as np
 
 from ....core.types import ProcessedData
-from ....functional import curry
 from ....reader import SimData, parse_data, read_raw_data
 from ..core.config import VisualizationConfig
+from ..core.constants import FIELD_ALIASES
 from ..core.figure import Figure
-from ..core.types import Array, CoordSystem, FieldData, PlotData
+from ..core.types import Array, FieldData
 
 T = TypeVar("T")
 
@@ -112,7 +112,7 @@ def slice_to_1d(axis_names: set[str], positions: Sequence[float]) -> Callable:
 
 def extract_field(field_name: str) -> Callable[[SimData], Array]:
     """Extract a named field from simulation data."""
-    return lambda data: data[field_name]
+    return lambda data: data[FIELD_ALIASES.get(field_name, field_name)]
 
 
 def extract_coordinate(coord_name: str) -> Callable[[SimData], Array | None]:
@@ -168,31 +168,10 @@ def create_slicer_from_config(slice_config: dict[str, Any]) -> Callable:
         return lambda data_dict: (data_dict["values"], data_dict["domain"])
 
 
-def transform_field(
-    data: SimData,
-    field_name: str,
-    ndim: int,
-    slice_config: Optional[dict[str, Any]] = None,
-) -> FieldData:
-    """Transform a single field based on dimension and slicing configuration."""
-    if slice_config and "orthogonal_ax" in slice_config:
-        vertices = False
-    elif ndim in (2, 3):
-        vertices = True
-    else:
-        vertices = False
-    values = extract_field(field_name)(data)
-    domain = get_domain_for_dimension(data, ndim, vertices=vertices)
-    if slice_config:
-        slicer = create_slicer_from_config(slice_config)
-        values, domain = slicer({"values": values, "domain": domain})
-
-    return create_field_data(field_name, values, domain)
-
-
 def get_effective_dimensions(data: SimData, config: VisualizationConfig) -> int:
     """Determine the effective number of dimensions to use based on data and config."""
-    return min(config.plot.ndim, data.metadata.dimensions)
+    x = sum(r > 1 for r in data.mesh.shape)
+    return min(config.plot.ndim, x)
 
 
 def get_slice_config(config: VisualizationConfig) -> Optional[dict[str, Any]]:
@@ -269,80 +248,42 @@ def _create_projection_slice_config(
     return {"axis": dim_to_axis[last_dim], "position": slice_position}
 
 
-def create_plot_data(
-    data: SimData, field_names: Sequence[str], config: VisualizationConfig
-) -> PlotData:
-    """Create plot data from simulation data"""
-    ndim = get_effective_dimensions(data, config)
-    slice_config = get_slice_config(config)
-    field_transform = curry(
-        transform_field, data, ndim=ndim, slice_config=slice_config
-    )
-    field_data = [field_transform(name) for name in field_names]
-    return PlotData(
-        fields=field_data,
-        bodies=data.bodies,
-        time=data.metadata.time,
-        dimensions=ndim,
-        coord_system=CoordSystem(data.metadata.coord_system),
-    )
+def transform_field(
+    data: SimData,
+    field_name: str,
+    level: int,
+    effective_dim: int,
+    slice_config: Optional[dict[str, Any]] = None,
+) -> FieldData:
+    """Transform a single field at a specific refinement level"""
+    # Get field values for this level
+    values = data.get_field(field_name, level)
 
+    # Get mesh for this level
+    mesh = data.level_mesh(level)
 
-def create_time_series_data(
-    files: Sequence[str],
-    field_names: Sequence[str] = ["rho"],
-) -> PlotData:
-    """
-    Create a time series of plot data for animation testing.
+    # Get domain appropriate for the effective dimension
+    if slice_config and "orthogonal_ax" in slice_config:
+        vertices = False
+    elif effective_dim in (2, 3):
+        vertices = True
+    else:
+        vertices = False
 
-    Args:
-        num_frames: Number of frames to create
-        field_names: List of field names to create
-        domain_size: Size of the spatial domain
+    # Get coordinates from level-specific mesh
+    coords = []
+    suffix = "v" if vertices else "c"
+    for i in range(1, effective_dim + 1):
+        coord = getattr(mesh, f"x{i}{suffix}")
+        if coord is not None:
+            coords.append(coord)
 
-    Returns:
-        List of PlotData objects representing a time series
-    """
-    times: list[float] = []
-    field_values = {field: [] for field in field_names}
-    for file_path in files:
-        sim_data = load_data(file_path)
-        time = sim_data.metadata.time
-        times.append(time)
-        for field in field_names:
-            if field in sim_data.fields:
-                field_values[field].append(np.mean(sim_data[field]))
-            elif field in ["mdot", "maccr"]:
-                if not sim_data.bodies:
-                    raise ValueError("No bodies in this run.")
-
-                if not any(v.accretion for _, v in sim_data.bodies.items()):
-                    raise ValueError(
-                        "This run did not include accreting bodies"
-                    )
-                prop = (
-                    "accretion_rate"
-                    if field == "mdot"
-                    else "total_accreted_mass"
-                )
-
-                field_values[field].append(
-                    np.array(
-                        [
-                            getattr(v.accretion, prop)
-                            for _, v in sim_data.bodies.items()
-                        ]
-                    )
-                )
-
-    return PlotData(
-        fields=[
-            FieldData(
-                name=field, values=np.array(vals), domain=[np.array(times)]
-            )
-            for field, vals in field_values.items()
-        ]
-    )
+    # Apply slicing if needed
+    if slice_config and effective_dim >= 2:
+        slicer = create_slicer_from_config(slice_config)
+        values, coords = slicer({"values": values, "domain": coords})
+    name = f"{field_name}_L{level}" if level > 0 else field_name
+    return create_field_data(name, values, coords)
 
 
 def load_data(file_path: str) -> SimData:
@@ -359,6 +300,7 @@ def load_data(file_path: str) -> SimData:
     with h5py.File(file_path, "r") as file:
         raw_data = read_raw_data(file).unwrap()
         data = parse_data(raw_data).unwrap()
+
     return SimData(data)
 
 
@@ -366,9 +308,10 @@ def prepare_figure(
     config: VisualizationConfig,
     nfiles: int = 1,
     projection: Literal["polar", "cartesian"] | None = None,
+    nlvls: int = 1,
 ) -> Figure:
     """Create and prepare a figure based on configuration."""
-    config.theme.apply(nfields=len(config.plot.fields), nfiles=nfiles)
+    config.theme.apply(nfields=len(config.plot.fields) * nlvls, nfiles=nfiles)
     if projection == "polar":
         fig, ax = plt.subplots(
             1,

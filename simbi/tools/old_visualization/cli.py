@@ -144,7 +144,7 @@ def setup_parser(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--setup", default="Simulation", help="Setup name")
     parser.add_argument(
         "--plot-type",
-        choices=["line", "multidim", "histogram", "temporal"],
+        choices=["line", "multidim", "histogram", "time_series"],
         default=None,
         help="Type of plot to create",
     )
@@ -373,8 +373,8 @@ def setup_parser(parser: argparse.ArgumentParser) -> None:
     )
     parser.add_argument("--powerfit", action="store_true", help="Fit power law")
 
-    # Temporal options
-    parser.add_argument("--weight", help="Weight field for temporal average")
+    # time_series options
+    parser.add_argument("--weight", help="Weight field for time_series average")
     parser.add_argument(
         "--orbital-params",
         nargs="+",
@@ -446,8 +446,8 @@ def main():
                 not args.no_show,
                 config=config,
             )
-        elif plot_type == "temporal":
-            api.plot_temporal(
+        elif plot_type == "time_series":
+            api.plot_time_series(
                 args.files,
                 args.fields,
                 args.save_as,

@@ -20,7 +20,9 @@ from .input import (
     Array,
     CellSpacing,
     FieldData,
+    HierarchyData,
     IArray,
+    LevelData,
     MeshConfig,
     Metadata,
     ProcessedData,
@@ -61,4 +63,6 @@ __all__ = [
     "BaseBody",
     "IArray",
     "UArray",
+    "LevelData",
+    "HierarchyData",
 ]

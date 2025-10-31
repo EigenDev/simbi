@@ -33,6 +33,33 @@ namespace simbi {
 }   // namespace simbi
 
 namespace simbi::fp {
+    namespace detail {
+        template <typename T>
+        struct is_callable {
+            template <typename U>
+            static auto test(int)
+                -> decltype(std::declval<U>()(), std::true_type{});
+
+            template <typename>
+            static auto test(...) -> std::false_type;
+
+            static constexpr bool value = decltype(test<T>(0))::value;
+        };
+
+        template <typename T>
+        struct is_unary_callable {
+            template <typename U>
+            static auto test(
+                int
+            ) -> decltype(std::declval<U>()(std::declval<void*>()), std::true_type{});
+
+            template <typename>
+            static auto test(...) -> std::false_type;
+
+            static constexpr bool value = decltype(test<T>(0))::value;
+        };
+    }   // namespace detail
+
     // ========================================================================
     // core concepts
     // ========================================================================
@@ -101,17 +128,36 @@ namespace simbi::fp {
     // ========================================================================
     // selection: pred(x) ? a(x) : b(x)
     // ========================================================================
+    template <typename Pred>
+    struct predicate_wrapper_t {
+        Pred pred;
+
+        // handle no-arg callable
+        template <typename Arg>
+        DUAL bool operator()(Arg&& arg) const
+        {
+            if constexpr (std::is_same_v<std::decay_t<Pred>, bool>) {
+                return pred;
+            }
+            else if constexpr (std::is_invocable_v<Pred>) {
+                return pred();
+            }
+            else {
+                return pred(std::forward<Arg>(arg));
+            }
+        }
+    };
 
     template <typename Pred, typename A, typename B>
     struct select_t {
-        Pred pred;
+        predicate_wrapper_t<Pred> pred;
         A a;
         B b;
 
         template <typename Arg>
         constexpr DUAL auto operator()(Arg&& arg) const
         {
-            if (pred(arg)) {
+            if (pred(std::forward<Arg>(arg))) {
                 return a(std::forward<Arg>(arg));
             }
             else {
@@ -124,7 +170,7 @@ namespace simbi::fp {
     constexpr auto select(Pred pred, A a, B b)
     {
         return select_t<Pred, A, B>{
-          std::move(pred),
+          predicate_wrapper_t<Pred>{std::move(pred)},
           std::move(a),
           std::move(b)
         };
@@ -179,6 +225,65 @@ namespace simbi::fp {
     constexpr auto transform(F f, Transform t)
     {
         return transform_t<F, Transform>{std::move(f), std::move(t)};
+    }
+
+    template <typename BinaryOp>
+    struct reduce_fn_t {
+        BinaryOp op_;
+        constexpr explicit reduce_fn_t(BinaryOp op) : op_(std::move(op)) {}
+
+        template <iterable Source>
+        constexpr auto operator()(Source&& source) const
+        {
+            auto begin = std::begin(std::forward<Source>(source));
+            auto end   = std::end(std::forward<Source>(source));
+
+            if (begin == end) {
+                using value_type =
+                    typename std::iterator_traits<decltype(begin)>::value_type;
+                // for empty range, return default-constructed value
+                return value_type{};
+            }
+
+            auto result = *begin;
+            ++begin;
+            for (; begin != end; ++begin) {
+                result = op_(result, *begin);
+            }
+            return result;
+        }
+
+        template <iterable Source, typename Init>
+        constexpr auto operator()(Source&& source, Init&& init) const
+        {
+            auto result = std::forward<Init>(init);
+            for (auto&& item : source) {
+                result =
+                    op_(std::move(result), std::forward<decltype(item)>(item));
+            }
+            return result;
+        }
+    };
+
+    template <typename BinaryOp>
+    constexpr auto fold(BinaryOp&& op)
+    {
+        return reduce_fn_t<std::decay_t<BinaryOp>>{std::forward<BinaryOp>(op)};
+    }
+    template <typename BinaryOp, typename Init>
+    constexpr auto fold(BinaryOp&& op, Init&& init)
+    {
+        return [op   = std::forward<BinaryOp>(op),
+                init = std::forward<Init>(init)]<iterable Source>(
+                   Source&& source
+               ) {
+            auto result = init;
+            for (auto&& item : source) {
+                result =
+                    op(std::move(result), std::forward<decltype(item)>(item));
+            }
+            return result;
+        };
     }
 
     // ========================================================================
@@ -1120,101 +1225,10 @@ namespace simbi::fp {
         return none_of_fn_t<std::decay_t<Pred>>(std::forward<Pred>(pred));
     }
 
-    // ========================================================================
-    // reduction operations
-    // ========================================================================
-
-    template <typename BinaryOp>
-    struct reduce_fn_t {
-        BinaryOp op_;
-        constexpr explicit reduce_fn_t(BinaryOp op) : op_(std::move(op)) {}
-
-        template <iterable Source>
-        constexpr auto operator()(Source&& source) const
-        {
-            auto begin = std::begin(std::forward<Source>(source));
-            auto end   = std::end(std::forward<Source>(source));
-
-            if (begin == end) {
-                using value_type =
-                    typename std::iterator_traits<decltype(begin)>::value_type;
-                // for empty range, return default-constructed value
-                return value_type{};
-            }
-
-            auto result = *begin;
-            ++begin;
-            for (; begin != end; ++begin) {
-                result = op_(result, *begin);
-            }
-            return result;
-        }
-    };
-
-    // ========================================================================
-    // async reduction - combines reduce + execute_async
-    // ========================================================================
-    template <typename Executor, typename BinaryOp>
-    struct async_reduce_fn_t {
-        Executor executor_;
-        BinaryOp op_;
-
-        constexpr async_reduce_fn_t(Executor executor, BinaryOp op)
-            : executor_(std::move(executor)), op_(std::move(op))
-        {
-        }
-
-        template <iterable Source>
-        constexpr auto operator()(Source&& source) const
-        {
-            return executor_.async([source = std::forward<Source>(source),
-                                    op     = op_]() {
-                auto begin = std::begin(source);
-                auto end   = std::end(source);
-
-                if (begin == end) {
-                    using value_type = typename std::iterator_traits<
-                        decltype(begin)>::value_type;
-                    return value_type{};
-                }
-
-                auto result = *begin;
-                ++begin;
-                for (; begin != end; ++begin) {
-                    result = op(result, *begin);
-                }
-                return result;
-            });
-        }
-    };
-
-    template <typename Executor, typename BinaryOp>
-    constexpr auto async_reduce(Executor&& executor, BinaryOp&& op)
-    {
-        return async_reduce_fn_t<
-            std::decay_t<Executor>,
-            std::decay_t<BinaryOp>>(
-            std::forward<Executor>(executor),
-            std::forward<BinaryOp>(op)
-        );
-    }
-
-    // ========================================================================
-    // factory functions
-    // ========================================================================
-
     template <typename BinaryOp>
     constexpr DUAL auto reduce(BinaryOp&& op)
     {
         return reduce_fn_t<std::decay_t<BinaryOp>>(std::forward<BinaryOp>(op));
-    }
-
-    template <typename Executor>
-    constexpr DUAL auto execute_async(Executor&& executor)
-    {
-        return execute_async_fn_t<std::decay_t<Executor>>(
-            std::forward<Executor>(executor)
-        );
     }
 
     // ========================================================================

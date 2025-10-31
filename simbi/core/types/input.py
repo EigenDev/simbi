@@ -1,6 +1,6 @@
 from dataclasses import dataclass
 from enum import Enum
-from typing import Any
+from typing import Any, Optional
 
 import numpy as np
 from numpy.typing import NDArray
@@ -186,14 +186,81 @@ class MeshConfig:
 
 
 @dataclass(frozen=True)
+class LevelData:
+    level_id: int
+    mesh: MeshConfig
+    fields: dict[str, Array]
+    ref_ratio: int | None  # ratio to next finer level
+
+
+@dataclass(frozen=True)
+class HierarchyData:
+    num_levels: int
+    levels: list[LevelData]
+    ref_ratios: list[int]  # between levels
+
+
+@dataclass(frozen=True)
 class ProcessedData:
     """Structured data after parsing"""
 
     fields: dict[str, Array]
     metadata: Metadata
     mesh: MeshConfig
+
+    hierarchy: Optional[HierarchyData] = None
+    levels: Optional[list[LevelData]] = None
+
     bodies: dict[str, Body] | None = None
     body_system: BodySystemConfig | list[ImmersedBodyConfig] | None = None
+
+    @property
+    def has_fmr(self) -> bool:
+        return self.hierarchy is not None and self.levels is not None
+
+    @property
+    def num_levels(self) -> int:
+        """get number of refinment levels"""
+        if self.hierarchy is None:
+            return 1
+        return self.hierarchy.num_levels
+
+    def get_level(self, level_id: int) -> tuple[dict[str, Array], MeshConfig]:
+        """Get data for a specific level
+
+        Args:
+            level_id: Level ID to retrieve (0 is base level)
+
+        Returns:
+            Tuple of (fields, mesh) for the requested level
+
+        Raises:
+            ValueError: If level_id is invalid or data isn't FMR
+        """
+        if level_id == 0:
+            return (self.fields, self.mesh)
+
+        if not self.has_fmr:
+            raise ValueError("Not an FMR dataset")
+
+        if not self.levels or level_id >= len(self.levels):
+            raise ValueError(f"Invalid level ID: {level_id}")
+
+        level = self.levels[level_id]
+        return (level.fields, level.mesh)
+
+    def get_refinement_ratio(self, level_id: int) -> Optional[int]:
+        """Get refinement ratio between this level and next finer level
+
+        Returns None if this is the finest level.
+        """
+        if not self.has_fmr or not self.hierarchy:
+            return None
+
+        if level_id >= len(self.hierarchy.ref_ratios):
+            return None
+
+        return self.hierarchy.ref_ratios[level_id]
 
 
 @dataclass(frozen=True)

@@ -1,5 +1,5 @@
 from dataclasses import asdict
-from typing import Any
+from typing import Any, Optional
 
 import numpy as np
 from numpy.typing import NDArray
@@ -14,6 +14,8 @@ from ..core.types import (
     DeformableProperties,
     ElasticProperties,
     GravitationalProperties,
+    HierarchyData,
+    LevelData,
     MeshConfig,
     Metadata,
     ProcessedData,
@@ -195,10 +197,10 @@ def parse_bodies(
 
 def parse_diagnostics(groups: dict[str, Any]) -> BodyDiagnostics | None:
     """Parse body diagnostics from HDF5 groups"""
-    if "diagnostics" not in groups:
+    if "diagnostics" not in groups["bodies"]:
         return None
 
-    diag_data = groups["diagnostics"].get("body_diagnostics", {})
+    diag_data = groups["bodies"]["diagnostics"]
     if not diag_data:
         return None
 
@@ -230,9 +232,71 @@ def parse_diagnostics(groups: dict[str, Any]) -> BodyDiagnostics | None:
     )
 
 
+def parse_hierarchy(groups: dict[str, Any]) -> Optional[HierarchyData]:
+    """Parse FMR hierarchy information from HDF5 groups"""
+    if "hierarchy" not in groups:
+        return None
+
+    hierarchy = groups["hierarchy"]
+    num_levels = int(hierarchy.get("num_levels", 1))
+
+    if num_levels == 1:
+        return None
+
+    ref_ratios = []
+    if "refinement_ratios" in hierarchy:
+        ref_ratios = [int(r) for r in hierarchy["refinement_ratios"]]
+
+    return HierarchyData(
+        num_levels=num_levels,
+        levels=[],  # Will be populated later
+        ref_ratios=ref_ratios,
+    )
+
+
+def parse_level_data(
+    level_id: int,
+    level_group: dict[str, Any],
+    metadata: Metadata,
+    unpad: bool = True,
+) -> LevelData:
+    """Parse single level data from HDF5 group"""
+    # Parse mesh config for this level
+    mesh_data = level_group.get("mesh", {})
+    mesh = MeshConfig(
+        shape=tuple(mesh_data["shape"][::-1]),
+        bounds_min=tuple(mesh_data["bounds_min"][::-1]),
+        bounds_max=tuple(mesh_data["bounds_max"][::-1]),
+        halo_radius=int(mesh_data["halo_radius"]),
+        spacing_types=tuple(mesh_data["spacing_types"].split(",")[::-1]),
+    )
+
+    # Get fields for this level
+    fields: dict[str, Array] = {}
+    for key in ["rho", "p", "v1", "v2", "v3", "chi", "b1", "b2", "b3"]:
+        if key in level_group:
+            field_data = np.asarray(level_group[key])
+            if unpad:
+                field_data = unpad_field(field_data, key, mesh, metadata)
+            fields[key] = field_data
+
+    # Get refinement ratio if not finest level
+    ref_ratio = None
+    if f"level_{level_id}" in level_group:
+        # We have a finer level, so parse the refinement ratio
+        next_level = level_group[f"level_{level_id}"]
+        if "ref_ratio" in next_level:
+            ref_ratio = int(next_level["ref_ratio"])
+
+    return LevelData(
+        level_id=level_id, mesh=mesh, fields=fields, ref_ratio=ref_ratio
+    )
+
+
 def parse_data(raw: RawHDF5, unpad: bool = True) -> Result[ProcessedData]:
+    """Parse raw HDF5 data into structured format"""
     try:
-        # Parse metadata
+        # Parse metadata (unchanged)
         attrs = raw.attributes
         metadata = Metadata(
             time=float(attrs["time"]),
@@ -264,9 +328,8 @@ def parse_data(raw: RawHDF5, unpad: bool = True) -> Result[ProcessedData]:
             system_info=raw.groups.get("bodies"),
         )
 
-        # Parse mesh config
+        # Parse mesh config for base level
         mesh_data: dict[str, Any] = raw.groups.get("mesh_config", {})
-        # Reverse shape and bounds to match internal (x1, x2, x3) ordering
         mesh = MeshConfig(
             shape=tuple(mesh_data["shape"][::-1]),
             bounds_min=tuple(mesh_data["bounds_min"][::-1]),
@@ -275,14 +338,35 @@ def parse_data(raw: RawHDF5, unpad: bool = True) -> Result[ProcessedData]:
             spacing_types=tuple(mesh_data["spacing_types"].split(",")[::-1]),
         )
 
+        # Get base level fields
         fields = preprocess_fields(raw.fields, mesh, metadata, unpad)
+
+        # Parse FMR hierarchy if present
+        hierarchy = parse_hierarchy(raw.groups)
+
+        # Parse additional levels if we have FMR data
+        levels = None
+        if hierarchy:
+            levels = []
+            level_id = 1
+            while f"level_{level_id}" in raw.groups:
+                level_group = raw.groups[f"level_{level_id}"]
+                level = parse_level_data(level_id, level_group, metadata, unpad)
+                levels.append(level)
+                level_id += 1
 
         # Bodies (if present)
         diagnostics = parse_diagnostics(raw.groups)
         bodies = parse_bodies(raw.groups.get("bodies"), diagnostics)
+
         return Result.ok(
             ProcessedData(
-                fields=fields, metadata=metadata, mesh=mesh, bodies=bodies
+                fields=fields,
+                metadata=metadata,
+                mesh=mesh,
+                hierarchy=hierarchy,
+                levels=levels,
+                bodies=bodies,
             )
         )
     except Exception as e:

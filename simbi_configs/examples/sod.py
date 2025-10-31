@@ -31,6 +31,22 @@ class SodProblem(SimbiBaseConfig):
         CellSpacing.LINEAR, description="Grid spacing in x1 direction"
     )
 
+    # fmr_enabled: bool = SimbiField(True, description="Enable FMR for testing")
+    # fmr_max_levels: int = SimbiField(2, description="Use 2 levels for testing")
+    # fmr_buffer_size: int = SimbiField(2, description="2-cell buffer")
+
+    # # Define a single refinement region around the discontinuity
+    # fmr_regions: list[list[float]] = SimbiField(
+    #     [[0.4, 0.6]],  # Single region around x=0.5 where the discontinuity is
+    #     description="Refinement region around discontinuity",
+    # )
+
+    # # Define refinement ratio
+    # fmr_ratios: list[int] = SimbiField(
+    #     [2],  # 2x refinement for the single region
+    #     description="Refinement ratio for the region",
+    # )
+
     def initial_primitive_state(self) -> InitialStateType:
         """Generate initial primitive state for Sod shock tube.
 

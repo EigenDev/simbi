@@ -1,9 +1,9 @@
 from .base import Component
+from .histogram_plot import HistogramComponent
 from .line_plot import LinePlotComponent
 from .multidim_plot import MultidimPlotComponent
+from .time_series_plot import time_seriesPlotComponent
 from .title import TitleComponent
-from .histogram_plot import HistogramComponent
-from .temporal_plot import TemporalPlotComponent
 
 __all__ = [
     "Component",
@@ -11,5 +11,5 @@ __all__ = [
     "MultidimPlotComponent",
     "TitleComponent",
     "HistogramComponent",
-    "TemporalPlotComponent",
+    "time_seriesPlotComponent",
 ]

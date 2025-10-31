@@ -18,7 +18,7 @@ namespace simbi::domain_algebra {
         iarray<Dims> new_start, new_end;
         for (std::uint64_t ii = 0; ii < Dims; ++ii) {
             new_start[ii] = std::max(a.start[ii], b.start[ii]);
-            new_end[ii]   = std::min(a.end[ii], b.end[ii]);
+            new_end[ii]   = std::min(a.fin[ii], b.fin[ii]);
         }
         return domain_t<Dims>{new_start, new_end};
     }
@@ -30,7 +30,7 @@ namespace simbi::domain_algebra {
         iarray<Dims> new_start, new_end;
         for (std::uint64_t ii = 0; ii < Dims; ++ii) {
             new_start[ii] = std::min(a.start[ii], b.start[ii]);
-            new_end[ii]   = std::max(a.end[ii], b.end[ii]);
+            new_end[ii]   = std::max(a.fin[ii], b.fin[ii]);
         }
         return domain_t<Dims>{new_start, new_end};
     }
@@ -39,7 +39,7 @@ namespace simbi::domain_algebra {
     template <std::uint64_t Dims>
     constexpr auto expand(const domain_t<Dims>& d, const iarray<Dims>& amount)
     {
-        return domain_t<Dims>{d.start - amount, d.end + amount};
+        return domain_t<Dims>{d.start - amount, d.fin + amount};
     }
 
     // expand end only
@@ -47,7 +47,7 @@ namespace simbi::domain_algebra {
     constexpr auto
     expand_end(const domain_t<Dims>& d, const iarray<Dims>& amount)
     {
-        iarray<Dims> new_end = d.end + amount;
+        iarray<Dims> new_end = d.fin + amount;
         return domain_t<Dims>{d.start, new_end};
     }
 
@@ -55,7 +55,7 @@ namespace simbi::domain_algebra {
     template <std::uint64_t Dims>
     constexpr auto contract(const domain_t<Dims>& d, const iarray<Dims>& amount)
     {
-        return domain_t<Dims>{d.start + amount, d.end - amount};
+        return domain_t<Dims>{d.start + amount, d.fin - amount};
     }
 
     // containment queries
@@ -65,7 +65,7 @@ namespace simbi::domain_algebra {
     {
         for (std::uint64_t ii = 0; ii < Dims; ++ii) {
             if (point[ii] < container.start[ii] ||
-                point[ii] >= container.end[ii]) {
+                point[ii] >= container.fin[ii]) {
                 return false;
             }
         }
@@ -78,7 +78,7 @@ namespace simbi::domain_algebra {
     {
         for (std::uint64_t ii = 0; ii < Dims; ++ii) {
             if (contained.start[ii] < container.start[ii] ||
-                contained.end[ii] > container.end[ii]) {
+                contained.fin[ii] > container.fin[ii]) {
                 return false;
             }
         }
@@ -90,7 +90,7 @@ namespace simbi::domain_algebra {
     constexpr bool overlaps(const domain_t<Dims>& a, const domain_t<Dims>& b)
     {
         for (std::uint64_t ii = 0; ii < Dims; ++ii) {
-            if (a.end[ii] <= b.start[ii] || b.end[ii] <= a.start[ii]) {
+            if (a.fin[ii] <= b.start[ii] || b.fin[ii] <= a.start[ii]) {
                 return false;
             }
         }
@@ -104,10 +104,10 @@ namespace simbi::domain_algebra {
         // must touch in exactly one dimension, overlap in all others
         std::uint64_t touching_dims = 0;
         for (std::uint64_t ii = 0; ii < Dims; ++ii) {
-            if (a.end[ii] == b.start[ii] || b.end[ii] == a.start[ii]) {
+            if (a.fin[ii] == b.start[ii] || b.fin[ii] == a.start[ii]) {
                 touching_dims++;
             }
-            else if (a.end[ii] <= b.start[ii] || b.end[ii] <= a.start[ii]) {
+            else if (a.fin[ii] <= b.start[ii] || b.fin[ii] <= a.start[ii]) {
                 // separated in this dimension
                 return false;
             }
@@ -162,7 +162,7 @@ namespace simbi::domain_algebra {
             return result;
         }
 
-        if (overlap.start == a.start && overlap.end == a.end) {
+        if (overlap.start == a.start && overlap.fin == a.fin) {
             result.count = 0;
             return result;
         }
@@ -183,10 +183,10 @@ namespace simbi::domain_algebra {
                {a.start[dim],
                 overlap.start[dim],
                 a.start[dim] < overlap.start[dim]},
-               // overlap: [overlap.start, overlap.end)
-               {overlap.start[dim], overlap.end[dim], true},
-               // after: [overlap.end, a.end)
-               {overlap.end[dim], a.end[dim], overlap.end[dim] < a.end[dim]}
+               // overlap: [overlap.start, overlap.fin)
+               {overlap.start[dim], overlap.fin[dim], true},
+               // after: [overlap.fin, a.fin)
+               {overlap.fin[dim], a.fin[dim], overlap.fin[dim] < a.fin[dim]}
               }
             };
         }
@@ -212,7 +212,7 @@ namespace simbi::domain_algebra {
                     for (std::uint64_t dim = 0; dim < Dims; ++dim) {
                         auto interval     = interval_sets[dim][indices[dim]];
                         region.start[dim] = interval.start;
-                        region.end[dim]   = interval.end;
+                        region.fin[dim]   = interval.end;
                     }
 
                     if (!region.empty()) {
@@ -224,6 +224,32 @@ namespace simbi::domain_algebra {
         } while (increment_base3_coord(indices));
 
         return result;
+    }
+
+    // get lower boundary region of specified width in dimension d
+    template <std::uint64_t Dims>
+    constexpr auto get_lower_boundary(
+        const domain_t<Dims>& d,
+        std::uint64_t dim,
+        std::int64_t width
+    )
+    {
+        auto boundary     = d;
+        boundary.fin[dim] = boundary.start[dim] + width;
+        return boundary;
+    }
+
+    // get upper boundary region of specified width in dimension d
+    template <std::uint64_t Dims>
+    constexpr auto get_upper_boundary(
+        const domain_t<Dims>& d,
+        std::uint64_t dim,
+        std::int64_t width
+    )
+    {
+        auto boundary       = d;
+        boundary.start[dim] = boundary.fin[dim] - width;
+        return boundary;
     }
 
     // template <std::uint64_t Dims>
@@ -249,7 +275,7 @@ namespace simbi::domain_algebra {
     //                 domain.start[ii] + div_coord[ii] * chunk_sizes[ii];
     //             sub_end[ii] =
     //                 std::min(sub_start[ii] + chunk_sizes[ii],
-    //                 domain.end[ii]);
+    //                 domain.fin[ii]);
     //         }
 
     //         if (sub_start != sub_end) {   // non-empty subdomain

@@ -12,6 +12,7 @@
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
+#include <limits>   // for std::numeric_limits
 #include <numbers>
 
 namespace simbi::mesh {

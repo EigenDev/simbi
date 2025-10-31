@@ -1,12 +1,8 @@
 #include "evolver.hpp"
 #include "compat.hpp"
-#include "compute/cfd.hpp"
-#include "compute/context.hpp"
 #include "containers/vector.hpp"
+#include "context/evolution.hpp"
 #include "dispatch.hpp"
-#include "functional/monad/computation.hpp"
-#include "physics/ib/motion.hpp"
-#include "update/adaptive_timestep.hpp"
 
 #include <cstdint>
 #include <functional>
@@ -29,6 +25,7 @@ namespace simbi::hydrostate {
         std::function<real(real)> const& scale_factor_derivative
     )
     {
+        using namespace evolution;
         // get buffer info for conserved and primitive arrays
         py::buffer_info cons_buffer = cons_array.request();
         py::buffer_info prim_buffer = prim_array.request();
@@ -58,25 +55,18 @@ namespace simbi::hydrostate {
             scale_factor,
             scale_factor_derivative,
             init,
-            [](auto& state, auto& ops, auto& mesh) {
-                // initialize timestep
-                boundary::apply_boundary_conditions(state, mesh);
-                hydro::recover_primitives(state);
-                update_timestep(state, mesh);
-
-                // rev up those engines
-                with_simulation(state, mesh, [&](auto& sim) {
-                    sim.evolve([&](auto& ctx) {
-                        compute(ctx)
-                            .then([&](auto& s) { cfd::step(s, mesh, ops); })
-                            .then([&](auto& s) {
-                                if (s.bodies) {
-                                    body::evolve_bodies(s);
-                                }
-                            })
-                            .run();
-                    });
-                });
+            [](auto& sim, const auto& ops) {
+                // rev up those fryers
+                auto evo_state = initialize(sim, "Cool Simulation [TM]");
+                auto pipeline  = evolution::hydro_pipeline_t{sim, ops};
+                for (std::uint64_t lvl = 0; lvl < sim.num_levels(); ++lvl) {
+                    pipeline.configure(lvl);
+                }
+                evolution::run(
+                    sim,
+                    [&](auto& s) { pipeline.step_all(s.levels, s.registry); },
+                    evo_state
+                );
             }
         );
     }

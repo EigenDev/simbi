@@ -182,21 +182,21 @@ namespace simbi::exec {
         void iterate_domain(const domain_t<Dims>& domain, Func func) const
         {
             if constexpr (Dims == 1) {
-                for (auto ii = domain.start[0]; ii < domain.end[0]; ++ii) {
+                for (auto ii = domain.start[0]; ii < domain.fin[0]; ++ii) {
                     func(iarray<1>{ii});
                 }
             }
             else if constexpr (Dims == 2) {
-                for (auto ii = domain.start[0]; ii < domain.end[0]; ++ii) {
-                    for (auto jj = domain.start[1]; jj < domain.end[1]; ++jj) {
+                for (auto ii = domain.start[0]; ii < domain.fin[0]; ++ii) {
+                    for (auto jj = domain.start[1]; jj < domain.fin[1]; ++jj) {
                         func(iarray<2>{ii, jj});
                     }
                 }
             }
             else if constexpr (Dims == 3) {
-                for (auto ii = domain.start[0]; ii < domain.end[0]; ++ii) {
-                    for (auto jj = domain.start[1]; jj < domain.end[1]; ++jj) {
-                        for (auto kk = domain.start[2]; kk < domain.end[2];
+                for (auto ii = domain.start[0]; ii < domain.fin[0]; ++ii) {
+                    for (auto jj = domain.start[1]; jj < domain.fin[1]; ++jj) {
+                        for (auto kk = domain.start[2]; kk < domain.fin[2];
                              ++kk) {
                             func(iarray<3>{ii, jj, kk});
                         }
@@ -328,21 +328,21 @@ namespace simbi::exec {
         void iterate_domain(const domain_t<Dims>& domain, Func func) const
         {
             if constexpr (Dims == 1) {
-                for (auto ii = domain.start[0]; ii < domain.end[0]; ++ii) {
+                for (auto ii = domain.start[0]; ii < domain.fin[0]; ++ii) {
                     func(iarray<1>{ii});
                 }
             }
             else if constexpr (Dims == 2) {
-                for (auto ii = domain.start[0]; ii < domain.end[0]; ++ii) {
-                    for (auto jj = domain.start[1]; jj < domain.end[1]; ++jj) {
+                for (auto ii = domain.start[0]; ii < domain.fin[0]; ++ii) {
+                    for (auto jj = domain.start[1]; jj < domain.fin[1]; ++jj) {
                         func(iarray<2>{ii, jj});
                     }
                 }
             }
             else if constexpr (Dims == 3) {
-                for (auto ii = domain.start[0]; ii < domain.end[0]; ++ii) {
-                    for (auto jj = domain.start[1]; jj < domain.end[1]; ++jj) {
-                        for (auto kk = domain.start[2]; kk < domain.end[2];
+                for (auto ii = domain.start[0]; ii < domain.fin[0]; ++ii) {
+                    for (auto jj = domain.start[1]; jj < domain.fin[1]; ++jj) {
+                        for (auto kk = domain.start[2]; kk < domain.fin[2];
                              ++kk) {
                             func(iarray<3>{ii, jj, kk});
                         }
@@ -468,21 +468,21 @@ namespace simbi::exec {
         iterate_domain_serial(const domain_t<Dims>& domain, Func func) const
         {
             if constexpr (Dims == 1) {
-                for (auto ii = domain.start[0]; ii < domain.end[0]; ++ii) {
+                for (auto ii = domain.start[0]; ii < domain.fin[0]; ++ii) {
                     func(iarray<1>{ii});
                 }
             }
             else if constexpr (Dims == 2) {
-                for (auto ii = domain.start[0]; ii < domain.end[0]; ++ii) {
-                    for (auto jj = domain.start[1]; jj < domain.end[1]; ++jj) {
+                for (auto ii = domain.start[0]; ii < domain.fin[0]; ++ii) {
+                    for (auto jj = domain.start[1]; jj < domain.fin[1]; ++jj) {
                         func(iarray<2>{ii, jj});
                     }
                 }
             }
             else if constexpr (Dims == 3) {
-                for (auto ii = domain.start[0]; ii < domain.end[0]; ++ii) {
-                    for (auto jj = domain.start[1]; jj < domain.end[1]; ++jj) {
-                        for (auto kk = domain.start[2]; kk < domain.end[2];
+                for (auto ii = domain.start[0]; ii < domain.fin[0]; ++ii) {
+                    for (auto jj = domain.start[1]; jj < domain.fin[1]; ++jj) {
+                        for (auto kk = domain.start[2]; kk < domain.fin[2];
                              ++kk) {
                             func(iarray<3>{ii, jj, kk});
                         }
@@ -497,23 +497,23 @@ namespace simbi::exec {
         {
             if constexpr (Dims == 1) {
 #pragma omp parallel for schedule(static)
-                for (auto ii = domain.start[0]; ii < domain.end[0]; ++ii) {
+                for (auto ii = domain.start[0]; ii < domain.fin[0]; ++ii) {
                     func(iarray<1>{ii});
                 }
             }
             else if constexpr (Dims == 2) {
 #pragma omp parallel for collapse(2) schedule(static)
-                for (auto ii = domain.start[0]; ii < domain.end[0]; ++ii) {
-                    for (auto jj = domain.start[1]; jj < domain.end[1]; ++jj) {
+                for (auto ii = domain.start[0]; ii < domain.fin[0]; ++ii) {
+                    for (auto jj = domain.start[1]; jj < domain.fin[1]; ++jj) {
                         func(iarray<2>{ii, jj});
                     }
                 }
             }
             else if constexpr (Dims == 3) {
 #pragma omp parallel for collapse(3) schedule(static)
-                for (auto ii = domain.start[0]; ii < domain.end[0]; ++ii) {
-                    for (auto jj = domain.start[1]; jj < domain.end[1]; ++jj) {
-                        for (auto kk = domain.start[2]; kk < domain.end[2];
+                for (auto ii = domain.start[0]; ii < domain.fin[0]; ++ii) {
+                    for (auto jj = domain.start[1]; jj < domain.fin[1]; ++jj) {
+                        for (auto kk = domain.start[2]; kk < domain.fin[2];
                              ++kk) {
                             func(iarray<3>{ii, jj, kk});
                         }

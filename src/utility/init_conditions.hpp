@@ -53,8 +53,8 @@
 #include "compat.hpp"
 #include "config_dict.hpp"
 #include "config_dict_visitor.hpp"
+#include "domain/domain.hpp"
 #include "io/exceptions.hpp"
-#include "physics/ib/diagnostics.hpp"
 #include <algorithm>
 #include <cstdint>
 #include <sstream>
@@ -77,7 +77,7 @@ namespace simbi {
         real gamma;
         real cfl;
         real tend;
-        real sound_speed_squared;
+        real ambient_sound_speed;
         real shakura_sunyaev_alpha;
 
         std::int64_t nx;
@@ -128,18 +128,25 @@ namespace simbi {
         bool enable_peer_access{true};
         bool managed_memory{false};
 
-        // New method to accept a visitor
+        // fmr-related fields
+        bool fmr_enabled;
+        std::uint64_t fmr_max_levels;
+        std::uint64_t fmr_buffer_size;
+        bool fmr_conservative_interpolation;
+        bool fmr_output_all_levels;
+        std::vector<std::vector<real>> raw_fmr_regions;
+        std::vector<std::uint64_t> fmr_ratios;
+
         template <typename Visitor>
         void accept(Visitor& visitor)
         {
-            // Call visitor methods for each field group
             visitor
                 .visit_time_parameters(time, tend, dlogt, checkpoint_interval);
             visitor.visit_resolution(nx, ny, nz);
             visitor.visit_physics_parameters(
                 gamma,
                 cfl,
-                sound_speed_squared,
+                ambient_sound_speed,
                 viscosity,
                 shakura_sunyaev_alpha
             );
@@ -184,29 +191,57 @@ namespace simbi {
                 nvars,
                 halo_radius
             );
+            visitor.visit_fmr_parameters(
+                fmr_enabled,
+                fmr_max_levels,
+                fmr_buffer_size,
+                fmr_conservative_interpolation,
+                fmr_output_all_levels,
+                raw_fmr_regions,
+                fmr_ratios
+            );
         }
 
-        // Factory method using visitor pattern
         static initial_conditions_t create(const config_dict_t& config)
         {
             initial_conditions_t result{};
 
-            // First apply defaults
+            // first apply defaults
             DefaultsVisitor defaults_visitor;
             result.accept(defaults_visitor);
 
-            // Then populate from config
-            config_dict_tVisitor config_visitor(config);
+            // then populate from config
+            config_dict_visitor_t config_visitor(config);
             result.accept(config_visitor);
 
-            // Validate the configuration
+            // validate the configuration
             ValidationVisitor validation_visitor;
             result.accept(validation_visitor);
 
-            // Store the original config for reference
+            // store the original config for reference
             result.config = config;
 
             return result;
+        }
+
+        template <std::uint64_t Dims>
+        std::vector<physical_region_t<Dims>> get_physical_regions() const
+        {
+            std::vector<physical_region_t<Dims>> regions;
+            for (const auto& region_vec : raw_fmr_regions) {
+                if (region_vec.size() != 2 * Dims) {
+                    throw std::runtime_error(
+                        "Invalid FMR region specification size"
+                    );
+                }
+                physical_region_t<Dims> region;
+                for (std::uint64_t d = 0; d < Dims; ++d) {
+                    region.min[d] = region_vec[2 * d];
+                    region.max[d] = region_vec[2 * d + 1];
+                }
+                regions.push_back(region);
+            }
+            return regions;
         }
 
         std::tuple<std::int64_t, std::int64_t, std::int64_t>

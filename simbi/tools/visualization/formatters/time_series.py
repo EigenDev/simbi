@@ -1,4 +1,4 @@
-"""Formatting functions for temporal plots."""
+"""Formatting functions for time_series plots."""
 
 from typing import Any, Optional
 
@@ -18,17 +18,17 @@ from .common import (
 )
 
 
-def format_temporal_plot_axes(
+def format_time_series_plot_axes(
     ax: Axes,
     data: PlotData,
     field_index: int,
     style: StyleConfig,
     value_units: Optional[str] = None,
 ) -> None:
-    """Format axes for a temporal plot."""
+    """Format axes for a time_series plot."""
     apply_basic_style(ax)
     set_axis_title(ax, style.setup, time=None)
-    apply_temporal_labels(
+    apply_time_series_labels(
         ax,
         data,
         field_index,
@@ -47,10 +47,10 @@ def format_temporal_plot_axes(
         if style.ylims:
             ax.set_ylim(style.ylims.min, style.ylims.max)
     # else:
-    # auto_scale_temporal_axes(ax, data, field_index)
+    # auto_scale_time_series_axes(ax, data, field_index)
 
 
-def apply_temporal_labels(
+def apply_time_series_labels(
     ax: Axes,
     data: PlotData,
     field_index: int,
@@ -59,7 +59,7 @@ def apply_temporal_labels(
     time_units: Optional[str],
     value_units: Optional[str],
 ) -> None:
-    """Apply axis labels for temporal plot."""
+    """Apply axis labels for time_series plot."""
     # Set x-label (time axis)
     if x_label:
         ax.set_xlabel(x_label)
@@ -80,10 +80,10 @@ def apply_temporal_labels(
         ax.set_ylabel(value_label)
 
 
-def auto_scale_temporal_axes(
+def auto_scale_time_series_axes(
     ax: Axes, data: PlotData, field_index: int
 ) -> None:
-    """Automatically set axis limits for temporal plot."""
+    """Automatically set axis limits for time_series plot."""
     # Skip if field index is out of range
     if field_index >= len(data.fields):
         return
@@ -155,7 +155,7 @@ def add_annotations(
     offsets: Optional[list[tuple[float, float]]] = None,
     arrow_props: Optional[dict[str, Any]] = None,
 ) -> None:
-    """Add annotations to points on a temporal plot."""
+    """Add annotations to points on a time_series plot."""
     from matplotlib.pyplot import annotate
 
     # Default offset and arrow properties if not provided
@@ -188,7 +188,7 @@ def add_event_lines(
     linestyles: Optional[list[str]] = None,
     alpha: float = 0.7,
 ) -> list[Line2D]:
-    """Add vertical lines marking events on the temporal plot."""
+    """Add vertical lines marking events on the time_series plot."""
     lines = []
     default_color = "gray"
     default_linestyle = "--"

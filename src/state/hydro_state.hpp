@@ -8,6 +8,8 @@
 #include "hydro_state_types.hpp"
 #include "io/exceptions.hpp"
 #include "memory/managed.hpp"
+#include "mesh/fmr/factory.hpp"
+#include "mesh/mesh_config.hpp"
 #include "physics/eos/isothermal.hpp"
 #include "physics/ib/body.hpp"
 #include "physics/ib/body_delta.hpp"
@@ -30,6 +32,7 @@
 
 namespace simbi::state {
     using namespace body::factory;
+    using namespace mesh::fmr;
 
     /**
      * hydro_state_t --- the main simulation state structure
@@ -52,10 +55,8 @@ namespace simbi::state {
         // cell-centered data
         field_t<conserved_t, Dims> cons;
         field_t<primitive_t, Dims> prim;
-
         // face-centered fluxes
         vector_t<field_t<conserved_t, Dims>, Dims> flux;
-
         // optional magnetic fields for mhd (face-centered)
         vector_t<field_t<real, Dims>, Dims> bstaggs;
         // b_old is used only when we are using the
@@ -78,6 +79,7 @@ namespace simbi::state {
             real checkpoint_interval;
             real checkpoint_time;
             real prev_checkpoint_time;
+            real ambient_sound_speed;
 
             // int tracking
             std::uint64_t iteration;
@@ -147,6 +149,9 @@ namespace simbi::state {
         std::optional<body::body_collection_t<Dims>> bodies;
         std::unique_ptr<body::body_diagnostics_t<Dims>> diagnostics;
 
+        // fmr extension
+        std::optional<fmr_data_t<conserved_t, primitive_t, Dims>> fmr;
+
         // error handling
         bool in_failure_state{false};
         bool was_interrupted{false};
@@ -154,10 +159,12 @@ namespace simbi::state {
         /**
          * create hydro_state from init conditions and numpy arrays
          */
+        template <typename MeshConfig>
         static hydro_state_t from_init(
             void* cons_data,
             void* prim_data,
             vector_t<void*, 3> bfield_data,
+            const MeshConfig& base_mesh,
             const initial_conditions_t& init
         )
         {
@@ -168,7 +175,7 @@ namespace simbi::state {
 
             auto bodies      = create_body_collection_from_init<Dims>(init);
             auto diagnostics = body::create_diagnostics_accumulator<Dims>();
-            // if there are bodies, load in their properties into diagnostics
+            // if there are bodies, load their properties into diagnostics
             if (bodies) {
                 bodies->visit_all([&](const auto& body) {
                     using body_type = std::decay_t<decltype(body)>;
@@ -180,7 +187,6 @@ namespace simbi::state {
                     };
                     if constexpr (body::has_accretion_capability_c<body_type>) {
                         delta.prev_mass_delta = body::total_accreted_mass(body);
-                        delta.mass_delta      = delta.prev_mass_delta;
                     }
                     diagnostics->accumulate_delta(delta);
                 });
@@ -200,7 +206,46 @@ namespace simbi::state {
               .sources     = setup_sources(init),
               .bodies      = std::move(bodies),
               .diagnostics = std::move(diagnostics),
+              .fmr         = try_create_fmr_config(init, base_mesh)
             };
+        }
+
+        // fmr methods
+        template <typename MeshConfig>
+        static std::optional<fmr_data_t<conserved_t, primitive_t, Dims>>
+        try_create_fmr_config(
+            const initial_conditions_t& init,
+            const MeshConfig& base_mesh
+        )
+        {
+            if constexpr (MeshConfig::geometry == Geometry::CARTESIAN) {
+                if (!init.fmr_enabled) {
+                    return std::nullopt;
+                }
+                return create_fmr_data<conserved_t, primitive_t, Dims>(
+                    init,
+                    base_mesh
+                );
+            }
+            else {
+                return std::nullopt;
+            }
+        }
+
+        bool has_fmr() const { return fmr.has_value(); }
+        template <typename MeshConfig>
+        auto&
+        get_mesh(std::uint64_t level_id, const MeshConfig& global_mesh) const
+        {
+            if (!has_fmr()) {
+                throw std::runtime_error(
+                    "No FMR hierarchy present in hydro_state"
+                );
+            }
+            if (level_id == 0) {
+                return global_mesh;
+            }
+            return fmr->levels[level_id].mesh;
         }
 
       private:
@@ -281,6 +326,7 @@ namespace simbi::state {
               .checkpoint_interval  = init.checkpoint_interval,
               .checkpoint_time      = init.time,
               .prev_checkpoint_time = init.time,
+              .ambient_sound_speed  = init.ambient_sound_speed,
               .iteration            = 0,
               .halo_radius          = init.halo_radius,
               .checkpoint_index     = init.checkpoint_index,
@@ -370,7 +416,7 @@ namespace simbi::state {
                        : (init.quirk_smoothing ? ShockWaveLimiter::QUIRK
                                                : ShockWaveLimiter::NONE);
         }
-    };
+    };   // namespace simbi::state
 }   // namespace simbi::state
 
 #endif   // STATE_HYDRO_STATE_HPP

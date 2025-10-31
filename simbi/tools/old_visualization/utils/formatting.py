@@ -2,7 +2,7 @@ import math
 from dataclasses import dataclass
 from itertools import cycle
 from math import pi
-from typing import Any, Sequence, Optional
+from typing import Any, Optional, Sequence
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -51,12 +51,20 @@ class PlotTextStyle:
         if config["style"].nlinestyles is not None:
             nind_curves = config["style"].nlinestyles
             nlines = config["style"].nlinestyles
-        colors = np.array([colormap(k) for k in np.linspace(0.1, 0.9, nind_curves)])
-        linestyles = [x[0] for x in zip(cycle(["-", "--", ":", "-."]), range(nlines))]
+        colors = np.array(
+            [colormap(k) for k in np.linspace(0.1, 0.9, nind_curves)]
+        )
+        linestyles = [
+            x[0] for x in zip(cycle(["-", "--", ":", "-."]), range(nlines))
+        ]
         if len(colors) == len(linestyles):
-            default_cycler = cycler(color=colors) + (cycler(linestyle=linestyles))
+            default_cycler = cycler(color=colors) + (
+                cycler(linestyle=linestyles)
+            )
         else:
-            default_cycler = cycler(color=colors) * (cycler(linestyle=linestyles))
+            default_cycler = cycler(color=colors) * (
+                cycler(linestyle=linestyles)
+            )
 
         # Update matplotlib params
         plt.rcParams.update(
@@ -153,9 +161,11 @@ class PlotFormatter:
             # ax.grid(True)
 
             kwargs = {"y": 0.8 if half_sphere else 1.03}
-            fig.suptitle(f"{config['plot'].setup} t = {setup['time']:.2f}", **kwargs)
+            fig.suptitle(
+                f"{config['plot'].setup} t = {setup['time']:.2f}", **kwargs
+            )
         else:
-            if config["plot"].plot_type == "temporal":
+            if config["plot"].plot_type == "time_series":
                 weight_string: str = get_field_str(
                     [config["plot"].weight], normalized=False
                 ).replace(r"$", "")
@@ -169,7 +179,9 @@ class PlotFormatter:
                     tunits = "[orbit(s)]"
                 ax.set_xlabel(rf"$t$ {tunits}")
                 if len(config["plot"].fields) == 1:
-                    ax.set_ylabel(rf"$\langle$ {field_string}$~\rangle{weight_string}$")
+                    ax.set_ylabel(
+                        rf"$\langle$ {field_string}$~\rangle{weight_string}$"
+                    )
                 else:
                     ax.legend()
                 ax.set_title(f"{config['plot'].setup}")
@@ -178,7 +190,10 @@ class PlotFormatter:
                 if len(config["plot"].fields) == 1:
                     ax.set_ylabel(f"{field_string}")
 
-                if len(config["plot"].fields) > 1 or config["multidim"].slice_along:
+                if (
+                    len(config["plot"].fields) > 1
+                    or config["multidim"].slice_along
+                ):
                     ax.legend()
                 ax.set_title(f"{config['plot'].setup} t = {setup['time']:.2f}")
                 if config["style"].labels is not None:
@@ -204,11 +219,15 @@ class PlotFormatter:
                     time = setup["time"] / (
                         2.0
                         * math.pi
-                        * math.sqrt(float(p["separation"]) ** 3 / float(p["mass"]))
+                        * math.sqrt(
+                            float(p["separation"]) ** 3 / float(p["mass"])
+                        )
                     )
                     time_unit = "orbit(s)"
 
-                ax.set_title(f"{config['plot'].setup} t = {time:.2f}{time_unit}")
+                ax.set_title(
+                    f"{config['plot'].setup} t = {time:.2f}{time_unit}"
+                )
                 if any(config["style"].xlims):
                     ax.set_xlim(config["style"].xlims)
                 if any(config["style"].ylims):
@@ -269,7 +288,9 @@ class PlotFormatter:
 
     @staticmethod
     def create_label(
-        field: str, coords: Optional[tuple[float, float]] = None, units: bool = False
+        field: str,
+        coords: Optional[tuple[float, float]] = None,
+        units: bool = False,
     ) -> str:
         """Create formatted label"""
         label = field
