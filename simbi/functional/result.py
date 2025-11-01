@@ -18,7 +18,9 @@ class Result(Generic[T]):
     def err(cls, error: Exception) -> Self:
         return cls(error=error)
 
-    def and_then(self, f: Callable[[T, *tuple[Any, ...]], "Result[U]"]) -> "Result[U]":
+    def and_then(
+        self, f: Callable[[T, *tuple[Any, ...]], "Result[U]"]
+    ) -> "Result[U]":
         if self.error is not None:
             return Result.err(self.error)
         else:
