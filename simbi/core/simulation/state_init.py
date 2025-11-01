@@ -9,9 +9,15 @@ from typing import Optional, cast
 import numpy as np
 from numpy.typing import NDArray
 
+from simbi.core.types.input import HierarchyData, LevelData, MeshConfig
+
 from ...functional import Maybe
 from ..config.base_config import SimbiBaseConfig
-from ..types.typing import InitialStateType, GasStateFunction, MHDStateGenerators
+from ..types.typing import (
+    InitialStateType,
+    GasStateFunction,
+    MHDStateGenerators,
+)
 import itertools
 
 
@@ -23,6 +29,20 @@ class SimulationState:
     conserved_state: NDArray[np.floating]  # (nvars, nx, ny, nz)
     config: SimbiBaseConfig
     staggered_bfields: Optional[list[NDArray[np.floating]]] = None
+    levels: Optional[list[LevelData]] = None
+    hierarchy: Optional[HierarchyData] = None
+
+    @property
+    def has_fmr(self) -> bool:
+        """Check if simulation has FMR levels."""
+        return self.levels is not None and len(self.levels) > 0
+
+    @property
+    def num_levels(self) -> int:
+        """Get number of FMR levels."""
+        if self.hierarchy is None:
+            return 1
+        return self.hierarchy.num_levels
 
 
 def is_mhd_generator(gen: InitialStateType) -> bool:
@@ -57,7 +77,11 @@ def primitive_to_conserved(
     pidx = (
         4 if is_mhd else config.dimensionality + 1
     )  # Pressure index in primitive array
-    rho, *velocities, pressure = primitive[0], *primitive[1:pidx], primitive[pidx]
+    rho, *velocities, pressure = (
+        primitive[0],
+        *primitive[1:pidx],
+        primitive[pidx],
+    )
 
     # Calculate square of velocity
     vsq = velocities[0] ** 2
@@ -95,10 +119,14 @@ def primitive_to_conserved(
     elif "sr" in regime:
         # Relativistic energy
         h = 1.0 + adiabatic_index * pressure / ((adiabatic_index - 1.0) * rho)
-        conserved[energy_index] = rho * h * lorentz**2 - pressure - rho * lorentz
+        conserved[energy_index] = (
+            rho * h * lorentz**2 - pressure - rho * lorentz
+        )
     else:
         # Classical energy
-        conserved[energy_index] = pressure / (adiabatic_index - 1.0) + 0.5 * rho * vsq
+        conserved[energy_index] = (
+            pressure / (adiabatic_index - 1.0) + 0.5 * rho * vsq
+        )
 
     # Handle magnetic fields for MHD
     if is_mhd and staggered_bfields:
@@ -119,9 +147,13 @@ def primitive_to_conserved(
                 + velocities[1] * b_mean[1]
                 + velocities[2] * b_mean[2]
             )
-            conserved[energy_index] += 0.5 * (b_squared + vsq * b_squared - v_dot_b**2)
+            conserved[energy_index] += 0.5 * (
+                b_squared + vsq * b_squared - v_dot_b**2
+            )
             for i in range(3):
-                conserved[i + 1] += b_squared * velocities[i] - v_dot_b * b_mean[i]
+                conserved[i + 1] += (
+                    b_squared * velocities[i] - v_dot_b * b_mean[i]
+                )
         else:
             # MHD energy
             conserved[energy_index] += 0.5 * b_squared
@@ -276,14 +308,20 @@ def initialize_state(config: SimbiBaseConfig) -> SimulationState:
         # create slices for each dimension
         for j in range(pad_width):
             # Fill left boundary ghost cells
-            left_ghost_slices = [slice(None)] * (ndim + 1)  # +1 for variables dimension
+            left_ghost_slices = [slice(None)] * (
+                ndim + 1
+            )  # +1 for variables dimension
             left_ghost_slices[dim + 1] = slice(j, j + 1)
 
             left_interior_slices = [slice(None)] * (ndim + 1)
             left_interior_slices[dim + 1] = slice(pad_width, pad_width + 1)
 
-            conserved[tuple(left_ghost_slices)] = conserved[tuple(left_interior_slices)]
-            primitive[tuple(left_ghost_slices)] = primitive[tuple(left_interior_slices)]
+            conserved[tuple(left_ghost_slices)] = conserved[
+                tuple(left_interior_slices)
+            ]
+            primitive[tuple(left_ghost_slices)] = primitive[
+                tuple(left_interior_slices)
+            ]
 
             # Fill right boundary ghost cells
             right_ghost_slices = [slice(None)] * (ndim + 1)
