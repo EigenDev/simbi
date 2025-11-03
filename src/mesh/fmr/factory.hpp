@@ -36,7 +36,8 @@ namespace simbi::mesh::fmr {
           .base_resolution = base_mesh.shape,
           .refine_regions  = regions,
           .refine_ratios   = init.fmr_ratios,
-          .halo_radius     = init.halo_radius
+          .halo_radius     = init.halo_radius,
+          .face_domains    = base_mesh.face_domain
         };
 
         return build_hierarchy(config);

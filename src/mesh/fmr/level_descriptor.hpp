@@ -23,6 +23,7 @@ namespace simbi::mesh::fmr {
 
         vector_t<real, Dims> physical_min;
         vector_t<real, Dims> physical_max;
+        vector_t<domain_t<Dims>, Dims> face_domains;   // face-centered domains
     };
 
 }   // namespace simbi::mesh::fmr

@@ -13,8 +13,7 @@
 #include <cstddef>      // for std::size_t
 #include <cstdint>      // for std::int64_t
 #include <functional>   // for std::function
-#include <limits>
-#include <utility>   // for std::pair
+#include <utility>      // for std::pair
 
 namespace simbi::mesh {
     template <std::uint64_t Dims, Geometry G>
