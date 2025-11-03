@@ -181,6 +181,7 @@ def format_multidim_plot_axes(
         time_scale=style.time_scale,
         time_units=style.time_units,
     )
+    # apply_multidim_limits(ax, data, field_index, style.xlims, style.ylims)
     if is_polar:
         format_polar_axes(ax, data, field_index, style.xlims)
     else:
@@ -305,20 +306,20 @@ def apply_multidim_limits(
     ax: Axes,
     data: PlotData,
     field_index: int,
-    xlim: Optional[tuple[float, float]] = None,
-    ylim: Optional[tuple[float, float]] = None,
+    xlim: Optional[Bounds] = None,
+    ylim: Optional[Bounds] = None,
     auto_scale: bool = True,
 ) -> None:
     """Apply axis limits for multidimensional plot."""
     # Apply user-defined limits if provided
     if xlim:
-        ax.set_xlim(xlim)
+        ax.set_xlim(xlim.min, xlim.max)
 
     if ylim:
-        ax.set_ylim(ylim)
+        ax.set_ylim(ylim.min, ylim.max)
 
     # Auto-scale if requested and no user limits
-    if auto_scale and not (xlim and ylim) and field_index < len(data.fields):
+    if auto_scale and field_index < len(data.fields):
         field = data.fields[field_index]
         if len(field.domain) >= 2:
             x_data = field.domain[0]
@@ -328,19 +329,9 @@ def apply_multidim_limits(
             if not xlim and x_data.size > 0:
                 x_min = float(np.min(x_data))
                 x_max = float(np.max(x_data))
-                x_margin = (
-                    0.05 * (x_max - x_min)
-                    if x_max > x_min
-                    else 0.1 * abs(x_max)
-                )
-                ax.set_xlim(x_min - x_margin, x_max + x_margin)
+                ax.set_xlim(x_min, x_max)
 
             if not ylim and y_data.size > 0:
                 y_min = float(np.min(y_data))
                 y_max = float(np.max(y_data))
-                y_margin = (
-                    0.05 * (y_max - y_min)
-                    if y_max > y_min
-                    else 0.1 * abs(y_max)
-                )
-                ax.set_ylim(y_min - y_margin, y_max + y_margin)
+                ax.set_ylim(y_min, y_max)

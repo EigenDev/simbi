@@ -341,6 +341,8 @@ class MultidimPlotComponent(Component):
         if style.draw_bodies:
             self.draw_bodies(data.bodies, self.props.projection, zorder=10)
 
+        self.last_x = x
+        self.last_y = y
         return {"mesh": self._mesh}
 
     def _render_polygons(
@@ -443,7 +445,10 @@ class MultidimPlotComponent(Component):
         if self._mesh is None:
             raise RuntimeError("Mesh is not initialized. Call render() first.")
 
-        if not np.allclose(x, self.last_x) or not np.allclose(y, self.last_y):
+        fast_mesh = self.props.render_mode == "pcolormesh"
+        if fast_mesh and (
+            not np.allclose(x, self.last_x) or not np.allclose(y, self.last_y)
+        ):
             # Coordinates changed: create new mesh
             if self._mesh in self.ax.collections:
                 self._mesh.remove()
