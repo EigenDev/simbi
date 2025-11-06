@@ -462,17 +462,22 @@ namespace simbi::boundary {
         auto full_domain   = mesh.full_domain;
         auto active_domain = mesh.domain;
         auto ghost_info    = analyze_ghost_regions(full_domain, active_domain);
+        static bool edges_filled = false;
 
         for (auto ghost : ghost_info) {
             if (ghost.type == ghost_type_t::face) {
                 face_bc_transform(ghost, sim);
             }
-            if constexpr (SimState::is_mhd) {
-                if (ghost.type == ghost_type_t::corner) {
+            else {
+                if constexpr (SimState::is_mhd) {
+                    corner_bc_transform(ghost, sim);
+                }
+                else if (!edges_filled) {
                     corner_bc_transform(ghost, sim);
                 }
             }
         }
+        edges_filled = true;
 
         apply_thin_dimension_bcs(sim);
     }
