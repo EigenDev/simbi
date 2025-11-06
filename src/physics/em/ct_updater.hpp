@@ -340,23 +340,6 @@ namespace simbi::em {
         }
     };
 
-    // template <typename HydroState, typename MeshConfig>
-    // auto interpolate_face_to_cell_magnetic(
-    //     const HydroState& state,
-    //     const MeshConfig& mesh
-    // )
-    // {
-    //     return compute_field_t{
-    //       interpolate_magnetic_op_t{
-    //         state.bstaggs[2][mesh.face_domain[2]],
-    //         state.bstaggs[1][mesh.face_domain[1]],
-    //         state.bstaggs[0][mesh.face_domain[0]],
-    //         mesh
-    //       },
-    //       make_domain(mesh.domain.shape())
-    //     };
-    // }
-
     template <typename BField, typename MeshConfig>
     auto interpolate_face_to_cell_magnetic(
         const BField& bfield,
