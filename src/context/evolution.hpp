@@ -259,7 +259,6 @@ namespace simbi::evolution {
             for (std::size_t lvl = levels.size() - 1; lvl > 0; --lvl) {
                 ecs::restriction_system_t{}(sim, lvl);
             }
-
             meta.time += meta.dt;
 
             if (sim.has_bodies()) {
