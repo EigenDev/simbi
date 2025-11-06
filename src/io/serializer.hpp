@@ -8,6 +8,7 @@
 #include "physics/ib/body.hpp"
 #include "utility/bimap.hpp"   // for simbi::helpers::serialize
 #include "utility/helpers.hpp"
+#include "write_traits.hpp"
 
 #include <H5Cpp.h>
 #include <cstddef>
@@ -103,61 +104,35 @@ namespace simbi::io {
             }
         }
 
-        template <typename T, typename U = real>
-        result_t<void>
-        write_scalar(H5::Group& group, const std::string& name, const T& value)
-        {
-            try {
-
-                auto scalar_space = H5::DataSpace(H5S_SCALAR);
-                auto attr         = group.createAttribute(
-                    name,
-                    H5::PredType::NATIVE_DOUBLE,
-                    scalar_space
-                );
-                attr.write(H5::PredType::NATIVE_DOUBLE, &value);
-                return result_t<void>::ok();
-            }
-            catch (const H5::Exception& e) {
-                return result_t<void>::error(e.getDetailMsg());
-            }
-        }
         template <typename T>
-        result_t<void>
-        write_integer(H5::Group& group, const std::string& name, const T& value)
+        result_t<T> write_attribute(
+            H5::Group& group,
+            const std::string& name,
+            const T& value
+        )
         {
             try {
                 auto scalar_space = H5::DataSpace(H5S_SCALAR);
                 auto attr         = group.createAttribute(
                     name,
-                    H5::PredType::NATIVE_INT,
+                    h5_pred_type<T>::value(),
                     scalar_space
                 );
-                attr.write(H5::PredType::NATIVE_INT, &value);
-                return result_t<void>::ok();
-            }
-            catch (const H5::Exception& e) {
-                return result_t<void>::error(e.getDetailMsg());
-            }
-        }
 
-        template <typename T>
-        result_t<void>
-        write_boolean(H5::Group& group, const std::string& name, const T& value)
-        {
-            try {
-                auto scalar_space = H5::DataSpace(H5S_SCALAR);
-                auto attr         = group.createAttribute(
-                    name,
-                    H5::PredType::NATIVE_HBOOL,
-                    scalar_space
-                );
-                hbool_t h5_value = static_cast<hbool_t>(value);
-                attr.write(H5::PredType::NATIVE_HBOOL, &h5_value);
-                return result_t<void>::ok();
+                if constexpr (std::is_same_v<T, bool>) {
+                    hbool_t h5_value = static_cast<hbool_t>(value);
+                    attr.write(h5_pred_type<bool>::value(), &h5_value);
+                }
+                else {
+                    attr.write(h5_pred_type<T>::value(), &value);
+                }
+                return result_t<T>::ok(value);
             }
             catch (const H5::Exception& e) {
-                return result_t<void>::error(e.getDetailMsg());
+                return result_t<T>::error(
+                    "Failed to read attribute '" + name +
+                    "': " + e.getDetailMsg()
+                );
             }
         }
 
@@ -237,13 +212,13 @@ namespace simbi::io {
                 h5::write_int_array(group, "shape", mesh.shape);
                 h5::write_array(group, "bounds_min", mesh.bounds_min);
                 h5::write_array(group, "bounds_max", mesh.bounds_max);
-                h5::write_integer(group, "halo_radius", mesh.halo_radius);
-                h5::write_scalar(
+                h5::write_attribute(group, "halo_radius", mesh.halo_radius);
+                h5::write_attribute(
                     group,
                     "expansion_factor",
                     mesh.expansion_factor
                 );
-                h5::write_boolean(group, "mesh_motion", mesh.mesh_motion);
+                h5::write_attribute(group, "mesh_motion", mesh.mesh_motion);
 
                 // spacing types as comma-separated string
                 auto spacing_str =
@@ -403,6 +378,36 @@ namespace simbi::io {
         }
 
         auto mesh_group = level_group.createGroup("mesh");
+        if (level > 0) {
+            try {
+                // get the FMR component from the entity
+                const auto& refinement =
+                    sim.registry
+                        .template get<ecs::refinement_child_t<Sim::dimensions>>(
+                            sim.levels[level]
+                        );
+
+                const auto& domain = refinement.parent_coverage;
+
+                // save the domain as two int arrays
+                h5::write_int_array(
+                    level_group,
+                    "parent_coverage_start",
+                    domain.start
+                );
+                h5::write_int_array(
+                    level_group,
+                    "parent_coverage_fin",
+                    domain.fin
+                );
+            }
+            catch (const std::exception& e) {
+                return result_t<void>::error(
+                    "Failed to write FMR data for level " +
+                    std::to_string(level) + ": " + e.what()
+                );
+            }
+        }
         return h5::write_mesh(sim, mesh_group, level);
     }
 
@@ -412,10 +417,10 @@ namespace simbi::io {
         try {
             const auto& meta = sim.metadata();
 
-            h5::write_scalar(group, "time", meta.time);
-            h5::write_scalar(group, "dt", meta.dt);
-            h5::write_integer(group, "iteration", meta.iteration);
-            h5::write_integer(group, "dimensions", meta.dimensions);
+            h5::write_attribute(group, "time", meta.time);
+            h5::write_attribute(group, "dt", meta.dt);
+            h5::write_attribute(group, "iteration", meta.iteration);
+            h5::write_attribute(group, "dimensions", meta.dimensions);
             h5::write_string(group, "regime", serialize(meta.regime));
             h5::write_string(group, "solver", serialize(meta.solver));
             h5::write_string(
@@ -438,22 +443,26 @@ namespace simbi::io {
                 "coord_system",
                 serialize(meta.coord_system)
             );
-            h5::write_scalar(group, "plm_theta", meta.plm_theta);
-            h5::write_scalar(group, "cfl_number", meta.cfl);
-            h5::write_boolean(group, "is_mhd", meta.is_mhd);
-            h5::write_boolean(group, "is_relativistic", meta.is_relativistic);
-            h5::write_scalar(group, "adiabatic_index", meta.gamma);
-            h5::write_scalar(group, "end_time", meta.tend);
+            h5::write_attribute(group, "plm_theta", meta.plm_theta);
+            h5::write_attribute(group, "cfl_number", meta.cfl);
+            h5::write_attribute(group, "is_mhd", meta.is_mhd);
+            h5::write_attribute(group, "is_relativistic", meta.is_relativistic);
+            h5::write_attribute(group, "adiabatic_index", meta.gamma);
+            h5::write_attribute(group, "end_time", meta.tend);
             h5::write_string(group, "x1_spacing", serialize(meta.x1_spacing));
             h5::write_string(group, "x2_spacing", serialize(meta.x2_spacing));
             h5::write_string(group, "x3_spacing", serialize(meta.x3_spacing));
-            h5::write_integer(group, "checkpoint_index", meta.checkpoint_index);
-            h5::write_scalar(
+            h5::write_attribute(
+                group,
+                "checkpoint_index",
+                meta.checkpoint_index
+            );
+            h5::write_attribute(
                 group,
                 "checkpoint_interval",
                 meta.checkpoint_interval
             );
-            h5::write_integer(group, "halo_radius", meta.halo_radius);
+            h5::write_attribute(group, "halo_radius", meta.halo_radius);
 
             // bcs as comma-separated string
             auto bc_str = meta.boundary_conditions |
@@ -496,13 +505,13 @@ namespace simbi::io {
     {
         try {
             const auto n_levels = hierarchy.num_levels;
-            h5::write_integer(group, "num_levels", n_levels);
+            h5::write_attribute(group, "num_levels", n_levels);
 
             if (n_levels > 1) {
-                const auto ratios =
-                    hierarchy.levels |
-                    fp::map([&](const auto& lvl) { return lvl.ref_ratio; }) |
-                    fp::collect<>;
+                std::vector<std::uint64_t> ratios(n_levels - 1);
+                for (std::uint64_t lvl = 1; lvl < n_levels; ++lvl) {
+                    ratios[lvl - 1] = hierarchy[lvl].ref_ratio;
+                }
                 std::vector<hsize_t> dims{n_levels - 1};
                 auto space = H5::DataSpace(1, dims.data());
 
@@ -553,7 +562,7 @@ namespace simbi::io {
                 );
 
                 // serialize mass delta
-                h5::write_scalar(
+                h5::write_attribute(
                     group,
                     "cumulative_mass_delta_" + std::to_string(body_idx),
                     delta.mass_delta
@@ -562,7 +571,7 @@ namespace simbi::io {
                 const auto dm   = delta.mass_delta - pmass;
                 const auto mdot = (dt > 0) ? dm / dt : 0.0;
 
-                h5::write_scalar(
+                h5::write_attribute(
                     group,
                     "accretion_rate_" + std::to_string(body_idx),
                     mdot
@@ -591,7 +600,7 @@ namespace simbi::io {
             auto diag_group         = group.createGroup("diagnostics");
             write_diagnostics(diag_group, diagnostics, delta_time);
 
-            h5::write_integer(group, "body_count", bodies.size());
+            h5::write_attribute(group, "body_count", bodies.size());
             h5::write_string(group, "system_name", bodies.name());
             h5::write_string(
                 group,
@@ -603,20 +612,32 @@ namespace simbi::io {
             if (bodies.binary_params_) {
                 auto binary_group  = group.createGroup("binary_params");
                 const auto& params = bodies.binary_params();
-                h5::write_scalar(binary_group, "total_mass", params.total_mass);
-                h5::write_scalar(binary_group, "semi_major", params.semi_major);
-                h5::write_scalar(
+                h5::write_attribute(
+                    binary_group,
+                    "total_mass",
+                    params.total_mass
+                );
+                h5::write_attribute(
+                    binary_group,
+                    "semi_major",
+                    params.semi_major
+                );
+                h5::write_attribute(
                     binary_group,
                     "eccentricity",
                     params.eccentricity
                 );
-                h5::write_scalar(binary_group, "mass_ratio", params.mass_ratio);
-                h5::write_scalar(
+                h5::write_attribute(
+                    binary_group,
+                    "mass_ratio",
+                    params.mass_ratio
+                );
+                h5::write_attribute(
                     binary_group,
                     "orbital_period",
                     params.orbital_period
                 );
-                h5::write_boolean(
+                h5::write_attribute(
                     binary_group,
                     "is_circular_orbit",
                     params.is_circular_orbit
@@ -629,17 +650,17 @@ namespace simbi::io {
                 auto body_group =
                     group.createGroup("body_" + std::to_string(body.idx));
 
-                h5::write_scalar(body_group, "mass", body.mass);
-                h5::write_scalar(body_group, "radius", body.radius);
+                h5::write_attribute(body_group, "mass", body.mass);
+                h5::write_attribute(body_group, "radius", body.radius);
                 h5::write_array(body_group, "position", body.position);
                 h5::write_array(body_group, "velocity", body.velocity);
 
                 // capabilities
                 auto caps = body.caps();
-                h5::write_integer(body_group, "capabilities", caps);
+                h5::write_attribute(body_group, "capabilities", caps);
 
                 if constexpr (body::has_gravitational_capability_c<body_t>) {
-                    h5::write_scalar(
+                    h5::write_attribute(
                         body_group,
                         "softening_length",
                         body::softening_length(body)
@@ -647,13 +668,17 @@ namespace simbi::io {
                 }
 
                 if constexpr (body::has_accretion_capability_c<body_t>) {
-                    h5::write_scalar(body_group, "sink_rate", sink_rate(body));
-                    h5::write_scalar(
+                    h5::write_attribute(
+                        body_group,
+                        "sink_rate",
+                        sink_rate(body)
+                    );
+                    h5::write_attribute(
                         body_group,
                         "sink_delta",
                         body::sink_delta(body)
                     );
-                    h5::write_scalar(
+                    h5::write_attribute(
                         body_group,
                         "accretion_radius",
                         body::accretion_radius(body)
