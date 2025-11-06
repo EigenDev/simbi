@@ -11,8 +11,8 @@ from .config import (
     MultidimConfig,
     PlotConfig,
     StyleConfig,
+    TimeSeriesConfig,
     VisualizationConfig,
-    time_seriesConfig,
 )
 from .figure import Figure
 from .types import (
@@ -29,7 +29,7 @@ __all__ = [
     "MultidimConfig",
     "PlotConfig",
     "HistogramConfig",
-    "time_seriesConfig",
+    "TimeSeriesConfig",
     "AnimationConfig",
     "VisualizationConfig",
     # Type definitions

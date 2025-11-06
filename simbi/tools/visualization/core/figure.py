@@ -115,7 +115,15 @@ class Figure:
         from ..pipeline import create_plot_data, load_data
 
         data = load_data(file_path)
-        return create_plot_data(data, self.config.plot.fields, self.config)
+        if self.config.plot.plot_type == "accretion":
+            if self.config.accretion.analysis_type == "angular_momentum":
+                fields = ["j_spec", "Sigma"]
+            else:
+                raise NotImplementedError("Other analysis types aren't ready.")
+        else:
+            fields = self.config.plot.fields
+
+        return create_plot_data(data, fields, self.config)
 
     def animate(
         self,

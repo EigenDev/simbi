@@ -14,65 +14,83 @@ from simbi.functional.helpers import print_progress
 from simbi.io.summary import print_simulation_parameters
 
 from ...io.logging import logger
-from ..config.base_config import SimbiBaseConfig
+from ..config.base_config import SimbiBaseConfig as BaseProblemConfig
 from ..serialization.executor import SimulationExecutor
-from .state_init import SimulationState, load_or_initialize_state
+from .state_init import (
+    SimulationState,
+    load_or_initialize_state,
+    validate_generator_output,
+)
 
 
 @dataclass
 class SimulationRunner:
-    """Manages the execution of a simulation.
+    """
+    Manages the execution of a simulation.
 
     This class orchestrates the initialization, execution, and output
     handling for a simulation.
 
     Attributes:
         config: The configuration for the simulation
-        state: The current simulation state
+        state: The current simulation state (lightweight - just generators)
     """
 
-    config: SimbiBaseConfig
+    config: BaseProblemConfig
     state: Optional[SimulationState] = None
 
     def initialize(self) -> "SimulationRunner":
-        """Initialize the simulation state.
+        """
+        Initialize the simulation state.
+
+        This is now very lightweight - just extracts generator functions.
 
         Returns:
             Self for method chaining
         """
-        self.state = load_or_initialize_state(self.config).unwrap()
+        self.state = load_or_initialize_state(self.config)
         self.config = self.state.config
+        return self
+
+    def validate(self) -> "SimulationRunner":
+        """
+        Validate generator output (optional diagnostic step).
+
+        Returns:
+            Self for method chaining
+
+        Raises:
+            ValueError: If generator produces invalid output
+        """
+        valid, error = validate_generator_output(self.config)
+        if not valid:
+            raise ValueError(f"Generator validation failed: {error}")
+
+        logger.info("✓ Generator validation passed")
         return self
 
     def _configure_backend(
         self, compute_mode: str = "cpu"
     ) -> tuple[Optional[ModuleType], Optional[Sequence[int]]]:
-        """Configure and load the appropriate backend.
+        """
+        Configure and load the appropriate backend.
 
         Args:
             compute_mode: Backend compute mode ('cpu', 'omp', or 'gpu')
 
         Returns:
-            The backend module or class
+            Tuple of (backend module, GPU block dimensions if applicable)
         """
         runtime_block_dims: Optional[Sequence[int]] = None
+
         # Configure block dimensions for GPU
         if compute_mode == "gpu":
-            # Set environment variables for block dimensions based on dimensionality
             dims = {1: (128, 1, 1), 2: (16, 16, 1), 3: (4, 4, 4)}
             dim = min(3, self.config.dimensionality)
             block_dims = dims[dim]
 
-            # if enviornment variables are not set, set them
-            if dim == 1 and "BLOCK_X" not in os.environ:
-                os.environ["BLOCK_X"] = str(block_dims[0])
-                os.environ["GPU_BLOCK_Y"] = "1"
-                os.environ["GPU_BLOCK_Z"] = "1"
-            elif dim == 2 and "BLOCK_X" not in os.environ:
-                os.environ["BLOCK_X"] = str(block_dims[0])
-                os.environ["GPU_BLOCK_Y"] = str(block_dims[1])
-                os.environ["GPU_BLOCK_Z"] = "1"
-            elif dim == 3 and "BLOCK_X" not in os.environ:
+            # Set environment variables if not already set
+            if "BLOCK_X" not in os.environ:
                 os.environ["BLOCK_X"] = str(block_dims[0])
                 os.environ["GPU_BLOCK_Y"] = str(block_dims[1])
                 os.environ["GPU_BLOCK_Z"] = str(block_dims[2])
@@ -98,7 +116,8 @@ class SimulationRunner:
             return None, None
 
     def run(self, compute_mode: str = "cpu") -> None:
-        """Run the simulation.
+        """
+        Run the simulation.
 
         Args:
             compute_mode: Backend compute mode ('cpu', 'omp', or 'gpu')
@@ -118,51 +137,49 @@ class SimulationRunner:
                 logger.info(f"  {key}: {value}")
             return
 
-        # Print key simulation parameters
         print_simulation_parameters(execution_dict, gpu_block_dims)
-        # Give the user a moment to read the parameters
         print_progress()
 
-        # Run the simulation
-        if self.state.conserved_state is not None:
-            # Reshape for contiguous memory layout.
-            # Since the backend expects an array of structs
-            # layout, we transpose the conserved state.
-            cons_contig = self.state.conserved_state.reshape(
-                self.state.conserved_state.shape[0], -1
-            ).T
-            prim_contig = self.state.primitive_state.reshape(
-                self.state.primitive_state.shape[0], -1
-            ).T
+        # Get fresh iterators for C++
+        prim_iterator = self.state.fresh_primitive_iterator()
+        bfield_iterators = self.state.fresh_bfield_iterators() or []
 
-            # Create scale factor and derivative functions
-            a = self.config.scale_factor or (lambda t: 1.0)
-            adot = self.config.scale_factor_derivative or (lambda t: 0.0)
-            if self.state.staggered_bfields:
-                staggered_fields = [
-                    b.flat for b in self.state.staggered_bfields[::-1]
-                ]
-            else:
-                staggered_fields = []
+        # Create scale factor functions
+        scale_factor = self.config.scale_factor or (lambda t: 1.0)
+        scale_factor_derivative = self.config.scale_factor_derivative or (
+            lambda t: 0.0
+        )
 
-            backend.run_simulation(
-                cons_array=cons_contig,
-                prim_array=prim_contig,
-                staggered_bfields=staggered_fields,
-                sim_info=execution_dict,
-                a=a,
-                adot=adot,
-            )
-        else:
-            logger.info("Error: Simulation state not initialized properly")
+        backend.run_simulation(
+            prim_gen=prim_iterator,
+            staggered_bfields=bfield_iterators,
+            sim_info=execution_dict,
+            a=scale_factor,
+            adot=scale_factor_derivative,
+        )
 
 
-def run_simulation(config: SimbiBaseConfig, compute_mode: str = "cpu") -> None:
-    """Run a simulation with the given configuration.
+def run_simulation(
+    config: BaseProblemConfig,
+    compute_mode: str = "cpu",
+    validate: bool = False,
+) -> None:
+    """
+    Run a simulation with the given configuration.
 
     Args:
         config: The simulation configuration
         compute_mode: Backend compute mode ('cpu', 'omp', or 'gpu')
+        validate: Whether to validate generator output before running
+
+    Example:
+        >>> from simbi.problems import SodProblem
+        >>> config = SodProblem(resolution=1000, end_time=0.2)
+        >>> run_simulation(config, compute_mode='cpu', validate=True)
     """
     runner = SimulationRunner(config)
+
+    if validate:
+        runner.validate()
+
     runner.run(compute_mode=compute_mode)

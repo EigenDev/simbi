@@ -16,7 +16,7 @@ from ..physics.calculations import (
     total_pressure,
 )
 
-ComputeFunc = Callable[[dict[str, Array]], Array]
+ComputeFunc = Callable[[dict[str, Any]], Array]
 
 
 def create_computation_pipeline(data: ProcessedData) -> dict[str, ComputeFunc]:
@@ -152,6 +152,104 @@ def create_computation_pipeline(data: ProcessedData) -> dict[str, ComputeFunc]:
             * lorentz_factor(get_velocities(fields), regime)
         )
 
+    def angular_momentum_density(level_data: dict[str, Array]) -> Array:
+        """Compute angular momentum density L = r x S."""
+        x = getattr(level_data, "mesh").x1c
+        y = getattr(level_data, "mesh").x2c
+        Sx = labframe_momentum(
+            level_data["rho"],
+            level_data["p"],
+            get_velocities(level_data),
+            get_b_fields(level_data),
+            gamma,
+            regime,
+            VectorComponent(0),
+        )
+        Sy = labframe_momentum(
+            level_data["rho"],
+            level_data["p"],
+            get_velocities(level_data),
+            get_b_fields(level_data),
+            gamma,
+            regime,
+            VectorComponent(1),
+        )
+        Lz = x * Sy - y * Sx
+        return np.asarray(Lz)
+
+    def specific_angular_momentum(
+        level_data: dict[str, Array],
+    ) -> Array:
+        """
+        Compute specific angular momentum l_z = (Integral L_z dz) / (Integral rho dz).
+        This returns a 2D array.
+        """
+        mesh = getattr(level_data, "mesh")
+        x = mesh.x1c
+        y = mesh.x2c
+
+        # Get momentum components
+        Sx = labframe_momentum(
+            level_data["rho"],
+            level_data["p"],
+            get_velocities(level_data),
+            get_b_fields(level_data),
+            gamma,
+            regime,
+            VectorComponent(0),
+        )
+        Sy = labframe_momentum(
+            level_data["rho"],
+            level_data["p"],
+            get_velocities(level_data),
+            get_b_fields(level_data),
+            gamma,
+            regime,
+            VectorComponent(1),
+        )
+
+        # ang momentum density
+        Lz = x * Sy - y * Sx
+
+        den = level_data["rho"]
+
+        if den.ndim == 3:
+            dz = mesh.x3v[1:] - mesh.x3v[:-1]
+            Sigma = np.sum(den * dz, axis=0)
+            Lz_integrated = np.sum(Lz * dz, axis=0)
+            return np.asarray(Lz_integrated / (Sigma + np.finfo(float).tiny))
+        elif den.ndim == 2:
+            return np.asarray(Lz / (den + np.finfo(float).tiny))
+        else:
+            raise ValueError(f"Density has unexpected dimension: {den.ndim}")
+
+    def surface_density(level_data: dict[str, Any]) -> Array:
+        den = level_data["rho"]
+        if den.ndim == 3:
+            mesh = getattr(level_data, "mesh")
+            dz = mesh.x3v[1:] - mesh.x3v[:-1]
+            den = np.sum(den * dz, axis=0)
+        return np.asarray(den)
+
+    def mass_flux(level_data: dict[str, Any]) -> Array:
+        """Compute mass flux through spherical shells."""
+        mesh = getattr(level_data, "mesh")
+        x = mesh.x1c
+        y = mesh.x2c
+        # Radial velocity
+        vx = level_data["v1"]
+        vy = level_data["v2"]
+        if vx.ndim == 3:
+            z = mesh.x3c
+            r = np.sqrt(x**2 + y**2 + z**2)
+            vz = level_data["v3"]
+            vr = (x * vx + y * vy + z * vz) / (r + np.finfo(float).tiny)
+        else:
+            r = np.sqrt(x**2 + y**2)
+            vr = (x * vx + y * vy) / (r + np.finfo(float).tiny)
+
+        return np.asarray(4.0 * np.pi * r**2 * level_data["rho"] * vr)
+
     # Build the pipeline
     pipeline: dict[str, Any] = {
         "W": compute_W,
@@ -166,6 +264,10 @@ def create_computation_pipeline(data: ProcessedData) -> dict[str, ComputeFunc]:
         "pmag": compute_magnetic_pressure,
         "mach": compute_mach_number,
         "chi_dens": compute_chi_density,
+        "j": angular_momentum_density,
+        "mass_flux": mass_flux,
+        "j_spec": specific_angular_momentum,
+        "Sigma": surface_density,
     }
 
     # Add component fields

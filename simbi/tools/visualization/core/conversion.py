@@ -7,17 +7,23 @@ from typing import Literal, Optional
 from typing_extensions import Any
 
 from ...utility import get_dimensionality
+from ..components.accretion import (
+    AccretionAnalysisProps,
+    AnalysisType,
+    RadialConfig,
+)
 from ..components.multidim import MultidimPlotProps
 from ..styling import ThemeManager
 from ..styling.theme import ThemeConfig
 from .config import (
+    AccretionConfig,
     AnimationConfig,
     HistogramConfig,
     MultidimConfig,
     PlotConfig,
     StyleConfig,
+    TimeSeriesConfig,
     VisualizationConfig,
-    time_seriesConfig,
 )
 from .types import Bounds, ColorRange
 
@@ -48,7 +54,7 @@ def first_from_cycle(value):
 
 def validate_plot_type(
     plot_type: str | None, files: list[str]
-) -> Literal["line", "multidim", "time_series", "histogram"]:
+) -> Literal["line", "multidim", "time_series", "histogram", "accretion"]:
     """Validate and auto-detect plot type if not specified."""
     if plot_type:
         return plot_type  # type: ignore[return-value]
@@ -71,6 +77,33 @@ def plot_config_from_args(args: Namespace) -> PlotConfig:
         plot_type=validate_plot_type(plot_type, files),
         fields=getattr(args, "fields", ["rho"]),
         ndim=get_dimensionality(files),
+    )
+
+
+def accretion_props_from_args(
+    config: AccretionConfig,
+) -> AccretionAnalysisProps:
+    """Create AccretionAnalysisProps from configuration."""
+    return AccretionAnalysisProps(
+        analysis_type=AnalysisType[config.analysis_type.upper()],
+        radial_config=RadialConfig(
+            n_bins=config.n_bins,
+        ),
+        angular_config=None,
+        level=config.level,
+        normalize=config.normalize,
+        time_average=config.time_average,
+    )
+
+
+def accretion_config_from_args(args: Namespace) -> AccretionConfig:
+    """Build AccretionConfig from cli arguments"""
+    return AccretionConfig(
+        analysis_type=getattr(args, "analysis_type", "quiver"),
+        n_bins=getattr(args, "accretion_n_bins", 50),
+        level=getattr(args, "accretion_level", 0),
+        normalize=getattr(args, "accretion_normalize", False),
+        time_average=getattr(args, "accretion_time_average", False),
     )
 
 
@@ -102,6 +135,8 @@ def style_config_from_args(args: Namespace) -> StyleConfig:
         draw_bodies=getattr(args, "draw_bodies", False),
         time_scale=getattr(args, "time_scale", None),
         time_units=getattr(args, "time_units", ""),
+        y_label=getattr(args, "ylabel", None),
+        x_label=getattr(args, "xlabel", None),
     )
 
 
@@ -153,9 +188,9 @@ def histogram_config_from_args(args: Namespace) -> HistogramConfig:
     )
 
 
-def time_series_config_from_args(args: Namespace) -> time_seriesConfig:
-    """Build time_seriesConfig from command line arguments."""
-    return time_seriesConfig(
+def time_series_config_from_args(args: Namespace) -> TimeSeriesConfig:
+    """Build TimeSeriesConfig from command line arguments."""
+    return TimeSeriesConfig(
         weight=getattr(args, "weight", None),
         body_id=getattr(args, "body_id", None),
         single_file_mode=getattr(args, "single_file_mode", False),
@@ -183,6 +218,7 @@ def config_from_args(args: Namespace) -> VisualizationConfig:
         multidim=multidim_config_from_args(args),
         histogram=histogram_config_from_args(args),
         time_series=time_series_config_from_args(args),
+        accretion=accretion_config_from_args(args),
         animation=animation_config_from_args(args),
         theme=theme_config_from_args(args),
     )

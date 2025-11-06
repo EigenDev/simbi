@@ -96,7 +96,7 @@ def create_time_series_style(
     return style
 
 
-class time_seriesPlotProps(ComponentProps):
+class TimeSeriesPlotProps(ComponentProps):
     """Properties for time_series plot component."""
 
     field_index: int = 0
@@ -139,10 +139,10 @@ class time_seriesPlotProps(ComponentProps):
         return v
 
 
-class time_seriesPlotComponent(Component):
+class TimeSeriesPlotComponent(Component):
     """time_series plot visualization component."""
 
-    def __init__(self, props: time_seriesPlotProps):
+    def __init__(self, props: TimeSeriesPlotProps):
         """Initialize the time_series plot component."""
         self.props = props
         self.times = np.array([])
@@ -205,7 +205,7 @@ class time_seriesPlotComponent(Component):
         """Check if component is initialized."""
         return self._initialized
 
-    def update(self, props: time_seriesPlotProps) -> None:
+    def update(self, props: TimeSeriesPlotProps) -> None:
         """Update component properties."""
         prev_props = self.props
         self.props = props

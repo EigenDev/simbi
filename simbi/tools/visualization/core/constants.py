@@ -1,5 +1,5 @@
 FIELD_ALIASES = {
-    "Sigma": "rho",
+    # "Sigma": "rho",
     "b1": "b1_mean",
     "b2": "b2_mean",
     "b3": "b3_mean",

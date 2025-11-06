@@ -118,7 +118,9 @@ class PlotConfig(BaseModel):
         ndim: Number of dimensions to visualize
     """
 
-    plot_type: Literal["line", "multidim", "histogram", "time_series"]
+    plot_type: Literal[
+        "line", "multidim", "histogram", "time_series", "accretion"
+    ]
     fields: Sequence[str]
     ndim: int = 1
 
@@ -164,7 +166,7 @@ class HistogramConfig(BaseModel):
         return v
 
 
-class time_seriesConfig(BaseModel):
+class TimeSeriesConfig(BaseModel):
     """
     Configuration for time_series plots.
 
@@ -182,6 +184,28 @@ class time_seriesConfig(BaseModel):
         "frozen": True,  # Make instances immutable
         "arbitrary_types_allowed": True,
     }
+
+
+class AccretionConfig(BaseModel):
+    """Configuration for accretion analysis plots.
+
+    Attributes:
+        analysis_type: Type of analysis to perform
+        r_min: Minimum radius for analysis
+        r_max: Maximum radius for analysis
+        n_bins: Number of radial bins
+        log_spacing: Whether to use logarithmic radial binning
+        time_average: Whether to average over time series
+        normalize: Whether to normalize quantities
+    """
+
+    analysis_type: Literal[
+        "angular_momentum", "mass_flux", "density", "quiver", "streamlines"
+    ] = "angular_momentum"
+    n_bins: int = 50
+    time_average: bool = False
+    normalize: bool = False
+    level: int = 0
 
 
 class AnimationConfig(BaseModel):
@@ -227,7 +251,8 @@ class VisualizationConfig(BaseModel):
     style: StyleConfig = Field(default_factory=StyleConfig)
     multidim: MultidimConfig = Field(default_factory=MultidimConfig)
     histogram: HistogramConfig = Field(default_factory=HistogramConfig)
-    time_series: time_seriesConfig = Field(default_factory=time_seriesConfig)
+    time_series: TimeSeriesConfig = Field(default_factory=TimeSeriesConfig)
+    accretion: AccretionConfig = Field(default_factory=AccretionConfig)
     animation: AnimationConfig = Field(default_factory=AnimationConfig)
     theme: ThemeConfig = Field(default_factory=ThemeConfig)
 

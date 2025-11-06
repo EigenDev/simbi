@@ -1,5 +1,6 @@
-from pydantic import Field
 from typing import Any, Optional
+
+from pydantic import Field
 
 
 def SimbiField(
@@ -45,4 +46,6 @@ def SimbiField(
     )
 
     # Pass description to both Field and CLI info
-    return Field(default, description=description, json_schema_extra=extra, **kwargs)
+    return Field(
+        default, description=description, json_schema_extra=extra, **kwargs
+    )

@@ -281,7 +281,13 @@ def transform_field(
     # Apply slicing if needed
     if slice_config and effective_dim >= 2:
         slicer = create_slicer_from_config(slice_config)
-        values, coords = slicer({"values": values, "domain": coords})
+        # we're likely plotting a quantity that's been averaged
+        # along one of the dimnesions, so while the values need
+        # no slicing, the coords still do
+        if effective_dim != values.ndim:
+            _, coords = slicer({"values": values, "domain": coords})
+        else:
+            values, coords = slicer({"values": values, "domain": coords})
     name = f"{field_name}_L{level}" if level > 0 else field_name
     return create_field_data(name, values, coords)
 

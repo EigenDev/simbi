@@ -1,373 +1,339 @@
 """
-Streamlined simulation state initialization.
+Streamlined simulation state initialization using iterator pattern.
 
-This module provides efficient functions for creating and initializing simulation states.
+This module provides efficient initialization by passing generators directly
+to C++, eliminating intermediate NumPy array allocation.
 """
 
 from dataclasses import dataclass
 from typing import Optional, cast
-import numpy as np
-from numpy.typing import NDArray
 
-from simbi.core.types.input import HierarchyData, LevelData, MeshConfig
-
-from ...functional import Maybe
 from ..config.base_config import SimbiBaseConfig
 from ..types.typing import (
-    InitialStateType,
     GasStateFunction,
+    GasStateGenerator,
+    InitialStateType,
     MHDStateGenerators,
+    StaggeredBFieldGenerator,
 )
-import itertools
 
 
 @dataclass
 class SimulationState:
-    """Container for simulation state data."""
+    """
+    Container for simulation state metadata and generators.
 
-    primitive_state: NDArray[np.floating]  # (nvars, nx, ny, nz)
-    conserved_state: NDArray[np.floating]  # (nvars, nx, ny, nz)
+    This is a lightweight container that holds:
+    - Generator functions (not arrays!)
+    - Configuration metadata
+    - FMR hierarchy info (if applicable)
+
+    Memory is owned entirely by C++.
+    """
+
+    # Generator functions (not consumed iterators!)
+    primitive_gen_func: GasStateFunction
     config: SimbiBaseConfig
-    staggered_bfields: Optional[list[NDArray[np.floating]]] = None
-    levels: Optional[list[LevelData]] = None
-    hierarchy: Optional[HierarchyData] = None
+
+    # Optional: MHD B-field generators
+    bfield_gen_funcs: Optional[list[StaggeredBFieldGenerator]] = None
+
+    @property
+    def is_mhd(self) -> bool:
+        """Check if this is an MHD simulation."""
+        return self.bfield_gen_funcs is not None
 
     @property
     def has_fmr(self) -> bool:
-        """Check if simulation has FMR levels."""
-        return self.levels is not None and len(self.levels) > 0
+        """Check if simulation has FMR enabled."""
+        return self.config.fmr_enabled
 
-    @property
-    def num_levels(self) -> int:
-        """Get number of FMR levels."""
-        if self.hierarchy is None:
-            return 1
-        return self.hierarchy.num_levels
+    def fresh_primitive_iterator(self) -> GasStateGenerator:
+        """
+        Get a fresh iterator for primitive variables.
+
+        Returns:
+            Fresh iterator that can be consumed by C++
+        """
+        return self.primitive_gen_func()
+
+    def fresh_bfield_iterators(
+        self,
+    ) -> Optional[list[StaggeredBFieldGenerator]]:
+        """
+        Get fresh iterators for B-field components.
+
+        Returns:
+            List of [Bx, By, Bz] iterators, or None for non-MHD
+        """
+        if self.bfield_gen_funcs is None:
+            return None
+        return [gen for gen in self.bfield_gen_funcs]
 
 
 def is_mhd_generator(gen: InitialStateType) -> bool:
-    """Check if generator is for MHD simulation."""
-    return not callable(gen) and len(gen) == 4
-
-
-def primitive_to_conserved(
-    primitive: NDArray[np.floating],
-    config: SimbiBaseConfig,
-    staggered_bfields: Optional[list[NDArray[np.floating]]] = None,
-) -> NDArray[np.floating]:
     """
-    Convert primitive variables to conserved variables.
-
-    This is a streamlined conversion function that handles both hydro and MHD.
-    """
-    # Extract key variables from config
-    adiabatic_index = config.adiabatic_index
-    regime = config.regime.value
-    is_mhd = config.is_mhd
-    ndim = config.dimensionality
-
-    # Create output array same shape as input
-    conserved = np.zeros_like(primitive)
-
-    # Handle special case for isothermal EOS
-    isothermal = abs(adiabatic_index - 1.0) < 1e-10
-
-    # Extract primitive variables
-    # Format is: [density, vel_x, vel_y, vel_z, pressure, ...]
-    pidx = (
-        4 if is_mhd else config.dimensionality + 1
-    )  # Pressure index in primitive array
-    rho, *velocities, pressure = (
-        primitive[0],
-        *primitive[1:pidx],
-        primitive[pidx],
-    )
-
-    # Calculate square of velocity
-    vsq = velocities[0] ** 2
-    if config.dimensionality > 1:
-        vsq += velocities[1] ** 2
-    if config.dimensionality > 2 or is_mhd:
-        vsq += velocities[2] ** 2
-
-    lorentz: float | NDArray[np.floating] = 1.0
-    # Calculate Lorentz factor for relativistic simulations
-    if "sr" in regime:
-        if np.any(vsq >= 1.0):
-            raise ValueError("Velocity exceeds speed of light")
-        lorentz = 1.0 / np.sqrt(1.0 - vsq)
-
-    # Conserved density (D)
-    conserved[0] = rho * lorentz
-
-    # Conserved momentum (m = ρh\gamma^2v for relativistic, \rho v for classical)
-    if "sr" in regime:
-        # Relativistic enthalpy
-        h = 1.0 + adiabatic_index * pressure / ((adiabatic_index - 1.0) * rho)
-        for i in range(ndim):
-            conserved[i + 1] = rho * h * lorentz**2 * velocities[i]
-    else:
-        # Classical momentum
-        for i in range(ndim):
-            conserved[i + 1] = rho * velocities[i]
-
-    # Energy equation
-    energy_index = config.dimensionality + 1
-    if isothermal:
-        # For isothermal flows, we store sound speed squared in energy slot
-        conserved[energy_index] = pressure / rho
-    elif "sr" in regime:
-        # Relativistic energy
-        h = 1.0 + adiabatic_index * pressure / ((adiabatic_index - 1.0) * rho)
-        conserved[energy_index] = (
-            rho * h * lorentz**2 - pressure - rho * lorentz
-        )
-    else:
-        # Classical energy
-        conserved[energy_index] = (
-            pressure / (adiabatic_index - 1.0) + 0.5 * rho * vsq
-        )
-
-    # Handle magnetic fields for MHD
-    if is_mhd and staggered_bfields:
-        # Calculate cell-centered magnetic fields from staggered fields
-        b_mean = get_cell_centered_bfields(staggered_bfields)
-
-        # Store magnetic fields in conserved array
-        conserved[5] = b_mean[0]
-        conserved[6] = b_mean[1]
-        conserved[7] = b_mean[2]
-
-        # Adjust energy and momentum for magnetic contribution
-        b_squared = b_mean[0] ** 2 + b_mean[1] ** 2 + b_mean[2] ** 2
-        if "sr" in regime:
-            # SRMHD energy
-            v_dot_b = (
-                velocities[0] * b_mean[0]
-                + velocities[1] * b_mean[1]
-                + velocities[2] * b_mean[2]
-            )
-            conserved[energy_index] += 0.5 * (
-                b_squared + vsq * b_squared - v_dot_b**2
-            )
-            for i in range(3):
-                conserved[i + 1] += (
-                    b_squared * velocities[i] - v_dot_b * b_mean[i]
-                )
-        else:
-            # MHD energy
-            conserved[energy_index] += 0.5 * b_squared
-
-    # Passive scalar
-    conserved[-1] = conserved[0] * primitive[-1]
-
-    return conserved
-
-
-def get_cell_centered_bfields(
-    staggered_bfields: list[NDArray[np.floating]],
-) -> list[NDArray[np.floating]]:
-    """
-    Convert staggered magnetic fields to cell-centered fields.
+    Check if generator tuple is for MHD simulation.
 
     Args:
-        staggered_bfields: List of staggered B-field components
+        gen: Generator or tuple of generators
 
     Returns:
-        List of cell-centered B-field components
+        True if this is an MHD generator tuple (gas + 3 B-fields)
     """
-    if not staggered_bfields or len(staggered_bfields) != 3:
-        return []
-
-    # Simple averaging of adjacent face values
-    b1, b2, b3 = staggered_bfields
-
-    # Handle edges based on shapes
-    b1_centered = 0.5 * (b1[..., :-1] + b1[..., 1:])
-    b2_centered = 0.5 * (b2[:, :-1, :] + b2[:, 1:, :])
-    b3_centered = 0.5 * (b3[:-1, ...] + b3[1:, ...])
-
-    return [b1_centered, b2_centered, b3_centered]
-
-
-def pad_staggered_fields(
-    staggered_bfields: list[NDArray[np.floating]],
-) -> list[NDArray[np.floating]]:
-    """Pad staggered magnetic fields along appropriate directions."""
-    if not staggered_bfields:
-        return []
-
-    b1, b2, b3 = staggered_bfields
-
-    # Pad each field appropriately
-    # Note: B1 is staggered in x, B2 in y, B3 in z
-    b1_padded = np.pad(b1, ((1, 1), (1, 1), (0, 0)), "edge")
-    b2_padded = np.pad(b2, ((1, 1), (0, 0), (1, 1)), "edge")
-    b3_padded = np.pad(b3, ((0, 0), (1, 1), (1, 1)), "edge")
-
-    return [b1_padded, b2_padded, b3_padded]
+    return not callable(gen) and len(gen) == 4
 
 
 def initialize_state(config: SimbiBaseConfig) -> SimulationState:
     """
     Initialize simulation state from configuration.
 
-    This function:
-    i). Determines grid dimensions
-    ii). Initializes arrays for primitive variables
-    iii). Populates arrays using generator functions from config
-    iv). Converts primitive variables to conserved variables
-    v). Returns a complete SimulationState object
+    This is now trivial - we just extract the generator functions
+    and store them. No arrays are created. C++ will consume the
+    iterators directly.
 
     Args:
         config: The simulation configuration
 
     Returns:
-        Complete simulation state with both primitive and conserved variables
+        Lightweight SimulationState with generator functions
+
+    Example:
+        >>> config = SodProblem(resolution=1000, end_time=1.0)
+        >>> state = initialize_state(config)
+        >>> # State now holds generator functions, ready for C++
+        >>> iterator = state.fresh_primitive_iterator()
+        >>> # C++ consumes this iterator directly
     """
-    from ...functional import to_iterable
+    # Get the initial state specification from config
+    initial_state = config.initial_primitive_state()
 
-    # Determine grid dimensions from resolution
-    if isinstance(config.resolution, int):
-        nx, ny, nz = config.resolution, 1, 1
-        resolution = [nx, ny, nz]
+    # Determine if this is MHD or pure hydro
+    if is_mhd_generator(initial_state):
+        # Unpack MHD generators: (gas, Bx, By, Bz)
+        gen_tuple = cast(MHDStateGenerators, initial_state)
+        gas_gen_func, bx_gen_func, by_gen_func, bz_gen_func = gen_tuple
+
+        # Store all generator functions (NOT called yet)
+        bfield_gen_funcs = [bx_gen_func(), by_gen_func(), bz_gen_func()]
+
+        return SimulationState(
+            primitive_gen_func=gas_gen_func,
+            bfield_gen_funcs=bfield_gen_funcs,
+            config=config,
+        )
     else:
-        resolution = list(config.resolution)
-        nx = resolution[0]
-        ny = resolution[1] if len(resolution) > 1 else 1
-        nz = resolution[2] if len(resolution) > 2 else 1
+        # Pure hydro case
+        gas_gen_func = cast(GasStateFunction, initial_state)
 
-    # Adjust for MHD (always 3D)
-    if config.is_mhd:
-        ny = max(ny, 1)
-        nz = max(nz, 1)
-        active_resolution = [nx, ny, nz]
-    else:
-        active_resolution = list(r for r in resolution if r > 1)
-
-    # Determine ghost cell padding
-    pad_width = 1 + (config.reconstruction.value == "plm")
-
-    # Number of variables
-    nvars = config.nvars
-
-    # Create array for primitive variables with ghost cells
-    padded_shape = (nvars,) + tuple(
-        r + 2 * pad_width for r in to_iterable(active_resolution)[::-1]
-    )
-    primitive = np.zeros(padded_shape, dtype=np.float64)
-
-    # Get appropriate generator(s)
-    generator = config.initial_primitive_state()
-    staggered_bfields: list[NDArray[np.floating]] = []
-
-    # Handle MHD generators
-    if is_mhd_generator(generator):
-        # Unpack MHD generators
-        gen_tuple = cast(MHDStateGenerators, generator)
-        gas_gen, b1_gen, b2_gen, b3_gen = gen_tuple
-
-        # Initialize staggered magnetic field arrays
-        b1_shape = (nz, ny, nx + 1)
-        b2_shape = (nz, ny + 1, nx)
-        b3_shape = (nz + 1, ny, nx)
-
-        # Use generators to fill magnetic field arrays
-        staggered_bfields = [
-            np.fromiter(b1_gen(), dtype=float).reshape(b1_shape),
-            np.fromiter(b2_gen(), dtype=float).reshape(b2_shape),
-            np.fromiter(b3_gen(), dtype=float).reshape(b3_shape),
-        ]
-
-        # Get gas state generator
-        gas_state = gas_gen()
-    else:
-        # Pure hydro case - just get the gas state generator
-        gas_state = cast(GasStateFunction, generator)()
-
-    # Peek at first value to determine number of components
-    values_iter, gas_iter = itertools.tee(gas_state)
-    first_values = next(values_iter)
-    n_components = len(first_values)
-
-    interior = (slice(pad_width, -pad_width),) * len(active_resolution)
-    interior_shape = primitive[:n_components, *interior].shape
-    primitive[:n_components, *interior] = np.fromiter(
-        gas_iter, dtype=(float, n_components)
-    ).T.reshape(interior_shape)
-
-    conserved = np.zeros_like(primitive)
-    # Convert primitive to conserved variables
-    conserved[:nvars, *interior] = primitive_to_conserved(
-        primitive[:nvars, *interior], config, staggered_bfields
-    )
-
-    # fill the ghost cells at the edges with values from the interior
-    ndim = len(active_resolution)
-    for dim in range(ndim):
-        # create slices for each dimension
-        for j in range(pad_width):
-            # Fill left boundary ghost cells
-            left_ghost_slices = [slice(None)] * (
-                ndim + 1
-            )  # +1 for variables dimension
-            left_ghost_slices[dim + 1] = slice(j, j + 1)
-
-            left_interior_slices = [slice(None)] * (ndim + 1)
-            left_interior_slices[dim + 1] = slice(pad_width, pad_width + 1)
-
-            conserved[tuple(left_ghost_slices)] = conserved[
-                tuple(left_interior_slices)
-            ]
-            primitive[tuple(left_ghost_slices)] = primitive[
-                tuple(left_interior_slices)
-            ]
-
-            # Fill right boundary ghost cells
-            right_ghost_slices = [slice(None)] * (ndim + 1)
-            right_ghost_slices[dim + 1] = slice(-j - 1, -j if j > 0 else None)
-
-            right_interior_slices = [slice(None)] * (ndim + 1)
-            right_interior_slices[dim + 1] = slice(-pad_width - 1, -pad_width)
-
-            conserved[tuple(right_ghost_slices)] = conserved[
-                tuple(right_interior_slices)
-            ]
-            primitive[tuple(right_ghost_slices)] = primitive[
-                tuple(right_interior_slices)
-            ]
-
-    if config.is_mhd:
-        # Pad staggered fields
-        staggered_bfields = pad_staggered_fields(staggered_bfields)
-
-    # Create and return simulation state
-    return SimulationState(
-        primitive_state=primitive,
-        conserved_state=conserved,
-        staggered_bfields=staggered_bfields,
-        config=config,
-    )
+        return SimulationState(
+            primitive_gen_func=gas_gen_func,
+            bfield_gen_funcs=None,
+            config=config,
+        )
 
 
 def load_or_initialize_state(
     config: SimbiBaseConfig,
-) -> Maybe[SimulationState]:
+) -> SimulationState:
     """
-    Load state from checkpoint if specified or initialize from scratch.
+    Load state from checkpoint if specified, or initialize from scratch.
 
     Args:
         config: Simulation configuration
 
     Returns:
-        SimulationState loaded from checkpoint or initialized from config
+        SimulationState (either from checkpoint or fresh initialization)
+
+    Note:
+        Checkpoint loading is handled by C++. Python just passes the
+        checkpoint path through the config.
     """
-    from ..io.checkpoint import load_checkpoint_to_state
+    # Check if resuming from checkpoint
+    if hasattr(config, "checkpoint_file") and config.checkpoint_file:
+        # For checkpoint resume, we don't need generators
+        # C++ will load the state from the checkpoint file
+        # We create a dummy state that signals "resume mode"
 
-    # Try to load from checkpoint if specified
-    if config.checkpoint_file:
-        checkpoint_state = load_checkpoint_to_state(config)
-        return checkpoint_state
+        # Create a no-op generator (won't be used)
+        def dummy_gen() -> GasStateGenerator:
+            raise RuntimeError(
+                "Generator should not be called when resuming from checkpoint"
+            )
+            yield
 
-    # Initialize from config and wrap in Maybe for consistency
-    return Maybe.of(initialize_state(config))
+        return SimulationState(
+            primitive_gen_func=dummy_gen,
+            bfield_gen_funcs=None,
+            config=config,
+        )
+
+    # Fresh initialization
+    return initialize_state(config)
+
+
+# Optional: Validation helpers
+
+
+def validate_generator_output(
+    config: SimbiBaseConfig, num_samples: int = 10
+) -> tuple[bool, Optional[str]]:
+    """
+    Validate that generator produces correctly-shaped output.
+
+    This is a diagnostic tool to help users debug their initial_primitive_state
+    implementations. It consumes a few values from the generator to check shape.
+
+    Args:
+        config: Configuration to validate
+        num_samples: Number of samples to test
+
+    Returns:
+        (is_valid, error_message)
+
+    Example:
+        >>> config = SodProblem(resolution=1000)
+        >>> valid, error = validate_generator_output(config)
+        >>> if not valid:
+        ...     print(f"Generator error: {error}")
+    """
+    try:
+        initial_state = config.initial_primitive_state()
+
+        if is_mhd_generator(initial_state):
+            gen_tuple = cast(MHDStateGenerators, initial_state)
+            gas_gen_func, bx_gen, by_gen, bz_gen = gen_tuple
+
+            # Test gas generator
+            gas_iter = gas_gen_func()
+            for i in range(num_samples):
+                values = next(gas_iter)
+
+                # Check it's a sequence
+                if not hasattr(values, "__len__"):
+                    return (
+                        False,
+                        f"Generator must yield sequences, got {type(values)}",
+                    )
+
+                # Check expected number of components
+                # For MHD: (rho, vx, vy, vz, p, ...) - at least 5
+                if len(values) < 5:
+                    return (
+                        False,
+                        f"MHD generator must yield at least 5 values, got {len(values)}",
+                    )
+
+                # Check all values are numeric
+                try:
+                    [float(v) for v in values]
+                except (ValueError, TypeError) as e:
+                    return False, f"All values must be numeric: {e}"
+
+            # Test B-field generators
+            for name, gen_func in [
+                ("Bx", bx_gen),
+                ("By", by_gen),
+                ("Bz", bz_gen),
+            ]:
+                b_iter = gen_func()
+                for i in range(num_samples):
+                    value = next(b_iter)
+                    try:
+                        float(value)
+                    except (ValueError, TypeError):
+                        return (
+                            False,
+                            f"{name} generator must yield numeric values",
+                        )
+
+        else:
+            # Pure hydro
+            gas_gen_func = cast(GasStateFunction, initial_state)
+            gas_iter = gas_gen_func()
+
+            for i in range(num_samples):
+                values = next(gas_iter)
+
+                if not hasattr(values, "__len__"):
+                    return (
+                        False,
+                        f"Generator must yield sequences, got {type(values)}",
+                    )
+
+                # For hydro: (rho, v1, [v2, v3,] p) - at least 3 (1D)
+                expected_min = config.dimensionality + 2
+                if len(values) < expected_min:
+                    return False, (
+                        f"Generator must yield at least {expected_min} values "
+                        f"for {config.dimensionality}D, got {len(values)}"
+                    )
+
+                try:
+                    [float(v) for v in values]
+                except (ValueError, TypeError) as e:
+                    return False, f"All values must be numeric: {e}"
+
+        return True, None
+
+    except StopIteration:
+        return False, f"Generator exhausted after {num_samples} samples"
+    except Exception as e:
+        return False, f"Unexpected error: {e}"
+
+
+def estimate_generator_size(config: SimbiBaseConfig) -> dict[str, int]:
+    """
+    Estimate number of values the generator should produce.
+
+    Useful for debugging - tells user how many values their generator
+    needs to yield.
+
+    Args:
+        config: Configuration to analyze
+
+    Returns:
+        Dictionary with expected sizes for each generator
+
+    Example:
+        >>> config = SodProblem(resolution=1000)
+        >>> sizes = estimate_generator_size(config)
+        >>> print(f"Your generator must yield {sizes['primitive']} tuples")
+    """
+
+    # Get resolution
+    if isinstance(config.resolution, int):
+        resolution = [config.resolution, 1, 1]
+    else:
+        resolution = list(config.resolution)
+
+    # Active dimensions
+    nx = resolution[0]
+    ny = resolution[1] if len(resolution) > 1 else 1
+    nz = resolution[2] if len(resolution) > 2 else 1
+
+    # For MHD, all dimensions are active
+    if config.is_mhd:
+        ny = max(ny, 1)
+        nz = max(nz, 1)
+        active_resolution = [nx, ny, nz]
+    else:
+        active_resolution = [r for r in resolution if r > 1]
+
+    # Total cells (without ghost zones)
+    total_cells = 1
+    for r in active_resolution:
+        total_cells *= r
+
+    result = {
+        "primitive": total_cells,
+        "components_per_tuple": config.nvars,
+    }
+
+    # Add B-field sizes for MHD (staggered grids)
+    if config.is_mhd:
+        result["bx"] = (nx + 1) * ny * nz
+        result["by"] = nx * (ny + 1) * nz
+        result["bz"] = nx * ny * (nz + 1)
+
+    return result

@@ -123,3 +123,16 @@ def execute(args: Namespace, argv: Optional[list] = None) -> None:
                 theme=theme,
                 **kwargs,
             )
+        elif plot_type == "accretion":
+            api.plot_accretion(
+                config,
+                files,
+                args.fields,
+                args.save_as,
+                setup=setup,
+                theme=theme,
+                **kwargs,
+            )
+        else:
+            print(f"Error: Unknown plot type '{plot_type}'")
+            sys.exit(1)

@@ -130,7 +130,6 @@ def should_use_legend(show_legend: Optional[bool], field_count: int) -> bool:
 
 def update_legend(ax: Axes, lines: list[Line2D]) -> None:
     """Update legend if any lines have labels."""
-    print(lines)
     ...
     # if any(
     #     line.get_label() and not str(line.get_label()).startswith("_")
@@ -203,6 +202,7 @@ class LinePlotComponent(Component):
 
     def update(self, props: LinePlotProps) -> None:
         """Update component properties."""
+        print("fawwk")
         self.props = props
 
     def render(self, data: PlotData, style: StyleConfig) -> list[Line2D]:
@@ -250,6 +250,7 @@ class LinePlotComponent(Component):
                 self._lines,
             )
         self._lines = []
+        self.ax.cla()
 
     def _should_reset_lines(self) -> bool:
         """Determine if lines should be reset based on field count change."""

@@ -6,7 +6,7 @@ This module provides animation functionality for visualizations.
 
 from typing import Any, Callable, Optional, Sequence
 
-from matplotlib.animation import FFMpegWriter, FuncAnimation, PillowWriter
+from matplotlib.animation import FuncAnimation
 from matplotlib.figure import Figure
 from rich.progress import (
     BarColumn,
@@ -69,9 +69,6 @@ class AnimationController:
         Returns:
             Tuple of artists that were updated
         """
-        # import time
-
-        # start_time = time.time()
         self.state.animation.frame_index = frame_idx
         file_path = self.state.animation.data_files[frame_idx]
 
@@ -82,6 +79,9 @@ class AnimationController:
 
         # Collect artists from all components
         artists = []
+
+        for component in self.components:
+            component.cleanup()
 
         # Update each component
         for component in self.components:
@@ -95,9 +95,6 @@ class AnimationController:
                 else:
                     artists.append(frame_element)
 
-        # end_time = time.time()
-        # elapsed_time = end_time - start_time
-        # print(f"Elapsed time: {elapsed_time} seconds")
         # Return tuple of artists for blitting
         return tuple(artists)
 

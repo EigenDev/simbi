@@ -6,7 +6,7 @@ from typing import Any, Optional
 from . import api
 from .core.conversion import config_from_args
 
-VALID_PLOT_TYPES = ["line", "multidim", "histogram", "time_series"]
+VALID_PLOT_TYPES = ["line", "multidim", "histogram", "time_series", "accretion"]
 
 try:
     with warnings.catch_warnings():
@@ -192,9 +192,15 @@ def setup_parser(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--setup", default="Simulation", help="Setup name")
     parser.add_argument(
         "--plot-type",
-        choices=["line", "multidim", "histogram", "time_series"],
+        choices=["line", "multidim", "histogram", "time_series", "accretion"],
         default=None,
         help="Type of plot to create",
+    )
+    parser.add_argument(
+        "--analysis-type",
+        choices=["angular_momentum", "mass_flux", "quiver", "streamlines"],
+        default="angular_momentum",
+        help="Type of analysis for accretion plots",
     )
     parser.add_argument(
         "--theme",
@@ -250,8 +256,8 @@ def setup_parser(parser: argparse.ArgumentParser) -> None:
         default=[None, None],
         help="Y axis limits",
     )
-    parser.add_argument("--xlabel", default="x", help="X axis label")
-    parser.add_argument("--ylabel", default="y", help="Y axis label")
+    parser.add_argument("--xlabel", default=None, help="X axis label")
+    parser.add_argument("--ylabel", default=None, help="Y axis label")
     parser.add_argument(
         "--nplots", type=int, default=1, help="Number of subplots"
     )
@@ -328,7 +334,7 @@ def setup_parser(parser: argparse.ArgumentParser) -> None:
         "--color-range",
         nargs="+",
         help="Color range(s) (min,max format)",
-        type=pair_of_floats,
+        type=colorbar_limits,
         default=[(None, None)],
     )
 

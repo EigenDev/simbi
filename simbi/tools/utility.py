@@ -88,6 +88,11 @@ FIELD_MAP: dict[str, str] = {
     "accreted_mass": r"$M_{\rm acc}$",
     "mdot": r"$\dot{M} / \dot{M_0}$",
     "maccr": r"$M_{\rm acc}$",
+    "j": r"$L_z / L_{z,0}$",
+    "vr": r"$v_r / v_0$",
+    "vphi": r"$v_\phi / v_0$",
+    "vtheta": r"$v_\theta / v_0$",
+    "j_spec": r"$j / j_{0}$",
 }
 
 UNITS: dict[str, str] = {

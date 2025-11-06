@@ -8,17 +8,20 @@ from typing import Optional, Sequence
 
 import matplotlib.pyplot as plt
 
+from .components.accretion import (
+    AccretionAnalysisComponent,
+)
 from .components.histogram import HistogramPlotComponent, HistogramPlotProps
 from .components.line import LinePlotComponent, LinePlotProps
 from .components.multidim import MultidimPlotComponent
 from .components.time_series import (
-    time_seriesPlotComponent,
-    time_seriesPlotProps,
+    TimeSeriesPlotComponent,
+    TimeSeriesPlotProps,
 )
 from .core.config import (
     VisualizationConfig,
 )
-from .core.conversion import multidim_props_from_args
+from .core.conversion import accretion_props_from_args, multidim_props_from_args
 from .core.figure import Figure
 from .pipeline import (
     create_plot_data,
@@ -54,15 +57,18 @@ def plot_line(
         files = [files]
 
     sim_data = load_data(files[0])
-    nlvls = sim_data.hierarchy().num_levels if sim_data.hierarchy else 1
+    nlvls = 1
+    hierarchy = sim_data.hierarchy() or None
+    if hierarchy is not None:
+        nlvls = hierarchy.num_levels
     figure = prepare_figure(config, len(files), nlvls=nlvls)
     plot_data = create_plot_data(sim_data, fields, config)
 
     # Add line component for each field
     for i, field in enumerate(fields):
-        if sim_data.hierarchy is not None:
+        if hierarchy is not None:
             # we make a list over all levels with "_L" in their name
-            n = sim_data.hierarchy().num_levels
+            n = hierarchy.num_levels
             indices = [n * i + j for j in range(n)]
         else:
             indices = [i]
@@ -246,7 +252,7 @@ def plot_time_series(
     time_series = create_time_series_data(files, fields)
 
     for i, field in enumerate(fields):
-        props = time_seriesPlotProps(
+        props = TimeSeriesPlotProps(
             field_index=i,
             color=kwargs.get("color"),
             linewidth=kwargs.get("linewidth", 2.0),
@@ -260,7 +266,7 @@ def plot_time_series(
             trend_degree=kwargs.get("trend_degree", 1),
         )
 
-        component = time_seriesPlotComponent(props=props)
+        component = TimeSeriesPlotComponent(props=props)
         if figure.fig is None:
             raise ValueError("Figure not initialized properly")
 
@@ -270,6 +276,66 @@ def plot_time_series(
     figure.load_data(time_series)
     figure.render()
     figure.tight_layout()
+    if save_as:
+        figure.save(save_as)
+
+    if show:
+        plt.show()
+
+    return figure
+
+
+def plot_accretion(
+    config: VisualizationConfig,
+    files: str | Sequence[str],
+    fields: Sequence[str] = ["j_spec", "Sigma"],
+    save_as: Optional[str] = None,
+    show: bool = True,
+    **kwargs,
+) -> Figure:
+    """Create accretion analysis visualization.
+
+    Args:
+        config: Visualization configuration
+        files: File path or sequence of file paths to visualize
+        fields: Sequence of field names to visualize
+        save_as: Optional file path to save the visualization
+        show: Whether to display the visualization
+        **kwargs: Additional visualization options
+    """
+    if isinstance(files, str):
+        files = [files]
+
+    # Prepare data
+    sim_data = load_data(files[0])
+    if config.accretion.analysis_type == "angular_momentum":
+        fields = ["j_spec", "Sigma"]
+    elif config.accretion.analysis_type == "quiver":
+        pn = kwargs.get("projections", (1, 2))
+        fields = [fields[0], f"v{pn[0]}", f"v{pn[1]}"]
+    elif config.accretion.analysis_type == "streamlines":
+        pn = kwargs.get("projections", (1, 2))
+        fields = [fields[0], f"v{pn[0]}", f"v{pn[1]}"]
+    elif config.accretion.analysis_type == "mass_flux":
+        fields = ["rho", "v1", "v2", "v3"]
+    else:
+        raise NotImplementedError("Other analyses types aren't ready.")
+    plot_data = create_plot_data(sim_data, fields, config)
+    figure = prepare_figure(config, len(files))
+
+    props = accretion_props_from_args(config.accretion)
+    component = AccretionAnalysisComponent(props)
+
+    if figure.fig is None:
+        raise ValueError("Figure not initialized properly")
+
+    component.initialize(figure.fig, figure.axes["main"])
+    figure.add_component(component)
+
+    # Render
+    figure.load_data(plot_data)
+    figure.render()
+
     if save_as:
         figure.save(save_as)
 
@@ -308,6 +374,10 @@ def animate(
         figure = plot_multidim(config, files[0], fields, None, False, **kwargs)
     elif plot_type == "histogram":
         figure = plot_histogram(config, files[0], fields, None, False, **kwargs)
+    elif plot_type == "accretion":
+        figure = plot_accretion(
+            config, files[0], save_as=None, show=False, **kwargs
+        )
     elif plot_type == "time_series":
         # time_series doesn't make sense to animate
         raise ValueError("time_series plots cannot be animated")

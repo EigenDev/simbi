@@ -111,10 +111,12 @@ class SimData:
         if key in self._pipeline:
             self._computing.add(key)
             try:
-                field_dict = FieldDict(self)
-                result = self._pipeline[key](field_dict)
+                level_dict = LevelDict(self, 0)
+                result = self._pipeline[key](level_dict)
                 self._computed_cache[key] = result
                 return result
+            except Exception as e:
+                raise e
             finally:
                 self._computing.discard(key)
 
@@ -144,8 +146,8 @@ class SimData:
         if key in self._pipeline:
             self._computing.add(key)
             try:
-                field_dict = FieldDict(self, level)
-                result = self._pipeline[key](field_dict)
+                level_dict = LevelDict(self, level)
+                result = self._pipeline[key](level_dict)
                 self._level_caches[level - 1][key] = result
                 return result
             finally:
@@ -172,3 +174,11 @@ class FieldDict(dict[str, Array]):
             if default is not None:
                 return default
             raise e
+
+
+class LevelDict(FieldDict):
+    """Dict-like wrapper for accessing fields at a specific refinement level"""
+
+    def __init__(self, lazy_fields: SimData, level: int):
+        super().__init__(lazy_fields, level)
+        self.mesh = lazy_fields.level_mesh(level)

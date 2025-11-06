@@ -210,7 +210,7 @@ class SimbiBaseConfig(CLIConfigurableModel):
         True, description="Output data from all refinement levels"
     )
 
-    @field_validator("fmr_ratios")
+    @field_validator("fmr_ratios", mode="after")
     def validate_ratios(cls, v: list[int]) -> list[np.uint64]:
         """Validate refinement ratios are positive integers within uint64 range."""
         try:
@@ -303,12 +303,6 @@ class SimbiBaseConfig(CLIConfigurableModel):
     @property
     def gravity_source_expressions(self) -> ExpressionDict:
         """Gravity source term expressions"""
-        return {}
-
-    @computed_field
-    @property
-    def local_sound_speed_expressions(self) -> ExpressionDict:
-        """Local sound speed expressions"""
         return {}
 
     # Body physics
@@ -723,10 +717,12 @@ class SimbiBaseConfig(CLIConfigurableModel):
         checkpoint_data = {
             "resolution": tuple(s - 2 * r for s in metadata.resolution[::-1]),
             "start_time": float(metadata.time),
-            "end_time": float(metadata.end_time),
+            "end_time": max(float(metadata.end_time), default_config.end_time),
             "adiabatic_index": float(metadata.adiabatic_index),
             "cfl_number": float(metadata.cfl_number),
-            # "data_directory": Path(metadata["data_directory"]),
+            "data_directory": Path(
+                default_config.data_directory
+            ),  # Path(metadata.data_directory),
             "solver": Solver(metadata.solver),
             "boundary_conditions": (
                 [BoundaryCondition(b) for b in metadata.boundary_conditions]
