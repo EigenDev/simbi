@@ -16,7 +16,6 @@
 #include <cstdint>   // for std::uint64_t
 #include <memory>    // for std::unique_ptr
 #include <string>    // for std::string
-#include <vector>    // for std::vector
 
 namespace simbi::ecs {
     /**
