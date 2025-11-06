@@ -4,9 +4,9 @@
 #include "compat.hpp"
 #include "compute/cfd.hpp"
 #include "containers/state_ops.hpp"
+#include "containers/vector.hpp"
 #include "ecs/components.hpp"
 #include "io/exceptions.hpp"
-#include "mesh/fmr/builder.hpp"
 #include "mesh/fmr/flux_correction.hpp"
 #include "mesh/fmr/hierarchy.hpp"
 #include "mesh/fmr/prolongation.hpp"
@@ -378,6 +378,7 @@ namespace simbi::ecs {
             if (sim.num_levels() == 1) {
                 return;
             }
+
             auto& hierarchy = sim.hierarchy();
             for (std::uint64_t lvl = hierarchy.num_levels - 1; lvl > 0; --lvl) {
                 auto& coarser_hydro = sim.hydro(lvl - 1);
@@ -395,7 +396,7 @@ namespace simbi::ecs {
             auto map   = mesh::fmr::create_level_mapping(sim.hierarchy(), lvl);
             auto& fine = sim.hydro(lvl);
             auto& coarse = sim.hydro(lvl - 1);
-            mesh::fmr::restrict_conservative(fine.cons, coarse.cons, map);
+            restrict_conservative(fine.cons, coarse.cons, map);
         }
     };
 
