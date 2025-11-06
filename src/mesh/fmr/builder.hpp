@@ -6,8 +6,6 @@
 #include "domain/algebra.hpp"      // for domain_algebra
 #include "domain/domain.hpp"       // for domain_t, physical_region_t
 #include "hierarchy.hpp"           // for mesh_hierarchy_t
-#include "level_mapping.hpp"       // for level_mapping_t
-#include <iostream>                // for std::cout
 
 #include <cstdint>     // for std::uint64_t
 #include <stdexcept>   // for std::runtime_error
@@ -114,8 +112,6 @@ namespace simbi::mesh::fmr {
             // get parent level's resolution
             iarray<Dims> parent_resolution;
             if (lvl == 1) {
-                // std::cout << "base res: " << config.base_resolution
-                //           << std::endl;
                 parent_resolution = config.base_resolution;
             }
             else {
@@ -159,21 +155,6 @@ namespace simbi::mesh::fmr {
                 refined_domain.start[d] += config.halo_radius;
                 refined_domain.fin[d] += config.halo_radius;
             }
-
-            // // diag output (after everything is set up)
-            // std::cout << "Level " << lvl << " domains:\n";
-            // std::cout << "  Active: " << refined_domain << "\n";
-            // std::cout << "  Full: "
-            //           << domain_algebra::expand(
-            //                  refined_domain,
-            //                  ones<Dims, std::int64_t>() *
-            //                      static_cast<std::int64_t>(config.halo_radius)
-            //              )
-            //           << "\n";
-            // for (std::uint64_t dir = 0; dir < Dims; ++dir) {
-            //     std::cout << "  Face[" << dir << "]: " << face_domains[dir]
-            //               << "\n";
-            // }
 
             // update parent bounds for next level
             parent_phys_min = config.refine_regions[lvl - 1].min;
