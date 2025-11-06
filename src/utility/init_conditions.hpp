@@ -105,6 +105,7 @@ namespace simbi {
         std::string regime;
         std::string reconstruct;
         std::string timestepping;
+        std::string checkpoint_file{""};
 
         std::vector<std::string> boundary_conditions;
 
@@ -183,7 +184,11 @@ namespace simbi {
                 gravity_source_expressions
             );
             visitor.visit_immersed_bodies(immersed_bodies);
-            visitor.visit_output_settings(data_directory, checkpoint_index);
+            visitor.visit_output_settings(
+                data_directory,
+                checkpoint_index,
+                checkpoint_file
+            );
             visitor.visit_computed_properties(
                 dimensionality,
                 is_mhd,

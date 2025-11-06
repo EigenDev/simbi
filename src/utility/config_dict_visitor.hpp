@@ -77,7 +77,7 @@ namespace simbi {
         {
         }
 
-        // Time-related fields
+        // time-related fields
         void visit_time_parameters(
             real& time,
             real& tend,
@@ -345,11 +345,15 @@ namespace simbi {
 
         void visit_output_settings(
             std::string& data_directory,
-            std::uint64_t& checkpoint_index
+            std::uint64_t& checkpoint_index,
+            std::string& checkpoint_file
         ) override
         {
             data_directory   = dict.at("data_directory").get<std::string>();
             checkpoint_index = dict.at("checkpoint_index").get<std::uint64_t>();
+            if (dict.contains("checkpoint_file")) {
+                checkpoint_file = dict.at("checkpoint_file").get<std::string>();
+            }
         }
 
         void visit_computed_properties(
@@ -610,11 +614,13 @@ namespace simbi {
 
         void visit_output_settings(
             std::string& data_directory,
-            std::uint64_t& checkpoint_index
+            std::uint64_t& checkpoint_index,
+            std::string& checkpoint_file
         ) override
         {
             data_directory   = "output";
             checkpoint_index = 0;
+            checkpoint_file  = "";
         }
 
         void visit_computed_properties(
@@ -827,7 +833,8 @@ namespace simbi {
 
         void visit_output_settings(
             std::string& data_directory,
-            std::uint64_t&
+            std::uint64_t&,
+            std::string&
         ) override
         {
             if (data_directory.empty()) {

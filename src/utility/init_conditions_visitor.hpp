@@ -150,7 +150,8 @@ namespace simbi {
         // Output settings
         virtual void visit_output_settings(
             std::string& data_directory,
-            std::uint64_t& checkpoint_index
+            std::uint64_t& checkpoint_index,
+            std::string& checkpoint_file
         ) = 0;
 
         // Other computed properties
