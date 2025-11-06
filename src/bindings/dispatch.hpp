@@ -1,9 +1,11 @@
+
 #ifndef HYDRO_DISPATCH_HPP
 #define HYDRO_DISPATCH_HPP
 
 #include "compat.hpp"
 #include "containers/vector.hpp"
 #include "ecs/factory.hpp"
+#include "io/loader.hpp"
 #include "physics/eos/ideal.hpp"
 #include "physics/eos/isothermal.hpp"
 #include "state/cfd_ops.hpp"
@@ -11,12 +13,16 @@
 #include "utility/enums.hpp"
 #include "utility/init_conditions.hpp"
 
+#include <cstddef>
 #include <cstdint>
 #include <functional>
+#include <pybind11/pybind11.h>
+#include <pybind11/pytypes.h>
 #include <stdexcept>
 #include <string>
 #include <type_traits>
 
+namespace py = pybind11;
 namespace simbi::dispatch {
 
     //==============================================================================
@@ -96,7 +102,6 @@ namespace simbi::dispatch {
 
     namespace detail {
 
-        // create specific state and call visitor with it
         template <
             Regime R,
             std::uint64_t D,
@@ -107,37 +112,40 @@ namespace simbi::dispatch {
             typename Visitor>
         auto call_visitor_with_state(
             Visitor&& visitor,
-            void* cons_data,
-            void* prim_data,
-            vector_t<void*, 3> bfield_data,
+            py::iterator prim_gen,
+            vector_t<py::iterator, 3> bfield_gens,
             std::function<real(real)> const& scale_factor,
             std::function<real(real)> const& scale_factor_derivative,
             const initial_conditions_t& init
         ) -> std::enable_if_t<valid_combination<R, D, G, S, Rec>, void>
         {
             const auto ops = cfd::cfd_operations_t<R, D, S, Rec, EoS>{};
-            // auto base_mesh = mesh::mesh_config_t<D, G>::from_init_conditions(
-            //     init,
-            //     scale_factor,
-            //     scale_factor_derivative
-            // );
 
-            // auto state = state::hydro_state_t<R, D, EoS>::from_init(
-            //     cons_data,
-            //     prim_data,
-            //     bfield_data,
-            //     base_mesh,
-            //     init
-            // );
-
-            auto sim = ecs::create_simulation<R, D, G, EoS>(
-                init,
-                cons_data,
-                prim_data,
-                bfield_data,
-                scale_factor,
-                scale_factor_derivative
-            );
+            auto sim = [&]() {
+                if (!init.checkpoint_file.empty()) {
+                    auto x = io::load_checkpoint<R, D, G, EoS>(
+                        init.checkpoint_file,
+                        init,
+                        scale_factor,
+                        scale_factor_derivative
+                    );
+                    if (x.is_ok()) {
+                        return x.value();
+                    }
+                    else {
+                        throw std::runtime_error(
+                            "Issue loading from checkpoint: " + x.error()
+                        );
+                    }
+                }
+                return ecs::create_simulation<R, D, G, EoS>(
+                    init,
+                    prim_gen,
+                    bfield_gens,
+                    scale_factor,
+                    scale_factor_derivative
+                );
+            }();
 
             // call visitor
             visitor(sim, ops);
@@ -154,9 +162,8 @@ namespace simbi::dispatch {
             typename Visitor>
         auto call_visitor_with_state(
             Visitor&&,
-            void*,
-            void*,
-            vector_t<void*, 3>,
+            py::iterator,
+            vector_t<py::iterator, 3>,
             std::function<real(real)> const&,
             std::function<real(real)> const&,
             const initial_conditions_t&
@@ -177,9 +184,8 @@ namespace simbi::dispatch {
             typename Visitor>
         void dispatch_eos(
             Visitor&& visitor,
-            void* cons_data,
-            void* prim_data,
-            vector_t<void*, 3> bfield_data,
+            py::iterator prim_gen,
+            vector_t<py::iterator, 3> bfield_gen,
             std::function<real(real)> const& scale_factor,
             std::function<real(real)> const& scale_factor_derivative,
             const initial_conditions_t& init
@@ -195,9 +201,8 @@ namespace simbi::dispatch {
                         Rec,
                         eos::ideal_gas_eos_t<R>>(
                         std::forward<Visitor>(visitor),
-                        cons_data,
-                        prim_data,
-                        bfield_data,
+                        prim_gen,
+                        bfield_gen,
                         scale_factor,
                         scale_factor_derivative,
                         init
@@ -212,9 +217,8 @@ namespace simbi::dispatch {
                         Rec,
                         eos::isothermal_gas_eos_t>(
                         std::forward<Visitor>(visitor),
-                        cons_data,
-                        prim_data,
-                        bfield_data,
+                        prim_gen,
+                        bfield_gen,
                         scale_factor,
                         scale_factor_derivative,
                         init
@@ -232,9 +236,8 @@ namespace simbi::dispatch {
                     Rec,
                     eos::ideal_gas_eos_t<R>>(
                     std::forward<Visitor>(visitor),
-                    cons_data,
-                    prim_data,
-                    bfield_data,
+                    prim_gen,
+                    bfield_gen,
                     scale_factor,
                     scale_factor_derivative,
                     init
@@ -252,9 +255,8 @@ namespace simbi::dispatch {
         void dispatch_reconstruction(
             Reconstruction rec,
             Visitor&& visitor,
-            void* cons_data,
-            void* prim_data,
-            vector_t<void*, 3> bfield_data,
+            py::iterator prim_gen,
+            vector_t<py::iterator, 3> bfield_gen,
             std::function<real(real)> const& scale_factor,
             std::function<real(real)> const& scale_factor_derivative,
             const initial_conditions_t& init
@@ -264,9 +266,8 @@ namespace simbi::dispatch {
                 case Reconstruction::PCM:
                     dispatch_eos<R, D, G, S, Reconstruction::PCM>(
                         std::forward<Visitor>(visitor),
-                        cons_data,
-                        prim_data,
-                        bfield_data,
+                        prim_gen,
+                        bfield_gen,
                         scale_factor,
                         scale_factor_derivative,
                         init
@@ -275,9 +276,8 @@ namespace simbi::dispatch {
                 case Reconstruction::PLM:
                     dispatch_eos<R, D, G, S, Reconstruction::PLM>(
                         std::forward<Visitor>(visitor),
-                        cons_data,
-                        prim_data,
-                        bfield_data,
+                        prim_gen,
+                        bfield_gen,
                         scale_factor,
                         scale_factor_derivative,
                         init
@@ -297,9 +297,8 @@ namespace simbi::dispatch {
             Solver solver,
             Reconstruction rec,
             Visitor&& visitor,
-            void* cons_data,
-            void* prim_data,
-            vector_t<void*, 3> bfield_data,
+            py::iterator prim_gen,
+            vector_t<py::iterator, 3> bfield_gen,
             std::function<real(real)> const& scale_factor,
             std::function<real(real)> const& scale_factor_derivative,
             const initial_conditions_t& init
@@ -310,9 +309,8 @@ namespace simbi::dispatch {
                     dispatch_reconstruction<R, D, G, Solver::HLLE>(
                         rec,
                         std::forward<Visitor>(visitor),
-                        cons_data,
-                        prim_data,
-                        bfield_data,
+                        prim_gen,
+                        bfield_gen,
                         scale_factor,
                         scale_factor_derivative,
                         init
@@ -322,9 +320,8 @@ namespace simbi::dispatch {
                     dispatch_reconstruction<R, D, G, Solver::HLLC>(
                         rec,
                         std::forward<Visitor>(visitor),
-                        cons_data,
-                        prim_data,
-                        bfield_data,
+                        prim_gen,
+                        bfield_gen,
                         scale_factor,
                         scale_factor_derivative,
                         init
@@ -334,9 +331,8 @@ namespace simbi::dispatch {
                     dispatch_reconstruction<R, D, G, Solver::HLLD>(
                         rec,
                         std::forward<Visitor>(visitor),
-                        cons_data,
-                        prim_data,
-                        bfield_data,
+                        prim_gen,
+                        bfield_gen,
                         scale_factor,
                         scale_factor_derivative,
                         init
@@ -357,9 +353,8 @@ namespace simbi::dispatch {
             Solver solver,
             Reconstruction rec,
             Visitor&& visitor,
-            void* cons_data,
-            void* prim_data,
-            vector_t<void*, 3> bfield_data,
+            py::iterator prim_gen,
+            vector_t<py::iterator, 3> bfield_gen,
             std::function<real(real)> const& scale_factor,
             std::function<real(real)> const& scale_factor_derivative,
             const initial_conditions_t& init
@@ -371,9 +366,8 @@ namespace simbi::dispatch {
                         solver,
                         rec,
                         std::forward<Visitor>(visitor),
-                        cons_data,
-                        prim_data,
-                        bfield_data,
+                        prim_gen,
+                        bfield_gen,
                         scale_factor,
                         scale_factor_derivative,
                         init
@@ -384,9 +378,8 @@ namespace simbi::dispatch {
                         solver,
                         rec,
                         std::forward<Visitor>(visitor),
-                        cons_data,
-                        prim_data,
-                        bfield_data,
+                        prim_gen,
+                        bfield_gen,
                         scale_factor,
                         scale_factor_derivative,
                         init
@@ -397,9 +390,8 @@ namespace simbi::dispatch {
                         solver,
                         rec,
                         std::forward<Visitor>(visitor),
-                        cons_data,
-                        prim_data,
-                        bfield_data,
+                        prim_gen,
+                        bfield_gen,
                         scale_factor,
                         scale_factor_derivative,
                         init
@@ -410,9 +402,8 @@ namespace simbi::dispatch {
                         solver,
                         rec,
                         std::forward<Visitor>(visitor),
-                        cons_data,
-                        prim_data,
-                        bfield_data,
+                        prim_gen,
+                        bfield_gen,
                         scale_factor,
                         scale_factor_derivative,
                         init
@@ -423,9 +414,8 @@ namespace simbi::dispatch {
                         solver,
                         rec,
                         std::forward<Visitor>(visitor),
-                        cons_data,
-                        prim_data,
-                        bfield_data,
+                        prim_gen,
+                        bfield_gen,
                         scale_factor,
                         scale_factor_derivative,
                         init
@@ -447,9 +437,8 @@ namespace simbi::dispatch {
             Solver solver,
             Reconstruction rec,
             Visitor&& visitor,
-            void* cons_data,
-            void* prim_data,
-            vector_t<void*, 3> bfield_data,
+            py::iterator prim_gen,
+            vector_t<py::iterator, 3> bfield_gen,
             std::function<real(real)> const& scale_factor,
             std::function<real(real)> const& scale_factor_derivative,
             const initial_conditions_t& init
@@ -462,9 +451,8 @@ namespace simbi::dispatch {
                         solver,
                         rec,
                         std::forward<Visitor>(visitor),
-                        cons_data,
-                        prim_data,
-                        bfield_data,
+                        prim_gen,
+                        bfield_gen,
                         scale_factor,
                         scale_factor_derivative,
                         init
@@ -476,9 +464,8 @@ namespace simbi::dispatch {
                         solver,
                         rec,
                         std::forward<Visitor>(visitor),
-                        cons_data,
-                        prim_data,
-                        bfield_data,
+                        prim_gen,
+                        bfield_gen,
                         scale_factor,
                         scale_factor_derivative,
                         init
@@ -490,9 +477,8 @@ namespace simbi::dispatch {
                         solver,
                         rec,
                         std::forward<Visitor>(visitor),
-                        cons_data,
-                        prim_data,
-                        bfield_data,
+                        prim_gen,
+                        bfield_gen,
                         scale_factor,
                         scale_factor_derivative,
                         init
@@ -514,9 +500,8 @@ namespace simbi::dispatch {
             Solver solver,
             Reconstruction rec,
             Visitor&& visitor,
-            void* cons_data,
-            void* prim_data,
-            vector_t<void*, 3> bfield_data,
+            py::iterator prim_gen,
+            vector_t<py::iterator, 3> bfield_gen,
             std::function<real(real)> const& scale_factor,
             std::function<real(real)> const& scale_factor_derivative,
             const initial_conditions_t& init
@@ -530,9 +515,8 @@ namespace simbi::dispatch {
                         solver,
                         rec,
                         std::forward<Visitor>(visitor),
-                        cons_data,
-                        prim_data,
-                        bfield_data,
+                        prim_gen,
+                        bfield_gen,
                         scale_factor,
                         scale_factor_derivative,
                         init
@@ -545,9 +529,8 @@ namespace simbi::dispatch {
                         solver,
                         rec,
                         std::forward<Visitor>(visitor),
-                        cons_data,
-                        prim_data,
-                        bfield_data,
+                        prim_gen,
+                        bfield_gen,
                         scale_factor,
                         scale_factor_derivative,
                         init
@@ -560,9 +543,8 @@ namespace simbi::dispatch {
                         solver,
                         rec,
                         std::forward<Visitor>(visitor),
-                        cons_data,
-                        prim_data,
-                        bfield_data,
+                        prim_gen,
+                        bfield_gen,
                         scale_factor,
                         scale_factor_derivative,
                         init
@@ -590,9 +572,8 @@ namespace simbi::dispatch {
      */
     template <typename Visitor>
     void with_hydro_state(
-        void* cons_data,
-        void* prim_data,
-        vector_t<void*, 3> bfield_data,
+        py::iterator prim_gen,
+        vector_t<py::iterator, 3> bfield_gen,
         std::function<real(real)> const& scale_factor,
         std::function<real(real)> const& scale_factor_derivative,
         const initial_conditions_t& init,
@@ -619,9 +600,8 @@ namespace simbi::dispatch {
                 solver,
                 reconstruction,
                 std::forward<Visitor>(visitor),
-                cons_data,
-                prim_data,
-                bfield_data,
+                prim_gen,
+                bfield_gen,
                 scale_factor,
                 scale_factor_derivative,
                 init

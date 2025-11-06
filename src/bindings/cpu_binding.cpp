@@ -15,8 +15,7 @@ PYBIND11_MODULE(cpu_ext, m)
     m.def(
         "run_simulation",
         &simbi::driver::run_simulation,
-        py::arg("cons_array"),
-        py::arg("prim_array"),
+        py::arg("prim_gen"),
         py::arg("staggered_bfields"),
         py::arg("sim_info"),
         py::arg("a"),

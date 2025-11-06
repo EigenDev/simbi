@@ -13,9 +13,17 @@ namespace py = pybind11;
 
 namespace simbi::driver {
     // main driver function that takes NumPy array directly
+    // void run_simulation(
+    //     py::array_t<real, py::array::c_style> cons_array,
+    //     py::array_t<real, py::array::c_style> prim_array,
+    //     py::list staggered_bfields,
+    //     py::dict sim_info,
+    //     py::function a_func,
+    //     py::function adot_func
+    // );
+
     void run_simulation(
-        py::array_t<real, py::array::c_style> cons_array,
-        py::array_t<real, py::array::c_style> prim_array,
+        py::iterator prim_gen,
         py::list staggered_bfields,
         py::dict sim_info,
         py::function a_func,

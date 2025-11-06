@@ -17,41 +17,33 @@ namespace py = pybind11;
 namespace simbi::hydrostate {
     // convenience dispatcher based on runtime parameters
     void dispatch_simulation(
-        py::array_t<real, py::array::c_style> cons_array,
-        py::array_t<real, py::array::c_style> prim_array,
-        py::list staggered_bfields,
+        py::iterator prim_gen,
+        py::list bstagg,
         initial_conditions_t& init,
         std::function<real(real)> const& scale_factor,
         std::function<real(real)> const& scale_factor_derivative
     )
     {
         using namespace evolution;
-        // get buffer info for conserved and primitive arrays
-        py::buffer_info cons_buffer = cons_array.request();
-        py::buffer_info prim_buffer = prim_array.request();
-
         const auto dims = init.dimensionality;
 
-        // prepare bfield pointers
-        vector_t<void*, 3> bfield_ptrs = {};
+        // prepare bfield iters
+        vector_t<py::iterator, 3> bfield_gens = {};
         if (init.is_mhd) {
-            for (std::uint64_t dir = 0; dir < dims; ++dir) {
-                if (dir < staggered_bfields.size()) {
-                    auto bfield_array =
-                        staggered_bfields[dir].cast<py::array_t<real>>();
-                    py::buffer_info bfield_buffer = bfield_array.request();
-                    bfield_ptrs[dir]              = bfield_buffer.ptr;
-                }
-                else {
-                    bfield_ptrs[dir] = nullptr;
+            for (std::uint64_t idx = 0; idx < dims; ++idx) {
+                if (idx < bstagg.size()) {
+                    // since we are doing array index, we need the logical
+                    // offset index. i.e., idx=0 -> x-dir -> dir=2
+                    auto bn_gen      = bstagg[idx].cast<py::iterator>();
+                    auto dir         = dims - idx - 1;
+                    bfield_gens[dir] = bn_gen;
                 }
             }
         }
 
         dispatch::with_hydro_state(
-            cons_buffer.ptr,
-            prim_buffer.ptr,
-            bfield_ptrs,
+            prim_gen,
+            bfield_gens,
             scale_factor,
             scale_factor_derivative,
             init,

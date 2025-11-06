@@ -26,6 +26,14 @@ namespace simbi::hydrostate {
         std::function<real(real)> const& scale_factor,
         std::function<real(real)> const& scale_factor_derivative
     );
+
+    void dispatch_simulation(
+        py::iterator prim_gen,
+        py::list staggered_bfields,
+        initial_conditions_t& init,
+        std::function<real(real)> const& scale_factor,
+        std::function<real(real)> const& scale_factor_derivative
+    );
 }   // namespace simbi::hydrostate
 
 #endif
