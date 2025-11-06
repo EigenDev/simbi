@@ -131,7 +131,9 @@ namespace simbi::hydro {
         using eos_t = typename primitive_t::eos_t;
         if constexpr (std::same_as<eos_t, isothermal_gas_eos_t>) {
             if constexpr (!is_mhd_primitive_c<primitive_t>) {
-                return 0.0;
+                // for convenience, I store the square of the sound speed here
+                // when doing isothermal runs to not waste the memory space
+                return prim.pre / prim.rho;
             }
             else {
                 return 0.5 * vecops::dot(prim.mag, prim.mag);
