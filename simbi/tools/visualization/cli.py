@@ -198,7 +198,13 @@ def setup_parser(parser: argparse.ArgumentParser) -> None:
     )
     parser.add_argument(
         "--analysis-type",
-        choices=["angular_momentum", "mass_flux", "quiver", "streamlines"],
+        choices=[
+            "angular_momentum",
+            "radial_profile",
+            "quiver",
+            "streamlines",
+            "mass_flux",
+        ],
         default="angular_momentum",
         help="Type of analysis for accretion plots",
     )

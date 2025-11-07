@@ -159,7 +159,7 @@ def create_slicer_from_config(slice_config: dict[str, Any]) -> Callable:
 
     # Handle the "orthogonal_ax" + "orthogonal_pos" pattern (1D slice from ND)
     elif "orthogonal_ax" in slice_config and "orthogonal_pos" in slice_config:
-        axis_names = set(slice_config["orthogonal_ax"])
+        axis_names = slice_config["orthogonal_ax"]
         positions = slice_config["orthogonal_pos"]
         return slice_to_1d(axis_names, positions)
 
@@ -207,6 +207,27 @@ def _create_orthogonal_slice_config(
     if not coords:
         return None
 
+    # Coords in in "xj", "xk" format, need to map to "x1", "x2", "x3"
+    # Assume coords keys are like "xj", "xk" where j,k are the other axes
+    # We need to map them to the correct axis names
+    mapped_coords = {}
+    for key, value in coords.items():
+        if key == "xj":
+            if slice_along == "x1":
+                mapped_coords["x2"] = value
+            elif slice_along == "x2":
+                mapped_coords["x1"] = value
+            elif slice_along == "x3":
+                mapped_coords["x1"] = value
+        elif key == "xk":
+            if slice_along == "x1":
+                mapped_coords["x3"] = value
+            elif slice_along == "x2":
+                mapped_coords["x3"] = value
+            elif slice_along == "x3":
+                mapped_coords["x2"] = value
+    coords = mapped_coords
+
     # Determine which axes to slice (orthogonal to slice_along)
     if ndim == 2:
         all_axes_2d = {"x1", "x2"}
@@ -215,14 +236,26 @@ def _create_orthogonal_slice_config(
         all_axes_3d = {"x1", "x2", "x3"}
         orthogonal_axes = all_axes_3d - {slice_along}
 
-    # Ensure we have positions for all orthogonal axes
     orthogonal_positions = []
     coord_vals = list(coords.values())
     for i, axis in enumerate(sorted(orthogonal_axes)):  # Sort for consistency)
         orthogonal_positions.append(coord_vals[i])
 
+    # Ensure we have positions for all orthogonal axes
+    orthogonal_positions = []
+
+    # Sort the axes for a consistent order
+    sorted_axes = sorted(orthogonal_axes)
+
+    # Explicitly look up the position for each axis in order
+    for axis in sorted_axes:
+        if axis not in coords:
+            # Handle error: missing position for a required axis
+            return None
+        orthogonal_positions.append(coords[axis])
+
     return {
-        "orthogonal_ax": sorted(orthogonal_axes),
+        "orthogonal_ax": sorted_axes,
         "orthogonal_pos": orthogonal_positions,
     }
 

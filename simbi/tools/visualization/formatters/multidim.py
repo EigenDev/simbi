@@ -181,7 +181,7 @@ def format_multidim_plot_axes(
         time_scale=style.time_scale,
         time_units=style.time_units,
     )
-    # apply_multidim_limits(ax, data, field_index, style.xlims, style.ylims)
+    apply_multidim_limits(ax, data, field_index, style.xlims, style.ylims)
     if is_polar:
         format_polar_axes(ax, data, field_index, style.xlims)
     else:

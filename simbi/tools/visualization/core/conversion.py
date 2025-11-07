@@ -90,7 +90,7 @@ def accretion_props_from_args(
             n_bins=config.n_bins,
         ),
         angular_config=None,
-        level=config.level,
+        # level=config.level,
         normalize=config.normalize,
         time_average=config.time_average,
     )

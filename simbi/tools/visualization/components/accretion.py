@@ -1,4 +1,4 @@
-"""Component for analyzing accretion disk properties."""
+"""Component for analyzing accretion properties."""
 
 from dataclasses import dataclass
 from enum import Enum, auto
@@ -10,8 +10,10 @@ from matplotlib.figure import Figure
 from matplotlib.lines import Line2D
 from scipy.stats import binned_statistic
 
+from simbi.functional.helpers import find_nearest
+
 from ..core.config import StyleConfig
-from ..core.types import PlotData
+from ..core.types import FieldData, PlotData
 from ..formatters.line import format_line_plot_axes
 from ..formatters.multidim import format_multidim_plot_axes
 from .interface import Component, ComponentProps
@@ -22,7 +24,7 @@ class AnalysisType(Enum):
 
     ANGULAR_MOMENTUM = auto()  # Specific angular momentum profile
     MASS_FLUX = auto()  # Mass flux through shells
-    DENSITY_PROFILE = auto()  # Density vs radius/angle
+    RADIAL_PROFILE = auto()  # Field vs radius
     QUIVER = auto()  # Density with velocity quiver overlay
     STREAMLINES = auto()  # Density with velocity streamline overlay
 
@@ -50,9 +52,11 @@ class AccretionAnalysisProps(ComponentProps):
     analysis_type: AnalysisType
     radial_config: Optional[RadialConfig] = None
     angular_config: Optional[AngularConfig] = None
-    level: int = 0  # Which refinement level to analyze
     time_average: bool = False  # Whether to average over time series
     normalize: bool = False  # Whether to normalize quantities
+
+    # level: int = 0  <- This property is now obsolete and can be removed
+    # The new methods are intrinsically level-aware.
 
 
 class AccretionAnalysisComponent(Component[AccretionAnalysisProps]):
@@ -71,16 +75,11 @@ class AccretionAnalysisComponent(Component[AccretionAnalysisProps]):
         if props.analysis_type in (
             AnalysisType.ANGULAR_MOMENTUM,
             AnalysisType.MASS_FLUX,
+            AnalysisType.RADIAL_PROFILE,
         ):
             if props.radial_config is None:
                 raise ValueError(
                     f"Radial configuration required for {props.analysis_type}"
-                )
-
-        if props.analysis_type == AnalysisType.DENSITY_PROFILE:
-            if props.angular_config is None:
-                raise ValueError(
-                    "Angular configuration required for density profile"
                 )
 
     def initialize(self, fig: Figure, ax: Axes) -> None:
@@ -111,11 +110,148 @@ class AccretionAnalysisComponent(Component[AccretionAnalysisProps]):
             case AnalysisType.MASS_FLUX:
                 self._plot_mass_flux_profile(data, style)
             case AnalysisType.QUIVER:
+                # Note: Quiver/Streamlines already use the heatmap's
+                # "composed" data, so they are *implicitly* level-aware,
+                # but they use the *downsampled* leaf cells.
+                # A true high-res quiver would be a different challenge.
                 self._plot_density_with_quiver(data, style)
             case AnalysisType.STREAMLINES:
                 self._plot_density_with_streamlines(data, style)
-            case AnalysisType.DENSITY_PROFILE:
-                self._plot_density_profile(data, style)
+            case AnalysisType.RADIAL_PROFILE:
+                self._plot_radial_profile(data, style)  # Added new plot
+
+    def _get_stitched_leaf_data(
+        self, data: PlotData, field_names: list[str]
+    ) -> dict[str, np.ndarray]:
+        """
+        Stitch all FMR levels into high-resolution flat arrays of leaf cells.
+
+        This is the core of the level-aware analysis. It adapts the logic
+        from your _render_polygons to build analysis arrays instead of patches.
+        """
+
+        level_fields_map: dict[str, list[FieldData]] = {}
+        all_levels = set()
+        for name in field_names:
+            level_fields_map[name] = [
+                f for f in data.fields if f.name.startswith(name)
+            ]
+            if not level_fields_map[name]:
+                raise ValueError(f"No fields found for base name: {name}")
+
+            # Sort fields by level, e.g., _L0, _L1, ...
+            level_fields_map[name].sort(key=lambda f: f.name)
+            all_levels.update(range(len(level_fields_map[name])))
+
+        num_levels = len(all_levels)
+        if num_levels == 0:
+            raise ValueError("No fields found for any requested name")
+
+        is_3d = False
+        refined_regions = []
+        for i in range(1, num_levels):  # All levels except base
+            # Use the domain from the first field's L1, L2, etc.
+            field_L_i = level_fields_map[field_names[0]][i]
+            domain = field_L_i.domain
+
+            # Check for 2D or 3D
+            is_3d = len(domain) == 3
+
+            region = {
+                "xmin": domain[0][0],
+                "xmax": domain[0][-1],
+                "ymin": domain[1][0],
+                "ymax": domain[1][-1],
+            }
+            if is_3d:
+                region["zmin"] = domain[2][0]
+                region["zmax"] = domain[2][-1]
+            refined_regions.append(region)
+
+        # Prepare output lists
+        stitched_data: dict[str, list] = {
+            f"{name}_flat": [] for name in field_names
+        }
+        stitched_data["x_flat"] = []
+        stitched_data["y_flat"] = []
+        if is_3d:
+            stitched_data["z_flat"] = []
+
+        for level_idx in range(num_levels):
+            # Get the fields for *this* level for all requested names
+            current_level_fields = {
+                name: level_fields_map[name][level_idx] for name in field_names
+            }
+
+            # Get domain info from the first field
+            domain = current_level_fields[field_names[0]].domain
+            values_map = {
+                name: current_level_fields[name].values for name in field_names
+            }
+
+            x_verts = domain[0]
+            y_verts = domain[1]
+            z_verts = (
+                domain[2] if is_3d else np.array([0.0, 1.0])
+            )  # Dummy for 2D
+
+            x_centers = 0.5 * (x_verts[1:] + x_verts[:-1])
+            y_centers = 0.5 * (y_verts[1:] + y_verts[:-1])
+            z_centers = (
+                0.5 * (z_verts[1:] + z_verts[:-1]) if is_3d else np.array([0.0])
+            )
+
+            nx, ny, nz = len(x_centers), len(y_centers), len(z_centers)
+
+            # Iterate through all cells in this level
+            for k in range(nz):
+                zc = z_centers[k]
+                for j in range(ny):
+                    yc = y_centers[j]
+                    for i in range(nx):
+                        xc = x_centers[i]
+
+                        # Check if this cell is covered by a *finer* level
+                        is_covered = False
+                        for region in refined_regions[level_idx:]:
+                            # Check 2D coverage
+                            covered_2d = (
+                                region["xmin"] <= xc <= region["xmax"]
+                                and region["ymin"] <= yc <= region["ymax"]
+                            )
+                            if not is_3d:
+                                if covered_2d:
+                                    is_covered = True
+                                    break
+                            else:
+                                # Check 3D coverage
+                                covered_3d = (
+                                    covered_2d
+                                    and region["zmin"] <= zc <= region["zmax"]
+                                )
+                                if covered_3d:
+                                    is_covered = True
+                                    break
+
+                        if is_covered:
+                            continue
+
+                        # This is a leaf cell. Add its data.
+                        stitched_data["x_flat"].append(xc)
+                        stitched_data["y_flat"].append(yc)
+                        if is_3d:
+                            stitched_data["z_flat"].append(zc)
+
+                        for name in field_names:
+                            val = (
+                                values_map[name][k, j, i]
+                                if is_3d
+                                else values_map[name][j, i]
+                            )
+                            stitched_data[f"{name}_flat"].append(val)
+
+        # Convert all lists to numpy arrays and return
+        return {key: np.array(val) for key, val in stitched_data.items()}
 
     def _plot_angular_momentum(
         self, data: PlotData, style: StyleConfig
@@ -124,26 +260,29 @@ class AccretionAnalysisComponent(Component[AccretionAnalysisProps]):
         if self.ax is None or self.props.radial_config is None:
             return
 
-        ell = data.fields[0].values
-        sigma = data.fields[1].values
+        # Get stitched leaf cell data for all levels
+        # Assuming 2D data and field names "j_spec" and "Sigma"
+        # This will find "j_spec_L0", "j_spec_L1", etc.
+        try:
+            stitched_data = self._get_stitched_leaf_data(
+                data, ["j_spec", "Sigma"]
+            )
+        except ValueError as e:
+            print(f"Error stitching data: {e}")
+            return
 
-        x_verts_1d = data.fields[0].domain[-2]
-        y_verts_1d = data.fields[0].domain[-1]
+        x_flat = stitched_data["x_flat"]
+        y_flat = stitched_data["y_flat"]
+        ell_flat = stitched_data["j_spec_flat"]
+        sigma_flat = stitched_data["Sigma_flat"]
 
-        x_centers_1d = 0.5 * (x_verts_1d[1:] + x_verts_1d[:-1])
-        y_centers_1d = 0.5 * (y_verts_1d[1:] + y_verts_1d[:-1])
-        xv_2d, yv_2d = np.meshgrid(x_centers_1d, y_centers_1d, indexing="ij")
+        # Calculate r and Lz for *all leaf cells*
+        r_flat = np.sqrt(x_flat**2 + y_flat**2)
+        Lz_flat = ell_flat * sigma_flat  # (l_z * Sigma)
 
-        r_2d = np.sqrt(xv_2d**2 + yv_2d**2)  # shape (Nx, Ny)
-
-        Lz = ell * sigma  # (l_z * Sigma)
-
-        r_flat = r_2d.flat
-        Lz_flat = Lz.flat
-        sigma_flat = sigma.flat
-
+        # Bin the stitched data
         max_radius = np.max(r_flat)
-        num_bins = 100
+        num_bins = self.props.radial_config.n_bins
         bins = np.linspace(0, max_radius, num_bins + 1)
 
         Lz_sum_in_bin, bin_edges, _ = binned_statistic(
@@ -156,25 +295,143 @@ class AccretionAnalysisComponent(Component[AccretionAnalysisProps]):
         mean_ell_mass_weighted = Lz_sum_in_bin / (
             sigma_sum_in_bin + np.finfo(float).tiny
         )
-        q = 1
-        mu = q / (1 + q) ** 2
+
         G = 1.0
         M = 1.0
-        a = 1
-        jref = mu * np.sqrt(G * M / a) / M
+        a = 1.0
+        q = 1.0
+        mu = q / (1.0 + q) ** 2
         bin_centers = 0.5 * (bin_edges[1:] + bin_edges[:-1])
+        jref = (G * M * bin_centers) ** (0.5)
+        # jref = (G * mu * a) ** 0.5 / M
+
         good_bins = ~np.isnan(mean_ell_mass_weighted)
         self.ax.plot(
-            bin_centers[good_bins], mean_ell_mass_weighted[good_bins] / jref
+            bin_centers[good_bins], (mean_ell_mass_weighted / jref)[good_bins]
         )
-        self.ax.axvline(1, linestyle="dashed", color="k", alpha=0.5)
-        self.ax.axvline(10, linestyle="dashed", color="k", alpha=0.5)
-        format_line_plot_axes(
-            self.ax,
-            data,
-            0,
-            style,
+        self.ax.axvline(1.0, color="gray", linestyle="--", linewidth=0.5)
+        # self.ax.axvline(5.0, color="gray", linestyle="--", linewidth=0.5)
+        self.ax.axvline(0.1, color="gray", linestyle="--", linewidth=0.5)
+        format_line_plot_axes(self.ax, data, 0, style)
+
+    def _plot_mass_flux_profile(
+        self, data: PlotData, style: StyleConfig
+    ) -> None:
+        """Plot the mass flux profile M_dot(r) in spherical shells."""
+        if self.ax is None or self.props.radial_config is None:
+            return
+
+        # get stiched 3D leaf cell data for all levels
+        try:
+            stitched_data = self._get_stitched_leaf_data(
+                data, ["rho", "v1", "v2", "v3"]
+            )
+        except ValueError as e:
+            print(f"Error stitching data: {e}")
+            return
+
+        x_flat = stitched_data["x_flat"]
+        y_flat = stitched_data["y_flat"]
+        z_flat = stitched_data["x_flat"]
+        rho_flat = stitched_data["rho_flat"]
+        vx_flat = stitched_data["v1_flat"]
+        vy_flat = stitched_data["v2_flat"]
+        vz_flat = stitched_data["v3_flat"]
+
+        # Calculate r, v_r, and (rho * v_r) for *all leaf cells*
+        r_flat = np.sqrt(x_flat**2 + y_flat**2 + z_flat**2)
+        vr_flat = (vx_flat * x_flat + vy_flat * y_flat + vz_flat * z_flat) / (
+            r_flat + 1e-10
         )
+        flux_density_flat = rho_flat * vr_flat
+
+        # Bin the stitched data
+        max_radius = np.max(r_flat)
+        num_bins = self.props.radial_config.n_bins
+        bins = np.linspace(0, max_radius, num_bins + 1)
+
+        mean_flux_density, bin_edges, _ = binned_statistic(
+            r_flat, flux_density_flat, statistic="mean", bins=bins
+        )
+
+        # Calculate Mass Flux M_dot
+        bin_centers = 0.5 * (bin_edges[1:] + bin_edges[:-1])
+        shell_area = 4.0 * np.pi * bin_centers**2
+        mass_flux_profile = mean_flux_density * shell_area
+
+        # Plotting
+        good_bins = ~np.isnan(mass_flux_profile)
+        norm = 0.445
+        self.ax.plot(
+            bin_centers[good_bins], mass_flux_profile[good_bins] / norm
+        )
+
+        self.ax.set_xlabel("Radius (r/a)")
+        self.ax.set_ylabel("Mass Flux $\\dot{M}$ (normalized)")
+        self.ax.axhline(0, color="gray", linestyle="--", linewidth=0.5)
+        self.ax.axvline(1.0, color="gray", linestyle="--", linewidth=0.5)
+        # self.ax.axvline(5.0, color="gray", linestyle="--", linewidth=0.5)
+        # self.ax.axvline(10.0, color="gray", linestyle="--", linewidth=0.5)
+        format_line_plot_axes(self.ax, data, 0, style)
+
+    def _plot_radial_profile(self, data: PlotData, style: StyleConfig) -> None:
+        """Plot the spherically-averaged volume density profile."""
+        if self.ax is None or self.props.radial_config is None:
+            return
+
+        # get stiched 3D leaf cell data for all levels
+        try:
+            stitched_data = self._get_stitched_leaf_data(data, ["rho"])
+        except ValueError as e:
+            print(f"Error stitching data: {e}")
+            return
+
+        x_flat = stitched_data["x_flat"]
+        y_flat = stitched_data["y_flat"]
+        z_flat = stitched_data["x_flat"]
+        rho_flat = stitched_data["rho_flat"]
+
+        # calc r for *all leaf cells*
+        r_flat = np.sqrt(x_flat**2 + y_flat**2 + z_flat**2)
+
+        # bin the stitched data
+        max_radius = np.max(r_flat)
+        num_bins = self.props.radial_config.n_bins
+        bins = np.linspace(0, max_radius, num_bins + 1)
+
+        mean_density, bin_edges, _ = binned_statistic(
+            r_flat, rho_flat, statistic="mean", bins=bins
+        )
+
+        bin_centers = 0.5 * (bin_edges[1:] + bin_edges[:-1])
+        good_bins = ~np.isnan(mean_density)
+        self.ax.plot(bin_centers[good_bins], mean_density[good_bins])
+
+        self.ax.set_xlabel("Radius (r/a)")
+        self.ax.set_ylabel("Average Density $\\langle \\rho \\rangle$")
+        self.ax.set_title("Spherically-Averaged Density Profile")
+        self.ax.set_xscale("log")
+        self.ax.set_yscale("log")
+        self.ax.axvline(1.0, color="gray", linestyle="--", linewidth=0.5)
+        self.ax.axvline(5.0, color="gray", linestyle="--", linewidth=0.5)
+        # plot the r^(-3/2) reference line
+        ref_distance = 1.1
+        ref_max = 4.5
+        r_ref = bin_centers[good_bins]
+        ref_idx = find_nearest(r_ref, ref_distance)[0]
+        ren_idx = find_nearest(r_ref, ref_max)[0]
+        rho_ref = mean_density[good_bins][ref_idx] * (
+            r_ref / r_ref[ref_idx]
+        ) ** (-1.5)
+        self.ax.plot(
+            r_ref[ref_idx:ren_idx],
+            rho_ref[ref_idx:ren_idx] * (1.5),
+            linestyle="--",
+            color="red",
+            label=r"$r^{-3/2}$",
+        )
+
+        format_line_plot_axes(self.ax, data, 0, style)
 
     def _plot_density_with_quiver(
         self, data: PlotData, style: StyleConfig
@@ -183,19 +440,14 @@ class AccretionAnalysisComponent(Component[AccretionAnalysisProps]):
         if self.ax is None:
             return
 
-        # --- 1. Get 1D VERTEX arrays ---
         x_verts_1d = data.fields[0].domain[-2]  # shape (Nx + 1,)
         y_verts_1d = data.fields[0].domain[-1]  # shape (Ny + 1,)
 
-        # --- 2. Get 2D Data Fields ---
-        # (Assuming sigma is field 0, vx is 1, vy is 2)
+        #
         sigma_2d = data.fields[0].values
         vx_2d = data.fields[1].values
         vy_2d = data.fields[2].values
 
-        # --- 3. Plot the Density Heatmap ---
-        # Use pcolormesh for vertex-based data
-        # We use log-density for better contrast
         log_sigma = np.log10(sigma_2d + 1e-10)
 
         mesh = self.ax.pcolormesh(
@@ -206,31 +458,30 @@ class AccretionAnalysisComponent(Component[AccretionAnalysisProps]):
             shading="auto",
         )
 
-        # --- 4. Downsample Velocity for Quiver ---
+        # Downsample Velocity for Quiver
 
-        # We need the 2D *centers* for the quiver locations
+        # we need the 2D *centers* for the quiver locations
         x_centers_1d = 0.5 * (x_verts_1d[1:] + x_verts_1d[:-1])
         y_centers_1d = 0.5 * (y_verts_1d[1:] + y_verts_1d[:-1])
         xv_2d_cen, yv_2d_cen = np.meshgrid(
             x_centers_1d, y_centers_1d, indexing="xy"
         )
 
-        skip = 10  # Adjust this to your liking
+        skip = 10
 
         x_coords_sparse = xv_2d_cen[::skip, ::skip]
         y_coords_sparse = yv_2d_cen[::skip, ::skip]
         vx_sparse = vx_2d[::skip, ::skip]
         vy_sparse = vy_2d[::skip, ::skip]
 
-        # --- 5. Plot the Quiver Overlay ---
         self.ax.quiver(
             x_coords_sparse,
             y_coords_sparse,
             vx_sparse,
             vy_sparse,
-            color="white",  # White arrows stand out on a heatmap
-            scale=20.0,  # Experiment with this value
-            width=0.002,  # (Optional: arrow width)
+            color="white",
+            scale=20.0,
+            width=0.002,
         )
 
         self.ax.set_aspect("equal")
@@ -243,35 +494,28 @@ class AccretionAnalysisComponent(Component[AccretionAnalysisProps]):
         if self.ax is None:
             return
 
-        # --- 1. Get 1D VERTEX arrays (for pcolormesh) ---
         x_verts_1d = data.fields[0].domain[-2]  # e.g., shape (Nx + 1,)
         y_verts_1d = data.fields[0].domain[-1]  # e.g., shape (Ny + 1,)
 
-        # --- 2. Get 1D CENTER arrays (for streamplot) ---
         x_centers_1d = 0.5 * (x_verts_1d[1:] + x_verts_1d[:-1])  # shape (Nx,)
         y_centers_1d = 0.5 * (y_verts_1d[1:] + y_verts_1d[:-1])  # shape (Ny,)
 
-        # --- 3. Get 2D Data Fields ---
-        # (Assuming sigma is field 0, vx is 1, vy is 2)
         sigma_2d = data.fields[0].values  # shape (Nx, Ny)
         vx_2d = data.fields[1].values  # shape (Nx, Ny)
         vy_2d = data.fields[2].values  # shape (Nx, Ny)
 
-        # --- 4. Plot the Density Heatmap (Background) ---
-        # Use log-density for better contrast
         log_sigma = np.log10(sigma_2d + 1e-10)  # 1e-10 avoids log(0)
 
         mesh = self.ax.pcolormesh(
             x_verts_1d,
             y_verts_1d,
             log_sigma.T,  # .T to match pcolormesh (x, y, C) convention
-            cmap="inferno",  # 'inferno' or 'viridis' look good
+            cmap="inferno",
             shading="auto",
             vmin=np.min(log_sigma),  # Optional: set color limits
             vmax=np.max(log_sigma),
         )
 
-        # --- 5. Plot the Streamlines (Overlay) ---
         # streamplot expects (M, N) data, where M=len(y) and N=len(x).
         # This requires transposing the velocity data.
         self.ax.streamplot(
@@ -279,118 +523,17 @@ class AccretionAnalysisComponent(Component[AccretionAnalysisProps]):
             y_centers_1d,  # 1D array of y-coords (shape Ny)
             vx_2d.T,  # 2D array of u-velocity (shape Ny, Nx)
             vy_2d.T,  # 2D array of v-velocity (shape Ny, Nx)
-            # --- Styling as requested ---
-            color="white",  # "nice... white lines"
-            linewidth=0.5,  # "thin"
-            density=2.0,  # A bit denser to see the pattern
+            color="white",
+            linewidth=0.5,
+            density=2.0,
             arrowsize=0.7,  # Small arrows to show direction
             arrowstyle="->",  # Standard arrow
         )
 
-        # --- 6. Final Touches ---
         self.ax.set_aspect("equal")
-
-        # Set limits to the cell centers
         self.ax.set_xlim(x_centers_1d[0], x_centers_1d[-1])
         self.ax.set_ylim(y_centers_1d[0], y_centers_1d[-1])
         format_multidim_plot_axes(self.ax, self.fig, mesh, data, 0, style)
-
-    def _plot_angular_momentum_rays(
-        self, data: PlotData, style: StyleConfig
-    ) -> None:
-        """Plot the MASS-WEIGHTED specific angular momentum profile."""
-        if self.ax is None or self.props.radial_config is None:
-            return
-        ell = data.fields[0].values
-
-        x_verts_1d = data.fields[0].domain[-2]
-        y_verts_1d = data.fields[0].domain[-1]
-
-        x_centers_1d = 0.5 * (x_verts_1d[1:] + x_verts_1d[:-1])
-        # y_centers_1d = 0.5 * (y_verts_1d[1:] + y_verts_1d[:-1])
-        self.ax.plot(x_centers_1d, ell, linestyle="dotted", alpha=0.5)
-        self.ax.axvline(1, linestyle="dashed")
-        self.ax.axvline(-1, linestyle="dashed")
-
-    def _plot_mass_flux_profile(
-        self, data: PlotData, style: StyleConfig
-    ) -> None:
-        """Plot the mass flux profile M_dot(r) in spherical shells."""
-        if self.ax is None:
-            return
-
-        # --- 1. Get 1D CENTER arrays (for all 3 dimensions) ---
-        # Assumes domain has x, y, and z vertices
-        x_verts_1d = data.fields[0].domain[0]  # x-vertices
-        y_verts_1d = data.fields[0].domain[1]  # y-vertices
-        z_verts_1d = x_verts_1d  # data.fields[0].domain[2]  # z-vertices
-        x_centers_1d = 0.5 * (x_verts_1d[1:] + x_verts_1d[:-1])
-        y_centers_1d = 0.5 * (y_verts_1d[1:] + y_verts_1d[:-1])
-        z_centers_1d = 0.5 * (z_verts_1d[1:] + z_verts_1d[:-1])
-
-        # --- 2. Create 3D CENTER-coordinate grids ---
-        xv_3d, yv_3d, zv_3d = np.meshgrid(
-            x_centers_1d, y_centers_1d, z_centers_1d, indexing="ij"
-        )
-
-        # --- 3. Get 3D Data Fields ---
-        # (Assuming field 0:rho, 1:vx, 2:vy, 3:vz)
-        rho_3d = data.fields[0].values
-        vx_3d = data.fields[1].values
-        vy_3d = data.fields[2].values
-        vz_3d = data.fields[3].values
-
-        # --- 4. Calculate 3D maps of r, v_r, and (rho * v_r) ---
-        r_3d = np.sqrt(xv_3d**2 + yv_3d**2 + zv_3d**2)
-
-        # Radial velocity: v_r = (v . r) / |r|
-        vr_3d = (vx_3d * xv_3d + vy_3d * yv_3d + vz_3d * zv_3d) / (r_3d + 1e-10)
-
-        # Radial mass flux density
-        flux_density_3d = rho_3d * vr_3d
-
-        # --- 5. Flatten arrays for binning ---
-        r_flat = r_3d.flatten()
-        flux_density_flat = flux_density_3d.flatten()
-
-        # --- 6. Bin the flux density by radius ---
-        max_radius = np.max(r_flat)
-        num_bins = 100
-        bins = np.linspace(0, max_radius, num_bins + 1)
-
-        mean_flux_density, bin_edges, _ = binned_statistic(
-            r_flat, flux_density_flat, statistic="mean", bins=bins
-        )
-
-        # --- 7. Calculate Mass Flux M_dot ---
-        bin_centers = 0.5 * (bin_edges[1:] + bin_edges[:-1])
-
-        # Area of each spherical shell
-        shell_area = 4.0 * np.pi * bin_centers**2
-
-        # M_dot = <rho * v_r> * Area
-        mass_flux_profile = mean_flux_density * shell_area
-
-        # --- 8. Plot the result ---
-        xi = 10
-        rho_infty = 1.0
-        c = xi ** (0.5)
-        vorb = 1
-        rbh = 10
-        mdot_bh = 4.0 * np.pi * rbh**2 * rho_infty * c
-        good_bins = ~np.isnan(mass_flux_profile)
-        self.ax.plot(
-            bin_centers[good_bins], mass_flux_profile[good_bins] / mdot_bh
-        )
-
-        self.ax.set_xlabel("Radius (r/a)")
-        self.ax.set_ylabel(r"Mass Flux ($\dot{M}$)")
-        self.ax.set_title(r"Mass Flux Profile $\dot{M}(r)$")
-
-        # Add a line at M_dot=0 for reference
-        self.ax.axhline(0, color="gray", linestyle="--", linewidth=0.5)
-        self.ax.spines["top"].set_visible(False)
-        self.ax.spines["right"].set_visible(False)
 
     @property
     def initialized(self) -> bool:

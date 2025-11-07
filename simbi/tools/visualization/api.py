@@ -318,6 +318,8 @@ def plot_accretion(
         fields = [fields[0], f"v{pn[0]}", f"v{pn[1]}"]
     elif config.accretion.analysis_type == "mass_flux":
         fields = ["rho", "v1", "v2", "v3"]
+    elif config.accretion.analysis_type == "radial_profile":
+        fields = [fields[0]]
     else:
         raise NotImplementedError("Other analyses types aren't ready.")
     plot_data = create_plot_data(sim_data, fields, config)

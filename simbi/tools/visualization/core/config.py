@@ -200,7 +200,11 @@ class AccretionConfig(BaseModel):
     """
 
     analysis_type: Literal[
-        "angular_momentum", "mass_flux", "density", "quiver", "streamlines"
+        "angular_momentum",
+        "mass_flux",
+        "radial_profile",
+        "quiver",
+        "streamlines",
     ] = "angular_momentum"
     n_bins: int = 50
     time_average: bool = False
