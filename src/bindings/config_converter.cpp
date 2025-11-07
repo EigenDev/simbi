@@ -196,7 +196,7 @@ namespace simbi {
             else if (py::isinstance<py::int_>(value)) {
                 if (key == "capability") {
                     result[key] = config_value_t(
-                        static_cast<BodyCapability>(
+                        static_cast<body_capability_t>(
                             py::cast<std::int64_t>(value)
                         )
                     );
