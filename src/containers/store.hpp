@@ -75,9 +75,9 @@ namespace simbi {
         DUAL T* data() { return data_.typed_data(); }
         DUAL const T* data() const { return data_.typed_data(); }
 
-        std::uint64_t size() const { return size_; }
-        std::uint64_t capacity() const { return data_.size(); }
-        bool empty() const { return size_ == 0; }
+        DUAL std::uint64_t size() const { return size_; }
+        DUAL std::uint64_t capacity() const { return data_.size(); }
+        DUAL bool empty() const { return size_ == 0; }
 
         void add(const T& value)
         {
