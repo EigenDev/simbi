@@ -93,6 +93,8 @@ FIELD_MAP: dict[str, str] = {
     "vphi": r"$v_\phi / v_0$",
     "vtheta": r"$v_\theta / v_0$",
     "j_spec": r"$j / j_{0}$",
+    "div_v": r"$\nabla \cdot \mathbf{v}$",
+    "vorticity": r"$(\nabla \times \mathbf{v})_z$",
 }
 
 UNITS: dict[str, str] = {

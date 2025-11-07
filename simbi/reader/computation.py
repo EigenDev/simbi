@@ -250,6 +250,49 @@ def create_computation_pipeline(data: ProcessedData) -> dict[str, ComputeFunc]:
 
         return np.asarray(4.0 * np.pi * r**2 * level_data["rho"] * vr)
 
+    def compute_divergence(level_data: dict[str, Array]) -> Array:
+        """
+        Computes the divergence of the velocity field: div(v) = dvx/dx + dvy/dy + dvz/dz
+        Assumes x1 (vx) is axis=ndim-1, x2 (vy) is axis=ndim-2, x3 (vz) is axis=0
+        """
+        mesh = getattr(level_data, "mesh")
+        vx = level_data["v1"]
+        vy = level_data["v2"]
+        x = mesh.x1c
+        y = mesh.x2c
+
+        # d/dx1 of v1
+        dvx_dx = np.gradient(vx, x, axis=ndim - 1)
+        # d/dx2 of v2
+        dvy_dy = np.gradient(vy, y, axis=ndim - 2)
+
+        if ndim == 3:
+            vz = level_data["v3"]
+            z = mesh.x3c
+            # d/dx3 of v3
+            dvz_dz = np.gradient(vz, z, axis=0)
+            return np.asarray(dvx_dx + dvy_dy + dvz_dz)
+        else:
+            return np.asarray(dvx_dx + dvy_dy)
+
+    def compute_vorticity_z(level_data: dict[str, Array]) -> Array:
+        """
+        Computes the z-component of vorticity: vort_z = dvy/dx - dvx/dy
+        Assumes x1 (vx) is axis=ndim-1, x2 (vy) is axis=ndim-2
+        """
+        mesh = getattr(level_data, "mesh")
+        vx = level_data["v1"]
+        vy = level_data["v2"]
+        x = mesh.x1c
+        y = mesh.x2c
+
+        # d/dx1 of v2
+        dvy_dx = np.gradient(vy, x, axis=ndim - 1)
+        # d/dx2 of v1
+        dvx_dy = np.gradient(vx, y, axis=ndim - 2)
+
+        return np.asarray(dvy_dx - dvx_dy)
+
     # Build the pipeline
     pipeline: dict[str, Any] = {
         "W": compute_W,
@@ -268,6 +311,8 @@ def create_computation_pipeline(data: ProcessedData) -> dict[str, ComputeFunc]:
         "mass_flux": mass_flux,
         "j_spec": specific_angular_momentum,
         "Sigma": surface_density,
+        "vorticity": compute_vorticity_z,
+        "div_v": compute_divergence,
     }
 
     # Add component fields
