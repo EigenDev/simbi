@@ -645,6 +645,40 @@ namespace simbi {
         return result;
     }
 
+    // element-wise multiplication
+    template <vector_like_c Vec1, vector_like_c Vec2>
+    DUAL constexpr auto operator*(const Vec1& lhs, const Vec2& rhs)
+        requires(Vec1::dimensions == Vec2::dimensions)
+    {
+        using T                      = typename Vec1::value_type;
+        using U                      = typename Vec2::value_type;
+        using result_t               = detail::promote_t<T, U>;
+        constexpr std::uint64_t Dims = Vec1::dimensions;
+        vector_t<result_t, Dims> result;
+        for (size_t ii = 0; ii < Dims; ++ii) {
+            result[ii] =
+                static_cast<result_t>(lhs[ii]) * static_cast<result_t>(rhs[ii]);
+        }
+        return result;
+    }
+
+    // element-wise division
+    template <vector_like_c Vec1, vector_like_c Vec2>
+    DUAL constexpr auto operator/(const Vec1& lhs, const Vec2& rhs)
+        requires(Vec1::dimensions == Vec2::dimensions)
+    {
+        using T                      = typename Vec1::value_type;
+        using U                      = typename Vec2::value_type;
+        using result_t               = detail::promote_t<T, U>;
+        constexpr std::uint64_t Dims = Vec1::dimensions;
+        vector_t<result_t, Dims> result;
+        for (size_t ii = 0; ii < Dims; ++ii) {
+            result[ii] =
+                static_cast<result_t>(lhs[ii]) / static_cast<result_t>(rhs[ii]);
+        }
+        return result;
+    }
+
     // utility for pipeline-style composition with operator|
     template <typename T, std::uint64_t Dims, typename F>
     DUAL constexpr auto operator|(const vector_t<T, Dims>& v, F&& f)
