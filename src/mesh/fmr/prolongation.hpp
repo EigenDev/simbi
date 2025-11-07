@@ -170,7 +170,6 @@ namespace simbi::mesh::fmr {
             auto coarse_coord = map.fine_to_coarse(fine_coord);
 
             // boundary handling (clamp to valid domain)
-            // this is the same as your other interpolators
             if (!map.coarse_full.contains(coarse_coord)) {
                 auto clamped = coarse_coord;
                 for (std::uint64_t d = 0; d < Dims; ++d) {

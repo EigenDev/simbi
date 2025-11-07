@@ -239,7 +239,7 @@ namespace simbi {
         RESET,
     };
 
-    enum class BodyCapability : uint32_t {
+    enum class body_capability_t : uint32_t {
         NONE          = 0,
         GRAVITATIONAL = 1 << 0,
         ACCRETION     = 1 << 1,
@@ -248,16 +248,16 @@ namespace simbi {
         RIGID         = 1 << 4,
     };
 
-    constexpr inline BodyCapability
-    operator|(BodyCapability lhs, BodyCapability rhs)
+    constexpr inline body_capability_t
+    operator|(body_capability_t lhs, body_capability_t rhs)
     {
-        return static_cast<BodyCapability>(
+        return static_cast<body_capability_t>(
             static_cast<uint32_t>(lhs) | static_cast<uint32_t>(rhs)
         );
     }
 
-    constexpr inline BodyCapability&
-    operator|=(BodyCapability& lhs, BodyCapability rhs)
+    constexpr inline body_capability_t&
+    operator|=(body_capability_t& lhs, body_capability_t rhs)
     {
         lhs = lhs | rhs;
         return lhs;

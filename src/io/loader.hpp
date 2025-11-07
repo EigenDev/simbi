@@ -321,232 +321,320 @@ namespace simbi::io {
     namespace {   // anonymous namespace for internal-linkage helpers
 
         /**
-         * @brief translates a single hdf5 body group (e.g., /bodies/body_0)
-         * into a config_dict_t.
+         * @brief reads a single body_n group from hdf5 and constructs the
+         * correct body_t variant.
          *
-         * this function reads all known required and optional body
-         * properties. the body factory will then infer the body type
-         * from the *presence* of these optional properties.
+         * this function reads the 'capabilities' bitmask, then, based on
+         * that mask, reads all required properties for that body type
+         * and calls the appropriate make_... factory function.
          */
         template <std::uint64_t Dims>
-        result_t<config_dict_t> read_body_as_config(H5::Group& body_group)
+        result_t<body::body_variant_t<Dims>>
+        read_body_from_group(H5::Group& body_group, std::uint64_t idx)
         {
-            config_dict_t props;
+            using namespace simbi::body;
+            using namespace simbi::body::capabilities;
 
             try {
-                // --- read required attributes ---
-                // if any of these fail, the whole function fails.
+                // --- read base properties ---
                 auto mass_res = h5::read_attribute<real>(body_group, "mass");
                 if (!mass_res.is_ok()) {
-                    return result_t<config_dict_t>::error(
-                        "failed to read 'mass': " + mass_res.error()
+                    return result_t<body_variant_t<Dims>>::error(
+                        mass_res.error()
                     );
                 }
-                props["mass"] = mass_res.value();
 
                 auto radius_res =
                     h5::read_attribute<real>(body_group, "radius");
                 if (!radius_res.is_ok()) {
-                    return result_t<config_dict_t>::error(
-                        "failed to read 'radius': " + radius_res.error()
+                    return result_t<body_variant_t<Dims>>::error(
+                        radius_res.error()
                     );
                 }
-                props["radius"] = radius_res.value();
 
                 auto pos_res =
                     h5::read_array<real, Dims>(body_group, "position");
                 if (!pos_res.is_ok()) {
-                    return result_t<config_dict_t>::error(
-                        "failed to read 'position': " + pos_res.error()
+                    return result_t<body_variant_t<Dims>>::error(
+                        pos_res.error()
                     );
                 }
-                props["position"] = pos_res.value();
 
                 auto vel_res =
                     h5::read_array<real, Dims>(body_group, "velocity");
                 if (!vel_res.is_ok()) {
-                    return result_t<config_dict_t>::error(
-                        "failed to read 'velocity': " + vel_res.error()
+                    return result_t<body_variant_t<Dims>>::error(
+                        vel_res.error()
                     );
                 }
-                props["velocity"] = vel_res.value();
 
-                // --- read optional attributes ---
-                // if these fail, we just ignore them, as they may not exist
-                // for this body type.
-                auto soft_res =
-                    h5::read_attribute<real>(body_group, "softening_length");
-                if (soft_res.is_ok()) {
-                    props["softening_length"] = soft_res.value();
+                auto coupling_res =
+                    h5::read_attribute<bool>(body_group, "two_way_coupling");
+                bool two_way_coupling =
+                    coupling_res.is_ok() ? coupling_res.value() : false;
+
+                // --- read cap bitmask ---
+                auto caps_res = h5::read_attribute<std::uint32_t>(
+                    body_group,
+                    "capabilities"
+                );
+                if (!caps_res.is_ok()) {
+                    return result_t<body_variant_t<Dims>>::error(
+                        caps_res.error()
+                    );
                 }
 
-                auto sink_r_res =
-                    h5::read_attribute<real>(body_group, "sink_rate");
-                if (sink_r_res.is_ok()) {
-                    props["sink_rate"] = sink_r_res.value();
-                }
+                auto caps = static_cast<body_capability_t>(caps_res.value());
 
-                auto sink_d_res =
-                    h5::read_attribute<real>(body_group, "sink_delta");
-                if (sink_d_res.is_ok()) {
-                    props["sink_delta"] = sink_d_res.value();
-                }
+// helper macro to read a required attribute for a component
+#define READ_BODY_COMP(name, type)                                             \
+    auto name##_res = h5::read_attribute<type>(body_group, #name);             \
+    if (!name##_res.is_ok()) {                                                 \
+        return result_t<body_variant_t<Dims>>::error(                          \
+            "body " + std::to_string(idx) +                                    \
+            " missing required param '" #name "': " + name##_res.error()       \
+        );                                                                     \
+    }
 
-                auto accr_r_res =
-                    h5::read_attribute<real>(body_group, "accretion_radius");
-                if (accr_r_res.is_ok()) {
-                    props["accretion_radius"] = accr_r_res.value();
-                }
+                if (caps == (body_capability_t::GRAVITATIONAL |
+                             body_capability_t::ACCRETION)) {
+                    // this is a black_hole_t
+                    READ_BODY_COMP(softening_length, real);
+                    READ_BODY_COMP(sink_rate, real);
+                    READ_BODY_COMP(sink_delta, real);
+                    READ_BODY_COMP(accretion_radius, real);
+                    READ_BODY_COMP(total_accreted_mass, real);
 
-                auto total_acc_res =
-                    h5::read_attribute<real>(body_group, "total_accreted_mass");
-                if (total_acc_res.is_ok()) {
-                    props["total_accreted_mass"] = total_acc_res.value();
+                    return result_t<body_variant_t<Dims>>::ok(
+                        make_black_hole<Dims>(
+                            idx,
+                            pos_res.value(),
+                            vel_res.value(),
+                            mass_res.value(),
+                            radius_res.value(),
+                            softening_length_res.value(),
+                            sink_rate_res.value(),
+                            sink_delta_res.value(),
+                            accretion_radius_res.value(),
+                            0.0,   // accretion_rate (runtime)
+                            total_accreted_mass_res.value(),
+                            two_way_coupling
+                        )
+                    );
                 }
+                else if (caps == (body_capability_t::GRAVITATIONAL |
+                                  body_capability_t::RIGID)) {
+                    // this is a planet_t
+                    READ_BODY_COMP(softening_length, real);
+                    READ_BODY_COMP(inertia, real);
+                    READ_BODY_COMP(apply_no_slip, bool);
 
-                auto inertia_res =
-                    h5::read_attribute<real>(body_group, "inertia");
-                if (inertia_res.is_ok()) {
-                    props["inertia"] = inertia_res.value();
+                    // note: make_planet sets softening_length to 0.0 by default
+                    // we create it, then update it.
+                    auto planet = make_planet<Dims>(
+                        idx,
+                        pos_res.value(),
+                        vel_res.value(),
+                        mass_res.value(),
+                        radius_res.value(),
+                        inertia_res.value(),
+                        apply_no_slip_res.value(),
+                        two_way_coupling
+                    );
+
+                    // update the softening_length
+                    constexpr auto grav_idx = find_capability_index<
+                        gravitational_tag,
+                        grav_component_t,
+                        rigid_component_t>::value;
+                    std::get<grav_idx>(planet.capabilities).softening_length =
+                        softening_length_res.value();
+
+                    return result_t<body_variant_t<Dims>>::ok(planet);
                 }
-
-                auto no_slip_res =
-                    h5::read_attribute<bool>(body_group, "apply_no_slip");
-                if (no_slip_res.is_ok()) {
-                    props["apply_no_slip"] = no_slip_res.value();
+                else if (caps == body_capability_t::GRAVITATIONAL) {
+                    // this is a gravitational_body_t
+                    READ_BODY_COMP(softening_length, real);
+                    return result_t<body_variant_t<Dims>>::ok(
+                        make_gravitational_body<Dims>(
+                            idx,
+                            pos_res.value(),
+                            vel_res.value(),
+                            mass_res.value(),
+                            radius_res.value(),
+                            softening_length_res.value(),
+                            two_way_coupling
+                        )
+                    );
                 }
-
-                return result_t<config_dict_t>::ok(std::move(props));
+                else if (caps == body_capability_t::RIGID) {
+                    // this is a rigid_sphere_t
+                    READ_BODY_COMP(inertia, real);
+                    READ_BODY_COMP(apply_no_slip, bool);
+                    return result_t<body_variant_t<Dims>>::ok(
+                        make_rigid_sphere<Dims>(
+                            idx,
+                            pos_res.value(),
+                            vel_res.value(),
+                            mass_res.value(),
+                            radius_res.value(),
+                            inertia_res.value(),
+                            apply_no_slip_res.value(),
+                            two_way_coupling
+                        )
+                    );
+                }
+                else if (caps == body_capability_t::NONE) {
+                    // this is a basic_body_t (no extra components)
+                    return result_t<body_variant_t<Dims>>::ok(
+                        make_basic_body<Dims>(
+                            idx,
+                            pos_res.value(),
+                            vel_res.value(),
+                            mass_res.value(),
+                            radius_res.value(),
+                            two_way_coupling
+                        )
+                    );
+                }
+                else {
+                    return result_t<body_variant_t<Dims>>::error(
+                        "unknown or unsupported body capability mask: " +
+                        std::to_string(caps_res.value())
+                    );
+                }
+#undef READ_BODY_COMP
             }
             catch (const H5::Exception& e) {
-                return result_t<config_dict_t>::error(
-                    "hdf5 exception in read_body_as_config: " +
+                return result_t<body_variant_t<Dims>>::error(
+                    "hdf5 exception in read_body_from_group: " +
+                    std::string(e.getDetailMsg())
+                );
+            }
+        }
+
+        /**
+         * @brief reads the /bodies group from hdf5 and constructs a
+         * complete body_collection_t.
+         *
+         * this is the symmetric counterpart to the write_bodies function
+         * in serializer2.hpp.
+         */
+        template <std::uint64_t Dims>
+        result_t<std::optional<body::body_collection_t<Dims>>>
+        read_body_collection_from_h5(H5::H5File& file)
+        {
+            using namespace simbi::body;
+
+            H5::Group bodies_group;
+            try {
+                bodies_group = file.openGroup("bodies");
+            }
+            catch (const H5::Exception&) {
+                // no "bodies" group, which is fine.
+                return result_t<std::optional<body_collection_t<Dims>>>::ok(
+                    std::nullopt
+                );
+            }
+
+            try {
+                auto count_res = h5::read_attribute<std::uint64_t>(
+                    bodies_group,
+                    "body_count"
+                );
+                if (!count_res.is_ok()) {
+                    return result_t<std::optional<body_collection_t<Dims>>>::
+                        error(
+                            "failed to read 'body_count': " + count_res.error()
+                        );
+                }
+
+                auto body_count = count_res.value();
+                if (body_count == 0) {
+                    return result_t<std::optional<body_collection_t<Dims>>>::ok(
+                        std::nullopt   // empty, but not an error
+                    );
+                }
+
+                auto collection = make_body_collection<Dims>();
+
+                auto system_name_res =
+                    h5::read_string(bodies_group, "system_name");
+                auto system_name =
+                    system_name_res.is_ok() ? system_name_res.value() : "";
+
+                if (system_name == "binary_system") {
+                    auto frame_res =
+                        h5::read_string(bodies_group, "reference_frame");
+                    if (!frame_res.is_ok()) {
+                        return result_t<
+                            std::optional<body_collection_t<Dims>>>::
+                            error(
+                                "failed to read 'reference_frame': " +
+                                frame_res.error()
+                            );
+                    }
+                    collection = std::move(collection)
+                                     .with_reference_frame(frame_res.value())
+                                     .with_name(system_name);
+
+                    // rebuild the "binary_params" struct
+                    body::binary_parameters_t params;
+                    auto binary_group = bodies_group.openGroup("binary_params");
+
+// helper macro for reading binary params
+#define read_binary_param(name, type)                                          \
+    auto name##_res = h5::read_attribute<type>(binary_group, #name);           \
+    if (!name##_res.is_ok())                                                   \
+        return result_t<std::optional<body_collection_t<Dims>>>::error(        \
+            "failed to read binary param '" #name "': " + name##_res.error()   \
+        );                                                                     \
+    params.name = name##_res.value();
+
+                    read_binary_param(total_mass, real);
+                    read_binary_param(semi_major, real);
+                    read_binary_param(eccentricity, real);
+                    read_binary_param(mass_ratio, real);
+                    read_binary_param(orbital_period, real);
+                    read_binary_param(is_circular_orbit, bool);
+#undef read_binary_param
+
+                    collection =
+                        std::move(collection).with_system_config(params);
+                }
+
+                // loop and read all bodies
+                for (std::uint64_t i = 0; i < body_count; ++i) {
+                    auto body_group =
+                        bodies_group.openGroup("body_" + std::to_string(i));
+                    auto body_variant_res =
+                        read_body_from_group<Dims>(body_group, i);
+
+                    if (!body_variant_res.is_ok()) {
+                        return result_t<
+                            std::optional<body_collection_t<Dims>>>::
+                            error(
+                                "failed to load body " + std::to_string(i) +
+                                ": " + body_variant_res.error()
+                            );
+                    }
+                    collection =
+                        std::move(collection).add(body_variant_res.value());
+                }
+
+                return result_t<std::optional<body_collection_t<Dims>>>::ok(
+                    std::move(collection)
+                );
+            }
+            catch (const H5::Exception& e) {
+                return result_t<std::optional<body_collection_t<Dims>>>::error(
+                    "hdf5 exception in read_body_collection_from_h5: " +
                     std::string(e.getDetailMsg())
                 );
             }
         }
 
     }   // end anonymous namespace
-
-    /**
-     * @brief reads the /bodies hdf5 group and populates the
-     * initial_conditions_t object.
-     *
-     * this function acts as an "anti-serializer" by reconstructing
-     * the config_dict_t structure that the body_factory expects.
-     * it handles both individual bodies and binary systems.
-     */
-    template <std::uint64_t Dims>
-    result_t<void> read_body_config(
-        H5::Group& bodies_group,
-        initial_conditions_t& init   // non-const: this is the output
-    )
-    {
-        try {
-            auto count_res =
-                h5::read_attribute<std::uint64_t>(bodies_group, "body_count");
-            if (!count_res.is_ok()) {
-                return result_t<void>::error(
-                    "failed to read 'body_count': " + count_res.error()
-                );
-            }
-
-            auto body_count = count_res.value();
-            if (body_count == 0) {
-                return result_t<void>::ok();   // no bodies to load
-            }
-
-            // system_name is optional; default to "" (individual)
-            auto system_name_res = h5::read_string(bodies_group, "system_name");
-            auto system_name =
-                system_name_res.is_ok() ? system_name_res.value() : "";
-
-            // --- case 1: load a "binary_system" ---
-            if (system_name == "binary_system") {
-                config_dict_t sys_props;
-                sys_props["system_type"] = "binary";
-
-                auto frame_res =
-                    h5::read_string(bodies_group, "reference_frame");
-                if (!frame_res.is_ok()) {
-                    return result_t<void>::error(
-                        "failed to read 'reference_frame': " + frame_res.error()
-                    );
-                }
-                sys_props["reference_frame"] = frame_res.value();
-
-                // rebuild the "binary_config" dictionary
-                config_dict_t binary_config;
-                auto binary_group = bodies_group.openGroup("binary_params");
-
-                // read all binary parameters
-#define READ_BINARY_PARAM(name, type)                                          \
-    auto name##_res = h5::read_attribute<type>(binary_group, #name);           \
-    if (!name##_res.is_ok())                                                   \
-        return result_t<void>::error(                                          \
-            "failed to read binary param '" #name "': " + name##_res.error()   \
-        );                                                                     \
-    binary_config[#name] = name##_res.value();
-
-                READ_BINARY_PARAM(total_mass, real);
-                READ_BINARY_PARAM(semi_major, real);
-                READ_BINARY_PARAM(eccentricity, real);
-                READ_BINARY_PARAM(mass_ratio, real);
-                READ_BINARY_PARAM(orbital_period, real);
-                READ_BINARY_PARAM(is_circular_orbit, bool);
-#undef READ_BINARY_PARAM
-
-                // load the component bodies
-                std::list<config_dict_t> components;
-                for (std::uint64_t i = 0; i < body_count; ++i) {
-                    auto body_group =
-                        bodies_group.openGroup("body_" + std::to_string(i));
-                    auto body_cfg_res = read_body_as_config<Dims>(body_group);
-
-                    if (!body_cfg_res.is_ok()) {
-                        return result_t<void>::error(
-                            "failed to load body " + std::to_string(i) + ": " +
-                            body_cfg_res.error()
-                        );
-                    }
-                    components.push_back(body_cfg_res.value());
-                }
-                binary_config["components"] = std::move(components);
-
-                sys_props["binary_config"] = std::move(binary_config);
-
-                // set the "body_system" property in the main init object
-                init.config["body_system"] = std::move(sys_props);
-
-                // --- case 2: load "individual bodies" ---
-            }
-            else {
-                // clear any existing default bodies and load from checkpoint
-                init.immersed_bodies.clear();
-                for (std::uint64_t i = 0; i < body_count; ++i) {
-                    auto body_group =
-                        bodies_group.openGroup("body_" + std::to_string(i));
-                    auto body_cfg_res = read_body_as_config<Dims>(body_group);
-
-                    if (!body_cfg_res.is_ok()) {
-                        return result_t<void>::error(
-                            "failed to load body " + std::to_string(i) + ": " +
-                            body_cfg_res.error()
-                        );
-                    }
-                    init.immersed_bodies.push_back(body_cfg_res.value());
-                }
-            }
-
-            return result_t<void>::ok();
-        }
-        catch (const H5::Exception& e) {
-            return result_t<void>::error(
-                "hdf5 exception in read_body_config: " +
-                std::string(e.getDetailMsg())
-            );
-        }
-    }
 
     // read metadata and update initial_conditions_t
     inline result_t<void>
@@ -809,7 +897,7 @@ namespace simbi::io {
               .bounds_min    = bounds_min,
               .bounds_max    = bounds_max,
               .spacing_types = spacing_types,
-              .dx            = {(bounds_max[0] - bounds_min[0]) / shape[0]}
+              .dx            = (bounds_max - bounds_min) / shape
             };
 
             return result_t<mesh::mesh_config_t<Dims, G>>::ok(
@@ -1034,43 +1122,45 @@ namespace simbi::io {
                 level_info_t{.level_id = 0, .refinement_ratio = 1}
             );
 
-            try {
-                auto bodies_group = file.openGroup("bodies");
-                auto body_cfg_res = read_body_config<Dims>(bodies_group, init);
-                if (!body_cfg_res.is_ok()) {
-                    return result_t<simulation_t<R, Dims, G, EoS>>::error(
-                        body_cfg_res.error()
-                    );
-                }
+            auto bodies_res = read_body_collection_from_h5<Dims>(file);
+            if (!bodies_res.is_ok()) {
+                return result_t<simulation_t<R, Dims, G, EoS>>::error(
+                    bodies_res.error()
+                );
             }
-            catch (const H5::Exception&) {
-                // no "bodies" group, which is fine.
-            }
-
-            auto bodies      = create_body_collection_from_init<Dims>(init);
+            auto bodies      = bodies_res.value();
             auto diagnostics = body::create_diagnostics_accumulator<Dims>();
 
-            // add bodies if enabled
             if (bodies) {
+                // add the immersed_bodies_t component
                 sim.registry.add(
                     sim.global,
                     immersed_bodies_t<Dims>{.bodies = std::move(bodies.value())}
                 );
 
-                bodies->visit_all([&](const auto& body) {
+                // re-initialize diagnostics accumulator with loaded checkpoint
+                // values
+                const auto& loaded_bodies =
+                    sim.registry
+                        .template get<immersed_bodies_t<Dims>>(sim.global)
+                        .bodies;
+
+                loaded_bodies.visit_all([&](const auto& body) {
                     using body_type = std::decay_t<decltype(body)>;
                     auto delta      = body::body_delta_t<Dims>{
                            .idx          = body.idx,
                            .force_delta  = body.force,
                            .torque_delta = body.torque,
-                           .mass_delta   = 0.0
+                           .mass_delta   = 0.0   // this will be set below
                     };
+
                     if constexpr (body::has_accretion_capability_c<body_type>) {
                         delta.prev_mass_delta = body::total_accreted_mass(body);
                     }
                     diagnostics->accumulate_delta(delta);
                 });
 
+                // add the body_info_t component
                 sim.registry.add(
                     sim.global,
                     body_info_t<Dims>{.diagnostics = std::move(diagnostics)}
@@ -1165,14 +1255,11 @@ namespace simbi::io {
                                   .parent_coverage;
 
                     if (lvl > 0) {
-                        hierarchy.levels[lvl].ref_ratio =
-                            hierarchy.levels[lvl - 1].ref_ratio *
-                            info.refinement_ratio;
+                        hierarchy.levels[lvl].ref_ratio = info.refinement_ratio;
                     }
                     else {
                         hierarchy.levels[lvl].ref_ratio = 1;
                     }
-
                     hierarchy.levels[lvl].level_id    = lvl;
                     hierarchy.levels[lvl].domain      = mesh.domain;
                     hierarchy.levels[lvl].full_domain = mesh.full_domain;

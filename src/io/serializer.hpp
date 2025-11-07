@@ -3,6 +3,7 @@
 
 #include "compat.hpp"
 #include "containers/vector.hpp"
+#include "ecs/components.hpp"
 #include "functional/fp.hpp"
 #include "functional/monad/result.hpp"
 #include "physics/ib/body.hpp"
@@ -654,6 +655,11 @@ namespace simbi::io {
                 h5::write_attribute(body_group, "radius", body.radius);
                 h5::write_array(body_group, "position", body.position);
                 h5::write_array(body_group, "velocity", body.velocity);
+                h5::write_attribute(
+                    body_group,
+                    "two_way_coupling",
+                    body.two_way_coupling
+                );
 
                 // capabilities
                 auto caps = body.caps();
@@ -682,6 +688,24 @@ namespace simbi::io {
                         body_group,
                         "accretion_radius",
                         body::accretion_radius(body)
+                    );
+                    h5::write_attribute(
+                        body_group,
+                        "total_accreted_mass",
+                        body::total_accreted_mass(body)
+                    );
+                }
+
+                if constexpr (body::has_rigid_capability_c<body_t>) {
+                    h5::write_attribute(
+                        body_group,
+                        "inertia",
+                        body::inertia(body)
+                    );
+                    h5::write_attribute(
+                        body_group,
+                        "apply_no_slip",
+                        body::apply_no_slip(body)
                     );
                 }
             });

@@ -46,7 +46,7 @@ namespace simbi {
             std::pair<real, real>,        // For pairs of real values
             config_dict_t,                // For nested dictionaries
             std::list<config_dict_t>,     // For list of dictionaries
-            BodyCapability                // For BodyCapabilities
+            body_capability_t             // For BodyCapabilities
             >;
 
         ValueType value;
@@ -73,7 +73,7 @@ namespace simbi {
         config_value_t(config_dict_t v) : value(std::move(v)) {}
         config_value_t(std::list<config_dict_t> v) : value(std::move(v)) {}
         config_value_t(std::pair<real, real> v) : value(std::move(v)) {}
-        config_value_t(BodyCapability v) : value(v) {}
+        config_value_t(body_capability_t v) : value(v) {}
 
         // Helper for spatial vectors
         template <typename T, std::uint64_t Dims>
@@ -158,7 +158,7 @@ namespace simbi {
 
         bool is_body_cap() const
         {
-            return std::holds_alternative<BodyCapability>(value);
+            return std::holds_alternative<body_capability_t>(value);
         }
 
         // Value access with type checking
@@ -268,8 +268,8 @@ namespace simbi {
                 }
                 throw std::runtime_error("Not an unsigned integer value");
             }
-            else if constexpr (std::is_same_v<T, BodyCapability>) {
-                return std::get<BodyCapability>(value);
+            else if constexpr (std::is_same_v<T, body_capability_t>) {
+                return std::get<body_capability_t>(value);
             }
             else {
                 static_assert(always_false<T>::value, "Unsupported type");

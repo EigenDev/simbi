@@ -22,6 +22,8 @@ namespace simbi::body::capabilities {
     };
     struct deformable_tag {
     };
+    struct passive_tag {
+    };
 }   // namespace simbi::body::capabilities
 
 namespace simbi::body {
@@ -114,6 +116,10 @@ namespace simbi::body {
         real plastic_strain;
     };
 
+    struct passive_component_t {
+        using tag_type = capabilities::passive_tag;
+    };
+
     // type aliases for common body types
     template <std::uint64_t Dims>
     using rigid_sphere_t = body_t<Dims, rigid_component_t>;
@@ -126,6 +132,9 @@ namespace simbi::body {
 
     template <std::uint64_t Dims>
     using planet_t = body_t<Dims, grav_component_t, rigid_component_t>;
+
+    template <std::uint64_t Dims>
+    using passive_body_t = body_t<Dims, passive_component_t>;
 
     // concepts for capabilities b/c c++20 is amazing :D
     template <typename T>
@@ -180,21 +189,21 @@ namespace simbi::body {
 
         constexpr std::uint32_t caps() const
         {
-            auto caps = BodyCapability::NONE;
+            auto caps = body_capability_t::NONE;
             if constexpr (has_gravitational_capability_c<body_t>) {
-                caps |= BodyCapability::GRAVITATIONAL;
+                caps |= body_capability_t::GRAVITATIONAL;
             }
             if constexpr (has_accretion_capability_c<body_t>) {
-                caps |= BodyCapability::ACCRETION;
+                caps |= body_capability_t::ACCRETION;
             }
             if constexpr (has_elastic_capability_c<body_t>) {
-                caps |= BodyCapability::ELASTIC;
+                caps |= body_capability_t::ELASTIC;
             }
             if constexpr (has_rigid_capability_c<body_t>) {
-                caps |= BodyCapability::RIGID;
+                caps |= body_capability_t::RIGID;
             }
             if constexpr (has_deformable_capability_c<body_t>) {
-                caps |= BodyCapability::DEFORMABLE;
+                caps |= body_capability_t::DEFORMABLE;
             }
             return static_cast<std::uint32_t>(caps);
         }
@@ -281,16 +290,16 @@ namespace simbi::body {
         bool two_way_coupling = false
     )
     {
-        return body_t<Dims>{
+        return body_t<Dims, passive_component_t>{
           idx,
           position,
           velocity,
-          vector_t<real, Dims>{},
-          vector_t<real, Dims>{},
+          vector_t<real, Dims>{},   // no force
+          vector_t<real, 3>{},      // no torque
           mass,
           radius,
           two_way_coupling,
-          std::tuple<>()   // no capabilities
+          std::make_tuple(passive_component_t{})   // no capabilities
         };
     }
 

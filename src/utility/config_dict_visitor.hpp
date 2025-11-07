@@ -417,7 +417,7 @@ namespace simbi {
                 props[name] = value.get<simbi::config_dict_t>();
             }
             else if (value.is_body_cap()) {
-                props[name] = value.get<simbi::BodyCapability>();
+                props[name] = value.get<body_capability_t>();
             }
             else if (value.is_string()) {
                 props[name] = value.get<std::string>();
@@ -471,7 +471,7 @@ namespace simbi {
         )
         {
             if (dict.contains(name) && dict.at(name).is_body_cap()) {
-                props[name] = dict.at(name).get<simbi::BodyCapability>();
+                props[name] = dict.at(name).get<body_capability_t>();
             }
         }
     };

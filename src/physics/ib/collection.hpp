@@ -13,7 +13,6 @@
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
-#include <iostream>
 #include <numbers>
 #include <optional>
 #include <stdexcept>
@@ -31,7 +30,8 @@ namespace simbi::body {
         rigid_sphere_t<Dims>,
         gravitational_body_t<Dims>,
         black_hole_t<Dims>,
-        planet_t<Dims>
+        planet_t<Dims>,
+        passive_body_t<Dims>
         // add more combinations as needed (maybe...)
         // [TODO]: revisit later
         >;
