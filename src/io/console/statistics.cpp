@@ -540,8 +540,14 @@ namespace simbi {
                     );
 
                     std::ostringstream mem_clock;
+                    int mem_clock_rate = 0;
+                    cudaDeviceGetAttribute(
+                        &mem_clock_rate,
+                        cudaDevAttrMemoryClockRate,
+                        0
+                    );
                     mem_clock << std::fixed << std::setprecision(1)
-                              << (props.memoryClockRate / 1000.0) << " MHz";
+                              << (mem_clock_rate / 1000.0) << " MHz";
                     gpu_table.add_row({"Memory Clock", mem_clock.str()});
 
                     gpu_table.add_row(
@@ -551,7 +557,7 @@ namespace simbi {
 
                     std::ostringstream bandwidth;
                     bandwidth << std::fixed << std::setprecision(1)
-                              << (2.0 * props.memoryClockRate *
+                              << (2.0 * mem_clock_rate *
                                   (props.memoryBusWidth / 8) / 1.0e6)
                               << " GB/s";
                     gpu_table.add_row({"Peak Bandwidth", bandwidth.str()});
