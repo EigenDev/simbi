@@ -124,7 +124,7 @@ namespace simbi::mem {
                         result.data(),
                         data_.get(),
                         domain_.size() * sizeof(T),
-                        hetero::memory_kind_t::device_to_device
+                        hetero::memory_direction_t::device_to_device
                     );
                 }
                 else {
@@ -148,7 +148,7 @@ namespace simbi::mem {
                     result.data(),
                     data_.get(),
                     domain_.size() * sizeof(T),
-                    hetero::memory_kind_t::device_to_host
+                    hetero::memory_direction_t::device_to_host
                 );
             }
             else if (!device.is_gpu && target_device.is_gpu) {
@@ -157,7 +157,7 @@ namespace simbi::mem {
                     result.data(),
                     data_.get(),
                     domain_.size() * sizeof(T),
-                    hetero::memory_kind_t::host_to_device
+                    hetero::memory_direction_t::host_to_device
                 );
             }
             else {
@@ -248,7 +248,7 @@ namespace simbi::mem {
                 result.data(),
                 host_data,
                 domain.size() * sizeof(T),
-                hetero::memory_kind_t::host_to_device
+                hetero::memory_direction_t::host_to_device
             );
         }
         else {

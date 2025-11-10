@@ -329,7 +329,6 @@ namespace simbi {
             }
 
             executors_.clear();
-            device_pools_.clear();
         }
     };
 

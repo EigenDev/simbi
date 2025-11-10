@@ -217,7 +217,7 @@ namespace simbi {
                         target_slice.data(),
                         shard.data(),
                         shard.size() * sizeof(T),
-                        hetero::memory_kind_t::device_to_host
+                        hetero::memory_direction_t::device_to_host
                     );
                 }
                 else if (!shard.device().is_gpu && target_device.is_gpu) {
@@ -226,7 +226,7 @@ namespace simbi {
                         target_slice.data(),
                         shard.data(),
                         shard.size() * sizeof(T),
-                        hetero::memory_kind_t::host_to_device
+                        hetero::memory_direction_t::host_to_device
                     );
                 }
                 else {
@@ -272,7 +272,7 @@ namespace simbi {
                         source_slice.size() * sizeof(T),
                         target_shard.device().device_id,
                         source.device().device_id,
-                        hetero::memory_kind_t::device_to_device
+                        hetero::memory_direction_t::device_to_device
                     );
                 }
                 else if (source.device().is_gpu &&
@@ -282,7 +282,7 @@ namespace simbi {
                         target_shard.data(),
                         source_slice.data(),
                         source_slice.size() * sizeof(T),
-                        hetero::memory_kind_t::device_to_host
+                        hetero::memory_direction_t::device_to_host
                     );
                 }
                 else if (!source.device().is_gpu &&
@@ -292,7 +292,7 @@ namespace simbi {
                         target_shard.data(),
                         source_slice.data(),
                         source_slice.size() * sizeof(T),
-                        hetero::memory_kind_t::host_to_device
+                        hetero::memory_direction_t::host_to_device
                     );
                 }
                 else {
