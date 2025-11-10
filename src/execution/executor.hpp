@@ -722,7 +722,7 @@ namespace simbi::exec {
     }
 
     using default_executor_t =
-        std::conditional_t<global::on_gpu, gpu_executor_t, par_cpu_executor_t>;
+        std::conditional_t<global::on_gpu, gpu_executor_t, omp_executor_t>;
 
 }   // namespace simbi::exec
 

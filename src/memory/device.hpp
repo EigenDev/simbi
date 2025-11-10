@@ -3,6 +3,7 @@
 
 #include "hetero/adapter.hpp"
 
+#include <compare>
 #include <cstdint>
 #include <cstdlib>
 #include <functional>
@@ -10,19 +11,27 @@
 #include <vector>
 
 namespace simbi::mem {
-
+    // where memory lives and kernels execute
     struct device_t {
-        std::int64_t index;   // global device index
-        bool is_gpu;          // true for gpu, false for cpu
-        // device id for gpus (only relevant when is_gpu=true)
-        std::int64_t device_id;
+        bool is_gpu;
+        std::int64_t device_id;   // gpu id, or numa node for cpu
 
-        // equality comparison for containers
-        auto operator<=>(const device_t&) const = default;
+        std::strong_ordering operator<=>(const device_t&) const = default;
 
-        // helper factory functions
-        static device_t cpu() { return {0, false, 0}; }
-        static device_t gpu(int id) { return {id + 1, true, id}; }
+        // factories
+        static device_t cpu(std::int64_t numa_node = 0)
+        {
+            return {false, numa_node};
+        }
+
+        static device_t gpu(std::int64_t id) { return {true, id}; }
+
+        // hash support for unordered_map
+        std::size_t hash() const
+        {
+            return std::hash<bool>{}(is_gpu) ^
+                   (std::hash<std::int64_t>{}(device_id) << 1);
+        }
     };
 
     // track current device (thread local)
@@ -81,7 +90,7 @@ namespace std {
     struct hash<simbi::mem::device_t> {
         std::size_t operator()(const simbi::mem::device_t& loc) const
         {
-            return std::hash<std::int64_t>{}(loc.index);
+            return std::hash<std::int64_t>{}(loc.device_id);
         }
     };
 }   // namespace std

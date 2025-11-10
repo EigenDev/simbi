@@ -222,8 +222,8 @@ namespace simbi::ecs {
             // optional body effects
             auto be = body_effects_system_t<Sim::dimensions>{}(sim, lvl);
 
-            auto u = hydro.cons[mesh.domain];
-            u      = u.enum_map([&](auto coord, auto u) {
+            auto u_p = hydro.cons[mesh.domain];
+            u_p      = u_p.enum_map([&](auto coord, auto u) {
                 return u | add_gas((ell(coord) + be(coord)) * meta.dt);
             });
 
@@ -249,8 +249,8 @@ namespace simbi::ecs {
             const auto dt = meta.dt;
 
             // assume fluxes already computed and corrected
-            auto k1    = godunov_op(hydro, mesh, meta, sources);
-            auto body1 = body_effects_system_t<Sim::dimensions>{}(sim, lvl);
+            auto k1   = godunov_op(hydro, mesh, meta, sources);
+            auto body = body_effects_system_t<Sim::dimensions>{}(sim, lvl);
 
             if (!sim.has_rk_workspace(lvl)) {
                 sim.create_rk_workspace(lvl);
@@ -262,8 +262,8 @@ namespace simbi::ecs {
 
             // advance to u^*
             auto u_star = hydro.cons[mesh.domain];
-            u_star      = u_star.enum_map([k1, body1, dt](auto coord, auto u) {
-                return u | add_gas((k1(coord) + body1(coord)) * dt);
+            u_star      = u_star.enum_map([k1, body, dt](auto coord, auto u) {
+                return u | add_gas((k1(coord) + body(coord)) * dt);
             });
 
             if constexpr (Sim::is_mhd) {
@@ -290,81 +290,22 @@ namespace simbi::ecs {
             auto& workspace = sim.rk_workspace(lvl);
 
             // assume fluxes already computed and corrected for u^*
-            auto k2    = godunov_op(hydro, mesh, meta, sources);
-            auto body2 = body_effects_system_t<Sim::dimensions>{}(sim, lvl);
+            auto k2   = godunov_op(hydro, mesh, meta, sources);
+            auto body = body_effects_system_t<Sim::dimensions>{}(sim, lvl);
 
             // get current u^* and original u^n
             auto u_star = hydro.cons[mesh.domain];
             auto u_n    = workspace.u_n[mesh.domain];
 
             // RK2 combination: u^(n+1) = 0.5*u^n + 0.5*(u^* + dt*k2)
-            u_n = u_n.enum_map([u_star, k2, body2, dt](auto coord, auto u) {
-                return u | scale_gas(0.5) | add_gas(0.5 * u_star[coord]) |
-                       add_gas(0.5 * dt * (k2(coord) + body2(coord)));
+            u_n = u_n.enum_map([u_star, k2, body, dt](auto coord, auto u) {
+                return u | scale_gas(0.5) | add_gas(0.5 * u_star(coord)) |
+                       add_gas(0.5 * dt * (k2(coord) + body(coord)));
             });
 
             // write final solution
             hydro.cons = workspace.u_n.map([](auto u) { return u; });
 
-            if constexpr (Sim::is_mhd) {
-                em::update_energy_density(hydro.cons, hydro.bfield, mesh);
-            }
-        }
-    };
-
-    template <typename Ops>
-    struct rk2_system_t {
-        Ops ops;
-
-        template <typename Sim>
-        void operator()(Sim& sim, std::uint64_t lvl) const
-        {
-            using namespace simbi::structs;
-
-            auto& hydro   = sim.hydro(lvl);
-            auto& mesh    = sim.mesh(lvl);
-            auto& meta    = sim.metadata();
-            auto& sources = sim.sources();
-            const auto dt = sim.metadata().dt;
-
-            sink_cache_system_t{}(sim);
-            staggered_fields_system_t{}(sim, ops, lvl);
-            auto body1 = body_effects_system_t<Sim::dimensions>{}(sim, lvl);
-
-            // create workspace for RK stages
-            auto& workspace = sim.rk_workspace(lvl);
-
-            // === First Stage (k1) ===
-            auto k1 = godunov_op(hydro, mesh, meta, sources);
-
-            // update to intermediate state u*
-            auto u1 = workspace.u_star[mesh.domain];
-            u1      = u1.enum_map([k1, body1, dt](auto coord, auto u) {
-                return u | add_gas((k1(coord) + body1(coord)) * dt);
-            });
-
-            hydro.cons = workspace.u_star.map([](auto u) { return u; });
-            if constexpr (Sim::is_mhd) {
-                em::update_energy_density(hydro.cons, hydro.bfield, mesh);
-            }
-
-            // apply BCs and recover primitives for stage 2
-            c2p_system_t{}(sim, lvl);
-            sink_cache_system_t{}(sim);
-            staggered_fields_system_t{.advance_bfields = false}(sim, ops, lvl);
-            auto body2 = body_effects_system_t<Sim::dimensions>{}(sim, lvl);
-
-            // === Second Stage (k2) ===
-            auto k2 = godunov_op(hydro, mesh, meta, sources);
-
-            // final update
-            auto unc = workspace.u_n[mesh.domain];
-            unc      = unc.enum_map([u1, k2, dt, body2](auto coord, auto u) {
-                return u | scale_gas(0.5) | add_gas(0.5 * u1[coord]) |
-                       add_gas(0.5 * dt * (k2(coord) + body2(coord)));
-            });
-
-            hydro.cons = workspace.u_n.map([](auto u) { return u; });
             if constexpr (Sim::is_mhd) {
                 em::update_energy_density(hydro.cons, hydro.bfield, mesh);
             }

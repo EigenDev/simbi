@@ -2,14 +2,17 @@
 #define LOADER_HPP
 
 #include "compat.hpp"
+#include "compute/field.hpp"
 #include "containers/vector.hpp"
 #include "ecs/builders.hpp"
+#include "ecs/components.hpp"
 #include "ecs/simulation.hpp"
+#include "functional/fp.hpp"
 #include "functional/monad/result.hpp"
+#include "memory/device.hpp"
+#include "mesh/mesh_config.hpp"
 #include "physics/hydro/physics.hpp"
-#include "physics/ib/factory.hpp"
 #include "utility/bimap.hpp"
-#include "utility/config_dict.hpp"
 #include "utility/enums.hpp"
 #include "utility/init_conditions.hpp"
 #include "write_traits.hpp"
@@ -17,6 +20,7 @@
 #include <H5Cpp.h>
 #include <cstddef>
 #include <cstdint>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -234,7 +238,7 @@ namespace simbi::io {
             }
 
             // allocate the final AoS field
-            auto field = stored_field<primitive_t, Dims>(domain);
+            auto field = field_t<primitive_t, Dims>(domain);
 
             // perform the single-pass SoA-to-AoS flip
             field = field.enum_map(
@@ -283,7 +287,7 @@ namespace simbi::io {
                 staggered_shape[dd] += 1;
 
                 auto domain = make_domain(staggered_shape);
-                auto field  = stored_field<real, Dims>(domain);
+                auto field  = field_t<real, Dims>(domain);
 
                 std::vector<real> data(domain.size());
                 auto result = h5::read_field(
@@ -950,10 +954,10 @@ namespace simbi::io {
 
             // convert primitives to conserved
             auto domain     = make_domain(mesh.full_shape);
-            auto cons_field = stored_field<conserved_t, Dims>(domain);
+            auto cons_field = field_t<conserved_t, Dims>(domain);
             cons_field =
                 cons_field.coord_map([prim_field, g = init.gamma](auto coord) {
-                    return hydro::to_conserved(prim_field[coord], g);
+                    return hydro::to_conserved(prim_field(coord), g);
                 });
 
             // read magnetic fields if MHD
@@ -970,10 +974,7 @@ namespace simbi::io {
             // create flux fields
             auto flux_fields =
                 fp::range(Dims) | fp::map([&](std::uint64_t dir) {
-                    return field(
-                        mesh.face_domain[dir],
-                        fp::default_t<conserved_t>{}
-                    );
+                    return field_t<conserved_t, Dims>(mesh.face_domain[dir]);
                 }) |
                 fp::collect<vector_t<field_t<conserved_t, Dims>, Dims>>;
 
@@ -1018,7 +1019,6 @@ namespace simbi::io {
     {
         using namespace ecs;
         using namespace body;
-        using namespace body::factory;
         try {
             auto file = H5::H5File(filename, H5F_ACC_RDONLY);
 
@@ -1233,6 +1233,7 @@ namespace simbi::io {
                         refinement_child_t<Dims>{
                           .parent = sim.levels[lvl - 1],   // link to parent
                           .parent_coverage = parent_coverage
+
                         }
                     );
                 }
@@ -1277,7 +1278,6 @@ namespace simbi::io {
                     fmr_hierarchy_t<Dims>{std::move(hierarchy)}
                 );
             }
-            // TODO: Load body system if present
 
             return result_t<simulation_t<R, Dims, G, EoS>>::ok(std::move(sim));
         }

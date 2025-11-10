@@ -1,14 +1,13 @@
 #ifndef HETERO_DEVICE_EXECUTION_CONTEXT_HPP
 #define HETERO_DEVICE_EXECUTION_CONTEXT_HPP
 
-#include "../config.hpp"
-#include "../core/backend_traits.hpp"
-#include "../core/common_types.hpp"
 #include "compat.hpp"
+#include "hetero/config.hpp"
+#include "hetero/core/backend_traits.hpp"
+#include "hetero/core/common_types.hpp"
 
 #include <cstddef>
 #include <cstdint>
-#include <utility>
 
 namespace simbi::hetero {
 

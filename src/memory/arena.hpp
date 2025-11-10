@@ -4,7 +4,6 @@
 #include "compat.hpp"
 #include "hetero/adapter.hpp"
 #include "memory/device.hpp"
-#include "memory/smart_ptr.hpp"
 
 #include <algorithm>
 #include <cstddef>
@@ -15,6 +14,12 @@
 #include <vector>
 
 namespace simbi::mem {
+
+    struct memory_stats_t {
+        std::size_t allocated;
+        std::size_t peak_allocated;
+        std::size_t arena_size;
+    };
 
     // forward declaration
     template <typename T>
@@ -28,58 +33,21 @@ namespace simbi::mem {
     class arena_t : public std::enable_shared_from_this<arena_t<T>>
     {
       private:
-        // reduced number of buckets (power of 2 sizes)
-        static constexpr int MAX_BUCKETS = 31;   // handles up to 2^30 elements
+        // 31 buckets handle sizes from 2^0 to 2^30 elements
+        // 2^30 * sizeof(T) = max ~8GB for 8-byte types
+        static constexpr int MAX_BUCKETS = 31;
 
-        // storage for each bucket size
-        struct bucket_entry_t {
-            hetero::memory memory_;
-            device_t device;
-
-            bucket_entry_t(hetero::memory&& mem, device_t dev)
-                : memory_(std::move(mem)), device(dev)
-            {
-            }
-
-            // no copy
-            bucket_entry_t(const bucket_entry_t&)            = delete;
-            bucket_entry_t& operator=(const bucket_entry_t&) = delete;
-
-            // move only
-            bucket_entry_t(bucket_entry_t&& other) noexcept
-                : memory_(std::move(other.memory_)), device(other.device)
-            {
-            }
-
-            bucket_entry_t& operator=(bucket_entry_t&& other) noexcept
-            {
-                if (this != &other) {
-                    memory_ = std::move(other.memory_);
-                    device  = other.device;
-                }
-                return *this;
-            }
-            ~bucket_entry_t() = default;
-
-            void* data() const { return memory_.data(); }
-            size_t size() const { return memory_.size(); }
-        };
-
-        std::vector<bucket_entry_t> buckets[MAX_BUCKETS];
+        std::vector<hetero::memory> buckets[MAX_BUCKETS];
         std::mutex mutex;
         device_t dev_;
 
-        // private constructor - use factory function
         explicit arena_t(device_t dev) : dev_(dev) {}
 
-        // calculate bucket index for count
         static int bucket_for(std::size_t count)
         {
             if (count <= 1) {
                 return 0;
             }
-
-            // find highest bit position
             const int bit_pos = 64 - __builtin_clzl(count - 1);
             return std::min(bit_pos, MAX_BUCKETS - 1);
         }
@@ -90,13 +58,12 @@ namespace simbi::mem {
         }
 
       public:
-        // factory method - arena must be managed by shared_ptr
         static std::shared_ptr<arena_t> create(device_t dev)
         {
             return std::shared_ptr<arena_t>(new arena_t(dev));
         }
 
-        mem::shared_ptr<T> get(std::size_t count)
+        std::shared_ptr<T[]> get(std::size_t count)
         {
             if (count == 0) {
                 return nullptr;
@@ -108,97 +75,87 @@ namespace simbi::mem {
 
             // try to reuse from bucket
             {
-                std::lock_guard<std::mutex> lock(mutex);
-                auto& bucket_pool = buckets[bucket];
+                std::lock_guard lock(mutex);
+                auto& pool = buckets[bucket];
 
-                if (!bucket_pool.empty()) {
-                    // extract the memory from bucket entry
-                    auto entry = std::move(bucket_pool.back());
-                    bucket_pool.pop_back();
+                if (!pool.empty()) {
+                    auto memory = std::move(pool.back());
+                    pool.pop_back();
 
-                    T* ptr = static_cast<T*>(entry.data());
-
-                    // create shared_ptr with custom deleter that returns to
-                    // arena
+                    T* ptr    = static_cast<T*>(memory.data());
                     auto self = this->shared_from_this();
-                    return mem::shared_ptr<T>(
+
+                    return std::shared_ptr<T[]>(
                         ptr,
-                        [self,
-                         bucket,
-                         entry = std::move(entry)](T* ptr) mutable {
-                            if (!ptr) {
-                                return;
-                            }
-
-                            try {
-                                std::lock_guard<std::mutex> lock(self->mutex);
-
-                                // return the entry back to the bucket
-                                self->buckets[bucket].emplace_back(
-                                    std::move(entry)
-                                );
-                            }
-                            catch (...) {
-                                // if bucket return fails, entry destructor will
-                                // clean up
-                            }
+                        [self, bucket, memory = std::move(memory)](T*) mutable {
+                            std::lock_guard lock(self->mutex);
+                            self->buckets[bucket].push_back(std::move(memory));
                         }
                     );
                 }
             }
 
-            // allocate new memory using the hetero adapter
+            // allocate new memory
             if (dev_.is_gpu) {
                 hetero::device::set_device(dev_.device_id);
             }
 
             auto memory = [this, bytes]() {
                 using alloc_type = hetero::device_memory::alloc_type;
-
                 if (dev_.is_gpu) {
-                    hetero::device::set_device(dev_.device_id);
                     return hetero::device_memory(bytes, alloc_type::device);
                 }
                 else {
                     return hetero::device_memory(bytes, alloc_type::host);
                 }
             }();
-            T* typed_ptr = static_cast<T*>(memory.data());
 
-            // move memory ownership to the deleter
+            T* ptr    = static_cast<T*>(memory.data());
             auto self = this->shared_from_this();
-            return mem::shared_ptr<T>(
-                typed_ptr,
-                [self, bucket, memory = std::move(memory)](T* ptr) mutable {
-                    if (!ptr) {
-                        return;
-                    }
 
-                    try {
-                        std::lock_guard<std::mutex> lock(self->mutex);
-
-                        // create bucket entry and add to pool
-                        bucket_entry_t entry(std::move(memory), self->dev_);
-                        self->buckets[bucket].emplace_back(std::move(entry));
-                    }
-                    catch (...) {
-                        // if bucket return fails, memory destructor will clean
-                        // up
-                    }
+            return std::shared_ptr<T[]>(
+                ptr,
+                [self, bucket, memory = std::move(memory)](T*) mutable {
+                    std::lock_guard lock(self->mutex);
+                    self->buckets[bucket].push_back(std::move(memory));
                 }
             );
         }
 
-        // clear all pooled memory
         void clear()
         {
-            std::lock_guard<std::mutex> lock(mutex);
+            std::lock_guard lock(mutex);
             for (auto& bucket : buckets) {
                 bucket.clear();
             }
         }
 
         device_t device() const { return dev_; }
+
+        memory_stats_t stats() const
+        {
+            memory_stats_t stats{0, 0, 0};
+
+            std::lock_guard lock(mutex);
+            for (int bucket = 0; bucket < MAX_BUCKETS; ++bucket) {
+                const std::size_t bucket_sz = bucket_size(bucket) * sizeof(T);
+                const std::size_t count     = buckets[bucket].size();
+
+                stats.allocated += count * bucket_sz;
+                stats.peak_allocated += count * bucket_sz;   // simplistic
+                stats.arena_size += count * bucket_sz;
+            }
+
+            return stats;
+        }
+
+        void release_unused()
+        {
+            std::lock_guard lock(mutex);
+            for (auto& bucket : buckets) {
+                bucket.clear();
+            }
+        }
     };
 
     // global arenas for each device and type

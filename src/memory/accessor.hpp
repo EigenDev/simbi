@@ -6,7 +6,7 @@
 #include "containers/vector.hpp"
 #include "domain/domain.hpp"
 #include "io/exceptions.hpp"
-#include "memory/smart_ptr.hpp"
+// #include "memory/smart_ptr.hpp"
 #include "traits/traits.hpp"
 
 #include <cstddef>
@@ -20,7 +20,7 @@ namespace simbi::mem {
     class accessor_t
     {
       private:
-        mem::shared_ptr<T> data_;
+        std::shared_ptr<T[]> data_;
         std::shared_ptr<arena_t<T>> arena_;
         domain_t<Dims> domain_;
         iarray<Dims> strides_;
@@ -57,7 +57,7 @@ namespace simbi::mem {
             }
         }
 
-        accessor_t(const domain_t<Dims>& domain, mem::shared_ptr<T> data)
+        accessor_t(const domain_t<Dims>& domain, std::shared_ptr<T> data)
             : domain_(domain),
               data_(data),
               strides_(compute_strides(domain.shape()))

@@ -2,7 +2,7 @@
 #define MHD_LOGIC_HPP
 
 #include "compat.hpp"
-#include "compute/field.hpp"
+#include "compute/computation.hpp"
 #include "contact.hpp"
 #include "containers/vector.hpp"
 #include "ct_geom.hpp"
@@ -185,10 +185,10 @@ namespace simbi::em {
         constexpr auto nhat = ehat<dims>(Permutation::e_field_component());
 
         return vector_t{
-          flux[h_flux_idx][coords[0]].mag[index(nhat)],   // north
-          flux[h_flux_idx][coords[1]].mag[index(nhat)],   // south
-          flux[v_flux_idx][coords[2]].mag[index(nhat)],   // east
-          flux[v_flux_idx][coords[3]].mag[index(nhat)]    // west
+          flux[h_flux_idx](coords[0]).mag[index(nhat)],   // north
+          flux[h_flux_idx](coords[1]).mag[index(nhat)],   // south
+          flux[v_flux_idx](coords[2]).mag[index(nhat)],   // east
+          flux[v_flux_idx](coords[3]).mag[index(nhat)]    // west
         };
     }
 
@@ -197,10 +197,10 @@ namespace simbi::em {
     {
         auto [h_flux_idx, v_flux_idx] = Permutation::flux_indices();
         return vector_t<real, 4>{
-          flux[h_flux_idx][coords[0]].den,   // north
-          flux[h_flux_idx][coords[1]].den,   // south
-          flux[v_flux_idx][coords[2]].den,   // east
-          flux[v_flux_idx][coords[3]].den    // west
+          flux[h_flux_idx](coords[0]).den,   // north
+          flux[h_flux_idx](coords[1]).den,   // south
+          flux[v_flux_idx](coords[2]).den,   // east
+          flux[v_flux_idx](coords[3]).den    // west
         };
     }
 
@@ -212,10 +212,10 @@ namespace simbi::em {
         constexpr auto nhat = ehat<dims>(Permutation::e_field_component());
 
         return vector_t{
-          em::electric_field(prim[coords[0]])[index(nhat)],   // ne
-          em::electric_field(prim[coords[1]])[index(nhat)],   // nw
-          em::electric_field(prim[coords[2]])[index(nhat)],   // se
-          em::electric_field(prim[coords[3]])[index(nhat)]    // sw
+          em::electric_field(prim(coords[0]))[index(nhat)],   // ne
+          em::electric_field(prim(coords[1]))[index(nhat)],   // nw
+          em::electric_field(prim(coords[2]))[index(nhat)],   // se
+          em::electric_field(prim(coords[3]))[index(nhat)]    // sw
         };
     }
 
@@ -295,7 +295,7 @@ namespace simbi::em {
           state.flux[2][mesh.face_domain[2]]
         };
 
-        return compute_field_t{
+        return computation_t{
           make_ct_magnetic_update_op<MagComp>(
               fluxes,
               state.prim[mesh.domain],
@@ -320,13 +320,13 @@ namespace simbi::em {
         {
             const auto cplus = cminus + array_offset<3>(dir);
             if constexpr (MeshConfig::geometry == Geometry::CARTESIAN) {
-                return 0.5 * (bface[cminus] + bface[cplus]);
+                return 0.5 * (bface(cminus) + bface(cplus));
             }
             else {
                 // volume-average for non-Cartesian geometries
                 auto al = mesh::face_area(cminus, dir, Dir::W, mesh);
                 auto ar = mesh::face_area(cplus, dir, Dir::E, mesh);
-                return (bface[cminus] * al + bface[cplus] * ar) / (al + ar);
+                return (bface(cminus) * al + bface(cplus) * ar) / (al + ar);
             }
         }
 
@@ -346,7 +346,7 @@ namespace simbi::em {
         const MeshConfig& mesh
     )
     {
-        return compute_field_t{
+        return computation_t{
           interpolate_magnetic_op_t{
             bfield[2][mesh.face_domain[2]],
             bfield[1][mesh.face_domain[1]],

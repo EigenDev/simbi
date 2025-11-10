@@ -2,7 +2,7 @@
 #define ADAPTIVE_TIMESTEP_HPP
 
 #include "compat.hpp"
-#include "compute/field.hpp"
+#include "compute/computation.hpp"
 #include "containers/vector.hpp"
 #include "execution/executor.hpp"
 #include "execution/future.hpp"
@@ -47,7 +47,7 @@ namespace simbi {
         DEV constexpr auto
         operator()(coordinate_t<PrimField::dimensions> coord) const
         {
-            const auto prim   = prims[coord];
+            const auto prim   = prims(coord);
             const auto widths = mesh::cell_widths(coord, mesh);
             return compute_local_timestep(prim, widths, gamma, cfl);
         }
@@ -61,7 +61,7 @@ namespace simbi {
         real cfl
     )
     {
-        return compute_field_t{
+        return computation_t{
           timestep_op_t{prim[mesh.domain], gamma, cfl, mesh},
           mesh.domain
         };

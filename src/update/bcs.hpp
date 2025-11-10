@@ -2,7 +2,7 @@
 #define BOUNDARY_CONDITIONS_HPP
 
 #include "compat.hpp"
-#include "compute/field.hpp"
+#include "compute/computation.hpp"
 #include "containers/vector.hpp"
 #include "domain/domain.hpp"
 #include "domain/ghost.hpp"
@@ -269,7 +269,8 @@ namespace simbi::boundary {
         };
 
         auto transform = make_bc_transform(ctx);
-        flux[flux_dim] = flux[flux_dim].insert(field(ghost.domain, transform));
+        flux[flux_dim] =
+            flux[flux_dim].insert(computation(ghost.domain, transform));
     }
 
     // apply boundary conditions to staggered fields
@@ -346,7 +347,7 @@ namespace simbi::boundary {
             };
 
         // apply transform
-        cons = cons.insert(field(full_domain, transform));
+        cons = cons.insert(computation(full_domain, transform));
     }
 
     // helper to find contact dimension and direction
@@ -395,7 +396,7 @@ namespace simbi::boundary {
 
         auto transform = make_bc_transform(ctx);
 
-        cons = cons.insert(field(ghost.domain, transform));
+        cons = cons.insert(computation(ghost.domain, transform));
     }
 
     template <typename SimState>
@@ -450,7 +451,7 @@ namespace simbi::boundary {
             return value;
         };
 
-        cons = cons.insert(field(ghost.domain, transform));
+        cons = cons.insert(computation(ghost.domain, transform));
     }
 
     // apply all boundary conditions
