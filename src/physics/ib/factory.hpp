@@ -248,11 +248,19 @@ namespace simbi::body::factory {
             binary_params.semi_major,
             binary_params.mass_ratio
         );
-        auto [vel1, vel2] = detail::calculate_binary_velocities<Dims>(
-            binary_params.semi_major,
-            binary_params.total_mass,
-            binary_params.mass_ratio
-        );
+        auto [vel1, vel2] = [reference_frame, binary_params]() {
+            if (reference_frame != "inertial") {
+                return std::make_pair(
+                    vector_t<real, Dims>{},
+                    vector_t<real, Dims>{}
+                );
+            }
+            return detail::calculate_binary_velocities<Dims>(
+                binary_params.semi_major,
+                binary_params.total_mass,
+                binary_params.mass_ratio
+            );
+        }();
 
         // create components with calculated kinematics
         auto comp_it = components.begin();

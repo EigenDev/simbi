@@ -25,6 +25,10 @@ namespace simbi::body {
                 return;   // nothing to do, already in rotating frame
             }
 
+            if (bodies.reference_frame() == "stationary") {
+                return;   // nothing to do, static frame
+            }
+
             const auto binary_params = bodies.binary_params();
             const auto total_mass    = binary_params.total_mass;
             const auto a             = binary_params.semi_major;
