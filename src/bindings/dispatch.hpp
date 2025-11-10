@@ -67,7 +67,7 @@ namespace simbi::dispatch {
              : true) &&
 
         // exclude unimplemented regimes
-        (R != Regime::MHD);   // classical mhd not implemented yet
+        (R != Regime::MHD);   // newtonian mhd not implemented yet
 
     //==============================================================================
     // ERROR HANDLING
