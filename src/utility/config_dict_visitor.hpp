@@ -573,7 +573,7 @@ namespace simbi {
             solver         = "hlle";
             reconstruction = "plm";
             timestepping   = "rk2";
-            regime         = "classical";
+            regime         = "newtonain";
             plm_theta      = 1.5;   // Default PLM theta
         }
 
