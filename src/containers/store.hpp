@@ -38,7 +38,7 @@ namespace simbi {
                     new_data.data(),
                     data_.data(),
                     size_ * sizeof(T),
-                    hetero::memory_kind_t::device_to_device
+                    hetero::memory_direction_t::device_to_device
                 );
             }
 
