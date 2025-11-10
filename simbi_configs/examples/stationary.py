@@ -22,7 +22,7 @@ class StationaryWaveHLL(SimbiBaseConfig):
         CoordSystem.CARTESIAN, description="Coordinate system"
     )
 
-    regime: Regime = SimbiField(Regime.CLASSICAL, description="Physics regime")
+    regime: Regime = SimbiField(Regime.NEWTONIAN, description="Physics regime")
 
     adiabatic_index: float = SimbiField(
         5.0 / 3.0, description="Adiabatic index"

@@ -24,7 +24,7 @@ class SodProblem(SimbiBaseConfig):
     coord_system: CoordSystem = SimbiField(
         CoordSystem.CARTESIAN, description="Coordinate system"
     )
-    regime: Regime = SimbiField(Regime.CLASSICAL, description="Physics regime")
+    regime: Regime = SimbiField(Regime.NEWTONIAN, description="Physics regime")
 
     # Optional customizations (with defaults from SimbiBaseConfig)
     x1_spacing: CellSpacing = SimbiField(
