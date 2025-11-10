@@ -14,6 +14,12 @@ namespace simbi {
     template <std::uint64_t Dims>
     struct domain_t;
 
+    namespace domain_algebra {
+        template <std::uint64_t Dims>
+        constexpr auto
+        contract(const domain_t<Dims>& domain, const iarray<Dims>& contraction);
+    }
+
     template <std::uint64_t Dims>
     struct physical_region_t {
         vector_t<real, Dims> min;
@@ -164,6 +170,19 @@ namespace simbi {
 
             auto [subdomains, count] = subdivide(*this, divisions);
             return (part < count) ? subdomains[part] : domain_t<Dims>{};
+        }
+
+        domain_t contract(const iarray<Dims>& amount) const
+        {
+            return domain_algebra::contract(*this, amount);
+        }
+        template <std::integral T>
+        domain_t contract(T amount) const
+        {
+            return domain_algebra::contract(
+                *this,
+                ones<Dims, std::int64_t>() * static_cast<std::int64_t>(amount)
+            );
         }
 
         // iterator support
