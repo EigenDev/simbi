@@ -204,7 +204,7 @@ class RichSimulationSummary:
             "x3bounds": "Physical bounds in x3-direction",
             "dimensionality": "Number of dimensions (1, 2, or 3)",
             "coord_system": "Coordinate system (cartesian, cylindrical, spherical)",
-            "regime": "Physical regime (classical, srhd, srmhd)",
+            "regime": "Physical regime (newtonian, srhd, srmhd)",
             "adiabatic_index": "Adiabatic index for the gas",
             "isothermal": "Isothermal condition (True/False)",
             "is_mhd": "Magnetohydrodynamics (True/False)",
