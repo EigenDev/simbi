@@ -44,7 +44,7 @@ namespace simbi::mem {
                     dst.data(),
                     src.data(),
                     bytes,
-                    hetero::memory_kind_t::device_to_device
+                    hetero::memory_direction_t::device_to_device
                 );
             }
             else {
@@ -66,7 +66,7 @@ namespace simbi::mem {
                 dst.data(),
                 src.data(),
                 bytes,
-                hetero::memory_kind_t::device_to_host
+                hetero::memory_direction_t::device_to_host
             );
         }
         else if (!src.device().is_gpu && dst.device().is_gpu) {
@@ -76,7 +76,7 @@ namespace simbi::mem {
                 dst.data(),
                 src.data(),
                 bytes,
-                hetero::memory_kind_t::host_to_device
+                hetero::memory_direction_t::host_to_device
             );
         }
         else {
@@ -111,7 +111,7 @@ namespace simbi::mem {
                 host_ptr,
                 src.data(),
                 bytes,
-                hetero::memory_kind_t::device_to_host
+                hetero::memory_direction_t::device_to_host
             );
         }
         else {
@@ -137,7 +137,7 @@ namespace simbi::mem {
                 dst.data(),
                 host_ptr,
                 bytes,
-                hetero::memory_kind_t::host_to_device
+                hetero::memory_direction_t::host_to_device
             );
         }
         else {
