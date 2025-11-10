@@ -54,7 +54,7 @@ namespace simbi::base::stencils {
                 for (std::uint64_t d = 0; d < Dims; ++d) {
                     coord[d] += pattern[ii][d];
                 }
-                values[ii] = field_[coord];
+                values[ii] = field_(coord);
             }
             return values;
         }
