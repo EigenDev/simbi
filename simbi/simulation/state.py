@@ -13,7 +13,7 @@ engine needs to run, with no ambiguity or partial state.
 
 import math
 from pathlib import Path
-from typing import Callable, Optional
+from typing import Any, Callable, Optional, Sequence
 
 from pydantic import BaseModel, ConfigDict, Field, computed_field
 
@@ -29,9 +29,7 @@ from simbi.core.types.input import (
 )
 from simbi.core.types.typing import ExpressionDict
 
-from .base import BaseProblemConfig
-
-# from .state import SimulationStateSpec
+from .interfaces import ProblemInterface
 
 
 class SimulationStateSpec(BaseModel):
@@ -67,7 +65,7 @@ class SimulationStateSpec(BaseModel):
         description="Grid resolution (nx,) or (nx, ny) or (nx, ny, nz)",
     )
 
-    bounds: list[tuple[float, float]] = Field(
+    bounds: Sequence[Sequence[float]] = Field(
         ...,
         description="Domain boundaries [(xmin, xmax), (ymin, ymax), (zmin, zmax)]",
     )
@@ -80,7 +78,7 @@ class SimulationStateSpec(BaseModel):
     # Physics configuration
     regime: Regime = Field(
         ...,
-        description="Physics regime (classical, SRHD, SRMHD)",
+        description="Physics regime (newtonian, SRHD, SRMHD)",
     )
 
     adiabatic_index: float = Field(
@@ -331,9 +329,10 @@ class SimulationStateSpec(BaseModel):
     # BACK-REFERENCE (runtime only, never serialized to C++)
     # ========================================================================
 
-    source_config: Optional[BaseProblemConfig] = Field(
+    source_config: Optional[Any] = Field(
         default=None,
         exclude=True,  # Never serialize to C++
+        validation_alias=None,
         description="Original problem config that produced this state (runtime only)",
     )
 
@@ -440,7 +439,7 @@ class SimulationStateSpec(BaseModel):
     def from_checkpoint(
         cls,
         checkpoint_metadata: dict,
-        user_config: BaseProblemConfig,
+        user_config: ProblemInterface,
     ) -> "SimulationStateSpec":
         """
         Create simulation state from checkpoint metadata and user config.

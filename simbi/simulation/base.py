@@ -29,10 +29,10 @@ from simbi.core.types.input import (
     Solver,
     TimeStepping,
 )
-from simbi.core.types.typing import InitialStateType
+from simbi.core.types.typing import ExpressionDict, InitialStateType
 
 from .fields import ProblemField
-from .state import SimulationStateSpec
+from .interfaces import StateInterface
 
 
 class BaseProblemConfig(CLIConfigurableModel, ABC):
@@ -64,7 +64,7 @@ class BaseProblemConfig(CLIConfigurableModel, ABC):
         ...             resolution=(self.resolution,),
         ...             bounds=[(0.0, 1.0)],
         ...             coord_system=CoordSystem.CARTESIAN,
-        ...             regime=Regime.CLASSICAL,
+        ...             regime=Regime.NEWTONAIN,
         ...             adiabatic_index=5.0/3.0,
         ...             boundary_conditions=[BoundaryCondition.OUTFLOW],
         ...             source_config=self,
@@ -191,12 +191,53 @@ class BaseProblemConfig(CLIConfigurableModel, ABC):
         description="Enable Fleischmann low-Mach fix for HLLC solver",
     )
 
+    # Expression properties - overrided as needed
+    @property
+    def hydro_source_expressions(self) -> ExpressionDict:
+        """Hydrodynamic source terms. Override to add buffer damping, heating, etc."""
+        return {}
+
+    @property
+    def gravity_source_expressions(self) -> ExpressionDict:
+        """Gravity source terms. Override for custom gravity."""
+        return {}
+
+    @property
+    def bx1_inner_expressions(self) -> ExpressionDict:
+        """Inner x1 boundary expressions. Override for dynamic boundaries."""
+        return {}
+
+    @property
+    def bx1_outer_expressions(self) -> ExpressionDict:
+        """Outer x1 boundary expressions."""
+        return {}
+
+    @property
+    def bx2_inner_expressions(self) -> ExpressionDict:
+        """Inner x2 boundary expressions."""
+        return {}
+
+    @property
+    def bx2_outer_expressions(self) -> ExpressionDict:
+        """Outer x2 boundary expressions."""
+        return {}
+
+    @property
+    def bx3_inner_expressions(self) -> ExpressionDict:
+        """Inner x3 boundary expressions."""
+        return {}
+
+    @property
+    def bx3_outer_expressions(self) -> ExpressionDict:
+        """Outer x3 boundary expressions."""
+        return {}
+
     # ========================================================================
     # ABSTRACT METHODS - Must be implemented by subclasses
     # ========================================================================
 
     @abstractmethod
-    def build_state(self) -> SimulationStateSpec:
+    def build_state(self) -> StateInterface:
         """
         Build the complete simulation state specification.
 
@@ -216,7 +257,7 @@ class BaseProblemConfig(CLIConfigurableModel, ABC):
             ...         resolution=(self.resolution,),
             ...         bounds=[(0.0, 1.0)],
             ...         coord_system=CoordSystem.CARTESIAN,
-            ...         regime=Regime.CLASSICAL,
+            ...         regime=Regime.NEWTONAIN,
             ...         adiabatic_index=5.0/3.0,
             ...         boundary_conditions=[BoundaryCondition.OUTFLOW],
             ...         source_config=self,
@@ -396,6 +437,20 @@ class BaseProblemConfig(CLIConfigurableModel, ABC):
 
         state_field_names = SimulationStateSpec.model_fields.keys()
         config_values = self.model_dump()
+
+        expression_fields = [
+            "hydro_source_expressions",
+            "gravity_source_expressions",
+            "bx1_inner_expressions",
+            "bx1_outer_expressions",
+            "bx2_inner_expressions",
+            "bx2_outer_expressions",
+            "bx3_inner_expressions",
+            "bx3_outer_expressions",
+        ]
+
+        for field in expression_fields:
+            config_values[field] = getattr(self, field)
 
         # Forward any config field that exists in state spec
         # Exclude 'order' since it's just a convenience parameter
