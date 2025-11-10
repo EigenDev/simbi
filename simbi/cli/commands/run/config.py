@@ -1,11 +1,12 @@
 import ast
-import sys
 import importlib
-from pathlib import Path
-from typing import Sequence, Optional, Set
+import sys
 from argparse import ArgumentParser, Namespace
-from ....simulator import Hydro
+from pathlib import Path
+from typing import Optional, Sequence, Set
+
 from ....detail import bcolors
+from ....simulator import Hydro
 from ...utils.type_checker import type_check_input
 
 
@@ -16,7 +17,9 @@ def _build_inheritance_graph(root: ast.Module) -> dict[str, Set[str]]:
     for node in root.body:
         if isinstance(node, ast.ClassDef):
             # Get all base classes for this class
-            bases = [base.id for base in node.bases if isinstance(base, ast.Name)]
+            bases = [
+                base.id for base in node.bases if isinstance(base, ast.Name)
+            ]
             inheritance_graph[node.name] = set(bases)
 
     return inheritance_graph
@@ -30,7 +33,9 @@ def _get_derived_classes(
 
     def visit(class_name: str) -> None:
         # Find all classes that directly inherit from this class
-        direct_children = {name for name, bases in graph.items() if class_name in bases}
+        direct_children = {
+            name for name, bases in graph.items() if class_name in bases
+        }
         # Add them to our result set
         derived.update(direct_children)
         # Recursively visit each child
@@ -78,7 +83,9 @@ def _configure_single_state(
     problem_class = problem_class_t.from_cli(parser)
 
     if args.info:
-        print(f"{bcolors.YELLOW}Printing parameters in {setup_class}{bcolors.ENDC}")
+        print(
+            f"{bcolors.YELLOW}Printing parameters in {setup_class}{bcolors.ENDC}"
+        )
         problem_class.cli_parser.print_help()
         return None, ""
 
@@ -117,7 +124,7 @@ def configure_state(
     states = []
     state_docs = []
 
-    for idx, setup_class in enumerate(setup_classes):
+    for _, setup_class in enumerate(setup_classes):
         state, doc = _configure_single_state(
             base_script, setup_class, parser, args, argv
         )
