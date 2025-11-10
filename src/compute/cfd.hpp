@@ -3,7 +3,7 @@
 
 #include "base/stencil_view.hpp"
 #include "compat.hpp"
-#include "compute/field.hpp"
+#include "compute/computation.hpp"
 #include "containers/state_ops.hpp"
 #include "containers/vector.hpp"
 #include "domain/domain.hpp"
@@ -23,7 +23,7 @@ namespace simbi::cfd {
     using namespace simbi::body;
 
     // =================================================================
-    // Pure CFD Operations - Return compute_field_t
+    // Pure CFD Operations - Return computation_t
     // =================================================================
 
     template <typename Fluxes, typename MeshConfig>
@@ -46,8 +46,8 @@ namespace simbi::cfd {
                 const auto coord_plus = coord + offset;
 
                 // flux values at left and right faces
-                const auto fl = fluxes[dir][coord /***/];
-                const auto fr = fluxes[dir][coord_plus];
+                const auto fl = fluxes[dir](coord /**/);
+                const auto fr = fluxes[dir](coord_plus);
 
                 // geometric face areas
                 const auto al = mesh::face_area(coord, dir, Dir::W, mesh);
@@ -74,7 +74,7 @@ namespace simbi::cfd {
         for (std::uint64_t dir = 0; dir < FluxField::dimensions; ++dir) {
             flux_views[dir] = flux[dir][mesh.face_domain[dir]];
         }
-        return compute_field_t{
+        return computation_t{
           flux_divergence_op_t{flux_views, mesh},
           make_domain(mesh.domain.shape())
         };
@@ -99,7 +99,7 @@ namespace simbi::cfd {
             }
 
             const auto position  = mesh::centroid(coord, mesh);
-            const auto primitive = prims[coord];
+            const auto primitive = prims(coord);
 
             return gravity_source->apply(position, primitive, time, gamma);
         }
@@ -118,7 +118,7 @@ namespace simbi::cfd {
         real gamma
     )
     {
-        return compute_field_t{
+        return computation_t{
           gravity_source_op_t{gravity_source, prims, mesh, time, gamma},
           make_domain(mesh.domain.shape())
         };
@@ -140,7 +140,7 @@ namespace simbi::cfd {
             }
 
             const auto position  = mesh::centroid(coord, mesh);
-            const auto conserved = cons[coord];
+            const auto conserved = cons(coord);
 
             return hydro_source->apply(position, conserved, time);
         }
@@ -158,7 +158,7 @@ namespace simbi::cfd {
         real time
     )
     {
-        return compute_field_t{
+        return computation_t{
           hydro_sources_op_t{source, cons, mesh, time},
           make_domain(mesh.domain.shape())
         };
@@ -180,7 +180,7 @@ namespace simbi::cfd {
                 return conserved_t{};
             }
             else {
-                const auto primitive = prims[coord];
+                const auto primitive = prims(coord);
                 return mesh::geometric_source_terms(
                     primitive,
                     coord,
@@ -202,7 +202,7 @@ namespace simbi::cfd {
         real gamma
     )
     {
-        return compute_field_t{
+        return computation_t{
           geometric_source_op_t{prims, mesh, gamma},
           make_domain(mesh.domain.shape())
         };
@@ -232,7 +232,7 @@ namespace simbi::cfd {
                 return total_effect;
             }
 
-            const auto prim       = prims[coord];
+            const auto prim       = prims(coord);
             const bool is_binary  = (bodies.size() == 2);
             const auto sink_cache = bodies.sink_cache;
             bodies.visit_all([&](const auto& body) {
@@ -310,7 +310,7 @@ namespace simbi::cfd {
         real dt
     )
     {
-        return compute_field_t{
+        return computation_t{
           body_effects_op_t{bodies, prims, mesh, diagnostics.get(), gamma, dt},
           make_domain(mesh.domain.shape())
         };
@@ -341,8 +341,8 @@ namespace simbi::cfd {
             const auto offset = unit_vectors::array_offset<dims>(ldd);
             const real dx     = widths[ldd];
 
-            const auto v_plus  = prims[coord + offset].vel;
-            const auto v_minus = prims[coord - offset].vel;
+            const auto v_plus  = prims(coord + offset).vel;
+            const auto v_minus = prims(coord - offset).vel;
             const auto dv      = (v_plus - v_minus) / (2.0 * dx);
 
             for (std::uint64_t ii = 0; ii < dims; ++ii) {
@@ -403,8 +403,8 @@ namespace simbi::cfd {
                 const auto offset = unit_vectors::array_offset<dims>(ldd);
                 const real dxi    = widths[ldd];
 
-                const auto v_plus  = prims[coord + offset].vel;
-                const auto v_minus = prims[coord - offset].vel;
+                const auto v_plus  = prims(coord + offset).vel;
+                const auto v_minus = prims(coord - offset).vel;
                 const auto dv      = (v_plus - v_minus) / (2.0 * dxi);
 
                 for (std::uint64_t ii = 0; ii < dims; ++ii) {
@@ -577,7 +577,7 @@ namespace simbi::cfd {
         std::uint64_t dir
     )
     {
-        return compute_field_t{
+        return computation_t{
           compute_fluxes_op_t{prims, metadata, mesh, ops, dir},
           make_domain(mesh.face_domain[dir].shape())
         };
