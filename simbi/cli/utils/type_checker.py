@@ -1,9 +1,11 @@
 import subprocess
 import sys
 import time
-from simbi import logger, bcolors
 from pathlib import Path
+
 from halo import Halo
+
+from simbi import bcolors, logger
 
 
 def type_check_input(file: Path) -> None:
@@ -38,7 +40,9 @@ def type_check_input(file: Path) -> None:
         spinner.stop_and_persist(
             symbol="\n", text=f"{bcolors.GREEN}{output}{bcolors.ENDC}"
         )
-        spinner = Halo(text="Moving forward with simulation setup", spinner="dots")
+        spinner = Halo(
+            text="Moving forward with simulation setup", spinner="dots"
+        )
         spinner.start()
         # wait a few seconds before moving forward
         # to give user a chance to read the message
