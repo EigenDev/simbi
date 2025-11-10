@@ -222,7 +222,7 @@ namespace simbi::hetero {
         using vector_type = device_vector_t<cpu_backend_t, T>;
 
         static void
-        copy(void* dst, const void* src, size_t bytes, memory_kind_t)
+        copy(void* dst, const void* src, size_t bytes, memory_direction_t)
         {
             std::memcpy(dst, src, bytes);
         }
@@ -231,7 +231,7 @@ namespace simbi::hetero {
             void* dst,
             const void* src,
             size_t bytes,
-            memory_kind_t kind,
+            memory_direction_t kind,
             const stream_type&
         )
         {
@@ -253,7 +253,7 @@ namespace simbi::hetero {
                     "cpu backend only supports device 0"
                 );
             }
-            copy(dst, src, bytes, memory_kind_t::device_to_device);
+            copy(dst, src, bytes, memory_direction_t::device_to_device);
         }
 
         static void peer_copy(
@@ -270,7 +270,7 @@ namespace simbi::hetero {
                     "cpu backend only supports device 0"
                 );
             }
-            copy(dst, src, bytes, memory_kind_t::device_to_device);
+            copy(dst, src, bytes, memory_direction_t::device_to_device);
         }
 
         static memory_type allocate(size_t bytes) { return memory_type(bytes); }

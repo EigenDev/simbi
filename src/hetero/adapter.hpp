@@ -3,6 +3,7 @@
 
 #include "compat.hpp"
 #include "core/resource_types.hpp"
+#include "hetero/config.hpp"
 
 #ifdef CUDA_ENABLED
 #include "detail/cuda_impl.hpp"
