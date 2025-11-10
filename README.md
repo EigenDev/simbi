@@ -290,7 +290,7 @@ class KelvinHelmholtz(SimbiBaseConfig):
     )
 
     # Physics configuration
-    regime: Regime = SimbiField(Regime.CLASSICAL, description="Physics regime")
+    regime: Regime = SimbiField(Regime.NEWTONIAN, description="Physics regime")
     solver: Solver = SimbiField(Solver.HLLC, description="Riemann solver")
     adiabatic_index: float = SimbiField(5.0/3.0, description="Ratio of specific heats")
 
