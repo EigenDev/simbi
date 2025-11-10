@@ -30,7 +30,7 @@ class CoordSystem(str, ExtendedEnum):
 
 
 class Regime(str, ExtendedEnum):
-    CLASSICAL = "newtonian"
+    NEWTONIAN = "newtonian"
     SRHD = "srhd"
     SRMHD = "srmhd"
 
