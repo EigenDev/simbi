@@ -46,6 +46,8 @@ gpu_settings = {
       '-std=c++20',
       '--compiler-options',
       '-fPIC',
+      '--compiler-options',
+      '-fdiagnostics-color=always',
       '-DCUDA_ENABLED',
     ],
     'link_args': [f'-L@cuda_root@/lib64', '-lcudart'],
@@ -56,7 +58,7 @@ gpu_settings = {
   'amd': {
     'compiler': 'hipcc',
     'arch': gpu_arch,
-    'args': ['-fPIC'] + gpu_arch.split(' ') + ['-DHIP_ENABLED'],
+    'args': ['-fPIC', '-fdiagnostics-color=always'] + gpu_arch.split(' ') + ['-DHIP_ENABLED'],
     'link_args': [f'-L@rocm_path@/lib', '-lamdhip64'],
     'inter_link_args': [],
     'extra_link_args': [],

@@ -22,7 +22,7 @@ namespace simbi::mesh::fmr {
         // (a - b + 1) / b is also not floor.
         std::int64_t d = a / b;
         std::int64_t r = a % b;
-        return (r != 0 && (a < 0 != b < 0)) ? d - 1 : d;
+        return (r != 0 && ((a < 0) != (b < 0))) ? d - 1 : d;
 
         // A simpler, correct alternative if you don't mind the cast:
         // return static_cast<std::int64_t>(std::floor(

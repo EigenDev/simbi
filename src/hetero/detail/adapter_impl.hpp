@@ -41,14 +41,18 @@ namespace simbi::hetero {
         using vector_type = typename detail::adapter_traits_t<
             backend_t>::template vector_type<T>;
 
-        static void
-        copy(void* dst, const void* src, std::size_t bytes, memory_kind_t kind);
+        static void copy(
+            void* dst,
+            const void* src,
+            std::size_t bytes,
+            memory_direction_t kind
+        );
 
         static void copy_async(
             void* dst,
             const void* src,
             std::size_t bytes,
-            memory_kind_t kind,
+            memory_direction_t kind,
             const stream_type& stream
         );
 

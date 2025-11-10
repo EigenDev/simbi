@@ -25,7 +25,7 @@ namespace simbi::hetero {
         }
     };
 
-    enum class memory_kind_t {
+    enum class memory_direction_t {
         host_to_device,
         device_to_host,
         device_to_device,

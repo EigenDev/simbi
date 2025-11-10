@@ -327,21 +327,25 @@ namespace simbi::hetero {
         template <typename T>
         using vector_type = device_vector_t<cuda_backend_t, T>;
 
-        static void
-        copy(void* dst, const void* src, std::size_t bytes, memory_kind_t kind)
+        static void copy(
+            void* dst,
+            const void* src,
+            std::size_t bytes,
+            memory_direction_t kind
+        )
         {
             cudaMemcpyKind cuda_kind;
             switch (kind) {
-                case memory_kind_t::host_to_device:
+                case memory_direction_t::host_to_device:
                     cuda_kind = cudaMemcpyHostToDevice;
                     break;
-                case memory_kind_t::device_to_host:
+                case memory_direction_t::device_to_host:
                     cuda_kind = cudaMemcpyDeviceToHost;
                     break;
-                case memory_kind_t::device_to_device:
+                case memory_direction_t::device_to_device:
                     cuda_kind = cudaMemcpyDeviceToDevice;
                     break;
-                case memory_kind_t::host_to_host:
+                case memory_direction_t::host_to_host:
                     cuda_kind = cudaMemcpyHostToHost;
                     break;
             }
@@ -355,22 +359,22 @@ namespace simbi::hetero {
             void* dst,
             const void* src,
             std::size_t bytes,
-            memory_kind_t kind,
+            memory_direction_t kind,
             const stream_type& stream
         )
         {
             cudaMemcpyKind cuda_kind;
             switch (kind) {
-                case memory_kind_t::host_to_device:
+                case memory_direction_t::host_to_device:
                     cuda_kind = cudaMemcpyHostToDevice;
                     break;
-                case memory_kind_t::device_to_host:
+                case memory_direction_t::device_to_host:
                     cuda_kind = cudaMemcpyDeviceToHost;
                     break;
-                case memory_kind_t::device_to_device:
+                case memory_direction_t::device_to_device:
                     cuda_kind = cudaMemcpyDeviceToDevice;
                     break;
-                case memory_kind_t::host_to_host:
+                case memory_direction_t::host_to_host:
                     cuda_kind = cudaMemcpyHostToHost;
                     break;
             }
@@ -445,13 +449,17 @@ namespace simbi::hetero {
             std::int64_t device_id = 0
         )
         {
-            int device = static_cast<int>(device_id);
+            int device       = static_cast<int>(device_id);
+            auto cuda_device = cudaMemLocation{
+              .type = cudaMemLocationTypeDevice,
+              .id   = device
+            };
             check_error<cuda_backend_t>(
                 cudaGetDevice(&device),
                 "get current device for prefetch"
             );
             check_error<cuda_backend_t>(
-                cudaMemPrefetchAsync(ptr, bytes, device, 0),
+                cudaMemPrefetchAsync(ptr, bytes, cuda_device, 0),
                 "prefetch to device"
             );
         }
@@ -632,7 +640,7 @@ namespace simbi::hetero {
                 host_ptr,
                 device_vec.data(),
                 device_vec.size_bytes(),
-                memory_kind_t::device_to_host
+                memory_direction_t::device_to_host
             );
         }
 
@@ -644,7 +652,7 @@ namespace simbi::hetero {
                 device_vec.data(),
                 host_ptr,
                 device_vec.size_bytes(),
-                memory_kind_t::host_to_device
+                memory_direction_t::host_to_device
             );
         }
 
@@ -659,7 +667,7 @@ namespace simbi::hetero {
                 host_ptr,
                 device_vec.data(),
                 device_vec.size_bytes(),
-                memory_kind_t::device_to_host,
+                memory_direction_t::device_to_host,
                 stream
             );
         }
@@ -675,7 +683,7 @@ namespace simbi::hetero {
                 device_vec.data(),
                 host_ptr,
                 device_vec.size_bytes(),
-                memory_kind_t::host_to_device,
+                memory_direction_t::host_to_device,
                 stream
             );
         }

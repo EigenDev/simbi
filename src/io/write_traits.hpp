@@ -2,6 +2,8 @@
 #define IO_TYPE_TRAITS_HPP
 
 #include <H5Cpp.h>
+#include <cstddef>
+#include <cstdint>
 
 namespace simbi::io {
     template <typename T>
@@ -58,6 +60,7 @@ namespace simbi::io {
         }
     };
 
+#ifdef __clang__
     template <>
     struct h5_pred_type<std::size_t> {
         static const H5::PredType& value()
@@ -65,6 +68,7 @@ namespace simbi::io {
             return H5::PredType::NATIVE_UINT64;
         }
     };
+#endif
 
     template <>
     struct h5_pred_type<std::uint32_t> {
