@@ -19,8 +19,8 @@ class {setup_name}(SimbiBaseConfig):
         help='Coordinate system used for the simulation'
     )
     regime: Regime = SimbiField(
-        value=Regime.CLASSICAL,
-        help='Regime of the simulation, e.g. CLASSICAL, SRHD, RMHD.'
+        value=Regime.NEWTONIAN,
+        help='Regime of the simulation, e.g. NEWTONIAN, SRHD, RMHD.'
     )
     solver: Solver = SimbiField(
         value=Solver.HLLC,
