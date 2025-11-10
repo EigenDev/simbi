@@ -141,6 +141,7 @@ namespace simbi::evolution {
             ecs::ghost_fill_system_t{}(sim, lvl);
             ecs::c2p_system_t{}(sim, lvl);
             ecs::timestep_system_t{}(sim, lvl);
+            ecs::sink_cache_system_t{}(sim);
         }
 
         void step_all_rk2(
@@ -162,7 +163,6 @@ namespace simbi::evolution {
 
             // calc timestep (only at finest level)
             ecs::timestep_system_t{}(sim, levels.size() - 1);
-
             ecs::sink_cache_system_t{}(sim);
 
             // calc fluxes for u^n
