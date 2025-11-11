@@ -8,6 +8,7 @@
 #include "execution/future.hpp"
 #include "functional/fp.hpp"
 #include "hetero/adapter.hpp"
+#include "hetero/core/primitives.hpp"
 #include "hetero/device/execution_context.hpp"
 #include "memory/device.hpp"
 #include "thread_pool.hpp"
@@ -391,21 +392,19 @@ namespace simbi::exec {
         auto for_each_impl(
             const domain_t<Dims>& domain,
             Func&& func,
-            const iarray<Dims>& /*tile_size*/
+            const iarray<Dims>& tile_size
         ) const -> future_t<void>
         {
             return async_impl([=, this]() {
-                iterate_domain_parallel(domain, func);
-                //                 const auto tiles = tiling::make_tiles(domain,
-                //                 tile_size);
+                // iterate_domain_parallel(domain, func);
+                const auto tiles = tiling::make_tiles(domain, tile_size);
 
-                // #pragma omp parallel for schedule(static)
-                //                 for (std::size_t tile_idx = 0; tile_idx <
-                //                 tiles.size();
-                //                      ++tile_idx) {
-                //                     const auto& tile = tiles[tile_idx];
-                //                     iterate_domain_serial(tile.domain, func);
-                //                 }
+#pragma omp parallel for schedule(static)
+                for (std::size_t tile_idx = 0; tile_idx < tiles.size();
+                     ++tile_idx) {
+                    const auto& tile = tiles[tile_idx];
+                    iterate_domain_serial(tile.domain, func);
+                }
             });
         }
 
@@ -526,82 +525,177 @@ namespace simbi::exec {
         }
     };
 
-    class gpu_executor_t : public executor_base_t<gpu_executor_t>
-    {
-      private:
-        std::vector<mem::device_t> devices_;
-        std::vector<hetero::stream> streams_;
+    namespace detail {
+        // --- reduction kernel definitions ---
 
-      public:
-        constexpr gpu_executor_t(
-            const std::vector<std::int64_t>& device_ids = {}
+        // this first kernel performs a partial reduction on each block
+        template <
+            std::uint64_t Dims,
+            typename U,
+            typename Mapper,
+            typename Reducer>
+        KERNEL void reduce_kernel_part1(
+            domain_t<Dims> domain,
+            Mapper mapper,
+            Reducer reducer,
+            U init,
+            std::size_t n,
+            U* partial_results   // output buffer [size = grid_size]
         )
         {
-            if (device_ids.empty()) {
-                auto device_count = hetero::device::get_device_count();
-                for (std::int64_t ii = 0; ii < device_count; ++ii) {
-                    devices_.push_back(mem::device_t::gpu(ii));
-                    streams_.emplace_back(hetero::device::create_stream());
-                }
-            }
-            else {
-                for (auto id : device_ids) {
-                    devices_.push_back(mem::device_t::gpu(id));
-                    streams_.emplace_back(hetero::device::create_stream());
-                }
+            // "rehydrate" the type-safe shared memory wrapper
+            extern SHARED hetero::shared_memory_t<U> shared_mem_proxy[];
+            auto& shared_mem = *shared_mem_proxy;
+
+            const auto block = hetero::this_block();
+            const auto warp  = block.get_sub_group();
+            const auto grid  = hetero::grid::idx();
+
+            U thread_sum = init;
+
+            // --- per-thread reduction (grid-stride loop) ---
+            const auto global_idx    = grid.global_thread_id();
+            const auto total_threads = grid.total_threads();
+
+            for (auto ii = global_idx; ii < n; ii += total_threads) {
+                thread_sum =
+                    reducer(thread_sum, mapper(domain.linear_to_coord(ii)));
             }
 
-            if (devices_.empty()) {
-                devices_.push_back(mem::device_t::gpu(0));
-                streams_.emplace_back(hetero::device::create_stream());
+            // --- per-block reduction (two-level: warp + shared mem) ---
+
+            // level 1: fast warp-level reduction using shuffles
+            U warp_sum = hetero::reduce(warp, thread_sum, reducer);
+
+            // level 2: block-level reduction
+            // one thread from each warp writes its partial sum to shared memory
+            if (warp.is_leader()) {
+                shared_mem[warp.id()] = warp_sum;
+            }
+
+            block.sync();   // wait for all warps to write
+
+            // the first warp (warp 0) now reduces the shared memory results
+            U block_sum = init;
+            if (warp.id() == 0) {
+                // read from shared mem, guarding against non-full warps
+                U val     = (block.rank() < block.num_sub_groups())
+                                ? shared_mem[block.rank()]
+                                : init;
+                block_sum = hetero::reduce(warp, val, reducer);
+            }
+
+            // the leader of the entire block writes the final block sum
+            if (block.is_leader()) {
+                partial_results[grid.block_id()] = block_sum;
             }
         }
 
-        ~gpu_executor_t() = default;
+        // this second kernel (run as one block) reduces the partial sums
+        template <typename U, typename Reducer>
+        KERNEL void reduce_kernel_part2(
+            U* partial_results,
+            U* final_result,
+            std::size_t num_partials,
+            Reducer reducer,
+            U init
+        )
+        {
+            extern SHARED hetero::shared_memory_t<U> shared_mem_proxy[];
+            auto& shared_mem = *shared_mem_proxy;
+
+            const auto block = hetero::this_block();
+            const auto warp  = block.get_sub_group();
+
+            U thread_sum = init;
+
+            // each thread sums a portion of the partial results
+            for (auto ii = block.rank(); ii < num_partials;
+                 ii += block.size()) {
+                thread_sum = reducer(thread_sum, partial_results[ii]);
+            }
+
+            // perform one final block-level reduction
+            U warp_sum = hetero::reduce(warp, thread_sum, reducer);
+
+            if (warp.is_leader()) {
+                shared_mem[warp.id()] = warp_sum;
+            }
+
+            block.sync();
+
+            U block_sum = init;
+            if (warp.id() == 0) {
+                U val     = (block.rank() < block.num_sub_groups())
+                                ? shared_mem[block.rank()]
+                                : init;
+                block_sum = hetero::reduce(warp, val, reducer);
+            }
+
+            // the block leader writes the single, final answer
+            if (block.is_leader()) {
+                *final_result = block_sum;
+            }
+        }
+    }   // namespace detail
+
+    /**
+     * @brief a "worker" executor that launches kernels on a *single* gpu.
+     */
+    class gpu_executor_t : public executor_base_t<gpu_executor_t>
+    {
+      private:
+        mem::device_t device_;
+        mutable hetero::stream stream_;
+
+        void set_device_for_thread() const
+        {
+            hetero::device::set_device(device_.device_id);
+        }
+
+        template <typename SizeType>
+        auto default_grid_size(SizeType n) const
+        {
+            constexpr std::int64_t block_size = 256;
+            std::int64_t grid_size = (n + block_size - 1) / block_size;
+            constexpr std::int64_t max_blocks = 65535;
+            grid_size                         = std::min(grid_size, max_blocks);
+            return hetero::grid::config(grid_size, block_size);
+        }
+
+      public:
+        // constructs a worker for a *single* device
+        explicit gpu_executor_t(std::int64_t device_id = 0)
+            : device_(mem::device_t::gpu(device_id))
+        {
+            set_device_for_thread();
+            stream_ = hetero::device::create_stream();
+        }
+
+        ~gpu_executor_t() {}
 
         gpu_executor_t(const gpu_executor_t&)            = delete;
         gpu_executor_t& operator=(const gpu_executor_t&) = delete;
         gpu_executor_t(gpu_executor_t&&)                 = default;
         gpu_executor_t& operator=(gpu_executor_t&&)      = default;
 
+        mem::device_t device() const { return device_; }
+        hetero::stream& stream() { return stream_; }
+
+        void synchronize() const { stream_.synchronize(); }
+
         template <typename Func, typename... Args>
-        auto async_impl(Func&& func, Args&&... args) const -> future_t<void>
+        auto async_impl(Func&&, Args&&...) const -> future_t<void>
         {
-            auto state =
-                std::make_shared<typename future_t<void>::future_state_t>();
-            auto completion_stream = hetero::device::create_stream();
-            state->completion_context =
-                completion_context_t::gpu_stream(std::move(completion_stream));
-
-            try {
-                // create events for tracking completion on each device
-                state->completion_events.reserve(devices_.size());
-                for (std::size_t ii = 0; ii < devices_.size(); ++ii) {
-                    state->completion_events.emplace_back(
-                        hetero::device::create_event()
-                    );
-                }
-
-                for (std::size_t ii = 0; ii < devices_.size(); ++ii) {
-                    set_current_device(devices_[ii]);
-
-                    std::forward<Func>(func)(
-                        ii,
-                        devices_.size(),
-                        std::forward<Args>(args)...
-                    );
-                    state->completion_events[ii].record(streams_[ii]);
-                }
-            }
-            catch (...) {
-                state->exception = std::current_exception();
-                state->has_error.store(true);
-                state->ready.store(true);
-            }
-
-            return future_t<void>{state};
+            throw std::runtime_error(
+                "gpu_executor_t::async_impl not supported"
+            );
         }
 
+        /**
+         * @brief   asynchronously executes a void function on the domain.
+         * returns a future<void> that can be waited upon.
+         */
         template <std::uint64_t Dims, typename Func>
         auto for_each_impl(
             const domain_t<Dims>& domain,
@@ -609,104 +703,146 @@ namespace simbi::exec {
             const iarray<Dims>& /*tile_size*/
         ) const -> future_t<void>
         {
-            return async_impl([domain, f = std::forward<Func>(func), this](
-                                  std::size_t device_idx,
-                                  std::size_t device_count
-                              ) {
-                std::uint64_t partition_axis = 0;
-                auto shape                   = domain.shape();
-                for (std::uint64_t ii = 1; ii < Dims; ++ii) {
-                    if (shape[ii] > shape[partition_axis]) {
-                        partition_axis = ii;
-                    }
+            set_device_for_thread();
+
+            auto state =
+                std::make_shared<typename future_t<void>::future_state_t>();
+
+            const auto n = domain.size();
+            if (n == 0) {
+                state->ready.store(true);
+                return future_t<void>{std::move(state)};
+            }
+
+            auto launch_config = default_grid_size(n);
+
+            auto kernel = [domain, f = std::forward<Func>(func)] DEV() {
+                const auto idx           = hetero::grid::idx();
+                const auto global_idx    = idx.global_thread_id();
+                const auto total_threads = idx.total_threads();
+
+                for (auto ii = global_idx; ii < domain.size();
+                     ii += total_threads) {
+                    const auto coord = domain.linear_to_coord(ii);
+                    f(coord);
                 }
+            };
 
-                auto subdomain =
-                    domain.partition(device_count, device_idx, partition_axis);
-                if (subdomain.empty()) {
-                    return;
-                }
+            try {
+                hetero::device::launch_async(kernel, launch_config, stream_);
 
-                auto [grid_size, block_size] =
-                    optimal_grid_size(subdomain.size());
+                auto event = hetero::device::create_event();
+                event.record(stream_);
 
-                auto kernel = [subdomain, f] DEV() {
-                    const auto idx           = hetero::grid::idx();
-                    const auto global_idx    = idx.global_thread_id();
-                    const auto total_threads = idx.total_threads();
-                    const auto domain_size   = subdomain.size();
+                state->completion_events.push_back(std::move(event));
+            }
+            catch (...) {
+                state->exception = std::current_exception();
+                state->has_error.store(true);
+                state->ready.store(true);
+            }
 
-                    // grid-stride loop for large domains
-                    for (auto ii = global_idx; ii < domain_size;
-                         ii += total_threads) {
-                        const auto coord = subdomain.linear_to_coord(ii);
-                        f(coord);
-                    }
-                };
-
-                auto launch_config =
-                    hetero::grid::config(grid_size, block_size);
-                hetero::device::launch_async(
-                    kernel,
-                    launch_config,
-                    streams_[device_idx]
-                );
-            });
+            return future_t<void>{std::move(state)};
         }
 
+        /**
+         * @brief   synchronously executes a reduction on the domain.
+         * this is *blocking* because future_t<T> has no
+         * mechanism to receive an async Gpu-to-Host value.
+         */
         template <
             std::uint64_t Dims,
-            typename T,
+            typename U,
             typename Mapper,
             typename Reducer>
         auto reduce_impl(
             const domain_t<Dims>& domain,
-            T init,
+            U init,
             Mapper&& mapper,
-            Reducer&& reducer
-        ) const -> future_t<T>
+            Reducer&& reducer,
+            const iarray<Dims>& /*tile_size*/
+        ) const -> future_t<U>
         {
-            // [TODO]: GPU reduction is non-trivial and requires careful
-            // handling of intermediate results and synchronization. This would
-            // need to be expanded to a full GPU reduction algorithm. For now,
-            // we'll use a simple implementation that delegates to async_impl
+            set_device_for_thread();
 
-            return async_impl(
-                [domain,
-                 init,
-                 mapper = std::forward<Mapper>(mapper),
-                 reducer =
-                     std::forward<Reducer>(reducer)](std::size_t, std::size_t) {
-                    // [TODO]: implementation would partition the domain and
-                    // perform reduction. For now, this is a placeholder
-                }
-            );
-        }
+            auto state =
+                std::make_shared<typename future_t<U>::future_state_t>();
+            // this is a synchronous operation, so it's "direct"
+            state->completion_context = completion_context_t::direct();
 
-        void synchronize()
-        {
-            for (auto& stream : streams_) {
-                stream.synchronize();
+            const std::size_t n = domain.size();
+            if (n == 0) {
+                state->construct_result(init);
+                state->ready.store(true);
+                return future_t<U>{std::move(state)};
             }
+
+            try {
+                constexpr std::uint32_t block_size = 256;
+                std::uint32_t grid_size = (n + block_size - 1) / block_size;
+                grid_size = std::min(grid_size, (std::uint32_t) 1024);
+
+                auto shared_mem_size =
+                    (block_size / hetero::sub_group_t{}.size()) * sizeof(U);
+
+                auto partial_results_dev =
+                    hetero::device::allocate_vector<U>(grid_size);
+                auto final_result_dev = hetero::device::allocate_vector<U>(1);
+
+                auto kernel1_config = hetero::grid::config(
+                    grid_size,
+                    block_size,
+                    shared_mem_size
+                );
+                hetero::device::launch_async(
+                    detail::reduce_kernel_part1<Dims, U, Mapper, Reducer>,
+                    kernel1_config,
+                    stream_,
+                    domain,
+                    std::forward<Mapper>(mapper),
+                    reducer,
+                    init,
+                    n,
+                    partial_results_dev.data()
+                );
+
+                auto kernel2_config =
+                    hetero::grid::config(1, block_size, shared_mem_size);
+                hetero::device::launch_async(
+                    detail::reduce_kernel_part2<U, Reducer>,
+                    kernel2_config,
+                    stream_,
+                    partial_results_dev.data(),
+                    final_result_dev.data(),
+                    grid_size,
+                    reducer,
+                    init
+                );
+
+                // this is the *only* way to guarantee the result is
+                // ready to be copied back.
+                stream_.synchronize();
+
+                // copy final result and populate state
+                U final_result;
+                hetero::device::copy_vector_to_host(
+                    &final_result,
+                    final_result_dev,
+                    1
+                );
+
+                state->construct_result(std::move(final_result));
+                state->ready.store(true);
+            }
+            catch (...) {
+                state->exception = std::current_exception();
+                state->has_error.store(true);
+                state->ready.store(true);
+            }
+
+            return future_t<U>{std::move(state)};
         }
-
-        // calculate optimal grid size for kernel launch
-        template <typename SizeType>
-        auto optimal_grid_size(SizeType size) const
-        {
-            constexpr std::int64_t threads_per_block = 256;
-            std::int64_t grid_size =
-                (size + threads_per_block - 1) / threads_per_block;
-
-            // number is from maximum number of blocks
-            // in y and z dimensions on GPUs. Why is that?
-            // No idea....
-            constexpr std::int64_t max_blocks = 65535;
-            grid_size                         = std::min(grid_size, max_blocks);
-
-            return std::make_pair(grid_size, threads_per_block);
-        }
-    };   // namespace simbi::exec
+    };
 
     template <bool OnGPU = global::on_gpu>
     auto& default_executor()

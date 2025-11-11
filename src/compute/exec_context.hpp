@@ -242,7 +242,7 @@ namespace simbi {
                                           exec::gpu_executor_t>) {
                             return executors_.try_emplace(
                                 dev,
-                                exec::gpu_executor_t({dev.device_id}),
+                                exec::gpu_executor_t(dev.device_id),
                                 dev
                             );
                         }
