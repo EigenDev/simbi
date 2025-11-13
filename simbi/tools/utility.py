@@ -10,6 +10,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 from numpy.typing import NDArray
 
+from simbi.core.types.input import CoordSystem
 from simbi.reader.io import read_raw_data
 
 from ..functional.helpers import find_nearest
@@ -313,3 +314,32 @@ def get_file_list(
     else:
         any(files[key].sort(key=len, reverse=False) for key in files.keys())
         return files, multidir
+
+
+def map_coordinate_label(
+    coord_name: str,
+    coord_system: CoordSystem,
+) -> str:
+    """Maps a logical coordinate name to a human-readable label."""
+    label_map_cartesian = {
+        "x1": "$x$",
+        "x2": "$y$",
+        "x3": "$z$",
+    }
+    label_map_polar = {
+        "x1": "$r$",
+        "x2": r"$\theta$",
+        "x3": r"$\phi$",
+    }
+    label_map_cylindrical = {
+        "x1": "$r$",
+        "x2": "$z$",
+        "x3": r"$\phi$",
+    }
+
+    if coord_system == CoordSystem.SPHERICAL:
+        return label_map_polar.get(coord_name, coord_name)
+    elif coord_system == CoordSystem.CARTESIAN:
+        return label_map_cartesian.get(coord_name, coord_name)
+    else:
+        return label_map_cylindrical.get(coord_name, coord_name)
