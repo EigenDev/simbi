@@ -22,44 +22,9 @@ namespace simbi {
 
     template <std::uint64_t Dims>
     struct domain_t;
-
-    // allow std::vector to be piped through custom FP toolkit
-    // funcs
-    template <typename T, typename Op>
-    constexpr auto operator|(const std::vector<T>& vec, Op&& op)
-    {
-        return std::forward<Op>(op)(vec);
-    }
 }   // namespace simbi
 
 namespace simbi::fp {
-    namespace detail {
-        template <typename T>
-        struct is_callable {
-            template <typename U>
-            static auto test(int)
-                -> decltype(std::declval<U>()(), std::true_type{});
-
-            template <typename>
-            static auto test(...) -> std::false_type;
-
-            static constexpr bool value = decltype(test<T>(0))::value;
-        };
-
-        template <typename T>
-        struct is_unary_callable {
-            template <typename U>
-            static auto test(
-                int
-            ) -> decltype(std::declval<U>()(std::declval<void*>()), std::true_type{});
-
-            template <typename>
-            static auto test(...) -> std::false_type;
-
-            static constexpr bool value = decltype(test<T>(0))::value;
-        };
-    }   // namespace detail
-
     // ========================================================================
     // core concepts
     // ========================================================================
@@ -128,29 +93,9 @@ namespace simbi::fp {
     // ========================================================================
     // selection: pred(x) ? a(x) : b(x)
     // ========================================================================
-    template <typename Pred>
-    struct predicate_wrapper_t {
-        Pred pred;
-
-        // handle no-arg callable
-        template <typename Arg>
-        DUAL bool operator()(Arg&& arg) const
-        {
-            if constexpr (std::is_same_v<std::decay_t<Pred>, bool>) {
-                return pred;
-            }
-            else if constexpr (std::is_invocable_v<Pred>) {
-                return pred();
-            }
-            else {
-                return pred(std::forward<Arg>(arg));
-            }
-        }
-    };
-
     template <typename Pred, typename A, typename B>
     struct select_t {
-        predicate_wrapper_t<Pred> pred;
+        Pred pred;
         A a;
         B b;
 
@@ -170,7 +115,7 @@ namespace simbi::fp {
     constexpr auto select(Pred pred, A a, B b)
     {
         return select_t<Pred, A, B>{
-          predicate_wrapper_t<Pred>{std::move(pred)},
+          {std::move(pred)},
           std::move(a),
           std::move(b)
         };
@@ -202,83 +147,19 @@ namespace simbi::fp {
     // ========================================================================
     // coordinate transformation: transform(f, t)(x) = f(t(x))
     // ========================================================================
-
-    template <typename F, typename Transform>
-    struct transform_t {
-        F f;
-        Transform t;
-
-        template <typename Arg>
-        constexpr DUAL auto operator()(Arg&& arg) const -> decltype(auto)
-        {
-            return f(t(std::forward<Arg>(arg)));
-        }
-
-        template <typename Arg>
-        constexpr DUAL auto operator()(Arg&& arg) -> decltype(auto)
-        {
-            return f(t(std::forward<Arg>(arg)));
-        }
-    };
-
-    template <typename F, typename Transform>
-    constexpr auto transform(F f, Transform t)
-    {
-        return transform_t<F, Transform>{std::move(f), std::move(t)};
-    }
-
-    template <typename BinaryOp>
-    struct reduce_fn_t {
-        BinaryOp op_;
-        constexpr explicit reduce_fn_t(BinaryOp op) : op_(std::move(op)) {}
-
-        template <iterable Source>
-        constexpr auto operator()(Source&& source) const
-        {
-            auto begin = std::begin(std::forward<Source>(source));
-            auto end   = std::end(std::forward<Source>(source));
-
-            if (begin == end) {
-                using value_type =
-                    typename std::iterator_traits<decltype(begin)>::value_type;
-                // for empty range, return default-constructed value
-                return value_type{};
-            }
-
-            auto result = *begin;
-            ++begin;
-            for (; begin != end; ++begin) {
-                result = op_(result, *begin);
-            }
-            return result;
-        }
-
-        template <iterable Source, typename Init>
-        constexpr auto operator()(Source&& source, Init&& init) const
-        {
-            auto result = std::forward<Init>(init);
-            for (auto&& item : source) {
-                result =
-                    op_(std::move(result), std::forward<decltype(item)>(item));
-            }
-            return result;
-        }
-    };
-
-    template <typename BinaryOp>
-    constexpr auto fold(BinaryOp&& op)
-    {
-        return reduce_fn_t<std::decay_t<BinaryOp>>{std::forward<BinaryOp>(op)};
-    }
     template <typename BinaryOp, typename Init>
-    constexpr auto fold(BinaryOp&& op, Init&& init)
+    constexpr DUAL auto fold(BinaryOp&& op, Init&& init)
     {
+        // capture init by value (or copy)
+        // capture op by forwarding
         return [op   = std::forward<BinaryOp>(op),
                 init = std::forward<Init>(init)]<iterable Source>(
                    Source&& source
-               ) {
+               ) -> Init   // always return the type of the initial value
+        {
             auto result = init;
             for (auto&& item : source) {
+                // move the accumulated result into the next operation
                 result =
                     op(std::move(result), std::forward<decltype(item)>(item));
             }
@@ -286,10 +167,39 @@ namespace simbi::fp {
         };
     }
 
+    template <typename BinaryOp>
+    constexpr DUAL auto reduce(BinaryOp&& op)
+    {
+        // capture op by forwarding
+        return
+            [op =
+                 std::forward<BinaryOp>(op)]<iterable Source>(Source&& source) {
+                auto begin = std::begin(std::forward<Source>(source));
+                auto end   = std::end(std::forward<Source>(source));
+
+                // get the actual value type, not a reference
+                using value_type = std::decay_t<decltype(*begin)>;
+
+                if (begin == end) {
+                    // matches std::reduce behavior for an empty range
+                    return value_type{};
+                }
+
+                // first element is the initial value
+                auto result = *begin;
+                ++begin;
+
+                for (; begin != end; ++begin) {
+                    // move the accumulated result into the next operation
+                    result = op(std::move(result), *begin);
+                }
+                return result;
+            };
+    }
+
     // ========================================================================
     // mathematical operators as function objects
     // ========================================================================
-
     struct add_op_t {
         template <typename A, typename B>
         constexpr DUAL auto operator()(A&& a, B&& b) const -> decltype(auto)
@@ -778,7 +688,7 @@ namespace simbi::fp {
             }
             constexpr bool operator==(const iterator_t& other) const
             {
-                return first_it_ == other.first_it_ &&
+                return first_it_ == other.first_it_ ||
                        second_it_ == other.second_it_;
             }
             constexpr bool operator!=(const iterator_t& other) const
@@ -983,10 +893,7 @@ namespace simbi::fp {
         template <iterable Source>
         constexpr auto operator()(Source&& source) const
         {
-            return map_view_t<std::decay_t<Source>, F>(
-                std::forward<Source>(source),
-                func_
-            );
+            return map_view_t<Source, F>(std::forward<Source>(source), func_);
         }
     };
 
@@ -998,7 +905,7 @@ namespace simbi::fp {
         template <iterable Source>
         constexpr auto operator()(Source&& source) const
         {
-            return filter_view_t<std::decay_t<Source>, Pred>(
+            return filter_view_t<Source, Pred>(
                 std::forward<Source>(source),
                 pred_
             );
@@ -1015,7 +922,7 @@ namespace simbi::fp {
         template <iterable First>
         constexpr auto operator()(First&& first) const
         {
-            return zip_view_t<std::decay_t<First>, Second>(
+            return zip_view_t<First, Second>(
                 std::forward<First>(first),
                 second_
             );
@@ -1029,10 +936,7 @@ namespace simbi::fp {
         template <iterable Source>
         constexpr auto operator()(Source&& source) const
         {
-            return take_view_t<std::decay_t<Source>>(
-                std::forward<Source>(source),
-                count_
-            );
+            return take_view_t<Source>(std::forward<Source>(source), count_);
         }
     };
 
@@ -1178,19 +1082,19 @@ namespace simbi::fp {
     template <typename F>
     constexpr auto map(F&& func)
     {
-        return map_fn_t<std::decay_t<F>>(std::forward<F>(func));
+        return map_fn_t<F>(std::forward<F>(func));
     }
 
     template <typename Pred>
     constexpr auto filter(Pred&& pred)
     {
-        return filter_fn_t<std::decay_t<Pred>>(std::forward<Pred>(pred));
+        return filter_fn_t<Pred>(std::forward<Pred>(pred));
     }
 
     template <iterable Second>
     constexpr auto zip(Second&& second)
     {
-        return zip_fn_t<std::decay_t<Second>>(std::forward<Second>(second));
+        return zip_fn_t<Second>(std::forward<Second>(second));
     }
 
     constexpr auto take(std::size_t count) { return take_fn_t{count}; }
@@ -1198,7 +1102,7 @@ namespace simbi::fp {
     template <typename F>
     constexpr auto for_each(F&& func)
     {
-        return for_each_fn_t<std::decay_t<F>>(std::forward<F>(func));
+        return for_each_fn_t<F>(std::forward<F>(func));
     }
 
     template <typename Container = void>
@@ -1210,25 +1114,19 @@ namespace simbi::fp {
     template <typename Pred>
     constexpr DEV auto any_of(Pred&& pred)
     {
-        return any_of_fn_t<std::decay_t<Pred>>(std::forward<Pred>(pred));
+        return any_of_fn_t<Pred>(std::forward<Pred>(pred));
     }
 
     template <typename Pred>
     constexpr DUAL auto all_of(Pred&& pred)
     {
-        return all_of_fn_t<std::decay_t<Pred>>(std::forward<Pred>(pred));
+        return all_of_fn_t<Pred>(std::forward<Pred>(pred));
     }
 
     template <typename Pred>
     constexpr DUAL auto none_of(Pred&& pred)
     {
-        return none_of_fn_t<std::decay_t<Pred>>(std::forward<Pred>(pred));
-    }
-
-    template <typename BinaryOp>
-    constexpr DUAL auto reduce(BinaryOp&& op)
-    {
-        return reduce_fn_t<std::decay_t<BinaryOp>>(std::forward<BinaryOp>(op));
+        return none_of_fn_t<Pred>(std::forward<Pred>(pred));
     }
 
     // ========================================================================
@@ -1248,11 +1146,11 @@ namespace simbi::fp {
     template <iterable First, iterable Second>
     constexpr DUAL auto zip(First&& first, Second&& second)
     {
-        return zip_view_t<std::decay_t<First>, std::decay_t<Second>>(
+        return zip_view_t<First, Second>(
             std::forward<First>(first),
             std::forward<Second>(second)
         );
     }
 }   // namespace simbi::fp
 
-#endif   // FP_MINIMAL_HPP
+#endif   // FP_TOOLKIT_HPP
