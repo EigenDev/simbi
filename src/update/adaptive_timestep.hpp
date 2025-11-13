@@ -92,7 +92,7 @@ namespace simbi {
         auto& prim     = sim.hydro(level_id).prim;
         auto& meta     = sim.metadata();
         auto dt_future = compute_timestep(prim, mesh, meta.gamma, meta.cfl);
-        meta.dt        = dt_future.wait();
+        meta.level_dts[level_id] = dt_future.wait();
     }
 
 }   // namespace simbi
