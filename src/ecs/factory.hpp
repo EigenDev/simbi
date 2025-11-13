@@ -8,7 +8,6 @@
 #include "compute/field.hpp"       // for field_t, from_data_field
 #include "containers/vector.hpp"   // for vector_t
 #include "functional/fp.hpp"       // for fp::transform, fp::collect, fp::range
-#include "memory/accessor.hpp"     // for accessor_t
 #include "mesh/fmr/factory.hpp"    // for fmr::build_hierarchy_from_init
 #include "mesh/fmr/prolongation.hpp"   // for fmr::prolongate_conserved
 #include "mesh/mesh_config.hpp"        // for mesh_config_t
