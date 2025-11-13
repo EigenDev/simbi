@@ -4,17 +4,17 @@
 #include "base/stencil_view.hpp"
 #include "compat.hpp"
 #include "containers/vector.hpp"
+#include "ecs/hydro_state_types.hpp"
 #include "physics/hydro/solvers/hllc.hpp"
 #include "physics/hydro/solvers/hlld.hpp"
 #include "physics/hydro/solvers/hlle.hpp"
-#include "state/hydro_state_types.hpp"
 #include "utility/enums.hpp"
 
 #include <cstdint>
 #include <utility>
 
 namespace simbi::cfd {
-    using namespace simbi::state;
+    using namespace simbi::ecs;
     using namespace simbi::base::stencils;
 
     template <
