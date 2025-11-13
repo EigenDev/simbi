@@ -151,7 +151,9 @@ namespace simbi {
                     if (!executor.check_and_update_limits(
                             shard.size() * sizeof(T)
                         )) {
-                        throw resource_limit_error("GPU memory limit exceeded");
+                        throw resource_limit_error_t(
+                            "GPU memory limit exceeded"
+                        );
                     }
 
                     futures.push_back(executor.for_each(

@@ -31,7 +31,7 @@ namespace simbi {
         using std::runtime_error::runtime_error;
     };
 
-    class resource_limit_error : public executor_error_t
+    class resource_limit_error_t : public executor_error_t
     {
         using executor_error_t::executor_error_t;
     };
