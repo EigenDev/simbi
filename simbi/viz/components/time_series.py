@@ -37,6 +37,7 @@ class TimeSeriesPlotProps(ComponentProps):
     marker: Optional[str] = None
     marker_size: float = 6.0
     alpha: float = 1.0
+    normalization: Optional[float] = None
 
     show_moving_average: bool = False
     moving_average_window: int = 5
@@ -135,9 +136,10 @@ class TimeSeriesPlotComponent(Component[TimeSeriesPlotProps, FieldData]):
         for i in range(num_lines):
             line_values = values_2d[:, i]
             line_label = labels[i]
+            norm = self.props.normalization or 1.0
             main_line = self.ax.plot(
                 times,
-                line_values,
+                line_values / norm,
                 label=line_label,
                 marker=self.props.marker,
                 linestyle=self.props.linestyle,
