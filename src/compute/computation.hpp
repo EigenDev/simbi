@@ -133,7 +133,7 @@ namespace simbi {
         auto operator[](const domain_t<Dims>& subdomain) const
         {
             auto offset_func =
-                fp::transform(func, fp::partial(fp::add_op, subdomain.start));
+                fp::compose(func, fp::partial(fp::add_op, subdomain.start));
             auto local_domain = make_domain(subdomain.shape());
 
             return computation_t<Dims, decltype(offset_func)>{
