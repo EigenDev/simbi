@@ -169,165 +169,104 @@ namespace simbi::evolution {
 
         void advance_level_euler(std::uint64_t lvl) const
         {
-            // prep: get u^n state
+            // get primitives from u^n
             ecs::ghost_fill_system_t{}(sim, lvl);
             ecs::c2p_system_t{}(sim, lvl);
             ecs::sink_cache_system_t{}(sim);
 
-            // compute provisional fluxes
-            // calculate fluxes from u^n and accumulate for parent
+            // compute fluxes from u^n and accumulate for parent
             ecs::staggered_fields_system_t{
               .accumulate_fluxes = (lvl > 0)
             }(sim, ops, lvl);
 
-            // sub-cycle (if fine level exists)
+            // if fine level exists: sub-cycle first, then correct flux
             if (lvl < sim.num_levels() - 1) {
                 const auto ref_ratio = sim.level_info(lvl + 1).refinement_ratio;
 
-                // zero fine level's accumulator once
+                // zero fine level's flux accumulator
                 ecs::zero_flux_buffer_system_t{}(sim, lvl + 1);
 
+                // sub-cycle fine level
                 for (std::uint64_t substep = 0; substep < ref_ratio;
                      ++substep) {
-                    advance_level_euler(lvl + 1);   // recurse
+                    advance_level_euler(lvl + 1);
                 }
 
-                // correct this level's fluxes
-                // now that lvl+1's flux_avg is full, correct *this* level's
-                // flux buffer (hydro(lvl).flux)
-                auto& meta         = sim.metadata();
-                auto& this_hydro   = sim.hydro(lvl);
-                auto& finer_hydro  = sim.hydro(lvl + 1);
-                const auto& map    = sim.level_mapping(lvl + 1);
-                const real dt_this = meta.level_dts[lvl];
-
+                // correct this level's flux using fine level's time-averaged
+                // flux
+                auto& meta = sim.metadata();
                 mesh::fmr::correct_level_fluxes(
-                    this_hydro.flux,        // correct this level's flux
-                    finer_hydro.flux_avg,   // using fine level's average
-                    map,
-                    dt_this   // normalize by this level's dt
+                    sim.hydro(lvl).flux,
+                    sim.hydro(lvl + 1).flux_avg,
+                    sim.level_mapping(lvl + 1),
+                    meta.level_dts[lvl]
                 );
             }
 
-            // advance this level
-            // advance u^n -> u^{n+1} using the now-corrected fluxes
+            // advance u^n -> u^{n+1} using (potentially corrected) flux
             ecs::euler_system_t{ops}(sim, lvl);
 
-            // restrict (if fine level exists)
-            // now that this level is at u^{n+1}, overwrite the
-            // covered cells with the more-accurate fine grid solution.
+            // restrict fine solution onto coarse covered cells
             if (lvl < sim.num_levels() - 1) {
                 ecs::restriction_system_t{}(sim, lvl + 1);
-            }
-
-            // correct parent (if parent exists)
-            // this level's flux_avg is now full, so we can
-            // correct the parent's flux buffer.
-            if (lvl > 0) {
-                correct_fluxes(lvl);
             }
         }
 
         void advance_level_rk2(std::uint64_t lvl) const
         {
-            // zero this level's flux accumulator for the entire rk2 step
-            // this buffer will be used by the parent (l-1)
             if (lvl > 0) {
                 ecs::zero_flux_buffer_system_t{}(sim, lvl);
             }
 
-            // === stage 1: u^n -> u* ===
+            // === STAGE 1: u^n -> u* ===
 
-            // prolongate u^n from parent, compute primitives
             ecs::ghost_fill_system_t{}(sim, lvl);
             ecs::c2p_system_t{}(sim, lvl);
             ecs::sink_cache_system_t{}(sim);
 
-            // compute provisional fluxes from u^n
+            // compute fluxes from u^n
             ecs::staggered_fields_system_t{
               .advance_bfields   = true,
-              .accumulate_fluxes = (lvl > 0),   // accumulate for parent
+              .accumulate_fluxes = (lvl > 0),
             }(sim, ops, lvl);
+
+            // advance to u* before sub-cycling
+            ecs::rk2_stage1_system_t{ops}(sim, lvl);
 
             // === sub-cycle between stages ===
 
             if (lvl < sim.num_levels() - 1) {
                 const auto ref_ratio = sim.level_info(lvl + 1).refinement_ratio;
-                const auto& map      = sim.level_mapping(lvl + 1);
-
-                // zero fine level's accumulator once for its entire rk2 cycle
                 ecs::zero_flux_buffer_system_t{}(sim, lvl + 1);
 
                 for (std::uint64_t substep = 0; substep < ref_ratio;
                      ++substep) {
-                    // advance to u* *before* the first substep
-                    if (substep == 0) {
-                        // advance to u* (and save u^n in workspace)
-                        // this uses the provisional (uncorrected) fluxes
-                        ecs::rk2_stage1_system_t{ops}(sim, lvl);
-                    }
+                    // time-interpolate for ALL substeps
+                    const real alpha = static_cast<real>(substep) / ref_ratio;
+                    ecs::time_interpolated_ghost_fill_system_t{
+                      alpha
+                    }(sim, lvl + 1);
 
-                    // time-interpolate ghosts for substeps 1, 2, ...
-                    if (substep > 0) {
-                        const real alpha =
-                            static_cast<real>(substep) / ref_ratio;
-                        ecs::time_interpolated_ghost_fill_system_t{
-                          alpha
-                        }(sim, lvl + 1);
-                    }
-
-                    // recursively advance fine level (full rk2)
+                    // advance fine level
                     advance_level_rk2(lvl + 1);
 
-                    // restriction must happen *inside* the loop
-                    // this overwrites coarse u* with fine u^{n+1}
+                    // restrict
                     ecs::restriction_system_t{}(sim, lvl + 1);
                 }
-
-                // now that the sub-cycle is done, correct *this level's* fluxes
-                // note: we correct the stage 1 fluxes *after* they were used
-                // this is the standard Berger-Colella method. the error
-                // is corrected in the final stage.
-                mesh::fmr::correct_level_fluxes(
-                    sim.hydro(lvl).flux,
-                    sim.hydro(lvl + 1).flux_avg,
-                    map,
-                    // normalize by this level's dt
-                    sim.metadata().level_dts[lvl]
-                );
-            }
-            else {
-                // if this is the finest level, there's no sub-cycle
-                // just advance to u*
-                ecs::rk2_stage1_system_t{ops}(sim, lvl);
             }
 
-            // === stage 2: u* -> u^{n+1} ===
+            // === STAGE 2: u* -> u^{n+1} ===
 
-            // compute primitives from u* (which was overwritten by restriction)
             ecs::c2p_system_t{}(sim, lvl);
             ecs::sink_cache_system_t{}(sim);
 
             // compute fluxes from u*
             ecs::staggered_fields_system_t{
-              .advance_bfields   = false,       // already advanced in stage 1
-              .accumulate_fluxes = (lvl > 0),   // continue accumulating
+              .advance_bfields   = false,
+              .accumulate_fluxes = (lvl > 0),
             }(sim, ops, lvl);
 
-            // flux correction for stage 2
-            if (lvl < sim.num_levels() - 1) {
-                // correct the stage 2 fluxes before they are used
-                const auto& map = sim.level_mapping(lvl + 1);
-                mesh::fmr::correct_level_fluxes(
-                    sim.hydro(lvl).flux,
-                    sim.hydro(lvl + 1)
-                        .flux_avg,   // use the same total avg flux
-                    map,
-                    sim.metadata().level_dts[lvl]
-                );
-            }
-
-            // advance from u* to u^{n+1} using corrected stage 2 fluxes
+            // advance to u^{n+1} (NO flux correction for stage 2)
             ecs::rk2_stage2_system_t{ops}(sim, lvl);
         }
 
@@ -337,11 +276,11 @@ namespace simbi::evolution {
             ecs::ghost_fill_system_t{}(sim, lvl);
             ecs::c2p_system_t{}(sim, lvl);
             ecs::timestep_system_t{}(sim, lvl);
-            ecs::sink_cache_system_t{}(sim);
         }
 
         void step_all() const
         {
+            ecs::sink_cache_system_t{}(sim);
             auto& meta = sim.metadata();
 
             // calculate all level timesteps (L_max -> L=0)
