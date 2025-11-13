@@ -3,8 +3,9 @@ from typing import Any, Optional, Sequence
 
 import numpy as np
 
-from ....core.types import Array, FieldData, MeshConfig
+from ....core.types import Array, MeshConfig
 from ....reader.lazy import SimData
+from ..core.types import FieldData
 from .transforms import create_field_data, create_slicer_from_config
 
 

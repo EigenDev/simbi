@@ -9,13 +9,13 @@ from matplotlib.collections import QuadMesh
 from matplotlib.figure import Figure
 from pydantic import ValidationInfo, field_validator
 
-from simbi.core.types import Body, FieldData
+from simbi.core.types import Body
 from simbi.tools.visualization.formatters.multidim import (
     format_multidim_plot_axes,
 )
 
 from ..core.config import StyleConfig
-from ..core.types import Array, ColorRange, PlotData
+from ..core.types import Array, ColorRange, FieldData, PlotData
 from .interface import Component, ComponentProps
 
 
