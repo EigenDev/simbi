@@ -257,6 +257,7 @@ def plot_time_series(
             marker=kwargs.get("marker", "o"),
             marker_size=kwargs.get("marker_size", 6.0),
             alpha=kwargs.get("alpha", 1.0),
+            normalization=kwargs["norm"][0],
         )
         component = TimeSeriesPlotComponent(props)
 
