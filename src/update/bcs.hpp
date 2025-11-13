@@ -229,13 +229,17 @@ namespace simbi::boundary {
 
         // compose using fp toolkit
         return fp::select(
-            [=]() { return ctx.bc_type == BoundaryCondition::REFLECTING; },
+            [=](auto) { return ctx.bc_type == BoundaryCondition::REFLECTING; },
             fp::partial(reflecting, ctx),
             fp::select(
-                [=]() { return ctx.bc_type == BoundaryCondition::PERIODIC; },
+                [=](auto) {
+                    return ctx.bc_type == BoundaryCondition::PERIODIC;
+                },
                 fp::partial(periodic, ctx),
                 fp::select(
-                    [=]() { return ctx.bc_type == BoundaryCondition::DYNAMIC; },
+                    [=](auto) {
+                        return ctx.bc_type == BoundaryCondition::DYNAMIC;
+                    },
                     fp::partial(dynamic, ctx),
                     fp::partial(outflow, ctx)
                 )
