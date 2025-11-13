@@ -64,12 +64,6 @@ class Solver(str, ExtendedEnum):
 
 
 @dataclass(frozen=True)
-class FieldData:
-    name: str
-    data: Array
-
-
-@dataclass(frozen=True)
 class Metadata:
     """Structured simulation metadata"""
 

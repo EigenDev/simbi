@@ -19,7 +19,6 @@ from .bodies import (
 from .input import (
     Array,
     CellSpacing,
-    FieldData,
     HierarchyData,
     IArray,
     LevelData,
@@ -49,7 +48,6 @@ __all__ = [
     "Reconstruction",
     "ProcessedData",
     "Metadata",
-    "FieldData",
     "BodyData",
     "RawHDF5",
     "MeshConfig",
