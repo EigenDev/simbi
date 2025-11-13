@@ -2,10 +2,8 @@ import sys
 from argparse import Namespace, _SubParsersAction
 from typing import Optional
 
-from simbi.tools.utility import get_dimensionality
+from simbi.viz import config_from_args, setup_viz_parser
 
-from ...tools.visualization.cli import setup_parser as setup_viz_parser
-from ...tools.visualization.core.conversion import config_from_args
 from ..utils.formatter import HelpFormatter
 
 
@@ -21,118 +19,79 @@ def setup_parser(subparsers: _SubParsersAction) -> None:
     plot_parser.set_defaults(func=execute)
 
 
-def execute(args: Namespace, argv: Optional[list] = None) -> None:
+def execute(args: Namespace, _: Optional[list] = None) -> None:
     """Execute plot command using new component-based API"""
-    from ...tools.visualization import api
+    from simbi.viz import api
 
-    # Get basic parameters
-    files = args.files
-    setup = args.setup
-    theme = args.theme
-
-    # If files don't exist, show error
-    if not files:
-        print("Error: No files specified")
+    if not args.files:
+        print("Error: No files specified for 'plot' command.")
         sys.exit(1)
 
-    var_set = {
-        "files": files,
-        "setup": setup,
-        "plot_type": args.plot_type,
-        "fields": args.fields,
-        "save_as": args.save_as,
-        "frame_rate": args.frame_rate,
-        "theme": args.theme,
-    }
-
-    # get subset of args that are not
-    # in var_set and turn this into a
-    # kwargs dict
-    kwargs = {k: v for k, v in vars(args).items() if k not in var_set}
-
-    # Remove unnecessary args
-    for arg in ["func", "files", "active_parser", "main_parser"]:
-        if arg in kwargs:
-            del kwargs[arg]
-
-    # Handle animation flag
-    is_animation = args.kind == "movie"
-
-    ndim = get_dimensionality(files)
-    kwargs["ndim"] = ndim
-    if not args.plot_type:
-        if ndim == 1 or args.slice_along:
-            plot_type = "line"
-        else:
-            plot_type = "multidim"
-    else:
-        plot_type = args.plot_type
-
     config = config_from_args(args)
-    # Call the appropriate API function
+    is_animation = getattr(args, "animate", False) or args.kind == "movie"
+    plot_type = config.plot.plot_type
+
+    cli_args = vars(args).copy()
+    processed_args = {
+        "func",
+        "active_parser",
+        "main_parser",
+        "files",
+        "fields",
+        "save_as",
+        "setup",
+        "theme",
+        "plot_type",
+        "frame_rate",
+        "kind",
+        "animate",
+        "no_show",
+        "vector_field",
+        "scale",
+        "rend",
+        "rbeg",
+    }
+    pass_through_kwargs = {
+        k: v for k, v in cli_args.items() if k not in processed_args
+    }
+    pass_through_kwargs["show"] = not getattr(args, "no_show", False)
+
+    # 5. Handle Animation
     if is_animation:
-        api.animate(
-            config,
-            files=files,
-            plot_type=plot_type,
-            fields=args.fields,
-            save_as=args.save_as,
-            frame_rate=args.frame_rate,
-            setup=setup,
-            theme=theme,
-            **kwargs,
+        raise NotImplementedError(
+            "Animation support is not yet implemented in the refactored API."
         )
+        # api.animate(
+        #     config=config,
+        #     files=args.files,
+        #     fields=args.fields,
+        #     plot_type=plot_type,
+        #     save_as=args.save_as,
+        #     frame_rate=config.animation.frame_rate,  # Get from config
+        #     setup=args.setup,
+        #     theme=args.theme,
+        #     **pass_through_kwargs,
+        # )
     else:
-        if plot_type == "line":
-            api.plot_line(
-                config,
-                files,
-                args.fields,
-                args.save_as,
-                setup=setup,
-                theme=theme,
-                **kwargs,
-            )
-        elif plot_type == "multidim":
-            api.plot_multidim(
-                config,
-                files,
-                args.fields,
-                args.save_as,
-                setup=setup,
-                theme=theme,
-                **kwargs,
-            )
-        elif plot_type == "histogram":
-            api.plot_histogram(
-                config,
-                files,
-                args.fields,
-                args.save_as,
-                setup=setup,
-                theme=theme,
-                **kwargs,
-            )
-        elif plot_type == "time_series":
-            api.plot_time_series(
-                config,
-                files,
-                args.fields,
-                args.save_as,
-                setup=setup,
-                theme=theme,
-                **kwargs,
-            )
-        elif plot_type == "accretion":
-            api.plot_accretion(
-                config,
-                files,
-                args.fields,
-                args.save_as,
-                setup=setup,
-                theme=theme,
-                **kwargs,
-            )
-        else:
+        plot_dispatch = {
+            "line": api.plot,
+            "multidim": api.plot,
+            "coordinate_bin": api.plot_coordinate_profile,
+            "time_series": api.plot_time_series,
+            # "histogram": api.plot_histogram,
+        }
+
+        plot_func = plot_dispatch.get(plot_type)
+        if plot_func is None:
             print(f"Error: Unknown plot type '{plot_type}'")
             sys.exit(1)
+
+        plot_func(
+            config=config,
+            files=args.files,
+            fields=args.fields,
+            save_as=args.save_as,
+            setup=args.setup,
+            theme=args.theme,
+            **pass_through_kwargs,
+        )
