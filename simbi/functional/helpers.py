@@ -1,16 +1,25 @@
-import numpy as np
-import math
-import sys
 import linecache
+import math
 import os
+import sys
 import tracemalloc
-from numpy.typing import NDArray
-from typing import Any, Callable, Generator, Optional, Sequence, cast, Type
-from ..io.logging import logger
-from time import sleep
 from dataclasses import is_dataclass
-from typing import TextIO
+from time import sleep
+from typing import (
+    Any,
+    Callable,
+    Generator,
+    Optional,
+    Sequence,
+    TextIO,
+    Type,
+    cast,
+)
 
+import numpy as np
+from numpy.typing import NDArray
+
+from ..io.logging import logger
 
 __all__ = [
     "calc_centroid",
@@ -58,7 +67,9 @@ def calc_any_mean(arr: NDArray[Any], cellspacing: str) -> Any:
         return np.sqrt(arr[1:] * arr[:-1])
 
 
-def calc_centroid(arr: NDArray[Any], coord_system: str = "spherical") -> NDArray[Any]:
+def calc_centroid(
+    arr: NDArray[Any], coord_system: str = "spherical"
+) -> NDArray[Any]:
     if coord_system == "spherical":
         return np.asanyarray(
             0.75
@@ -120,7 +131,9 @@ def calc_vertices(
                 return np.sqrt(tmp[..., 1:] * tmp[..., :-1])
 
 
-def calc_domega(*, x2: NDArray[Any], x3: NDArray[Any] | None = None) -> NDArray[Any]:
+def calc_domega(
+    *, x2: NDArray[Any], x3: NDArray[Any] | None = None
+) -> NDArray[Any]:
     x2v = calc_vertices(arr=x2, direction=1)
     dcos = np.cos(x2v[:-1]) - np.cos(x2v[1:])
     if x3:
@@ -142,7 +155,9 @@ def get_vertices(
 
     # Add boundary vertices
     vertices = np.insert(vertices, 0, coords[..., 0], axis=axis)
-    vertices = np.insert(vertices, vertices.shape[axis], coords[..., -1], axis=axis)
+    vertices = np.insert(
+        vertices, vertices.shape[axis], coords[..., -1], axis=axis
+    )
     return vertices
 
 
@@ -166,7 +181,9 @@ def calc_volume_1d(
 
 
 def calc_volume_2d(
-    x1v: NDArray[np.floating[Any]], x2v: NDArray[np.floating[Any]], coord_system: str
+    x1v: NDArray[np.floating[Any]],
+    x2v: NDArray[np.floating[Any]],
+    coord_system: str,
 ) -> NDArray[np.floating[Any]]:
     """Calculate 2D cell volumes from vertices
 
@@ -255,7 +272,9 @@ def calc_cell_volume(
     # Convert to vertices if needed
     if not vertices:
         is_radial: bool = coord_system in ["spherical", "cylindrical"]
-        coords = [get_vertices(c, is_radial and i == 0) for i, c in enumerate(coords)]
+        coords = [
+            get_vertices(c, is_radial and i == 0) for i, c in enumerate(coords)
+        ]
 
     if ndim == 1:
         return calc_volume_1d(coords[0], coord_system)
@@ -274,12 +293,16 @@ def compute_num_polar_zones(
     theta_bounds: tuple[float, float] = (0.0, np.pi),
 ) -> int:
     if zpd is not None:
-        return int(round((theta_bounds[1] - theta_bounds[0]) * zpd / np.log(10)))
+        return int(
+            round((theta_bounds[1] - theta_bounds[0]) * zpd / np.log(10))
+        )
     elif None not in (rmin, rmax, nr):
         dlogr: float = np.log(rmax / rmin) / nr
         return int(round(1 + (theta_bounds[1] - theta_bounds[0]) / dlogr))
     else:
-        raise ValueError("Please either specify zones per decade or rmin, rmax, and nr")
+        raise ValueError(
+            "Please either specify zones per decade or rmin, rmax, and nr"
+        )
 
 
 def calc_dlogt(tmin: float, tmax: float, ncheckpoints: int) -> float:
@@ -329,7 +352,9 @@ def find_nearest(arr: NDArray[Any], val: Any) -> Any:
         return idx, arr[idx]
 
 
-def to_iterable(x: Any, func: Callable[..., Sequence[Any]] = list) -> Sequence[Any]:
+def to_iterable(
+    x: Any, func: Callable[..., Sequence[Any]] = list
+) -> Sequence[Any]:
     if isinstance(x, (Sequence, np.ndarray)) and not isinstance(x, str):
         return func(x)
     else:
@@ -372,7 +397,9 @@ def display_top(
         frame = stat.traceback[0]
         # replace "/path/to/module/file.py" with "module/file.py"
         filename = os.sep.join(frame.filename.split(os.sep)[-2:])
-        logger.info(f"#{index}: {filename}:{frame.lineno}: {format_size(stat.size)}")
+        logger.info(
+            f"#{index}: {filename}:{frame.lineno}: {format_size(stat.size)}"
+        )
         line = linecache.getline(frame.filename, frame.lineno).strip()
         if line:
             logger.info(f"    {line}")
