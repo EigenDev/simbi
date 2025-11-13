@@ -42,8 +42,31 @@ namespace simbi::ecs {
         }
     };
 
+    struct zero_flux_buffer_system_t {
+        template <typename Sim>
+        void operator()(Sim& sim, std::uint64_t lvl) const
+        {
+            // only run if we have refinement (and thus, flux_avg buffers)
+            if (!sim.has_refinement()) {
+                return;
+            }
+
+            auto& hydro = sim.hydro(lvl);
+
+            // loop over each spatial direction
+            for (std::uint64_t dir = 0; dir < Sim::dimensions; ++dir) {
+                // get the entire flux_avg field (not just a domain view)
+                auto& ff_avg = hydro.flux_avg[dir];
+                ff_avg       = ff_avg.map([](auto f) {
+                    return f | structs::scale_gas(0.0);
+                });
+            }
+        }
+    };
+
     struct staggered_fields_system_t {
-        bool advance_bfields = true;
+        bool advance_bfields   = true;
+        bool accumulate_fluxes = false;
 
         template <typename Sim, typename Ops>
         void operator()(Sim& sim, Ops ops, std::uint64_t lvl) const
@@ -53,11 +76,23 @@ namespace simbi::ecs {
             auto& meta        = sim.metadata();
             const auto& prims = hydro.prim[mesh.domain];
 
+            const real dt_lvl = meta.level_dts[lvl];
+
             // compute fluxes in each direction
             for (std::uint64_t dir = 0; dir < Sim::dimensions; ++dir) {
                 auto ff   = compute_fluxes(prims, mesh, ops, meta, dir);
                 auto flux = hydro.flux[dir][mesh.face_domain[dir]];
                 flux      = flux.coord_map(ff);
+
+                if (accumulate_fluxes && sim.has_refinement()) {
+                    auto flux_avg = hydro.flux_avg[dir][mesh.face_domain[dir]];
+
+                    // accumulate the time-weighted flux
+                    flux_avg =
+                        flux_avg.enum_map([ff, dt_lvl](auto coord, auto avg) {
+                            return avg + ff(coord) * dt_lvl;
+                        });
+                }
             }
 
             if constexpr (Sim::is_mhd) {
@@ -73,7 +108,11 @@ namespace simbi::ecs {
                         mesh,
                         meta.boundary_conditions
                     );
-                    em::update_magnetic_fields(hydro, mesh, meta.dt);
+                    em::update_magnetic_fields(
+                        hydro,
+                        mesh,
+                        meta.level_dts[lvl]
+                    );
                 }
             }
         }
@@ -92,10 +131,21 @@ namespace simbi::ecs {
         template <typename Sim>
         void operator()(Sim& sim, std::uint64_t lvl) const
         {
-            if (lvl < sim.num_levels() - 1) {
+            const auto nlvls = sim.num_levels();
+            if (lvl < nlvls - 1) {
                 return;
             }
             update_timestep(sim, lvl);
+            auto& meta = sim.metadata();
+
+            // propagate dt to all levels
+            for (std::int64_t ell = nlvls - 2; ell >= 0; --ell) {
+                // get the refinement ratio from the *finer* level (L+1)
+                const auto ref_ratio = sim.level_info(ell + 1).refinement_ratio;
+
+                meta.level_dts[ell] = meta.level_dts[ell + 1] * ref_ratio;
+            }
+            meta.global_dt = meta.level_dts[0];
         }
     };
 
@@ -107,12 +157,40 @@ namespace simbi::ecs {
                 boundary::apply_boundary_conditions(sim);
                 return;
             }
-            auto map     = create_level_mapping(sim.hierarchy(), lvl);
-            auto& fine   = sim.hydro(lvl);
-            auto& coarse = sim.hydro(lvl - 1);
+            const auto& map = sim.level_mapping(lvl);
+            auto& fine      = sim.hydro(lvl);
+            auto& coarse    = sim.hydro(lvl - 1);
 
             // porlongate
             prolongate_ghosts_conservative(coarse.cons, fine.cons, map);
+        }
+    };
+
+    struct time_interpolated_ghost_fill_system_t {
+        // 'alpha' is the fractional time to interpolate to.
+        real alpha = 0.5;
+
+        template <typename Sim>
+        void operator()(Sim& sim, std::uint64_t lvl) const
+        {
+            using namespace structs;
+            if (lvl == 0) {
+                return;
+            }
+
+            // get components
+            const auto& coarse_rk    = sim.rk_workspace(lvl - 1);
+            const auto& coarse_hydro = sim.hydro(lvl - 1);
+            auto& fine_hydro         = sim.hydro(lvl);
+            const auto& map          = sim.level_mapping(lvl);
+
+            prolongate_ghosts_time_interpolated(
+                coarse_rk.u_n,       //  u_n
+                coarse_hydro.cons,   //  u_star
+                alpha,               //  interpolation factor
+                fine_hydro.cons,     //  destination field
+                map
+            );
         }
     };
 
@@ -168,7 +246,7 @@ namespace simbi::ecs {
                     body::body_collection_t<Dims>{},
                     def_diag,
                     meta.gamma,
-                    meta.dt
+                    meta.level_dts[lvl]
                 );
             }
 
@@ -199,7 +277,7 @@ namespace simbi::ecs {
                 bodies,
                 this_level_has_body ? sim.diagnostics() : def_diag,
                 meta.gamma,
-                meta.dt
+                meta.level_dts[lvl]
             );
         }
     };
@@ -224,7 +302,8 @@ namespace simbi::ecs {
 
             auto u_p = hydro.cons[mesh.domain];
             u_p      = u_p.enum_map([&](auto coord, auto u) {
-                return u | add_gas((ell(coord) + be(coord)) * meta.dt);
+                return u |
+                       add_gas((ell(coord) + be(coord)) * meta.level_dts[lvl]);
             });
 
             if constexpr (Sim::is_mhd) {
@@ -246,7 +325,7 @@ namespace simbi::ecs {
             auto& mesh    = sim.mesh(lvl);
             auto& meta    = sim.metadata();
             auto& sources = sim.sources();
-            const auto dt = meta.dt;
+            const auto dt = meta.level_dts[lvl];
 
             // assume fluxes already computed and corrected
             auto k1   = godunov_op(hydro, mesh, meta, sources);
@@ -285,7 +364,7 @@ namespace simbi::ecs {
             auto& mesh    = sim.mesh(lvl);
             auto& meta    = sim.metadata();
             auto& sources = sim.sources();
-            const auto dt = meta.dt;
+            const auto dt = meta.level_dts[lvl];
 
             auto& workspace = sim.rk_workspace(lvl);
 
@@ -316,16 +395,23 @@ namespace simbi::ecs {
         template <typename Sim>
         void operator()(Sim& sim) const
         {
-            if (sim.num_levels() == 1) {
+            if (!sim.has_refinement()) {
                 return;
             }
 
             auto& hierarchy = sim.hierarchy();
+            auto& meta      = sim.metadata();
             for (std::uint64_t lvl = hierarchy.num_levels - 1; lvl > 0; --lvl) {
-                auto& coarser_hydro = sim.hydro(lvl - 1);
-                auto& finer_hydro   = sim.hydro(lvl);
-                auto map            = create_level_mapping(hierarchy, lvl);
-                correct_level_fluxes(coarser_hydro.flux, finer_hydro.flux, map);
+                auto& coarser_hydro  = sim.hydro(lvl - 1);
+                auto& finer_hydro    = sim.hydro(lvl);
+                auto& map            = sim.level_mapping(lvl);
+                const real dt_coarse = meta.level_dts[lvl - 1];
+                correct_level_fluxes(
+                    coarser_hydro.flux,
+                    finer_hydro.flux_avg,
+                    map,
+                    dt_coarse
+                );
             }
         }
     };
@@ -334,13 +420,13 @@ namespace simbi::ecs {
         template <typename Sim>
         void operator()(Sim& sim, std::uint64_t lvl) const
         {
-            auto map   = mesh::fmr::create_level_mapping(sim.hierarchy(), lvl);
-            auto& fine = sim.hydro(lvl);
-            auto& coarse = sim.hydro(lvl - 1);
+            const auto& map = sim.level_mapping(lvl);
+            auto& fine      = sim.hydro(lvl);
+            auto& coarse    = sim.hydro(lvl - 1);
             restrict_conservative(fine.cons, coarse.cons, map);
         }
     };
 
 }   // namespace simbi::ecs
 
-#endif
+#endif   // SYSTEMS_HPP

@@ -6,16 +6,18 @@
 #include "containers/vector.hpp"   // for vector_t
 #include "domain/domain.hpp"       // for domain_t
 #include "entity.hpp"              // for entity_t
+#include "math/express_t.hpp"
 #include "mesh/fmr/hierarchy.hpp"
+#include "mesh/fmr/level_mapping.hpp"
 #include "mesh/mesh_config.hpp"         // for mesh_config_t
 #include "physics/ib/collection.hpp"    // for body_collection_t
 #include "physics/ib/diagnostics.hpp"   // for body_diagnostics_t
-#include "state/express_t.hpp"
-#include "utility/enums.hpp"   // for Geometry
+#include "utility/enums.hpp"            // for Geometry
 
 #include <cstdint>   // for std::uint64_t
 #include <memory>    // for std::unique_ptr
 #include <string>    // for std::string
+#include <vector>
 
 namespace simbi::ecs {
     /**
@@ -30,7 +32,8 @@ namespace simbi::ecs {
         field_t<Conserved, Dims> cons;
         field_t<Primitive, Dims> prim;
         vector_t<field_t<Conserved, Dims>, Dims> flux;
-        vector_t<field_t<real, Dims>, Dims> bfield;   // for MHD
+        vector_t<field_t<Conserved, Dims>, Dims> flux_avg;   // for sub-cycling
+        vector_t<field_t<real, Dims>, Dims> bfield;          // for MHD
     };
 
     // mesh geometry for one level
@@ -43,6 +46,11 @@ namespace simbi::ecs {
     struct level_info_t {
         std::uint64_t level_id;
         std::uint64_t refinement_ratio;
+    };
+
+    template <std::uint64_t Dims>
+    struct level_mapping_cache_t {
+        mesh::fmr::level_mapping_t<Dims> mapping;
     };
 
     // marks refined levels
@@ -73,7 +81,7 @@ namespace simbi::ecs {
         real cfl;
         real time;
         real tend;
-        real dt;
+        real global_dt;
         real dlogt;
         real checkpoint_interval;
         real checkpoint_time;
@@ -98,6 +106,7 @@ namespace simbi::ecs {
         Reconstruction reconstruction;
         Timestepping timestepping;
         vector_t<BoundaryCondition, 2 * Dims> boundary_conditions;
+        // can be (1, 1, nx) or (1, ny, nx) or (nz, ny, nx)
         iarray<3> resolution;
 
         // flags
@@ -107,8 +116,10 @@ namespace simbi::ecs {
         // strings
         std::string data_dir;
 
-        // queries
+        // level-aware timestepping
+        std::vector<real> level_dts;
 
+        // queries
         void advance_schedule(auto schedule)
         {
             checkpoint_time  = schedule.checkpoint_time;

@@ -419,7 +419,7 @@ namespace simbi::io {
             const auto& meta = sim.metadata();
 
             h5::write_attribute(group, "time", meta.time);
-            h5::write_attribute(group, "dt", meta.dt);
+            h5::write_attribute(group, "dt", meta.global_dt);
             h5::write_attribute(group, "iteration", meta.iteration);
             h5::write_attribute(group, "dimensions", meta.dimensions);
             h5::write_string(group, "regime", serialize(meta.regime));

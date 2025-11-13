@@ -971,21 +971,28 @@ namespace simbi::io {
                 bfields = bfield_result.value();
             }
 
+            auto create_flux_fields = [&]() {
+                return fp::range(Dims) | fp::map([&](std::uint64_t dir) {
+                           return field_t<conserved_t, Dims>(
+                               mesh.face_domain[dir]
+                           );
+                       }) |
+                       fp::collect<vector_t<field_t<conserved_t, Dims>, Dims>>;
+            };
+
             // create flux fields
-            auto flux_fields =
-                fp::range(Dims) | fp::map([&](std::uint64_t dir) {
-                    return field_t<conserved_t, Dims>(mesh.face_domain[dir]);
-                }) |
-                fp::collect<vector_t<field_t<conserved_t, Dims>, Dims>>;
+            auto flux_fields = create_flux_fields();
+            auto flux_avgs   = create_flux_fields();
 
             // add hydro fields to level
             sim.registry.add(
                 sim.levels[level],
                 hydro_fields_t<conserved_t, primitive_t, Dims>{
-                  .cons   = std::move(cons_field),
-                  .prim   = std::move(prim_field),
-                  .flux   = std::move(flux_fields),
-                  .bfield = std::move(bfields)
+                  .cons     = std::move(cons_field),
+                  .prim     = std::move(prim_field),
+                  .flux     = std::move(flux_fields),
+                  .flux_avg = std::move(flux_avgs),
+                  .bfield   = std::move(bfields)
                 }
             );
 

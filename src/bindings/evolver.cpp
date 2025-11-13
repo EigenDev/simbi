@@ -56,7 +56,7 @@ namespace simbi::hydrostate {
                 }
                 evolution::run(
                     sim,
-                    [&](auto& s) { pipeline.step_all(s.levels, s.registry); },
+                    [&](auto&) { pipeline.step_all(); },
                     evo_state
                 );
             }

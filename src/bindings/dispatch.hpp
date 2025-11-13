@@ -3,12 +3,12 @@
 #define HYDRO_DISPATCH_HPP
 
 #include "compat.hpp"
+#include "compute/cfd_ops.hpp"
 #include "containers/vector.hpp"
 #include "ecs/factory.hpp"
 #include "io/loader.hpp"
 #include "physics/eos/ideal.hpp"
 #include "physics/eos/isothermal.hpp"
-#include "state/cfd_ops.hpp"
 #include "utility/bimap.hpp"
 #include "utility/enums.hpp"
 #include "utility/init_conditions.hpp"

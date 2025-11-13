@@ -33,7 +33,7 @@ namespace simbi::body {
             const auto total_mass    = binary_params.total_mass;
             const auto a             = binary_params.semi_major;
             const auto omega         = std::sqrt(total_mass / (a * a * a));
-            const auto dt            = state.metadata().dt;
+            const auto dt            = state.metadata().global_dt;
 
             // the new collection to hold updated bodies
             auto new_coll = make_body_collection<Dims>();

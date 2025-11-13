@@ -3,6 +3,7 @@
 
 #include "compat.hpp"
 #include "compute/field.hpp"
+#include "containers/state_ops.hpp"
 #include "containers/vector.hpp"
 #include "domain/ghost.hpp"
 #include "level_mapping.hpp"
@@ -297,6 +298,35 @@ namespace simbi::mesh::fmr {
         }
     };
 
+    template <typename T, std::uint64_t Dims, typename SpatialInterpolator>
+    struct time_varying_interpolator_t {
+        const field_t<T, Dims>& u_n;
+        const field_t<T, Dims>& u_star;
+        real alpha;
+        SpatialInterpolator
+            spatial_interp;   // the wrapped spatial interpolator
+
+        // this ignores the 'coarse' field passed by the driver
+        // and uses its own u_n and u_star fields instead.
+        DUAL T operator()(
+            const field_t<T, Dims>& /* dummy_coarse */,
+            const coordinate_t<Dims>& fine_coord,
+            const level_mapping_t<Dims>& map
+        ) const
+        {
+            // spatially interpolate u_n to the fine coord
+            T v_n = spatial_interp(u_n, fine_coord, map);
+
+            // spatially interpolate u_star to the fine coord
+            T v_star = spatial_interp(u_star, fine_coord, map);
+
+            // time interpolate the two spatially-interpolated values
+            //    (Using the operators from your systems.hpp)
+            return v_n | structs::scale_gas(1.0 - alpha) |
+                   structs::add_gas(v_star | structs::scale_gas(alpha));
+        }
+    };
+
     // fill entire fine field from coarse field
     template <typename T, std::uint64_t Dims, typename Interpolator>
     void prolongate_full(
@@ -372,40 +402,28 @@ namespace simbi::mesh::fmr {
         );
     }
 
-    template <typename Sim>
-    void diagnose_ghost_filling(Sim& sim, std::uint64_t lvl)
+    template <typename T, std::uint64_t Dims>
+    void prolongate_ghosts_time_interpolated(
+        const field_t<T, Dims>& coarse_u_n,
+        const field_t<T, Dims>& coarse_u_star,
+        real alpha,
+        field_t<T, Dims>& fine,
+        const level_mapping_t<Dims>& map
+    )
     {
-        if (lvl == 0) {
-            return;
-        }
+        auto spatial_interpolator = parabolic_interpolator_t<T, Dims>{};
 
-        auto map = create_level_mapping(sim.hierarchy(), lvl);
-        auto ghost_regions =
-            boundary::analyze_ghost_regions(map.fine_full, map.fine_active);
+        auto time_space_interpolator = time_varying_interpolator_t<
+            T,
+            Dims,
+            decltype(spatial_interpolator)>{
+          coarse_u_n,
+          coarse_u_star,
+          alpha,
+          spatial_interpolator
+        };
 
-        std::cout << "\n=== Ghost Region Diagnostic for Level " << lvl
-                  << " ===\n";
-        std::cout << "Fine full domain: " << map.fine_full << "\n";
-        std::cout << "Fine active domain: " << map.fine_active << "\n";
-        std::cout << "Number of ghost regions: " << ghost_regions.size()
-                  << "\n";
-
-        std::uint64_t total_ghost_cells = 0;
-        for (const auto& region : ghost_regions) {
-            auto size = region.domain.volume();
-            total_ghost_cells += size;
-            std::cout << "  Ghost region: " << region.domain
-                      << " (volume: " << size << ")\n";
-        }
-
-        std::uint64_t expected_ghost =
-            map.fine_full.volume() - map.fine_active.volume();
-        std::cout << "Total ghost cells found: " << total_ghost_cells << "\n";
-        std::cout << "Expected ghost cells: " << expected_ghost << "\n";
-
-        if (total_ghost_cells != expected_ghost) {
-            std::cout << "WARNING: Ghost region analysis incomplete!\n";
-        }
+        prolongate_ghosts_only(coarse_u_n, fine, map, time_space_interpolator);
     }
 
 }   // namespace simbi::mesh::fmr

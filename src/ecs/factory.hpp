@@ -9,6 +9,7 @@
 #include "containers/vector.hpp"   // for vector_t
 #include "functional/fp.hpp"       // for fp::transform, fp::collect, fp::range
 #include "mesh/fmr/factory.hpp"    // for fmr::build_hierarchy_from_init
+#include "mesh/fmr/level_mapping.hpp"
 #include "mesh/fmr/prolongation.hpp"   // for fmr::prolongate_conserved
 #include "mesh/mesh_config.hpp"        // for mesh_config_t
 #include "physics/em/ct_updater.hpp"
@@ -22,10 +23,8 @@
 
 #include <cstdint>
 #include <functional>
-#include <iostream>
 #include <pybind11/pybind11.h>
 #include <pybind11/pytypes.h>
-#include <stdexcept>
 #include <type_traits>
 
 namespace py = pybind11;
@@ -123,28 +122,37 @@ namespace simbi::ecs {
             return hydro::to_conserved(prim, g);
         });
 
+        auto create_flux_fields = [&]() {
+            return fp::range(Dims) | fp::map([&](std::uint64_t dir) {
+                       const auto mhd_b = 2 * init.is_mhd;
+                       // create staggered shape
+                       iarray<Dims> staggered_shape = active_shape;
+                       staggered_shape[dir] += 1;
+                       // add MHD offset to other dimensions
+                       for (std::uint64_t d = 0; d < Dims; ++d) {
+                           if (d != dir) {
+                               staggered_shape[d] += mhd_b;
+                           }
+                       }
+                       return field_t<conserved_t, Dims>(
+                           make_domain(staggered_shape)
+                       );
+                   }) |
+                   fp::collect<vector_t<field_t<conserved_t, Dims>, Dims>>;
+        };
+
+        auto flux_fields = create_flux_fields();
+        auto flux_avg_fields =
+            init.fmr_enabled ? create_flux_fields()
+                             : vector_t<field_t<conserved_t, Dims>, Dims>{};
         sim.registry.add(
             level_0,
             hydro_fields_t<conserved_t, primitive_t, Dims>{
-              .cons = std::move(cons),
-              .prim = std::move(prims),
-              .flux = fp::range(Dims) | fp::map([&](std::uint64_t dir) {
-                          const auto mhd_b = 2 * init.is_mhd;
-                          // create staggered shape
-                          iarray<Dims> staggered_shape = active_shape;
-                          staggered_shape[dir] += 1;
-                          // add MHD offset to other dimensions
-                          for (std::uint64_t d = 0; d < Dims; ++d) {
-                              if (d != dir) {
-                                  staggered_shape[d] += mhd_b;
-                              }
-                          }
-                          return field_t<conserved_t, Dims>(
-                              make_domain(staggered_shape)
-                          );
-                      }) |
-                      fp::collect<vector_t<field_t<conserved_t, Dims>, Dims>>,
-              .bfield = std::move(bfield)
+              .cons     = std::move(cons),
+              .prim     = std::move(prims),
+              .flux     = std::move(flux_fields),
+              .flux_avg = std::move(flux_avg_fields),
+              .bfield   = std::move(bfield)
             }
         );
 
@@ -230,6 +238,14 @@ namespace simbi::ecs {
                               }) |
                               fp::collect<
                                   vector_t<field_t<conserved_t, Dims>, Dims>>,
+                      .flux_avg =
+                          fp::range(Dims) | fp::map([&](std::uint64_t dir) {
+                              return field_t<conserved_t, Dims>(
+                                  level_desc.face_domains[dir]
+                              );
+                          }) |
+                          fp::collect<
+                              vector_t<field_t<conserved_t, Dims>, Dims>>,
                       .bfield = std::move(bfield)
                     }
                 );
@@ -259,6 +275,10 @@ namespace simbi::ecs {
                 );
 
                 const auto map = create_level_mapping(hierarchy, lvl);
+                sim.registry.add(
+                    level_entity,
+                    level_mapping_cache_t<Dims>{.mapping = map}
+                );
                 prolongate_conservative(
                     sim.hydro(lvl - 1).cons,
                     sim.hydro(lvl).cons,

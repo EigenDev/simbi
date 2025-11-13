@@ -119,6 +119,17 @@ namespace simbi::ecs {
             return registry.get<fmr_hierarchy_t<Dims>>(global).hierarchy;
         }
 
+        auto& level_mapping(std::uint64_t lvl)
+        {
+            return registry.get<level_mapping_cache_t<Dims>>(levels[lvl])
+                .mapping;
+        }
+        const auto& level_mapping(std::uint64_t lvl) const
+        {
+            return registry.get<level_mapping_cache_t<Dims>>(levels[lvl])
+                .mapping;
+        }
+
         // RK workspace management
         bool has_rk_workspace(std::uint64_t lvl) const
         {

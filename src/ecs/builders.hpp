@@ -1,13 +1,16 @@
 #ifndef COMPONENT_BUILDERS_HPP
 #define COMPONENT_BUILDERS_HPP
 
+#include "compat.hpp"
 #include "components.hpp"
 #include "containers//vector.hpp"
-#include "state/express_t.hpp"
+#include "math/express_t.hpp"
 #include "utility/bimap.hpp"
 #include "utility/enums.hpp"
 #include "utility/init_conditions.hpp"
+
 #include <cstdint>
+#include <vector>
 
 namespace simbi::ecs {
 
@@ -29,7 +32,7 @@ namespace simbi::ecs {
           .cfl                  = init.cfl,
           .time                 = init.time,
           .tend                 = init.tend,
-          .dt                   = 0.0,
+          .global_dt            = 0.0,
           .dlogt                = init.dlogt,
           .checkpoint_interval  = init.checkpoint_interval,
           .checkpoint_time      = init.time,
@@ -52,7 +55,8 @@ namespace simbi::ecs {
           .resolution           = {init.nz, init.ny, init.nx},
           .is_mhd               = init.is_mhd,
           .is_relativistic      = init.is_relativistic,
-          .data_dir             = init.data_directory
+          .data_dir             = init.data_directory,
+          .level_dts            = std::vector<real>(init.fmr_max_levels)
         };
 
         for (std::uint64_t ii = 0; ii < 2 * Dims; ++ii) {
