@@ -7,7 +7,6 @@
 #include "level_mapping.hpp"
 
 #include <cstdint>
-#include <iostream>
 
 namespace simbi::mesh::fmr {
     // conservative restriction (volume-weighted averaging)
