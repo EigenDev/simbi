@@ -10,7 +10,6 @@
 #include "utility/helpers.hpp"
 
 #include <cstdint>
-#include <iostream>
 
 namespace simbi::mesh::fmr {
     // === Interpolation Strategies ===
