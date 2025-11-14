@@ -19,6 +19,16 @@ namespace simbi::ecs {
     build_metadata_component(const initial_conditions_t& init)
     {
         auto get_shock_smoother = [&init]() {
+            /**
+             * Picks out a shock smoothing limiter based on the initial
+             * base on the pressure and / or entrop conditions.
+             * The first one is from a class paper by James Quirk (1994):
+             * "A contribution to the great Riemann solver debate"
+             * The second is from:
+             * Fleischmann et al. (2020): "A shock-stable modification of the
+             * HLLC Riemann solver with reduced numerical dissipation"
+             *
+             */
             return init.fleischmann_limiter
                        ? ShockWaveLimiter::FLEISCHMANN
                        : (init.quirk_smoothing ? ShockWaveLimiter::QUIRK
