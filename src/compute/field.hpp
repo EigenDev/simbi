@@ -180,7 +180,7 @@ namespace simbi {
             executor
                 .for_each(
                     buffer.domain(),
-                    [acc, computation] DUAL(coordinate_t<Dims> coord) mutable {
+                    [acc, computation] DUAL(coordinate_t<Dims> coord) {
                         acc(coord) = computation(coord);
                     }
                 )
