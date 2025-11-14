@@ -158,8 +158,7 @@ namespace simbi {
 
                     futures.push_back(executor.for_each(
                         shard.domain(),
-                        [acc = shard.accessor(),
-                         local_comp] DUAL(auto coord) mutable {
+                        [acc = shard.accessor(), local_comp] DUAL(auto coord) {
                             acc(coord) = local_comp(coord);
                         }
                     ));
@@ -169,8 +168,7 @@ namespace simbi {
                         ctx.get_executor<exec::cpu_executor_t>(shard.device());
                     futures.push_back(executor.for_each(
                         shard.domain(),
-                        [acc = shard.accessor(),
-                         local_comp](auto coord) mutable {
+                        [acc = shard.accessor(), local_comp](auto coord) {
                             acc(coord) = local_comp(coord);
                         }
                     ));
