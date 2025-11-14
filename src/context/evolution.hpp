@@ -158,35 +158,33 @@ namespace simbi::evolution {
             ecs::sink_cache_system_t{}(sim);
 
             // compute provisional fluxes for this level
-            // these will be corrected by the sub-cycle before being used
             ecs::staggered_fields_system_t{
-              .accumulate_fluxes = (lvl > 0)   // accumulate for parent
+              .accumulate_fluxes = (lvl > 0)
             }(sim, ops, lvl);
 
             // sub-cycle finer level first (if it exists)
             if (lvl < sim.num_levels() - 1) {
-                const auto ref_ratio = sim.level_info(lvl + 1).refinement_ratio;
-                const auto& map      = sim.level_mapping(lvl + 1);
+                const auto& map = sim.level_mapping(lvl + 1);
+
+                // get the actual number of substeps
+                const auto nsteps = get_substeps(lvl + 1);
 
                 // zero fine level's accumulator once
                 ecs::zero_flux_buffer_system_t{}(sim, lvl + 1);
 
-                for (std::uint64_t substep = 0; substep < ref_ratio;
-                     ++substep) {
+                for (std::uint64_t substep = 0; substep < nsteps; ++substep) {
                     // recurse
                     advance_level_euler(lvl + 1);
                     // restriction must happen *inside* the loop
                     ecs::restriction_system_t{}(sim, lvl + 1);
                 }
 
-                // now that the sub-cycle is done, correct *this level's* fluxes
-                // using the accumulated data from the fine level
+                // correct this level's fluxes using accumulated fine flux
                 mesh::fmr::correct_level_fluxes(
                     sim.hydro(lvl).flux,
                     sim.hydro(lvl + 1).flux_avg,
                     map,
-                    sim.metadata()
-                        .level_dts[lvl]   // normalize by this level's dt
+                    sim.metadata().level_dts[lvl]
                 );
             }
 
@@ -225,16 +223,16 @@ namespace simbi::evolution {
             // === sub-cycle fine level ===
 
             if (lvl < sim.num_levels() - 1) {
-                const auto ref_ratio = sim.level_info(lvl + 1).refinement_ratio;
+                // Get the actual number of substeps (from timestep system)
+                const auto nsteps = get_substeps(lvl + 1);
 
                 // zero child's accumulator
                 ecs::zero_flux_buffer_system_t{}(sim, lvl + 1);
 
-                for (std::uint64_t substep = 0; substep < ref_ratio;
-                     ++substep) {
+                for (std::uint64_t substep = 0; substep < nsteps; ++substep) {
                     // time-interpolate boundaries between u^n and u*
                     const real alpha =
-                        (static_cast<real>(substep) + 0.5) / ref_ratio;
+                        (static_cast<real>(substep) + 0.5) / nsteps;
                     ecs::time_interpolated_ghost_fill_system_t{
                       alpha
                     }(sim, lvl + 1);
@@ -271,12 +269,27 @@ namespace simbi::evolution {
             ecs::rk2_stage2_system_t{ops}(sim, lvl);
         }
 
+        std::uint64_t get_substeps(std::uint64_t child_lvl) const
+        {
+            auto& meta = sim.metadata();
+
+            if (meta.subcycling_mode == subcycling_mode_t::NONE) {
+                return 1;   // no subcycling
+            }
+            else if (meta.subcycling_mode == subcycling_mode_t::ADAPTIVE) {
+                return meta.level_substeps[child_lvl];
+            }
+            else {   // STANDARD
+                return sim.level_info(child_lvl).refinement_ratio;
+            }
+        }
+
       public:
         void configure(std::uint64_t lvl) const
         {
             ecs::ghost_fill_system_t{}(sim, lvl);
             ecs::c2p_system_t{}(sim, lvl);
-            ecs::timestep_system_t{}(sim, lvl);
+            ecs::timestep_system_t{}(sim);
         }
 
         void step_all() const
@@ -284,7 +297,7 @@ namespace simbi::evolution {
             auto& meta = sim.metadata();
 
             // calculate all level timesteps (l_max -> l=0)
-            ecs::timestep_system_t{}(sim, sim.num_levels() - 1);
+            ecs::timestep_system_t{}(sim);
 
             if (meta.timestepping == Timestepping::RK2) {
                 advance_level_rk2(0);

@@ -41,6 +41,7 @@ from ..types.input import (
     Reconstruction,
     Regime,
     Solver,
+    SubCycleMode,
     TimeStepping,
 )
 from ..types.typing import ExpressionDict, InitialStateType
@@ -175,10 +176,6 @@ class SimbiBaseConfig(CLIConfigurableModel):
         },  # Limit reasonable choices
     )
 
-    fmr_buffer_size: int = SimbiField(
-        1, description="Number of buffer cells around refinement regions"
-    )
-
     # List of refinement regions for each level
     # Format: List of (xmin, xmax) for 1D, (xmin, xmax, ymin, ymax) for 2D, etc.
     fmr_regions: list[list[float]] = SimbiField(
@@ -200,14 +197,13 @@ class SimbiBaseConfig(CLIConfigurableModel):
     fmr_ratios: list[int] | list[np.uint64] = SimbiField(
         [], description="Refinement ratio for each level relative to its parent"
     )
-
-    fmr_conservative_interpolation: bool = SimbiField(
-        True, description="Use conservative interpolation between levels"
+    fmr_substeps: list[int] = SimbiField(
+        [1],
+        description="Number of substeps for each refinement level",
     )
-
-    # Control output of refined levels
-    fmr_output_all_levels: bool = SimbiField(
-        True, description="Output data from all refinement levels"
+    fmr_subcycling_mode: SubCycleMode = SimbiField(
+        SubCycleMode.NONE,
+        description="Subcycling mode for FMR",
     )
 
     @field_validator("fmr_ratios", mode="after")
@@ -216,7 +212,15 @@ class SimbiBaseConfig(CLIConfigurableModel):
         try:
             return [np.uint64(r) for r in v]
         except (ValueError, TypeError) as e:
-            raise ValueError(f"Invalid refinement ratio: {e}")
+            raise ValueError(f"Invalid refinement ratio(s): {e}")
+
+    @field_validator("fmr_substeps", mode="after")
+    def validate_substeps(cls, v: list[int]) -> list[np.uint64]:
+        """Validate substeps are positive integers."""
+        try:
+            return [np.uint64(s) for s in v]
+        except (ValueError, TypeError) as e:
+            raise ValueError(f"Invalid substep value(s): {e}")
 
     # Isothermal physics
     @computed_field
@@ -639,19 +643,16 @@ class SimbiBaseConfig(CLIConfigurableModel):
                         f"expected {expected_coords} for {self.dimensionality}D problem"
                     )
 
-            # Enforce minimum buffer size
-            if self.fmr_buffer_size < 1:
-                raise ValueError("FMR buffer size must be at least 1")
+            # number of substeps must match number of levels -1
+            if len(self.fmr_substeps) != self.fmr_max_levels - 1:
+                raise ValueError(
+                    f"Expected {self.fmr_max_levels - 1} FMR substeps, got {len(self.fmr_substeps)}"
+                )
 
-            # Warn if buffer might be too small for interpolation order
-            if (
-                self.reconstruction == Reconstruction.PLM
-                and self.fmr_buffer_size < 2
-            ):
-                import warnings
-
-                warnings.warn(
-                    "Buffer size < 2 might be insufficient for PLM reconstruction"
+            # if substeps not specified, raise error
+            if not self.fmr_substeps:
+                raise ValueError(
+                    "FMR substeps must be specified when FMR is enabled"
                 )
 
         return self

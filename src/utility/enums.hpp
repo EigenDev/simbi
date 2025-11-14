@@ -248,6 +248,12 @@ namespace simbi {
         RIGID         = 1 << 4,
     };
 
+    enum class subcycling_mode_t : uint32_t {
+        NONE,
+        STANDARD,
+        ADAPTIVE,
+    };
+
     constexpr inline body_capability_t
     operator|(body_capability_t lhs, body_capability_t rhs)
     {
@@ -358,6 +364,13 @@ namespace simbi {
         {CTAlgo::CONTACT, "contact"},
         {CTAlgo::MdZ, "mdz"},
         {CTAlgo::ZERO, "zero"}
+    );
+
+    REGISTER_ENUM_BIMAP(
+        subcycling_mode_t,
+        {subcycling_mode_t::NONE, "none"},
+        {subcycling_mode_t::STANDARD, "standard"},
+        {subcycling_mode_t::ADAPTIVE, "adaptive"}
     );
 }   // namespace simbi
 #endif

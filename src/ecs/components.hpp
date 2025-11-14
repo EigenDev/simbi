@@ -118,6 +118,8 @@ namespace simbi::ecs {
 
         // level-aware timestepping
         std::vector<real> level_dts;
+        std::vector<std::uint64_t> level_substeps;
+        subcycling_mode_t subcycling_mode{subcycling_mode_t::STANDARD};
 
         // queries
         void advance_schedule(auto schedule)

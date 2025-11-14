@@ -53,6 +53,7 @@
 #include "compat.hpp"
 #include "config_dict.hpp"
 #include "init_conditions_visitor.hpp"
+#include "utility/bimap.hpp"
 #include "utility/enums.hpp"
 
 #include <cstdint>
@@ -375,26 +376,24 @@ namespace simbi {
         void visit_fmr_parameters(
             bool& fmr_enabled,
             std::uint64_t& fmr_max_levels,
-            std::uint64_t& fmr_buffer_size,
-            bool& fmr_conservative_interpolation,
-            bool& fmr_output_all_levels,
             std::vector<std::vector<real>>& fmr_regions,
-            std::vector<std::uint64_t>& fmr_ratios
+            std::vector<std::uint64_t>& fmr_ratios,
+            std::vector<std::uint64_t>& substeps,
+            subcycling_mode_t& subcycling_mode
         ) override
         {
             fmr_enabled = dict.at("fmr_enabled").get<bool>();
             if (fmr_enabled) {
                 fmr_max_levels = dict.at("fmr_max_levels").get<std::uint64_t>();
-                fmr_buffer_size =
-                    dict.at("fmr_buffer_size").get<std::uint64_t>();
-                fmr_conservative_interpolation =
-                    dict.at("fmr_conservative_interpolation").get<bool>();
-                fmr_output_all_levels =
-                    dict.at("fmr_output_all_levels").get<bool>();
-                fmr_regions = dict.at("fmr_regions")
+                fmr_regions    = dict.at("fmr_regions")
                                   .get<std::vector<std::vector<real>>>();
                 fmr_ratios =
                     dict.at("fmr_ratios").get<std::vector<std::uint64_t>>();
+                substeps =
+                    dict.at("fmr_substeps").get<std::vector<std::uint64_t>>();
+                subcycling_mode = deserialize<subcycling_mode_t>(
+                    dict.at("fmr_subcycling_mode").get<std::string>()
+                );
             }
         }
 
@@ -641,20 +640,18 @@ namespace simbi {
         void visit_fmr_parameters(
             bool& fmr_enabled,
             std::uint64_t& fmr_max_levels,
-            std::uint64_t& fmr_buffer_size,
-            bool& fmr_conservative_interpolation,
-            bool& fmr_output_all_levels,
             std::vector<std::vector<real>>& fmr_regions,
-            std::vector<std::uint64_t>& fmr_ratios
+            std::vector<std::uint64_t>& fmr_ratios,
+            std::vector<std::uint64_t>& substeps,
+            subcycling_mode_t& subcycling_mode
         ) override
         {
-            fmr_enabled                    = false;
-            fmr_max_levels                 = 1;
-            fmr_buffer_size                = 2;
-            fmr_conservative_interpolation = true;
-            fmr_output_all_levels          = false;
+            fmr_enabled    = false;
+            fmr_max_levels = 1;
             fmr_regions.clear();
             fmr_ratios.clear();
+            substeps.clear();
+            subcycling_mode = subcycling_mode_t::STANDARD;
         }
     };
 
@@ -861,11 +858,10 @@ namespace simbi {
         void visit_fmr_parameters(
             bool&,
             std::uint64_t&,
-            std::uint64_t&,
-            bool&,
-            bool&,
             std::vector<std::vector<real>>&,
-            std::vector<std::uint64_t>&
+            std::vector<std::uint64_t>&,
+            std::vector<std::uint64_t>&,
+            subcycling_mode_t&
         ) override
         {
             // [TODO]: implement FMR validation

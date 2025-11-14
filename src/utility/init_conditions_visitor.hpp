@@ -52,6 +52,7 @@
 
 #include "compat.hpp"        // for real, std::int64_t types
 #include "config_dict.hpp"   // for config_dict_t
+#include "utility/enums.hpp"
 #include <cstdint>
 #include <string>
 #include <utility>
@@ -166,11 +167,10 @@ namespace simbi {
         virtual void visit_fmr_parameters(
             bool& fmr_enabled,
             std::uint64_t& fmr_max_levels,
-            std::uint64_t& fmr_buffer_size,
-            bool& fmr_conservative_interpolation,
-            bool& fmr_output_all_levels,
             std::vector<std::vector<real>>& fmr_regions,
-            std::vector<std::uint64_t>& fmr_ratios
+            std::vector<std::uint64_t>& fmr_ratios,
+            std::vector<std::uint64_t>& substeps,
+            subcycling_mode_t& subcycling_mode
         ) = 0;
 
         // Allow for proper polymorphic destruction

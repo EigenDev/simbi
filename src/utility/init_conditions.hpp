@@ -55,6 +55,7 @@
 #include "config_dict_visitor.hpp"
 #include "domain/domain.hpp"
 #include "io/exceptions.hpp"
+#include "utility/enums.hpp"
 #include <algorithm>
 #include <cstdint>
 #include <sstream>
@@ -132,11 +133,10 @@ namespace simbi {
         // fmr-related fields
         bool fmr_enabled;
         std::uint64_t fmr_max_levels;
-        std::uint64_t fmr_buffer_size;
-        bool fmr_conservative_interpolation;
-        bool fmr_output_all_levels;
         std::vector<std::vector<real>> raw_fmr_regions;
         std::vector<std::uint64_t> fmr_ratios;
+        std::vector<std::uint64_t> substeps;
+        subcycling_mode_t subcycling_mode{subcycling_mode_t::STANDARD};
 
         template <typename Visitor>
         void accept(Visitor& visitor)
@@ -199,11 +199,10 @@ namespace simbi {
             visitor.visit_fmr_parameters(
                 fmr_enabled,
                 fmr_max_levels,
-                fmr_buffer_size,
-                fmr_conservative_interpolation,
-                fmr_output_all_levels,
                 raw_fmr_regions,
-                fmr_ratios
+                fmr_ratios,
+                substeps,
+                subcycling_mode
             );
         }
 

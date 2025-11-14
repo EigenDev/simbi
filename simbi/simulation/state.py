@@ -184,12 +184,6 @@ class SimulationStateSpec(BaseModel):
         ge=1,
     )
 
-    fmr_buffer_size: int = Field(
-        default=1,
-        description="Number of buffer cells around refined regions",
-        ge=1,
-    )
-
     fmr_regions: list[list[float]] = Field(
         default_factory=list,
         description="Refinement regions for each level (nested)",
@@ -198,16 +192,6 @@ class SimulationStateSpec(BaseModel):
     fmr_ratios: list[int] = Field(
         default_factory=list,
         description="Refinement ratios for each level relative to parent",
-    )
-
-    fmr_conservative_interpolation: bool = Field(
-        default=True,
-        description="Use conservative interpolation between FMR levels",
-    )
-
-    fmr_output_all_levels: bool = Field(
-        default=True,
-        description="Output data from all refinement levels",
     )
 
     # Body physics

@@ -17,9 +17,13 @@
 #include "update/adaptive_timestep.hpp"
 #include "update/bcs.hpp"
 #include "update/prim_recovery.hpp"
+#include "utility/enums.hpp"
 
+#include <algorithm>
+#include <cmath>
 #include <cstdint>
 #include <memory>
+#include <vector>
 
 namespace simbi::ecs {
     using namespace simbi::cfd;
@@ -129,23 +133,94 @@ namespace simbi::ecs {
 
     struct timestep_system_t {
         template <typename Sim>
-        void operator()(Sim& sim, std::uint64_t lvl) const
+        void operator()(Sim& sim) const
         {
             const auto nlvls = sim.num_levels();
-            if (lvl < nlvls - 1) {
-                return;
-            }
-            update_timestep(sim, lvl);
-            auto& meta = sim.metadata();
+            auto& meta       = sim.metadata();
 
-            // propagate dt to all levels
-            for (std::int64_t ell = nlvls - 2; ell >= 0; --ell) {
-                // get the refinement ratio from the *finer* level (L+1)
-                const auto ref_ratio = sim.level_info(ell + 1).refinement_ratio;
-
-                meta.level_dts[ell] = meta.level_dts[ell + 1] * ref_ratio;
+            // compute CFL timestep for each level independently
+            for (std::uint64_t ell = 0; ell < nlvls; ++ell) {
+                update_timestep(sim, ell);
             }
+
+            // step 2: Apply subcycling logic based on mode
+            if (meta.subcycling_mode == subcycling_mode_t::NONE) {
+                // all levels use global minimum
+                real dt_min = meta.level_dts[0];
+                for (std::uint64_t ell = 1; ell < nlvls; ++ell) {
+                    dt_min = std::min(dt_min, meta.level_dts[ell]);
+                }
+                for (std::uint64_t ell = 0; ell < nlvls; ++ell) {
+                    meta.level_dts[ell] = dt_min;
+                }
+            }
+            else if (meta.subcycling_mode == subcycling_mode_t::STANDARD) {
+                // fixed subcycling by refinement ratio
+                subcycle_standard(sim, meta.level_dts);
+            }
+            else if (meta.subcycling_mode == subcycling_mode_t::ADAPTIVE) {
+                // adaptive subcycling (future feature)
+                subcycle_adaptive(sim, meta.level_dts);
+            }
+
             meta.global_dt = meta.level_dts[0];
+        }
+
+      private:
+        // standard subcycling: fixed ratios, respect all CFL constraints
+        template <typename Sim>
+        void subcycle_standard(Sim& sim, const std::vector<real>& dt_cfl) const
+        {
+            const auto nlvls = sim.num_levels();
+            auto& meta       = sim.metadata();
+
+            // find the most restrictive scaled timestep
+            real dt_min_scaled = dt_cfl[0];
+            for (std::uint64_t ell = 1; ell < nlvls; ++ell) {
+                // compute cumulative refinement ratio from level 0 to ell
+                real cumulative_ratio = 1;
+                for (std::uint64_t k = 1; k <= ell; ++k) {
+                    cumulative_ratio *= sim.level_info(k).refinement_ratio;
+                }
+
+                // scale fine level dt back to coarse level equivalent
+                dt_min_scaled =
+                    std::min(dt_min_scaled, dt_cfl[ell] * cumulative_ratio);
+            }
+
+            // set timesteps respecting refinement ratios
+            meta.level_dts[0] = dt_min_scaled;
+            for (std::uint64_t ell = 1; ell < nlvls; ++ell) {
+                const auto ref_ratio = sim.level_info(ell).refinement_ratio;
+                meta.level_dts[ell]  = meta.level_dts[ell - 1] / ref_ratio;
+            }
+        }
+
+        // adaptive subcycling: levels can take different numbers of substeps
+        template <typename Sim>
+        void subcycle_adaptive(Sim& sim, const std::vector<real>& dt_cfl) const
+        {
+            const auto nlvls = sim.num_levels();
+            auto& meta       = sim.metadata();
+
+            // find global minimum CFL timestep
+            real dt_min = dt_cfl[0];
+            for (std::uint64_t ell = 1; ell < nlvls; ++ell) {
+                dt_min = std::min(dt_min, dt_cfl[ell]);
+            }
+
+            // each level determines how many substeps it needs
+            for (std::uint64_t ell = 0; ell < nlvls; ++ell) {
+                // how many substeps to respect CFL?
+                int nsteps = std::max(
+                    1,
+                    static_cast<int>(std::ceil(dt_min / dt_cfl[ell]))
+                );
+                meta.level_substeps[ell] = nsteps;
+                meta.level_dts[ell]      = dt_min / nsteps;
+            }
+
+            meta.global_dt = dt_min;
         }
     };
 

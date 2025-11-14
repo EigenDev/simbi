@@ -63,6 +63,12 @@ class Solver(str, ExtendedEnum):
     HLLD = "hlld"
 
 
+class SubCycleMode(str, ExtendedEnum):
+    STANDARD = "standard"
+    ADAPTIVE = "adaptive"
+    NONE = "none"
+
+
 @dataclass(frozen=True)
 class Metadata:
     """Structured simulation metadata"""

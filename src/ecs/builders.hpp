@@ -56,7 +56,9 @@ namespace simbi::ecs {
           .is_mhd               = init.is_mhd,
           .is_relativistic      = init.is_relativistic,
           .data_dir             = init.data_directory,
-          .level_dts            = std::vector<real>(init.fmr_max_levels)
+          .level_dts            = std::vector<real>(init.fmr_max_levels),
+          .level_substeps       = init.substeps,
+          .subcycling_mode      = init.subcycling_mode
         };
 
         for (std::uint64_t ii = 0; ii < 2 * Dims; ++ii) {
