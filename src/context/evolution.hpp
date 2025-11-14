@@ -141,85 +141,74 @@ namespace simbi::evolution {
         const Ops& ops;
 
       private:
-        void correct_fluxes(std::uint64_t lvl) const
-        {
-            // only correct if this is a fine level (L > 0)
-            if (lvl == 0) {
-                return;
-            }
-
-            auto& meta          = sim.metadata();
-            auto& coarser_hydro = sim.hydro(lvl - 1);
-            auto& finer_hydro   = sim.hydro(lvl);
-            const auto& map     = sim.level_mapping(lvl);
-
-            // get the timestep of the *coarse* level (L-1)
-            const real dt_coarse = meta.level_dts[lvl - 1];
-
-            // call the flux correction function directly.
-            // this reads from finer_hydro.flux_avg and corrects
-            // coarser_hydro.flux
-            mesh::fmr::correct_level_fluxes(
-                coarser_hydro.flux,
-                finer_hydro.flux_avg,   // read from the time-weighted buffer
-                map,
-                dt_coarse   // pass coarse dt for normalization
-            );
-        }
-
+        // ---
+        // euler driver
+        //
+        // the order is:
+        // > compute provisional fluxes for coarse level (l) from u^n
+        // > sub-cycle and restrict fine level (l+1)
+        // > correct coarse level (l) fluxes using fine flux_avg
+        // > advance coarse level (l) from u^n to u^{n+1}
+        // ---
         void advance_level_euler(std::uint64_t lvl) const
         {
-            // get primitives from u^n
+            // prep: prolongate ghosts, compute primitives
             ecs::ghost_fill_system_t{}(sim, lvl);
             ecs::c2p_system_t{}(sim, lvl);
             ecs::sink_cache_system_t{}(sim);
 
-            // compute fluxes from u^n and accumulate for parent
+            // compute provisional fluxes for this level
+            // these will be corrected by the sub-cycle before being used
             ecs::staggered_fields_system_t{
-              .accumulate_fluxes = (lvl > 0)
+              .accumulate_fluxes = (lvl > 0)   // accumulate for parent
             }(sim, ops, lvl);
 
-            // if fine level exists: sub-cycle first, then correct flux
+            // sub-cycle finer level first (if it exists)
             if (lvl < sim.num_levels() - 1) {
                 const auto ref_ratio = sim.level_info(lvl + 1).refinement_ratio;
+                const auto& map      = sim.level_mapping(lvl + 1);
 
-                // zero fine level's flux accumulator
+                // zero fine level's accumulator once
                 ecs::zero_flux_buffer_system_t{}(sim, lvl + 1);
 
-                // sub-cycle fine level
                 for (std::uint64_t substep = 0; substep < ref_ratio;
                      ++substep) {
+                    // recurse
                     advance_level_euler(lvl + 1);
+                    // restriction must happen *inside* the loop
+                    ecs::restriction_system_t{}(sim, lvl + 1);
                 }
 
-                // correct this level's flux using fine level's time-averaged
-                // flux
-                auto& meta = sim.metadata();
+                // now that the sub-cycle is done, correct *this level's* fluxes
+                // using the accumulated data from the fine level
                 mesh::fmr::correct_level_fluxes(
                     sim.hydro(lvl).flux,
                     sim.hydro(lvl + 1).flux_avg,
-                    sim.level_mapping(lvl + 1),
-                    meta.level_dts[lvl]
+                    map,
+                    sim.metadata()
+                        .level_dts[lvl]   // normalize by this level's dt
                 );
             }
 
-            // advance u^n -> u^{n+1} using (potentially corrected) flux
+            // advance this level using the (now corrected) fluxes
             ecs::euler_system_t{ops}(sim, lvl);
-
-            // restrict fine solution onto coarse covered cells
-            if (lvl < sim.num_levels() - 1) {
-                ecs::restriction_system_t{}(sim, lvl + 1);
-            }
         }
 
+        // ---
+        // rk2 driver (berger-colella)
+        //
+        // the order is:
+        // > compute fluxes for l from u^n
+        // > advance l to u* (using uncorrected fluxes)
+        // > sub-cycle l+1 (interpolating between u^n and u* from l)
+        // > re-compute fluxes for l from u* (which was modified by
+        // restriction)
+        // > correct stage 2 fluxes for l using fine flux_avg
+        // > advance l from u* to u^{n+1}
+        // ---
         void advance_level_rk2(std::uint64_t lvl) const
         {
-            if (lvl > 0) {
-                ecs::zero_flux_buffer_system_t{}(sim, lvl);
-            }
-
-            // === STAGE 1: u^n -> u* ===
-
+            // === stage 1: u^n -> u* ===
             ecs::ghost_fill_system_t{}(sim, lvl);
             ecs::c2p_system_t{}(sim, lvl);
             ecs::sink_cache_system_t{}(sim);
@@ -227,36 +216,38 @@ namespace simbi::evolution {
             // compute fluxes from u^n
             ecs::staggered_fields_system_t{
               .advance_bfields   = true,
-              .accumulate_fluxes = (lvl > 0),
+              .accumulate_fluxes = false,
             }(sim, ops, lvl);
 
-            // advance to u* before sub-cycling
+            // advance coarse to u* BEFORE subcycling
             ecs::rk2_stage1_system_t{ops}(sim, lvl);
 
-            // === sub-cycle between stages ===
+            // === sub-cycle fine level ===
 
             if (lvl < sim.num_levels() - 1) {
                 const auto ref_ratio = sim.level_info(lvl + 1).refinement_ratio;
+
+                // zero child's accumulator
                 ecs::zero_flux_buffer_system_t{}(sim, lvl + 1);
 
                 for (std::uint64_t substep = 0; substep < ref_ratio;
                      ++substep) {
-                    // time-interpolate for ALL substeps
-                    const real alpha = static_cast<real>(substep) / ref_ratio;
+                    // time-interpolate boundaries between u^n and u*
+                    const real alpha =
+                        (static_cast<real>(substep) + 0.5) / ref_ratio;
                     ecs::time_interpolated_ghost_fill_system_t{
                       alpha
                     }(sim, lvl + 1);
 
-                    // advance fine level
+                    // fine level does full RK2
                     advance_level_rk2(lvl + 1);
 
-                    // restrict
+                    // restrict after each fine step
                     ecs::restriction_system_t{}(sim, lvl + 1);
                 }
             }
 
-            // === STAGE 2: u* -> u^{n+1} ===
-
+            // === stage 2: u* -> u^{n+1} ===
             ecs::c2p_system_t{}(sim, lvl);
             ecs::sink_cache_system_t{}(sim);
 
@@ -266,7 +257,17 @@ namespace simbi::evolution {
               .accumulate_fluxes = (lvl > 0),
             }(sim, ops, lvl);
 
-            // advance to u^{n+1} (NO flux correction for stage 2)
+            // correct stage 2 fluxes using fine's accumulated flux
+            if (lvl < sim.num_levels() - 1) {
+                mesh::fmr::correct_level_fluxes(
+                    sim.hydro(lvl).flux,
+                    sim.hydro(lvl + 1).flux_avg,
+                    sim.level_mapping(lvl + 1),
+                    sim.metadata().level_dts[lvl]
+                );
+            }
+
+            // advance to u^{n+1} using corrected stage 2 fluxes
             ecs::rk2_stage2_system_t{ops}(sim, lvl);
         }
 
@@ -280,13 +281,11 @@ namespace simbi::evolution {
 
         void step_all() const
         {
-            ecs::sink_cache_system_t{}(sim);
             auto& meta = sim.metadata();
 
-            // calculate all level timesteps (L_max -> L=0)
+            // calculate all level timesteps (l_max -> l=0)
             ecs::timestep_system_t{}(sim, sim.num_levels() - 1);
 
-            // branch to the correct recursive driver
             if (meta.timestepping == Timestepping::RK2) {
                 advance_level_rk2(0);
             }
@@ -295,7 +294,7 @@ namespace simbi::evolution {
             }
             else {
                 throw std::runtime_error(
-                    "That timestepping method is not implemented."
+                    "that timestepping method is not implemented."
                 );
             }
 
