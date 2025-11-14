@@ -643,17 +643,13 @@ class SimbiBaseConfig(CLIConfigurableModel):
                         f"expected {expected_coords} for {self.dimensionality}D problem"
                     )
 
+            # Validate subcycling settings
             # number of substeps must match number of levels -1
-            if len(self.fmr_substeps) != self.fmr_max_levels - 1:
-                raise ValueError(
-                    f"Expected {self.fmr_max_levels - 1} FMR substeps, got {len(self.fmr_substeps)}"
-                )
-
-            # if substeps not specified, raise error
-            if not self.fmr_substeps:
-                raise ValueError(
-                    "FMR substeps must be specified when FMR is enabled"
-                )
+            if self.fmr_subcycling_mode != SubCycleMode.NONE:
+                if len(self.fmr_substeps) != self.fmr_max_levels - 1:
+                    raise ValueError(
+                        "FMR substeps must be specified for subcycling modes other than NONE"
+                    )
 
         return self
 

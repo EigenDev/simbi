@@ -32,6 +32,9 @@ namespace simbi::ecs {
             if (!init.fmr_enabled) {
                 return substeps;
             }
+            if (init.subcycling_mode != subcycling_mode_t::ADAPTIVE) {
+                return substeps;
+            }
             substeps.push_back(1);   // level 0
             for (std::uint64_t ii = 0; ii < init.fmr_max_levels - 1; ++ii) {
                 substeps.push_back(init.substeps[ii]);
