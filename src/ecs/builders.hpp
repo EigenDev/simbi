@@ -25,6 +25,20 @@ namespace simbi::ecs {
                                                : ShockWaveLimiter::NONE);
         };
 
+        // insert a substep of 1 at the beginning of the
+        // vector for ease of indexing later
+        auto normalize_substeps = [&init]() {
+            std::vector<std::uint64_t> substeps;
+            if (!init.fmr_enabled) {
+                return substeps;
+            }
+            substeps.push_back(1);   // level 0
+            for (std::uint64_t ii = 0; ii < init.fmr_max_levels - 1; ++ii) {
+                substeps.push_back(init.substeps[ii]);
+            }
+            return substeps;
+        };
+
         ecs::simulation_metadata_t<Dims> meta{
           .gamma                = init.gamma,
           .plm_theta            = init.plm_theta,
@@ -57,7 +71,7 @@ namespace simbi::ecs {
           .is_relativistic      = init.is_relativistic,
           .data_dir             = init.data_directory,
           .level_dts            = std::vector<real>(init.fmr_max_levels),
-          .level_substeps       = init.substeps,
+          .level_substeps       = normalize_substeps(),
           .subcycling_mode      = init.subcycling_mode
         };
 
