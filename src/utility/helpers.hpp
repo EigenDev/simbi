@@ -53,7 +53,7 @@
 #include "compat.hpp"              // for real, STATIC, std::uint64_t, sint
 #include "containers/vector.hpp"   // for vector_t
 #include "io/exceptions.hpp"       // for ErrorCode
-#include "utility/enums.hpp"       // for Geometry, BoundaryCondition, Solver
+#include "utility/enums.hpp"       // for geometry_t, BoundaryCondition, Solver
 #include <H5Cpp.h>       // for H5::Exception, H5::DataSpace, H5::DataType, etc
 #include <cmath>         // for sqrt, exp, INFINITY
 #include <concepts>      // for std::integral, std::floating_point
@@ -374,7 +374,7 @@ namespace simbi::helpers {
         return a > b && !approx_equal(a, b);
     }
 
-    std::string get_color_code(Color color);
+    std::string get_color_code(color_t color);
 
     /**
      * @brief the next permutation in the set {1,2} or {1, 2, 3}
@@ -389,24 +389,24 @@ namespace simbi::helpers {
         return ((nhat - 1) + step) % 3 + 1;
     };
 
-    template <std::uint64_t Dims>
+    template <std::uint64_t Rank>
     DUAL constexpr auto unravel_idx(const std::uint64_t idx, const auto& shape)
     {
-        iarray<Dims> coords;
+        iarray<Rank> coords;
         auto stride = 1;
         if constexpr (global::col_major) {
             // Column major: shape=(nk,nj,ni)
             // Want [k,j,i] where i is fastest
-            for (std::uint64_t ii = 0; ii < Dims; ++ii) {
-                coords[Dims - 1 - ii] = (idx / stride) % shape[Dims - 1 - ii];
-                stride *= shape[Dims - 1 - ii];
+            for (std::uint64_t ii = 0; ii < Rank; ++ii) {
+                coords[Rank - 1 - ii] = (idx / stride) % shape[Rank - 1 - ii];
+                stride *= shape[Rank - 1 - ii];
             }
         }
         else {
             // Row major: shape=(nk,nj,ni)
             // Want [i,j,k] where i is fastest
-            for (std::uint64_t ii = Dims - 1; ii < Dims; --ii) {
-                coords[Dims - 1 - ii] = (idx / stride) % shape[ii];
+            for (std::uint64_t ii = Rank - 1; ii < Rank; --ii) {
+                coords[Rank - 1 - ii] = (idx / stride) % shape[ii];
                 stride *= shape[ii];
             }
         }
@@ -608,10 +608,10 @@ namespace simbi::helpers {
 
     std::string error_code_to_string(const ErrorCode code);
 
-    template <std::uint64_t Dims>
+    template <std::uint64_t Rank>
     DUAL static auto
-    memory_layout_coordinates(auto idx, const iarray<Dims>& shape)
-        -> iarray<Dims>;
+    memory_layout_coordinates(auto idx, const iarray<Rank>& shape)
+        -> iarray<Rank>;
 
     template <typename F, std::size_t... Is>
     void for_each_index(F&& func, std::index_sequence<Is...>)
@@ -865,35 +865,35 @@ namespace simbi::helpers {
                (delta_t * 1e9);
     }
 
-    template <std::uint64_t Dims>
+    template <std::uint64_t Rank>
     DEV static auto
-    memory_layout_coordinates(auto idx, const iarray<Dims>& shape)
-        -> iarray<Dims>
+    memory_layout_coordinates(auto idx, const iarray<Rank>& shape)
+        -> iarray<Rank>
     {
-        iarray<Dims> coords;
+        iarray<Rank> coords;
         auto stride = 1;
         if constexpr (global::col_major) {
             // Column major: shape=(nk,nj,ni)
             // Want [k,j,i] where k is fastest
-            for (std::uint64_t ii = 0; ii < Dims; ++ii) {
-                coords[Dims - 1 - ii] = (idx / stride) % shape[Dims - 1 - ii];
-                stride *= shape[Dims - 1 - ii];
+            for (std::uint64_t ii = 0; ii < Rank; ++ii) {
+                coords[Rank - 1 - ii] = (idx / stride) % shape[Rank - 1 - ii];
+                stride *= shape[Rank - 1 - ii];
             }
         }
         else {
             // Row major: shape=(nk,nj,ni)
             // Want [i,j,k] where i is fastest
-            for (std::uint64_t ii = Dims - 1; ii < Dims; --ii) {
-                coords[Dims - 1 - ii] = (idx / stride) % shape[ii];
+            for (std::uint64_t ii = Rank - 1; ii < Rank; --ii) {
+                coords[Rank - 1 - ii] = (idx / stride) % shape[ii];
                 stride *= shape[ii];
             }
         }
         return coords;
     }
 
-    constexpr std::uint64_t reconstruction_to_ghosts(Reconstruction rec)
+    constexpr std::uint64_t reconstruction_to_ghosts(reconstruction_t rec)
     {
-        if (rec == Reconstruction::PLM) {
+        if (rec == reconstruction_t::PLM) {
             return 2;
         }
         else {

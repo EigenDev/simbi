@@ -18,15 +18,15 @@ namespace simbi::cfd {
     using namespace simbi::base::stencils;
 
     template <
-        Regime R,
-        std::uint64_t Dims,
-        Solver S,
-        Reconstruction Rec,
+        regime_t R,
+        std::uint64_t Rank,
+        solver_t S,
+        reconstruction_t Rec,
         typename EoS>
     struct cfd_operations_t {
-        using primitive_t   = typename vtraits<R, Dims, EoS>::primitive_type;
-        using conserved_t   = typename vtraits<R, Dims, EoS>::conserved_type;
-        using unit_vector_t = simbi::unit_vector_t<Dims>;
+        using primitive_t   = typename vtraits<R, Rank, EoS>::primitive_type;
+        using conserved_t   = typename vtraits<R, Rank, EoS>::conserved_type;
+        using unit_vector_t = simbi::unit_vector_t<Rank>;
         static constexpr auto rec_t = Rec;
 
         // need template function b/c nvcc complains about if constexpr in
@@ -37,10 +37,10 @@ namespace simbi::cfd {
             const unit_vector_t& nhat,
             real vface,
             real gamma,
-            ShockWaveLimiter limiter = ShockWaveLimiter::NONE
+            shockwave_limiter_t limiter = shockwave_limiter_t::NONE
         ) const
         {
-            if constexpr (S == Solver::HLLE) {
+            if constexpr (S == solver_t::HLLE) {
                 return hydro::hlle_flux<primitive_t>(
                     primL,
                     primR,
@@ -50,8 +50,8 @@ namespace simbi::cfd {
                     limiter
                 );
             }
-            else if constexpr (S == Solver::HLLC) {
-                if constexpr (R == Regime::NEWTONIAN) {
+            else if constexpr (S == solver_t::HLLC) {
+                if constexpr (R == regime_t::NEWTONIAN) {
                     return hydro::newtonian::hllc_flux<primitive_t>(
                         primL,
                         primR,
@@ -61,7 +61,7 @@ namespace simbi::cfd {
                         limiter
                     );
                 }
-                else if constexpr (R == Regime::SRHD) {
+                else if constexpr (R == regime_t::SRHD) {
                     return hydro::srhd::hllc_flux<primitive_t>(
                         primL,
                         primR,
@@ -71,7 +71,7 @@ namespace simbi::cfd {
                         limiter
                     );
                 }
-                else if constexpr (R == Regime::RMHD) {
+                else if constexpr (R == regime_t::RMHD) {
                     return hydro::rmhd::hllc_flux<primitive_t>(
                         primL,
                         primR,
@@ -82,7 +82,7 @@ namespace simbi::cfd {
                     );
                 }
             }
-            else if constexpr (S == Solver::HLLD && R == Regime::RMHD) {
+            else if constexpr (S == solver_t::HLLD && R == regime_t::RMHD) {
                 return hydro::rmhd::hlld_flux<primitive_t>(
                     primL,
                     primR,
@@ -101,7 +101,7 @@ namespace simbi::cfd {
 
         template <typename field_type>
         DEV std::pair<primitive_t, primitive_t> reconstruct(
-            const stencil_view_t<Rec, field_type, Dims>& stencil,
+            const stencil_view_t<Rec, field_type, Rank>& stencil,
             real theta
         ) const
         {

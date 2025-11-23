@@ -9,8 +9,8 @@
 #include "execution/executor.hpp"
 #include "execution/future.hpp"
 #include "field.hpp"
-#include "hetero/adapter.hpp"
-#include "hetero/core/common_types.hpp"
+#include "het/adapter.hpp"
+#include "het/core/types.hpp"
 #include "memory/device.hpp"
 
 #include <algorithm>
@@ -23,16 +23,16 @@ namespace simbi {
 
     // distributed field across multiple devices
     // owns multiple field_t shards, one per device
-    template <typename T, std::uint64_t Dims>
+    template <typename T, std::uint64_t Rank>
     struct field_set_t {
-        std::vector<field_t<T, Dims>> shards;
-        std::vector<domain_t<Dims>> partitions;
-        domain_t<Dims> global_domain_;
+        std::vector<field_t<T, Rank>> shards;
+        std::vector<domain_t<Rank>> partitions;
+        domain_t<Rank> global_domain_;
 
         // construction from devices
 
         // ctor using device pool
-        explicit field_set_t(const domain_t<Dims>& domain, device_pool_t& pool)
+        explicit field_set_t(const domain_t<Rank>& domain, device_pool_t& pool)
             : global_domain_(domain)
         {
             std::size_t n_devices = pool.size();
@@ -50,7 +50,7 @@ namespace simbi {
             }
         }
         field_set_t(
-            const domain_t<Dims>& domain,
+            const domain_t<Rank>& domain,
             const std::vector<mem::device_t>& devices
         )
             : global_domain_(domain)
@@ -72,18 +72,18 @@ namespace simbi {
         }
 
         // partition domain along largest axis
-        static std::vector<domain_t<Dims>>
-        partition_domain(const domain_t<Dims>& domain, std::size_t n_parts)
+        static std::vector<domain_t<Rank>>
+        partition_domain(const domain_t<Rank>& domain, std::size_t n_parts)
         {
             auto shape         = domain.shape();
             std::uint64_t axis = 0;
-            for (std::uint64_t ii = 1; ii < Dims; ++ii) {
+            for (std::uint64_t ii = 1; ii < Rank; ++ii) {
                 if (shape[ii] > shape[axis]) {
                     axis = ii;
                 }
             }
 
-            std::vector<domain_t<Dims>> result;
+            std::vector<domain_t<Rank>> result;
             result.reserve(n_parts);
 
             for (std::size_t ii = 0; ii < n_parts; ++ii) {
@@ -94,15 +94,15 @@ namespace simbi {
         }
 
         // queries
-        const domain_t<Dims>& domain() const { return global_domain_; }
+        const domain_t<Rank>& domain() const { return global_domain_; }
         std::size_t num_shards() const { return shards.size(); }
-        const std::vector<domain_t<Dims>>& shard_domains() const
+        const std::vector<domain_t<Rank>>& shard_domains() const
         {
             return partitions;
         }
 
         // find which shard contains a coordinate
-        std::size_t find_shard(const coordinate_t<Dims>& coord) const
+        std::size_t find_shard(const coordinate_t<Rank>& coord) const
         {
             for (std::size_t ii = 0; ii < partitions.size(); ++ii) {
                 if (partitions[ii].contains(coord)) {
@@ -113,16 +113,16 @@ namespace simbi {
         }
 
         // access shard by index
-        field_t<T, Dims>& operator[](std::size_t idx) { return shards[idx]; }
+        field_t<T, Rank>& operator[](std::size_t idx) { return shards[idx]; }
 
-        const field_t<T, Dims>& operator[](std::size_t idx) const
+        const field_t<T, Rank>& operator[](std::size_t idx) const
         {
             return shards[idx];
         }
 
         // assignment materializes computation across all shards
         template <typename F>
-        field_set_t& operator=(const computation_t<Dims, F>& comp)
+        field_set_t& operator=(const computation_t<Rank, F>& comp)
         {
             // cost model assumptions:
             // - computation executed in parallel on all devices (N-way
@@ -183,9 +183,9 @@ namespace simbi {
         }
 
         // gather: collect all shards onto a single device
-        field_t<T, Dims> gather(mem::device_t target_device) const
+        field_t<T, Rank> gather(mem::device_t target_device) const
         {
-            field_t<T, Dims> result(global_domain_, target_device);
+            field_t<T, Rank> result(global_domain_, target_device);
 
             // copy each shard to its location in result
             for (std::size_t ii = 0; ii < shards.size(); ++ii) {
@@ -244,7 +244,7 @@ namespace simbi {
 
         // scatter: distribute single-device field across shards
         static field_set_t scatter(
-            const field_t<T, Dims>& source,
+            const field_t<T, Rank>& source,
             const std::vector<mem::device_t>& devices
         )
         {
@@ -320,11 +320,11 @@ namespace simbi {
     };
 
     // factory functions
-    template <typename T, std::uint64_t Dims>
-    field_set_t<T, Dims>
-    field_set(const domain_t<Dims>& domain, device_pool_t& pool)
+    template <typename T, std::uint64_t Rank>
+    field_set_t<T, Rank>
+    field_set(const domain_t<Rank>& domain, device_pool_t& pool)
     {
-        return field_set_t<T, Dims>(domain, pool);
+        return field_set_t<T, Rank>(domain, pool);
     }
 
 }   // namespace simbi

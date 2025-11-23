@@ -4,8 +4,7 @@
 #include "body.hpp"
 #include "compat.hpp"
 #include "containers/vector.hpp"
-#include "execution/executor.hpp"
-#include "mesh/mesh_ops.hpp"
+#include "hesi/exec/reduce.hpp"
 #include "physics/hydro/physics.hpp"
 #include "utility/config_dict.hpp"
 
@@ -25,13 +24,13 @@ namespace simbi::body {
     using namespace simbi::config;
 
     // forward declarations for common body types
-    template <std::uint64_t Dims>
+    template <std::uint64_t Rank>
     using body_variant_t = std::variant<
-        rigid_sphere_t<Dims>,
-        gravitational_body_t<Dims>,
-        black_hole_t<Dims>,
-        planet_t<Dims>,
-        passive_body_t<Dims>
+        rigid_sphere_t<Rank>,
+        gravitational_body_t<Rank>,
+        black_hole_t<Rank>,
+        planet_t<Rank>,
+        passive_body_t<Rank>
         // add more combinations as needed (maybe...)
         // [TODO]: revisit later
         >;
@@ -75,7 +74,7 @@ namespace simbi::body {
         }
     };
 
-    template <std::uint64_t Dims>
+    template <std::uint64_t Rank>
     struct sink_properties_t {
         std::uint64_t body_idx;
 
@@ -85,9 +84,9 @@ namespace simbi::body {
         real total_weight{0};
     };
 
-    template <std::uint64_t Dims, std::uint64_t MaxBodies = 2>
+    template <std::uint64_t Rank, std::uint64_t MaxBodies = 2>
     struct sink_cache_t {
-        vector_t<sink_properties_t<Dims>, MaxBodies> properties;
+        vector_t<sink_properties_t<Rank>, MaxBodies> properties;
         std::size_t count{0};
 
         const auto& operator[](std::uint64_t idx) const
@@ -100,7 +99,7 @@ namespace simbi::body {
         bool empty() const { return count == 0; }
     };
 
-    template <std::uint64_t Dims>
+    template <std::uint64_t Rank>
     struct weighted_sums_t {
         real weighted_density{0};
         real weighted_v{0};
@@ -120,13 +119,13 @@ namespace simbi::body {
         }
     };
 
-    template <std::uint64_t Dims, std::uint64_t MaxBodies = 2>
+    template <std::uint64_t Rank, std::uint64_t MaxBodies = 2>
     struct body_collection_t {
-        static constexpr std::uint64_t dimensions = Dims;
+        static constexpr std::uint64_t rank = Rank;
 
-        vector_t<body_variant_t<Dims>, MaxBodies> bodies_;
+        vector_t<body_variant_t<Rank>, MaxBodies> bodies_;
         std::optional<binary_parameters_t> binary_params_;
-        std::optional<sink_cache_t<Dims>> sink_cache;
+        std::optional<sink_cache_t<Rank>> sink_cache;
         std::size_t size_        = 0;
         std::string system_name_ = "Untitled";
         std::string reference_frame_ =
@@ -328,12 +327,12 @@ namespace simbi::body {
     template <
         typename Body,
         typename SimState,
-        std::uint64_t Dims = SimState::dimensions>
+        std::uint64_t Rank = SimState::rank>
     auto compute_sink_properties(
         const Body& body,
         const SimState& sim,
         std::uint64_t lvl
-    ) -> sink_properties_t<Dims>
+    ) -> sink_properties_t<Rank>
     {
         using namespace simbi::hydro;
         static_assert(
@@ -352,14 +351,14 @@ namespace simbi::body {
         const auto prims     = hydro.prim;
 
         // Mapper: compute weighted contribution from each cell
-        auto mapper = [=](auto coord) -> weighted_sums_t<Dims> {
+        auto mapper = [=](auto coord) -> weighted_sums_t<Rank> {
             // get cell position and compute distance to sink
-            const auto cell_pos = mesh::centroid(coord, mesh);
+            const auto cell_pos = mesh.geometry.metric.centroid(coord);
             const auto r_mag    = (cell_pos - body.position).norm();
 
             // Gaussian weight
             const auto weight = [is_binary, r_mag, r_acc]() {
-                if constexpr (Dims == 2) {
+                if constexpr (Rank == 2) {
                     if (is_binary) {
                         const auto r_norm = r_mag / r_acc;
                         // from Dittmann & Ryan (2021)
@@ -380,7 +379,7 @@ namespace simbi::body {
             }();
 
             if (weight < 1e-10) {
-                return weighted_sums_t<Dims>{};
+                return weighted_sums_t<Rank>{};
             }
             const auto prim = prims[mesh.domain](coord);
             const auto rho  = labframe_density(prim);
@@ -390,9 +389,9 @@ namespace simbi::body {
             // const auto v_mag = (prim.vel - body.velocity).norm();
             const auto v_mag = body.velocity.norm();
             const auto cs    = sound_speed(prim, gamma);
-            const auto mass  = mesh::volume(coord, mesh) * rho;
+            const auto mass  = mesh.geometry.metric.volume(coord) * rho;
 
-            return weighted_sums_t<Dims>{
+            return weighted_sums_t<Rank>{
               .weighted_density = weight * rho,
               .weighted_v       = weight * mass * v_mag,
               .weighted_cs      = weight * mass * cs,
@@ -402,13 +401,17 @@ namespace simbi::body {
         };
 
         auto reducer = [](const auto& a, const auto& b) { return a + b; };
+        auto exec    = sim.partition_executor(lvl, 0);
+        auto sums    = het::exec::reduce_sync(
+            exec,
+            mesh.domain,               // domain
+            weighted_sums_t<Rank>{},   // init
+            mapper,                    // mapper function
+            reducer,                   // reduction op
+            weighted_sums_t<Rank>{}    // identity
+        );
 
-        auto sums =
-            exec::default_executor()
-                .reduce(mesh.domain, weighted_sums_t<Dims>{}, mapper, reducer)
-                .wait();
-
-        sink_properties_t<Dims> props{.body_idx = body.idx};
+        sink_properties_t<Rank> props{.body_idx = body.idx};
         if (sums.sum_weight > 1e-10) {
             const auto rho_eff   = sums.weighted_density / sums.sum_weight;
             const auto v_eff_mag = sums.weighted_v / sums.sum_mass;
@@ -445,11 +448,11 @@ namespace simbi::body {
             return;
         }
 
-        constexpr auto Dims      = SimState::dimensions;
+        constexpr auto Rank      = SimState::rank;
         constexpr auto MaxBodies = 2;
 
         if (!bodies.sink_cache.has_value()) {
-            bodies.sink_cache = sink_cache_t<Dims, MaxBodies>{};
+            bodies.sink_cache = sink_cache_t<Rank, MaxBodies>{};
         }
 
         auto finest_level = sim.num_levels() - 1;
@@ -460,18 +463,18 @@ namespace simbi::body {
         });
     }
 
-    template <std::uint64_t Dims, std::uint64_t MaxBodies = 2>
+    template <std::uint64_t Rank, std::uint64_t MaxBodies = 2>
     constexpr auto make_body_collection()
     {
-        return body_collection_t<Dims, MaxBodies>{};
+        return body_collection_t<Rank, MaxBodies>{};
     }
 
-    template <std::uint64_t Dims, std::uint64_t MaxBodies = 2>
+    template <std::uint64_t Rank, std::uint64_t MaxBodies = 2>
     constexpr auto create_binary_system(
-        const vector_t<real, Dims>& pos1,
-        const vector_t<real, Dims>& vel1,
-        const vector_t<real, Dims>& pos2,
-        const vector_t<real, Dims>& vel2,
+        const vector_t<real, Rank>& pos1,
+        const vector_t<real, Rank>& vel1,
+        const vector_t<real, Rank>& pos2,
+        const vector_t<real, Rank>& vel2,
         real mass1,
         real mass2,
         real radius1,
@@ -488,9 +491,9 @@ namespace simbi::body {
     {
         if (sink_rate1 > 0.0 && sink_rate2 > 0.0) {
             // this is a binary black hole system
-            return make_body_collection<Dims, MaxBodies>()
+            return make_body_collection<Rank, MaxBodies>()
                 .add(
-                    make_black_hole<Dims>(
+                    make_black_hole<Rank>(
                         pos1,
                         vel1,
                         mass1,
@@ -502,7 +505,7 @@ namespace simbi::body {
                     )
                 )
                 .add(
-                    make_black_hole<Dims>(
+                    make_black_hole<Rank>(
                         pos2,
                         vel2,
                         mass2,
@@ -516,23 +519,23 @@ namespace simbi::body {
         }
         else if (sink_rate1 <= 0.0 && sink_rate2 <= 0.0) {
             // this is a binary gravitational system
-            return make_body_collection<Dims, MaxBodies>()
+            return make_body_collection<Rank, MaxBodies>()
                 .add(
                     make_gravitational_body<
-                        Dims>(pos1, vel1, mass1, radius1, softening1)
+                        Rank>(pos1, vel1, mass1, radius1, softening1)
                 )
                 .add(
                     make_gravitational_body<
-                        Dims>(pos2, vel2, mass2, radius2, softening2)
+                        Rank>(pos2, vel2, mass2, radius2, softening2)
                 );
         }
         else {
             // this is a mixed system with one gravitational and one
             // accretion body
             if (sink_rate1 > 0.0) {
-                return make_body_collection<Dims, MaxBodies>()
+                return make_body_collection<Rank, MaxBodies>()
                     .add(
-                        make_black_hole<Dims>(
+                        make_black_hole<Rank>(
                             pos1,
                             vel1,
                             mass1,
@@ -545,17 +548,17 @@ namespace simbi::body {
                     )
                     .add(
                         make_gravitational_body<
-                            Dims>(pos2, vel2, mass2, radius2, softening2)
+                            Rank>(pos2, vel2, mass2, radius2, softening2)
                     );
             }
             else {
-                return make_body_collection<Dims, MaxBodies>()
+                return make_body_collection<Rank, MaxBodies>()
                     .add(
                         make_gravitational_body<
-                            Dims>(pos1, vel1, mass1, radius1, softening1)
+                            Rank>(pos1, vel1, mass1, radius1, softening1)
                     )
                     .add(
-                        make_black_hole<Dims>(
+                        make_black_hole<Rank>(
                             pos2,
                             vel2,
                             mass2,
@@ -610,7 +613,7 @@ namespace simbi::body {
             constexpr auto operator()(const Collection& collection) const
             {
                 // returns new collection with only matching bodies
-                auto result = make_body_collection<Collection::dimensions>();
+                auto result = make_body_collection<Collection::rank>();
 
                 collection.visit_all([&](const auto& body) {
                     if (std::visit(pred_, body)) {

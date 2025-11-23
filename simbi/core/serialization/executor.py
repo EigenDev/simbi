@@ -106,9 +106,9 @@ class SimulationExecutor:
 
         # Remove bounds from dict and replace with x1bounds, etc.
         model_dict.pop("bounds", None)
-        model_dict["x1bounds"] = x1bounds
-        model_dict["x2bounds"] = x2bounds
-        model_dict["x3bounds"] = x3bounds
+        model_dict["x1_bounds"] = x1bounds
+        model_dict["x2_bounds"] = x2bounds
+        model_dict["x3_bounds"] = x3bounds
 
         # Process boundary conditions
         bcs = SimulationExecutor._process_boundary_conditions(

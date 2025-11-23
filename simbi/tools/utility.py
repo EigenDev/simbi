@@ -96,6 +96,10 @@ FIELD_MAP: dict[str, str] = {
     "j_spec": r"$j / j_{0}$",
     "div_v": r"$\nabla \cdot \mathbf{v}$",
     "vorticity": r"$(\nabla \times \mathbf{v})_z$",
+    "term_advection": r"$\rho \mathbf{v} \cdot \nabla \mathbf{v}$",
+    "term_gravity": r"$-\rho \nabla \Phi$",
+    "term_pressure": r"$-\nabla p$",
+    "term_residual": r"$\mathbf{R}$",
 }
 
 UNITS: dict[str, str] = {
@@ -216,6 +220,24 @@ def get_dimensionality(files: Union[list[str], dict[int, list[str]]]) -> int:
     def all_equal(x: list[int]) -> bool:
         return x.count(x[0]) == len(x)
 
+    def extract_shape(raw: Any, attrs: dict[str, Any]) -> tuple[int, ...]:
+        """Extract shape from mesh_config, handling both v1 and v2 formats"""
+        mesh_data = raw.groups.get("mesh_config", {})
+
+        # v2 format uses global_cells
+        if "global_cells" in mesh_data:
+            return tuple(int(x) for x in mesh_data["global_cells"])
+
+        # v1 format uses shape directly
+        if "shape" in mesh_data:
+            return tuple(int(x) for x in mesh_data["shape"])
+
+        # fallback to resolution from attributes
+        res = attrs.get("resolution", (1,))
+        if isinstance(res, str):
+            return tuple(int(x) for x in res.split(","))
+        return tuple(int(x) for x in res)
+
     ndim: int = 0
     if isinstance(files, dict):
         import itertools
@@ -228,7 +250,8 @@ def get_dimensionality(files: Union[list[str], dict[int, list[str]]]) -> int:
             dat = read_raw_data(hf)
             if dat.is_ok:
                 raw = dat.unwrap()
-                shape = np.array(raw.groups["mesh_config"]["shape"], dtype=int)
+                print("mesh config", raw.groups.get("mesh_config", {}))
+                shape = extract_shape(raw, raw.attributes)
                 dims.append(sum(int(r) > 1 for r in shape))
 
     if dims and all_equal(dims):

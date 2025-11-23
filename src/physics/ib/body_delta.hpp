@@ -56,10 +56,10 @@
 #include <cstdint>
 
 namespace simbi::body {
-    template <std::uint64_t Dims>
+    template <std::uint64_t Rank>
     struct body_delta_t {
         std::uint64_t idx{0};
-        vector_t<real, Dims> force_delta{0};
+        vector_t<real, Rank> force_delta{0};
         vector_t<real, 3> torque_delta{0};
         real mass_delta{0};
         real prev_mass_delta{0};

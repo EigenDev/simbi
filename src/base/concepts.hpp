@@ -11,7 +11,7 @@
 #include <type_traits>
 
 namespace simbi {
-    template <typename T, std::uint64_t Dims>
+    template <typename T, std::uint64_t Rank>
     struct vector_t;
 }   // namespace simbi
 
@@ -22,13 +22,13 @@ namespace simbi::concepts {
     template <typename T>
     concept Arithmetic = std::integral<T> || std::floating_point<T>;
 
-    template <typename F, std::uint64_t Dims>
-    concept ArrayFunction = requires(F f, std::array<size_t, Dims> point) {
+    template <typename F, std::uint64_t Rank>
+    concept ArrayFunction = requires(F f, std::array<size_t, Rank> point) {
         { f(point) };
     };
 
-    template <std::uint64_t Dims>
-    concept valid_dimension = (Dims >= 1 && Dims <= 3);
+    template <std::uint64_t Rank>
+    concept valid_dimension = (Rank >= 1 && Rank <= 3);
 
     // concept defining a state variable - structural approach
     template <typename T>
@@ -37,7 +37,7 @@ namespace simbi::concepts {
         {
             t.vel
         } -> std::convertible_to<
-            vector_t<real, std::remove_reference_t<T>::dimensions>>;
+            vector_t<real, std::remove_reference_t<T>::rank>>;
         { t.pre } -> std::convertible_to<real>;
         { t.chi } -> std::convertible_to<real>;
     };
@@ -48,7 +48,7 @@ namespace simbi::concepts {
         {
             t.mom
         } -> std::convertible_to<
-            vector_t<real, std::remove_reference_t<T>::dimensions>>;
+            vector_t<real, std::remove_reference_t<T>::rank>>;
         { t.nrg } -> std::convertible_to<real>;
         { t.chi } -> std::convertible_to<real>;
     };
@@ -59,12 +59,12 @@ namespace simbi::concepts {
         {
             t.vel
         } -> std::convertible_to<
-            vector_t<real, std::remove_reference_t<T>::dimensions>>;
+            vector_t<real, std::remove_reference_t<T>::rank>>;
         { t.pre } -> std::convertible_to<real>;
         {
             t.mag
         } -> std::convertible_to<
-            vector_t<real, std::remove_reference_t<T>::dimensions>>;
+            vector_t<real, std::remove_reference_t<T>::rank>>;
         { t.chi } -> std::convertible_to<real>;
     };
 
@@ -74,12 +74,12 @@ namespace simbi::concepts {
         {
             t.mom
         } -> std::convertible_to<
-            vector_t<real, std::remove_reference_t<T>::dimensions>>;
+            vector_t<real, std::remove_reference_t<T>::rank>>;
         { t.nrg } -> std::convertible_to<real>;
         {
             t.mag
         } -> std::convertible_to<
-            vector_t<real, std::remove_reference_t<T>::dimensions>>;
+            vector_t<real, std::remove_reference_t<T>::rank>>;
         { t.chi } -> std::convertible_to<real>;
     };
 
@@ -91,8 +91,8 @@ namespace simbi::concepts {
 
     template <typename T>
     concept is_relativistic_c = requires {
-        { T::regime } -> std::convertible_to<Regime>;
-        requires T::regime == Regime::SRHD || T::regime == Regime::RMHD;
+        { T::regime } -> std::convertible_to<regime_t>;
+        requires T::regime == regime_t::SRHD || T::regime == regime_t::RMHD;
     };
 
     template <typename T>
@@ -106,28 +106,33 @@ namespace simbi::concepts {
         is_relativistic_c<T>;
 
     template <typename T>
-    concept is_srhd_c = is_relativistic_c<T> && T::regime == Regime::SRHD;
+    concept is_srhd_c = is_relativistic_c<T> && T::regime == regime_t::SRHD;
 
     template <typename T>
-    concept is_rmhd_c = is_relativistic_c<T> && T::regime == Regime::RMHD;
+    concept is_rmhd_c = is_relativistic_c<T> && T::regime == regime_t::RMHD;
 
     template <typename T>
     concept is_newtonian_c = requires {
-        { T::regime } -> std::convertible_to<Regime>;
-        requires T::regime == Regime::NEWTONIAN;
+        { T::regime } -> std::convertible_to<regime_t>;
+        requires T::regime == regime_t::NEWTONIAN;
     };
 
     template <typename T>
     concept is_mhd_c = requires {
-        { T::regime } -> std::convertible_to<Regime>;
-        requires T::regime == Regime::MHD || T::regime == Regime::RMHD;
+        { T::regime } -> std::convertible_to<regime_t>;
+        requires T::regime == regime_t::MHD || T::regime == regime_t::RMHD;
     };
 
     template <typename T>
     concept vector_like_c = requires(T vec, size_t i) {
         { vec[i] } -> std::convertible_to<typename T::value_type>;
         { vec.size() } -> std::convertible_to<size_t>;
-        { T::dimensions } -> std::convertible_to<size_t>;
+        { T::rank } -> std::convertible_to<size_t>;
+    };
+
+    template <typename T>
+    concept field_like_c = requires {
+        { T::handle_type };
     };
 
 }   // namespace simbi::concepts

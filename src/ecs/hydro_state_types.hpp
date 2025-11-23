@@ -8,34 +8,34 @@
 namespace simbi::ecs {
     // type traits to select the correct primitive/conserved type based on
     // regime
-    template <Regime R, std::uint64_t Dims, typename EoS>
+    template <regime_t R, std::uint64_t Rank, typename EoS>
     struct vtraits;
 
     // specialization for NEWTONIAN regime
-    template <std::uint64_t Dims, typename EoS>
-    struct vtraits<Regime::NEWTONIAN, Dims, EoS> {
+    template <std::uint64_t Rank, typename EoS>
+    struct vtraits<regime_t::NEWTONIAN, Rank, EoS> {
         using conserved_type =
-            typename structs::conserved_t<Regime::NEWTONIAN, Dims, EoS>;
+            typename structs::conserved_t<regime_t::NEWTONIAN, Rank, EoS>;
         using primitive_type =
-            typename structs::primitive_t<Regime::NEWTONIAN, Dims, EoS>;
+            typename structs::primitive_t<regime_t::NEWTONIAN, Rank, EoS>;
     };
 
     // specialization for SRHD regime
-    template <std::uint64_t Dims, typename EoS>
-    struct vtraits<Regime::SRHD, Dims, EoS> {
+    template <std::uint64_t Rank, typename EoS>
+    struct vtraits<regime_t::SRHD, Rank, EoS> {
         using conserved_type =
-            typename structs::conserved_t<Regime::SRHD, Dims, EoS>;
+            typename structs::conserved_t<regime_t::SRHD, Rank, EoS>;
         using primitive_type =
-            typename structs::primitive_t<Regime::SRHD, Dims, EoS>;
+            typename structs::primitive_t<regime_t::SRHD, Rank, EoS>;
     };
 
     // specialization for RMHD regime
-    template <std::uint64_t Dims, typename EoS>
-    struct vtraits<Regime::RMHD, Dims, EoS> {
+    template <std::uint64_t Rank, typename EoS>
+    struct vtraits<regime_t::RMHD, Rank, EoS> {
         using conserved_type =
-            typename structs::mhd_conserved_t<Regime::RMHD, Dims, EoS>;
+            typename structs::mhd_conserved_t<regime_t::RMHD, Rank, EoS>;
         using primitive_type =
-            typename structs::mhd_primitive_t<Regime::RMHD, Dims, EoS>;
+            typename structs::mhd_primitive_t<regime_t::RMHD, Rank, EoS>;
     };
 }   // namespace simbi::ecs
 

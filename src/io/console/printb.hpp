@@ -70,14 +70,14 @@ namespace simbi::util {
         return ((std::istringstream(s) >> ld >> std::ws).eof());
     }
 
-    template <Color C, typename... ARGS>
+    template <color_t C, typename... ARGS>
     void write(std::string const& fmt, ARGS... args)
     {
 
         if constexpr (sizeof...(args) == 0) {
             // no arguments - just print the format string directly
             std::cout << helpers::get_color_code(C) << fmt
-                      << helpers::get_color_code(Color::RESET);
+                      << helpers::get_color_code(color_t::RESET);
             return;
         }
 
@@ -201,13 +201,13 @@ namespace simbi::util {
             else {
                 width_str = "";
                 std::cout << helpers::get_color_code(C) << ch
-                          << helpers::get_color_code(Color::RESET);
+                          << helpers::get_color_code(color_t::RESET);
             }
             cidx++;
         }
     }
 
-    template <Color C = Color::DEFAULT, typename... ARGS>
+    template <color_t C = color_t::DEFAULT, typename... ARGS>
     void writeln(std::string const& fmt, ARGS... args)
     {
         std::cout << "\n";
@@ -215,7 +215,7 @@ namespace simbi::util {
         std::cout << '\n';
     }
 
-    template <Color C = Color::DEFAULT, typename... ARGS>
+    template <color_t C = color_t::DEFAULT, typename... ARGS>
     void writefl(std::string const& fmt, ARGS... args)
     {
         write<C>(fmt, args...);

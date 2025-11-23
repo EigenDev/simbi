@@ -229,13 +229,13 @@ namespace simbi::hydro {
     template <is_hydro_conserved_c conserved_t>
     DEV constexpr auto to_primitive(const conserved_t& cons, real gamma)
     {
-        if constexpr (conserved_t::regime == Regime::NEWTONIAN) {
+        if constexpr (conserved_t::regime == regime_t::NEWTONIAN) {
             return newtonian::to_primitive(cons, gamma);
         }
-        else if constexpr (conserved_t::regime == Regime::SRHD) {
+        else if constexpr (conserved_t::regime == regime_t::SRHD) {
             return srhd::to_primitive(cons, gamma);
         }
-        else if constexpr (conserved_t::regime == Regime::RMHD) {
+        else if constexpr (conserved_t::regime == regime_t::RMHD) {
             return rmhd::to_primitive(cons, gamma);
         }
         else {

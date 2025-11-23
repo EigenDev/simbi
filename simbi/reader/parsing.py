@@ -44,11 +44,11 @@ def unpad_field(
     if padwidth == 0:
         return field_data
 
-    # Calculate effective dimensions (non-unity dimensions)
+    # calculate effective dimensions (non-unity dimensions)
     inactive_dimensions = sum(1 for x in mesh.shape if x == 1)
     effective_dim = metadata.dimensions - inactive_dimensions
 
-    # Remove inactive dimensions that have shape 1 + 2*padwidth
+    # remove inactive dimensions that have shape 1 + 2*padwidth
     data = field_data
     if any(x == 1 + 2 * padwidth for x in data.shape):
         slices: list[slice] = list(
@@ -57,14 +57,14 @@ def unpad_field(
         )
         data = data[tuple(slices)]
 
-    # Create padding specification for effective dimensions
+    # create padding specification for effective dimensions
     npad = tuple((padwidth, padwidth) for _ in range(effective_dim))
 
-    # If we're in 3D but have fewer effective dimensions, pad the tuple
+    # if we're in 3D but have fewer effective dimensions, pad the tuple
     if metadata.dimensions == 3:
         npad = ((0, 0),) * (3 - effective_dim) + npad
 
-    # Remove padding
+    # remove padding
     if padwidth > 0:
         slices = []
         for pad_start, pad_end in npad:
@@ -72,7 +72,7 @@ def unpad_field(
             slices.append(slice(pad_start, end_slice))
         data = data[tuple(slices)]
 
-    # Remove singleton dimensions
+    # remove singleton dimensions
     if any(s == 1 for s in data.shape):
         data = data.reshape(tuple(s for s in data.shape if s != 1))
 
@@ -116,7 +116,7 @@ def parse_bodies(
         body_data = bodies_group[body_key]
         capabilities = BodyCapability(int(body_data["capabilities"]))
 
-        # Create base body
+        # create base body
         base = BaseBody(
             mass=float(body_data["mass"]),
             radius=float(body_data["radius"]),
@@ -125,7 +125,7 @@ def parse_bodies(
             capabilities=capabilities,
         )
 
-        # Build capability-specific properties
+        # build capability-specific properties
         gravitational = None
         if (
             has_capability(capabilities, BodyCapability.GRAVITATIONAL)
@@ -180,7 +180,7 @@ def parse_bodies(
                 poisson_ratio=float(body_data["poisson_ratio"]),
             )
 
-        # Create the fused body
+        # create the fused body
         body = Body(
             **asdict(base),
             gravitational=gravitational,
@@ -197,6 +197,9 @@ def parse_bodies(
 
 def parse_diagnostics(groups: dict[str, Any]) -> BodyDiagnostics | None:
     """Parse body diagnostics from HDF5 groups"""
+    if "bodies" not in groups:
+        return None
+
     if "diagnostics" not in groups["bodies"]:
         return None
 
@@ -249,7 +252,7 @@ def parse_hierarchy(groups: dict[str, Any]) -> Optional[HierarchyData]:
 
     return HierarchyData(
         num_levels=num_levels,
-        levels=[],  # Will be populated later
+        levels=[],
         ref_ratios=ref_ratios,
     )
 
@@ -261,17 +264,19 @@ def parse_level_data(
     unpad: bool = True,
 ) -> LevelData:
     """Parse single level data from HDF5 group"""
-    # Parse mesh config for this level
+    # parse mesh config for this level
     mesh_data = level_group.get("mesh", {})
     mesh = MeshConfig(
-        shape=tuple(mesh_data["shape"][::-1]),
-        bounds_min=tuple(mesh_data["bounds_min"][::-1]),
-        bounds_max=tuple(mesh_data["bounds_max"][::-1]),
-        halo_radius=int(mesh_data["halo_radius"]),
-        spacing_types=tuple(mesh_data["spacing_types"].split(",")[::-1]),
+        shape=tuple(mesh_data.get("shape", [1])[::-1]),
+        bounds_min=tuple(mesh_data.get("bounds_min", [0.0])[::-1]),
+        bounds_max=tuple(mesh_data.get("bounds_max", [1.0])[::-1]),
+        halo_radius=int(mesh_data.get("halo_radius", 0)),
+        spacing_types=tuple(
+            mesh_data.get("spacing_types", "linear").split(",")[::-1]
+        ),
     )
 
-    # Get fields for this level
+    # get fields for this level
     fields: dict[str, Array] = {}
     for key in ["rho", "p", "v1", "v2", "v3", "chi", "b1", "b2", "b3"]:
         if key in level_group:
@@ -280,10 +285,9 @@ def parse_level_data(
                 field_data = unpad_field(field_data, key, mesh, metadata)
             fields[key] = field_data
 
-    # Get refinement ratio if not finest level
+    # get refinement ratio if not finest level
     ref_ratio = None
     if f"level_{level_id}" in level_group:
-        # We have a finer level, so parse the refinement ratio
         next_level = level_group[f"level_{level_id}"]
         if "ref_ratio" in next_level:
             ref_ratio = int(next_level["ref_ratio"])
@@ -293,58 +297,163 @@ def parse_level_data(
     )
 
 
+def get_attr(attrs: dict[str, Any], *keys: str, default: Any = None) -> Any:
+    """Get attribute by trying multiple possible keys"""
+    for key in keys:
+        if key in attrs:
+            return attrs[key]
+    return default
+
+
+def parse_mesh_config_v2(
+    groups: dict[str, Any], attrs: dict[str, Any]
+) -> MeshConfig:
+    """Parse mesh config from v2 format"""
+    mesh_data = groups.get("mesh_config", {})
+
+    # try to get shape from mesh_config or from geometry info
+    shape = mesh_data.get("global_cells", mesh_data.get("shape"))
+    if shape is None:
+        # fall back to resolution from metadata
+        res = attrs.get("resolution", (1, 1, 1))
+        if isinstance(res, tuple):
+            shape = res
+        else:
+            shape = tuple(res)
+
+    # get bounds from geometry.dims if available
+    bounds_min = [0.0, 0.0, 0.0]
+    bounds_max = [1.0, 1.0, 1.0]
+
+    if "geometry" in mesh_data:
+        geo = mesh_data["geometry"]
+        if "dims" in geo:
+            dims = geo["dims"]
+            for i, dim in enumerate(dims if isinstance(dims, list) else [dims]):
+                if isinstance(dim, dict):
+                    bounds_min[i] = dim.get("start", 0.0)
+                    bounds_max[i] = dim.get("end", 1.0)
+
+    halo_radius = int(mesh_data.get("ghost_width", attrs.get("halo_radius", 0)))
+
+    # spacing types from metadata
+    spacing_types = (
+        str(attrs.get("x1_spacing", "linear")),
+        str(attrs.get("x2_spacing", "linear")),
+        str(attrs.get("x3_spacing", "linear")),
+    )
+
+    return MeshConfig(
+        shape=tuple(int(s) for s in shape)[::-1],
+        bounds_min=tuple(bounds_min)[::-1],
+        bounds_max=tuple(bounds_max)[::-1],
+        halo_radius=halo_radius,
+        spacing_types=spacing_types[::-1],
+    )
+
+
+def parse_metadata_v2(attrs: dict[str, Any]) -> Metadata:
+    """Parse metadata from v2 format attributes"""
+    # handle resolution - could be tuple or need parsing
+    resolution = attrs.get("resolution", (1, 1, 1))
+    if isinstance(resolution, str):
+        resolution = tuple(int(x) for x in resolution.split(","))
+    elif not isinstance(resolution, tuple):
+        resolution = tuple(int(x) for x in resolution)
+
+    # handle boundary conditions
+    bcs = attrs.get("boundary_conditions", ())
+    if isinstance(bcs, str):
+        bcs = tuple(bcs.split(","))
+
+    return Metadata(
+        time=float(attrs.get("time", 0.0)),
+        dt=float(attrs.get("dt", 0.0)),
+        iteration=int(attrs.get("iteration", 0)),
+        dimensions=int(attrs.get("dimensions", 1)),
+        regime=str(attrs.get("regime", "newtonian")),
+        adiabatic_index=float(attrs.get("gamma", 1.4)),
+        is_mhd=bool(attrs.get("is_mhd", False)),
+        coord_system=str(attrs.get("coord_system", "cartesian")),
+        boundary_conditions=bcs,
+        resolution=resolution,
+        cfl_number=float(attrs.get("cfl", 0.4)),
+        end_time=float(attrs.get("tend", 1.0)),
+        reconstruction=str(attrs.get("reconstruction", "plm")),
+        timestepping=str(attrs.get("timestepping", "rk2")),
+        x1_spacing=str(attrs.get("x1_spacing", "linear")),
+        x2_spacing=str(attrs.get("x2_spacing", "linear")),
+        x3_spacing=str(attrs.get("x3_spacing", "linear")),
+        plm_theta=float(attrs.get("plm_theta", 1.5)),
+        checkpoint_index=int(attrs.get("checkpoint_index", 0)),
+        solver=str(attrs.get("solver", "hllc")),
+        checkpoint_interval=float(attrs.get("checkpoint_interval", 0.1)),
+        halo_radius=int(attrs.get("halo_radius", 2)),
+        system_info=None,
+    )
+
+
 def parse_data(raw: RawHDF5, unpad: bool = True) -> Result[ProcessedData]:
     """Parse raw HDF5 data into structured format"""
     try:
-        # Parse metadata (unchanged)
         attrs = raw.attributes
-        metadata = Metadata(
-            time=float(attrs["time"]),
-            dt=float(attrs["dt"]),
-            iteration=int(attrs["iteration"]),
-            dimensions=int(attrs["dimensions"]),
-            regime=str(attrs["regime"]),
-            adiabatic_index=float(attrs["adiabatic_index"]),
-            is_mhd="mhd" in str(attrs["regime"]),
-            coord_system=str(attrs["coord_system"]),
-            boundary_conditions=tuple(
-                str(attrs["boundary_conditions"]).split(",")
-            ),
-            resolution=tuple(
-                int(x) for x in str(attrs["resolution"]).split(",")
-            ),
-            cfl_number=float(attrs["cfl_number"]),
-            end_time=float(attrs["end_time"]),
-            reconstruction=str(attrs["reconstruction"]),
-            timestepping=str(attrs["timestepping"]),
-            x1_spacing=str(attrs["x1_spacing"]),
-            x2_spacing=str(attrs["x2_spacing"]),
-            x3_spacing=str(attrs["x3_spacing"]),
-            plm_theta=float(attrs["plm_theta"]),
-            checkpoint_index=int(attrs["checkpoint_index"]),
-            solver=str(attrs["solver"]),
-            checkpoint_interval=int(attrs["checkpoint_interval"]),
-            halo_radius=int(attrs["halo_radius"]),
-            system_info=raw.groups.get("bodies"),
-        )
 
-        # Parse mesh config for base level
-        mesh_data: dict[str, Any] = raw.groups.get("mesh_config", {})
-        mesh = MeshConfig(
-            shape=tuple(mesh_data["shape"][::-1]),
-            bounds_min=tuple(mesh_data["bounds_min"][::-1]),
-            bounds_max=tuple(mesh_data["bounds_max"][::-1]),
-            halo_radius=int(mesh_data["halo_radius"]),
-            spacing_types=tuple(mesh_data["spacing_types"].split(",")[::-1]),
-        )
+        # detect format by checking for v2 attribute names
+        is_v2 = "gamma" in attrs or "tend" in attrs
 
-        # Get base level fields
+        if is_v2:
+            metadata = parse_metadata_v2(attrs)
+            mesh = parse_mesh_config_v2(raw.groups, attrs)
+        else:
+            # legacy v1 format parsing
+            metadata = Metadata(
+                time=float(attrs["time"]),
+                dt=float(attrs["dt"]),
+                iteration=int(attrs["iteration"]),
+                dimensions=int(attrs["dimensions"]),
+                regime=str(attrs["regime"]),
+                adiabatic_index=float(attrs["adiabatic_index"]),
+                is_mhd="mhd" in str(attrs["regime"]),
+                coord_system=str(attrs["coord_system"]),
+                boundary_conditions=tuple(
+                    str(attrs["boundary_conditions"]).split(",")
+                ),
+                resolution=tuple(
+                    int(x) for x in str(attrs["resolution"]).split(",")
+                ),
+                cfl_number=float(attrs["cfl_number"]),
+                end_time=float(attrs["end_time"]),
+                reconstruction=str(attrs["reconstruction"]),
+                timestepping=str(attrs["timestepping"]),
+                x1_spacing=str(attrs["x1_spacing"]),
+                x2_spacing=str(attrs["x2_spacing"]),
+                x3_spacing=str(attrs["x3_spacing"]),
+                plm_theta=float(attrs["plm_theta"]),
+                checkpoint_index=int(attrs["checkpoint_index"]),
+                solver=str(attrs["solver"]),
+                checkpoint_interval=int(attrs["checkpoint_interval"]),
+                halo_radius=int(attrs["halo_radius"]),
+                system_info=raw.groups.get("bodies"),
+            )
+
+            mesh_data: dict[str, Any] = raw.groups.get("mesh_config", {})
+            mesh = MeshConfig(
+                shape=tuple(mesh_data["shape"][::-1]),
+                bounds_min=tuple(mesh_data["bounds_min"][::-1]),
+                bounds_max=tuple(mesh_data["bounds_max"][::-1]),
+                halo_radius=int(mesh_data["halo_radius"]),
+                spacing_types=tuple(
+                    mesh_data["spacing_types"].split(",")[::-1]
+                ),
+            )
+
+        # get base level fields
         fields = preprocess_fields(raw.fields, mesh, metadata, unpad)
 
-        # Parse FMR hierarchy if present
+        # parse FMR hierarchy if present
         hierarchy = parse_hierarchy(raw.groups)
 
-        # Parse additional levels if we have FMR data
+        # parse additional levels if we have FMR data
         levels = None
         if hierarchy:
             levels = []
@@ -355,7 +464,7 @@ def parse_data(raw: RawHDF5, unpad: bool = True) -> Result[ProcessedData]:
                 levels.append(level)
                 level_id += 1
 
-        # Bodies (if present)
+        # bodies (if present)
         diagnostics = parse_diagnostics(raw.groups)
         bodies = parse_bodies(raw.groups.get("bodies"), diagnostics)
 

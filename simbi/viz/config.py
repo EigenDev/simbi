@@ -35,8 +35,8 @@ class StyleConfig(BaseModel):
     cmap: Iterator[str] = cycle(["viridis"])
     units: bool = False
     log: bool = False
-    semilogx: bool = False
-    semilogy: bool = False
+    xscale: str = "linear"
+    yscale: str = "linear"
     setup: str = "Simulation"
     x_label: Optional[str] = None
     y_label: Optional[str] = None

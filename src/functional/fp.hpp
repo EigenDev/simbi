@@ -14,13 +14,13 @@
 #include <vector>
 
 namespace simbi {
-    template <typename T, std::uint64_t Dims>
+    template <typename T, std::uint64_t Rank>
     struct vector_t;
 
-    template <std::uint64_t Dims>
-    using coordinate_t = vector_t<std::int64_t, Dims>;
+    template <std::uint64_t Rank>
+    using coordinate_t = vector_t<std::int64_t, Rank>;
 
-    template <std::uint64_t Dims>
+    template <std::uint64_t Rank>
     struct domain_t;
 }   // namespace simbi
 
@@ -241,36 +241,36 @@ namespace simbi::fp {
     // coordinate utilities
     // ========================================================================
 
-    template <std::uint64_t Dims>
+    template <std::uint64_t Rank>
     struct offset_transform_t {
-        coordinate_t<Dims> offset;
+        coordinate_t<Rank> offset;
 
-        constexpr DUAL auto operator()(coordinate_t<Dims> coord) const
+        constexpr DUAL auto operator()(coordinate_t<Rank> coord) const
         {
             return offset + coord;
         }
     };
 
-    template <std::uint64_t Dims>
-    constexpr auto offset_transform(coordinate_t<Dims> offset)
+    template <std::uint64_t Rank>
+    constexpr auto offset_transform(coordinate_t<Rank> offset)
     {
-        return offset_transform_t<Dims>{offset};
+        return offset_transform_t<Rank>{offset};
     }
 
-    template <std::uint64_t Dims>
+    template <std::uint64_t Rank>
     struct domain_predicate_t {
-        domain_t<Dims> domain;
+        domain_t<Rank> domain;
 
-        constexpr DUAL bool operator()(coordinate_t<Dims> coord) const
+        constexpr DUAL bool operator()(coordinate_t<Rank> coord) const
         {
             return domain.contains(coord);
         }
     };
 
-    template <std::uint64_t Dims>
-    constexpr auto domain_predicate(domain_t<Dims> domain)
+    template <std::uint64_t Rank>
+    constexpr auto domain_predicate(domain_t<Rank> domain)
     {
-        return domain_predicate_t<Dims>{domain};
+        return domain_predicate_t<Rank>{domain};
     }
 
     // ========================================================================
@@ -314,20 +314,20 @@ namespace simbi::fp {
     };
 
     // domain operations
-    template <std::uint64_t Dims>
+    template <std::uint64_t Rank>
     struct contains_op_t {
-        domain_t<Dims> domain;
+        domain_t<Rank> domain;
 
-        constexpr DEV bool operator()(coordinate_t<Dims> coord) const
+        constexpr DEV bool operator()(coordinate_t<Rank> coord) const
         {
             return domain.contains(coord);
         }
     };
 
-    template <std::uint64_t Dims>
-    constexpr auto contains_op(domain_t<Dims> domain)
+    template <std::uint64_t Rank>
+    constexpr auto contains_op(domain_t<Rank> domain)
     {
-        return contains_op_t<Dims>{domain};
+        return contains_op_t<Rank>{domain};
     }
 
     // ========================================================================

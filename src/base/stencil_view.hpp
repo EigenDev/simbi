@@ -13,28 +13,28 @@
 
 namespace simbi::base::stencils {
     template <
-        Reconstruction Rec,
+        reconstruction_t Rec,
         typename field_type,
-        std::uint64_t Dims = field_type::dimensions>
+        std::uint64_t Rank = field_type::rank>
     struct stencil_view_t {
         using value_type = std::remove_cvref_t<typename field_type::value_type>;
         static constexpr auto stencil_size = base::stencil_size<Rec>();
         using stencil_values_t             = vector_t<value_type, stencil_size>;
 
         const field_type& field_;
-        iarray<Dims> base_coord_;
+        iarray<Rank> base_coord_;
         std::uint64_t direction_;
 
         stencil_values_t DEV left_values() const
         {
-            auto pattern = base::stencil_t<Dims, Rec>::left_pattern(direction_);
+            auto pattern = base::stencil_t<Rank, Rec>::left_pattern(direction_);
             return gather_pattern(pattern);
         }
 
         stencil_values_t DEV right_values() const
         {
             auto pattern =
-                base::stencil_t<Dims, Rec>::right_pattern(direction_);
+                base::stencil_t<Rank, Rec>::right_pattern(direction_);
             return gather_pattern(pattern);
         }
 
@@ -50,8 +50,8 @@ namespace simbi::base::stencils {
         {
             stencil_values_t values;
             for (std::uint64_t ii = 0; ii < stencil_size; ++ii) {
-                iarray<Dims> coord = base_coord_;
-                for (std::uint64_t d = 0; d < Dims; ++d) {
+                iarray<Rank> coord = base_coord_;
+                for (std::uint64_t d = 0; d < Rank; ++d) {
                     coord[d] += pattern[ii][d];
                 }
                 values[ii] = field_(coord);
@@ -61,29 +61,29 @@ namespace simbi::base::stencils {
     };
 
     template <
-        Reconstruction Rec,
+        reconstruction_t Rec,
         typename field_type,
-        std::uint64_t Dims = field_type::dimensions>
+        std::uint64_t Rank = field_type::rank>
     DEV auto make_stencil(
         const field_type& field,
-        const iarray<Dims>& coord,
+        const iarray<Rank>& coord,
         std::uint64_t dir
     )
     {
-        return stencil_view_t<Rec, field_type, Dims>{field, coord, dir};
+        return stencil_view_t<Rec, field_type, Rank>{field, coord, dir};
     }
 
     // === RECONSTRUCTION INTERFACE ===
-    template <Reconstruction Rec, typename T>
+    template <reconstruction_t Rec, typename T>
     DEV T reconstruct_left(
         const vector_t<T, base::stencil_size<Rec>()>& values,
         double theta = 1.5
     )
     {
-        if constexpr (Rec == Reconstruction::PCM) {
+        if constexpr (Rec == reconstruction_t::PCM) {
             return values[0];
         }
-        else if constexpr (Rec == Reconstruction::PLM) {
+        else if constexpr (Rec == reconstruction_t::PLM) {
             const auto gradient =
                 helpers::plm_gradient(values[0], values[1], values[2], theta);
             return values[1] + gradient * 0.5;
@@ -91,21 +91,21 @@ namespace simbi::base::stencils {
         else {
             // lambda trick
             []<bool flag = false>() {
-                static_assert(flag, "Reconstruction method not implemented");
+                static_assert(flag, "reconstruction_t method not implemented");
             }();
         }
     }
 
-    template <Reconstruction Rec, typename T>
+    template <reconstruction_t Rec, typename T>
     DEV T reconstruct_right(
         const vector_t<T, base::stencil_size<Rec>()>& values,
         double theta = 1.5
     )
     {
-        if constexpr (Rec == Reconstruction::PCM) {
+        if constexpr (Rec == reconstruction_t::PCM) {
             return values[0];
         }
-        else if constexpr (Rec == Reconstruction::PLM) {
+        else if constexpr (Rec == reconstruction_t::PLM) {
             auto gradient =
                 helpers::plm_gradient(values[0], values[1], values[2], theta);
             return values[1] - 0.5 * gradient;
@@ -113,7 +113,7 @@ namespace simbi::base::stencils {
         else {
             // lambda trick to satisfy nvcc
             []<bool flag = false>() {
-                static_assert(flag, "Reconstruction method not implemented");
+                static_assert(flag, "reconstruction_t method not implemented");
             }();
         }
     }

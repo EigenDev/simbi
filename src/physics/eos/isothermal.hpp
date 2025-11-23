@@ -18,7 +18,7 @@ namespace simbi::eos {
         DEV auto enthalpy(real /*rho*/, real /*pressure*/) const
         {
             return 1.0;
-            // if constexpr (R == Regime::NEWTONIAN || R == Regime::MHD) {
+            // if constexpr (R == regime_t::NEWTONIAN || R == regime_t::MHD) {
             //     return 1.0;
             // }
             // 1 + cs^2

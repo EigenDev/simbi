@@ -16,10 +16,10 @@ namespace simbi::hydro {
     DEV constexpr auto hlle_flux(
         const primitive_t& primL,
         const primitive_t& primR,
-        const unit_vector_t<primitive_t::dimensions>& nhat,
+        const unit_vector_t<primitive_t::rank>& nhat,
         real vface,
         real gamma,
-        ShockWaveLimiter = ShockWaveLimiter::NONE
+        shockwave_limiter_t = shockwave_limiter_t::NONE
     )
     {
         const auto uL       = to_conserved(primL, gamma);

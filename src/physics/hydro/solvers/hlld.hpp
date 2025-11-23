@@ -28,7 +28,7 @@ namespace simbi::hydro::rmhd {
         const vector_t<typename primitive_t::counterpart_t, 2> r,
         const vector_t<real, 2> lam,
         const real bn,
-        const unit_vector_t<primitive_t::dimensions>& nhat,
+        const unit_vector_t<primitive_t::rank>& nhat,
         primitive_t& praL,
         primitive_t& praR,
         primitive_t& prC
@@ -168,15 +168,15 @@ namespace simbi::hydro::rmhd {
     DEV constexpr auto hlld_flux(
         const primitive_t& primL,
         const primitive_t& primR,
-        const unit_vector_t<primitive_t::dimensions>& nhat,
+        const unit_vector_t<primitive_t::rank>& nhat,
         real vface,
         real gamma,
-        ShockWaveLimiter shock_smoother
+        shockwave_limiter_t shock_smoother
     )
     {
         using conserved_t = typename primitive_t::counterpart_t;
-        if constexpr (primitive_t::dimensions > 1) {
-            if (shock_smoother == ShockWaveLimiter::QUIRK &&
+        if constexpr (primitive_t::rank > 1) {
+            if (shock_smoother == shockwave_limiter_t::QUIRK &&
                 quirk_strong_shock(primL.pre, primR.pre)) {
                 return hlle_flux(primL, primR, nhat, vface, gamma);
             }

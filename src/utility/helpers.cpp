@@ -24,26 +24,26 @@ namespace simbi {
         // Flag that detects whether program was terminated by external forces
         std::atomic<bool> killsig_received = false;
 
-        std::string get_color_code(Color color)
+        std::string get_color_code(color_t color)
         {
             switch (color) {
-                case Color::RED: return "\033[31m";
-                case Color::GREEN: return "\033[32m";
-                case Color::YELLOW: return "\033[33m";
-                case Color::BLUE: return "\033[34m";
-                case Color::MAGENTA: return "\033[35m";
-                case Color::CYAN: return "\033[36m";
-                case Color::WHITE: return "\033[37m";
-                case Color::LIGHT_BLUE: return "\033[0;94m";
-                case Color::LIGHT_CYAN: return "\033[0;96m";
-                case Color::LIGHT_GREEN: return "\033[0;92m";
-                case Color::LIGHT_GREY: return "\033[0;37m";
-                case Color::LIGHT_MAGENTA: return "\033[0;95m";
-                case Color::LIGHT_RED: return "\033[0;91m";
-                case Color::LIGHT_YELLOW: return "\033[0;93m";
-                case Color::BLACK: return "\033[0;30m";
-                case Color::DARK_GREY: return "\033[0;90m";
-                case Color::BOLD: return "\033[1m";
+                case color_t::RED: return "\033[31m";
+                case color_t::GREEN: return "\033[32m";
+                case color_t::YELLOW: return "\033[33m";
+                case color_t::BLUE: return "\033[34m";
+                case color_t::MAGENTA: return "\033[35m";
+                case color_t::CYAN: return "\033[36m";
+                case color_t::WHITE: return "\033[37m";
+                case color_t::LIGHT_BLUE: return "\033[0;94m";
+                case color_t::LIGHT_CYAN: return "\033[0;96m";
+                case color_t::LIGHT_GREEN: return "\033[0;92m";
+                case color_t::LIGHT_GREY: return "\033[0;37m";
+                case color_t::LIGHT_MAGENTA: return "\033[0;95m";
+                case color_t::LIGHT_RED: return "\033[0;91m";
+                case color_t::LIGHT_YELLOW: return "\033[0;93m";
+                case color_t::BLACK: return "\033[0;30m";
+                case color_t::DARK_GREY: return "\033[0;90m";
+                case color_t::BOLD: return "\033[1m";
                 default: return "\033[0m";
             }
         }

@@ -1,15 +1,26 @@
-/**
- * compat.hpp - configuration system for SIMBI
+/*
+ * compat.hpp
  *
- * This file provides a type-safe, compile-time configuration system
+ * This header provides a compatibility layer for different build
+ * configurations and platforms. It defines compile-time constants,
+ * type definitions, and macros based on the build options specified
+ * during the Meson build process.
  *
+ * The goal is to centralize configuration-dependent code and provide
+ * a clear interface for platform-specific features.
+ *
+ * Created by: Marcus DuPont
+ * Date: 2025-11-23
+ * Copyright (c) 2025 Marcus DuPont
+ * All rights reserved.
  */
 #ifndef COMPAT_HPP
 #define COMPAT_HPP
 
 #include "build_options.hpp"   // include the Meson-generated configuration
 #include <cstdint>             // for fixed-width integer types
-#include <type_traits>         // for std::conditional_t and other type traits
+#include <cstdlib>
+#include <type_traits>   // for std::conditional_t and other type traits
 
 namespace simbi {
     namespace build {
@@ -231,7 +242,7 @@ using namespace simbi::build;
  * alternatives where possible.
  */
 #if GPU_ENABLED
-#if CUDA_ENABLED || HIP_ENABLED
+#if defined(CUDA_ENABLED) || defined(HIP_ENABLED)
 #define DEV        __device__
 #define KERNEL     __global__
 #define DUAL       __host__ __device__
@@ -239,6 +250,12 @@ using namespace simbi::build;
 #define EXTERN     extern __shared__
 #define STATIC_VAR __device__ volatile
 #define SHARED     __shared__
+
+#if CUDA_ENABLED
+#include <cuda_runtime.h>
+#elif HIP_ENABLED
+#include <hip/hip_runtime.h>
+#endif
 
 // these macros should be replaced with template functions
 #define SINGLE(kernel_name, ...) kernel_name<<<1, 1>>>(__VA_ARGS__);

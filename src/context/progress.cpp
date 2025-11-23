@@ -18,10 +18,10 @@ namespace simbi::progress {
         std::cout << std::string(5, '\n');
         statistics::display_system_info();
 
-        auto table = io::TableFactory::create_elegant_table(
+        auto table = io::table_factory_t::create_elegant_table(
             title,
-            io::DisplayMode::Dynamic,
-            io::ProgressBar::Enabled
+            io::display_mode_t::Dynamic,
+            io::progress_bar_t::Enabled
         );
 
         table.set_header(

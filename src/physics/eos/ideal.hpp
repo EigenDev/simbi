@@ -7,7 +7,7 @@
 #include <cmath>   // for std::sqrt
 
 namespace simbi::eos {
-    template <Regime R>
+    template <regime_t R>
     struct ideal_gas_eos_t {
         real gamma;
 
@@ -20,7 +20,7 @@ namespace simbi::eos {
 
         DEV auto enthalpy(real rho, real pressure) const
         {
-            if constexpr (!(R == Regime::SRHD || R == Regime::RMHD)) {
+            if constexpr (!(R == regime_t::SRHD || R == regime_t::RMHD)) {
                 return 1.0;
             }
             return 1.0 + gamma * pressure / (rho * (gamma - 1.0));

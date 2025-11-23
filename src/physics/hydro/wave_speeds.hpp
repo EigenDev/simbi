@@ -88,7 +88,7 @@ namespace simbi::hydro::newtonian {
     template <is_hydro_primitive_c primitive_t>
     DEV wave_speeds_t wave_speeds(
         const primitive_t& prim,
-        const unit_vector_t<primitive_t::dimensions>& nhat,
+        const unit_vector_t<primitive_t::rank>& nhat,
         real gamma
     )
     {
@@ -101,7 +101,7 @@ namespace simbi::hydro::newtonian {
     DEV wave_speeds_t extremal_speeds(
         const primitive_t& primL,
         const primitive_t& primR,
-        const unit_vector_t<primitive_t::dimensions>& nhat,
+        const unit_vector_t<primitive_t::rank>& nhat,
         real gamma
     )
     {
@@ -117,7 +117,7 @@ namespace simbi::hydro::newtonian {
     DEV wave_properties_t wave_properties(
         const primitive_t& primL,
         const primitive_t& primR,
-        const unit_vector_t<primitive_t::dimensions>& nhat,
+        const unit_vector_t<primitive_t::rank>& nhat,
         real gamma
     )
     {
@@ -204,14 +204,14 @@ namespace simbi::hydro::srhd {
     template <is_hydro_primitive_c primitive_t>
     DEV wave_speeds_t wave_speeds(
         const primitive_t& prim,
-        const unit_vector_t<primitive_t::dimensions>& nhat,
+        const unit_vector_t<primitive_t::rank>& nhat,
         real gamma
     )
     {
         const auto vn = vecops::dot(prim.vel, nhat);
         const auto cs = sound_speed(prim, gamma);
         switch (comp_wave_speed) {
-            case WaveSpeedEstimate::MIGNONE_AND_BODO_05: {
+            case wave_speed_estimate_t::MIGNONE_AND_BODO_05: {
                 // get wave speeds based on Mignone & Bodo Eqs. (21.0 - 23)
                 const auto w = 1.0 / std::sqrt(1.0 - vn * vn);
                 const auto s = cs * cs / (w * w * (1.0 - cs * cs));
@@ -234,7 +234,7 @@ namespace simbi::hydro::srhd {
     DEV wave_speeds_t extremal_speeds(
         const primitive_t& primL,
         const primitive_t& primR,
-        const unit_vector_t<primitive_t::dimensions>& nhat,
+        const unit_vector_t<primitive_t::rank>& nhat,
         real gamma
     )
     {
@@ -253,7 +253,7 @@ namespace simbi::hydro::rmhd {
     template <is_mhd_primitive_c primitive_t>
     DEV wave_speeds_t wave_speeds(
         const primitive_t& prim,
-        const unit_vector_t<primitive_t::dimensions>& nhat,
+        const unit_vector_t<primitive_t::rank>& nhat,
         real gamma
     )
     {
@@ -397,7 +397,7 @@ namespace simbi::hydro::rmhd {
     DEV wave_speeds_t extremal_speeds(
         const primitive_t& primL,
         const primitive_t& primR,
-        const unit_vector_t<primitive_t::dimensions>& nhat,
+        const unit_vector_t<primitive_t::rank>& nhat,
         real gamma
     )
     {
@@ -414,7 +414,7 @@ namespace simbi::hydro {
     template <is_hydro_primitive_c primitive_t>
     DEV wave_speeds_t wave_speeds(
         const primitive_t& prim,
-        const unit_vector_t<primitive_t::dimensions>& nhat,
+        const unit_vector_t<primitive_t::rank>& nhat,
         real gamma
     )
     {
@@ -433,7 +433,7 @@ namespace simbi::hydro {
     DEV wave_speeds_t extremal_speeds(
         const primitive_t& primL,
         const primitive_t& primR,
-        const unit_vector_t<primitive_t::dimensions>& nhat,
+        const unit_vector_t<primitive_t::rank>& nhat,
         real gamma
     )
     {

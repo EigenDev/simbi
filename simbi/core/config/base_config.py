@@ -645,10 +645,10 @@ class SimbiBaseConfig(CLIConfigurableModel):
 
             # Validate subcycling settings
             # number of substeps must match number of levels -1
-            if self.fmr_subcycling_mode != SubCycleMode.NONE:
+            if self.fmr_subcycling_mode == SubCycleMode.ADAPTIVE:
                 if len(self.fmr_substeps) != self.fmr_max_levels - 1:
                     raise ValueError(
-                        "FMR substeps must be specified for subcycling modes other than NONE"
+                        "FMR substeps must be specified for Adaptive subcycling mode"
                     )
 
         return self

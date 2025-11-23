@@ -21,7 +21,7 @@ namespace simbi {
     using namespace simbi::concepts;
 
     // forward declarations
-    template <typename T, std::uint64_t Dims>
+    template <typename T, std::uint64_t Rank>
     struct vector_t;
 
     namespace detail {
@@ -61,14 +61,14 @@ namespace simbi {
             const auto n   = norm(vec);
             return n > 0 ? vec | fp::map([n](const auto& x) -> result_t {
                                return x / n;
-                           }) | fp::collect<vector_t<result_t, Vec::dimensions>>
+                           }) | fp::collect<vector_t<result_t, Vec::rank>>
                          : vec;
         }
 
         // cross product
         template <vector_like_c Vec1, vector_like_c Vec2>
         DUAL constexpr auto cross(const Vec1& a, const Vec2& b)
-            requires(Vec1::dimensions == 3 && Vec2::dimensions == 3)
+            requires(Vec1::rank == 3 && Vec2::rank == 3)
         {
             using T = decltype(a[0] * b[0]);
             return vector_t<T, 3>{
@@ -81,7 +81,7 @@ namespace simbi {
         // cross product magnitude for Dim = 2
         template <vector_like_c Vec1, vector_like_c Vec2>
         DUAL constexpr auto cross(const Vec1& a, const Vec2& b)
-            requires(Vec1::dimensions == 2 && Vec2::dimensions == 2)
+            requires(Vec1::rank == 2 && Vec2::rank == 2)
         {
             using T = decltype(a[0] * b[0]);
             return vector_t<T, 3>{T{0.0}, T{0.0}, a[0] * b[1] - b[0] * a[1]};
@@ -129,7 +129,7 @@ namespace simbi {
         template <vector_like_c Vec, typename T>
         DEV static constexpr auto rotate(const Vec& vec, const T& angle)
         {
-            if constexpr (Vec::dimensions == 2) {
+            if constexpr (Vec::rank == 2) {
                 return rotate_2D(vec, angle);
             }
             else {
@@ -140,10 +140,10 @@ namespace simbi {
         template <vector_like_c Vec>
         DEV auto constexpr spherical_to_cartesian(const Vec& vec)
         {
-            if constexpr (Vec::dimensions == 1) {
+            if constexpr (Vec::rank == 1) {
                 return vec;
             }
-            else if constexpr (Vec::dimensions == 2) {   // r-theta, not r-phi
+            else if constexpr (Vec::rank == 2) {   // r-theta, not r-phi
                 return Vec{
                   vec[0] * std::sin(vec[1]),
                   vec[0] * std::cos(vec[1])
@@ -161,10 +161,10 @@ namespace simbi {
         template <vector_like_c Vec>
         DEV auto constexpr cylindrical_to_cartesian(const Vec& vec)
         {
-            if constexpr (Vec::dimensions == 1) {
+            if constexpr (Vec::rank == 1) {
                 return vec;
             }
-            else if constexpr (Vec::dimensions == 2) {
+            else if constexpr (Vec::rank == 2) {
                 return Vec{
                   vec[0] * std::cos(vec[1]),
                   vec[0] * std::sin(vec[1])
@@ -182,10 +182,10 @@ namespace simbi {
         template <vector_like_c Vec>
         DEV auto constexpr cartesian_to_spherical(const Vec& vec)
         {
-            if constexpr (Vec::dimensions == 1) {
+            if constexpr (Vec::rank == 1) {
                 return vec;
             }
-            else if constexpr (Vec::dimensions == 2) {
+            else if constexpr (Vec::rank == 2) {
                 return Vec{vec.norm(), std::atan2(vec[1], vec[0])};
             }
             else {
@@ -200,10 +200,10 @@ namespace simbi {
         template <vector_like_c Vec>
         DEV auto constexpr centralize_cartesian_to_spherical(const Vec& vec)
         {
-            if constexpr (Vec::dimensions == 1) {
+            if constexpr (Vec::rank == 1) {
                 return vec;
             }
-            else if constexpr (Vec::dimensions == 2) {
+            else if constexpr (Vec::rank == 2) {
                 return Vec{
                   vec.norm(),
                   0.0,
@@ -217,10 +217,10 @@ namespace simbi {
         template <vector_like_c Vec>
         DEV auto constexpr centralize_cartesian_to_cylindrical(const Vec& vec)
         {
-            if constexpr (Vec::dimensions == 1) {
+            if constexpr (Vec::rank == 1) {
                 return vec;
             }
-            else if constexpr (Vec::dimensions == 2) {
+            else if constexpr (Vec::rank == 2) {
                 return Vec{
                   vec.norm(),
                   0.0,
@@ -234,10 +234,10 @@ namespace simbi {
         template <vector_like_c Vec>
         DEV auto constexpr cartesian_to_cylindrical(const Vec& vec)
         {
-            if constexpr (Vec::dimensions == 1) {
+            if constexpr (Vec::rank == 1) {
                 return vec;
             }
-            else if constexpr (Vec::dimensions == 2) {
+            else if constexpr (Vec::rank == 2) {
                 return Vec{vec.norm(), std::atan2(vec[1], vec[0])};
             }
             else {
@@ -248,12 +248,12 @@ namespace simbi {
         // convert a cartesian vector to a curvlinear
         // coordinate system
         template <vector_like_c Vec>
-        DEV auto to_geometry(const Vec& vec, Geometry geometry)
+        DEV auto to_geometry(const Vec& vec, geometry_t geometry)
         {
-            if (geometry == Geometry::SPHERICAL) {
+            if (geometry == geometry_t::SPHERICAL) {
                 return cartesian_to_spherical(vec);
             }
-            else if (geometry == Geometry::CYLINDRICAL) {
+            else if (geometry == geometry_t::CYLINDRICAL) {
                 return cartesian_to_cylindrical(vec);
             }
             else {
@@ -264,12 +264,12 @@ namespace simbi {
         // project some vector onto the mesh
         // using the mesh basis vectors
         template <vector_like_c Vec>
-        DEV constexpr auto centralize(const Vec& vec, Geometry mesh_geometry)
+        DEV constexpr auto centralize(const Vec& vec, geometry_t mesh_geometry)
         {
             switch (mesh_geometry) {
-                case Geometry::SPHERICAL:
+                case geometry_t::SPHERICAL:
                     return centralize_cartesian_to_spherical(vec);
-                case Geometry::CYLINDRICAL:
+                case geometry_t::CYLINDRICAL:
                     return centralize_cartesian_to_cylindrical(vec);
                 default: return vec;
             }
@@ -279,16 +279,16 @@ namespace simbi {
     // -------------------------------------------------------------
     // Vector: pure value-based immutable vector with direct storage
     // -------------------------------------------------------------
-    template <typename T, std::uint64_t Dims>
+    template <typename T, std::uint64_t Rank>
     struct vector_t {
-        T storage[Dims];   // direct storage of elements
+        T storage[Rank];   // direct storage of elements
         static inline T zero_value{};
 
         // type definitions for type traits and functional interfaces
-        using value_type                          = T;
-        using reference                           = T&;
-        using const_reference                     = const T&;
-        static constexpr std::uint64_t dimensions = Dims;
+        using value_type                    = T;
+        using reference                     = T&;
+        using const_reference               = const T&;
+        static constexpr std::uint64_t rank = Rank;
 
         // element access
         DUAL constexpr reference operator[](std::uint64_t idx)
@@ -304,7 +304,7 @@ namespace simbi {
         DUAL constexpr bool is_zero() const
         {
             bool result = true;
-            for (std::uint64_t ii = 0; ii < Dims; ++ii) {
+            for (std::uint64_t ii = 0; ii < Rank; ++ii) {
                 result &= (storage[ii] == 0.0);
             }
             return result;
@@ -313,7 +313,7 @@ namespace simbi {
         // safe access with bounds checking
         DUAL constexpr maybe_t<reference> at(std::uint64_t idx)
         {
-            if (idx < Dims) {
+            if (idx < Rank) {
                 return maybe_t<reference>(storage[idx]);
             }
             return Nothing;
@@ -321,7 +321,7 @@ namespace simbi {
 
         DUAL constexpr maybe_t<const_reference> at(std::uint64_t idx) const
         {
-            if (idx < Dims) {
+            if (idx < Rank) {
                 return maybe_t<const_reference>(storage[idx]);
             }
             return Nothing;
@@ -330,11 +330,19 @@ namespace simbi {
         DUAL auto reverse() const
         {
             // traditional for loop version
-            vector_t<T, Dims> result;
-            for (std::uint64_t ii = 0; ii < Dims; ++ii) {
-                result[ii] = storage[Dims - ii - 1];
+            vector_t<T, Rank> result;
+            for (std::uint64_t ii = 0; ii < Rank; ++ii) {
+                result[ii] = storage[Rank - ii - 1];
             }
             return result;
+        }
+
+        // fill operation
+        DUAL constexpr void fill(const T& value)
+        {
+            for (std::uint64_t ii = 0; ii < Rank; ++ii) {
+                storage[ii] = value;
+            }
         }
 
         // data access for algorithms
@@ -342,15 +350,15 @@ namespace simbi {
         DUAL constexpr const T* data() const { return &storage[0]; }
 
         // size and capacity
-        DUAL constexpr std::uint64_t size() const { return Dims; }
+        DUAL constexpr std::uint64_t size() const { return Rank; }
 
         // iterators for standard algorithms (forward)
         DUAL constexpr T* begin() { return &storage[0]; }
-        DUAL constexpr T* end() { return &storage[0] + Dims; }
+        DUAL constexpr T* end() { return &storage[0] + Rank; }
         DUAL constexpr const T* begin() const { return &storage[0]; }
-        DUAL constexpr const T* end() const { return &storage[0] + Dims; }
+        DUAL constexpr const T* end() const { return &storage[0] + Rank; }
         DUAL constexpr const T* cbegin() const { return &storage[0]; }
-        DUAL constexpr const T* cend() const { return &storage[0] + Dims; }
+        DUAL constexpr const T* cend() const { return &storage[0] + Rank; }
 
         // reverse iterators
         DUAL constexpr std::reverse_iterator<T*> rbegin()
@@ -391,7 +399,7 @@ namespace simbi {
         {
             // traditional for loop version
             // const auto n = norm();
-            // for (std::uint64_t ii = 0; ii < Dims; ++ii) {
+            // for (std::uint64_t ii = 0; ii < Rank; ++ii) {
             //     storage[ii] /= n;
             // }
             // return *this;
@@ -401,7 +409,7 @@ namespace simbi {
             if (n > T{0}) {
                 return *this | fp::map([n](const auto& x) -> result_t {
                     return x / n;
-                }) | fp::collect<vector_t<result_t, Dims>>;
+                }) | fp::collect<vector_t<result_t, Rank>>;
             }
             return *this;
         }
@@ -410,20 +418,20 @@ namespace simbi {
         DUAL constexpr auto operator-() const
         {
             // tradiational for loop version
-            // vector_t<T, Dims> result;
-            // for (std::uint64_t ii = 0; ii < Dims; ++ii) {
+            // vector_t<T, Rank> result;
+            // for (std::uint64_t ii = 0; ii < Rank; ++ii) {
             //     result[ii] = -storage[ii];
             // }
             // return result;
 
             return *this | fp::map([](const auto& x) { return -x; }) |
-                   fp::collect<vector_t<T, Dims>>;
+                   fp::collect<vector_t<T, Rank>>;
         }
 
         // comparison operators
         DUAL constexpr bool operator==(const vector_t& other) const
         {
-            for (std::uint64_t ii = 0; ii < Dims; ++ii) {
+            for (std::uint64_t ii = 0; ii < Rank; ++ii) {
                 if (storage[ii] != other[ii]) {
                     return false;
                 }
@@ -437,11 +445,11 @@ namespace simbi {
         }
 
         // compound assignment (+=, -=, *=, /=)
-        template <typename U, std::uint64_t OtherDims>
-        DUAL constexpr auto operator+=(const vector_t<U, OtherDims>& other)
+        template <typename U, std::uint64_t OtherRank>
+        DUAL constexpr auto operator+=(const vector_t<U, OtherRank>& other)
         {
             // traditional for loop version
-            // for (std::uint64_t ii = 0; ii < Dims; ++ii) {
+            // for (std::uint64_t ii = 0; ii < Rank; ++ii) {
             //     storage[ii] += static_cast<T>(other[ii]);
             // }
             // return *this;
@@ -449,11 +457,11 @@ namespace simbi {
             return *this = *this + other;
         }
 
-        template <typename U, std::uint64_t OtherDims>
-        DUAL constexpr auto operator-=(const vector_t<U, OtherDims>& other)
+        template <typename U, std::uint64_t OtherRank>
+        DUAL constexpr auto operator-=(const vector_t<U, OtherRank>& other)
         {
             // traditional for loop version
-            // for (std::uint64_t ii = 0; ii < Dims; ++ii) {
+            // for (std::uint64_t ii = 0; ii < Rank; ++ii) {
             //     storage[ii] -= static_cast<T>(other[ii]);
             // }
             // return *this;
@@ -470,9 +478,9 @@ namespace simbi {
 
         template <vector_like_c OtherVec>
         DUAL constexpr auto inner_product(const OtherVec& other) const
-            requires(Dims == OtherVec::dimensions)
+            requires(Rank == OtherVec::rank)
         {
-            if constexpr (Dims == 4) {
+            if constexpr (Rank == 4) {
                 // special case for 4-vectors (spacetime vectors)
                 return -storage[0] * other[0] + storage[1] * other[1] +
                        storage[2] * other[2] + storage[3] * other[3];
@@ -480,7 +488,7 @@ namespace simbi {
             else {
                 // general case for lower dimensions
                 T result = 0;
-                for (std::uint64_t ii = 0; ii < Dims; ++ii) {
+                for (std::uint64_t ii = 0; ii < Rank; ++ii) {
                     result += storage[ii] * other[ii];
                 }
                 return result;
@@ -497,7 +505,7 @@ namespace simbi {
         template <size_t I>
         DUAL constexpr T& get() &
         {
-            if constexpr (I >= Dims) {
+            if constexpr (I >= Rank) {
                 return zero_value;
             }
             else {
@@ -508,7 +516,7 @@ namespace simbi {
         template <size_t I>
         DUAL constexpr const T& get() const&
         {
-            if constexpr (I >= Dims) {
+            if constexpr (I >= Rank) {
                 return zero_value;
             }
             else {
@@ -519,7 +527,7 @@ namespace simbi {
         template <size_t I>
         DUAL constexpr T&& get() &&
         {
-            if constexpr (I >= Dims) {
+            if constexpr (I >= Rank) {
                 return std::move(zero_value);
             }
             else {
@@ -559,7 +567,7 @@ namespace simbi {
                    return static_cast<result_t>(x) *
                           static_cast<result_t>(scalar);
                }) |
-               fp::collect<vector_t<result_t, Vec::dimensions>>;
+               fp::collect<vector_t<result_t, Vec::rank>>;
     }
 
     template <vector_like_c Vec, typename U>
@@ -571,7 +579,7 @@ namespace simbi {
                    return static_cast<result_t>(x) *
                           static_cast<result_t>(scalar);
                }) |
-               fp::collect<vector_t<result_t, Vec::dimensions>>;
+               fp::collect<vector_t<result_t, Vec::rank>>;
     }
 
     // vector-like scalar division
@@ -584,7 +592,7 @@ namespace simbi {
                    return static_cast<result_t>(x) /
                           static_cast<result_t>(scalar);
                }) |
-               fp::collect<vector_t<result_t, Vec::dimensions>>;
+               fp::collect<vector_t<result_t, Vec::rank>>;
     }
 
     // vector-like scalar multiply assignment
@@ -593,7 +601,7 @@ namespace simbi {
         requires(std::is_arithmetic_v<U>)
     {
         using result_t = detail::promote_t<typename Vec::value_type, U>;
-        for (size_t ii = 0; ii < Vec::dimensions; ++ii) {
+        for (size_t ii = 0; ii < Vec::rank; ++ii) {
             vec[ii] *= static_cast<result_t>(scalar);
         }
         return vec;
@@ -605,7 +613,7 @@ namespace simbi {
         requires(std::is_arithmetic_v<U>)
     {
         using result_t = detail::promote_t<typename Vec::value_type, U>;
-        for (size_t ii = 0; ii < Vec::dimensions; ++ii) {
+        for (size_t ii = 0; ii < Vec::rank; ++ii) {
             vec[ii] /= static_cast<result_t>(scalar);
         }
         return vec;
@@ -613,15 +621,15 @@ namespace simbi {
 
     template <vector_like_c Vec1, vector_like_c Vec2>
     DUAL constexpr auto operator+(const Vec1& lhs, const Vec2& rhs)
-        requires(Vec1::dimensions == Vec2::dimensions)
+        requires(Vec1::rank == Vec2::rank)
     {
         using T                      = typename Vec1::value_type;
         using U                      = typename Vec2::value_type;
         using result_t               = detail::promote_t<T, U>;
-        constexpr std::uint64_t Dims = Vec1::dimensions;
+        constexpr std::uint64_t Rank = Vec1::rank;
 
-        vector_t<result_t, Dims> result;
-        for (size_t ii = 0; ii < Dims; ++ii) {
+        vector_t<result_t, Rank> result;
+        for (size_t ii = 0; ii < Rank; ++ii) {
             result[ii] =
                 static_cast<result_t>(lhs[ii]) + static_cast<result_t>(rhs[ii]);
         }
@@ -630,15 +638,15 @@ namespace simbi {
 
     template <vector_like_c Vec1, vector_like_c Vec2>
     DUAL constexpr auto operator-(const Vec1& lhs, const Vec2& rhs)
-        requires(Vec1::dimensions == Vec2::dimensions)
+        requires(Vec1::rank == Vec2::rank)
     {
         using T                      = typename Vec1::value_type;
         using U                      = typename Vec2::value_type;
         using result_t               = detail::promote_t<T, U>;
-        constexpr std::uint64_t Dims = Vec1::dimensions;
+        constexpr std::uint64_t Rank = Vec1::rank;
 
-        vector_t<result_t, Dims> result;
-        for (size_t ii = 0; ii < Dims; ++ii) {
+        vector_t<result_t, Rank> result;
+        for (size_t ii = 0; ii < Rank; ++ii) {
             result[ii] =
                 static_cast<result_t>(lhs[ii]) - static_cast<result_t>(rhs[ii]);
         }
@@ -648,14 +656,14 @@ namespace simbi {
     // element-wise multiplication
     template <vector_like_c Vec1, vector_like_c Vec2>
     DUAL constexpr auto operator*(const Vec1& lhs, const Vec2& rhs)
-        requires(Vec1::dimensions == Vec2::dimensions)
+        requires(Vec1::rank == Vec2::rank)
     {
         using T                      = typename Vec1::value_type;
         using U                      = typename Vec2::value_type;
         using result_t               = detail::promote_t<T, U>;
-        constexpr std::uint64_t Dims = Vec1::dimensions;
-        vector_t<result_t, Dims> result;
-        for (size_t ii = 0; ii < Dims; ++ii) {
+        constexpr std::uint64_t Rank = Vec1::rank;
+        vector_t<result_t, Rank> result;
+        for (size_t ii = 0; ii < Rank; ++ii) {
             result[ii] =
                 static_cast<result_t>(lhs[ii]) * static_cast<result_t>(rhs[ii]);
         }
@@ -665,14 +673,14 @@ namespace simbi {
     // element-wise division
     template <vector_like_c Vec1, vector_like_c Vec2>
     DUAL constexpr auto operator/(const Vec1& lhs, const Vec2& rhs)
-        requires(Vec1::dimensions == Vec2::dimensions)
+        requires(Vec1::rank == Vec2::rank)
     {
         using T                      = typename Vec1::value_type;
         using U                      = typename Vec2::value_type;
         using result_t               = detail::promote_t<T, U>;
-        constexpr std::uint64_t Dims = Vec1::dimensions;
-        vector_t<result_t, Dims> result;
-        for (size_t ii = 0; ii < Dims; ++ii) {
+        constexpr std::uint64_t Rank = Vec1::rank;
+        vector_t<result_t, Rank> result;
+        for (size_t ii = 0; ii < Rank; ++ii) {
             result[ii] =
                 static_cast<result_t>(lhs[ii]) / static_cast<result_t>(rhs[ii]);
         }
@@ -680,8 +688,8 @@ namespace simbi {
     }
 
     // utility for pipeline-style composition with operator|
-    template <typename T, std::uint64_t Dims, typename F>
-    DUAL constexpr auto operator|(const vector_t<T, Dims>& v, F&& f)
+    template <typename T, std::uint64_t Rank, typename F>
+    DUAL constexpr auto operator|(const vector_t<T, Rank>& v, F&& f)
         -> decltype(std::invoke(std::forward<F>(f), v))
     {
         return std::invoke(std::forward<F>(f), v);
@@ -689,22 +697,22 @@ namespace simbi {
 
     namespace unit_vectors {
 
-        template <std::uint64_t Dims>
+        template <std::uint64_t Rank>
         DEV constexpr auto canonical_basis(std::uint64_t ii)
         {
-            vector_t<std::uint64_t, Dims> basis{0};
-            if (ii > 0 && ii <= Dims) {
+            vector_t<std::uint64_t, Rank> basis{0};
+            if (ii > 0 && ii <= Rank) {
                 basis[ii - 1] = 1;   // 1-indexed to 0-indexed
             }
             return basis;
         }
 
-        template <std::uint64_t Dims>
+        template <std::uint64_t Rank>
         DEV constexpr std::uint64_t
-        index(const vector_t<std::uint64_t, Dims>& comp)
+        index(const vector_t<std::uint64_t, Rank>& comp)
         {
             // return the index of the first non-zero element
-            for (std::uint64_t ii = 0; ii < Dims; ++ii) {
+            for (std::uint64_t ii = 0; ii < Rank; ++ii) {
                 if (comp[ii] != 0) {
                     return ii;
                 }
@@ -713,31 +721,31 @@ namespace simbi {
         }
 
         // generate offset vector for array dimension (0=z, 1=y, 2=x)
-        template <std::uint64_t Dims>
+        template <std::uint64_t Rank>
         DEV constexpr auto array_offset(std::uint64_t array_dim)
         {
-            vector_t<std::int64_t, Dims> offset{};
-            if (array_dim < Dims) {
+            vector_t<std::int64_t, Rank> offset{};
+            if (array_dim < Rank) {
                 offset[array_dim] = 1;
             }
             return offset;
         }
 
-        template <std::uint64_t Dims>
+        template <std::uint64_t Rank>
         DEV constexpr auto ehat(std::uint64_t array_dim)
         {
-            return canonical_basis<Dims>(Dims - array_dim);
+            return canonical_basis<Rank>(Rank - array_dim);
         }
     }   // namespace unit_vectors
 
     // overload ostream operator for printing vectors
-    template <typename T, std::uint64_t Dims>
-    std::ostream& operator<<(std::ostream& os, const vector_t<T, Dims>& v)
+    template <typename T, std::uint64_t Rank>
+    std::ostream& operator<<(std::ostream& os, const vector_t<T, Rank>& v)
     {
         os << "[";
-        for (std::uint64_t ii = 0; ii < Dims; ++ii) {
+        for (std::uint64_t ii = 0; ii < Rank; ++ii) {
             os << v[ii];
-            if (ii < Dims - 1) {
+            if (ii < Rank - 1) {
                 os << ", ";
             }
         }
@@ -745,11 +753,11 @@ namespace simbi {
         return os;
     }
 
-    template <std::uint64_t Dims, typename T = std::uint64_t>
+    template <std::uint64_t Rank, typename T = std::uint64_t>
     constexpr auto ones()
     {
-        return fp::range(Dims) | fp::map([](auto) { return T{1}; }) |
-               fp::collect<vector_t<T, Dims>>;
+        return fp::range(Rank) | fp::map([](auto) { return T{1}; }) |
+               fp::collect<vector_t<T, Rank>>;
     }
 
     // -------------------------------------------------------------
@@ -760,55 +768,55 @@ namespace simbi {
     template <typename T>
     using spacetime_vector_t = vector_t<T, 4>;
     // unit vector type
-    template <std::uint64_t Dims>
-    using unit_vector_t = vector_t<std::uint64_t, Dims>;
+    template <std::uint64_t Rank>
+    using unit_vector_t = vector_t<std::uint64_t, Rank>;
 
-    template <std::integral T, std::uint64_t Dims>
-    using ivec = vector_t<T, Dims>;
+    template <std::integral T, std::uint64_t Rank>
+    using ivec = vector_t<T, Rank>;
 
     // domain-specific aliases
-    template <std::uint64_t Dims>
-    using coordinate_t = ivec<std::int64_t, Dims>;
+    template <std::uint64_t Rank>
+    using coordinate_t = ivec<std::int64_t, Rank>;
 
-    template <std::uint64_t Dims>
-    using shape_t = ivec<std::uint64_t, Dims>;
+    template <std::uint64_t Rank>
+    using shape_t = ivec<std::uint64_t, Rank>;
 
-    template <std::uint64_t Dims>
-    using compact_coord_t = ivec<std::int32_t, Dims>;
+    template <std::uint64_t Rank>
+    using compact_coord_t = ivec<std::int32_t, Rank>;
 
-    template <std::uint64_t Dims>
-    using iarray = ivec<std::int64_t, Dims>;
+    template <std::uint64_t Rank>
+    using iarray = ivec<std::int64_t, Rank>;
 
-    template <std::uint64_t Dims>
-    using uarray = ivec<std::uint64_t, Dims>;
+    template <std::uint64_t Rank>
+    using uarray = ivec<std::uint64_t, Rank>;
 
-    template <std::uint64_t Dims>
-    using iarray32 = ivec<std::int32_t, Dims>;
+    template <std::uint64_t Rank>
+    using iarray32 = ivec<std::int32_t, Rank>;
 }   // namespace simbi
 
 // structured binding support
 namespace std {
-    template <typename T, std::uint64_t Dims>
-    struct tuple_size<simbi::vector_t<T, Dims>>
-        : integral_constant<size_t, Dims> {
+    template <typename T, std::uint64_t Rank>
+    struct tuple_size<simbi::vector_t<T, Rank>>
+        : integral_constant<size_t, Rank> {
     };
 
-    template <size_t I, typename T, std::uint64_t Dims>
-    struct tuple_element<I, simbi::vector_t<T, Dims>> {
+    template <size_t I, typename T, std::uint64_t Rank>
+    struct tuple_element<I, simbi::vector_t<T, Rank>> {
         using type = T;
     };
 
-    template <size_t I, typename T, std::uint64_t Dims>
-    DUAL constexpr T& get(simbi::vector_t<T, Dims>& v)
+    template <size_t I, typename T, std::uint64_t Rank>
+    DUAL constexpr T& get(simbi::vector_t<T, Rank>& v)
     {
-        static_assert(I < Dims, "index out of bounds");
+        static_assert(I < Rank, "index out of bounds");
         return v[I];
     }
 
-    template <size_t I, typename T, std::uint64_t Dims>
-    DUAL constexpr const T& get(const simbi::vector_t<T, Dims>& v)
+    template <size_t I, typename T, std::uint64_t Rank>
+    DUAL constexpr const T& get(const simbi::vector_t<T, Rank>& v)
     {
-        static_assert(I < Dims, "index out of bounds");
+        static_assert(I < Rank, "index out of bounds");
         return v[I];
     }
 }   // namespace std

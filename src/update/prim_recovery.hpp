@@ -8,12 +8,19 @@ namespace simbi::hydro {
     /**
      *
      */
-    template <typename ConsField, typename PrimField>
-    void recover_primitives(PrimField& prim, const ConsField& cons, real gamma)
+    template <typename Executor, typename ConsField, typename PrimField>
+    void recover_primitives(
+        Executor& exec,
+        PrimField& prim,
+        const ConsField& cons,
+        real gamma
+    )
     {
-        prim = cons.map([gamma] DEV(const auto& c) {
-            return to_primitive(c, gamma);
-        });
+        prim = cons.map(
+                       [gamma] DEV(const auto& c) {
+                           return to_primitive(c, gamma);
+                       }
+        ).with(exec);
     }
 }   // namespace simbi::hydro
 #endif

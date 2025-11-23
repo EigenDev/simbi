@@ -1,197 +1,261 @@
-#ifndef GEOMETRY_CT_EXTENSIONS_HPP
-#define GEOMETRY_CT_EXTENSIONS_HPP
+#ifndef GEOMETRY_NCT_GEOM_HPP
+#define GEOMETRY_NCT_GEOM_HPP
 
 #include "compat.hpp"
 #include "containers/vector.hpp"
-#include "mesh/mesh_config.hpp"
-#include "mesh/mesh_ops.hpp"
+#include "geometry/metrics.hpp"
 #include "utility/enums.hpp"
 
 #include <cmath>
 #include <cstdint>
 
 namespace simbi::em {
-    using namespace simbi::mesh;
 
-    template <magnetic_comp_t MagComp, std::uint64_t Dims, Geometry G>
-    real discrete_curl(
+    // ========================================================================
+    // discrete curl for constrained transport (geometry-based)
+    // computes -dB/dt = curl(E) using face/edge EMFs
+    // ========================================================================
+
+    // cartesian discrete curl
+    template <magnetic_comp_t MagComp, std::uint64_t Rank, typename Geometry>
+    DEV real discrete_curl_cartesian(
         const vector_t<vector_t<real, 2>, 2>& edge_emfs,
-        const iarray<Dims>& face_coord,
-        const mesh::mesh_config_t<Dims, G>& config
+        const iarray<Rank>& face_coord,
+        const Geometry& geo
     )
     {
-        if constexpr (G == Geometry::CARTESIAN) {
-            const auto widths = cell_widths(face_coord, config);
+        // get cell widths from geometry
+        const auto h = geo.scale_factors(face_coord);
 
-            if constexpr (MagComp == magnetic_comp_t::K) {   // Bz
-                const auto& iedge = edge_emfs[0];   // Ex(i, j\pm 1/2, k-1/2)
-                const auto& jedge = edge_emfs[1];   // Ey(i\pm 1/2, j, k-1/2)
-                const real ei_l   = iedge[0];       // Ex(i, j - 1/2, k-1/2)
-                const real ei_r   = iedge[1];       // Ex(i, j + 1/2, k-1/2)
-                const real ej_l   = jedge[0];       // Ey(i - 1/2, j, k-1/2)
-                const real ej_r   = jedge[1];       // Ey(i + 1/2, j, k-1/2)
+        if constexpr (MagComp == magnetic_comp_t::K) {   // Bz
+            const auto& iedge = edge_emfs[0];            // Ex(i, j±1/2, k-1/2)
+            const auto& jedge = edge_emfs[1];            // Ey(i±1/2, j, k-1/2)
+            const real ei_l   = iedge[0];
+            const real ei_r   = iedge[1];
+            const real ej_l   = jedge[0];
+            const real ej_r   = jedge[1];
 
-                const real dxi = widths[2];   // i-direction (x)
-                const real dxj = widths[1];   // j-direction (y)
+            const real dxi = h[2];   // i-direction (x)
+            const real dxj = h[1];   // j-direction (y)
 
-                return ((ej_r - ej_l) / dxi) - ((ei_r - ei_l) / dxj);
-            }
-            else if constexpr (MagComp == magnetic_comp_t::J) {   // By
-                const auto& kedge = edge_emfs[0];   // Ez(i \pm 1/2, j - 1/2, k)
-                const auto& iedge = edge_emfs[1];   // Ex(i, j - 1/2, k \pm 1/2)
-                const real ei_l   = iedge[0];       // Ex(i, j - 1/2, k - 1/2)
-                const real ei_r   = iedge[1];       // Ex(i, j - 1/2, k + 1/2)
-                const real ek_l   = kedge[0];       // Ez(i - 1/2, j - 1/2, k)
-                const real ek_r   = kedge[1];       // Ez(i + 1/2, j - 1/2, k)
-
-                const real dxk = widths[0];   // k-direction (z)
-                const real dxi = widths[2];   // i-direction (x)
-
-                return ((ei_r - ei_l) / dxk) - ((ek_r - ek_l) / dxi);
-            }
-            else {                                  // Bx
-                const auto& jedge = edge_emfs[0];   // Ey(i-1/2, j\pm 1/2, k)
-                const auto& kedge = edge_emfs[1];   // Ey(i-1/2, j, k\pm 1/2)
-                const real ek_l   = kedge[0];       // Ez(i-1/2, j - 1/2, k)
-                const real ek_r   = kedge[1];       // Ez(i-1/2, j + 1/2, k)
-                const real ej_l   = jedge[0];       // Ey(i-1/2, j, k - 1/2)
-                const real ej_r   = jedge[1];       // Ey(i-1/2, j, k + 1/2)
-
-                const real dxj = widths[1];   // j-direction (y)
-                const real dxk = widths[0];   // k-direction (z)
-
-                return ((ek_r - ek_l) / dxj) - ((ej_r - ej_l) / dxk);
-            }
+            return ((ej_r - ej_l) / dxi) - ((ei_r - ei_l) / dxj);
         }
-        else if constexpr (G == Geometry::SPHERICAL) {
-            const auto position = centroid(face_coord, config);
-            const real r        = position[2];
-            const real theta    = position[1];
+        else if constexpr (MagComp == magnetic_comp_t::J) {   // By
+            const auto& kedge = edge_emfs[0];
+            const auto& iedge = edge_emfs[1];
+            const real ei_l   = iedge[0];
+            const real ei_r   = iedge[1];
+            const real ek_l   = kedge[0];
+            const real ek_r   = kedge[1];
 
-            if constexpr (MagComp == magnetic_comp_t::I) {   // Br (x-like)
-                const auto& jedge =
-                    edge_emfs[0];   // E_\theta at \phi\pm 1/2 edges
-                const auto& kedge =
-                    edge_emfs[1];   // E_\phi at \theta \pm 1/2 edges
+            const real dxk = h[0];   // k-direction (z)
+            const real dxi = h[2];   // i-direction (x)
 
-                const real tl = face_position(face_coord, 1, Dir::W, config);
-                const real tr = face_position(face_coord, 1, Dir::E, config);
-
-                // E_\theta (h_\theta = r, but r is constant here)
-                const real ej_l = jedge[0];
-                const real ej_r = jedge[1];   // E_\theta
-                const real ek_l =
-                    kedge[0] * std::sin(tl);   // E_\phi * sin \theta
-                const real ek_r =
-                    kedge[1] * std::sin(tr);   // E_\phi * sin \theta
-
-                const real dxk = face_position(face_coord, 0, Dir::E, config) -
-                                 face_position(face_coord, 0, Dir::W, config);
-                const real dxj = tr - tl;   // \theta difference
-
-                return (1.0 / (r * std::sin(theta))) *
-                       (((ek_r - ek_l) / dxj) - ((ej_r - ej_l) / dxk));
-            }
-            else if constexpr (MagComp ==
-                               magnetic_comp_t::J) {   // B\theta (y-like)
-                const auto& kedge = edge_emfs[0];      // E_\phi at r±1/2 edges
-                const auto& iedge = edge_emfs[1];      // E_r at \phi±1/2 edges
-
-                const real rl = face_position(face_coord, 2, Dir::W, config);
-                const real rr = face_position(face_coord, 2, Dir::E, config);
-
-                const real ei_l = iedge[0];        // E_r (h_r = 1)
-                const real ei_r = iedge[1];        // E_r
-                const real ek_l = kedge[0] * rl;   // E_\phi * r
-                const real ek_r = kedge[1] * rr;   // E_\phi * r
-
-                const real dxk =
-                    (face_position(face_coord, 0, Dir::E, config) -
-                     face_position(face_coord, 0, Dir::W, config)) /
-                    std::sin(theta);
-                const real dxi = rr - rl;
-
-                return (1.0 / r) *
-                       (((ei_r - ei_l) / dxk) - ((ek_r - ek_l) / dxi));
-            }
-            else {                                  // B\phi (z-like)
-                const auto& iedge = edge_emfs[0];   // E_r at \theta±1/2 edges
-                const auto& jedge = edge_emfs[1];   // E_\theta at r±1/2 edges
-
-                const real rl = face_position(face_coord, 2, Dir::W, config);
-                const real rr = face_position(face_coord, 2, Dir::E, config);
-
-                const real ei_l = iedge[0];        // E_r (h_r = 1)
-                const real ei_r = iedge[1];        // E_r
-                const real ej_l = jedge[0] * rl;   // E_\theta * r
-                const real ej_r = jedge[1] * rr;   // E_\theta * r
-
-                const real dxj = face_position(face_coord, 1, Dir::E, config) -
-                                 face_position(face_coord, 1, Dir::W, config);
-                const real dxi = rr - rl;
-
-                return (1.0 / r) *
-                       (((ej_r - ej_l) / dxi) - ((ei_r - ei_l) / dxj));
-            }
+            return ((ei_r - ei_l) / dxk) - ((ek_r - ek_l) / dxi);
         }
-        else {   // cylindrical
-            const auto position = centroid(face_coord, config);
-            const real r        = position[2];
+        else {   // Bx
+            const auto& jedge = edge_emfs[0];
+            const auto& kedge = edge_emfs[1];
+            const real ek_l   = kedge[0];
+            const real ek_r   = kedge[1];
+            const real ej_l   = jedge[0];
+            const real ej_r   = jedge[1];
 
-            if constexpr (MagComp == magnetic_comp_t::I) {   // Br (x-like)
-                const auto& jedge = edge_emfs[0];   // E_\phi at z±1/2 edges
-                const auto& kedge = edge_emfs[1];   // E_z at \phi±1/2 edges
+            const real dxj = h[1];   // j-direction (y)
+            const real dxk = h[0];   // k-direction (z)
 
-                const real ej_l = jedge[0] * r;   // E_\phi * r
-                const real ej_r = jedge[1] * r;   // E_\phi * r
-                const real ek_l = kedge[0];       // E_z (h_z = 1)
-                const real ek_r = kedge[1];       // E_z
-
-                const real dxk = face_position(face_coord, 0, Dir::E, config) -
-                                 face_position(face_coord, 0, Dir::W, config);
-                const real dxj = face_position(face_coord, 1, Dir::E, config) -
-                                 face_position(face_coord, 1, Dir::W, config);
-
-                return (1.0 / r) * (ek_r - ek_l) / dxj - (ej_r - ej_l) / dxk;
-            }
-            else if constexpr (MagComp ==
-                               magnetic_comp_t::J) {   // B\phi (y-like)
-                const auto& kedge = edge_emfs[0];      // E_r at z\pm1/2 edges
-                const auto& iedge = edge_emfs[1];      // E_z at r\pm1/2 edges
-
-                const real ei_l = iedge[0];   // E_r (h_r = 1)
-                const real ei_r = iedge[1];   // E_r
-                const real ek_l = kedge[0];   // E_z (h_z = 1)
-                const real ek_r = kedge[1];   // E_z
-
-                const real dxk = face_position(face_coord, 0, Dir::E, config) -
-                                 face_position(face_coord, 0, Dir::W, config);
-                const real dxi = face_position(face_coord, 1, Dir::E, config) -
-                                 face_position(face_coord, 1, Dir::W, config);
-
-                return ((ei_r - ei_l) / dxk) - ((ek_r - ek_l) / dxi);
-            }
-            else {                                  // Bz (z-like)
-                const auto& iedge = edge_emfs[0];   // E_r at \phi±1/2 edges
-                const auto& jedge = edge_emfs[1];   // E_\phi at r±1/2 edges
-
-                const real rl = face_position(face_coord, 2, Dir::W, config);
-                const real rr = face_position(face_coord, 2, Dir::E, config);
-
-                const real ei_l = iedge[0];        // E_r (h_r = 1)
-                const real ei_r = iedge[1];        // E_r
-                const real ej_l = jedge[0] * rl;   // E_\phi * r
-                const real ej_r = jedge[1] * rr;   // E_\phi * r
-
-                const real dxj = face_position(face_coord, 1, Dir::E, config) -
-                                 face_position(face_coord, 1, Dir::W, config);
-                const real dxi = rr - rl;
-
-                return (1.0 / r) *
-                       (((ej_r - ej_l) / dxi) - ((ei_r - ei_l) / dxj));
-            }
+            return ((ek_r - ek_l) / dxj) - ((ej_r - ej_l) / dxk);
         }
     }
+
+    // spherical discrete curl
+    template <magnetic_comp_t MagComp, std::uint64_t Rank, typename Geometry>
+    DEV real discrete_curl_spherical(
+        const vector_t<vector_t<real, 2>, 2>& edge_emfs,
+        const iarray<Rank>& face_coord,
+        const Geometry& geo
+    )
+    {
+        const auto position = geo.centroid(face_coord);
+        const real r        = position[2];
+        const real theta    = position[1];
+
+        if constexpr (MagComp == magnetic_comp_t::I) {   // Br
+            const auto& jedge = edge_emfs[0];
+            const auto& kedge = edge_emfs[1];
+
+            const real tl = geo.metric.face_position(face_coord, 1);
+            auto tr_coord = face_coord;
+            tr_coord[1] += 1;
+            const real tr = geo.metric.face_position(tr_coord, 1);
+
+            const real ej_l = jedge[0];
+            const real ej_r = jedge[1];
+            const real ek_l = kedge[0] * std::sin(tl);
+            const real ek_r = kedge[1] * std::sin(tr);
+
+            auto pk_coord = face_coord;
+            pk_coord[0] += 1;
+            const real dxk = geo.metric.face_position(pk_coord, 0) -
+                             geo.metric.face_position(face_coord, 0);
+            const real dxj = tr - tl;
+
+            return (1.0 / (r * std::sin(theta))) *
+                   (((ek_r - ek_l) / dxj) - ((ej_r - ej_l) / dxk));
+        }
+        else if constexpr (MagComp == magnetic_comp_t::J) {   // Btheta
+            const auto& kedge = edge_emfs[0];
+            const auto& iedge = edge_emfs[1];
+
+            const real rl = geo.metric.face_position(face_coord, 2);
+            auto rr_coord = face_coord;
+            rr_coord[2] += 1;
+            const real rr = geo.metric.face_position(rr_coord, 2);
+
+            const real ei_l = iedge[0];
+            const real ei_r = iedge[1];
+            const real ek_l = kedge[0] * rl;
+            const real ek_r = kedge[1] * rr;
+
+            auto pk_coord = face_coord;
+            pk_coord[0] += 1;
+            const real dxk = (geo.metric.face_position(pk_coord, 0) -
+                              geo.metric.face_position(face_coord, 0)) /
+                             std::sin(theta);
+            const real dxi = rr - rl;
+
+            return (1.0 / r) * (((ei_r - ei_l) / dxk) - ((ek_r - ek_l) / dxi));
+        }
+        else {   // Bphi
+            const auto& iedge = edge_emfs[0];
+            const auto& jedge = edge_emfs[1];
+
+            const real rl = geo.metric.face_position(face_coord, 2);
+            auto rr_coord = face_coord;
+            rr_coord[2] += 1;
+            const real rr = geo.metric.face_position(rr_coord, 2);
+
+            const real ei_l = iedge[0];
+            const real ei_r = iedge[1];
+            const real ej_l = jedge[0] * rl;
+            const real ej_r = jedge[1] * rr;
+
+            auto pj_coord = face_coord;
+            pj_coord[1] += 1;
+            const real dxj = geo.metric.face_position(pj_coord, 1) -
+                             geo.metric.face_position(face_coord, 1);
+            const real dxi = rr - rl;
+
+            return (1.0 / r) * (((ej_r - ej_l) / dxi) - ((ei_r - ei_l) / dxj));
+        }
+    }
+
+    // cylindrical discrete curl
+    template <magnetic_comp_t MagComp, std::uint64_t Rank, typename Geometry>
+    DEV real discrete_curl_cylindrical(
+        const vector_t<vector_t<real, 2>, 2>& edge_emfs,
+        const iarray<Rank>& face_coord,
+        const Geometry& geo
+    )
+    {
+        const auto position = geo.centroid(face_coord);
+        const real r        = position[2];
+
+        if constexpr (MagComp == magnetic_comp_t::I) {   // Br
+            const auto& jedge = edge_emfs[0];
+            const auto& kedge = edge_emfs[1];
+
+            const real ej_l = jedge[0] * r;
+            const real ej_r = jedge[1] * r;
+            const real ek_l = kedge[0];
+            const real ek_r = kedge[1];
+
+            auto pk_coord = face_coord;
+            pk_coord[0] += 1;
+            const real dxk = geo.metric.face_position(pk_coord, 0) -
+                             geo.metric.face_position(face_coord, 0);
+            auto pj_coord = face_coord;
+            pj_coord[1] += 1;
+            const real dxj = geo.metric.face_position(pj_coord, 1) -
+                             geo.metric.face_position(face_coord, 1);
+
+            return (1.0 / r) * (ek_r - ek_l) / dxj - (ej_r - ej_l) / dxk;
+        }
+        else if constexpr (MagComp == magnetic_comp_t::J) {   // Bphi
+            const auto& kedge = edge_emfs[0];
+            const auto& iedge = edge_emfs[1];
+
+            const real ei_l = iedge[0];
+            const real ei_r = iedge[1];
+            const real ek_l = kedge[0];
+            const real ek_r = kedge[1];
+
+            auto pk_coord = face_coord;
+            pk_coord[0] += 1;
+            const real dxk = geo.metric.face_position(pk_coord, 0) -
+                             geo.metric.face_position(face_coord, 0);
+            auto pi_coord = face_coord;
+            pi_coord[1] += 1;
+            const real dxi = geo.metric.face_position(pi_coord, 1) -
+                             geo.metric.face_position(face_coord, 1);
+
+            return ((ei_r - ei_l) / dxk) - ((ek_r - ek_l) / dxi);
+        }
+        else {   // Bz
+            const auto& iedge = edge_emfs[0];
+            const auto& jedge = edge_emfs[1];
+
+            const real rl = geo.metric.face_position(face_coord, 2);
+            auto rr_coord = face_coord;
+            rr_coord[2] += 1;
+            const real rr = geo.metric.face_position(rr_coord, 2);
+
+            const real ei_l = iedge[0];
+            const real ei_r = iedge[1];
+            const real ej_l = jedge[0] * rl;
+            const real ej_r = jedge[1] * rr;
+
+            auto pj_coord = face_coord;
+            pj_coord[1] += 1;
+            const real dxj = geo.metric.face_position(pj_coord, 1) -
+                             geo.metric.face_position(face_coord, 1);
+            const real dxi = rr - rl;
+
+            return (1.0 / r) * (((ej_r - ej_l) / dxi) - ((ei_r - ei_l) / dxj));
+        }
+    }
+
+    // ========================================================================
+    // unified discrete curl dispatcher
+    // ========================================================================
+    template <magnetic_comp_t MagComp, std::uint64_t Rank, typename Geometry>
+    DEV real discrete_curl(
+        const vector_t<vector_t<real, 2>, 2>& edge_emfs,
+        const iarray<Rank>& face_coord,
+        const Geometry& geo
+    )
+    {
+        using metric_t = typename Geometry::metric_type;
+
+        if constexpr (geometry::is_cartesian_c<metric_t>) {
+            return discrete_curl_cartesian<MagComp>(edge_emfs, face_coord, geo);
+        }
+        else if constexpr (geometry::is_spherical_c<metric_t>) {
+            return discrete_curl_spherical<MagComp>(edge_emfs, face_coord, geo);
+        }
+        else if constexpr (geometry::is_cylindrical_c<metric_t>) {
+            return discrete_curl_cylindrical<MagComp>(
+                edge_emfs,
+                face_coord,
+                geo
+            );
+        }
+        else {
+            // fallback to cartesian
+            return discrete_curl_cartesian<MagComp>(edge_emfs, face_coord, geo);
+        }
+    }
+
 }   // namespace simbi::em
 
-#endif   // GEOMETRY_CT_EXTENSIONS_HPP
+#endif   // GEOMETRY_NCT_GEOM_HPP

@@ -102,3 +102,6 @@ if get_option('gpu_compilation').enabled()
   endif
   subdir('gpu')
 endif
+
+# Tests
+# subdir('tests')

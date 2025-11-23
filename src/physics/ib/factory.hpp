@@ -5,8 +5,8 @@
 #include "collection.hpp"
 #include "compat.hpp"
 #include "containers/vector.hpp"
+#include "ecs/blueprints.hpp"
 #include "utility/config_dict.hpp"
-#include "utility/init_conditions.hpp"
 
 #include <cmath>
 #include <cstdint>
@@ -38,24 +38,24 @@ namespace simbi::body::factory {
         std::string determine_body_type(const config_dict_t& props);
 
         // binary orbital mechanics
-        template <std::uint64_t Dims>
+        template <std::uint64_t Rank>
         auto calculate_binary_positions(real semi_major, real mass_ratio)
-            -> std::pair<vector_t<real, Dims>, vector_t<real, Dims>>
+            -> std::pair<vector_t<real, Rank>, vector_t<real, Rank>>
         {
 
             real a1 = semi_major / (real{1} + mass_ratio);
             real a2 = semi_major - a1;
 
-            if constexpr (Dims == 2) {
+            if constexpr (Rank == 2) {
                 return {
-                  vector_t<real, Dims>{a1, real{0}},
-                  vector_t<real, Dims>{-a2, real{0}}
+                  vector_t<real, Rank>{a1, real{0}},
+                  vector_t<real, Rank>{-a2, real{0}}
                 };
             }
-            else if constexpr (Dims == 3) {
+            else if constexpr (Rank == 3) {
                 return {
-                  vector_t<real, Dims>{a1, real{0}, real{0}},
-                  vector_t<real, Dims>{-a2, real{0}, real{0}}
+                  vector_t<real, Rank>{a1, real{0}, real{0}},
+                  vector_t<real, Rank>{-a2, real{0}, real{0}}
                 };
             }
             else {
@@ -65,12 +65,12 @@ namespace simbi::body::factory {
             }
         }
 
-        template <std::uint64_t Dims>
+        template <std::uint64_t Rank>
         auto calculate_binary_velocities(
             real semi_major,
             real total_mass,
             real mass_ratio
-        ) -> std::pair<vector_t<real, Dims>, vector_t<real, Dims>>
+        ) -> std::pair<vector_t<real, Rank>, vector_t<real, Rank>>
         {
 
             const real phi_dot =
@@ -78,16 +78,16 @@ namespace simbi::body::factory {
             const real a1 = semi_major / (real{1} + mass_ratio);
             const real a2 = semi_major - a1;
 
-            if constexpr (Dims == 2) {
+            if constexpr (Rank == 2) {
                 return {
-                  vector_t<real, Dims>{real{0}, phi_dot * a2},
-                  vector_t<real, Dims>{real{0}, -phi_dot * a1}
+                  vector_t<real, Rank>{real{0}, phi_dot * a2},
+                  vector_t<real, Rank>{real{0}, -phi_dot * a1}
                 };
             }
-            else if constexpr (Dims == 3) {
+            else if constexpr (Rank == 3) {
                 return {
-                  vector_t<real, Dims>{real{0}, phi_dot * a2, real{0}},
-                  vector_t<real, Dims>{real{0}, -phi_dot * a1, real{0}}
+                  vector_t<real, Rank>{real{0}, phi_dot * a2, real{0}},
+                  vector_t<real, Rank>{real{0}, -phi_dot * a1, real{0}}
                 };
             }
             else {
@@ -102,13 +102,13 @@ namespace simbi::body::factory {
     // body creation functions - compile-time dispatch
     // ========================================================================
 
-    template <std::uint64_t Dims>
+    template <std::uint64_t Rank>
     auto create_body_from_config(std::uint64_t idx, const config_dict_t& props)
-        -> body_variant_t<Dims>
+        -> body_variant_t<Rank>
     {
         // extract basic properties
-        auto position = try_read_vec<real, Dims>(props, "position").value();
-        auto velocity = try_read_vec<real, Dims>(props, "velocity").value();
+        auto position = try_read_vec<real, Rank>(props, "position").value();
+        auto velocity = try_read_vec<real, Rank>(props, "velocity").value();
         auto mass     = try_read<real>(props, "mass").value();
         auto radius   = try_read<real>(props, "radius").value();
         bool two_way =
@@ -126,7 +126,7 @@ namespace simbi::body::factory {
             auto total_accreted =
                 try_read<real>(props, "total_accreted_mass").unwrap_or(real{0});
 
-            return make_black_hole<Dims>(
+            return make_black_hole<Rank>(
                 idx,
                 position,
                 velocity,
@@ -142,14 +142,11 @@ namespace simbi::body::factory {
             );
         }
         else if (body_type == "planet") {
-            // auto softening = try_read<real>(props,
-            // "softening_length")
-            //                      .unwrap_or(real{0});
             auto inertia = try_read<real>(props, "inertia").value();
             bool no_slip =
                 try_read<bool>(props, "apply_no_slip").unwrap_or(true);
 
-            return make_planet<Dims>(
+            return make_planet<Rank>(
                 idx,
                 position,
                 velocity,
@@ -163,7 +160,7 @@ namespace simbi::body::factory {
         else if (body_type == "gravitational") {
             auto softening = try_read<real>(props, "softening_length").value();
 
-            return make_gravitational_body<Dims>(
+            return make_gravitational_body<Rank>(
                 idx,
                 position,
                 velocity,
@@ -178,7 +175,7 @@ namespace simbi::body::factory {
             bool no_slip =
                 try_read<bool>(props, "apply_no_slip").unwrap_or(true);
 
-            return make_rigid_sphere<Dims>(
+            return make_rigid_sphere<Rank>(
                 idx,
                 position,
                 velocity,
@@ -195,17 +192,18 @@ namespace simbi::body::factory {
     }
 
     // ========================================================================
-    // collection creation from config
+    // collection creation from blueprint
     // ========================================================================
 
-    template <std::uint64_t Dims>
-    auto
-    create_collection_from_individual_bodies(const initial_conditions_t& init)
+    template <std::uint64_t Rank>
+    auto create_collection_from_bodies(
+        const std::vector<config_dict_t>& body_configs
+    )
     {
-        auto collection   = make_body_collection<Dims>();
+        auto collection   = make_body_collection<Rank>();
         std::uint64_t idx = 0;
-        for (const auto& body_config : init.immersed_bodies) {
-            auto body  = create_body_from_config<Dims>(idx, body_config);
+        for (const auto& body_config : body_configs) {
+            auto body  = create_body_from_config<Rank>(idx, body_config);
             collection = std::move(collection).add(body);
             ++idx;
         }
@@ -213,7 +211,7 @@ namespace simbi::body::factory {
         return collection;
     }
 
-    template <std::uint64_t Dims>
+    template <std::uint64_t Rank>
     auto create_binary_system_from_config(const config_dict_t& sys_props)
     {
         using real = real;
@@ -244,18 +242,18 @@ namespace simbi::body::factory {
         }
 
         // calculate orbital positions and velocities
-        auto [pos1, pos2] = detail::calculate_binary_positions<Dims>(
+        auto [pos1, pos2] = detail::calculate_binary_positions<Rank>(
             binary_params.semi_major,
             binary_params.mass_ratio
         );
         auto [vel1, vel2] = [reference_frame, binary_params]() {
             if (reference_frame != "inertial") {
                 return std::make_pair(
-                    vector_t<real, Dims>{},
-                    vector_t<real, Dims>{}
+                    vector_t<real, Rank>{},
+                    vector_t<real, Rank>{}
                 );
             }
-            return detail::calculate_binary_velocities<Dims>(
+            return detail::calculate_binary_velocities<Rank>(
                 binary_params.semi_major,
                 binary_params.total_mass,
                 binary_params.mass_ratio
@@ -267,8 +265,8 @@ namespace simbi::body::factory {
 
         // first component
         auto config1       = *comp_it++;
-        auto pos_override1 = try_read_vec<real, Dims>(config1, "position");
-        auto vel_override1 = try_read_vec<real, Dims>(config1, "velocity");
+        auto pos_override1 = try_read_vec<real, Rank>(config1, "position");
+        auto vel_override1 = try_read_vec<real, Rank>(config1, "velocity");
 
         if (!pos_override1.has_value() ||
             std::all_of(
@@ -289,8 +287,8 @@ namespace simbi::body::factory {
 
         // second component
         auto config2       = *comp_it;
-        auto pos_override2 = try_read_vec<real, Dims>(config2, "position");
-        auto vel_override2 = try_read_vec<real, Dims>(config2, "velocity");
+        auto pos_override2 = try_read_vec<real, Rank>(config2, "position");
+        auto vel_override2 = try_read_vec<real, Rank>(config2, "velocity");
 
         if (!pos_override2.has_value() ||
             std::all_of(
@@ -310,10 +308,10 @@ namespace simbi::body::factory {
         }
 
         // create bodies and collection
-        auto body1 = create_body_from_config<Dims>(0, config1);
-        auto body2 = create_body_from_config<Dims>(1, config2);
+        auto body1 = create_body_from_config<Rank>(0, config1);
+        auto body2 = create_body_from_config<Rank>(1, config2);
 
-        return make_body_collection<Dims>()
+        return make_body_collection<Rank>()
             .add(body1)
             .add(body2)
             .with_name("binary_system")
@@ -322,33 +320,38 @@ namespace simbi::body::factory {
     }
 
     // ========================================================================
-    // main factory function
+    // main factory function - creates collection from blueprint
     // ========================================================================
 
-    template <std::uint64_t Dims>
-    auto create_body_collection_from_init(const initial_conditions_t& init)
-        -> std::optional<body_collection_t<Dims>>
+    template <std::uint64_t Rank>
+    auto create_body_collection(const ecs::bodies_blueprint_t& blueprint)
+        -> std::optional<body_collection_t<Rank>>
     {
-        // no bodies needed
-        if (!init.contains("body_system") && init.immersed_bodies.empty()) {
+        if (blueprint.body_configs.empty()) {
             return std::nullopt;
         }
 
-        // handle individual bodies
-        if (!init.immersed_bodies.empty() && !init.contains("body_system")) {
-            return create_collection_from_individual_bodies<Dims>(init);
-        }
+        return create_collection_from_bodies<Rank>(blueprint.body_configs);
+    }
 
-        // handle system definitions
-        if (init.contains("body_system")) {
-            const auto& sys_props = init.get_dict("body_system");
+    // overload taking raw config for binary system support
+    template <std::uint64_t Rank>
+    auto create_body_collection(
+        const ecs::bodies_blueprint_t& blueprint,
+        const config_dict_t& full_config
+    ) -> std::optional<body_collection_t<Rank>>
+    {
+        // check for binary system configuration
+        if (full_config.contains("body_system")) {
+            const auto& sys_props =
+                full_config.at("body_system").template get<config_dict_t>();
 
             if (sys_props.contains("system_type")) {
                 auto system_type =
                     sys_props.at("system_type").template get<std::string>();
 
                 if (system_type == "binary") {
-                    return create_binary_system_from_config<Dims>(sys_props);
+                    return create_binary_system_from_config<Rank>(sys_props);
                 }
                 else {
                     throw std::runtime_error(
@@ -358,14 +361,8 @@ namespace simbi::body::factory {
             }
         }
 
-        // fallback - create empty collection
-        return make_body_collection<Dims>();
-    }
-
-    template <std::uint64_t Dims>
-    auto create_default_collection_from_init(const initial_conditions_t& init)
-    {
-        return create_body_collection_from_init<Dims, 2>(init);
+        // fall back to individual bodies
+        return create_body_collection<Rank>(blueprint);
     }
 
 }   // namespace simbi::body::factory

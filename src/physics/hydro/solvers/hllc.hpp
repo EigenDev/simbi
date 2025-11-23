@@ -7,7 +7,7 @@
 #include "physics/em/electromagnetism.hpp"   // for shift_electric_field
 #include "physics/hydro/solvers/hlle.hpp"    // for hlle_flux
 #include "physics/hydro/wave_speeds.hpp"     // for extremal_speeds
-#include "utility/enums.hpp"                 // for ShockWaveLimiter
+#include "utility/enums.hpp"                 // for shockwave_limiter_t
 #include "utility/helpers.hpp"   // for goes_to_zero, sgn, vecops::dot, vecops::norm
 
 #include <algorithm>   // for std::max, std::min
@@ -219,14 +219,14 @@ namespace simbi::hydro::newtonian {
     DEV constexpr auto hllc_flux(
         const primitive_t& primL,
         const primitive_t& primR,
-        const unit_vector_t<primitive_t::dimensions>& nhat,
+        const unit_vector_t<primitive_t::rank>& nhat,
         real vface,
         real gamma,
-        ShockWaveLimiter shock_smoother
+        shockwave_limiter_t shock_smoother
     )
     {
-        if constexpr (primitive_t::dimensions > 1) {
-            if (shock_smoother == ShockWaveLimiter::QUIRK &&
+        if constexpr (primitive_t::rank > 1) {
+            if (shock_smoother == shockwave_limiter_t::QUIRK &&
                 quirk_strong_shock(primL.pre, primR.pre)) {
                 return hlle_flux(primL, primR, nhat, vface, gamma);
             }
@@ -286,7 +286,7 @@ namespace simbi::hydro::newtonian {
             nhat,
             gamma,
             // flag for Fleischmann et al. (2020) low-Mach fix
-            shock_smoother == ShockWaveLimiter::FLEISCHMANN
+            shock_smoother == shockwave_limiter_t::FLEISCHMANN
         );
         const real aL_lm          = phi * aL;
         const real aR_lm          = phi * aR;
@@ -320,14 +320,14 @@ namespace simbi::hydro::srhd {
     DUAL constexpr auto hllc_flux(
         const primitive_t& primL,
         const primitive_t& primR,
-        const unit_vector_t<primitive_t::dimensions>& nhat,
+        const unit_vector_t<primitive_t::rank>& nhat,
         real vface,
         real gamma,
-        ShockWaveLimiter shock_smoother
+        shockwave_limiter_t shock_smoother
     )
     {
-        if constexpr (primitive_t::dimensions > 1) {
-            if (shock_smoother == ShockWaveLimiter::QUIRK) {
+        if constexpr (primitive_t::rank > 1) {
+            if (shock_smoother == shockwave_limiter_t::QUIRK) {
                 if (quirk_strong_shock(primL.pre, primR.pre)) {
                     return hlle_flux(primL, primR, nhat, vface, gamma);
                 }
@@ -390,16 +390,16 @@ namespace simbi::hydro::rmhd {
     DUAL constexpr auto hllc_flux(
         const primitive_t& primL,
         const primitive_t& primR,
-        const unit_vector_t<primitive_t::dimensions>& nhat,
+        const unit_vector_t<primitive_t::rank>& nhat,
         // real bface,
         real vface,
         real gamma,
-        ShockWaveLimiter shock_smoother
+        shockwave_limiter_t shock_smoother
     )
     {
         using conserved_t = typename primitive_t::counterpart_t;
-        if constexpr (primitive_t::dimensions > 1) {
-            if (shock_smoother == ShockWaveLimiter::QUIRK &&
+        if constexpr (primitive_t::rank > 1) {
+            if (shock_smoother == shockwave_limiter_t::QUIRK &&
                 quirk_strong_shock(primL.pre, primR.pre)) {
                 return hlle_flux(primL, primR, nhat, vface, gamma);
             }
@@ -544,13 +544,13 @@ namespace simbi::hydro {
     DUAL constexpr auto hllc_flux(
         const primitive_t& primL,
         const primitive_t& primR,
-        const unit_vector_t<primitive_t::dimensions>& nhat,
+        const unit_vector_t<primitive_t::rank>& nhat,
         real vface,
         real gamma,
-        ShockWaveLimiter shock_smoother
+        shockwave_limiter_t shock_smoother
     )
     {
-        if constexpr (primitive_t::regime == Regime::NEWTONIAN) {
+        if constexpr (primitive_t::regime == regime_t::NEWTONIAN) {
             return newtonian::hllc_flux(
                 primL,
                 primR,
@@ -560,7 +560,7 @@ namespace simbi::hydro {
                 shock_smoother
             );
         }
-        else if constexpr (primitive_t::regime == Regime::SRHD) {
+        else if constexpr (primitive_t::regime == regime_t::SRHD) {
             return srhd::hllc_flux(
                 primL,
                 primR,
@@ -570,7 +570,7 @@ namespace simbi::hydro {
                 shock_smoother
             );
         }
-        else if constexpr (primitive_t::regime == Regime::RMHD) {
+        else if constexpr (primitive_t::regime == regime_t::RMHD) {
             return rmhd::hllc_flux(
                 primL,
                 primR,

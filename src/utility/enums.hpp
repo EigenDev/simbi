@@ -56,19 +56,19 @@
 #include <cstdint>
 
 namespace simbi {
-    enum class Cellspacing {
+    enum class cellspacing_t {
         LINEAR,
         LOG,
     };
 
-    enum class Regime {
+    enum class regime_t {
         NEWTONIAN,
         SRHD,
         RMHD,
         MHD,
     };
 
-    enum class Geometry {
+    enum class geometry_t {
         CARTESIAN,
         SPHERICAL,
         CYLINDRICAL,
@@ -76,67 +76,35 @@ namespace simbi {
         PLANAR_CYLINDRICAL,
     };
 
-    enum class Accuracy {
+    enum class accuracy_t {
         FIRST_ORDER,
         SECOND_ORDER,
     };
 
-    enum class Reconstruction {
+    enum class reconstruction_t {
         PCM,
         PLM,
     };
 
-    enum class Timestepping {
+    enum class timestepping_t {
         EULER,
         RK2,
     };
 
-    enum class Solver {
+    enum class solver_t {
         HLLD,
         HLLC,
         HLLE,
     };
 
-    enum class TIMESTEP_TYPE {
-        MINIMUM,
-        ADAPTIVE,
-    };
-
-    enum class BoundaryCondition {
-        REFLECTING = 0,
-        OUTFLOW,
-        DYNAMIC,
-        PERIODIC,
-    };
-
-    enum class BoundaryFace {
-        X1_INNER = 0,
-        X1_OUTER = 1,
-        X2_INNER = 2,
-        X2_OUTER = 3,
-        X3_INNER = 4,
-        X3_OUTER = 5
-    };
-
-    enum class WaveSpeedEstimate {
+    enum class wave_speed_estimate_t {
         SCHNEIDER_ET_AL_93,
         MIGNONE_AND_BODO_05,
         HUBER_AND_KISSMANN_2021,
         DAVIDSON,
     };
 
-    enum class CONS2PRIMTYPE {
-        VOLUMETRIC,
-        CHARGES,
-    };
-
-    enum class BlockAx {
-        K,
-        J,
-        I
-    };
-
-    enum class Dir {
+    enum class dir_t {
         N,
         E,
         S,
@@ -147,59 +115,32 @@ namespace simbi {
         NE
     };
 
-    enum class Corner {
+    enum class corner_t {
         NE,
         SE,
         SW,
         NW
     };
 
-    enum class Face {
+    enum class face_t {
         N,
         E,
         S,
         W
     };
 
-    enum class Plane {
+    enum class plane_t {
         IJ,
         IK,
         JK
     };
 
-    enum Interface {
+    enum interface_t {
         LF,
         RF
     };
 
-    namespace IJ {
-        enum corner {
-            NE,
-            SE,
-            SW,
-            NW
-        };
-    };   // namespace IJ
-
-    namespace IK {
-        enum corner {
-            NE,
-            SE,
-            SW,
-            NW
-        };
-    };   // namespace IK
-
-    namespace JK {
-        enum corner {
-            NE,
-            SE,
-            SW,
-            NW
-        };
-    }   // namespace JK
-
-    enum class CTAlgo {
+    enum class ct_algo_t {
         ZERO,
         CONTACT,
         ALPHA,
@@ -211,13 +152,13 @@ namespace simbi {
         VAN_LEER
     };
 
-    enum class ShockWaveLimiter {
+    enum class shockwave_limiter_t {
         NONE,
         FLEISCHMANN,
         QUIRK,
     };
 
-    enum class Color {
+    enum class color_t {
         DEFAULT,
         BLACK,
         BLUE,
@@ -276,80 +217,73 @@ namespace simbi {
         K = 0    // B3 component
     };
 
-    constexpr auto comp_wave_speed    = WaveSpeedEstimate::MIGNONE_AND_BODO_05;
-    constexpr auto comp_ct_type       = CTAlgo::CONTACT;
+    constexpr auto comp_wave_speed = wave_speed_estimate_t::MIGNONE_AND_BODO_05;
+    constexpr auto comp_ct_type    = ct_algo_t ::CONTACT;
     constexpr auto comp_slope_limiter = LIMITER::MINMOD;
 
     // register BiMaps for enum serialization and deserialization
     REGISTER_ENUM_BIMAP(
-        Timestepping,
-        {Timestepping::EULER, "rk1"},
-        {Timestepping::RK2, "rk2"}
+        timestepping_t,
+        {timestepping_t::EULER, "rk1"},
+        {timestepping_t::RK2, "rk2"}
     );
 
     REGISTER_ENUM_BIMAP(
-        Cellspacing,
-        {Cellspacing::LINEAR, "linear"},
-        {Cellspacing::LOG, "log"}
+        cellspacing_t,
+        {cellspacing_t::LINEAR, "linear"},
+        {cellspacing_t::LOG, "log"}
     );
 
     REGISTER_ENUM_BIMAP(
-        Regime,
-        {Regime::NEWTONIAN, "newtonian"},
-        {Regime::SRHD, "srhd"},
-        {Regime::RMHD, "srmhd"},
-        {Regime::MHD, "mhd"}
+        regime_t,
+        {regime_t::NEWTONIAN, "newtonian"},
+        {regime_t::SRHD, "srhd"},
+        {regime_t::RMHD, "srmhd"},
+        {regime_t::MHD, "mhd"}
     );
 
     REGISTER_ENUM_BIMAP(
-        Geometry,
-        {Geometry::CARTESIAN, "cartesian"},
-        {Geometry::SPHERICAL, "spherical"},
-        {Geometry::CYLINDRICAL, "cylindrical"},
-        {Geometry::AXIS_CYLINDRICAL, "axis_cylindrical"},
-        {Geometry::PLANAR_CYLINDRICAL, "planar_cylindrical"}
+        geometry_t,
+        {geometry_t::CARTESIAN, "cartesian"},
+        {geometry_t::SPHERICAL, "spherical"},
+        {geometry_t::CYLINDRICAL, "cylindrical"},
+        {geometry_t::AXIS_CYLINDRICAL, "axis_cylindrical"},
+        {geometry_t::PLANAR_CYLINDRICAL, "planar_cylindrical"}
     );
 
     REGISTER_ENUM_BIMAP(
-        Accuracy,
-        {Accuracy::FIRST_ORDER, "first_order"},
-        {Accuracy::SECOND_ORDER, "second_order"}
+        accuracy_t,
+        {accuracy_t::FIRST_ORDER, "first_order"},
+        {accuracy_t::SECOND_ORDER, "second_order"}
     );
 
     REGISTER_ENUM_BIMAP(
-        Reconstruction,
-        {Reconstruction::PCM, "pcm"},
-        {Reconstruction::PLM, "plm"},
+        reconstruction_t,
+        {reconstruction_t::PCM, "pcm"},
+        {reconstruction_t::PLM, "plm"},
     );
 
     REGISTER_ENUM_BIMAP(
-        Solver,
-        {Solver::HLLD, "hlld"},
-        {Solver::HLLC, "hllc"},
-        {Solver::HLLE, "hlle"},
+        solver_t,
+        {solver_t::HLLD, "hlld"},
+        {solver_t::HLLC, "hllc"},
+        {solver_t::HLLE, "hlle"},
     );
 
     REGISTER_ENUM_BIMAP(
-        BoundaryCondition,
-        {BoundaryCondition::REFLECTING, "reflecting"},
-        {BoundaryCondition::OUTFLOW, "outflow"},
-        {BoundaryCondition::DYNAMIC, "dynamic"},
-        {BoundaryCondition::PERIODIC, "periodic"}
+        wave_speed_estimate_t,
+        {wave_speed_estimate_t::SCHNEIDER_ET_AL_93, "schneider_et_al_93"},
+        {wave_speed_estimate_t::MIGNONE_AND_BODO_05, "mignone_and_bodo_05"},
+        {wave_speed_estimate_t::HUBER_AND_KISSMANN_2021,
+         "huber_and_kissmann_2021"},
+        {wave_speed_estimate_t::DAVIDSON, "davidson"}
     );
 
     REGISTER_ENUM_BIMAP(
-        WaveSpeedEstimate,
-        {WaveSpeedEstimate::SCHNEIDER_ET_AL_93, "schneider_et_al_93"},
-        {WaveSpeedEstimate::MIGNONE_AND_BODO_05, "mignone_and_bodo_05"},
-        {WaveSpeedEstimate::HUBER_AND_KISSMANN_2021, "huber_and_kissmann_2021"},
-        {WaveSpeedEstimate::DAVIDSON, "davidson"}
-    );
-
-    REGISTER_ENUM_BIMAP(
-        ShockWaveLimiter,
-        {ShockWaveLimiter::NONE, "none"},
-        {ShockWaveLimiter::FLEISCHMANN, "fleischmann"},
-        {ShockWaveLimiter::QUIRK, "quirk"}
+        shockwave_limiter_t,
+        {shockwave_limiter_t::NONE, "none"},
+        {shockwave_limiter_t::FLEISCHMANN, "fleischmann"},
+        {shockwave_limiter_t::QUIRK, "quirk"}
     );
 
     REGISTER_ENUM_BIMAP(
@@ -359,11 +293,11 @@ namespace simbi {
     );
 
     REGISTER_ENUM_BIMAP(
-        CTAlgo,
-        {CTAlgo::ALPHA, "alpha"},
-        {CTAlgo::CONTACT, "contact"},
-        {CTAlgo::MdZ, "mdz"},
-        {CTAlgo::ZERO, "zero"}
+        ct_algo_t,
+        {ct_algo_t::ALPHA, "alpha"},
+        {ct_algo_t::CONTACT, "contact"},
+        {ct_algo_t::MdZ, "mdz"},
+        {ct_algo_t::ZERO, "zero"}
     );
 
     REGISTER_ENUM_BIMAP(

@@ -22,7 +22,6 @@ from simbi.core.types.input import (
     BoundaryCondition,
     CellSpacing,
     CoordSystem,
-    Reconstruction,
     Regime,
     Solver,
     TimeStepping,

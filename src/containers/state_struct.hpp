@@ -12,32 +12,32 @@
 namespace simbi::structs {
     // forward declarations
     // these are used to define the counterpart_t type
-    template <Regime R, std::uint64_t Dims, typename EoS>
-        requires(R == Regime::NEWTONIAN || R == Regime::SRHD)
+    template <regime_t R, std::uint64_t Rank, typename EoS>
+        requires(R == regime_t::NEWTONIAN || R == regime_t::SRHD)
     struct primitive_t;
 
-    template <Regime R, std::uint64_t Dims, typename EoS>
-        requires(R == Regime::NEWTONIAN || R == Regime::SRHD)
+    template <regime_t R, std::uint64_t Rank, typename EoS>
+        requires(R == regime_t::NEWTONIAN || R == regime_t::SRHD)
     struct conserved_t;
 
-    template <Regime R, std::uint64_t Dims, typename EoS>
-        requires(R == Regime::MHD || R == Regime::RMHD)
+    template <regime_t R, std::uint64_t Rank, typename EoS>
+        requires(R == regime_t::MHD || R == regime_t::RMHD)
     struct mhd_primitive_t;
 
-    template <Regime R, std::uint64_t Dims, typename EoS>
-        requires(R == Regime::MHD || R == Regime::RMHD)
+    template <regime_t R, std::uint64_t Rank, typename EoS>
+        requires(R == regime_t::MHD || R == regime_t::RMHD)
     struct mhd_conserved_t;
 
-    template <Regime R, std::uint64_t Dims, typename EoS>
-        requires(R == Regime::NEWTONIAN || R == Regime::SRHD)
+    template <regime_t R, std::uint64_t Rank, typename EoS>
+        requires(R == regime_t::NEWTONIAN || R == regime_t::SRHD)
     struct primitive_t {
-        static constexpr std::uint64_t dimensions = Dims;
-        static constexpr Regime regime            = R;
-        static constexpr std::uint64_t nmem = Dims + 3;   // rho, vel, pre, chi
-        using counterpart_t                 = conserved_t<R, Dims, EoS>;
+        static constexpr std::uint64_t rank = Rank;
+        static constexpr regime_t regime    = R;
+        static constexpr std::uint64_t nmem = Rank + 3;   // rho, vel, pre, chi
+        using counterpart_t                 = conserved_t<R, Rank, EoS>;
         using eos_t                         = EoS;
         real rho{0.0};
-        vector_t<real, Dims> vel{0.0};
+        vector_t<real, Rank> vel{0.0};
         real pre{0.0};
         real chi{0.0};
 
@@ -49,10 +49,10 @@ namespace simbi::structs {
             if (idx == 0) {
                 return rho;
             }
-            else if (idx < Dims + 1) {
+            else if (idx < Rank + 1) {
                 return vel[idx - 1];
             }
-            else if (idx == Dims + 1) {
+            else if (idx == Rank + 1) {
                 return pre;
             }
             else {
@@ -65,10 +65,10 @@ namespace simbi::structs {
             if (idx == 0) {
                 return rho;
             }
-            else if (idx < Dims + 1) {
+            else if (idx < Rank + 1) {
                 return vel[idx - 1];
             }
-            else if (idx == Dims + 1) {
+            else if (idx == Rank + 1) {
                 return pre;
             }
             else {
@@ -77,16 +77,16 @@ namespace simbi::structs {
         }
     };
 
-    template <Regime R, std::uint64_t Dims, typename EoS>
-        requires(R == Regime::NEWTONIAN || R == Regime::SRHD)
+    template <regime_t R, std::uint64_t Rank, typename EoS>
+        requires(R == regime_t::NEWTONIAN || R == regime_t::SRHD)
     struct conserved_t {
-        static constexpr std::uint64_t dimensions = Dims;
-        static constexpr Regime regime            = R;
-        static constexpr std::uint64_t nmem = Dims + 3;   // den, mom, nrg, chi
-        using counterpart_t                 = primitive_t<R, Dims, EoS>;
+        static constexpr std::uint64_t rank = Rank;
+        static constexpr regime_t regime    = R;
+        static constexpr std::uint64_t nmem = Rank + 3;   // den, mom, nrg, chi
+        using counterpart_t                 = primitive_t<R, Rank, EoS>;
         using eos_t                         = EoS;
         real den{0.0};
-        vector_t<real, Dims> mom{0.0};
+        vector_t<real, Rank> mom{0.0};
         real nrg{0.0};
         real chi{0.0};
 
@@ -95,7 +95,7 @@ namespace simbi::structs {
 
         DEV constexpr auto total_energy() const noexcept -> real
         {
-            if constexpr (R == Regime::NEWTONIAN) {
+            if constexpr (R == regime_t::NEWTONIAN) {
                 return nrg;
             }
             else {
@@ -108,10 +108,10 @@ namespace simbi::structs {
             if (idx == 0) {
                 return den;
             }
-            else if (idx < Dims + 1) {
+            else if (idx < Rank + 1) {
                 return mom[idx - 1];
             }
-            else if (idx == Dims + 1) {
+            else if (idx == Rank + 1) {
                 return nrg;
             }
             else {
@@ -124,10 +124,10 @@ namespace simbi::structs {
             if (idx == 0) {
                 return den;
             }
-            else if (idx < Dims + 1) {
+            else if (idx < Rank + 1) {
                 return mom[idx - 1];
             }
-            else if (idx == Dims + 1) {
+            else if (idx == Rank + 1) {
                 return nrg;
             }
             else {
@@ -136,19 +136,19 @@ namespace simbi::structs {
         }
     };
 
-    template <Regime R, std::uint64_t Dims, typename EoS>
-        requires(R == Regime::MHD || R == Regime::RMHD)
+    template <regime_t R, std::uint64_t Rank, typename EoS>
+        requires(R == regime_t::MHD || R == regime_t::RMHD)
     struct mhd_primitive_t {
-        static constexpr std::uint64_t dimensions = Dims;
-        static constexpr Regime regime            = R;
+        static constexpr std::uint64_t rank = Rank;
+        static constexpr regime_t regime    = R;
         // rho, vel, pre, mag, chi
-        static constexpr std::uint64_t nmem = 2 * Dims + 3;
-        using counterpart_t                 = mhd_conserved_t<R, Dims, EoS>;
+        static constexpr std::uint64_t nmem = 2 * Rank + 3;
+        using counterpart_t                 = mhd_conserved_t<R, Rank, EoS>;
         using eos_t                         = EoS;
         real rho{0.0};
-        vector_t<real, Dims> vel{0.0};
+        vector_t<real, Rank> vel{0.0};
         real pre{0.0};
-        vector_t<real, Dims> mag{0.0};
+        vector_t<real, Rank> mag{0.0};
         real chi{0.0};
 
         DEV constexpr real* data() noexcept { return &rho; }
@@ -159,14 +159,14 @@ namespace simbi::structs {
             if (idx == 0) {
                 return rho;
             }
-            else if (idx < Dims + 1) {
+            else if (idx < Rank + 1) {
                 return vel[idx - 1];
             }
-            else if (idx == Dims + 1) {
+            else if (idx == Rank + 1) {
                 return pre;
             }
-            else if (idx < 2 * Dims + 2) {
-                return mag[idx - Dims - 2];
+            else if (idx < 2 * Rank + 2) {
+                return mag[idx - Rank - 2];
             }
             else {
                 return chi;
@@ -178,14 +178,14 @@ namespace simbi::structs {
             if (idx == 0) {
                 return rho;
             }
-            else if (idx < Dims + 1) {
+            else if (idx < Rank + 1) {
                 return vel[idx - 1];
             }
-            else if (idx == Dims + 1) {
+            else if (idx == Rank + 1) {
                 return pre;
             }
-            else if (idx < 2 * Dims + 2) {
-                return mag[idx - Dims - 2];
+            else if (idx < 2 * Rank + 2) {
+                return mag[idx - Rank - 2];
             }
             else {
                 return chi;
@@ -197,20 +197,20 @@ namespace simbi::structs {
         DEV constexpr const real& alfven() const noexcept { return chi; }
     };
 
-    template <Regime R, std::uint64_t Dims, typename EoS>
-        requires(R == Regime::MHD || R == Regime::RMHD)
+    template <regime_t R, std::uint64_t Rank, typename EoS>
+        requires(R == regime_t::MHD || R == regime_t::RMHD)
     struct mhd_conserved_t {
-        static constexpr std::uint64_t dimensions = Dims;
-        static constexpr Regime regime            = R;
+        static constexpr std::uint64_t rank = Rank;
+        static constexpr regime_t regime    = R;
         // den, mom, nrg, mag, chi
-        static constexpr std::uint64_t nmem = 2 * Dims + 3;
-        using counterpart_t                 = mhd_primitive_t<R, Dims, EoS>;
+        static constexpr std::uint64_t nmem = 2 * Rank + 3;
+        using counterpart_t                 = mhd_primitive_t<R, Rank, EoS>;
         using eos_t                         = EoS;
 
         real den{0.0};
-        vector_t<real, Dims> mom{0.0};
+        vector_t<real, Rank> mom{0.0};
         real nrg{0.0};
-        vector_t<real, Dims> mag{0.0};
+        vector_t<real, Rank> mag{0.0};
         real chi{0.0};
 
         DEV constexpr real* data() noexcept { return &den; }
@@ -218,7 +218,7 @@ namespace simbi::structs {
 
         DEV constexpr auto total_energy() const noexcept -> real
         {
-            if constexpr (R == Regime::NEWTONIAN) {
+            if constexpr (R == regime_t::NEWTONIAN) {
                 return nrg;
             }
             else {
@@ -231,14 +231,14 @@ namespace simbi::structs {
             if (idx == 0) {
                 return den;
             }
-            else if (idx < Dims + 1) {
+            else if (idx < Rank + 1) {
                 return mom[idx - 1];
             }
-            else if (idx == Dims + 1) {
+            else if (idx == Rank + 1) {
                 return nrg;
             }
-            else if (idx < 2 * Dims + 2) {
-                return mag[idx - Dims - 2];
+            else if (idx < 2 * Rank + 2) {
+                return mag[idx - Rank - 2];
             }
             else {
                 return chi;
@@ -250,14 +250,14 @@ namespace simbi::structs {
             if (idx == 0) {
                 return den;
             }
-            else if (idx < Dims + 1) {
+            else if (idx < Rank + 1) {
                 return mom[idx - 1];
             }
-            else if (idx == Dims + 1) {
+            else if (idx == Rank + 1) {
                 return nrg;
             }
-            else if (idx < 2 * Dims + 2) {
-                return mag[idx - Dims - 2];
+            else if (idx < 2 * Rank + 2) {
+                return mag[idx - Rank - 2];
             }
             else {
                 return chi;
@@ -267,13 +267,13 @@ namespace simbi::structs {
 
     // ostream operator overloads for primitive and conserved states
     // for future debugging and logging
-    template <Regime R, std::uint64_t Dims, typename EoS>
-        requires(R == Regime::NEWTONIAN || R == Regime::SRHD)
+    template <regime_t R, std::uint64_t Rank, typename EoS>
+        requires(R == regime_t::NEWTONIAN || R == regime_t::SRHD)
     std::ostream&
-    operator<<(std::ostream& os, const primitive_t<R, Dims, EoS>& p)
+    operator<<(std::ostream& os, const primitive_t<R, Rank, EoS>& p)
     {
-        // os << "Primitive State (Regime: " << serialize(R) << ", Dims: " <<
-        // Dims
+        // os << "Primitive State (Regime: " << serialize(R) << ", Rank: " <<
+        // Rank
         //    << "):";
         os << "( " << p.rho << ", ";
         os << p.vel << ", " << p.pre << ", " << p.chi << " )";
@@ -281,38 +281,38 @@ namespace simbi::structs {
         return os;
     }
 
-    template <Regime R, std::uint64_t Dims, typename EoS>
-        requires(R == Regime::NEWTONIAN || R == Regime::SRHD)
+    template <regime_t R, std::uint64_t Rank, typename EoS>
+        requires(R == regime_t::NEWTONIAN || R == regime_t::SRHD)
     std::ostream&
-    operator<<(std::ostream& os, const conserved_t<R, Dims, EoS>& c)
+    operator<<(std::ostream& os, const conserved_t<R, Rank, EoS>& c)
     {
-        // os << "Conserved State (Regime: " << serialize(R) << ", Dims: " <<
-        // Dims
+        // os << "Conserved State (Regime: " << serialize(R) << ", Rank: " <<
+        // Rank
         //    << "):";
         os << "( " << c.den << ", ";
         os << c.mom << ", " << c.nrg << ", " << c.chi << " )";
         return os;
     }
 
-    template <Regime R, std::uint64_t Dims, typename EoS>
-        requires(R == Regime::MHD || R == Regime::RMHD)
+    template <regime_t R, std::uint64_t Rank, typename EoS>
+        requires(R == regime_t::MHD || R == regime_t::RMHD)
     std::ostream&
-    operator<<(std::ostream& os, const mhd_primitive_t<R, Dims, EoS>& p)
+    operator<<(std::ostream& os, const mhd_primitive_t<R, Rank, EoS>& p)
     {
         // os << "MHD Primitive State (Regime: " << serialize(R)
-        //    << ", Dims: " << Dims << "):";
+        //    << ", Rank: " << Rank << "):";
         os << "( " << p.rho << ", ";
         os << p.vel << ", " << p.pre << ", " << p.mag << ", " << p.chi << " )";
         return os;
     }
 
-    template <Regime R, std::uint64_t Dims, typename EoS>
-        requires(R == Regime::MHD || R == Regime::RMHD)
+    template <regime_t R, std::uint64_t Rank, typename EoS>
+        requires(R == regime_t::MHD || R == regime_t::RMHD)
     std::ostream&
-    operator<<(std::ostream& os, const mhd_conserved_t<R, Dims, EoS>& c)
+    operator<<(std::ostream& os, const mhd_conserved_t<R, Rank, EoS>& c)
     {
         // os << "MHD Primitive State (Regime: " << serialize(R)
-        //    << ", Dims: " << Dims << "):";
+        //    << ", Rank: " << Rank << "):";
         os << "( " << c.den << ", ";
         os << c.mom << ", " << c.nrg << ", " << c.mag << ", " << c.chi << " )";
         return os;

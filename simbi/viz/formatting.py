@@ -34,10 +34,8 @@ def set_title(
 
 def apply_scaling(ax: Axes, config: StyleConfig) -> None:
     """Applies log or semilog scaling."""
-    if config.semilogx:
-        ax.set_xscale("log")
-    if config.semilogy:
-        ax.set_yscale("log")
+    ax.set_xscale(config.xscale)
+    ax.set_yscale(config.yscale)
     # Note: 'log' is handled by the component's norm
 
 

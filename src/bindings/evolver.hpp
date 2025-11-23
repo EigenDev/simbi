@@ -2,6 +2,7 @@
 #define BINDINGS_STATE_HPP
 
 #include "compat.hpp"
+#include "utility/config_dict.hpp"
 
 #include <functional>
 #include <pybind11/buffer_info.h>
@@ -17,20 +18,10 @@ namespace simbi {
 };
 
 namespace simbi::hydrostate {
-    // convenience dispatcher based on runtime parameters
     void dispatch_simulation(
-        py::array_t<real, py::array::c_style> cons_array,
-        py::array_t<real, py::array::c_style> prim_array,
-        py::list staggered_bfields,
-        initial_conditions_t& init,
-        std::function<real(real)> const& scale_factor,
-        std::function<real(real)> const& scale_factor_derivative
-    );
-
-    void dispatch_simulation(
+        config_dict_t& init,
         py::iterator prim_gen,
         py::list staggered_bfields,
-        initial_conditions_t& init,
         std::function<real(real)> const& scale_factor,
         std::function<real(real)> const& scale_factor_derivative
     );

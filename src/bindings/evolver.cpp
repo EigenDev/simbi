@@ -3,6 +3,7 @@
 #include "containers/vector.hpp"
 #include "context/evolution.hpp"
 #include "dispatch.hpp"
+#include "utility/config_dict.hpp"
 
 #include <cstdint>
 #include <functional>
@@ -17,19 +18,19 @@ namespace py = pybind11;
 namespace simbi::hydrostate {
     // convenience dispatcher based on runtime parameters
     void dispatch_simulation(
+        config_dict_t& init,
         py::iterator prim_gen,
         py::list bstagg,
-        initial_conditions_t& init,
         std::function<real(real)> const& scale_factor,
         std::function<real(real)> const& scale_factor_derivative
     )
     {
-        using namespace evolution;
-        const auto dims = init.dimensionality;
+        const auto dims   = init.at("dimensionality").get<std::uint64_t>();
+        const bool is_mhd = init.at("is_mhd").get<bool>();
 
         // prepare bfield iters
         vector_t<py::iterator, 3> bfield_gens = {};
-        if (init.is_mhd) {
+        if (is_mhd) {
             for (std::uint64_t idx = 0; idx < dims; ++idx) {
                 if (idx < bstagg.size()) {
                     // since we are doing array index, we need the logical
@@ -42,18 +43,20 @@ namespace simbi::hydrostate {
         }
 
         dispatch::with_hydro_state(
+            init,
             prim_gen,
             bfield_gens,
             scale_factor,
             scale_factor_derivative,
-            init,
             [](auto& sim, const auto& ops) {
                 // rev up those fryers
-                auto evo_state = initialize(sim, "Cool Simulation [TM]");
-                auto pipeline  = evolution::hydro_pipeline_t{sim, ops};
+                auto evo_state =
+                    evolution::initialize(sim, "Cool Simulation [TM]");
+                auto pipeline = evolution::hydro_pipeline_t{sim, ops};
                 for (std::uint64_t lvl = 0; lvl < sim.num_levels(); ++lvl) {
                     pipeline.configure(lvl);
                 }
+
                 evolution::run(
                     sim,
                     [&](auto&) { pipeline.step_all(); },

@@ -59,7 +59,6 @@ class Figure:
 
         main_ax.relim()
         main_ax.autoscale_view()
-        # --- POST-RENDER FORMATTING ---
 
         # Get context from the *first* component
         first_component, first_data = (
@@ -104,8 +103,6 @@ class Figure:
             )
         formatting.apply_axis_limits(main_ax, self.config.style)
 
-        # --- COMPONENT-AWARE FORMATTING ---
-
         # Add a colorbar only if a 2D component was rendered
         mappable_artist = None
         if any(
@@ -120,7 +117,7 @@ class Figure:
         if mappable_artist:
             self._format_colorbar(main_ax, mappable_artist, first_data)
 
-        # Add a legend ONLY if line components were rendered
+        # Add a legend only if line components were rendered
         if any(
             isinstance(
                 c,
@@ -133,8 +130,7 @@ class Figure:
             for c, d in self._components
         ):
             formatting.remove_spines(main_ax)
-            if len(self._components) > 1:
-                formatting.apply_legend(main_ax, self.config.style)
+            formatting.apply_legend(main_ax, self.config.style)
 
     def _format_colorbar(self, ax: Axes, artist: Any, field_data: FieldData):
         """

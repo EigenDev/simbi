@@ -2,7 +2,7 @@
 #define EXECUTION_CONTEXT_HPP
 
 #include "execution/executor.hpp"
-#include "hetero/adapter.hpp"
+#include "hesi/adapter.hpp"
 #include "memory/device.hpp"
 
 #include <atomic>
@@ -212,7 +212,7 @@ namespace simbi {
         {
             if (dev.is_gpu) {
                 return dev.device_id >= 0 &&
-                       dev.device_id < hetero::device::get_device_count();
+                       dev.device_id < het::device_count();
             }
             return true;   // cpu devices always valid
         }
@@ -286,7 +286,7 @@ namespace simbi {
         device_pool_t create_gpu_pool()
         {
             std::vector<mem::device_t> devices;
-            auto n_gpus = hetero::device::get_device_count();
+            auto n_gpus = het::device_count();
             if (n_gpus == 0) {
                 // it's valid to have a pool of 0 gpus,
                 // but the pool ctor will throw if we try to use it.

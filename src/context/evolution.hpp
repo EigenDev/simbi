@@ -1,10 +1,21 @@
 #ifndef EVOLUTION_HPP
 #define EVOLUTION_HPP
 
+// =============================================================================
+// evolution.hpp
+//
+// evolution driver for partition-aware multi-device simulations.
+// uses nsystems.hpp and ntiming.hpp infrastructure.
+//
+// key changes from evolution.hpp:
+//   - timer requires executor (from partition 0)
+//   - zone counting accounts for multiple partitions
+//   - pipeline uses partition-aware systems
+// =============================================================================
+
 #include "checkpoint.hpp"
 #include "compat.hpp"
 #include "ecs/systems.hpp"
-#include "functional/fp.hpp"
 #include "io/console/printb.hpp"
 #include "io/exceptions.hpp"
 #include "physics/ib/motion.hpp"
@@ -19,22 +30,28 @@
 #include <string>
 
 namespace simbi::evolution {
+    template <typename Sim>
+    std::uint64_t count_weighted_zones(const Sim& sim);
 
+    // =========================================================================
+    // evolution state
+    // =========================================================================
     struct evolution_state_t {
-        timing::timer_t timer;
         timing::timing_stats_t stats;
         progress::progress_state_t progress;
         checkpoint::checkpoint_schedule_t schedule;
         bool should_stop{false};
     };
 
+    // =========================================================================
+    // initialization
+    // =========================================================================
     template <typename Sim>
     evolution_state_t initialize(Sim& sim, const char* title = "Simulation")
     {
         auto& meta = sim.metadata();
 
         return {
-          .timer    = timing::timer_t{},
           .stats    = timing::timing_stats_t{},
           .progress = progress::initialize(title),
           .schedule =
@@ -48,10 +65,16 @@ namespace simbi::evolution {
         };
     }
 
+    // =========================================================================
+    // main evolution loop
+    // =========================================================================
     template <typename Sim, typename PhysicsStep>
     void run(Sim& sim, PhysicsStep&& step, evolution_state_t& state)
     {
         auto& meta = sim.metadata();
+
+        // get executor from partition 0 level 0 for timing
+        auto exec = sim.partition_executor(0, 0);
 
         // initial checkpoint
         state.progress.table.refresh();
@@ -63,29 +86,24 @@ namespace simbi::evolution {
         }
         state.schedule.advance(meta.time);
         meta.advance_schedule(state.schedule);
+
         while (meta.time < meta.tend && !state.should_stop) {
             try {
-                state.timer.start();
+                // create scoped timer
+                std::uint64_t nzones_weighted = count_weighted_zones(sim);
+                timing::scoped_timer_t timer(
+                    exec,
+                    state.stats,
+                    nzones_weighted
+                );
 
-                // run physics
+                // run physics step
                 step(sim);
-
-                auto duration                 = state.timer.elapsed_seconds();
-                std::uint64_t nzones_weighted = 0;
-                const real dt_coarse          = meta.level_dts[0];
-                for (std::uint64_t lvl = 0; lvl < sim.num_levels(); ++lvl) {
-                    const auto shape = sim.hydro(lvl).cons.domain().shape();
-                    const auto zones = fp::product(shape);
-
-                    const real weight = dt_coarse / meta.level_dts[lvl];
-                    nzones_weighted +=
-                        static_cast<std::uint64_t>(zones * weight);
-                }
-                state.stats.record(duration, nzones_weighted);
 
                 // update progress periodically
                 if (meta.iteration % 100 == 0) {
-                    auto speed = nzones_weighted / duration;
+                    auto elapsed = timer.timer_.elapsed_so_far();
+                    auto speed   = nzones_weighted / elapsed;
                     progress::update(
                         state.progress,
                         meta.iteration,
@@ -135,138 +153,136 @@ namespace simbi::evolution {
         }
     }
 
+    // =========================================================================
+    // zone counting helper
+    // =========================================================================
+    template <typename Sim>
+    std::uint64_t count_weighted_zones(const Sim& sim)
+    {
+        const auto& meta     = sim.metadata();
+        const real dt_coarse = meta.level_dts[0];
+
+        std::uint64_t total = 0;
+        for (std::uint64_t lvl = 0; lvl < sim.num_levels(); ++lvl) {
+            // sum zones across all partitions
+            std::uint64_t level_zones = 0;
+            for (std::uint64_t pp = 0; pp < sim.num_partitions(lvl); ++pp) {
+                const auto& part = sim.partition(lvl, pp);
+                level_zones += part.owned_domain.size();
+            }
+
+            // weight by timestep ratio
+            const real weight = dt_coarse / meta.level_dts[lvl];
+            total += static_cast<std::uint64_t>(level_zones * weight);
+        }
+
+        return total;
+    }
+
+    // =========================================================================
+    // hydro pipeline
+    // orchestrates the time integration with amr subcycling
+    // =========================================================================
     template <typename Sim, typename Ops>
     struct hydro_pipeline_t {
         Sim& sim;
         const Ops& ops;
 
       private:
-        // ---
+        // ---------------------------------------------------------------------
         // euler driver
-        //
-        // the order is:
-        // > compute provisional fluxes for coarse level (l) from u^n
-        // > sub-cycle and restrict fine level (l+1)
-        // > correct coarse level (l) fluxes using fine flux_avg
-        // > advance coarse level (l) from u^n to u^{n+1}
-        // ---
-        void advance_level_euler(std::uint64_t lvl) const
+        // ---------------------------------------------------------------------
+        template <typename Geometry>
+        void
+        advance_level_euler(const Geometry& block_geo, std::uint64_t lvl) const
         {
-            // prep: prolongate ghosts, compute primitives
-            ecs::ghost_fill_system_t{}(sim, lvl);
-            ecs::c2p_system_t{}(sim, lvl);
-            ecs::sink_cache_system_t{}(sim);
+            using namespace ecs;
 
-            // compute provisional fluxes for this level
-            ecs::staggered_fields_system_t{
+            // prep: fill ghosts, recover primitives
+            ghost_fill_system_t{}(sim, lvl);
+            c2p_system_t{}(sim, lvl);
+
+            // compute fluxes
+            flux_system_t{
               .accumulate_fluxes = (lvl > 0)
-            }(sim, ops, lvl);
-
-            // sub-cycle finer level first (if it exists)
+            }(sim, ops, block_geo, lvl);
+            // subcycle finer level
             if (lvl < sim.num_levels() - 1) {
-                const auto& map = sim.level_mapping(lvl + 1);
-
-                // get the actual number of substeps
                 const auto nsteps = get_substeps(lvl + 1);
 
-                // zero fine level's accumulator once
-                ecs::zero_flux_buffer_system_t{}(sim, lvl + 1);
+                zero_flux_buffer_system_t{}(sim, lvl + 1);
 
                 for (std::uint64_t substep = 0; substep < nsteps; ++substep) {
-                    // recurse
-                    advance_level_euler(lvl + 1);
-                    // restriction must happen *inside* the loop
-                    ecs::restriction_system_t{}(sim, lvl + 1);
+                    advance_level_euler(block_geo, lvl + 1);
+                    restriction_system_t{}(sim, lvl + 1);
                 }
 
-                // correct this level's fluxes using accumulated fine flux
-                mesh::fmr::correct_level_fluxes(
-                    sim.hydro(lvl).flux,
-                    sim.hydro(lvl + 1).flux_avg,
-                    map,
-                    sim.metadata().level_dts[lvl]
-                );
+                reflux_system_t{}(sim, lvl + 1);
             }
 
-            // advance this level using the (now corrected) fluxes
-            ecs::euler_system_t{ops}(sim, lvl);
+            // advance this level
+            euler_system_t<Ops>{ops}(sim, block_geo, lvl);
+
+            // apply body effects (all levels compute, only authoritative passes
+            // diagnostics)
+            body_effects_system_t<Sim::rank>{}(
+                sim,
+                block_geo,
+                lvl,
+                sim.metadata().level_dts[lvl]
+            );
+
+            // sync partitions
+            synchronize_system_t{}(sim, lvl);
         }
 
-        // ---
+        // ---------------------------------------------------------------------
         // rk2 driver (berger-colella)
-        //
-        // the order is:
-        // > compute fluxes for l from u^n
-        // > advance l to u* (using uncorrected fluxes)
-        // > sub-cycle l+1 (interpolating between u^n and u* from l)
-        // > re-compute fluxes for l from u* (which was modified by
-        // restriction)
-        // > correct stage 2 fluxes for l using fine flux_avg
-        // > advance l from u* to u^{n+1}
-        // ---
-        void advance_level_rk2(std::uint64_t lvl) const
+        // ---------------------------------------------------------------------
+        template <typename Geometry>
+        void
+        advance_level_rk2(const Geometry& block_geo, std::uint64_t lvl) const
         {
+            using namespace ecs;
+
             // === stage 1: u^n -> u* ===
-            ecs::ghost_fill_system_t{}(sim, lvl);
-            ecs::c2p_system_t{}(sim, lvl);
-            ecs::sink_cache_system_t{}(sim);
+            ghost_fill_system_t{}(sim, lvl);
+            c2p_system_t{}(sim, lvl);
+            flux_system_t{.accumulate_fluxes = false}(sim, ops, block_geo, lvl);
+            rk2_stage1_system_t<Ops>{ops}(sim, block_geo, lvl);
 
-            // compute fluxes from u^n
-            ecs::staggered_fields_system_t{
-              .advance_bfields   = true,
-              .accumulate_fluxes = false,
-            }(sim, ops, lvl);
-
-            // advance coarse to u* BEFORE subcycling
-            ecs::rk2_stage1_system_t{ops}(sim, lvl);
-
-            // === sub-cycle fine level ===
-
+            // === subcycle fine level ===
             if (lvl < sim.num_levels() - 1) {
-                // Get the actual number of substeps (from timestep system)
                 const auto nsteps = get_substeps(lvl + 1);
-
-                // zero child's accumulator
-                ecs::zero_flux_buffer_system_t{}(sim, lvl + 1);
+                zero_flux_buffer_system_t{}(sim, lvl + 1);
 
                 for (std::uint64_t substep = 0; substep < nsteps; ++substep) {
-                    // time-interpolate boundaries between u^n and u*
-                    const real alpha =
-                        (static_cast<real>(substep) + 0.5) / nsteps;
-                    ecs::time_interpolated_ghost_fill_system_t{
-                      alpha
-                    }(sim, lvl + 1);
-
-                    // fine level does full RK2
-                    advance_level_rk2(lvl + 1);
-
-                    // restrict after each fine step
-                    ecs::restriction_system_t{}(sim, lvl + 1);
+                    advance_level_rk2(block_geo, lvl + 1);
+                    restriction_system_t{}(sim, lvl + 1);
                 }
+
+                reflux_system_t{}(sim, lvl + 1);
             }
 
             // === stage 2: u* -> u^{n+1} ===
-            ecs::c2p_system_t{}(sim, lvl);
-            ecs::sink_cache_system_t{}(sim);
+            c2p_system_t{}(sim, lvl);
+            flux_system_t{
+              .accumulate_fluxes = (lvl > 0)
+            }(sim, ops, block_geo, lvl);
 
-            // compute fluxes from u*
-            ecs::staggered_fields_system_t{
-              .advance_bfields   = false,
-              .accumulate_fluxes = (lvl > 0),
-            }(sim, ops, lvl);
+            rk2_stage2_system_t<Ops>{ops}(sim, block_geo, lvl);
 
-            // correct stage 2 fluxes using fine's accumulated flux
-            if (lvl < sim.num_levels() - 1) {
-                mesh::fmr::correct_level_fluxes(
-                    sim.hydro(lvl).flux,
-                    sim.hydro(lvl + 1).flux_avg,
-                    sim.level_mapping(lvl + 1),
-                    sim.metadata().level_dts[lvl]
-                );
-            }
+            // apply body effects (all levels compute, only authoritative passes
+            // diagnostics)
+            body_effects_system_t<Sim::rank>{}(
+                sim,
+                block_geo,
+                lvl,
+                sim.metadata().level_dts[lvl]
+            );
 
-            // advance to u^{n+1} using corrected stage 2 fluxes
-            ecs::rk2_stage2_system_t{ops}(sim, lvl);
+            // sync partitions
+            synchronize_system_t{}(sim, lvl);
         }
 
         std::uint64_t get_substeps(std::uint64_t child_lvl) const
@@ -274,7 +290,7 @@ namespace simbi::evolution {
             auto& meta = sim.metadata();
 
             if (meta.subcycling_mode == subcycling_mode_t::NONE) {
-                return 1;   // no subcycling
+                return 1;
             }
             else if (meta.subcycling_mode == subcycling_mode_t::ADAPTIVE) {
                 return meta.level_substeps[child_lvl];
@@ -285,33 +301,51 @@ namespace simbi::evolution {
         }
 
       public:
+        // ---------------------------------------------------------------------
+        // configure (called before evolution loop)
+        // ---------------------------------------------------------------------
         void configure(std::uint64_t lvl) const
         {
-            ecs::ghost_fill_system_t{}(sim, lvl);
-            ecs::c2p_system_t{}(sim, lvl);
-            ecs::timestep_system_t{}(sim);
+            using namespace ecs;
+            ghost_fill_system_t{}(sim, lvl);
+            c2p_system_t{}(sim, lvl);
+            timestep_system_t{}(sim);
         }
 
+        // ---------------------------------------------------------------------
+        // step_all (one coarse timestep)
+        // ---------------------------------------------------------------------
         void step_all() const
         {
+            using namespace ecs;
             auto& meta = sim.metadata();
 
-            // calculate all level timesteps (l_max -> l=0)
-            ecs::timestep_system_t{}(sim);
+            // compute all level timesteps
+            timestep_system_t{}(sim);
 
-            if (meta.timestepping == Timestepping::RK2) {
-                advance_level_rk2(0);
-            }
-            else if (meta.timestepping == Timestepping::EULER) {
-                advance_level_euler(0);
-            }
-            else {
-                throw std::runtime_error(
-                    "that timestepping method is not implemented."
-                );
-            }
+            // build geometry once per timestep and advance
+            auto motion    = get_motion_state(sim);
+            auto& mesh_cfg = sim.mesh(0);
 
-            // advance global time by the *coarsest* step
+            with_block_geometry<Sim::coord_system>(
+                mesh_cfg,
+                motion,
+                [&](const auto& block_geo) {
+                    if (meta.timestepping == timestepping_t::RK2) {
+                        advance_level_rk2(block_geo, 0);
+                    }
+                    else if (meta.timestepping == timestepping_t::EULER) {
+                        advance_level_euler(block_geo, 0);
+                    }
+                    else {
+                        throw std::runtime_error(
+                            "that timestepping method is not implemented."
+                        );
+                    }
+                }
+            );
+
+            // advance global time
             meta.time += meta.global_dt;
 
             // evolve bodies (if any)
@@ -323,4 +357,4 @@ namespace simbi::evolution {
 
 }   // namespace simbi::evolution
 
-#endif
+#endif   // EVOLUTION_HPP

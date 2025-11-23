@@ -2,6 +2,7 @@
 #define CONFIG_CONVERTER_HPP
 
 #include "utility/config_dict.hpp"
+
 #include <pybind11/pybind11.h>
 
 namespace simbi {

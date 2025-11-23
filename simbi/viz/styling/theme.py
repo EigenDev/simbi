@@ -70,10 +70,11 @@ class ThemeConfig:
         linestyles = [
             x[0] for x in zip(cycle(["-", "--", ":", "-."]), range(nlines))
         ]
-        if len(colors) == len(linestyles):
-            default_cycler = cycler(linestyle=linestyles) + cycler(color=colors)
-        else:
-            default_cycler = cycler(color=colors) * cycler(linestyle=linestyles)
+        default_cycler = cycler(color=colors)
+        # if len(colors) == len(linestyles):
+        #     default_cycler = cycler(color=colors) * cycler(linestyle=linestyles)
+        # else:
+        #     default_cycler = cycler(color=colors) * cycler(linestyle=linestyles)
 
         plt.rcParams.update(
             {

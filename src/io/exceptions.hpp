@@ -60,14 +60,14 @@
 
 namespace simbi {
     // forward declarations
-    template <typename T, std::uint64_t Dims>
+    template <typename T, std::uint64_t Rank>
     struct vector_t;
 
-    template <std::uint64_t Dims>
-    using uarray = vector_t<std::uint64_t, Dims>;
+    template <std::uint64_t Rank>
+    using uarray = vector_t<std::uint64_t, Rank>;
 
-    template <std::uint64_t Dims>
-    using iarray = vector_t<std::int64_t, Dims>;
+    template <std::uint64_t Rank>
+    using iarray = vector_t<std::int64_t, Rank>;
 
     enum class ErrorCode : uint32_t {
         NONE                  = 0,
@@ -154,13 +154,13 @@ namespace simbi {
         }
     };
 
-    template <std::uint64_t Dims>
-    std::string format_coord(const iarray<Dims>& coord)
+    template <std::uint64_t Rank>
+    std::string format_coord(const iarray<Rank>& coord)
     {
         std::string result = "(";
-        for (std::uint64_t i = 0; i < Dims; ++i) {
+        for (std::uint64_t i = 0; i < Rank; ++i) {
             result += std::to_string(coord[i]);
-            if (i < Dims - 1) {
+            if (i < Rank - 1) {
                 result += ", ";
             }
         }
@@ -168,13 +168,13 @@ namespace simbi {
         return result;
     }
 
-    template <std::uint64_t Dims, typename T>
-    std::string format_position(const vector_t<T, Dims>& position)
+    template <std::uint64_t Rank, typename T>
+    std::string format_position(const vector_t<T, Rank>& position)
     {
         std::string result = "(";
-        for (std::uint64_t i = 0; i < Dims; ++i) {
+        for (std::uint64_t i = 0; i < Rank; ++i) {
             result += std::to_string(position[i]);
-            if (i < Dims - 1) {
+            if (i < Rank - 1) {
                 result += ", ";
             }
         }

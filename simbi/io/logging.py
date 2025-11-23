@@ -1,8 +1,9 @@
 import logging
 import sys
-from ..detail.colors import bcolors
-from typing import Any
 import typing
+from typing import Any
+
+from ..detail.colors import bcolors
 
 TRACE_LEVEL_NUM = 5
 VERBOSE_LEVEL_NUM = 15
@@ -14,9 +15,7 @@ logging.addLevelName(VERBOSE_LEVEL_NUM, "VERBOSE")
 class SimbiFormatter(logging.Formatter):
     non_fmt: str = "%(message)s"
     inf_fmt: str = "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
-    gen_fmt: str = (
-        "%(asctime)s - %(name)s - %(levelname)s - %(message)s (%(filename)s:%(lineno)d)"
-    )
+    gen_fmt: str = "%(asctime)s - %(name)s - %(levelname)s - %(message)s (%(filename)s:%(lineno)d)"
 
     FORMATS = {
         TRACE_LEVEL_NUM: bcolors.LIGHT_CYAN + inf_fmt + bcolors.ENDC,

@@ -27,65 +27,65 @@ namespace simbi {
     namespace io {
 
         // initialize static members
-        bool TerminalCapabilities::unicode_tested    = false;
-        bool TerminalCapabilities::unicode_supported = false;
+        bool terminal_capabilities_t::unicode_tested    = false;
+        bool terminal_capabilities_t::unicode_supported = false;
 
         // enhanced color functions with extended palette
-        std::string get_color_code(Color color)
+        std::string get_color_code(color_t color)
         {
             switch (color) {
-                case Color::Default: return "\033[39m";
-                case Color::Black: return "\033[30m";
-                case Color::Red: return "\033[31m";
-                case Color::Green: return "\033[32m";
-                case Color::Yellow: return "\033[33m";
-                case Color::Blue: return "\033[34m";
-                case Color::Magenta: return "\033[35m";
-                case Color::Cyan: return "\033[36m";
-                case Color::White: return "\033[37m";
-                case Color::BrightBlack: return "\033[90m";
-                case Color::BrightRed: return "\033[91m";
-                case Color::BrightGreen: return "\033[92m";
-                case Color::BrightYellow: return "\033[93m";
-                case Color::BrightBlue: return "\033[94m";
-                case Color::BrightMagenta: return "\033[95m";
-                case Color::BrightCyan: return "\033[96m";
-                case Color::BrightWhite: return "\033[97m";
+                case color_t::Default: return "\033[39m";
+                case color_t::Black: return "\033[30m";
+                case color_t::Red: return "\033[31m";
+                case color_t::Green: return "\033[32m";
+                case color_t::Yellow: return "\033[33m";
+                case color_t::Blue: return "\033[34m";
+                case color_t::Magenta: return "\033[35m";
+                case color_t::Cyan: return "\033[36m";
+                case color_t::White: return "\033[37m";
+                case color_t::BrightBlack: return "\033[90m";
+                case color_t::BrightRed: return "\033[91m";
+                case color_t::BrightGreen: return "\033[92m";
+                case color_t::BrightYellow: return "\033[93m";
+                case color_t::BrightBlue: return "\033[94m";
+                case color_t::BrightMagenta: return "\033[95m";
+                case color_t::BrightCyan: return "\033[96m";
+                case color_t::BrightWhite: return "\033[97m";
 
                 // extended colors using 256-color palette
-                case Color::DarkGray: return "\033[38;5;240m";
-                case Color::LightGray: return "\033[38;5;250m";
-                case Color::Orange: return "\033[38;5;208m";
-                case Color::Purple: return "\033[38;5;129m";
-                case Color::Pink: return "\033[38;5;205m";
-                case Color::Lime: return "\033[38;5;154m";
-                case Color::Teal: return "\033[38;5;80m";
-                case Color::Navy: return "\033[38;5;17m";
+                case color_t::DarkGray: return "\033[38;5;240m";
+                case color_t::LightGray: return "\033[38;5;250m";
+                case color_t::Orange: return "\033[38;5;208m";
+                case color_t::Purple: return "\033[38;5;129m";
+                case color_t::Pink: return "\033[38;5;205m";
+                case color_t::Lime: return "\033[38;5;154m";
+                case color_t::Teal: return "\033[38;5;80m";
+                case color_t::Navy: return "\033[38;5;17m";
 
                 default: return "\033[0m";
             }
         }
 
-        std::string get_bg_color_code(Color color)
+        std::string get_bg_color_code(color_t color)
         {
             switch (color) {
-                case Color::Default: return "\033[49m";
-                case Color::Black: return "\033[40m";
-                case Color::Red: return "\033[41m";
-                case Color::Green: return "\033[42m";
-                case Color::Yellow: return "\033[43m";
-                case Color::Blue: return "\033[44m";
-                case Color::Magenta: return "\033[45m";
-                case Color::Cyan: return "\033[46m";
-                case Color::White: return "\033[47m";
-                case Color::BrightBlack: return "\033[100m";
-                case Color::BrightRed: return "\033[101m";
-                case Color::BrightGreen: return "\033[102m";
-                case Color::BrightYellow: return "\033[103m";
-                case Color::BrightBlue: return "\033[104m";
-                case Color::BrightMagenta: return "\033[105m";
-                case Color::BrightCyan: return "\033[106m";
-                case Color::BrightWhite: return "\033[107m";
+                case color_t::Default: return "\033[49m";
+                case color_t::Black: return "\033[40m";
+                case color_t::Red: return "\033[41m";
+                case color_t::Green: return "\033[42m";
+                case color_t::Yellow: return "\033[43m";
+                case color_t::Blue: return "\033[44m";
+                case color_t::Magenta: return "\033[45m";
+                case color_t::Cyan: return "\033[46m";
+                case color_t::White: return "\033[47m";
+                case color_t::BrightBlack: return "\033[100m";
+                case color_t::BrightRed: return "\033[101m";
+                case color_t::BrightGreen: return "\033[102m";
+                case color_t::BrightYellow: return "\033[103m";
+                case color_t::BrightBlue: return "\033[104m";
+                case color_t::BrightMagenta: return "\033[105m";
+                case color_t::BrightCyan: return "\033[106m";
+                case color_t::BrightWhite: return "\033[107m";
                 default: return "\033[49m";
             }
         }
@@ -96,7 +96,7 @@ namespace simbi {
         std::string underline() { return "\033[4m"; }
 
         // terminal capabilities detection
-        bool TerminalCapabilities::supports_unicode()
+        bool terminal_capabilities_t::supports_unicode()
         {
             if (!unicode_tested) {
                 // simple test: try to detect utf-8 support
@@ -117,7 +117,7 @@ namespace simbi {
             return unicode_supported;
         }
 
-        bool TerminalCapabilities::supports_256_colors()
+        bool terminal_capabilities_t::supports_256_colors()
         {
             const char* term = std::getenv("TERM");
             if (!term) {
@@ -132,7 +132,7 @@ namespace simbi {
             );
         }
 
-        bool TerminalCapabilities::supports_truecolor()
+        bool terminal_capabilities_t::supports_truecolor()
         {
             const char* colorterm = std::getenv("COLORTERM");
             if (!colorterm) {
@@ -143,7 +143,7 @@ namespace simbi {
             return (colorterm_str == "truecolor" || colorterm_str == "24bit");
         }
 
-        std::int64_t TerminalCapabilities::get_terminal_width()
+        std::int64_t terminal_capabilities_t::get_terminal_width()
         {
 #ifdef _WIN32
             CONSOLE_SCREEN_BUFFER_INFO csbi;
@@ -163,12 +163,12 @@ namespace simbi {
         }
 
         // sophisticated border character sets
-        BorderChars get_border_chars(BorderStyle style)
+        border_chars_t get_border_chars(border_style_t style)
         {
-            bool use_unicode = TerminalCapabilities::supports_unicode();
+            bool use_unicode = terminal_capabilities_t::supports_unicode();
 
             switch (style) {
-                case BorderStyle::None:
+                case border_style_t::None:
                     return {
                       "",
                       "",
@@ -188,7 +188,7 @@ namespace simbi {
                       ""
                     };
 
-                case BorderStyle::Simple:
+                case border_style_t::Simple:
                     return {
                       "+",
                       "+",
@@ -208,7 +208,7 @@ namespace simbi {
                       "|"   // thick variants
                     };
 
-                case BorderStyle::Elegant:
+                case border_style_t::Elegant:
                     if (use_unicode) {
                         return {
                           "┌",
@@ -250,7 +250,7 @@ namespace simbi {
                         };
                     }
 
-                case BorderStyle::Modern:
+                case border_style_t::Modern:
                     if (use_unicode) {
                         return {
                           "╭",
@@ -292,7 +292,7 @@ namespace simbi {
                         };
                     }
 
-                case BorderStyle::Cyberpunk:
+                case border_style_t::Cyberpunk:
                     if (use_unicode) {
                         return {
                           "╔",
@@ -334,7 +334,7 @@ namespace simbi {
                         };
                     }
 
-                case BorderStyle::Classic:
+                case border_style_t::Classic:
                     if (use_unicode) {
                         return {
                           "╔",
@@ -376,7 +376,7 @@ namespace simbi {
                         };
                     }
 
-                case BorderStyle::Minimal:
+                case border_style_t::Minimal:
                     return {
                       " ",
                       " ",
@@ -396,29 +396,29 @@ namespace simbi {
                       " "
                     };
 
-                default: return get_border_chars(BorderStyle::Simple);
+                default: return get_border_chars(border_style_t::Simple);
             }
         }
 
         // theme configurations for gorgeous styling
-        ThemeConfig Table::get_theme_config(TableTheme theme) const
+        theme_config_t table_t::get_theme_config(table_theme_t theme) const
         {
             switch (theme) {
-                case TableTheme::Cyberpunk:
+                case table_theme_t::Cyberpunk:
                     return {
-                      .header_color          = Color::BrightWhite,
-                      .text_color            = Color::BrightCyan,
-                      .border_color          = Color::BrightGreen,
-                      .title_color           = Color::BrightYellow,
-                      .accent_color          = Color::BrightMagenta,
-                      .info_color            = Color::BrightCyan,
-                      .success_color         = Color::BrightGreen,
-                      .warning_color         = Color::BrightYellow,
-                      .error_color           = Color::BrightRed,
-                      .debug_color           = Color::BrightBlack,
-                      .progress_color        = Color::BrightGreen,
-                      .progress_bg_color     = Color::DarkGray,
-                      .border_style          = BorderStyle::Cyberpunk,
+                      .header_color          = color_t::BrightWhite,
+                      .text_color            = color_t::BrightCyan,
+                      .border_color          = color_t::BrightGreen,
+                      .title_color           = color_t::BrightYellow,
+                      .accent_color          = color_t::BrightMagenta,
+                      .info_color            = color_t::BrightCyan,
+                      .success_color         = color_t::BrightGreen,
+                      .warning_color         = color_t::BrightYellow,
+                      .error_color           = color_t::BrightRed,
+                      .debug_color           = color_t::BrightBlack,
+                      .progress_color        = color_t::BrightGreen,
+                      .progress_bg_color     = color_t::DarkGray,
+                      .border_style          = border_style_t::Cyberpunk,
                       .use_bold_header       = true,
                       .use_italic_title      = false,
                       .use_gradient_progress = true,
@@ -428,21 +428,21 @@ namespace simbi {
                       .section_spacing       = 1
                     };
 
-                case TableTheme::Elegant:
+                case table_theme_t::Elegant:
                     return {
-                      .header_color          = Color::Yellow,
-                      .text_color            = Color::White,
-                      .border_color          = Color::Yellow,
-                      .title_color           = Color::BrightWhite,
-                      .accent_color          = Color::Yellow,
-                      .info_color            = Color::BrightWhite,
-                      .success_color         = Color::BrightGreen,
-                      .warning_color         = Color::Orange,
-                      .error_color           = Color::BrightRed,
-                      .debug_color           = Color::LightGray,
-                      .progress_color        = Color::Yellow,
-                      .progress_bg_color     = Color::DarkGray,
-                      .border_style          = BorderStyle::Elegant,
+                      .header_color          = color_t::Yellow,
+                      .text_color            = color_t::White,
+                      .border_color          = color_t::Yellow,
+                      .title_color           = color_t::BrightWhite,
+                      .accent_color          = color_t::Yellow,
+                      .info_color            = color_t::BrightWhite,
+                      .success_color         = color_t::BrightGreen,
+                      .warning_color         = color_t::Orange,
+                      .error_color           = color_t::BrightRed,
+                      .debug_color           = color_t::LightGray,
+                      .progress_color        = color_t::Yellow,
+                      .progress_bg_color     = color_t::DarkGray,
+                      .border_style          = border_style_t::Elegant,
                       .use_bold_header       = true,
                       .use_italic_title      = true,
                       .use_gradient_progress = false,
@@ -452,21 +452,21 @@ namespace simbi {
                       .section_spacing       = 1
                     };
 
-                case TableTheme::Matrix:
+                case table_theme_t::Matrix:
                     return {
-                      .header_color          = Color::BrightGreen,
-                      .text_color            = Color::Green,
-                      .border_color          = Color::BrightGreen,
-                      .title_color           = Color::BrightGreen,
-                      .accent_color          = Color::Lime,
-                      .info_color            = Color::BrightGreen,
-                      .success_color         = Color::Lime,
-                      .warning_color         = Color::BrightYellow,
-                      .error_color           = Color::BrightRed,
-                      .debug_color           = Color::DarkGray,
-                      .progress_color        = Color::BrightGreen,
-                      .progress_bg_color     = Color::Black,
-                      .border_style          = BorderStyle::Modern,
+                      .header_color          = color_t::BrightGreen,
+                      .text_color            = color_t::Green,
+                      .border_color          = color_t::BrightGreen,
+                      .title_color           = color_t::BrightGreen,
+                      .accent_color          = color_t::Lime,
+                      .info_color            = color_t::BrightGreen,
+                      .success_color         = color_t::Lime,
+                      .warning_color         = color_t::BrightYellow,
+                      .error_color           = color_t::BrightRed,
+                      .debug_color           = color_t::DarkGray,
+                      .progress_color        = color_t::BrightGreen,
+                      .progress_bg_color     = color_t::Black,
+                      .border_style          = border_style_t::Modern,
                       .use_bold_header       = true,
                       .use_italic_title      = false,
                       .use_gradient_progress = true,
@@ -476,21 +476,21 @@ namespace simbi {
                       .section_spacing       = 0
                     };
 
-                case TableTheme::Ocean:
+                case table_theme_t::Ocean:
                     return {
-                      .header_color          = Color::BrightCyan,
-                      .text_color            = Color::Cyan,
-                      .border_color          = Color::Blue,
-                      .title_color           = Color::BrightBlue,
-                      .accent_color          = Color::Teal,
-                      .info_color            = Color::BrightBlue,
-                      .success_color         = Color::BrightCyan,
-                      .warning_color         = Color::BrightYellow,
-                      .error_color           = Color::BrightRed,
-                      .debug_color           = Color::LightGray,
-                      .progress_color        = Color::BrightCyan,
-                      .progress_bg_color     = Color::Navy,
-                      .border_style          = BorderStyle::Modern,
+                      .header_color          = color_t::BrightCyan,
+                      .text_color            = color_t::Cyan,
+                      .border_color          = color_t::Blue,
+                      .title_color           = color_t::BrightBlue,
+                      .accent_color          = color_t::Teal,
+                      .info_color            = color_t::BrightBlue,
+                      .success_color         = color_t::BrightCyan,
+                      .warning_color         = color_t::BrightYellow,
+                      .error_color           = color_t::BrightRed,
+                      .debug_color           = color_t::LightGray,
+                      .progress_color        = color_t::BrightCyan,
+                      .progress_bg_color     = color_t::Navy,
+                      .border_style          = border_style_t::Modern,
                       .use_bold_header       = false,
                       .use_italic_title      = true,
                       .use_gradient_progress = true,
@@ -500,21 +500,21 @@ namespace simbi {
                       .section_spacing       = 1
                     };
 
-                case TableTheme::Sunset:
+                case table_theme_t::Sunset:
                     return {
-                      .header_color          = Color::Orange,
-                      .text_color            = Color::BrightYellow,
-                      .border_color          = Color::Red,
-                      .title_color           = Color::BrightRed,
-                      .accent_color          = Color::Pink,
-                      .info_color            = Color::BrightYellow,
-                      .success_color         = Color::BrightGreen,
-                      .warning_color         = Color::Orange,
-                      .error_color           = Color::BrightRed,
-                      .debug_color           = Color::LightGray,
-                      .progress_color        = Color::Orange,
-                      .progress_bg_color     = Color::Red,
-                      .border_style          = BorderStyle::Elegant,
+                      .header_color          = color_t::Orange,
+                      .text_color            = color_t::BrightYellow,
+                      .border_color          = color_t::Red,
+                      .title_color           = color_t::BrightRed,
+                      .accent_color          = color_t::Pink,
+                      .info_color            = color_t::BrightYellow,
+                      .success_color         = color_t::BrightGreen,
+                      .warning_color         = color_t::Orange,
+                      .error_color           = color_t::BrightRed,
+                      .debug_color           = color_t::LightGray,
+                      .progress_color        = color_t::Orange,
+                      .progress_bg_color     = color_t::Red,
+                      .border_style          = border_style_t::Elegant,
                       .use_bold_header       = true,
                       .use_italic_title      = false,
                       .use_gradient_progress = true,
@@ -524,21 +524,21 @@ namespace simbi {
                       .section_spacing       = 1
                     };
 
-                case TableTheme::Monochrome:
+                case table_theme_t::Monochrome:
                     return {
-                      .header_color          = Color::BrightWhite,
-                      .text_color            = Color::White,
-                      .border_color          = Color::LightGray,
-                      .title_color           = Color::BrightWhite,
-                      .accent_color          = Color::LightGray,
-                      .info_color            = Color::LightGray,
-                      .success_color         = Color::White,
-                      .warning_color         = Color::LightGray,
-                      .error_color           = Color::BrightWhite,
-                      .debug_color           = Color::DarkGray,
-                      .progress_color        = Color::White,
-                      .progress_bg_color     = Color::DarkGray,
-                      .border_style          = BorderStyle::Minimal,
+                      .header_color          = color_t::BrightWhite,
+                      .text_color            = color_t::White,
+                      .border_color          = color_t::LightGray,
+                      .title_color           = color_t::BrightWhite,
+                      .accent_color          = color_t::LightGray,
+                      .info_color            = color_t::LightGray,
+                      .success_color         = color_t::White,
+                      .warning_color         = color_t::LightGray,
+                      .error_color           = color_t::BrightWhite,
+                      .debug_color           = color_t::DarkGray,
+                      .progress_color        = color_t::White,
+                      .progress_bg_color     = color_t::DarkGray,
+                      .border_style          = border_style_t::Minimal,
                       .use_bold_header       = true,
                       .use_italic_title      = true,
                       .use_gradient_progress = false,
@@ -548,22 +548,22 @@ namespace simbi {
                       .section_spacing       = 1
                     };
 
-                case TableTheme::Modern:
+                case table_theme_t::Modern:
                 default:
                     return {
-                      .header_color          = Color::BrightCyan,
-                      .text_color            = Color::White,
-                      .border_color          = Color::BrightBlue,
-                      .title_color           = Color::BrightBlue,
-                      .accent_color          = Color::BrightCyan,
-                      .info_color            = Color::BrightBlue,
-                      .success_color         = Color::BrightGreen,
-                      .warning_color         = Color::BrightYellow,
-                      .error_color           = Color::BrightRed,
-                      .debug_color           = Color::LightGray,
-                      .progress_color        = Color::BrightBlue,
-                      .progress_bg_color     = Color::DarkGray,
-                      .border_style          = BorderStyle::Modern,
+                      .header_color          = color_t::BrightCyan,
+                      .text_color            = color_t::White,
+                      .border_color          = color_t::BrightBlue,
+                      .title_color           = color_t::BrightBlue,
+                      .accent_color          = color_t::BrightCyan,
+                      .info_color            = color_t::BrightBlue,
+                      .success_color         = color_t::BrightGreen,
+                      .warning_color         = color_t::BrightYellow,
+                      .error_color           = color_t::BrightRed,
+                      .debug_color           = color_t::LightGray,
+                      .progress_color        = color_t::BrightBlue,
+                      .progress_bg_color     = color_t::DarkGray,
+                      .border_style          = border_style_t::Modern,
                       .use_bold_header       = false,
                       .use_italic_title      = false,
                       .use_gradient_progress = false,
@@ -576,27 +576,27 @@ namespace simbi {
         }
 
         // constructors
-        Table::Table() { set_theme(TableTheme::Modern); }
+        table_t::table_t() { set_theme(table_theme_t::Modern); }
 
-        Table::Table(TableTheme theme) { set_theme(theme); }
+        table_t::table_t(table_theme_t theme) { set_theme(theme); }
 
-        Table::Table(BorderStyle style, DisplayMode mode)
+        table_t::table_t(border_style_t style, display_mode_t mode)
         {
             display_mode = mode;
-            set_theme(TableTheme::Modern);
+            set_theme(table_theme_t::Modern);
             theme_config.border_style = style;
             update_border_characters();
         }
 
-        Table::~Table()
+        table_t::~table_t()
         {
             // show cursor if we're in dynamic mode
-            if (display_mode == DisplayMode::Dynamic) {
+            if (display_mode == display_mode_t::Dynamic) {
                 std::cout << "\033[?25h" << std::flush;
             }
         }
 
-        Table::Table(Table&& other) noexcept
+        table_t::table_t(table_t&& other) noexcept
         {
             table_data        = std::move(other.table_data);
             column_alignments = std::move(other.column_alignments);
@@ -637,7 +637,7 @@ namespace simbi {
             center_table_        = other.center_table_;
         }
 
-        Table& Table::operator=(Table&& other) noexcept
+        table_t& table_t::operator=(table_t&& other) noexcept
         {
             if (this != &other) {
                 table_data           = std::move(other.table_data);
@@ -670,7 +670,7 @@ namespace simbi {
             return *this;
         }
 
-        void Table::print_horizontal_border(
+        void table_t::print_horizontal_border(
             std::ostream& os,
             const std::string& char_to_use,
             std::int64_t length
@@ -683,14 +683,14 @@ namespace simbi {
             }
         }
 
-        void Table::print_border_line(
+        void table_t::print_border_line(
             std::ostream& os,
             bool is_top,
             bool is_bottom,
             bool is_header_separator
         ) const
         {
-            if (theme_config.border_style == BorderStyle::None) {
+            if (theme_config.border_style == border_style_t::None) {
                 return;
             }
 
@@ -764,7 +764,7 @@ namespace simbi {
             os << reset_color() << "\n";
         }
 
-        void Table::print_row(
+        void table_t::print_row(
             std::ostream& os,
             const std::vector<std::string>& row,
             bool is_header,
@@ -783,9 +783,9 @@ namespace simbi {
 
             for (size_t i = 0; i < column_widths.size(); ++i) {
                 // select color and styling
-                Color cell_color = is_header ? theme_config.header_color
-                                             : theme_config.text_color;
-                bool use_bold    = is_header && theme_config.use_bold_header;
+                color_t cell_color = is_header ? theme_config.header_color
+                                               : theme_config.text_color;
+                bool use_bold      = is_header && theme_config.use_bold_header;
 
                 // apply styling
                 std::string cell_prefix;
@@ -838,7 +838,7 @@ namespace simbi {
             os << "\n";
         }
 
-        void Table::print_title_section(std::ostream& os) const
+        void table_t::print_title_section(std::ostream& os) const
         {
             if (title.empty() && subtitle.empty()) {
                 return;
@@ -891,7 +891,7 @@ namespace simbi {
             }
         }
 
-        void Table::print_footer_section(std::ostream& os) const
+        void table_t::print_footer_section(std::ostream& os) const
         {
             if (footer.empty()) {
                 return;
@@ -919,7 +919,7 @@ namespace simbi {
             os << footer_text << "\n";
         }
 
-        std::string Table::align_text(
+        std::string table_t::align_text(
             const std::string& text,
             size_t width,
             Alignment align
@@ -950,7 +950,7 @@ namespace simbi {
         }
 
         std::string
-        Table::wrap_text_to_width(const std::string& text, size_t width) const
+        table_t::wrap_text_to_width(const std::string& text, size_t width) const
         {
             if (!wrap_text || text.length() <= width) {
                 return text;
@@ -991,7 +991,7 @@ namespace simbi {
             return result;
         }
 
-        std::string Table::apply_zebra_styling(
+        std::string table_t::apply_zebra_styling(
             const std::string& text,
             size_t row_index,
             bool is_data_row
@@ -1007,19 +1007,19 @@ namespace simbi {
             }
             else {
                 // subtle background color for alternating rows
-                return get_bg_color_code(Color::DarkGray) + text +
+                return get_bg_color_code(color_t::DarkGray) + text +
                        reset_color();
             }
         }
 
-        std::string Table::create_gradient_text(
+        std::string table_t::create_gradient_text(
             const std::string& text,
-            Color start_color,
-            Color /* end_color */
+            color_t start_color,
+            color_t /* end_color */
         ) const
         {
             // simple gradient effect - can be enhanced with truecolor support
-            if (!TerminalCapabilities::supports_256_colors()) {
+            if (!terminal_capabilities_t::supports_256_colors()) {
                 return get_color_code(start_color) + text + reset_color();
             }
 
@@ -1027,7 +1027,7 @@ namespace simbi {
             return get_color_code(start_color) + text + reset_color();
         }
 
-        std::int64_t TerminalCapabilities::get_terminal_height()
+        std::int64_t terminal_capabilities_t::get_terminal_height()
         {
 #ifdef _WIN32
             CONSOLE_SCREEN_BUFFER_INFO csbi;
@@ -1047,52 +1047,55 @@ namespace simbi {
         }
 
         // theme and styling methods
-        void Table::set_theme(TableTheme theme)
+        void table_t::set_theme(table_theme_t theme)
         {
             current_theme = theme;
             theme_config  = get_theme_config(theme);
             update_border_characters();
         }
 
-        void Table::apply_theme(TableTheme theme) { set_theme(theme); }
+        void table_t::apply_theme(table_theme_t theme) { set_theme(theme); }
 
-        void Table::update_border_characters()
+        void table_t::update_border_characters()
         {
             border_chars = get_border_chars(theme_config.border_style);
         }
 
-        void Table::set_border_style(BorderStyle style)
+        void table_t::set_border_style(border_style_t style)
         {
             theme_config.border_style = style;
             update_border_characters();
         }
 
-        void Table::set_display_mode(DisplayMode mode) { display_mode = mode; }
+        void table_t::set_display_mode(display_mode_t mode)
+        {
+            display_mode = mode;
+        }
 
-        void Table::customize_theme(const ThemeConfig& config)
+        void table_t::customize_theme(const theme_config_t& config)
         {
             theme_config = config;
             update_border_characters();
         }
 
         // table metadata methods
-        void Table::set_title(const std::string& table_title)
+        void table_t::set_title(const std::string& table_title)
         {
             title = table_title;
         }
 
-        void Table::set_subtitle(const std::string& table_subtitle)
+        void table_t::set_subtitle(const std::string& table_subtitle)
         {
             subtitle = table_subtitle;
         }
 
-        void Table::set_footer(const std::string& table_footer)
+        void table_t::set_footer(const std::string& table_footer)
         {
             footer = table_footer;
         }
 
         // data manipulation methods
-        void Table::set_header(const std::vector<std::string>& header_row)
+        void table_t::set_header(const std::vector<std::string>& header_row)
         {
             if (table_data.empty() || !has_header) {
                 table_data.insert(table_data.begin(), header_row);
@@ -1110,7 +1113,7 @@ namespace simbi {
             calculate_column_widths();
         }
 
-        void Table::add_row(const std::vector<std::string>& row)
+        void table_t::add_row(const std::vector<std::string>& row)
         {
             table_data.push_back(row);
 
@@ -1122,7 +1125,7 @@ namespace simbi {
             calculate_column_widths();
         }
 
-        void Table::update_row(
+        void table_t::update_row(
             size_t row_index,
             const std::vector<std::string>& new_data
         )
@@ -1141,7 +1144,7 @@ namespace simbi {
             calculate_column_widths();
         }
 
-        void Table::update_cell(
+        void table_t::update_cell(
             size_t row_index,
             size_t col_index,
             const std::string& new_data
@@ -1156,8 +1159,10 @@ namespace simbi {
             calculate_column_widths();
         }
 
-        void
-        Table::insert_row(size_t position, const std::vector<std::string>& row)
+        void table_t::insert_row(
+            size_t position,
+            const std::vector<std::string>& row
+        )
         {
             if (position > table_data.size()) {
                 position = table_data.size();
@@ -1167,7 +1172,7 @@ namespace simbi {
             calculate_column_widths();
         }
 
-        void Table::remove_row(size_t row_index)
+        void table_t::remove_row(size_t row_index)
         {
             if (row_index >= table_data.size()) {
                 return;
@@ -1182,7 +1187,7 @@ namespace simbi {
             calculate_column_widths();
         }
 
-        void Table::clear_rows()
+        void table_t::clear_rows()
         {
             if (has_header && !table_data.empty()) {
                 // keep header but clear data rows
@@ -1199,7 +1204,7 @@ namespace simbi {
             calculate_column_widths();
         }
 
-        void Table::sort_by_column(size_t col_index, bool ascending)
+        void table_t::sort_by_column(size_t col_index, bool ascending)
         {
             if (table_data.empty() || col_index >= column_count()) {
                 return;
@@ -1235,7 +1240,8 @@ namespace simbi {
         }
 
         // column configuration methods
-        void Table::set_column_alignment(size_t col_index, Alignment alignment)
+        void
+        table_t::set_column_alignment(size_t col_index, Alignment alignment)
         {
             if (column_alignments.size() <= col_index) {
                 column_alignments.resize(col_index + 1, Alignment::Left);
@@ -1244,7 +1250,7 @@ namespace simbi {
             column_alignments[col_index] = alignment;
         }
 
-        void Table::set_column_width(size_t col_index, std::int64_t width)
+        void table_t::set_column_width(size_t col_index, std::int64_t width)
         {
             if (column_widths.size() <= col_index) {
                 column_widths.resize(col_index + 1, 0);
@@ -1254,7 +1260,7 @@ namespace simbi {
         }
 
         void
-        Table::set_min_column_width(size_t col_index, std::int64_t min_width)
+        table_t::set_min_column_width(size_t col_index, std::int64_t min_width)
         {
             if (min_column_widths.size() <= col_index) {
                 min_column_widths.resize(col_index + 1, 0);
@@ -1265,7 +1271,7 @@ namespace simbi {
         }
 
         void
-        Table::set_max_column_width(size_t col_index, std::int64_t max_width)
+        table_t::set_max_column_width(size_t col_index, std::int64_t max_width)
         {
             if (max_column_widths.size() <= col_index) {
                 max_column_widths.resize(col_index + 1, 0);
@@ -1275,7 +1281,7 @@ namespace simbi {
             calculate_column_widths();
         }
 
-        void Table::auto_resize_columns(bool enable)
+        void table_t::auto_resize_columns(bool enable)
         {
             auto_resize_columns_ = enable;
             if (enable) {
@@ -1284,14 +1290,14 @@ namespace simbi {
         }
 
         // advanced table features
-        void Table::enable_zebra_striping(bool enable)
+        void table_t::enable_zebra_striping(bool enable)
         {
             zebra_striping = enable;
         }
 
-        void Table::enable_text_wrapping(bool enable) { wrap_text = enable; }
+        void table_t::enable_text_wrapping(bool enable) { wrap_text = enable; }
 
-        void Table::set_max_table_width(std::int64_t width)
+        void table_t::set_max_table_width(std::int64_t width)
         {
             max_table_width = width;
             if (width > 0) {
@@ -1299,20 +1305,20 @@ namespace simbi {
             }
         }
 
-        void Table::center_table(bool enable) { center_table_ = enable; }
+        void table_t::center_table(bool enable) { center_table_ = enable; }
 
         // message board functionality
-        void Table::enable_message_board(bool enable)
+        void table_t::enable_message_board(bool enable)
         {
             show_message_board = enable;
         }
 
-        void Table::set_message_board_title(const std::string& mb_title)
+        void table_t::set_message_board_title(const std::string& mb_title)
         {
             message_board_title = mb_title;
         }
 
-        void Table::set_max_messages(size_t max)
+        void table_t::set_max_messages(size_t max)
         {
             max_messages = max;
 
@@ -1322,14 +1328,17 @@ namespace simbi {
             }
         }
 
-        void Table::enable_timestamps(bool enable) { show_timestamps = enable; }
+        void table_t::enable_timestamps(bool enable)
+        {
+            show_timestamps = enable;
+        }
 
-        void Table::enable_compact_messages(bool enable)
+        void table_t::enable_compact_messages(bool enable)
         {
             compact_messages = enable;
         }
 
-        void Table::post_info(const std::string& message)
+        void table_t::post_info(const std::string& message)
         {
             messages.emplace_back(MessageType::Info, message);
 
@@ -1339,7 +1348,7 @@ namespace simbi {
             }
         }
 
-        void Table::post_success(const std::string& message)
+        void table_t::post_success(const std::string& message)
         {
             messages.emplace_back(MessageType::Success, message);
 
@@ -1348,7 +1357,7 @@ namespace simbi {
             }
         }
 
-        void Table::post_warning(const std::string& message)
+        void table_t::post_warning(const std::string& message)
         {
             messages.emplace_back(MessageType::Warning, message);
 
@@ -1357,7 +1366,7 @@ namespace simbi {
             }
         }
 
-        void Table::post_error(const std::string& message)
+        void table_t::post_error(const std::string& message)
         {
             messages.emplace_back(MessageType::Error, message);
 
@@ -1366,7 +1375,7 @@ namespace simbi {
             }
         }
 
-        void Table::post_debug(const std::string& message)
+        void table_t::post_debug(const std::string& message)
         {
             messages.emplace_back(MessageType::Debug, message);
 
@@ -1375,7 +1384,7 @@ namespace simbi {
             }
         }
 
-        void Table::post_custom(const std::string& message, Color color)
+        void table_t::post_custom(const std::string& message, color_t color)
         {
             messages.emplace_back(MessageType::Info, message, color);
 
@@ -1384,40 +1393,43 @@ namespace simbi {
             }
         }
 
-        void Table::clear_messages() { messages.clear(); }
+        void table_t::clear_messages() { messages.clear(); }
 
         // progress bar functionality
-        void Table::enable_progress(bool enable) { show_progress = enable; }
+        void table_t::enable_progress(bool enable) { show_progress = enable; }
 
-        void Table::set_progress(std::int64_t percent)
+        void table_t::set_progress(std::int64_t percent)
         {
             progress_percent = std::clamp<std::int64_t>(percent, 0, 100);
         }
 
-        void Table::set_progress_style(ProgressStyle style)
+        void table_t::set_progress_style(ProgressStyle style)
         {
             progress_style = style;
         }
 
-        void Table::set_progress_description(const std::string& desc)
+        void table_t::set_progress_description(const std::string& desc)
         {
             progress_description = desc;
         }
 
-        void Table::set_progress_units(const std::string& units)
+        void table_t::set_progress_units(const std::string& units)
         {
             progress_units = units;
         }
 
-        void Table::set_progress_speed(double speed) { progress_speed = speed; }
+        void table_t::set_progress_speed(double speed)
+        {
+            progress_speed = speed;
+        }
 
         void
-        Table::set_estimated_time_remaining(const std::chrono::seconds& time)
+        table_t::set_estimated_time_remaining(const std::chrono::seconds& time)
         {
             estimated_time_remaining = time;
         }
 
-        std::string Table::format_timestamp(
+        std::string table_t::format_timestamp(
             const std::chrono::system_clock::time_point& tp
         ) const
         {
@@ -1428,7 +1440,7 @@ namespace simbi {
             return oss.str();
         }
 
-        void Table::calculate_column_widths()
+        void table_t::calculate_column_widths()
         {
             if (table_data.empty()) {
                 column_widths.clear();
@@ -1475,7 +1487,7 @@ namespace simbi {
             }
         }
 
-        std::string Table::format_timestamp_duration(
+        std::string table_t::format_timestamp_duration(
             const std::chrono::seconds& duration
         ) const
         {
@@ -1494,7 +1506,7 @@ namespace simbi {
         }
 
         // main rendering method
-        void Table::print()
+        void table_t::print()
         {
             std::ostringstream ss;
 
@@ -1502,7 +1514,7 @@ namespace simbi {
             size_t left_padding = 0;
             // if (center_table_) {
             //     size_t terminal_width =
-            //         TerminalCapabilities::get_terminal_width();
+            //         terminal_capabilities_t::get_terminal_width();
             //     size_t table_width = calculate_total_width();
             //     if (terminal_width > table_width) {
             //         left_padding = (terminal_width - table_width) / 2;
@@ -1514,7 +1526,7 @@ namespace simbi {
                 center_table_ ? std::string(left_padding, ' ') : "";
 
             // for dynamic mode, clear screen and move to home
-            if (display_mode == DisplayMode::Dynamic) {
+            if (display_mode == display_mode_t::Dynamic) {
                 ss << "\033[H\033[J";   // home and clear screen
                 ss << "\033[?25l";      // hide cursor
             }
@@ -1583,7 +1595,7 @@ namespace simbi {
             std::cout << ss.str() << std::flush;
         }
 
-        void Table::print_separator(
+        void table_t::print_separator(
             std::ostream& os,
             bool is_top,
             bool is_bottom,
@@ -1591,7 +1603,7 @@ namespace simbi {
             bool at_middle
         ) const
         {
-            if (theme_config.border_style == BorderStyle::None) {
+            if (theme_config.border_style == border_style_t::None) {
                 return;
             }
 
@@ -1650,7 +1662,7 @@ namespace simbi {
             os << reset_color();
         }
 
-        void Table::print_table_row(
+        void table_t::print_table_row(
             std::ostream& os,
             const std::vector<std::string>& row,
             bool is_header
@@ -1665,8 +1677,8 @@ namespace simbi {
                 os << std::string(theme_config.padding, ' ');
 
                 // select color
-                Color cell_color = is_header ? theme_config.header_color
-                                             : theme_config.text_color;
+                color_t cell_color = is_header ? theme_config.header_color
+                                               : theme_config.text_color;
                 os << get_color_code(cell_color);
 
                 // cell content with alignment
@@ -1692,7 +1704,7 @@ namespace simbi {
             os << "\n";
         }
 
-        void Table::print_progress_row(std::ostream& os) const
+        void table_t::print_progress_row(std::ostream& os) const
         {
             if (!show_progress) {
                 return;
@@ -1812,7 +1824,7 @@ namespace simbi {
             os << reset_color();
         }
 
-        void Table::print_message_board_section(std::ostream& os) const
+        void table_t::print_message_board_section(std::ostream& os) const
         {
             if (!show_message_board || messages.empty()) {
                 return;
@@ -1850,7 +1862,7 @@ namespace simbi {
 
             // messages
             for (const auto& msg : messages) {
-                Color msg_color;
+                color_t msg_color;
                 switch (msg.type) {
                     case MessageType::Info:
                         msg_color = theme_config.info_color;
@@ -1914,31 +1926,31 @@ namespace simbi {
             os << reset_color();
         }
 
-        void Table::refresh()
+        void table_t::refresh()
         {
             // for dynamic tables, just call print which handles screen
             // clearing
             print();
         }
 
-        std::string Table::to_string() const
+        std::string table_t::to_string() const
         {
             std::ostringstream ss;
 
             // create a temporary copy to avoid modifying state
-            auto temp_display_mode                 = display_mode;
-            const_cast<Table*>(this)->display_mode = DisplayMode::Static;
+            auto temp_display_mode                   = display_mode;
+            const_cast<table_t*>(this)->display_mode = display_mode_t::Static;
 
             // render to string stream
-            const_cast<Table*>(this)->print();
+            const_cast<table_t*>(this)->print();
 
             // restore original display mode
-            const_cast<Table*>(this)->display_mode = temp_display_mode;
+            const_cast<table_t*>(this)->display_mode = temp_display_mode;
 
             return ss.str();
         }
 
-        void Table::print_to_file(const std::string& filename) const
+        void table_t::print_to_file(const std::string& filename) const
         {
             std::ofstream file(filename);
             if (!file.is_open()) {
@@ -1946,8 +1958,8 @@ namespace simbi {
             }
 
             // save the table content without colors to file
-            auto temp_display_mode                 = display_mode;
-            const_cast<Table*>(this)->display_mode = DisplayMode::Static;
+            auto temp_display_mode                   = display_mode;
+            const_cast<table_t*>(this)->display_mode = display_mode_t::Static;
 
             // temporarily disable colors for file output
             // (this could be enhanced to strip ANSI codes)
@@ -1955,16 +1967,16 @@ namespace simbi {
             std::streambuf* orig = std::cout.rdbuf();
             std::cout.rdbuf(file.rdbuf());
 
-            const_cast<Table*>(this)->print();
+            const_cast<table_t*>(this)->print();
 
             std::cout.rdbuf(orig);
-            const_cast<Table*>(this)->display_mode = temp_display_mode;
+            const_cast<table_t*>(this)->display_mode = temp_display_mode;
 
             file.close();
         }
 
         // utility methods
-        size_t Table::calculate_total_width() const
+        size_t table_t::calculate_total_width() const
         {
             if (column_widths.empty()) {
                 return 0;
@@ -1981,7 +1993,7 @@ namespace simbi {
             return total;
         }
 
-        void Table::set_minimum_width(size_t width)
+        void table_t::set_minimum_width(size_t width)
         {
             size_t current_width = calculate_total_width();
             if (width <= current_width) {
@@ -2003,9 +2015,9 @@ namespace simbi {
             }
         }
 
-        size_t Table::row_count() const { return table_data.size(); }
+        size_t table_t::row_count() const { return table_data.size(); }
 
-        size_t Table::column_count() const
+        size_t table_t::column_count() const
         {
             if (table_data.empty()) {
                 return 0;
@@ -2019,17 +2031,17 @@ namespace simbi {
             return max_columns;
         }
 
-        bool Table::is_empty() const { return table_data.empty(); }
+        bool table_t::is_empty() const { return table_data.empty(); }
 
-        void Table::reserve_rows(size_t count) { table_data.reserve(count); }
+        void table_t::reserve_rows(size_t count) { table_data.reserve(count); }
 
         // factory methods for beautiful themed tables
-        Table TableFactory::create_cyberpunk_table(
+        table_t table_factory_t::create_cyberpunk_table(
             const std::string& title,
-            DisplayMode display_mode
+            display_mode_t display_mode
         )
         {
-            Table table(TableTheme::Cyberpunk);
+            table_t table(table_theme_t::Cyberpunk);
             if (!title.empty()) {
                 table.set_title(title);
             }
@@ -2041,98 +2053,98 @@ namespace simbi {
             return table;
         }
 
-        Table TableFactory::create_elegant_table(
+        table_t table_factory_t::create_elegant_table(
             const std::string& title,
-            DisplayMode display_mode,
-            ProgressBar progress_bar
+            display_mode_t display_mode,
+            progress_bar_t progress_bar
         )
         {
-            Table table(TableTheme::Elegant);
+            table_t table(table_theme_t::Elegant);
             if (!title.empty()) {
                 table.set_title(title);
             }
             table.set_display_mode(display_mode);
             table.enable_message_board(true);
-            table.enable_progress(progress_bar != ProgressBar::Disabled);
+            table.enable_progress(progress_bar != progress_bar_t::Disabled);
             table.set_message_board_title("Simulation Messages");
             table.set_progress_style(ProgressStyle::Gradient);
             return table;
         }
 
-        Table TableFactory::create_matrix_table(
+        table_t table_factory_t::create_matrix_table(
             const std::string& title,
-            DisplayMode display_mode,
-            ProgressBar progress_bar
+            display_mode_t display_mode,
+            progress_bar_t progress_bar
         )
         {
-            Table table(TableTheme::Matrix);
+            table_t table(table_theme_t::Matrix);
             if (!title.empty()) {
                 table.set_title(title);
             }
             table.set_display_mode(display_mode);
             table.enable_message_board(true);
-            table.enable_progress(progress_bar != ProgressBar::Disabled);
+            table.enable_progress(progress_bar != progress_bar_t::Disabled);
             table.set_message_board_title("Simulation Messages");
             table.set_progress_style(ProgressStyle::Gradient);
             return table;
         }
 
-        Table TableFactory::create_ocean_table(
+        table_t table_factory_t::create_ocean_table(
             const std::string& title,
-            DisplayMode display_mode,
-            ProgressBar progress_bar
+            display_mode_t display_mode,
+            progress_bar_t progress_bar
         )
         {
-            Table table(TableTheme::Ocean);
+            table_t table(table_theme_t::Ocean);
             if (!title.empty()) {
                 table.set_title(title);
             }
             table.set_display_mode(display_mode);
             table.enable_message_board(true);
-            table.enable_progress(progress_bar != ProgressBar::Disabled);
+            table.enable_progress(progress_bar != progress_bar_t::Disabled);
             table.set_message_board_title("Simulation Messages");
             table.set_progress_style(ProgressStyle::Gradient);
             return table;
         }
 
-        Table TableFactory::create_sunset_table(
+        table_t table_factory_t::create_sunset_table(
             const std::string& title,
-            DisplayMode display_mode,
-            ProgressBar progress_bar
+            display_mode_t display_mode,
+            progress_bar_t progress_bar
         )
         {
-            Table table(TableTheme::Sunset);
+            table_t table(table_theme_t::Sunset);
             if (!title.empty()) {
                 table.set_title(title);
             }
             table.set_display_mode(display_mode);
             table.enable_message_board(true);
-            table.enable_progress(progress_bar != ProgressBar::Disabled);
+            table.enable_progress(progress_bar != progress_bar_t::Disabled);
             table.set_message_board_title("Simulation Messages");
             table.set_progress_style(ProgressStyle::Gradient);
             return table;
         }
 
-        Table TableFactory::create_minimal_table(
+        table_t table_factory_t::create_minimal_table(
             const std::string& title,
-            DisplayMode display_mode,
-            ProgressBar progress_bar
+            display_mode_t display_mode,
+            progress_bar_t progress_bar
         )
         {
-            Table table(TableTheme::Monochrome);
+            table_t table(table_theme_t::Monochrome);
             if (!title.empty()) {
                 table.set_title(title);
             }
             table.set_display_mode(display_mode);
             table.enable_message_board(true);
-            table.enable_progress(progress_bar != ProgressBar::Disabled);
+            table.enable_progress(progress_bar != progress_bar_t::Disabled);
             table.set_message_board_title("Simulation Messages");
             table.set_progress_style(ProgressStyle::Bar);
             return table;
         }
 
         // specialized tables for common use cases
-        Table TableFactory::create_benchmark_table()
+        table_t table_factory_t::create_benchmark_table()
         {
             auto table = create_cyberpunk_table("Simulation Benchmarks");
             table.enable_progress(true);
@@ -2142,7 +2154,7 @@ namespace simbi {
             return table;
         }
 
-        Table TableFactory::create_system_info_table()
+        table_t table_factory_t::create_system_info_table()
         {
             auto table = create_elegant_table();
             table.set_column_alignment(0, Alignment::Left);
@@ -2150,7 +2162,7 @@ namespace simbi {
             return table;
         }
 
-        Table TableFactory::create_log_table()
+        table_t table_factory_t::create_log_table()
         {
             auto table = create_matrix_table("System Log");
             table.enable_message_board(true);
@@ -2158,7 +2170,7 @@ namespace simbi {
             return table;
         }
 
-        Table TableFactory::create_status_table()
+        table_t table_factory_t::create_status_table()
         {
             auto table = create_ocean_table("Status Monitor");
             table.enable_progress(true);
@@ -2167,7 +2179,7 @@ namespace simbi {
             return table;
         }
 
-        Table TableFactory::create_data_table()
+        table_t table_factory_t::create_data_table()
         {
             auto table = create_minimal_table();
             table.enable_zebra_striping(true);

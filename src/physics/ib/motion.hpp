@@ -11,11 +11,11 @@ namespace simbi::body {
     template <typename SimState>
     void evolve_bodies(SimState& state)
     {
-        if constexpr (SimState::dimensions < 2) {
+        if constexpr (SimState::rank < 2) {
             return;
         }
         else {
-            constexpr auto Dims = SimState::dimensions;
+            constexpr auto Rank = SimState::rank;
             auto& bodies        = state.bodies();
             if (bodies.name() != "binary_system") {
                 return;
@@ -36,7 +36,7 @@ namespace simbi::body {
             const auto dt            = state.metadata().global_dt;
 
             // the new collection to hold updated bodies
-            auto new_coll = make_body_collection<Dims>();
+            auto new_coll = make_body_collection<Rank>();
 
             if (bodies.binary_params_) {
                 new_coll = std::move(new_coll).with_system_config(
@@ -51,7 +51,7 @@ namespace simbi::body {
             auto updated_body_variants =
                 bodies |
                 collection_ops::map_bodies(
-                    [omega, dt](const auto& body) -> body_variant_t<Dims> {
+                    [omega, dt](const auto& body) -> body_variant_t<Rank> {
                         auto pos = vecops::rotate(body.position, omega * dt);
                         auto vel = vecops::rotate(body.velocity, omega * dt);
                         return at_position(with_velocity(body, vel), pos);

@@ -1,17 +1,19 @@
-#ifndef MHD_LOGIC_HPP
-#define MHD_LOGIC_HPP
+#ifndef MHD_NLOGIC_HPP
+#define MHD_NLOGIC_HPP
 
 #include "compat.hpp"
 #include "compute/computation.hpp"
 #include "contact.hpp"
 #include "containers/vector.hpp"
 #include "ct_geom.hpp"
-#include "domain/domain.hpp"
 #include "functional/fp.hpp"
+#include "geometry/metrics.hpp"
+#include "grid/domain.hpp"
 #include "physics/em/electromagnetism.hpp"
 #include "utility/enums.hpp"
 
 #include <cstdint>
+#include <type_traits>
 
 namespace simbi::em {
     using namespace simbi::unit_vectors;
@@ -22,9 +24,6 @@ namespace simbi::em {
 
     template <std::uint8_t L, std::uint8_t M, std::uint8_t N>
     struct coord_permutation_t {
-        // L = horizontal axis index in array coordinates [K,J,I]
-        // M = vertical axis index in array coordinates
-        // N = normal axis index in array coordinates
         static constexpr std::uint8_t horizontal_axis = L;
         static constexpr std::uint8_t vertical_axis   = M;
         static constexpr std::uint8_t normal_axis     = N;
@@ -50,7 +49,6 @@ namespace simbi::em {
         static constexpr auto e_field_component() { return N; }
     };
 
-    // the three fundamental permutations
     using IJ_permutation = coord_permutation_t<2, 1, 0>;
     using JK_permutation = coord_permutation_t<1, 0, 2>;
     using IK_permutation = coord_permutation_t<2, 0, 1>;
@@ -109,33 +107,25 @@ namespace simbi::em {
     template <magnetic_comp_t MagComp, typename Permutation>
     constexpr auto gen_edge_coords(const iarray<3>& face_coord)
     {
-        // determine which index to VARY based on permutation
-        // (from the 2 non-fixed indices, pick one based on permutation)
         constexpr auto vary_index = Permutation::vary_index(MagComp);
         auto face_doubled         = to_doubled_coord(face_coord);
 
-        // take the face-centered index and adjust it to the semantic
-        // face coordinate in the doubled system
         constexpr auto face_idx = static_cast<uint8_t>(MagComp);
-        constexpr auto half = 1;   // conceptual half-step for normal direction
+        constexpr auto half     = 1;
         face_doubled[face_idx] -= half;
 
         auto make_edge = [&](int offset) {
             auto edge = face_doubled;
-            edge[vary_index] += offset;   // vary only in this direction
+            edge[vary_index] += offset;
             return edge;
         };
 
-        return vector_t<iarray<3>, 2>{
-          make_edge(-1),   // negative direction
-          make_edge(+1)    // positive direction
-        };
+        return vector_t<iarray<3>, 2>{make_edge(-1), make_edge(+1)};
     }
 
     template <typename Permutation>
     constexpr auto flux_stencil(const iarray<3>& edge_doubled_coord)
     {
-        // for any permutation, flux stencil is \pm 1 in the tangent directions
         auto make_flux_coord = [&](std::int64_t h_offset,
                                    std::int64_t v_offset) {
             auto coord = edge_doubled_coord;
@@ -143,13 +133,12 @@ namespace simbi::em {
             coord[Permutation::vertical_axis] += v_offset;
             return to_array_index_coord(coord);
         };
-        constexpr auto half = 1;   // conceptual half-step for fluxes
-        // standard N/S/E/W pattern in permuted coordinates
+        constexpr auto half = 1;
         return vector_t{
-          make_flux_coord(half, +1),   // North (positive vertical)
-          make_flux_coord(half, -1),   // South (negative vertical)
-          make_flux_coord(+1, half),   // East (positive horizontal)
-          make_flux_coord(-1, half)    // West (negative horizontal)
+          make_flux_coord(half, +1),
+          make_flux_coord(half, -1),
+          make_flux_coord(+1, half),
+          make_flux_coord(-1, half)
         };
     }
 
@@ -165,10 +154,10 @@ namespace simbi::em {
         };
 
         return vector_t{
-          make_prim_coord(+1, +1),   // ne
-          make_prim_coord(-1, +1),   // nw
-          make_prim_coord(+1, -1),   // se
-          make_prim_coord(-1, -1)    // sw
+          make_prim_coord(+1, +1),
+          make_prim_coord(-1, +1),
+          make_prim_coord(+1, -1),
+          make_prim_coord(-1, -1)
         };
     }
 
@@ -181,14 +170,14 @@ namespace simbi::em {
     face_efields(const FluxField& flux, const vector_t<iarray<3>, 4>& coords)
     {
         auto [h_flux_idx, v_flux_idx] = Permutation::flux_indices();
-        constexpr auto dims           = FluxField::dimensions;
+        constexpr auto dims           = FluxField::rank;
         constexpr auto nhat = ehat<dims>(Permutation::e_field_component());
 
         return vector_t{
-          flux[h_flux_idx](coords[0]).mag[index(nhat)],   // north
-          flux[h_flux_idx](coords[1]).mag[index(nhat)],   // south
-          flux[v_flux_idx](coords[2]).mag[index(nhat)],   // east
-          flux[v_flux_idx](coords[3]).mag[index(nhat)]    // west
+          flux[h_flux_idx](coords[0]).mag[index(nhat)],
+          flux[h_flux_idx](coords[1]).mag[index(nhat)],
+          flux[v_flux_idx](coords[2]).mag[index(nhat)],
+          flux[v_flux_idx](coords[3]).mag[index(nhat)]
         };
     }
 
@@ -197,10 +186,10 @@ namespace simbi::em {
     {
         auto [h_flux_idx, v_flux_idx] = Permutation::flux_indices();
         return vector_t<real, 4>{
-          flux[h_flux_idx](coords[0]).den,   // north
-          flux[h_flux_idx](coords[1]).den,   // south
-          flux[v_flux_idx](coords[2]).den,   // east
-          flux[v_flux_idx](coords[3]).den    // west
+          flux[h_flux_idx](coords[0]).den,
+          flux[h_flux_idx](coords[1]).den,
+          flux[v_flux_idx](coords[2]).den,
+          flux[v_flux_idx](coords[3]).den
         };
     }
 
@@ -208,30 +197,30 @@ namespace simbi::em {
     auto
     center_efields(const PrimField& prim, const vector_t<iarray<3>, 4>& coords)
     {
-        constexpr auto dims = PrimField::dimensions;
+        constexpr auto dims = PrimField::rank;
         constexpr auto nhat = ehat<dims>(Permutation::e_field_component());
 
         return vector_t{
-          em::electric_field(prim(coords[0]))[index(nhat)],   // ne
-          em::electric_field(prim(coords[1]))[index(nhat)],   // nw
-          em::electric_field(prim(coords[2]))[index(nhat)],   // se
-          em::electric_field(prim(coords[3]))[index(nhat)]    // sw
+          em::electric_field(prim(coords[0]))[index(nhat)],
+          em::electric_field(prim(coords[1]))[index(nhat)],
+          em::electric_field(prim(coords[2]))[index(nhat)],
+          em::electric_field(prim(coords[3]))[index(nhat)]
         };
     }
 
     // ========================================================================
-    // CT MAGNETIC UPDATE
+    // CT MAGNETIC UPDATE (geometry-based)
     // ========================================================================
     template <
         magnetic_comp_t MagComp,
         typename FluxField,
         typename PrimField,
-        typename MeshConfig>
+        typename Geometry>
     struct ct_magnetic_update_op_t {
         FluxField fluxes;
         PrimField prims;
         real dt;
-        MeshConfig mesh;
+        Geometry geometry;
 
         DEV auto operator()(auto face_coord) const
         {
@@ -259,7 +248,7 @@ namespace simbi::em {
                        fp::collect<vector_t<real, 2>>;
             });
 
-            real curl = discrete_curl<MagComp>(emfs, face_coord, mesh);
+            real curl = discrete_curl<MagComp>(emfs, face_coord, geometry);
             return -dt * curl;   // Faraday's law
         }
     };
@@ -269,63 +258,74 @@ namespace simbi::em {
         auto&& fluxes,
         auto&& prims,
         real dt,
-        auto&& mesh
+        auto&& geometry
     )
     {
         return ct_magnetic_update_op_t<
             MagComp,
             std::decay_t<decltype(fluxes)>,
             std::decay_t<decltype(prims)>,
-            std::decay_t<decltype(mesh)>>{
+            std::decay_t<decltype(geometry)>>{
           std::forward<decltype(fluxes)>(fluxes),
           std::forward<decltype(prims)>(prims),
           dt,
-          std::forward<decltype(mesh)>(mesh)
+          std::forward<decltype(geometry)>(geometry)
         };
     }
 
-    template <magnetic_comp_t MagComp, typename HydroState, typename MeshConfig>
-    auto
-    ct_magnetic_update(const HydroState& state, const MeshConfig& mesh, real dt)
+    template <
+        magnetic_comp_t MagComp,
+        typename HydroState,
+        typename Geometry,
+        typename Domain>
+    auto ct_magnetic_update(
+        const HydroState& state,
+        const Geometry& geometry,
+        const Domain& face_domain,
+        real dt
+    )
     {
         constexpr auto comp = static_cast<std::uint64_t>(MagComp);
         const auto fluxes   = vector_t{
-          state.flux[0][mesh.face_domain[0]],
-          state.flux[1][mesh.face_domain[1]],
-          state.flux[2][mesh.face_domain[2]]
+          state.flux[0][face_domain[0]],
+          state.flux[1][face_domain[1]],
+          state.flux[2][face_domain[2]]
         };
+        const auto prim_domain = state.prim.domain();
 
-        return computation_t{
+        return compute::computation_t{
           make_ct_magnetic_update_op<MagComp>(
               fluxes,
-              state.prim[mesh.domain],
+              state.prim[prim_domain],
               dt,
-              mesh
+              geometry
           ),
-          make_domain(mesh.face_domain[comp].shape())
+          grid::extents(face_domain[comp].shape())
         };
     }
 
     // ========================================================================
-    // INTERPOLATION FIELDS
+    // INTERPOLATION FIELDS (geometry-based)
     // ========================================================================
-    template <typename Bfield, typename MeshConfig>
+    template <typename Bfield, typename Geometry>
     struct interpolate_magnetic_op_t {
         Bfield b1;
         Bfield b2;
         Bfield b3;
-        const MeshConfig& mesh;
+        Geometry geometry;
 
         DEV auto get_face_avg(const auto& bface, auto cminus, int dir) const
         {
             const auto cplus = cminus + array_offset<3>(dir);
-            if constexpr (MeshConfig::geometry == Geometry::CARTESIAN) {
+
+            using metric_t = typename Geometry::metric_type;
+            if constexpr (geometry::is_cartesian_c<metric_t>) {
                 return 0.5 * (bface(cminus) + bface(cplus));
             }
             else {
                 // volume-average for non-Cartesian geometries
-                auto al = mesh::face_area(cminus, dir, Dir::W, mesh);
-                auto ar = mesh::face_area(cplus, dir, Dir::E, mesh);
+                auto al = geometry.face_area(cminus, dir);
+                auto ar = geometry.face_area(cplus, dir);
                 return (bface(cminus) * al + bface(cplus) * ar) / (al + ar);
             }
         }
@@ -333,91 +333,178 @@ namespace simbi::em {
         DEV auto operator()(auto coord) const
         {
             return vector_t<real, 3>{
-              get_face_avg(b1, coord, 2),   // x1-component
-              get_face_avg(b2, coord, 1),   // x2-component
-              get_face_avg(b3, coord, 0)    // x3-component
+              get_face_avg(b1, coord, 2),
+              get_face_avg(b2, coord, 1),
+              get_face_avg(b3, coord, 0)
             };
         }
     };
 
-    template <typename BField, typename MeshConfig>
+    template <
+        typename BField,
+        typename Geometry,
+        typename Domain,
+        typename FaceDomains>
     auto interpolate_face_to_cell_magnetic(
         const BField& bfield,
-        const MeshConfig& mesh
+        const Geometry& geometry,
+        const FaceDomains& face_domains,
+        const Domain& cell_domain
     )
     {
-        return computation_t{
-          interpolate_magnetic_op_t{
-            bfield[2][mesh.face_domain[2]],
-            bfield[1][mesh.face_domain[1]],
-            bfield[0][mesh.face_domain[0]],
-            mesh
+        return compute::computation_t{
+          interpolate_magnetic_op_t<
+              std::decay_t<decltype(bfield[2][face_domains[2]])>,
+              Geometry>{
+            bfield[2][face_domains[2]],
+            bfield[1][face_domains[1]],
+            bfield[0][face_domains[0]],
+            geometry
           },
-          make_domain(mesh.domain.shape())
+          grid::extents(cell_domain.shape())
         };
     }
 
     // ========================================================================
-    // HIGH-LEVEL INTERFACE
+    // HIGH-LEVEL INTERFACE (geometry-based)
     // ========================================================================
-    template <typename ConsField, typename BField, typename MeshConfig>
+    template <
+        typename ConsField,
+        typename BField,
+        typename Geometry,
+        typename Domain,
+        typename FaceDomains,
+        typename Executor>
     void update_energy_density(
+        Executor& exec,
         ConsField& cons,
         const BField& bfields,
-        const MeshConfig& mesh
+        const Geometry& geometry,
+        const FaceDomains& face_domains,
+        const Domain& cell_domain
     )
     {
-        auto bavg = interpolate_face_to_cell_magnetic(bfields, mesh);
-        auto u_p  = cons[mesh.domain];
+        auto bavg = interpolate_face_to_cell_magnetic(
+            bfields,
+            geometry,
+            face_domains,
+            cell_domain
+        );
+        auto u_p = cons[cell_domain];
 
-        u_p = u_p.enum_map([bavg](auto coord, auto u) {
-            const auto b_interp = bavg(coord);
-            const auto bmean    = u.mag;
-            const auto old_emag = 0.5 * vecops::dot(bmean, bmean);
-            const auto new_emag = 0.5 * vecops::dot(b_interp, b_interp);
-            u.nrg += (new_emag - old_emag);
-            return u;
-        });
+        u_p = u_p.enum_map(
+                     [bavg](auto coord, auto u) {
+                         const auto b_interp = bavg(coord);
+                         const auto bmean    = u.mag;
+                         const auto old_emag = 0.5 * vecops::dot(bmean, bmean);
+                         const auto new_emag =
+                             0.5 * vecops::dot(b_interp, b_interp);
+                         u.nrg += (new_emag - old_emag);
+                         return u;
+                     }
+        ).with(exec);
     }
 
-    template <typename HydroState, typename MeshConfig>
-    void interpolate_magnetic_fields(HydroState& state, const MeshConfig& mesh)
-    {
-        auto bavg = interpolate_face_to_cell_magnetic(state.bfield, mesh);
-        auto u_p  = state.cons[mesh.domain];
-
-        u_p = u_p.enum_map([bavg](auto coord, auto u) {
-            // update magnetic field in the conservative state
-            u.mag = bavg(coord);
-            return u;
-        });
-    }
-
-    template <magnetic_comp_t MagComp, typename HydroState, typename MeshConfig>
-    void update_magnetic_component(
+    template <
+        typename Executor,
+        typename HydroState,
+        typename Geometry,
+        typename Domain,
+        typename FaceDomains>
+    void interpolate_magnetic_fields(
+        Executor& exec,
         HydroState& state,
-        const MeshConfig& mesh,
+        const Geometry& geometry,
+        const FaceDomains& face_domains,
+        const Domain& cell_domain
+    )
+    {
+        auto bavg = interpolate_face_to_cell_magnetic(
+            state.bfield,
+            geometry,
+            face_domains,
+            cell_domain
+        );
+        auto u_p = state.cons[cell_domain];
+
+        u_p = u_p.enum_map(
+                     [bavg](auto coord, auto u) {
+                         u.mag = bavg(coord);
+                         return u;
+                     }
+        ).with(exec);
+    }
+
+    template <
+        magnetic_comp_t MagComp,
+        typename HydroState,
+        typename Geometry,
+        typename Domain,
+        typename Executor>
+    void update_magnetic_component(
+        Executor& exec,
+        HydroState& state,
+        const Geometry& geometry,
+        const Domain& face_domain,
         real dt
     )
     {
         constexpr auto comp = static_cast<std::uint64_t>(MagComp);
-        auto db             = ct_magnetic_update<MagComp>(state, mesh, dt);
-        auto bfield         = state.bfield[comp][mesh.face_domain[comp]];
-        bfield              = bfield.enum_map([db](auto coord, auto b_old) {
-            return b_old + db(coord);
-        });
+        auto db = ct_magnetic_update<MagComp>(state, geometry, face_domain, dt);
+        auto bfield = state.bfield[comp][face_domain[comp]];
+
+        bfield = bfield
+                     .enum_map([db](auto coord, auto b_old) {
+                         return b_old + db(coord);
+                     })
+                     .with(exec);
     }
 
-    template <typename HydroState, typename MeshConfig>
-    void
-    update_magnetic_fields(HydroState& state, const MeshConfig& mesh, real dt)
+    template <
+        typename HydroState,
+        typename Geometry,
+        typename Domain,
+        typename FaceDomains,
+        typename Executor>
+    void update_magnetic_fields(
+        Executor& exec,
+        HydroState& state,
+        const Geometry& geometry,
+        const FaceDomains& face_domains,
+        const Domain& cell_domain,
+        real dt
+    )
     {
-        update_magnetic_component<magnetic_comp_t::I>(state, mesh, dt);
-        update_magnetic_component<magnetic_comp_t::J>(state, mesh, dt);
-        update_magnetic_component<magnetic_comp_t::K>(state, mesh, dt);
-        interpolate_magnetic_fields(state, mesh);
+        update_magnetic_component<magnetic_comp_t::I>(
+            exec,
+            state,
+            geometry,
+            face_domains,
+            dt
+        );
+        update_magnetic_component<magnetic_comp_t::J>(
+            exec,
+            state,
+            geometry,
+            face_domains,
+            dt
+        );
+        update_magnetic_component<magnetic_comp_t::K>(
+            exec,
+            state,
+            geometry,
+            face_domains,
+            dt
+        );
+        interpolate_magnetic_fields(
+            exec,
+            state,
+            geometry,
+            face_domains,
+            cell_domain
+        );
     }
 
 }   // namespace simbi::em
 
-#endif   // MHD_LOGIC_HPP
+#endif   // MHD_NLOGIC_HPP

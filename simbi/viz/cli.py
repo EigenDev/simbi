@@ -223,10 +223,16 @@ def setup_parser(parser: argparse.ArgumentParser) -> None:
         help="Use log scale",
     )
     parser.add_argument(
-        "--semilogx", action="store_true", help="Log scale for x-axis"
+        "--xscale",
+        default="linear",
+        help="scale for x-axis",
+        choices=["linear", "log", "symlog", "asinh"],
     )
     parser.add_argument(
-        "--semilogy", action="store_true", help="Log scale for y-axis"
+        "--yscale",
+        default="linear",
+        help="scale for y-axis",
+        choices=["linear", "log", "symlog", "asinh"],
     )
     parser.add_argument(
         "--cmap", nargs="+", help="Colormap(s) to use", default=["viridis"]

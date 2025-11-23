@@ -12,7 +12,7 @@
 #include <vector>
 
 #if GPU_ENABLED
-#include "hetero/adapter.hpp"
+#include "het/adapter.hpp"
 real gpu_theoretical_bw = 1.0;
 #endif
 
@@ -357,7 +357,8 @@ namespace simbi {
 
             // CPU information table
             {
-                auto cpu_table = io::TableFactory::create_system_info_table();
+                auto cpu_table =
+                    io::table_factory_t::create_system_info_table();
                 cpu_table.set_title("CPU & System Information");
                 cpu_table.center_table(true);
 
@@ -429,7 +430,7 @@ namespace simbi {
             {
 
                 auto memory_table =
-                    io::TableFactory::create_system_info_table();
+                    io::table_factory_t::create_system_info_table();
                 memory_table.set_title("Memory Information");
                 memory_table.center_table(true);
 
@@ -507,7 +508,8 @@ namespace simbi {
             // GPU information table
             {
 
-                auto gpu_table = io::TableFactory::create_system_info_table();
+                auto gpu_table =
+                    io::table_factory_t::create_system_info_table();
                 gpu_table.set_title("GPU Information");
 
                 auto dev_count = hetero::device::get_device_count();

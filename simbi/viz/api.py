@@ -200,13 +200,13 @@ def plot_coordinate_profile(
         raise ValueError("No coordinate profiles were generated.")
 
     # Prepare the figure
-    figure = prepare_figure(config, len(files), projection="cartesian")
+    figure = prepare_figure(config, len(files), projection="cartesian", nlvls=4)
     # Dispatch components
     for field_data in plot_data.fields:
         props = CoordinateProfileProps(
             label=field_data.name,
-            x_scale="log" if kwargs["semilogx"] else "linear",
-            y_scale="log" if kwargs["semilogy"] else "linear",
+            x_scale=kwargs["xscale"],
+            y_scale=kwargs["yscale"],
             normalization=kwargs["norm"][0],
             rend=kwargs.get("rend", 1),
             rbeg=kwargs.get("rbeg", 0.2),

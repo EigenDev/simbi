@@ -217,12 +217,12 @@ namespace simbi::hydro {
     proper_velocity(const primitive_t& prim, std::size_t comp)
     {
         if (comp == 2) {
-            if constexpr (primitive_t::dimensions < 2) {
+            if constexpr (primitive_t::rank < 2) {
                 return 0.0;   // no y-velocity in 1D
             }
         }
         if (comp == 3) {
-            if constexpr (primitive_t::dimensions < 3) {
+            if constexpr (primitive_t::rank < 3) {
                 return 0.0;   // no z-velocity in 2D or 1D
             }
         }
@@ -272,7 +272,7 @@ namespace simbi::hydro {
     template <is_hydro_primitive_c primitive_t>
     DEV constexpr auto to_flux(
         const primitive_t& prim,
-        const unit_vector_t<primitive_t::dimensions>& nhat,
+        const unit_vector_t<primitive_t::rank>& nhat,
         real gamma
     )
     {

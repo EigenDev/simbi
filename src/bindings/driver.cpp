@@ -2,8 +2,9 @@
 #include "compat.hpp"
 #include "config_converter.hpp"
 #include "evolver.hpp"
-#include "utility/init_conditions.hpp"
 
+#include <cassert>
+#include <cstdlib>
 #include <pybind11/cast.h>
 #include <pybind11/functional.h>
 #include <pybind11/gil.h>
@@ -11,6 +12,7 @@
 #include <pybind11/pybind11.h>
 #include <pybind11/pytypes.h>
 #include <pybind11/stl.h>
+#include <string>
 
 namespace simbi::driver {
     void run_simulation(
@@ -21,9 +23,20 @@ namespace simbi::driver {
         py::function adot_func
     )
     {
+        // read runtime hints from environment variable
+        bool omp_flag_set = []() {
+            if (const char* env_p = std::getenv("USE_OMP")) {
+                std::string val(env_p);
+                if (val == "1" || val == "true" || val == "TRUE") {
+                    return true;
+                }
+            }
+            return false;
+        }();
+        simbi::global::use_omp = omp_flag_set;
+
         // convert Python dict to config_dict_t
         auto config_dict = dict_to_config(sim_info);
-        auto init_cond   = initial_conditions_t::create(config_dict);
 
         // create C++ function wrappers for callbacks
         auto scale_factor = [a_func](real t) -> real {
@@ -38,9 +51,9 @@ namespace simbi::driver {
 
         // dispatch to appropriate simulation
         hydrostate::dispatch_simulation(
+            config_dict,
             prim_gen,
             staggered_bfields,
-            init_cond,
             scale_factor,
             scale_factor_derivative
         );

@@ -81,9 +81,6 @@ class CoordinateProfileComponent(Component[CoordinateProfileProps, FieldData]):
                 r_bins[good_bins],
                 values[good_bins] / norm,
                 label=field_str,
-                color=self.props.color,
-                linestyle=self.props.linestyle,
-                linewidth=self.props.linewidth,
             )[0]
         else:
             self._main_line.set_data(
@@ -101,12 +98,12 @@ class CoordinateProfileComponent(Component[CoordinateProfileProps, FieldData]):
         self.ax.set_yscale(self.props.y_scale)
         field_base_name, field_str = stripped_field_name(field_name)
 
-        self.ax.set_xlabel("$r/r_0$")
-        self.ax.set_ylabel(field_str)
+        self.ax.set_xlabel("$r/a$")
+        # self.ax.set_ylabel(field_str)
 
         # Add reference lines
         if self.props.show_reference_lines:
-            self.ax.axvline(1.0, color="gray", linestyle="--", linewidth=0.5)
+            # self.ax.axvline(50.0, color="gray", linestyle="--", linewidth=0.5)
             # Add power-law reference for density
             if field_base_name == "rho":
                 good_bins = ~np.isnan(values)
@@ -114,17 +111,17 @@ class CoordinateProfileComponent(Component[CoordinateProfileProps, FieldData]):
                 val_ref = values[good_bins]
 
                 # Find a good anchor point for the reference line
-                ref_beg_idx = np.argmax(r_ref > self.props.rbeg)
-                ref_end_idx = np.argmax(r_ref > self.props.rend)
+                ref_beg_idx = np.argmax(r_ref > 2)
+                ref_end_idx = np.argmax(r_ref > 30)
                 if ref_beg_idx > 0:
                     norm = val_ref[ref_beg_idx] / (r_ref[ref_beg_idx] ** (-1.5))
                     ref_vals = norm * (r_ref ** (-1.5))
 
                     ref_line = self.ax.plot(
-                        r_ref[:ref_end_idx],
-                        ref_vals[:ref_end_idx] * 1.2,
+                        r_ref[ref_beg_idx:ref_end_idx],
+                        ref_vals[ref_beg_idx:ref_end_idx] * 1.5,
                         linestyle="--",
-                        color="black",
+                        color="red",
                         label=r"$r^{-3/2}$",
                     )[0]
                     self._ref_lines.append(ref_line)

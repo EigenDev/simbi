@@ -2,7 +2,8 @@
 #define CHECKPOINT_HPP
 
 #include "compat.hpp"
-#include "io/serializer.hpp"
+#include "io/checkpoint.hpp"
+#include "io/write_policy.hpp"
 #include "progress.hpp"
 
 #include <cmath>
@@ -23,14 +24,12 @@ namespace simbi::checkpoint {
 
         void advance(real time)
         {
-            // Set the initial time interval
-            // based on the current time, advanced
-            // by the checkpoint interval to the nearest
-            // place in the log10 scale. If dlogt is 0
-            // then the interval is set to the current time
-            // shifted towards the nearest checkpoint interval
-            // if the checkpoint interval is 0 then the interval
-            // is set to the current time
+            // set the initial time interval based on the current time,
+            // advanced by the checkpoint interval to the nearest place
+            // in the log10 scale. if dlogt is 0 then the interval is set
+            // to the current time shifted towards the nearest checkpoint
+            // interval. if the checkpoint interval is 0 then the interval
+            // is set to the current time.
             if (dlogt != 0) {
                 checkpoint_time =
                     time * std::pow(10.0, std::floor(std::log10(time) + dlogt));
@@ -51,15 +50,30 @@ namespace simbi::checkpoint {
     };
 
     template <typename Sim>
-    void save(Sim& sim, progress::progress_state_t& progress)
+    void save(
+        Sim& sim,
+        progress::progress_state_t& progress,
+        const io::write_policy_t& policy = {}
+    )
     {
-        const auto filename = io::h5::compute_checkpoint_filename(sim);
+        const auto& meta    = sim.metadata();
+        const auto filename = io::compute_checkpoint_filename(
+            meta.data_dir,
+            meta.checkpoint_identifier(),
+            meta.checkpoint_index,
+            meta.checkpoint_zones,
+            meta.time,
+            meta.dlogt,
+            sim.was_interrupted,
+            sim.in_failure_state
+        );
+
         progress.table.post_info(
             "[Writing checkpoint to path: " + filename + "]"
         );
         progress.table.print();
 
-        io::serialize_sim_state(sim, filename);
+        io::write_checkpoint(sim, filename, policy);
     }
 
 }   // namespace simbi::checkpoint

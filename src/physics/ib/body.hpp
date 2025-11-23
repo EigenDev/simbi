@@ -81,7 +81,7 @@ namespace simbi::body {
 }   // namespace simbi::body
 
 namespace simbi::body {
-    template <std::uint64_t Dims, typename... Caps>
+    template <std::uint64_t Rank, typename... Caps>
     struct body_t;
 
     struct grav_component_t {
@@ -121,20 +121,20 @@ namespace simbi::body {
     };
 
     // type aliases for common body types
-    template <std::uint64_t Dims>
-    using rigid_sphere_t = body_t<Dims, rigid_component_t>;
+    template <std::uint64_t Rank>
+    using rigid_sphere_t = body_t<Rank, rigid_component_t>;
 
-    template <std::uint64_t Dims>
-    using gravitational_body_t = body_t<Dims, grav_component_t>;
+    template <std::uint64_t Rank>
+    using gravitational_body_t = body_t<Rank, grav_component_t>;
 
-    template <std::uint64_t Dims>
-    using black_hole_t = body_t<Dims, grav_component_t, accretion_component_t>;
+    template <std::uint64_t Rank>
+    using black_hole_t = body_t<Rank, grav_component_t, accretion_component_t>;
 
-    template <std::uint64_t Dims>
-    using planet_t = body_t<Dims, grav_component_t, rigid_component_t>;
+    template <std::uint64_t Rank>
+    using planet_t = body_t<Rank, grav_component_t, rigid_component_t>;
 
-    template <std::uint64_t Dims>
-    using passive_body_t = body_t<Dims, passive_component_t>;
+    template <std::uint64_t Rank>
+    using passive_body_t = body_t<Rank, passive_component_t>;
 
     // concepts for capabilities b/c c++20 is amazing :D
     template <typename T>
@@ -166,16 +166,16 @@ namespace simbi::body {
                      true;
     };
 
-    template <std::uint64_t Dims, typename... Caps>
+    template <std::uint64_t Rank, typename... Caps>
     struct body_t {
         // expose the types for easier access
         using caps_tuple                     = std::tuple<Caps...>;
         static constexpr std::uint64_t ncaps = sizeof...(Caps);
 
         std::uint64_t idx;
-        vector_t<real, Dims> position;
-        vector_t<real, Dims> velocity;
-        vector_t<real, Dims> force;
+        vector_t<real, Rank> position;
+        vector_t<real, Rank> velocity;
+        vector_t<real, Rank> force;
         vector_t<real, 3> torque;
         real mass;
         real radius;
@@ -210,17 +210,17 @@ namespace simbi::body {
     };
 
     // immutable update functions
-    template <typename Tag, std::uint64_t Dims, typename... Caps>
-    DUAL constexpr auto get_capabilities(const body_t<Dims, Caps...>& body)
+    template <typename Tag, std::uint64_t Rank, typename... Caps>
+    DUAL constexpr auto get_capabilities(const body_t<Rank, Caps...>& body)
     {
         constexpr auto index = find_capability_index<Tag, Caps...>::value;
         return std::get<index>(body.capabilities);
     }
 
-    template <std::uint64_t Dims, typename... Caps>
+    template <std::uint64_t Rank, typename... Caps>
     DUAL constexpr auto with_force(
-        const body_t<Dims, Caps...>& body,
-        const vector_t<real, Dims>& new_force
+        const body_t<Rank, Caps...>& body,
+        const vector_t<real, Rank>& new_force
     )
     {
         auto result  = body;
@@ -228,9 +228,9 @@ namespace simbi::body {
         return result;
     }
 
-    template <std::uint64_t Dims, typename... Caps>
+    template <std::uint64_t Rank, typename... Caps>
     DUAL constexpr auto with_torque(
-        const body_t<Dims, Caps...>& body,
+        const body_t<Rank, Caps...>& body,
         const vector_t<real, 3>& new_torque
     )
     {
@@ -239,10 +239,10 @@ namespace simbi::body {
         return result;
     }
 
-    template <std::uint64_t Dims, typename... Caps>
+    template <std::uint64_t Rank, typename... Caps>
     DUAL constexpr auto with_velocity(
-        const body_t<Dims, Caps...>& body,
-        const vector_t<real, Dims>& new_velocity
+        const body_t<Rank, Caps...>& body,
+        const vector_t<real, Rank>& new_velocity
     )
     {
         auto result     = body;
@@ -250,28 +250,28 @@ namespace simbi::body {
         return result;
     }
 
-    template <std::uint64_t Dims, typename... Caps>
+    template <std::uint64_t Rank, typename... Caps>
     DUAL constexpr auto
-    with_mass(const body_t<Dims, Caps...>& body, real new_mass)
+    with_mass(const body_t<Rank, Caps...>& body, real new_mass)
     {
         auto result = body;
         result.mass = new_mass;
         return result;
     }
 
-    template <std::uint64_t Dims, typename... Caps>
+    template <std::uint64_t Rank, typename... Caps>
     DUAL constexpr auto
-    with_radius(const body_t<Dims, Caps...>& body, real new_radius)
+    with_radius(const body_t<Rank, Caps...>& body, real new_radius)
     {
         auto result   = body;
         result.radius = new_radius;
         return result;
     }
 
-    template <std::uint64_t Dims, typename... Caps>
+    template <std::uint64_t Rank, typename... Caps>
     DUAL constexpr auto at_position(
-        const body_t<Dims, Caps...>& body,
-        const vector_t<real, Dims>& new_position
+        const body_t<Rank, Caps...>& body,
+        const vector_t<real, Rank>& new_position
     )
     {
         auto result     = body;
@@ -280,21 +280,21 @@ namespace simbi::body {
     }
 
     // factory functions for common body types
-    template <std::uint64_t Dims>
+    template <std::uint64_t Rank>
     DUAL constexpr auto make_basic_body(
         std::uint64_t idx,
-        const vector_t<real, Dims>& position,
-        const vector_t<real, Dims>& velocity,
+        const vector_t<real, Rank>& position,
+        const vector_t<real, Rank>& velocity,
         real mass,
         real radius,
         bool two_way_coupling = false
     )
     {
-        return body_t<Dims, passive_component_t>{
+        return body_t<Rank, passive_component_t>{
           idx,
           position,
           velocity,
-          vector_t<real, Dims>{},   // no force
+          vector_t<real, Rank>{},   // no force
           vector_t<real, 3>{},      // no torque
           mass,
           radius,
@@ -303,22 +303,22 @@ namespace simbi::body {
         };
     }
 
-    template <std::uint64_t Dims>
+    template <std::uint64_t Rank>
     DUAL constexpr auto make_gravitational_body(
         std::uint64_t idx,
-        const vector_t<real, Dims>& position,
-        const vector_t<real, Dims>& velocity,
+        const vector_t<real, Rank>& position,
+        const vector_t<real, Rank>& velocity,
         real mass,
         real radius,
         real softening_length,
         bool two_way_coupling = false
     )
     {
-        return body_t<Dims, grav_component_t>{
+        return body_t<Rank, grav_component_t>{
           idx,
           position,
           velocity,
-          vector_t<real, Dims>{},
+          vector_t<real, Rank>{},
           vector_t<real, 3>{},
           mass,
           radius,
@@ -327,11 +327,11 @@ namespace simbi::body {
         };
     }
 
-    template <std::uint64_t Dims>
+    template <std::uint64_t Rank>
     DUAL constexpr auto make_black_hole(
         std::uint64_t idx,
-        const vector_t<real, Dims>& position,
-        const vector_t<real, Dims>& velocity,
+        const vector_t<real, Rank>& position,
+        const vector_t<real, Rank>& velocity,
         real mass,
         real radius,
         real softening_length,
@@ -343,11 +343,11 @@ namespace simbi::body {
         bool two_way_coupling    = false
     )
     {
-        return body_t<Dims, grav_component_t, accretion_component_t>{
+        return body_t<Rank, grav_component_t, accretion_component_t>{
           idx,
           position,
           velocity,
-          vector_t<real, Dims>{},
+          vector_t<real, Rank>{},
           vector_t<real, 3>{},
           mass,
           radius,
@@ -365,11 +365,11 @@ namespace simbi::body {
         };
     }
 
-    template <std::uint64_t Dims>
+    template <std::uint64_t Rank>
     DUAL constexpr auto make_planet(
         std::uint64_t idx,
-        const vector_t<real, Dims>& position,
-        const vector_t<real, Dims>& velocity,
+        const vector_t<real, Rank>& position,
+        const vector_t<real, Rank>& velocity,
         real mass,
         real radius,
         real inertia,
@@ -377,11 +377,11 @@ namespace simbi::body {
         bool two_way_coupling = false
     )
     {
-        return body_t<Dims, grav_component_t, rigid_component_t>{
+        return body_t<Rank, grav_component_t, rigid_component_t>{
           idx,
           position,
           velocity,
-          vector_t<real, Dims>{},
+          vector_t<real, Rank>{},
           vector_t<real, 3>{},
           mass,
           radius,
@@ -395,11 +395,11 @@ namespace simbi::body {
         };
     }
 
-    template <std::uint64_t Dims>
+    template <std::uint64_t Rank>
     DUAL constexpr auto make_rigid_sphere(
         std::uint64_t idx,
-        const vector_t<real, Dims>& position,
-        const vector_t<real, Dims>& velocity,
+        const vector_t<real, Rank>& position,
+        const vector_t<real, Rank>& velocity,
         real mass,
         real radius,
         real inertia,
@@ -407,11 +407,11 @@ namespace simbi::body {
         bool two_way_coupling = false
     )
     {
-        return body_t<Dims, rigid_component_t>{
+        return body_t<Rank, rigid_component_t>{
           idx,
           position,
           velocity,
-          vector_t<real, Dims>{},
+          vector_t<real, Rank>{},
           vector_t<real, 3>{},
           mass,
           radius,

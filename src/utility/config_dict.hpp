@@ -8,7 +8,6 @@
 
 #include <cstdint>
 #include <exception>
-#include <iostream>
 #include <list>
 #include <stdexcept>
 #include <string>
@@ -33,6 +32,7 @@ namespace simbi {
             std::monostate,      // For empty/null values
             bool,                // For boolean values
             std::int64_t,        // For integer values
+            std::int32_t,        // For integer 32-bit values
             std::uint64_t,       // For unsigned integer values
             std::uint32_t,       // For unsigned 32-bit integer values
             real,                // For floating point
@@ -57,6 +57,7 @@ namespace simbi {
         // Constructors for different types
         config_value_t(bool v) : value(v) {}
         config_value_t(std::int64_t v) : value(v) {}
+        config_value_t(std::int32_t v) : value(v) {}
         config_value_t(std::uint64_t v) : value(v) {}
         config_value_t(std::uint32_t v) : value(v) {}
         config_value_t(real v) : value(v) {}
@@ -76,11 +77,11 @@ namespace simbi {
         config_value_t(body_capability_t v) : value(v) {}
 
         // Helper for spatial vectors
-        template <typename T, std::uint64_t Dims>
-        config_value_t(vector_t<T, Dims> v)
+        template <typename T, std::uint64_t Rank>
+        config_value_t(vector_t<T, Rank> v)
         {
             std::vector<real> vec_values;
-            for (std::uint64_t i = 0; i < Dims; ++i) {
+            for (std::uint64_t i = 0; i < Rank; ++i) {
                 vec_values.push_back(static_cast<real>(v[i]));
             }
             value = std::move(vec_values);
@@ -95,6 +96,10 @@ namespace simbi {
         bool is_int() const
         {
             return std::holds_alternative<std::int64_t>(value);
+        }
+        bool is_int32() const
+        {
+            return std::holds_alternative<std::int32_t>(value);
         }
         bool is_uint() const
         {
@@ -271,26 +276,37 @@ namespace simbi {
             else if constexpr (std::is_same_v<T, body_capability_t>) {
                 return std::get<body_capability_t>(value);
             }
+            else if constexpr (std::is_same_v<T, std::int32_t>) {
+                if (is_int32()) {
+                    return std::get<std::int32_t>(value);
+                }
+                if (is_int()) {
+                    return static_cast<std::int32_t>(
+                        std::get<std::int64_t>(value)
+                    );
+                }
+                throw std::runtime_error("Not a 32-bit integer value");
+            }
             else {
                 static_assert(always_false<T>::value, "Unsupported type");
             }
         }
 
         // Conversion to spatial vector
-        template <typename T, std::uint64_t Dims>
-        vector_t<T, Dims> to_spatial_vector() const
+        template <typename T, std::uint64_t Rank>
+        vector_t<T, Rank> to_spatial_vector() const
         {
             if (!is_array_of_floats()) {
                 throw std::runtime_error("Not an array value");
             }
 
             const auto& array = std::get<std::vector<real>>(value);
-            if (array.size() < Dims) {
+            if (array.size() < Rank) {
                 throw std::runtime_error("Array too small for spatial vector");
             }
 
-            vector_t<T, Dims> result;
-            for (std::uint64_t ii = 0; ii < Dims; ++ii) {
+            vector_t<T, Rank> result;
+            for (std::uint64_t ii = 0; ii < Rank; ++ii) {
                 result[ii] = static_cast<T>(array[ii]);
             }
             return result;
@@ -304,10 +320,10 @@ namespace simbi {
     };
 
     // Helper function to create a spatial vector from config_value_t
-    template <typename T, std::uint64_t Dims>
-    vector_t<T, Dims> to_spatial_vector(const config_value_t& value)
+    template <typename T, std::uint64_t Rank>
+    vector_t<T, Rank> to_spatial_vector(const config_value_t& value)
     {
-        return value.to_spatial_vector<T, Dims>();
+        return value.to_spatial_vector<T, Rank>();
     }
 
     // helper functions for property extraction
@@ -327,8 +343,8 @@ namespace simbi {
             }
         }
 
-        template <typename T, std::uint64_t Dims>
-        maybe_t<vector_t<T, Dims>>
+        template <typename T, std::uint64_t Rank>
+        maybe_t<vector_t<T, Rank>>
         try_read_vec(const config_dict_t& dict, const std::string& key)
         {
             if (!dict.contains(key)) {
@@ -336,8 +352,8 @@ namespace simbi {
             }
 
             try {
-                return maybe_t<vector_t<T, Dims>>(
-                    dict.at(key).template to_spatial_vector<T, Dims>()
+                return maybe_t<vector_t<T, Rank>>(
+                    dict.at(key).template to_spatial_vector<T, Rank>()
                 );
             }
             catch (const std::exception&) {

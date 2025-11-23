@@ -1,19 +1,34 @@
 #ifndef CFD_OPS_HPP
 #define CFD_OPS_HPP
 
+// =============================================================================
+// ncfd.hpp
+//
+// cfd operations using block_geometry_t instead of mesh_config.
+// all operations are lazy computations that compose with the field algebra.
+//
+// key changes from cfd.hpp:
+//   - geometry provides: volume(), face_area(), centroid(), scale_factors()
+//   - geometry also provides: face_grid_velocity() for moving mesh
+//   - no mesh:: namespace calls, geometry is self-contained
+// =============================================================================
+
 #include "base/stencil_view.hpp"
 #include "compat.hpp"
 #include "compute/computation.hpp"
 #include "containers/state_ops.hpp"
 #include "containers/vector.hpp"
-#include "domain/domain.hpp"
-#include "mesh/mesh_ops.hpp"
+#include "geometry/block_geometry.hpp"
+#include "geometry/source_terms.hpp"
+#include "grid/domain.hpp"
 #include "physics/ib/body.hpp"
 #include "physics/ib/body_delta.hpp"
+#include "physics/ib/diagnostics.hpp"
 #include "physics/ib/effects.hpp"
 #include "utility/enums.hpp"
 
-#include <cmath>
+#include <concepts>
+#include <cstddef>
 #include <cstdint>
 #include <type_traits>
 
@@ -22,38 +37,50 @@ namespace simbi::cfd {
     using namespace simbi::body::expr;
     using namespace simbi::body;
 
-    // =================================================================
-    // Pure CFD Operations - Return computation_t
-    // =================================================================
+    // =========================================================================
+    // geometry concept
+    // any type that provides the required geometric operations
+    // =========================================================================
+    template <typename G, std::uint64_t Rank>
+    concept block_geometry_c =
+        requires(const G& geo, const iarray<Rank>& idx, std::size_t dim) {
+            { geo.volume(idx) } -> std::convertible_to<real>;
+            { geo.face_area(idx, dim) } -> std::convertible_to<real>;
+            { geo.centroid(idx) } -> std::convertible_to<vector_t<real, Rank>>;
+            {
+                geo.scale_factors(idx)
+            } -> std::convertible_to<vector_t<real, Rank>>;
+        };
 
-    template <typename Fluxes, typename MeshConfig>
+    // =========================================================================
+    // flux divergence
+    // =========================================================================
+    template <typename Fluxes, typename Geometry>
     struct flux_divergence_op_t {
-        using flux_t      = Fluxes::value_type;
+        using flux_t      = typename Fluxes::value_type;
         using conserved_t = std::remove_cvref_t<typename flux_t::value_type>;
-        static constexpr std::uint64_t dims = Fluxes::dimensions;
+        static constexpr std::uint64_t dims = Fluxes::rank;
 
         Fluxes fluxes;
-        MeshConfig mesh;
+        Geometry geometry;
 
-        DEV constexpr auto operator()(auto coord) const
+        DEV constexpr auto operator()(iarray<dims> coord) const
         {
             conserved_t divergence{};
-            const auto dv = mesh::volume(coord, mesh);
+            const auto dv = geometry.volume(coord);
 
-            // compute divergence using pre-computed fluxes
             for (std::uint64_t dir = 0; dir < dims; ++dir) {
                 const auto offset     = unit_vectors::array_offset<dims>(dir);
                 const auto coord_plus = coord + offset;
 
-                // flux values at left and right faces
-                const auto fl = fluxes[dir](coord /**/);
+                // flux at left and right faces
+                const auto fl = fluxes[dir](coord);
                 const auto fr = fluxes[dir](coord_plus);
 
-                // geometric face areas
-                const auto al = mesh::face_area(coord, dir, Dir::W, mesh);
-                const auto ar = mesh::face_area(coord, dir, Dir::E, mesh);
+                // face areas from geometry
+                const auto al = geometry.face_area(coord, dir);
+                const auto ar = geometry.face_area(coord_plus, dir);
 
-                // add contribution to divergence
                 divergence = divergence + (fr * ar - fl * al) / dv;
             }
 
@@ -61,171 +88,384 @@ namespace simbi::cfd {
         }
     };
 
-    /**
-     * flux divergence using pre-computed interface fluxes
-     * returns: conservative update from flux divergence
-     */
-    template <typename FluxField, typename MeshConfig>
-    auto flux_divergence(const FluxField& flux, const MeshConfig& mesh)
+    template <typename FluxField, typename Geometry, std::uint64_t Rank>
+    auto flux_divergence(
+        const FluxField& flux,
+        const grid::domain_t<Rank>& active_domain,
+        const vector_t<grid::domain_t<Rank>, Rank>& face_domains,
+        const Geometry& geometry
+    )
     {
-        vector_t<decltype(flux[0][mesh.face_domain[0]]), FluxField::dimensions>
-            flux_views;
+        vector_t<decltype(flux[0][face_domains[0]]), Rank> flux_views;
 
-        for (std::uint64_t dir = 0; dir < FluxField::dimensions; ++dir) {
-            flux_views[dir] = flux[dir][mesh.face_domain[dir]];
+        for (std::uint64_t dir = 0; dir < Rank; ++dir) {
+            flux_views[dir] = flux[dir][face_domains[dir]];
         }
-        return computation_t{
-          flux_divergence_op_t{flux_views, mesh},
-          make_domain(mesh.domain.shape())
+
+        return compute::computation_t{
+          flux_divergence_op_t<decltype(flux_views), Geometry>{
+            flux_views,
+            geometry
+          },
+          grid::extents(active_domain.shape())
         };
     }
 
-    template <typename GravitySource, typename PrimField, typename MeshConfig>
+    // =========================================================================
+    // gravity source terms
+    // =========================================================================
+    template <typename GravitySource, typename PrimField, typename Geometry>
     struct gravity_source_op_t {
-        constexpr static auto dims = MeshConfig::dimensions;
+        static constexpr auto dims = PrimField::rank;
         using prim_t      = std::remove_cvref_t<typename PrimField::value_type>;
-        using conserved_t = prim_t::counterpart_t;
+        using conserved_t = typename prim_t::counterpart_t;
 
-        GravitySource* gravity_source;
+        const GravitySource* gravity_source;
         PrimField prims;
-        MeshConfig mesh;
+        Geometry geometry;
         real time;
         real gamma;
 
-        DEV constexpr auto operator()(auto coord) const
+        DEV constexpr auto operator()(iarray<dims> coord) const
         {
-            if (!gravity_source->enabled) {
+            if (!gravity_source || !gravity_source->enabled) {
                 return conserved_t{};
             }
 
-            const auto position  = mesh::centroid(coord, mesh);
+            const auto position  = geometry.centroid(coord);
             const auto primitive = prims(coord);
 
             return gravity_source->apply(position, primitive, time, gamma);
         }
     };
 
-    /**
-     * gravity source terms
-     * returns: conservative update from gravitational acceleration
-     */
-    template <typename MeshConfig, typename PrimField, typename T>
+    template <typename PrimField, typename Geometry, typename GravSource>
     auto gravity_sources(
         const PrimField& prims,
-        const MeshConfig& mesh,
-        const T* gravity_source,
+        const grid::domain_t<PrimField::rank>& domain,
+        const Geometry& geometry,
+        const GravSource* gravity_source,
         real time,
         real gamma
     )
     {
-        return computation_t{
-          gravity_source_op_t{gravity_source, prims, mesh, time, gamma},
-          make_domain(mesh.domain.shape())
+        return compute::computation_t{
+          gravity_source_op_t<GravSource, PrimField, Geometry>{
+            gravity_source,
+            prims,
+            geometry,
+            time,
+            gamma
+          },
+          grid::extents(domain.shape())
         };
     }
 
-    template <typename HydroSource, typename ConsField, typename MeshConfig>
-    struct hydro_sources_op_t {
+    // =========================================================================
+    // hydro source terms
+    // =========================================================================
+    template <typename HydroSource, typename ConsField, typename Geometry>
+    struct hydro_source_op_t {
+        static constexpr auto dims = ConsField::rank;
         using conserved_t = std::remove_cvref_t<typename ConsField::value_type>;
 
-        HydroSource* hydro_source;
+        const HydroSource* hydro_source;
         ConsField cons;
-        MeshConfig mesh;
+        Geometry geometry;
         real time;
 
-        DEV constexpr auto operator()(auto coord) const
+        DEV constexpr auto operator()(iarray<dims> coord) const
         {
-            if (!hydro_source->enabled) {
+            if (!hydro_source || !hydro_source->enabled) {
                 return conserved_t{};
             }
 
-            const auto position  = mesh::centroid(coord, mesh);
+            const auto position  = geometry.centroid(coord);
             const auto conserved = cons(coord);
 
             return hydro_source->apply(position, conserved, time);
         }
     };
 
-    /**
-     * hydro source terms (cooling, heating, etc.)
-     * returns: conservative update from hydro sources
-     */
-    template <typename ConsField, typename MeshConfig, typename HydroSource>
+    template <typename ConsField, typename Geometry, typename HydroSource>
     auto hydro_sources(
         const ConsField& cons,
-        const MeshConfig& mesh,
+        const grid::domain_t<ConsField::rank>& domain,
+        const Geometry& geometry,
         const HydroSource* source,
         real time
     )
     {
-        return computation_t{
-          hydro_sources_op_t{source, cons, mesh, time},
-          make_domain(mesh.domain.shape())
+        return compute::computation_t{
+          hydro_source_op_t<HydroSource, ConsField, Geometry>{
+            source,
+            cons,
+            geometry,
+            time
+          },
+          grid::extents(domain.shape())
         };
     }
 
-    template <typename PrimField, typename MeshConfig>
+    // =========================================================================
+    // geometric source terms (curvilinear coordinates)
+    // =========================================================================
+    template <typename PrimField, typename Geometry>
     struct geometric_source_op_t {
+        static constexpr auto dims = PrimField::rank;
         using prim_t      = std::remove_cvref_t<typename PrimField::value_type>;
-        using conserved_t = prim_t::counterpart_t;
+        using conserved_t = typename prim_t::counterpart_t;
 
         PrimField prims;
-        MeshConfig mesh;
+        Geometry geometry;
         real gamma;
 
-        DEV constexpr auto operator()(auto coord) const
+        DEV constexpr auto operator()(iarray<dims> coord) const
         {
-            // geometric sources only exist for non-Cartesian geometries
-            if constexpr (MeshConfig::geometry == Geometry::CARTESIAN) {
-                return conserved_t{};
-            }
-            else {
-                const auto primitive = prims(coord);
-                return mesh::geometric_source_terms(
-                    primitive,
-                    coord,
-                    mesh,
-                    gamma
-                );
-            }
+            const auto primitive = prims(coord);
+
+            // delegate to geometry's metric for source term computation
+            return geometry.geomtric_source_factors(primitive, gamma, coord);
         }
     };
 
-    /**
-     * geometric source terms for non-Cartesian coordinates
-     * returns: conservative update from geometric effects
-     */
-    template <typename PrimField, typename MeshConfig>
+    template <typename PrimField, typename Geometry>
     auto geometric_sources(
         const PrimField& prims,
-        const MeshConfig& mesh,
+        const grid::domain_t<PrimField::rank>& domain,
+        const Geometry& geometry,
         real gamma
     )
     {
-        return computation_t{
-          geometric_source_op_t{prims, mesh, gamma},
-          make_domain(mesh.domain.shape())
+        return compute::computation_t{
+          geometric_source_op_t<PrimField, Geometry>{prims, geometry, gamma},
+          grid::extents(domain.shape())
         };
     }
 
+    // =========================================================================
+    // flux computation at interfaces
+    // =========================================================================
+    template <typename PrimField, typename Geometry, typename CfdOps>
+    struct compute_fluxes_op_t {
+        static constexpr auto dims = PrimField::rank;
+
+        PrimField prims;
+        Geometry geometry;
+        CfdOps ops;
+        real gamma;
+        real plm_theta;
+        real viscosity;
+        shockwave_limiter_t shock_smoother;
+        std::uint64_t dir;
+
+        DEV auto operator()(iarray<dims> coord) const
+        {
+            // create stencil for reconstruction
+            const auto stenc = make_stencil<CfdOps::rec_t>(prims, coord, dir);
+            const auto [pl, pr] = ops.reconstruct(stenc, plm_theta);
+
+            // normal vector
+            const auto nhat = unit_vectors::ehat<dims>(dir);
+
+            // face grid velocity (moving mesh)
+            const auto vface = geometry.face_grid_velocity(coord, dir);
+
+            // solve riemann problem
+            auto flux = ops.flux(pl, pr, nhat, vface, gamma, shock_smoother);
+
+            // add viscous stress if enabled
+            if (viscosity > 0) {
+                const auto visc =
+                    compute_viscous_flux(coord, dir, pl.rho, pr.rho);
+                flux.mom = flux.mom - visc;
+                flux.nrg = flux.nrg + vecops::dot(visc, pl.vel);
+            }
+
+            return flux;
+        }
+
+      private:
+        DEV auto compute_viscous_flux(
+            iarray<dims> coord,
+            std::uint64_t flux_dir,
+            real rhoL,
+            real rhoR
+        ) const
+        {
+            const auto offset     = unit_vectors::array_offset<dims>(flux_dir);
+            const auto left_cell  = coord - offset;
+            const auto right_cell = coord;
+
+            auto stress_left  = compute_stress_tensor(left_cell, rhoL);
+            auto stress_right = compute_stress_tensor(right_cell, rhoR);
+
+            // average to interface
+            vector_t<vector_t<real, dims>, dims> avg_stress;
+            for (std::uint64_t ii = 0; ii < dims; ++ii) {
+                for (std::uint64_t jj = 0; jj < dims; ++jj) {
+                    avg_stress[ii][jj] =
+                        0.5 * (stress_left[ii][jj] + stress_right[ii][jj]);
+                }
+            }
+
+            // extract flux for this direction
+            vector_t<real, dims> stress_flux{};
+            const auto ldd = dims - 1 - flux_dir;
+            for (std::uint64_t ii = 0; ii < dims; ++ii) {
+                stress_flux[ii] = avg_stress[ii][ldd];
+            }
+
+            return stress_flux;
+        }
+
+        DEV auto compute_stress_tensor(iarray<dims> coord, real rho) const
+        {
+            // velocity gradient tensor
+            vector_t<vector_t<real, dims>, dims> dv_dx{};
+            const auto h = geometry.scale_factors(coord);
+
+            for (std::uint64_t dd = 0; dd < dims; ++dd) {
+                const auto ldd    = dims - 1 - dd;
+                const auto offset = unit_vectors::array_offset<dims>(ldd);
+                const real dx     = h[ldd];
+
+                const auto v_plus  = prims(coord + offset).vel;
+                const auto v_minus = prims(coord - offset).vel;
+                const auto dv      = (v_plus - v_minus) / (2.0 * dx);
+
+                for (std::uint64_t ii = 0; ii < dims; ++ii) {
+                    dv_dx[ii][dd] = dv[ii];
+                }
+            }
+
+            // divergence
+            real div_v = 0.0;
+            for (std::uint64_t ii = 0; ii < dims; ++ii) {
+                div_v += dv_dx[ii][ii];
+            }
+
+            // dynamic viscosity
+            const auto mu = rho * viscosity;
+
+            // stress tensor
+            vector_t<vector_t<real, dims>, dims> sigma;
+            for (std::uint64_t ii = 0; ii < dims; ++ii) {
+                for (std::uint64_t jj = 0; jj < dims; ++jj) {
+                    if (ii == jj) {
+                        sigma[ii][jj] =
+                            2.0 * mu * (dv_dx[ii][jj] - div_v / 3.0);
+                    }
+                    else {
+                        sigma[ii][jj] = mu * (dv_dx[ii][jj] + dv_dx[jj][ii]);
+                    }
+                }
+            }
+
+            return sigma;
+        }
+    };
+
+    template <typename PrimField, typename Geometry, typename CfdOps>
+    auto compute_fluxes(
+        const PrimField& prims,
+        const grid::domain_t<PrimField::rank>& face_domain,
+        const Geometry& geometry,
+        const CfdOps& ops,
+        real gamma,
+        real plm_theta,
+        real viscosity,
+        shockwave_limiter_t shock_smoother,
+        std::uint64_t dir
+    )
+    {
+        return compute::computation_t{
+          compute_fluxes_op_t<PrimField, Geometry, CfdOps>{
+            prims,
+            geometry,
+            ops,
+            gamma,
+            plm_theta,
+            viscosity,
+            shock_smoother,
+            dir
+          },
+          grid::extents(face_domain.shape())
+        };
+    }
+
+    // =========================================================================
+    // godunov operator (complete RHS)
+    // =========================================================================
     template <
-        typename Bodies,
-        typename PrimField,
-        typename MeshConfig,
-        typename BodyDiagnostics>
+        typename HydroState,
+        typename Geometry,
+        typename Sources,
+        typename MetaData,
+        std::uint64_t Rank>
+    auto godunov_op(
+        const HydroState& state,
+        const grid::domain_t<Rank>& active_domain,
+        const Geometry& geometry,
+        const MetaData& meta,
+        const Sources& sources
+    )
+    {
+        constexpr auto dims = Rank;
+
+        // build face domain array
+        vector_t<grid::domain_t<Rank>, Rank> face_domains;
+        for (std::uint64_t dd = 0; dd < dims; ++dd) {
+            face_domains[dd] = active_domain;
+            face_domains[dd].fin[dd] += 1;
+        }
+
+        return flux_divergence(
+                   state.flux,
+                   active_domain,
+                   face_domains,
+                   geometry
+               ) +
+               gravity_sources(
+                   state.prim[active_domain],
+                   active_domain,
+                   geometry,
+                   &sources.gravity_source,
+                   meta.time,
+                   meta.gamma
+               ) +
+               hydro_sources(
+                   state.cons[active_domain],
+                   active_domain,
+                   geometry,
+                   &sources.hydro_source,
+                   meta.time
+               ) +
+               geometric_sources(
+                   state.prim[active_domain],
+                   active_domain,
+                   geometry,
+                   meta.gamma
+               );
+    }
+
+    // =========================================================================
+    // body effects operator
+    // =========================================================================
+    template <typename Bodies, typename PrimField, typename Geometry>
     struct body_effects_op_t {
         using prim_t      = std::remove_cvref_t<typename PrimField::value_type>;
         using conserved_t = prim_t::counterpart_t;
-        static constexpr std::uint64_t Dims = PrimField::dimensions;
+        static constexpr std::uint64_t Rank = PrimField::rank;
 
         Bodies bodies;
         PrimField prims;
-        MeshConfig mesh;
-        BodyDiagnostics* diagnostics;
+        Geometry geometry;
+        body::body_diagnostics_t<Rank>* diagnostics;
         real gamma;
         real dt;
 
-        DEV constexpr auto operator()(auto coord) const
+        DEV constexpr auto operator()(iarray<Rank> coord) const
         {
             conserved_t total_effect{};
             if (bodies.empty()) {
@@ -235,9 +475,10 @@ namespace simbi::cfd {
             const auto prim       = prims(coord);
             const bool is_binary  = (bodies.size() == 2);
             const auto sink_cache = bodies.sink_cache;
+
             bodies.visit_all([&](const auto& body) {
                 using body_type = std::decay_t<decltype(body)>;
-                body_delta_t<Dims> delta{
+                body_delta_t<Rank> delta{
                   .idx          = body.idx,
                   .force_delta  = {},
                   .torque_delta = {},
@@ -245,14 +486,14 @@ namespace simbi::cfd {
                 };
 
                 if constexpr (has_gravitational_capability_c<body_type>) {
-                    auto grav_op           = grav_op_t{prim, mesh};
+                    auto grav_op           = make_grav_op(prim, geometry);
                     auto [effect, g_delta] = grav_op(body, coord);
                     total_effect = total_effect | structs::add_gas(effect);
                     delta += g_delta;
                 }
 
                 if constexpr (has_accretion_capability_c<body_type>) {
-                    auto accr_op     = accretion_op_t{prim, mesh, gamma, dt};
+                    auto accr_op = make_accretion_op(prim, geometry, gamma, dt);
                     real mdot_target = 0.0;
                     real w_total     = 0.0;
                     real r_bh        = 0.0;
@@ -277,7 +518,7 @@ namespace simbi::cfd {
                 }
 
                 if constexpr (has_rigid_capability_c<body_type>) {
-                    auto rigid_op          = rigid_op_t{prim, mesh, gamma};
+                    auto rigid_op = make_rigid_op(prim, geometry, gamma);
                     auto [effect, r_delta] = rigid_op(body, coord);
                     total_effect = total_effect | structs::add_gas(effect);
                     delta += r_delta;
@@ -292,333 +533,33 @@ namespace simbi::cfd {
         }
     };
 
-    /**
-     * immersed body effects
-     * returns: conservative update from body forces/sources
-     */
-    template <
-        typename PrimField,
-        typename MeshConfig,
-        typename Bodies,
-        typename Diagnostics>
+    // =========================================================================
+    // body effects computation
+    // =========================================================================
+    template <typename PrimField, typename Geometry, typename Bodies>
     auto body_effects(
         const PrimField& prims,
-        const MeshConfig& mesh,
+        const grid::domain_t<PrimField::rank>& active_domain,
+        const Geometry& geometry,
         const Bodies& bodies,
-        const Diagnostics& diagnostics,
+        body::body_diagnostics_t<PrimField::rank>* diagnostics,
         real gamma,
         real dt
     )
     {
-        return computation_t{
-          body_effects_op_t{bodies, prims, mesh, diagnostics.get(), gamma, dt},
-          make_domain(mesh.domain.shape())
+        return compute::computation_t{
+          body_effects_op_t<Bodies, PrimField, Geometry>{
+            bodies,
+            prims,
+            geometry,
+            diagnostics,
+            gamma,
+            dt
+          },
+          active_domain
         };
     }
 
-    // =================================================================
-    // Flux Computation Operations
-    // =================================================================
-    // viscous stress computation
-
-    // cylindrical/spherical coordinate gradients
-    template <typename PrimField, typename MeshConfig>
-    DEV auto compute_curvilinear_gradients(
-        const PrimField& prims,
-        const auto& coord,
-        const MeshConfig& mesh
-    )
-    {
-        constexpr auto dims = PrimField::dimensions;
-        constexpr auto geom = MeshConfig::geometry;
-
-        vector_t<vector_t<real, dims>, dims> dv_dx{};
-        const auto widths = mesh::cell_widths(coord, mesh);
-        const auto cent   = mesh::centroid(coord, mesh);
-
-        for (std::uint64_t dd = 0; dd < dims; ++dd) {
-            const auto ldd    = dims - 1 - dd;   // logical dimension
-            const auto offset = unit_vectors::array_offset<dims>(ldd);
-            const real dx     = widths[ldd];
-
-            const auto v_plus  = prims(coord + offset).vel;
-            const auto v_minus = prims(coord - offset).vel;
-            const auto dv      = (v_plus - v_minus) / (2.0 * dx);
-
-            for (std::uint64_t ii = 0; ii < dims; ++ii) {
-                if constexpr (geom == Geometry::CYLINDRICAL) {
-                    // cylindrical metric corrections
-                    if (dd == 0) {   // radial derivative
-                        dv_dx[ii][dd] = dv[ii];
-                    }
-                    else if (dd == 1 && dims > 1) {   // azimuthal derivative
-                        const real r  = cent[dims - 1];
-                        dv_dx[ii][dd] = dv[ii] / r;
-                    }
-                    else {   // z derivative
-                        dv_dx[ii][dd] = dv[ii];
-                    }
-                }
-                else if constexpr (geom == Geometry::SPHERICAL) {
-                    // spherical metric corrections
-                    if (dd == 0) {   // radial derivative
-                        dv_dx[ii][dd] = dv[ii];
-                    }
-                    else if (dd == 1 && dims > 1) {   // theta derivative
-                        const real r  = cent[dims - 1];
-                        dv_dx[ii][dd] = dv[ii] / r;
-                    }
-                    else if (dd == 2 && dims > 2) {   // phi derivative
-                        const real r     = cent[dims - 1];
-                        const real theta = cent[dims - 2];
-                        dv_dx[ii][dd]    = dv[ii] / (r * std::sin(theta));
-                    }
-                }
-            }
-        }
-
-        return dv_dx;
-    }
-
-    // generalized velocity gradient computation accounting for coordinate
-    // system
-    template <typename PrimField, typename MeshConfig>
-    DEV auto compute_velocity_gradients(
-        const PrimField& prims,
-        const auto& coord,
-        const MeshConfig& mesh
-    )
-    {
-        constexpr auto dims = PrimField::dimensions;
-        constexpr auto geom = MeshConfig::geometry;
-
-        // velocity gradient tensor
-        vector_t<vector_t<real, dims>, dims> dv_dx;
-
-        if constexpr (geom == Geometry::CARTESIAN) {
-            const auto widths = mesh::cell_widths(coord, mesh);
-
-            for (std::uint64_t dd = 0; dd < dims; ++dd) {
-                const auto ldd    = dims - 1 - dd;   // logical dimension
-                const auto offset = unit_vectors::array_offset<dims>(ldd);
-                const real dxi    = widths[ldd];
-
-                const auto v_plus  = prims(coord + offset).vel;
-                const auto v_minus = prims(coord - offset).vel;
-                const auto dv      = (v_plus - v_minus) / (2.0 * dxi);
-
-                for (std::uint64_t ii = 0; ii < dims; ++ii) {
-                    dv_dx[ii][dd] = dv[ii];
-                }
-            }
-        }
-        else {
-            // need metric tensor corrections for curvilinear coordinates
-            return compute_curvilinear_gradients(prims, coord, mesh);
-        }
-
-        return dv_dx;
-    }
-
-    // extract stress components for flux direction
-    template <std::uint64_t dims>
-    DEV auto extract_stress_flux(
-        const vector_t<vector_t<real, dims>, dims>& sigma,
-        std::uint64_t dir
-    )
-    {
-        vector_t<real, dims> stress_flux{};
-        // logical dimension
-        const auto ldd = dims - 1 - dir;
-        for (std::uint64_t ii = 0; ii < dims; ++ii) {
-            stress_flux[ii] = sigma[ii][ldd];   // sigma column for direction j
-        }
-
-        return stress_flux;
-    }
-
-    // compute full stress tensor at cell center
-    template <typename PrimField, typename MeshConfig>
-    DEV auto stress_tensor(
-        const PrimField& prims,
-        const auto& coord,
-        const MeshConfig& mesh,
-        real nu,
-        real rho_interface
-    )
-    {
-        constexpr auto dims = PrimField::dimensions;
-
-        const auto dv_dx = compute_velocity_gradients(prims, coord, mesh);
-
-        real div_v = 0.0;
-        for (std::uint64_t ii = 0; ii < dims; ++ii) {
-            div_v += dv_dx[ii][ii];
-        }
-
-        // dynamic viscosity
-        const auto mu = rho_interface * nu;
-
-        // assemble stress tensor
-        vector_t<vector_t<real, dims>, dims> sigma;
-        for (std::uint64_t ii = 0; ii < dims; ++ii) {
-            for (std::uint64_t jj = 0; jj < dims; ++jj) {
-                if (ii == jj) {
-                    // diagonal components
-                    sigma[ii][jj] = 2.0 * mu * (dv_dx[ii][jj] - div_v / 3.0);
-                }
-                else {
-                    // off-diagonal components
-                    sigma[ii][jj] = mu * (dv_dx[ii][jj] + dv_dx[jj][ii]);
-                }
-            }
-        }
-
-        return sigma;
-    }
-
-    // viscous stress computation
-    template <typename PrimField, typename MeshConfig>
-    DEV auto viscous_stress_flux(
-        const PrimField& prims,
-        const auto& coord,
-        std::uint64_t dir,
-        const MeshConfig& mesh,
-        real nu,
-        real rhoL,
-        real rhoR
-    )
-    {
-        constexpr auto dims = PrimField::dimensions;
-
-        // get cells on either side of interface
-        const auto offset     = unit_vectors::array_offset<dims>(dir);
-        const auto left_cell  = coord - offset;
-        const auto right_cell = coord;
-
-        // compute stress tensor at both cells
-        auto stress_left  = stress_tensor(prims, left_cell, mesh, nu, rhoL);
-        auto stress_right = stress_tensor(prims, right_cell, mesh, nu, rhoR);
-
-        // average stress tensor to interface
-        vector_t<vector_t<real, dims>, dims> avg_stress;
-        for (std::uint64_t ii = 0; ii < dims; ++ii) {
-            for (std::uint64_t jj = 0; jj < dims; ++jj) {
-                avg_stress[ii][jj] =
-                    0.5 * (stress_left[ii][jj] + stress_right[ii][jj]);
-            }
-        }
-
-        // extract stress flux for this direction
-        return extract_stress_flux<dims>(avg_stress, dir);
-    }
-
-    template <
-        typename PrimField,
-        typename Metadata,
-        typename CfdOps,
-        typename MeshConfig>
-    struct compute_fluxes_op_t {
-        PrimField prims;
-        Metadata meta;
-        MeshConfig mesh;
-        CfdOps ops;
-        std::uint64_t dir;
-
-        DEV auto operator()(auto coord) const
-        {
-            constexpr auto dims       = MeshConfig::dimensions;
-            const auto gamma          = meta.gamma;
-            const auto shock_smoother = meta.shock_smoother;
-            const auto plm_theta      = meta.plm_theta;
-            const auto nu             = meta.viscosity;
-
-            // create stencil for reconstruction around this interface
-            const auto stenc = make_stencil<CfdOps::rec_t>(prims, coord, dir);
-            const auto [pl, pr] = ops.reconstruct(stenc, plm_theta);
-            // normal vector for this dimension
-            const auto nhat = unit_vectors::ehat<dims>(dir);
-            // face velocity (for moving meshes)
-            const auto vface = mesh::face_velocity(coord, dir, mesh);
-
-            // solve Riemann problem
-            auto flux = ops.flux(pl, pr, nhat, vface, gamma, shock_smoother);
-            if (nu > 0) {
-                const auto visc = viscous_stress_flux(
-                    prims,
-                    coord,
-                    dir,
-                    mesh,
-                    nu,
-                    pl.rho,
-                    pr.rho
-                );
-                flux.mom = flux.mom - visc;
-                flux.nrg = flux.nrg + vecops::dot(visc, pl.vel);
-            }
-            return flux;
-        }
-    };
-
-    /**
-     * compute interface fluxes using Riemann solvers
-     * returns: flux field for a specific direction
-     */
-    template <
-        typename PrimField,
-        typename MeshConfig,
-        typename CfdOps,
-        typename Metadata>
-    auto compute_fluxes(
-        const PrimField& prims,
-        const MeshConfig& mesh,
-        const CfdOps& ops,
-        const Metadata& metadata,
-        std::uint64_t dir
-    )
-    {
-        return computation_t{
-          compute_fluxes_op_t{prims, metadata, mesh, ops, dir},
-          make_domain(mesh.face_domain[dir].shape())
-        };
-    }
-
-    // =================================================================
-    // Composite Operations - Automatic Fusion
-    // =================================================================
-
-    /**
-     * complete RHS for conservative update
-     * returns: fused field of all source terms
-     */
-    template <
-        typename HydroState,
-        typename MeshConfig,
-        typename Sources,
-        typename MetaData>
-    auto godunov_op(
-        const HydroState& state,
-        const MeshConfig& mesh,
-        const MetaData& meta,
-        const Sources& sources
-    )
-    {
-        return flux_divergence(state.flux, mesh) +
-               gravity_sources(
-                   state.prim[mesh.domain],
-                   mesh,
-                   &sources.gravity_source,
-                   meta.time,
-                   meta.gamma
-               ) +
-               hydro_sources(
-                   state.cons[mesh.domain],
-                   mesh,
-                   &sources.hydro_source,
-                   meta.time
-               ) +
-               geometric_sources(state.prim[mesh.domain], mesh, meta.gamma);
-    }
 }   // namespace simbi::cfd
 
 #endif   // CFD_OPS_HPP

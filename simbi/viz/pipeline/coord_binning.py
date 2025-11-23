@@ -17,6 +17,7 @@ def _get_stitched_leaf_data(
     Stitch all FMR levels into high-resolution flat arrays of leaf cells.
 
     This is the core of the level-aware 3D analysis.
+    Now also returns cell volumes for proper weighting.
     """
     level_fields_map: dict[str, list[FieldData]] = {}
     all_levels = set()
@@ -53,6 +54,7 @@ def _get_stitched_leaf_data(
         if is_3d:
             region["zmin"] = domain[2][0]
             region["zmax"] = domain[2][-1]
+
         refined_regions.append(region)
 
     # Prepare output lists
@@ -61,6 +63,7 @@ def _get_stitched_leaf_data(
     }
     stitched_data["x_flat"] = []
     stitched_data["y_flat"] = []
+    stitched_data["volume_flat"] = []  # NEW: cell volumes
     if is_3d:
         stitched_data["z_flat"] = []
 
@@ -81,6 +84,14 @@ def _get_stitched_leaf_data(
         z_centers = (
             0.5 * (z_verts[1:] + z_verts[:-1]) if is_3d else np.array([0.0])
         )
+
+        # Calculate cell sizes for this level
+        dx = x_verts[1] - x_verts[0]
+        dy = y_verts[1] - y_verts[0]
+        dz = (z_verts[1] - z_verts[0]) if is_3d else 1.0
+
+        # Cell volume for this level
+        cell_volume = dx * dy * dz
 
         nx, ny, nz = len(x_centers), len(y_centers), len(z_centers)
 
@@ -117,6 +128,7 @@ def _get_stitched_leaf_data(
                     # This is a leaf cell. Add its data.
                     stitched_data["x_flat"].append(xc)
                     stitched_data["y_flat"].append(yc)
+                    stitched_data["volume_flat"].append(cell_volume)  # NEW
                     if is_3d:
                         stitched_data["z_flat"].append(zc)
 
@@ -129,6 +141,91 @@ def _get_stitched_leaf_data(
                         stitched_data[f"{name}_flat"].append(val)
 
     return {key: np.array(val) for key, val in stitched_data.items()}
+
+
+def _calculate_momentum_terms(
+    stitched_data: dict[str, np.ndarray],
+    n_bins: int,
+    gamma: float = 1.0,
+    GM: float = 1.0,
+) -> list[FieldData]:
+    """
+    Calculates the terms of the radial momentum equation.
+    """
+    # unpack data
+    x_flat = stitched_data["x_flat"]
+    y_flat = stitched_data["y_flat"]
+    z_flat = stitched_data.get("z_flat", np.zeros_like(x_flat))
+    rho_flat = stitched_data["rho_flat"]
+
+    # handle pressure
+    if "p_flat" in stitched_data:
+        p_flat = stitched_data["p_flat"]
+    else:
+        # for isothermal dimensionless units where cs=1, P = rho
+        p_flat = rho_flat
+
+    vx = stitched_data["v1_flat"]
+    vy = stitched_data["v2_flat"]
+    vz = stitched_data.get("v3_flat", np.zeros_like(x_flat))
+
+    # calculate Spherical Quantities
+    r_flat = np.sqrt(x_flat**2 + y_flat**2 + z_flat**2)
+    vr_flat = (vx * x_flat + vy * y_flat + vz * z_flat) / (r_flat + 1e-10)
+
+    # bin the data
+    max_radius = np.max(r_flat)
+
+    bins = np.linspace(0, max_radius, n_bins + 1)
+
+    # calc centers from the bins array
+    bin_centers = 0.5 * (bins[1:] + bins[:-1])
+
+    # profile: Radial Velocity <vr>
+    mean_vr, _, _ = binned_statistic(
+        r_flat, vr_flat, statistic="mean", bins=bins
+    )
+
+    # profile: Density <rho>
+    mean_rho, _, _ = binned_statistic(
+        r_flat, rho_flat, statistic="mean", bins=bins
+    )
+
+    # profile: Pressure <P>
+    mean_p, _, _ = binned_statistic(r_flat, p_flat, statistic="mean", bins=bins)
+
+    # compute Terms (Finite Differences)
+
+    # term 1: Advection (v_r * dv_r/dr)
+    dvr_dr = np.gradient(mean_vr, bin_centers)
+    term_advection = mean_rho * mean_vr * dvr_dr
+
+    # term 2: Pressure Gradient (-1/rho * dP/dr)
+    dp_dr = np.gradient(mean_p, bin_centers)
+    # Safety for vacuum regions
+    term_pressure = -dp_dr
+
+    # term 3: Gravity (-GM / r^2)
+    term_gravity = -mean_rho * GM / (bin_centers**2 + 1e-10)
+
+    # term 4: Residual
+    term_residual = term_advection - (term_pressure + term_gravity)
+
+    # 5. Package Results
+    return [
+        FieldData(
+            name="term_advection", values=term_advection, domain=[bin_centers]
+        ),
+        FieldData(
+            name="term_pressure", values=term_pressure, domain=[bin_centers]
+        ),
+        FieldData(
+            name="term_gravity", values=term_gravity, domain=[bin_centers]
+        ),
+        FieldData(
+            name="term_residual", values=term_residual, domain=[bin_centers]
+        ),
+    ]
 
 
 def _calculate_coordinate_profile(
@@ -157,10 +254,11 @@ def _calculate_coordinate_profile(
 def _calculate_mass_flux_profile(
     stitched_data: dict[str, Array], n_bins: int
 ) -> FieldData:
-    """Calculates the M-dot(r) profile."""
+    """Calculates the M-dot(r) profile with proper volume weighting for AMR."""
     x_flat = stitched_data["x_flat"]
     y_flat = stitched_data["y_flat"]
     z_flat = stitched_data.get("z_flat", np.zeros_like(x_flat))
+    volume_flat = stitched_data["volume_flat"]
     rho_flat = stitched_data["rho_flat"]
     vx_flat = stitched_data["v1_flat"]
     vy_flat = stitched_data["v2_flat"]
@@ -175,14 +273,21 @@ def _calculate_mass_flux_profile(
     max_radius = np.max(r_flat)
     bins = np.linspace(0, max_radius, n_bins + 1)
 
-    # We need the *mean* flux density in each shell
-    mean_flux_density, bin_edges, _ = binned_statistic(
-        r_flat, flux_density_flat, statistic="mean", bins=bins
+    # Volume-weighted mean flux density in each shell
+    # \sum(\rho v_r * volume) / \sum(volume)
+    weighted_flux, bin_edges, _ = binned_statistic(
+        r_flat, flux_density_flat * volume_flat, statistic="sum", bins=bins
     )
+    total_volume, _, _ = binned_statistic(
+        r_flat, volume_flat, statistic="sum", bins=bins
+    )
+
+    mean_flux_density = weighted_flux / (total_volume + 1e-10)
 
     bin_centers = 0.5 * (bin_edges[1:] + bin_edges[:-1])
     shell_area = 4.0 * np.pi * bin_centers**2
     mass_flux_profile = mean_flux_density * shell_area
+
     label = "mdot_vs_r"
     return FieldData(
         name=label,
@@ -206,10 +311,12 @@ def create_coordinate_profile_data(
     for name in field_names:
         if name == "mdot":
             prerequisite_fields.update(["rho", "v1", "v2", "v3"])
+        elif name == "momentum_terms":
+            prerequisite_fields.update(["rho", "v1", "v2", "v3", "p"])
         else:
             prerequisite_fields.add(name)
 
-    # Load *all* full-dim FMR levels for the prerequisites
+    # Load all full-dim FMR levels for the prerequisites
     fmr_plot_data = PlotData(
         fields=prepare_fields(data, list(prerequisite_fields), config),
         # ... (other PlotData fields) ...
@@ -228,6 +335,9 @@ def create_coordinate_profile_data(
         if name == "mdot":
             profile_data = _calculate_mass_flux_profile(stitched_data, n_bins)
             final_fields.append(profile_data)
+        elif name == "momentum_terms":
+            momentum_terms = _calculate_momentum_terms(stitched_data, n_bins)
+            final_fields.extend(momentum_terms)
         else:
             profile_data = _calculate_coordinate_profile(
                 stitched_data, name, n_bins

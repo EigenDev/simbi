@@ -1,17 +1,38 @@
-
 #ifndef HYDRO_DISPATCH_HPP
 #define HYDRO_DISPATCH_HPP
+
+// =============================================================================
+// dispatch.hpp
+//
+// type dispatch system for hydro simulations.
+// converts runtime configuration (strings, enums) to compile-time template
+// parameters via nested switch dispatchers.
+//
+// dispatch chain:
+//   regime -> dims -> geometry -> solver -> reconstruction -> eos
+//   -> call_visitor_with_state<R, D, G, S, Rec, EoS>(visitor, blueprints, ...)
+//
+// usage:
+//   with_hydro_state(config, prim_gen, bfield_gens, scale_factor, ...,
+//       [](auto& sim, auto& ops) {
+//           // sim is simulation_t<R, D, G, EoS>
+//           // ops is cfd_operations_t<R, D, S, Rec, EoS>
+//       });
+// =============================================================================
 
 #include "compat.hpp"
 #include "compute/cfd_ops.hpp"
 #include "containers/vector.hpp"
-#include "ecs/factory.hpp"
-#include "io/loader.hpp"
+#include "ecs/blueprints.hpp"
+#include "ecs/components.hpp"
+#include "ecs/creation/blueprint_extractor.hpp"
+#include "ecs/creation/field_initializer.hpp"
+#include "ecs/creation/sim.hpp"
 #include "physics/eos/ideal.hpp"
 #include "physics/eos/isothermal.hpp"
 #include "utility/bimap.hpp"
+#include "utility/config_dict.hpp"
 #include "utility/enums.hpp"
-#include "utility/init_conditions.hpp"
 
 #include <cstddef>
 #include <cstdint>
@@ -21,57 +42,55 @@
 #include <stdexcept>
 #include <string>
 #include <type_traits>
+#include <utility>
 
 namespace py = pybind11;
 namespace simbi::dispatch {
 
-    //==============================================================================
-    // VALIDITY CONCEPTS - Define which combinations are supported
-    //==============================================================================
+    // =============================================================================
+    // validity concept - defines which template combinations are supported
+    // =============================================================================
 
     template <
-        Regime R,
+        regime_t R,
         std::uint64_t D,
-        Geometry G,
-        Solver S,
-        Reconstruction Rec>
+        geometry_t G,
+        solver_t S,
+        reconstruction_t Rec>
     concept valid_combination =
         // basic constraints
         (D >= 1 && D <= 3) &&
 
         // reconstruction constraints
-        (Rec == Reconstruction::PCM ||
-         Rec == Reconstruction::PLM) &&   // only implemented ones
+        (Rec == reconstruction_t::PCM || Rec == reconstruction_t::PLM) &&
 
         // geometry constraints
-        (G == Geometry::CARTESIAN || G == Geometry::CYLINDRICAL ||
-         G == Geometry::AXIS_CYLINDRICAL || G == Geometry::PLANAR_CYLINDRICAL ||
-         G == Geometry::SPHERICAL) &&
+        (G == geometry_t::CARTESIAN || G == geometry_t::CYLINDRICAL ||
+         G == geometry_t::AXIS_CYLINDRICAL ||
+         G == geometry_t::PLANAR_CYLINDRICAL || G == geometry_t::SPHERICAL) &&
 
         // geometry-dimension constraints
-        ((G != Geometry::AXIS_CYLINDRICAL &&
-          G != Geometry::PLANAR_CYLINDRICAL) ||
-         D == 2) &&   // AXIS and PLANAR only in 2D
-        ((G != Geometry::CYLINDRICAL) || D == 3) &&   // CYLINDRICAL only in 3D
+        ((G != geometry_t::AXIS_CYLINDRICAL &&
+          G != geometry_t::PLANAR_CYLINDRICAL) ||
+         D == 2) &&
+        ((G != geometry_t::CYLINDRICAL) || D == 3) &&
 
         // regime-specific constraints
-        (R != Regime::RMHD || D == 3) &&   // (r)mhd requires 3D
-        (R != Regime::MHD || D == 3) &&
+        (R != regime_t::RMHD || D == 3) && (R != regime_t::MHD || D == 3) &&
 
         // solver-regime compatibility
-        (
-            S != Solver::HLLD || (R == Regime::RMHD || R == Regime::MHD)
-        ) &&   // hlld only for mhd regimes
-        ((R == Regime::NEWTONIAN || R == Regime::SRHD)
-             ? (S == Solver::HLLE || S == Solver::HLLC)
+        (S != solver_t::HLLD || (R == regime_t::RMHD || R == regime_t::MHD)) &&
+        ((R == regime_t::NEWTONIAN || R == regime_t::SRHD)
+             ? (S == solver_t::HLLE || S == solver_t::HLLC)
              : true) &&
 
         // exclude unimplemented regimes
-        (R != Regime::MHD);   // newtonian mhd not implemented yet
+        (R != regime_t::MHD);
 
-    //==============================================================================
-    // ERROR HANDLING
-    //==============================================================================
+    // =============================================================================
+    // error handling
+    // =============================================================================
+
     class configuration_error : public std::runtime_error
     {
       public:
@@ -96,18 +115,21 @@ namespace simbi::dispatch {
         }
     };
 
-    //==============================================================================
-    // VISITOR PATTERN DISPATCH - Gets you raw template types!
-    //==============================================================================
+    // =============================================================================
+    // dispatch implementation
+    // =============================================================================
 
     namespace detail {
 
+        // -------------------------------------------------------------------------
+        // terminal dispatch - builds simulation and calls visitor
+        // -------------------------------------------------------------------------
         template <
-            Regime R,
+            regime_t R,
             std::uint64_t D,
-            Geometry G,
-            Solver S,
-            Reconstruction Rec,
+            geometry_t G,
+            solver_t S,
+            reconstruction_t Rec,
             typename EoS,
             typename Visitor>
         auto call_visitor_with_state(
@@ -116,48 +138,62 @@ namespace simbi::dispatch {
             vector_t<py::iterator, 3> bfield_gens,
             std::function<real(real)> const& scale_factor,
             std::function<real(real)> const& scale_factor_derivative,
-            const initial_conditions_t& init
+            const ecs::blueprint_set_t<D>& blueprints
         ) -> std::enable_if_t<valid_combination<R, D, G, S, Rec>, void>
         {
+            using namespace ecs;
+            using namespace ecs::builders;
+            using ecs::mesh_motion_config_t;
+
+            // build simulation from blueprints
+            auto builder = simulation_builder_t<R, D, G, EoS>{}
+                               .configure_mesh(blueprints.mesh)
+                               .configure_physics(blueprints.physics)
+                               .configure_execution(blueprints.execution)
+                               .configure_amr(blueprints.amr)
+                               .configure_numerics(blueprints.numerics)
+                               .configure_expressions(blueprints.expressions)
+                               .configure_bodies(blueprints.bodies);
+
+            // configure decomposition if present
+            if (blueprints.decomposition.has_value()) {
+                builder.configure_decomposition(*blueprints.decomposition);
+            }
+
+            auto sim = builder.build();
+
+            // initialize fields from generators
+            using sim_t = decltype(sim);
+            creation::field_initializer_t<sim_t>::initialize(
+                sim,
+                prim_gen,
+                bfield_gens,
+                blueprints.physics.gamma
+            );
+
+            // configure moving mesh if enabled
+            if (blueprints.mesh.moving_mesh) {
+                mesh_motion_config_t motion_config;
+                motion_config.scale_factor            = scale_factor;
+                motion_config.scale_factor_derivative = scale_factor_derivative;
+                motion_config.homologous = blueprints.mesh.homologous_expansion;
+                sim.registry.add(sim.global, std::move(motion_config));
+            }
+
+            // create operations bundle
             const auto ops = cfd::cfd_operations_t<R, D, S, Rec, EoS>{};
 
-            auto sim = [&]() {
-                if (!init.checkpoint_file.empty()) {
-                    auto x = io::load_checkpoint<R, D, G, EoS>(
-                        init.checkpoint_file,
-                        init,
-                        scale_factor,
-                        scale_factor_derivative
-                    );
-                    if (x.is_ok()) {
-                        return x.value();
-                    }
-                    else {
-                        throw std::runtime_error(
-                            "Issue loading from checkpoint: " + x.error()
-                        );
-                    }
-                }
-                return ecs::create_simulation<R, D, G, EoS>(
-                    init,
-                    prim_gen,
-                    bfield_gens,
-                    scale_factor,
-                    scale_factor_derivative
-                );
-            }();
-
-            // call visitor
+            // call visitor with typed simulation and ops
             visitor(sim, ops);
         }
 
         // fallback for invalid combinations
         template <
-            Regime R,
+            regime_t R,
             std::uint64_t D,
-            Geometry G,
-            Solver S,
-            Reconstruction Rec,
+            geometry_t G,
+            solver_t S,
+            reconstruction_t Rec,
             typename EoS,
             typename Visitor>
         auto call_visitor_with_state(
@@ -166,7 +202,7 @@ namespace simbi::dispatch {
             vector_t<py::iterator, 3>,
             std::function<real(real)> const&,
             std::function<real(real)> const&,
-            const initial_conditions_t&
+            const ecs::blueprint_set_t<D>&
         ) -> std::enable_if_t<!valid_combination<R, D, G, S, Rec>, void>
         {
             throw unsupported_configuration(
@@ -174,13 +210,15 @@ namespace simbi::dispatch {
             );
         }
 
-        // EoS dispatch
+        // -------------------------------------------------------------------------
+        // eos dispatch
+        // -------------------------------------------------------------------------
         template <
-            Regime R,
+            regime_t R,
             std::uint64_t D,
-            Geometry G,
-            Solver S,
-            Reconstruction Rec,
+            geometry_t G,
+            solver_t S,
+            reconstruction_t Rec,
             typename Visitor>
         void dispatch_eos(
             Visitor&& visitor,
@@ -188,11 +226,11 @@ namespace simbi::dispatch {
             vector_t<py::iterator, 3> bfield_gen,
             std::function<real(real)> const& scale_factor,
             std::function<real(real)> const& scale_factor_derivative,
-            const initial_conditions_t& init
+            const ecs::blueprint_set_t<D>& blueprints
         )
         {
-            if constexpr (R == Regime::NEWTONIAN) {
-                if (init.gamma > 1.0) {
+            if constexpr (R == regime_t::NEWTONIAN) {
+                if (blueprints.physics.gamma > 1.0) {
                     call_visitor_with_state<
                         R,
                         D,
@@ -205,7 +243,7 @@ namespace simbi::dispatch {
                         bfield_gen,
                         scale_factor,
                         scale_factor_derivative,
-                        init
+                        blueprints
                     );
                 }
                 else {
@@ -221,13 +259,11 @@ namespace simbi::dispatch {
                         bfield_gen,
                         scale_factor,
                         scale_factor_derivative,
-                        init
+                        blueprints
                     );
                 }
             }
             else {
-                // for regimes other than NEWTONIAN, we assume ideal gas EOS
-                // [TODO]: update this later
                 call_visitor_with_state<
                     R,
                     D,
@@ -240,47 +276,49 @@ namespace simbi::dispatch {
                     bfield_gen,
                     scale_factor,
                     scale_factor_derivative,
-                    init
+                    blueprints
                 );
             }
         }
 
+        // -------------------------------------------------------------------------
         // reconstruction dispatch
+        // -------------------------------------------------------------------------
         template <
-            Regime R,
+            regime_t R,
             std::uint64_t D,
-            Geometry G,
-            Solver S,
+            geometry_t G,
+            solver_t S,
             typename Visitor>
         void dispatch_reconstruction(
-            Reconstruction rec,
+            reconstruction_t rec,
             Visitor&& visitor,
             py::iterator prim_gen,
             vector_t<py::iterator, 3> bfield_gen,
             std::function<real(real)> const& scale_factor,
             std::function<real(real)> const& scale_factor_derivative,
-            const initial_conditions_t& init
+            const ecs::blueprint_set_t<D>& blueprints
         )
         {
             switch (rec) {
-                case Reconstruction::PCM:
-                    dispatch_eos<R, D, G, S, Reconstruction::PCM>(
+                case reconstruction_t::PCM:
+                    dispatch_eos<R, D, G, S, reconstruction_t::PCM>(
                         std::forward<Visitor>(visitor),
                         prim_gen,
                         bfield_gen,
                         scale_factor,
                         scale_factor_derivative,
-                        init
+                        blueprints
                     );
                     break;
-                case Reconstruction::PLM:
-                    dispatch_eos<R, D, G, S, Reconstruction::PLM>(
+                case reconstruction_t::PLM:
+                    dispatch_eos<R, D, G, S, reconstruction_t::PLM>(
                         std::forward<Visitor>(visitor),
                         prim_gen,
                         bfield_gen,
                         scale_factor,
                         scale_factor_derivative,
-                        init
+                        blueprints
                     );
                     break;
                 default:
@@ -291,51 +329,53 @@ namespace simbi::dispatch {
             }
         }
 
+        // -------------------------------------------------------------------------
         // solver dispatch
-        template <Regime R, std::uint64_t D, Geometry G, typename Visitor>
+        // -------------------------------------------------------------------------
+        template <regime_t R, std::uint64_t D, geometry_t G, typename Visitor>
         void dispatch_solver(
-            Solver solver,
-            Reconstruction rec,
+            solver_t solver,
+            reconstruction_t rec,
             Visitor&& visitor,
             py::iterator prim_gen,
             vector_t<py::iterator, 3> bfield_gen,
             std::function<real(real)> const& scale_factor,
             std::function<real(real)> const& scale_factor_derivative,
-            const initial_conditions_t& init
+            const ecs::blueprint_set_t<D>& blueprints
         )
         {
             switch (solver) {
-                case Solver::HLLE:
-                    dispatch_reconstruction<R, D, G, Solver::HLLE>(
+                case solver_t::HLLE:
+                    dispatch_reconstruction<R, D, G, solver_t::HLLE>(
                         rec,
                         std::forward<Visitor>(visitor),
                         prim_gen,
                         bfield_gen,
                         scale_factor,
                         scale_factor_derivative,
-                        init
+                        blueprints
                     );
                     break;
-                case Solver::HLLC:
-                    dispatch_reconstruction<R, D, G, Solver::HLLC>(
+                case solver_t::HLLC:
+                    dispatch_reconstruction<R, D, G, solver_t::HLLC>(
                         rec,
                         std::forward<Visitor>(visitor),
                         prim_gen,
                         bfield_gen,
                         scale_factor,
                         scale_factor_derivative,
-                        init
+                        blueprints
                     );
                     break;
-                case Solver::HLLD:
-                    dispatch_reconstruction<R, D, G, Solver::HLLD>(
+                case solver_t::HLLD:
+                    dispatch_reconstruction<R, D, G, solver_t::HLLD>(
                         rec,
                         std::forward<Visitor>(visitor),
                         prim_gen,
                         bfield_gen,
                         scale_factor,
                         scale_factor_derivative,
-                        init
+                        blueprints
                     );
                     break;
                 default:
@@ -346,23 +386,25 @@ namespace simbi::dispatch {
             }
         }
 
+        // -------------------------------------------------------------------------
         // geometry dispatch
-        template <Regime R, std::uint64_t D, typename Visitor>
+        // -------------------------------------------------------------------------
+        template <regime_t R, std::uint64_t D, typename Visitor>
         void dispatch_geometry(
-            Geometry geometry,
-            Solver solver,
-            Reconstruction rec,
+            geometry_t geometry,
+            solver_t solver,
+            reconstruction_t rec,
             Visitor&& visitor,
             py::iterator prim_gen,
             vector_t<py::iterator, 3> bfield_gen,
             std::function<real(real)> const& scale_factor,
             std::function<real(real)> const& scale_factor_derivative,
-            const initial_conditions_t& init
+            const ecs::blueprint_set_t<D>& blueprints
         )
         {
             switch (geometry) {
-                case Geometry::CARTESIAN:
-                    dispatch_solver<R, D, Geometry::CARTESIAN>(
+                case geometry_t::CARTESIAN:
+                    dispatch_solver<R, D, geometry_t::CARTESIAN>(
                         solver,
                         rec,
                         std::forward<Visitor>(visitor),
@@ -370,11 +412,11 @@ namespace simbi::dispatch {
                         bfield_gen,
                         scale_factor,
                         scale_factor_derivative,
-                        init
+                        blueprints
                     );
                     break;
-                case Geometry::CYLINDRICAL:
-                    dispatch_solver<R, D, Geometry::CYLINDRICAL>(
+                case geometry_t::CYLINDRICAL:
+                    dispatch_solver<R, D, geometry_t::CYLINDRICAL>(
                         solver,
                         rec,
                         std::forward<Visitor>(visitor),
@@ -382,11 +424,11 @@ namespace simbi::dispatch {
                         bfield_gen,
                         scale_factor,
                         scale_factor_derivative,
-                        init
+                        blueprints
                     );
                     break;
-                case Geometry::AXIS_CYLINDRICAL:
-                    dispatch_solver<R, D, Geometry::AXIS_CYLINDRICAL>(
+                case geometry_t::AXIS_CYLINDRICAL:
+                    dispatch_solver<R, D, geometry_t::AXIS_CYLINDRICAL>(
                         solver,
                         rec,
                         std::forward<Visitor>(visitor),
@@ -394,11 +436,11 @@ namespace simbi::dispatch {
                         bfield_gen,
                         scale_factor,
                         scale_factor_derivative,
-                        init
+                        blueprints
                     );
                     break;
-                case Geometry::PLANAR_CYLINDRICAL:
-                    dispatch_solver<R, D, Geometry::PLANAR_CYLINDRICAL>(
+                case geometry_t::PLANAR_CYLINDRICAL:
+                    dispatch_solver<R, D, geometry_t::PLANAR_CYLINDRICAL>(
                         solver,
                         rec,
                         std::forward<Visitor>(visitor),
@@ -406,11 +448,11 @@ namespace simbi::dispatch {
                         bfield_gen,
                         scale_factor,
                         scale_factor_derivative,
-                        init
+                        blueprints
                     );
                     break;
-                case Geometry::SPHERICAL:
-                    dispatch_solver<R, D, Geometry::SPHERICAL>(
+                case geometry_t::SPHERICAL:
+                    dispatch_solver<R, D, geometry_t::SPHERICAL>(
                         solver,
                         rec,
                         std::forward<Visitor>(visitor),
@@ -418,7 +460,7 @@ namespace simbi::dispatch {
                         bfield_gen,
                         scale_factor,
                         scale_factor_derivative,
-                        init
+                        blueprints
                     );
                     break;
                 default:
@@ -429,23 +471,29 @@ namespace simbi::dispatch {
             }
         }
 
+        // -------------------------------------------------------------------------
         // dimensions dispatch
-        template <Regime R, typename Visitor>
+        //
+        // this is where blueprint_set_t<D> is created with the resolved D
+        // -------------------------------------------------------------------------
+        template <regime_t R, typename Visitor>
         void dispatch_dimensions(
             std::uint64_t dims,
-            Geometry geometry,
-            Solver solver,
-            Reconstruction rec,
+            geometry_t geometry,
+            solver_t solver,
+            reconstruction_t rec,
             Visitor&& visitor,
             py::iterator prim_gen,
             vector_t<py::iterator, 3> bfield_gen,
             std::function<real(real)> const& scale_factor,
             std::function<real(real)> const& scale_factor_derivative,
-            const initial_conditions_t& init
+            const config_dict_t& config
         )
         {
             switch (dims) {
-                case 1:
+                case 1: {
+                    auto blueprints =
+                        ecs::blueprint_set_t<1>::from_config(config);
                     dispatch_geometry<R, 1>(
                         geometry,
                         solver,
@@ -455,10 +503,13 @@ namespace simbi::dispatch {
                         bfield_gen,
                         scale_factor,
                         scale_factor_derivative,
-                        init
+                        blueprints
                     );
                     break;
-                case 2:
+                }
+                case 2: {
+                    auto blueprints =
+                        ecs::blueprint_set_t<2>::from_config(config);
                     dispatch_geometry<R, 2>(
                         geometry,
                         solver,
@@ -468,10 +519,13 @@ namespace simbi::dispatch {
                         bfield_gen,
                         scale_factor,
                         scale_factor_derivative,
-                        init
+                        blueprints
                     );
                     break;
-                case 3:
+                }
+                case 3: {
+                    auto blueprints =
+                        ecs::blueprint_set_t<3>::from_config(config);
                     dispatch_geometry<R, 3>(
                         geometry,
                         solver,
@@ -481,9 +535,10 @@ namespace simbi::dispatch {
                         bfield_gen,
                         scale_factor,
                         scale_factor_derivative,
-                        init
+                        blueprints
                     );
                     break;
+                }
                 default:
                     throw unsupported_configuration(
                         "unsupported dimensions: " + std::to_string(dims)
@@ -491,25 +546,27 @@ namespace simbi::dispatch {
             }
         }
 
+        // -------------------------------------------------------------------------
         // regime dispatch (top level)
+        // -------------------------------------------------------------------------
         template <typename Visitor>
         void dispatch_regime(
-            Regime regime,
+            regime_t regime,
             std::uint64_t dims,
-            Geometry geometry,
-            Solver solver,
-            Reconstruction rec,
+            geometry_t geometry,
+            solver_t solver,
+            reconstruction_t rec,
             Visitor&& visitor,
             py::iterator prim_gen,
             vector_t<py::iterator, 3> bfield_gen,
             std::function<real(real)> const& scale_factor,
             std::function<real(real)> const& scale_factor_derivative,
-            const initial_conditions_t& init
+            const config_dict_t& config
         )
         {
             switch (regime) {
-                case Regime::NEWTONIAN:
-                    dispatch_dimensions<Regime::NEWTONIAN>(
+                case regime_t::NEWTONIAN:
+                    dispatch_dimensions<regime_t::NEWTONIAN>(
                         dims,
                         geometry,
                         solver,
@@ -519,11 +576,11 @@ namespace simbi::dispatch {
                         bfield_gen,
                         scale_factor,
                         scale_factor_derivative,
-                        init
+                        config
                     );
                     break;
-                case Regime::SRHD:
-                    dispatch_dimensions<Regime::SRHD>(
+                case regime_t::SRHD:
+                    dispatch_dimensions<regime_t::SRHD>(
                         dims,
                         geometry,
                         solver,
@@ -533,11 +590,11 @@ namespace simbi::dispatch {
                         bfield_gen,
                         scale_factor,
                         scale_factor_derivative,
-                        init
+                        config
                     );
                     break;
-                case Regime::RMHD:
-                    dispatch_dimensions<Regime::RMHD>(
+                case regime_t::RMHD:
+                    dispatch_dimensions<regime_t::RMHD>(
                         dims,
                         geometry,
                         solver,
@@ -547,7 +604,7 @@ namespace simbi::dispatch {
                         bfield_gen,
                         scale_factor,
                         scale_factor_derivative,
-                        init
+                        config
                     );
                     break;
                 default:
@@ -560,39 +617,52 @@ namespace simbi::dispatch {
 
     }   // namespace detail
 
-    //==============================================================================
-    // MAIN VISITOR DISPATCH FUNCTION
-    //==============================================================================
+    // =============================================================================
+    // main entry point
+    // =============================================================================
 
     /**
-     * create hydro state and call visitor with it
+     * create hydro state and call visitor with it.
      *
-     * visitor receives the raw hydro_state_t<R,D,G,S,Rec> type!
-     * only the specific combination you request gets compiled!
+     * visitor receives:
+     *   - sim: simulation_t<R, D, G, EoS> (fully typed)
+     *   - ops: cfd_operations_t<R, D, S, Rec, EoS>
+     *
+     * only the specific template combination requested gets compiled.
      */
     template <typename Visitor>
     void with_hydro_state(
+        const config_dict_t& config,
         py::iterator prim_gen,
         vector_t<py::iterator, 3> bfield_gen,
         std::function<real(real)> const& scale_factor,
         std::function<real(real)> const& scale_factor_derivative,
-        const initial_conditions_t& init,
         Visitor&& visitor
     )
     {
-        const auto& regime_str         = init.regime;
-        const auto& geometry_str       = init.coord_system;
-        const auto& solver_str         = init.solver;
-        const auto& reconstruction_str = init.reconstruct;
-        const auto dims                = init.dimensionality;
-        // convert runtime strings to enum values
-        auto regime         = deserialize<Regime>(regime_str);
-        auto geometry       = deserialize<Geometry>(geometry_str);
-        auto solver         = deserialize<Solver>(solver_str);
-        auto reconstruction = deserialize<Reconstruction>(reconstruction_str);
+        using namespace ecs::creation;
+
+        // extract dispatch parameters from config
+        auto regime_str = config::try_read<std::string>(config, "regime")
+                              .unwrap_or("newtonian");
+        auto geometry_str =
+            config::try_read<std::string>(config, "coord_system")
+                .unwrap_or("cartesian");
+        auto solver_str =
+            config::try_read<std::string>(config, "solver").unwrap_or("hllc");
+        auto rec_str = config::try_read<std::string>(config, "reconstruct")
+                           .unwrap_or("plm");
+
+        // infer dimensionality
+        auto dims = infer_dimensionality(config);
+
+        // convert to enums
+        auto regime         = deserialize<regime_t>(regime_str);
+        auto geometry       = deserialize<geometry_t>(geometry_str);
+        auto solver         = deserialize<solver_t>(solver_str);
+        auto reconstruction = deserialize<reconstruction_t>(rec_str);
 
         try {
-            // dispatch to visitor with raw template type!
             detail::dispatch_regime(
                 regime,
                 dims,
@@ -604,15 +674,14 @@ namespace simbi::dispatch {
                 bfield_gen,
                 scale_factor,
                 scale_factor_derivative,
-                init
+                config
             );
         }
         catch (const configuration_error&) {
-            // generate helpful error message
             std::string msg =
                 "regime=" + regime_str + ", dims=" + std::to_string(dims) +
                 ", geometry=" + geometry_str + ", solver=" + solver_str +
-                ", reconstruction=" + reconstruction_str;
+                ", reconstruction=" + rec_str;
             throw unsupported_configuration(msg);
         }
     }

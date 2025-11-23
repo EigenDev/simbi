@@ -1,39 +1,38 @@
-#ifndef BODY_EXPR_EFFECTS_HPP
-#define BODY_EXPR_EFFECTS_HPP
+#ifndef BODY_EXPR_NEFFECTS_HPP
+#define BODY_EXPR_NEFFECTS_HPP
 
 #include "base/concepts.hpp"
 #include "body.hpp"
 #include "body_delta.hpp"
 #include "compat.hpp"
 #include "containers/vector.hpp"
-#include "mesh/mesh_ops.hpp"
 #include "physics/hydro/physics.hpp"
 #include "utility/helpers.hpp"
 
 #include <cmath>
+#include <cstddef>
 #include <cstdint>
-#include <iostream>
 
 namespace simbi::body::expr {
     using namespace simbi::hydro;
 
     // ========================================================================
-    // individual body effect operations
+    // gravitational effect operation (geometry-based)
     // ========================================================================
-
-    // gravitational effect operation
-    template <typename Primitive, typename MeshConfig>
+    template <typename Primitive, typename Geometry>
     struct grav_op_t {
         using conserved_t                   = Primitive::counterpart_t;
-        static constexpr std::uint64_t Dims = Primitive::dimensions;
+        static constexpr std::uint64_t Rank = Primitive::rank;
 
         Primitive prim;
-        MeshConfig mesh_;
+        Geometry geometry;
 
         template <typename Body, typename Coord>
         constexpr DEV auto operator()(const Body& body, Coord coord) const
         {
-            const auto cell_pos = mesh::to_cartesian(coord, mesh_);
+            const auto cell_pos =
+                geometry.metric.to_cartesian(geometry.centroid(coord));
+
             // gravitational physics
             const auto r_vec = cell_pos - body.position;
             const auto r_mag = r_vec.norm();
@@ -44,7 +43,7 @@ namespace simbi::body::expr {
 
             // gravitational acceleration (G = 1)
             const auto g_cart  = body.mass * r_vec / (r_eff * r_eff * r_eff);
-            const auto g_accel = -vecops::centralize(g_cart, mesh_.geometry);
+            const auto g_accel = -geometry.metric.from_cartesian(g_cart);
 
             // fluid changes
             const auto density = labframe_density(prim);
@@ -53,9 +52,9 @@ namespace simbi::body::expr {
 
             return std::make_pair(
                 conserved_t{0.0, dp_dt, dE_dt},
-                body_delta_t<Dims>{
+                body_delta_t<Rank>{
                   .idx          = body.idx,
-                  .force_delta  = -dp_dt * mesh::volume(coord, mesh_),
+                  .force_delta  = -dp_dt * geometry.volume(coord),
                   .torque_delta = {},
                   .mass_delta   = 0.0
                 }
@@ -63,37 +62,49 @@ namespace simbi::body::expr {
         }
     };
 
-    // accretion effect operation
-    template <typename Primitive, typename MeshConfig>
+    // ========================================================================
+    // accretion effect operation (geometry-based)
+    // ========================================================================
+    template <typename Primitive, typename Geometry>
     struct accretion_op_t {
         using conserved_t                   = Primitive::counterpart_t;
-        static constexpr std::uint64_t Dims = Primitive::dimensions;
+        static constexpr std::uint64_t Rank = Primitive::rank;
 
         Primitive prim;
-        MeshConfig mesh_;
+        Geometry geometry;
         real gamma;
         real dt;
 
-        /**
-         * torque control described in Section 2.1 of Dittmann & Ryan (2021)
-         * https://ui.adsabs.harvard.edu/abs/2021ApJ...921...71D/abstract
-         * delta = 0 (torque-free)
-         * delta = 1 (standatd sink)
-         */
+        // torque control from Dittmann & Ryan (2021)
+        // delta = 0 (torque-free), delta = 1 (standard sink)
         constexpr DEV auto apply_torque_control(
-            const vector_t<real, Dims>& r_hat,
-            const vector_t<real, Dims>& v_sink,
-            const vector_t<real, Dims>& v_parc,
+            const vector_t<real, Rank>& r_hat,
+            const vector_t<real, Rank>& v_sink,
+            const vector_t<real, Rank>& v_parc,
             real delta = 0.0
         ) const
         {
-            const auto gas_vel_cart = mesh::to_cartesian(v_parc, mesh_);
+            const auto gas_vel_cart = geometry.metric.to_cartesian(v_parc);
             const auto v_rel_cart   = gas_vel_cart - v_sink;
             const auto v_rad_comp   = vecops::dot(v_rel_cart, r_hat);
             const auto v_rad_cart   = v_rad_comp * r_hat;
             const auto v_angular    = v_rel_cart - v_rad_cart;
             const auto v_star_cart  = v_rad_cart + delta * v_angular + v_sink;
-            return mesh::from_cartesian(v_star_cart, mesh_);
+            return geometry.metric.from_cartesian(v_star_cart);
+        }
+
+        template <typename Coord>
+        constexpr DEV auto min_cell_width(Coord coord) const
+        {
+            const auto h = geometry.scale_factors(coord);
+            // approximate cell width from scale factors and unit spacing
+            real min_width = h[0];
+            for (std::size_t dd = 1; dd < Rank; ++dd) {
+                if (h[dd] < min_width) {
+                    min_width = h[dd];
+                }
+            }
+            return min_width;
         }
 
         template <typename Body, typename Coord>
@@ -103,22 +114,23 @@ namespace simbi::body::expr {
             bool is_binary,
             real mdot_target = 0.0,
             real w_total     = 0.0,
-            real /*r_bh */   = 0.0
+            real /*r_bh*/    = 0.0
         ) const
         {
             using namespace simbi::helpers;
-            const auto cell_pos = mesh::to_cartesian(coord, mesh_);
+            const auto cell_pos =
+                geometry.metric.to_cartesian(geometry.centroid(coord));
             const auto r_vec    = cell_pos - body.position;
             const auto r_mag    = r_vec.norm();
             const auto r_acc    = accretion_radius(body);
             const auto sr_param = sink_rate(body);
-            const auto dv       = mesh::volume(coord, mesh_);
+            const auto dv       = geometry.volume(coord);
 
             // quick exit if outside accretion radius
             if (r_mag > 4.0 * r_acc) {
                 return std::make_pair(
                     conserved_t{},
-                    body_delta_t<Dims>{
+                    body_delta_t<Rank>{
                       .idx          = body.idx,
                       .force_delta  = {},
                       .torque_delta = {},
@@ -138,46 +150,29 @@ namespace simbi::body::expr {
                     const auto r_norm   = r_mag / r_kernel;
                     return std::exp(-r_norm * r_norm);
                 }();
+
                 // physical timescales
-                const auto cell_size = mesh::min_cell_width(coord, mesh_);
-                const auto local_cs  = sound_speed(prim, gamma);
+                const auto cell_size           = min_cell_width(coord);
+                const auto local_cs            = sound_speed(prim, gamma);
                 const auto sound_crossing_time = cell_size / local_cs;
 
-                // free-fall time to sink center (gravitational timescale)
+                // free-fall time to sink center
                 const auto t_ff =
                     (r_mag > 1e-10)
                         ? std::sqrt(r_mag * r_mag * r_mag / (2.0 * body.mass))
-                        : sound_crossing_time;   // fallback for r→0
+                        : sound_crossing_time;
 
-                // use the shorter of the two natural timescales
                 const auto t_natural = std::min(sound_crossing_time, t_ff);
-                // stability limits (maybe? TODO: revisit...)
-                // [1/time] - physical rate
-                const auto nat_rate = 1.0 / t_natural;
-                // [1/time] - max safe rate
+                const auto nat_rate  = 1.0 / t_natural;
                 const auto stab_rate = 1.0 / dt;
                 const auto sr_base   = my_min3(sr_param, nat_rate, stab_rate);
-
-                const auto sr = sr_base * weight;
-                den_dot       = labframe_density(prim) * sr;
+                const auto sr        = sr_base * weight;
+                den_dot              = labframe_density(prim) * sr;
             }
             else {
-                // const auto r_kernel = [=, this]() {
-                //     const auto dx = mesh::min_cell_width(coord, mesh_);
-                //     if (r_bh < 0.25 * dx) {
-                //         return 0.25 * dx;
-                //     }
-                //     else if ((r_bh <= 0.25 * dx) && (r_bh <= 0.5 * r_acc)) {
-                //         return r_bh;
-                //     }
-                //     else {
-                //         return 0.5 * r_acc;
-                //     }
-                // }();
-                const auto r_kernel = 0.5 * r_acc;
-                const auto r_norm   = r_mag / r_kernel;
-                const auto weight   = std::exp(-r_norm * r_norm);
-                // from Krumholz et al. (2004) sink prescription
+                const auto r_kernel    = 0.5 * r_acc;
+                const auto r_norm      = r_mag / r_kernel;
+                const auto weight      = std::exp(-r_norm * r_norm);
                 const auto norm_weight = weight / w_total;
                 den_dot                = mdot_target * (norm_weight / dv);
 
@@ -191,9 +186,7 @@ namespace simbi::body::expr {
                 }
             }
 
-            // torque-controlled sink prescription from Dittmann &
-            // Ryan(2021)
-            // https://ui.adsabs.harvard.edu/abs/2021ApJ...921...71D/abstract
+            // torque-controlled sink prescription
             const auto v_star = apply_torque_control(
                 r_vec / r_mag,
                 body.velocity,
@@ -208,7 +201,7 @@ namespace simbi::body::expr {
             // force and torque from momentum removal
             const auto force_delta  = -mom_dot * dv;
             const auto torque_delta = [&]() -> vector_t<real, 3> {
-                if constexpr (Dims > 2) {
+                if constexpr (Rank > 2) {
                     return vecops::cross(r_vec, force_delta);
                 }
                 else {
@@ -218,7 +211,7 @@ namespace simbi::body::expr {
 
             return std::make_pair(
                 conserved_t{-den_dot, -mom_dot, -nrg_dot},
-                body_delta_t<Dims>{
+                body_delta_t<Rank>{
                   .idx          = body.idx,
                   .force_delta  = std::move(force_delta),
                   .torque_delta = std::move(torque_delta),
@@ -228,22 +221,38 @@ namespace simbi::body::expr {
         }
     };
 
-    // rigid body effect operation
-    template <typename Primitive, typename MeshConfig>
+    // ========================================================================
+    // rigid body effect operation (geometry-based)
+    // ========================================================================
+    template <typename Primitive, typename Geometry>
     struct rigid_op_t {
         using conserved_t                   = Primitive::counterpart_t;
-        static constexpr std::uint64_t Dims = Primitive::dimensions;
+        static constexpr std::uint64_t Rank = Primitive::rank;
 
         Primitive prim;
-        MeshConfig mesh_;
+        Geometry geometry;
         real gamma;
+
+        template <typename Coord>
+        constexpr DEV auto min_cell_width(Coord coord) const
+        {
+            const auto h   = geometry.scale_factors(coord);
+            real min_width = h[0];
+            for (std::size_t dd = 1; dd < Rank; ++dd) {
+                if (h[dd] < min_width) {
+                    min_width = h[dd];
+                }
+            }
+            return min_width;
+        }
 
         template <typename Body, typename Coord>
         constexpr DEV auto operator()(const Body& body, Coord coord) const
         {
             using namespace simbi::helpers;
-            const auto cell_pos       = mesh::to_cartesian(coord, mesh_);
-            const auto min_cell_width = mesh::min_cell_width(coord, mesh_);
+            const auto cell_pos =
+                geometry.metric.to_cartesian(geometry.centroid(coord));
+            const auto min_cw = min_cell_width(coord);
 
             const auto r_vec    = cell_pos - body.position;
             const auto distance = r_vec.norm();
@@ -263,7 +272,7 @@ namespace simbi::body::expr {
 
             // calculate boundary thickness
             real boundary_thickness =
-                (mach_number > 1.0) ? 0.5 * min_cell_width : min_cell_width;
+                (mach_number > 1.0) ? 0.5 * min_cw : min_cw;
 
             const real extended_radius =
                 body.radius + ((mach_number > 1.0) ? 2.0 * boundary_thickness
@@ -271,7 +280,7 @@ namespace simbi::body::expr {
 
             // skip if outside influence region
             if (distance > extended_radius + boundary_thickness) {
-                return std::make_pair(conserved_t{}, body_delta_t<Dims>{});
+                return std::make_pair(conserved_t{}, body_delta_t<Rank>{});
             }
 
             // rigid body forcing physics
@@ -286,7 +295,7 @@ namespace simbi::body::expr {
                     ? 25.0 * density * sound_speed_val * sound_speed_val
                     : 10.0 * density * sound_speed_val * sound_speed_val;
 
-            vector_t<real, Dims> dp_dt{};
+            vector_t<real, Rank> dp_dt{};
 
             if (signed_distance < 0) {
                 // inside body - strong forcing
@@ -301,9 +310,6 @@ namespace simbi::body::expr {
                 const real boundary_factor =
                     1.0 - signed_distance / boundary_thickness;
                 const real sharp_factor = std::pow(boundary_factor, 3);
-
-                // check if body has no-slip (would need to access rigid
-                // component) for now, assume no-slip
                 dp_dt = -rel_velocity * base_strength * sharp_factor;
             }
             else if (mach_number > 1.0 &&
@@ -324,12 +330,12 @@ namespace simbi::body::expr {
 
             // calculate energy change
             const auto dE_dt = vecops::dot(prim.vel, dp_dt);
-            const auto dv    = mesh::volume(coord, mesh_);
+            const auto dv    = geometry.volume(coord);
             auto torque      = [&]() -> vector_t<real, 3> {
-                if constexpr (Dims == 3) {
+                if constexpr (Rank == 3) {
                     return vecops::cross(r_vec, dp_dt) * dv;
                 }
-                else if constexpr (Dims == 2) {
+                else if constexpr (Rank == 2) {
                     return vector_t<real, 3>{
                       0,
                       0,
@@ -343,7 +349,7 @@ namespace simbi::body::expr {
 
             return std::make_pair(
                 conserved_t{0.0, dp_dt, dE_dt},
-                body_delta_t<Dims>{
+                body_delta_t<Rank>{
                   .idx          = body.idx,
                   .force_delta  = -dp_dt,
                   .torque_delta = std::move(torque),
@@ -352,6 +358,33 @@ namespace simbi::body::expr {
             );
         }
     };
+
+    // ========================================================================
+    // factory helpers
+    // ========================================================================
+    template <typename Primitive, typename Geometry>
+    auto make_grav_op(const Primitive& prim, const Geometry& geo)
+    {
+        return grav_op_t<Primitive, Geometry>{prim, geo};
+    }
+
+    template <typename Primitive, typename Geometry>
+    auto make_accretion_op(
+        const Primitive& prim,
+        const Geometry& geo,
+        real gamma,
+        real dt
+    )
+    {
+        return accretion_op_t<Primitive, Geometry>{prim, geo, gamma, dt};
+    }
+
+    template <typename Primitive, typename Geometry>
+    auto make_rigid_op(const Primitive& prim, const Geometry& geo, real gamma)
+    {
+        return rigid_op_t<Primitive, Geometry>{prim, geo, gamma};
+    }
+
 }   // namespace simbi::body::expr
 
-#endif   // BODY_EXPR_EFFECTS_HPP
+#endif   // BODY_EXPR_NEFFECTS_HPP

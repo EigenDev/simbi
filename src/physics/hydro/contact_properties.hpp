@@ -72,7 +72,7 @@ namespace simbi::hydro {
         const real a,
         const real a_star,
         const real p_star,
-        const unit_vector_t<primitive_t::dimensions>& nhat
+        const unit_vector_t<primitive_t::rank>& nhat
     )
     {
         const auto& mom = cons.mom;
@@ -102,7 +102,7 @@ namespace simbi::hydro {
         const conserved_t& uR,
         const conserved_t& fL,
         const conserved_t& fR,
-        const unit_vector_t<conserved_t::dimensions>& nhat,
+        const unit_vector_t<conserved_t::rank>& nhat,
         real aL,
         real aR
     ) -> contact_properties_t

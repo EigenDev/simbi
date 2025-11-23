@@ -13,7 +13,7 @@ namespace simbi::progress {
     using time_point_t = clock_t::time_point;
 
     struct progress_state_t {
-        io::Table table;
+        io::table_t table;
         time_point_t start_time;
         std::uint64_t last_emit_iteration{0};
     };
