@@ -149,7 +149,6 @@ namespace simbi::ecs::creation {
                 bp.bounds.push_back(x3_bounds);
             }
 
-            // rearannge bounds to match internal ordering (x3, x2, x1)
             std::reverse(bp.bounds.begin(), bp.bounds.end());
 
             // coordinate system
@@ -170,23 +169,25 @@ namespace simbi::ecs::creation {
                     require_field<std::string>(config, "x3_spacing", "mesh")
                 );
             }
-            // reverse to match internal ordering
             std::reverse(bp.spacing.begin(), bp.spacing.end());
 
             // boundary conditions
+            // input is logical order: [x1_left, x1_right, x2_left, x2_right,
+            // ...] we need array-index order: reverse dimension pairs, not
+            // individual elements
             auto bcs = require_field<std::vector<std::string>>(
                 config,
                 "boundary_conditions",
                 {}
             );
-            bp.boundary_conditions = std::move(bcs);
-            // reverse to match internal ordering
-            std::reverse(
-                bp.boundary_conditions.begin(),
-                bp.boundary_conditions.end()
-            );
-            for (auto& bc : bp.boundary_conditions) {
-                std::cout << "bc: " << bc << std::endl;
+            bp.boundary_conditions.resize(bcs.size());
+            for (std::uint64_t dd = 0; dd < Rank; ++dd) {
+                // logical dim dd maps to array-index dim (Rank - 1 - dd)
+                std::uint64_t src_offset           = dd * 2;
+                std::uint64_t dst_offset           = (Rank - 1 - dd) * 2;
+                bp.boundary_conditions[dst_offset] = bcs[src_offset];   // left
+                bp.boundary_conditions[dst_offset + 1] =
+                    bcs[src_offset + 1];   // right
             }
 
             // motion
@@ -396,9 +397,9 @@ namespace simbi::ecs::creation {
             numerics_blueprint_t bp;
 
             bp.use_quirk_smoothing =
-                read_or_default<bool>(config, "quirk_smoothing", false);
+                read_or_default<bool>(config, "use_quirk_smoothing", false);
             bp.use_fleischmann_limiter =
-                read_or_default<bool>(config, "fleischmann_limiter", false);
+                read_or_default<bool>(config, "use_fleischmann_limiter", false);
 
             return bp;
         }
@@ -522,7 +523,6 @@ namespace simbi::ecs::creation {
                 "reconstruction",
                 "decomposition"
             );
-            std::cout << "reconstr: " << reconstr << std::endl;
             if (reconstr == "plm") {
                 bp.halo_width = 2;
             }

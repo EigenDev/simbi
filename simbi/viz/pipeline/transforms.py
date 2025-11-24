@@ -10,8 +10,8 @@ from typing import Any, Callable, Literal, Optional, Sequence
 
 import numpy as np
 
-from simbi.types import ProcessedData
 from simbi.reader import SimData, parse_data, read_raw_data
+from simbi.types import ProcessedData
 
 from ..config import VisualizationConfig
 from ..figure import Figure
@@ -160,6 +160,9 @@ def create_field_data(
     slice_plan: SlicePlan,
 ) -> FieldData:
     """Create a FieldData object from raw arrays."""
+    print(
+        f"Creating FieldData: {name}, shape={values.shape}, domain_sizes={[len(d) for d in domain]}"
+    )
     return FieldData(
         name=name,
         values=values,

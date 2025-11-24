@@ -41,6 +41,9 @@ namespace simbi::ecs {
         Func&& func
     )
     {
+        constexpr auto x1c  = Rank - 1;
+        constexpr auto x2c  = Rank - 2;
+        constexpr auto x3c  = Rank - 3;
         const auto& geo_cfg = mesh_cfg.geometry;
 
         // helper to create uniform map for a dimension
@@ -62,26 +65,26 @@ namespace simbi::ecs {
         // check if radial uses log spacing
         const bool radial_log =
             !geo_cfg.dims.empty() &&
-            geo_cfg.dims[0].type == geometry::map_type_t::log;
+            geo_cfg.dims[x1c].type == geometry::map_type_t::log;
 
         if constexpr (G == geometry_t::CARTESIAN) {
             // cartesian always uses uniform maps
             if constexpr (Rank == 1) {
-                auto metric = geometry::cartesian_metric_t(make_uniform(0));
+                auto metric = geometry::cartesian_metric_t(make_uniform(x1c));
                 return func(geometry::block_geometry(metric, motion));
             }
             else if constexpr (Rank == 2) {
                 auto metric = geometry::cartesian_metric_t(
-                    make_uniform(0),
-                    make_uniform(1)
+                    make_uniform(x1c),
+                    make_uniform(x2c)
                 );
                 return func(geometry::block_geometry(metric, motion));
             }
             else {
                 auto metric = geometry::cartesian_metric_t(
-                    make_uniform(0),
-                    make_uniform(1),
-                    make_uniform(2)
+                    make_uniform(x1c),
+                    make_uniform(x2c),
+                    make_uniform(x3c)
                 );
                 return func(geometry::block_geometry(metric, motion));
             }
@@ -90,26 +93,27 @@ namespace simbi::ecs {
             // spherical: radial may be log, angular always uniform
             if constexpr (Rank == 1) {
                 if (radial_log) {
-                    auto metric = geometry::spherical_metric_t(make_log(0));
+                    auto metric = geometry::spherical_metric_t(make_log(x1c));
                     return func(geometry::block_geometry(metric, motion));
                 }
                 else {
-                    auto metric = geometry::spherical_metric_t(make_uniform(0));
+                    auto metric =
+                        geometry::spherical_metric_t(make_uniform(x1c));
                     return func(geometry::block_geometry(metric, motion));
                 }
             }
             else if constexpr (Rank == 2) {
                 if (radial_log) {
                     auto metric = geometry::spherical_metric_t(
-                        make_log(0),
-                        make_uniform(1)
+                        make_log(x1c),
+                        make_uniform(x2c)
                     );
                     return func(geometry::block_geometry(metric, motion));
                 }
                 else {
                     auto metric = geometry::spherical_metric_t(
-                        make_uniform(0),
-                        make_uniform(1)
+                        make_uniform(x1c),
+                        make_uniform(x2c)
                     );
                     return func(geometry::block_geometry(metric, motion));
                 }
@@ -117,17 +121,17 @@ namespace simbi::ecs {
             else {
                 if (radial_log) {
                     auto metric = geometry::spherical_metric_t(
-                        make_log(0),
-                        make_uniform(1),
-                        make_uniform(2)
+                        make_log(x1c),
+                        make_uniform(x2c),
+                        make_uniform(x3c)
                     );
                     return func(geometry::block_geometry(metric, motion));
                 }
                 else {
                     auto metric = geometry::spherical_metric_t(
-                        make_uniform(0),
-                        make_uniform(1),
-                        make_uniform(2)
+                        make_uniform(x1c),
+                        make_uniform(x2c),
+                        make_uniform(x3c)
                     );
                     return func(geometry::block_geometry(metric, motion));
                 }
@@ -137,27 +141,27 @@ namespace simbi::ecs {
             // cylindrical: radial may be log, angular/axial always uniform
             if constexpr (Rank == 1) {
                 if (radial_log) {
-                    auto metric = geometry::cylindrical_metric_t(make_log(0));
+                    auto metric = geometry::cylindrical_metric_t(make_log(x1c));
                     return func(geometry::block_geometry(metric, motion));
                 }
                 else {
                     auto metric =
-                        geometry::cylindrical_metric_t(make_uniform(0));
+                        geometry::cylindrical_metric_t(make_uniform(x1c));
                     return func(geometry::block_geometry(metric, motion));
                 }
             }
             else if constexpr (Rank == 2) {
                 if (radial_log) {
                     auto metric = geometry::cylindrical_metric_t(
-                        make_log(0),
-                        make_uniform(1)
+                        make_log(x1c),
+                        make_uniform(x2c)
                     );
                     return func(geometry::block_geometry(metric, motion));
                 }
                 else {
                     auto metric = geometry::cylindrical_metric_t(
-                        make_uniform(0),
-                        make_uniform(1)
+                        make_uniform(x1c),
+                        make_uniform(x2c)
                     );
                     return func(geometry::block_geometry(metric, motion));
                 }
@@ -165,17 +169,17 @@ namespace simbi::ecs {
             else {
                 if (radial_log) {
                     auto metric = geometry::cylindrical_metric_t(
-                        make_log(0),
-                        make_uniform(1),
-                        make_uniform(2)
+                        make_log(x1c),
+                        make_uniform(x2c),
+                        make_uniform(x3c)
                     );
                     return func(geometry::block_geometry(metric, motion));
                 }
                 else {
                     auto metric = geometry::cylindrical_metric_t(
-                        make_uniform(0),
-                        make_uniform(1),
-                        make_uniform(2)
+                        make_uniform(x1c),
+                        make_uniform(x2c),
+                        make_uniform(x3c)
                     );
                     return func(geometry::block_geometry(metric, motion));
                 }

@@ -37,8 +37,8 @@
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
-#include <iostream>
 #include <memory>
+#include <numbers>
 
 namespace simbi::ecs {
 
@@ -217,7 +217,26 @@ namespace simbi::ecs {
             constexpr bool is_mhd        = Sim::is_mhd;
 
             // create boundary policy for this physics
-            auto policy = hydro::make_boundary_policy<is_mhd, Rank>();
+            auto& mesh_cfg = sim.mesh(lvl);
+            auto& geo      = mesh_cfg.geometry;
+
+            // extract theta bounds for spherical coordinate handling
+            // theta is x2 (logical), which is at array index Rank-2
+            real theta_min = 0.0;
+            real theta_max = std::numbers::pi;
+            if constexpr (Rank >= 2) {
+                constexpr std::uint64_t theta_idx = Rank - 2;
+                if (geo.dims.size() > theta_idx) {
+                    theta_min = geo.dims[theta_idx].start;
+                    theta_max = geo.dims[theta_idx].end;
+                }
+            }
+
+            auto policy = hydro::make_boundary_policy<is_mhd, Rank>(
+                geo.metric,
+                theta_min,
+                theta_max
+            );
 
             // simple context (no dynamic expressions for now)
             geometry::simple_context_t context;
@@ -228,9 +247,6 @@ namespace simbi::ecs {
                 auto& fields = sim.partition_hydro(lvl, pp);
                 auto& part   = sim.partition(lvl, pp);
                 auto exec    = sim.partition_executor(lvl, pp);
-
-                // get mesh config for this partition
-                auto& mesh_cfg = sim.mesh(lvl);
 
                 // apply boundaries using the driver
                 geometry::boundary_driver_t::apply_boundaries(
@@ -355,8 +371,6 @@ namespace simbi::ecs {
         template <typename Sim>
         void operator()(Sim& sim, std::uint64_t lvl) const
         {
-            std::cout << "Zeroing flux buffers at level " << lvl << "\n";
-            std::cout << "Has refinement: " << sim.has_refinement() << "\n";
             if (!sim.has_refinement()) {
                 return;
             }

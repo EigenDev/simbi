@@ -49,6 +49,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <filesystem>
+#include <iostream>
 #include <optional>
 #include <string>
 
@@ -435,20 +436,16 @@ namespace simbi::ecs::builders {
                 return (s == "log") ? cellspacing_t::LOG
                                     : cellspacing_t::LINEAR;
             };
-            meta.x1_spacing = (Rank > 0 && mesh_bp_.spacing.size() > 0)
-                                  ? to_spacing(mesh_bp_.spacing[0])
+            meta.x1_spacing = to_spacing(mesh_bp_.spacing[Rank - 1]);
+            meta.x2_spacing = (Rank > 1)
+                                  ? to_spacing(mesh_bp_.spacing[Rank - 2])
                                   : cellspacing_t::LINEAR;
-            meta.x2_spacing = (Rank > 1 && mesh_bp_.spacing.size() > 1)
-                                  ? to_spacing(mesh_bp_.spacing[1])
-                                  : cellspacing_t::LINEAR;
-            meta.x3_spacing = (Rank > 2 && mesh_bp_.spacing.size() > 2)
-                                  ? to_spacing(mesh_bp_.spacing[2])
+            meta.x3_spacing = (Rank > 2)
+                                  ? to_spacing(mesh_bp_.spacing[Rank - 3])
                                   : cellspacing_t::LINEAR;
 
             // boundary conditions
-            for (std::uint64_t ii = 0;
-                 ii < 2 * Rank && ii < mesh_bp_.boundary_conditions.size();
-                 ++ii) {
+            for (std::uint64_t ii = 0; ii < 2 * Rank; ++ii) {
                 meta.boundary_conditions[ii] =
                     deserialize<grid::boundary_type_t>(
                         mesh_bp_.boundary_conditions[ii]
@@ -643,9 +640,12 @@ namespace simbi::ecs::builders {
         // -------------------------------------------------------------------------
         grid::mesh_config_t<Rank> build_mesh_config(std::uint64_t lvl)
         {
+            // some things are given to use in logical order (ni, nj, nz)
+            // and we manually convert them into array order (nz, ny, nx)
             grid::mesh_config_t<Rank> cfg;
 
             // compute resolution for this level (apply refinement ratios)
+            // already in array order
             cfg.global_cells = mesh_bp_.active_resolution;
             for (std::uint64_t ll = 0; ll < lvl; ++ll) {
                 std::uint64_t ratio = (ll < amr_bp_.refinement_ratios.size())
@@ -691,8 +691,7 @@ namespace simbi::ecs::builders {
                 geometry::dimension_config_t dcfg;
                 dcfg.type = geometry::map_type_t::uniform;
 
-                if (dd < mesh_bp_.spacing.size() &&
-                    mesh_bp_.spacing[dd] == "log") {
+                if (mesh_bp_.spacing[dd] == "log") {
                     dcfg.type = geometry::map_type_t::log;
                 }
 

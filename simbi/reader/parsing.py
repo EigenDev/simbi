@@ -273,13 +273,11 @@ def parse_level_data(
     # parse mesh config for this level
     mesh_data = level_group.get("mesh", {})
     mesh = MeshConfig(
-        shape=tuple(mesh_data.get("shape", [1])[::-1]),
-        bounds_min=tuple(mesh_data.get("bounds_min", [0.0])[::-1]),
-        bounds_max=tuple(mesh_data.get("bounds_max", [1.0])[::-1]),
-        halo_radius=int(mesh_data.get("halo_radius", 0)),
-        spacing_types=tuple(
-            mesh_data.get("spacing_types", "linear").split(",")[::-1]
-        ),
+        shape=tuple(mesh_data["shape"]),
+        bounds_min=tuple(mesh_data["bounds_min"])[::-1],
+        bounds_max=tuple(mesh_data["bounds_max"])[::-1],
+        halo_radius=int(mesh_data["halo_radius"]),
+        spacing_types=tuple(mesh_data["spacing_types"].split(",")[::-1]),
     )
 
     # get fields for this level
@@ -328,17 +326,23 @@ def parse_mesh_config_v2(
             shape = tuple(res)
 
     # get bounds from geometry.dims if available
-    bounds_min = [0.0, 0.0, 0.0]
-    bounds_max = [1.0, 1.0, 1.0]
+    bounds_min = []
+    bounds_max = []
 
     if "geometry" in mesh_data:
         geo = mesh_data["geometry"]
-        if "dims" in geo:
-            dims = geo["dims"]
-            for i, dim in enumerate(dims if isinstance(dims, list) else [dims]):
-                if isinstance(dim, dict):
-                    bounds_min[i] = dim.get("start", 0.0)
-                    bounds_max[i] = dim.get("end", 1.0)
+        # filter out all keys that start with dim_x
+        dims = {
+            key: value for key, value in geo.items() if key.startswith("dim_")
+        }
+        for dim in dims.values():
+            bounds_min.append(dim.get("start", 0.0))
+            bounds_max.append(dim.get("end", 1.0))
+
+    # we prepend default bounds for inactive dimensions
+    while len(bounds_min) < 3:
+        bounds_min.insert(0, 0.0)
+        bounds_max.insert(0, 1.0)
 
     halo_radius = int(mesh_data.get("ghost_width", attrs.get("halo_radius", 0)))
 
@@ -350,11 +354,11 @@ def parse_mesh_config_v2(
     )
 
     return MeshConfig(
-        shape=tuple(int(s) for s in shape)[::-1],
+        shape=tuple(int(s) for s in shape),
         bounds_min=tuple(bounds_min)[::-1],
         bounds_max=tuple(bounds_max)[::-1],
         halo_radius=halo_radius,
-        spacing_types=spacing_types[::-1],
+        spacing_types=spacing_types,
     )
 
 
@@ -444,13 +448,11 @@ def parse_data(raw: RawHDF5, unpad: bool = True) -> Result[ProcessedData]:
 
             mesh_data: dict[str, Any] = raw.groups.get("mesh_config", {})
             mesh = MeshConfig(
-                shape=tuple(mesh_data["shape"][::-1]),
-                bounds_min=tuple(mesh_data["bounds_min"][::-1]),
-                bounds_max=tuple(mesh_data["bounds_max"][::-1]),
+                shape=tuple(mesh_data["shape"]),
+                bounds_min=tuple(mesh_data["bounds_min"]),
+                bounds_max=tuple(mesh_data["bounds_max"]),
                 halo_radius=int(mesh_data["halo_radius"]),
-                spacing_types=tuple(
-                    mesh_data["spacing_types"].split(",")[::-1]
-                ),
+                spacing_types=tuple(mesh_data["spacing_types"].split(",")),
             )
 
         # get base level fields

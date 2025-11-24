@@ -8,6 +8,7 @@
 #include <H5Cpp.h>
 #include <array>
 #include <concepts>
+#include <iostream>
 #include <string>
 #include <string_view>
 #include <type_traits>
@@ -51,19 +52,30 @@ namespace simbi::io {
     {
         H5::DataSpace space(static_cast<int>(dims.size()), dims.data());
         auto plist = policy.creation_props(dims);
-        auto dtype = policy.data_type();
+
+        // for floating-point types, respect precision policy
+        // for integer types, use native type
+        auto dtype = []<typename U>(const write_policy_t& p) {
+            if constexpr (std::is_floating_point_v<U>) {
+                return p.data_type();
+            }
+            else {
+                return h5_pred_type<U>::value();
+            }
+        }.template operator()<T>(policy);
 
         auto dataset = group.createDataSet(name, dtype, space, plist);
 
-        // handle precision downsampling
-        if (policy.precision == precision_t::float32 &&
-            std::is_same_v<T, double>) {
-            std::vector<float> temp(data.begin(), data.end());
-            dataset.write(temp.data(), H5::PredType::NATIVE_FLOAT);
+        // handle precision downsampling for floating-point
+        if constexpr (std::is_floating_point_v<T>) {
+            if (policy.precision == precision_t::float32 &&
+                std::is_same_v<T, double>) {
+                std::vector<float> temp(data.begin(), data.end());
+                dataset.write(temp.data(), H5::PredType::NATIVE_FLOAT);
+                return;
+            }
         }
-        else {
-            dataset.write(data.data(), h5_pred_type<T>::value());
-        }
+        dataset.write(data.data(), h5_pred_type<T>::value());
     }
 
     // write a scalar as a dataset

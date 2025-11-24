@@ -142,10 +142,10 @@ class QuadPlotComponent(Component):
 
         if self.props.plot_type == "polar":
             # (r, theta) -> (theta, r) for polar plot
-            x, y = data.domain[1], data.domain[0]
+            x, y = data.domain[0], data.domain[1]
             values = data.values.T
         else:
-            x, y = data.domain[0], data.domain[1]
+            x, y = data.domain[1], data.domain[0]
             values = data.values
 
         norm = _create_color_normalization(

@@ -73,7 +73,7 @@ namespace simbi::geometry {
         {
         }
 
-        DUAL cell_interval_t operator()(std::int64_t ii) const
+        DUAL constexpr cell_interval_t operator()(std::int64_t ii) const
         {
             // calculate faces using powers
             // x_i = start * 10^(i * slope)
@@ -90,19 +90,19 @@ namespace simbi::geometry {
             return {x_l, x_r, x_c, x_r - x_l};
         }
 
-        DUAL real face(std::int64_t ii) const
+        DUAL constexpr real face(std::int64_t ii) const
         {
             return start_ * std::pow(10.0, static_cast<real>(ii) * log_slope_);
         }
 
-        DUAL real center(std::int64_t ii) const
+        DUAL constexpr real center(std::int64_t ii) const
         {
             real x_l = face(ii);
             real x_r = face(ii + 1);
             return std::sqrt(x_l * x_r);
         }
 
-        DUAL std::int64_t index_at(real x) const
+        DUAL constexpr std::int64_t index_at(real x) const
         {
             // i = log10(x / start) / slope
             return static_cast<std::int64_t>(

@@ -184,7 +184,9 @@ namespace simbi::geometry {
                         };
 
                         field[ghost_box] =
-                            field.remap(map_op).map(phys_op).with(exec);
+                            field[ghost_box].remap(map_op).map(phys_op).with(
+                                exec
+                            );
                     };
 
                     // dispatch
@@ -205,7 +207,11 @@ namespace simbi::geometry {
                         }
                         case grid::boundary_type_t::periodic: {
                             execute_static(
-                                periodic_map_t{dd, 0, global_dims[dd]}
+                                periodic_map_t{
+                                  dd,
+                                  geometry.start[dd],
+                                  global_dims[dd]
+                                }
                             );
                             break;
                         }
@@ -217,9 +223,6 @@ namespace simbi::geometry {
                                     context.geo_service,
                                     id,
                                     [&](const auto&... maps) {
-                                        // construct concrete geometry on
-                                        // stack
-                                        // (assuming cartesian composition)
                                         auto block_geo =
                                             typename Context::metric_type(
                                                 maps...
@@ -251,7 +254,8 @@ namespace simbi::geometry {
                                         // > remap(clamp) -> gets U_interior
                                         // > enum_map(dynOp) -> uses  GhostCoord
                                         // + U_interior -> U_new
-                                        field[ghost_box] = field.remap(clamp)
+                                        field[ghost_box] = field[ghost_box]
+                                                               .remap(clamp)
                                                                .enum_map(dyn_op)
                                                                .with(exec);
                                     }

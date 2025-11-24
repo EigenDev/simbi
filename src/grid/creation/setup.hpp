@@ -41,24 +41,21 @@ namespace simbi::grid::creation {
             // we map them to the [dim][side] structure.
             // order is: x3_L, x13_R, x2_L, x2_R...
             const auto& bc_strs = bp.boundary_conditions;
-            for (std::uint64_t ii = 0; ii < bc_strs.size(); ++ii) {
+            for (std::uint64_t dd = 0; dd < Rank; ++dd) {
                 // map input index 0 -> dimension (Rank-1)
                 // example 3d: idx 0 -> dim 2 (z)
                 // example 2d: idx 0 -> dim 1 (y)
-                std::uint64_t logical_dim = (Rank - 1) - ii;
 
                 // vector is packed [left, right, left, right...]
-                std::size_t vec_offset = ii * 2;
+                std::size_t vec_offset = dd * 2;
 
-                if (vec_offset + 1 < bc_strs.size()) {
-                    auto left_type =
-                        deserialize<boundary_type_t>(bc_strs[vec_offset]);
-                    auto right_type =
-                        deserialize<boundary_type_t>(bc_strs[vec_offset + 1]);
+                auto left_type =
+                    deserialize<boundary_type_t>(bc_strs[vec_offset]);
+                auto right_type =
+                    deserialize<boundary_type_t>(bc_strs[vec_offset + 1]);
 
-                    config.boundaries.set_left(logical_dim, left_type);
-                    config.boundaries.set_right(logical_dim, right_type);
-                }
+                config.boundaries.set_left(dd, left_type);
+                config.boundaries.set_right(dd, right_type);
             }
 
             config.geometry.metric =

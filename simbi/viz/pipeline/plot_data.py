@@ -73,6 +73,7 @@ def apply_slicing(
 
     sliced_fields: list[FieldData] = []
     for field in fields:
+        print(f"Applying slicing to field '{field.name}'")
         # Plan and execute the slice
         plan = plan_slice(field.domain, slice_spec)
         sliced_values, sliced_domain = execute_slice(

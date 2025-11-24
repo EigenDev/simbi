@@ -87,16 +87,16 @@ def run_config(args: Namespace, argv: Optional[Sequence[str]] = None) -> None:
             "ensure your config defines a class that inherits from SimbiProblem."
         )
 
-    # get the main parser for cli registration
-    main_parser = getattr(args, "main_parser", None)
+    # get the active subparser (run parser) for cli registration
+    active_parser = getattr(args, "active_parser", None)
 
     for class_name in problem_classes:
         # load the class
         problem_class = _load_problem_class(script, class_name)
 
         # setup cli params from the problem class
-        if main_parser is not None:
-            problem_class.setup_cli(main_parser)
+        if active_parser is not None:
+            problem_class.setup_cli(active_parser)
 
         # show help if --info flag
         if args.info:
@@ -121,10 +121,7 @@ def run_config(args: Namespace, argv: Optional[Sequence[str]] = None) -> None:
             continue
 
         # create instance from cli args
-        if main_parser is not None:
-            problem = problem_class.from_cli(main_parser)
-        else:
-            problem = problem_class()
+        problem = problem_class.from_cli(argv, args)
 
         # set checkpoint if provided
         if args.checkpoint:

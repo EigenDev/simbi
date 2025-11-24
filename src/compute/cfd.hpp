@@ -18,8 +18,6 @@
 #include "compute/computation.hpp"
 #include "containers/state_ops.hpp"
 #include "containers/vector.hpp"
-#include "geometry/block_geometry.hpp"
-#include "geometry/source_terms.hpp"
 #include "grid/domain.hpp"
 #include "physics/ib/body.hpp"
 #include "physics/ib/body_delta.hpp"
@@ -107,7 +105,7 @@ namespace simbi::cfd {
             flux_views,
             geometry
           },
-          grid::extents(active_domain.shape())
+          active_domain
         };
     }
 
@@ -157,7 +155,7 @@ namespace simbi::cfd {
             time,
             gamma
           },
-          grid::extents(domain.shape())
+          domain
         };
     }
 
@@ -203,7 +201,7 @@ namespace simbi::cfd {
             geometry,
             time
           },
-          grid::extents(domain.shape())
+          domain
         };
     }
 
@@ -239,7 +237,7 @@ namespace simbi::cfd {
     {
         return compute::computation_t{
           geometric_source_op_t<PrimField, Geometry>{prims, geometry, gamma},
-          grid::extents(domain.shape())
+          domain
         };
     }
 
@@ -390,7 +388,7 @@ namespace simbi::cfd {
             shock_smoother,
             dir
           },
-          grid::extents(face_domain.shape())
+          face_domain
         };
     }
 

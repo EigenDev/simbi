@@ -120,7 +120,7 @@ class SimbiProblem(BaseModel):
     # numerics - checkpoint_safe=False (must match checkpoint)
     # =========================================================================
     solver: Solver = ProblemParam(
-        Solver.HLLC, cli=True, description="numerical solver"
+        Solver.HLLE, cli=True, description="numerical solver"
     )
     reconstruction: Reconstruction = ProblemParam(
         Reconstruction.PLM, cli=True, description="spatial reconstruction"
@@ -155,10 +155,10 @@ class SimbiProblem(BaseModel):
     # solver options
     # =========================================================================
     use_quirk_smoothing: bool = ProblemParam(
-        False, description="use quirk smoothing"
+        False, cli=True, description="use quirk smoothing"
     )
     use_fleischmann_limiter: bool = ProblemParam(
-        False, description="use fleischmann low-mach fix"
+        False, cli=True, description="use fleischmann low-mach fix"
     )
 
     # =========================================================================
@@ -490,10 +490,19 @@ class SimbiProblem(BaseModel):
                 kwargs["type"] = non_none[0]
 
     @classmethod
-    def from_cli(cls, parser: argparse.ArgumentParser) -> SimbiProblem:
+    def from_cli(
+        cls,
+        argv: Optional[Sequence[str]] = None,
+        namespace: Optional[argparse.Namespace] = None,
+    ) -> SimbiProblem:
         """create instance from cli arguments."""
-        namespace = parser.parse_args()
-        return cls.from_namespace(namespace)
+        # create a dedicated parser for problem-specific args only
+        parser = argparse.ArgumentParser(add_help=False)
+        cls.setup_cli(parser)
+
+        # parse into existing namespace (if provided)
+        parsed, _ = parser.parse_known_args(argv, namespace)
+        return cls.from_namespace(parsed)
 
     @classmethod
     def from_namespace(cls, namespace: argparse.Namespace) -> SimbiProblem:

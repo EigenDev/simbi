@@ -9,6 +9,7 @@
 
 #include <cmath>
 #include <cstdint>
+#include <iostream>
 #include <numbers>
 #include <type_traits>
 
@@ -43,10 +44,10 @@ namespace simbi::geometry {
         else if constexpr (is_spherical_c<metric_t>) {
             // retrieve coordinates
             auto centroid = metric.centroid(idx);
-            real r        = centroid[0];
+            real r        = centroid[Rank - 1];
             real theta    = [=]() {
                 if constexpr (Rank > 1) {
-                    return centroid[1];
+                    return centroid[Rank - 2];
                 }
                 else {
                     return 0.5 * std::numbers::pi;
@@ -62,6 +63,10 @@ namespace simbi::geometry {
             real cot = (std::abs(sin_t) > global::epsilon)
                            ? std::cos(theta) / sin_t
                            : 0.0;
+
+            // std::cout << "idx: " << idx << " r: " << r << " theta: " << theta
+            //           << " cot: " << cot << std::endl;
+            // std::cin.get();
 
             // unpack primitives
             const real v1    = proper_velocity(prim, 1);

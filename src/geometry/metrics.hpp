@@ -207,6 +207,9 @@ namespace simbi::geometry {
         DUAL constexpr auto
         scale_factors(const simbi::vector_t<int64_t, Rank>& idx) const
         {
+            constexpr std::uint64_t x1c = Rank - 1;
+            constexpr std::uint64_t x2c = Rank - 2;
+            constexpr std::uint64_t x3c = Rank - 3;
             vector_t<real, Rank> h;
             h.fill(1.0);
 
@@ -214,14 +217,14 @@ namespace simbi::geometry {
 
             // theta (h_theta = r)
             if constexpr (Rank > 1) {
-                h[Rank - 2] = r_map.center(idx[Rank - 1]);
+                h[x2c] = r_map.center(idx[x1c]);
             }
 
             // phi (h_phi = r sin theta)
             if constexpr (Rank > 2) {
-                real r      = r_map.center(idx[Rank - 1]);
-                real theta  = theta_map.center(idx[Rank - 2]);
-                h[Rank - 3] = r * std::sin(theta);
+                real r     = r_map.center(idx[x1c]);
+                real theta = theta_map.center(idx[x2c]);
+                h[x3c]     = r * std::sin(theta);
             }
             return h;
         }
@@ -231,13 +234,16 @@ namespace simbi::geometry {
         DUAL constexpr auto
         cell_widths(const simbi::vector_t<int64_t, Rank>& idx) const
         {
+            constexpr std::uint64_t x1c = Rank - 1;
+            constexpr std::uint64_t x2c = Rank - 2;
+            constexpr std::uint64_t x3c = Rank - 3;
             vector_t<real, Rank> w;
-            w[Rank - 1] = r_map(idx[Rank - 1]).width;
+            w[x1c] = r_map(idx[x1c]).width;
             if constexpr (Rank > 1) {
-                w[Rank - 2] = theta_map(idx[Rank - 2]).width;
+                w[x2c] = theta_map(idx[x2c]).width;
             }
             if constexpr (Rank > 2) {
-                w[Rank - 3] = phi_map(idx[Rank - 3]).width;
+                w[x3c] = phi_map(idx[x3c]).width;
             }
             return w;
         }
@@ -248,26 +254,25 @@ namespace simbi::geometry {
             std::size_t dim
         ) const
         {
-            constexpr std::uint64_t rc = Rank - 1;
-            constexpr std::uint64_t tc = Rank - 2;
-            constexpr std::uint64_t pc = Rank - 3;
-
+            constexpr std::uint64_t x1c = Rank - 1;
+            constexpr std::uint64_t x2c = Rank - 2;
+            constexpr std::uint64_t x3c = Rank - 3;
             // r-face
-            if (dim == rc) {
-                return r_map.face(idx[rc]);
+            if (dim == x1c) {
+                return r_map.face(idx[x1c]);
             }
 
             // theta-face
             if constexpr (Rank > 1) {
-                if (dim == tc) {
-                    return theta_map.face(idx[tc]);
+                if (dim == x2c) {
+                    return theta_map.face(idx[x2c]);
                 }
             }
 
             // phi-face
             if constexpr (Rank > 2) {
-                if (dim == pc) {
-                    return phi_map.face(idx[pc]);
+                if (dim == x3c) {
+                    return phi_map.face(idx[x3c]);
                 }
             }
 
@@ -277,8 +282,11 @@ namespace simbi::geometry {
         template <std::uint64_t Rank>
         DUAL constexpr real volume(const iarray<Rank>& idx) const
         {
+            constexpr std::uint64_t x1c = Rank - 1;
+            constexpr std::uint64_t x2c = Rank - 2;
+            constexpr std::uint64_t x3c = Rank - 3;
             // radial: (r_r^3 - r_l^3) / 3
-            auto r_c  = r_map(idx[0]);
+            auto r_c  = r_map(idx[x1c]);
             real dv_r = (r_c.end * r_c.end * r_c.end -
                          r_c.start * r_c.start * r_c.start) /
                         3.0;
@@ -286,14 +294,14 @@ namespace simbi::geometry {
             // theta: cos(t_l) - cos(t_r)
             real dv_theta = 2.0;   // full sphere default
             if constexpr (Rank > 1) {
-                auto t_c = theta_map(idx[1]);
+                auto t_c = theta_map(idx[x2c]);
                 dv_theta = std::cos(t_c.start) - std::cos(t_c.end);
             }
 
             // phi: dphi
             real dv_phi = 2.0 * std::numbers::pi;
             if constexpr (Rank > 2) {
-                dv_phi = phi_map(idx[2]).width;
+                dv_phi = phi_map(idx[x3c]).width;
             }
 
             return dv_r * dv_theta * dv_phi;
@@ -305,9 +313,9 @@ namespace simbi::geometry {
         {
             constexpr std::uint64_t x1c = Rank - 1;
             constexpr std::uint64_t x2c = Rank - 2;
-            constexpr std::uint64_t x3c = Rank - 2;
+            constexpr std::uint64_t x3c = Rank - 3;
             // r-face (dim 0)
-            if (dim == 0) {
+            if (dim == x1c) {
                 real r_l = r_map.face(idx[x1c]);
 
                 real d_omega = 4.0 * std::numbers::pi;
@@ -326,7 +334,7 @@ namespace simbi::geometry {
 
             // theta-face (dim 1)
             if constexpr (Rank > 1) {
-                if (dim == 1) {
+                if (dim == x2c) {
                     // area = integral(r dr) * integral(sin(theta_face) dphi)
                     //      = 0.5 * (r_r^2 - r_l^2) * sin(theta_l) * dphi
                     auto r_c = r_map(idx[x1c]);
@@ -347,7 +355,7 @@ namespace simbi::geometry {
 
             // phi-face (dim 2)
             if constexpr (Rank > 2) {
-                if (dim == 2) {
+                if (dim == x3c) {
                     // surface normal to phi is the "half-disk" slice.
                     // area = integral(r dr dtheta) = 0.5 * r^2 * dtheta.
                     // correct.
@@ -368,17 +376,20 @@ namespace simbi::geometry {
         template <std::uint64_t Rank>
         DUAL constexpr auto centroid(const iarray<Rank>& idx) const
         {
+            constexpr std::uint64_t x1c = Rank - 1;
+            constexpr std::uint64_t x2c = Rank - 2;
+            constexpr std::uint64_t x3c = Rank - 3;
             // note: geometric centroid of spherical shell is not just
             // arithmetic mean of coords but for finite volume, we usually store
             // the 'coordinate center' r_i+1/2 specialized physics might need
             // volume-weighted centroids. for now, returning coordinate centers.
             vector_t<real, Rank> c;
-            c[Rank - 1] = r_map.center(idx[Rank - 1]);
+            c[x1c] = r_map.center(idx[x1c]);
             if constexpr (Rank > 1) {
-                c[Rank - 2] = theta_map.center(idx[Rank - 2]);
+                c[x2c] = theta_map.center(idx[x2c]);
             }
             if constexpr (Rank > 2) {
-                c[Rank - 3] = phi_map.center(idx[Rank - 3]);
+                c[x3c] = phi_map.center(idx[x3c]);
             }
             return c;
         }
@@ -438,6 +449,8 @@ namespace simbi::geometry {
         DUAL constexpr auto
         scale_factors(const simbi::vector_t<int64_t, Rank>& idx) const
         {
+            constexpr std::uint64_t x1c = Rank - 1;
+            constexpr std::uint64_t x2c = Rank - 2;
             vector_t<real, Rank> h;
             h.fill(1.0);
 
@@ -446,7 +459,7 @@ namespace simbi::geometry {
             // phi (h_phi = r)
             if constexpr (Rank > 1) {
                 if constexpr (!std::is_same_v<CylType, axis_cylindrical_tag>) {
-                    h[Rank - 2] = r_map.center(idx[Rank - 1]);
+                    h[x2c] = r_map.center(idx[x1c]);
                 }
             }
 
@@ -459,18 +472,21 @@ namespace simbi::geometry {
         DUAL constexpr auto
         cell_widths(const simbi::vector_t<int64_t, Rank>& idx) const
         {
+            constexpr std::uint64_t x1c = Rank - 1;
+            constexpr std::uint64_t x2c = Rank - 2;
+            constexpr std::uint64_t x3c = Rank - 3;
             vector_t<real, Rank> w;
-            w[Rank - 1] = r_map(idx[Rank - 1]).width;
+            w[x1c] = r_map(idx[x1c]).width;
             if constexpr (Rank > 1) {
                 if constexpr (std::is_same_v<CylType, axis_cylindrical_tag>) {
-                    w[Rank - 2] = z_map(idx[Rank - 2]).width;
+                    w[x2c] = z_map(idx[x2c]).width;
                 }
                 else {
-                    w[Rank - 2] = phi_map(idx[Rank - 2]).width;
+                    w[x2c] = phi_map(idx[x2c]).width;
                 }
             }
             if constexpr (Rank > 2) {
-                w[Rank - 3] = z_map(idx[Rank - 3]).width;
+                w[x3c] = z_map(idx[x3c]).width;
             }
             return w;
         }
@@ -481,33 +497,33 @@ namespace simbi::geometry {
             std::size_t dim
         ) const
         {
-            constexpr std::uint64_t rc = Rank - 1;
-            constexpr std::uint64_t pc = Rank - 2;
-            constexpr std::uint64_t zc = Rank - 3;
+            constexpr std::uint64_t x1c = Rank - 1;
+            constexpr std::uint64_t x2c = Rank - 2;
+            constexpr std::uint64_t x3c = Rank - 3;
 
             // r-face
-            if (dim == rc) {
-                return r_map.face(idx[rc]);
+            if (dim == x1c) {
+                return r_map.face(idx[x1c]);
             }
 
             // phi-face
             if constexpr (Rank > 1) {
-                if (dim == pc) {
+                if (dim == x2c) {
                     if constexpr (std::is_same_v<
                                       cyl_type,
                                       axis_cylindrical_tag>) {
-                        return z_map.face(idx[pc]);
+                        return z_map.face(idx[x2c]);
                     }
                     else {
-                        return phi_map.face(idx[pc]);
+                        return phi_map.face(idx[x2c]);
                     }
                 }
             }
 
             // z-face
             if constexpr (Rank > 2) {
-                if (dim == zc) {
-                    return z_map.face(idx[zc]);
+                if (dim == x3c) {
+                    return z_map.face(idx[x3c]);
                 }
             }
 
@@ -517,22 +533,26 @@ namespace simbi::geometry {
         template <std::uint64_t Rank>
         DUAL constexpr real volume(const vector_t<int64_t, Rank>& idx) const
         {
-            auto r_c  = r_map(idx[Rank - 1]);
+            constexpr std::uint64_t x1c = Rank - 1;
+            constexpr std::uint64_t x2c = Rank - 2;
+            constexpr std::uint64_t x3c = Rank - 3;
+
+            auto r_c  = r_map(idx[x1c]);
             real dv_r = 0.5 * (r_c.end * r_c.end - r_c.start * r_c.start);
 
             real dv_phi = 2.0 * std::numbers::pi;
             if constexpr (Rank > 1) {
                 if constexpr (!std::is_same_v<CylType, axis_cylindrical_tag>) {
-                    dv_phi = phi_map(idx[Rank - 2]).width;
+                    dv_phi = phi_map(idx[x2c]).width;
                 }
             }
 
             real dv_z = 1.0;
             if constexpr (Rank > 2) {
-                dv_z = z_map(idx[Rank - 3]).width;
+                dv_z = z_map(idx[x3c]).width;
             }
             else if constexpr (std::is_same_v<CylType, axis_cylindrical_tag>) {
-                dv_z = z_map(idx[Rank - 3]).width;
+                dv_z = z_map(idx[x3c]).width;
             }
 
             return dv_r * dv_phi * dv_z;
@@ -542,27 +562,30 @@ namespace simbi::geometry {
         DUAL constexpr real
         face_area(const iarray<Rank>& idx, std::size_t dim) const
         {
+            constexpr std::uint64_t x1c = Rank - 1;
+            constexpr std::uint64_t x2c = Rank - 2;
+            constexpr std::uint64_t x3c = Rank - 3;
             // r-face (0): r * dphi * dz
-            if (dim == Rank - 1) {
-                real r_l   = r_map.face(idx[Rank - 1]);
+            if (dim == x1c) {
+                real r_l   = r_map.face(idx[x1c]);
                 real d_phi = 2.0 * std::numbers::pi;
                 if constexpr (Rank > 1) {
-                    d_phi = phi_map(idx[Rank - 2]).width;
+                    d_phi = phi_map(idx[x2c]).width;
                 }
                 real d_z = 1.0;
                 if constexpr (Rank > 2) {
-                    d_z = z_map(idx[Rank - 3]).width;
+                    d_z = z_map(idx[x3c]).width;
                 }
                 return r_l * d_phi * d_z;
             }
 
             // phi-face (1): dr * dz
             if constexpr (Rank > 1) {
-                if (dim == Rank - 2) {
-                    real d_r = r_map(idx[Rank - 1]).width;
+                if (dim == x2c) {
+                    real d_r = r_map(idx[x1c]).width;
                     real d_z = 1.0;
                     if constexpr (Rank > 2) {
-                        d_z = z_map(idx[Rank - 3]).width;
+                        d_z = z_map(idx[x3c]).width;
                     }
                     return d_r * d_z;
                 }
@@ -570,11 +593,11 @@ namespace simbi::geometry {
 
             // z-face (2): 0.5(r^2) * dphi
             if constexpr (Rank > 2) {
-                if (dim == Rank - 3) {
-                    auto r_c = r_map(idx[Rank - 1]);
+                if (dim == x3c) {
+                    auto r_c = r_map(idx[x1c]);
                     real area_r =
                         0.5 * (r_c.end * r_c.end - r_c.start * r_c.start);
-                    real d_phi = phi_map(idx[Rank - 2]).width;
+                    real d_phi = phi_map(idx[x2c]).width;
                     return area_r * d_phi;
                 }
             }
@@ -584,23 +607,26 @@ namespace simbi::geometry {
         template <std::uint64_t Rank>
         DUAL constexpr auto centroid(const iarray<Rank>& idx) const
         {
+            constexpr std::uint64_t x1c = Rank - 1;
+            constexpr std::uint64_t x2c = Rank - 2;
+            constexpr std::uint64_t x3c = Rank - 3;
             // note: geometric centroid of spherical shell is not just
             // arithmetic mean of coords but for finite volume, we usually
             // store the 'coordinate center' r_i+1/2 specialized physics
             // might need volume-weighted centroids. for now, returning
             // coordinate centers.
             vector_t<real, Rank> c;
-            c[Rank - 1] = r_map.center(idx[Rank - 1]);
+            c[x1c] = r_map.center(idx[x1c]);
             if constexpr (Rank > 1) {
                 if constexpr (std::is_same_v<CylType, axis_cylindrical_tag>) {
-                    c[Rank - 2] = z_map.center(idx[Rank - 2]);
+                    c[x2c] = z_map.center(idx[x2c]);
                 }
                 else {
-                    c[Rank - 2] = phi_map.center(idx[Rank - 2]);
+                    c[x2c] = phi_map.center(idx[x2c]);
                 }
             }
             if constexpr (Rank > 2) {
-                c[Rank - 3] = z_map.center(idx[Rank - 3]);
+                c[x3c] = z_map.center(idx[x3c]);
             }
             return c;
         }
