@@ -149,6 +149,9 @@ namespace simbi::ecs::creation {
                 bp.bounds.push_back(x3_bounds);
             }
 
+            // rearannge bounds to match internal ordering (x3, x2, x1)
+            std::reverse(bp.bounds.begin(), bp.bounds.end());
+
             // coordinate system
             bp.coord_system =
                 require_field<std::string>(config, "coord_system", "mesh");
@@ -167,6 +170,8 @@ namespace simbi::ecs::creation {
                     require_field<std::string>(config, "x3_spacing", "mesh")
                 );
             }
+            // reverse to match internal ordering
+            std::reverse(bp.spacing.begin(), bp.spacing.end());
 
             // boundary conditions
             auto bcs = require_field<std::vector<std::string>>(
@@ -175,6 +180,14 @@ namespace simbi::ecs::creation {
                 {}
             );
             bp.boundary_conditions = std::move(bcs);
+            // reverse to match internal ordering
+            std::reverse(
+                bp.boundary_conditions.begin(),
+                bp.boundary_conditions.end()
+            );
+            for (auto& bc : bp.boundary_conditions) {
+                std::cout << "bc: " << bc << std::endl;
+            }
 
             // motion
             bp.moving_mesh = require_field<bool>(config, "mesh_motion", "mesh");
