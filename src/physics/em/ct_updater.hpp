@@ -170,8 +170,8 @@ namespace simbi::em {
     face_efields(const FluxField& flux, const vector_t<iarray<3>, 4>& coords)
     {
         auto [h_flux_idx, v_flux_idx] = Permutation::flux_indices();
-        constexpr auto dims           = FluxField::rank;
-        constexpr auto nhat = ehat<dims>(Permutation::e_field_component());
+        constexpr std::uint64_t rank  = FluxField::rank;
+        constexpr auto nhat = ehat<rank>(Permutation::e_field_component());
 
         return vector_t{
           flux[h_flux_idx](coords[0]).mag[index(nhat)],
@@ -197,8 +197,8 @@ namespace simbi::em {
     auto
     center_efields(const PrimField& prim, const vector_t<iarray<3>, 4>& coords)
     {
-        constexpr auto dims = PrimField::rank;
-        constexpr auto nhat = ehat<dims>(Permutation::e_field_component());
+        constexpr std::uint64_t rank = PrimField::rank;
+        constexpr auto nhat = ehat<rank>(Permutation::e_field_component());
 
         return vector_t{
           em::electric_field(prim(coords[0]))[index(nhat)],

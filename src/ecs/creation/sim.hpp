@@ -46,6 +46,7 @@
 #include "utility/bimap.hpp"
 #include "utility/enums.hpp"
 
+#include <cstddef>
 #include <cstdint>
 #include <filesystem>
 #include <optional>
@@ -671,10 +672,8 @@ namespace simbi::ecs::builders {
                         bc_strs[vec_offset + 1]
                     );
 
-                    // map input index to dimension (reverse order)
-                    std::uint64_t dim = (Rank - 1) - ii;
-                    cfg.boundaries.set_left(dim, left_type);
-                    cfg.boundaries.set_right(dim, right_type);
+                    cfg.boundaries.set_left(ii, left_type);
+                    cfg.boundaries.set_right(ii, right_type);
                 }
             }
 
@@ -697,14 +696,8 @@ namespace simbi::ecs::builders {
                     dcfg.type = geometry::map_type_t::log;
                 }
 
-                if (dd < mesh_bp_.bounds.size()) {
-                    dcfg.start = mesh_bp_.bounds[dd].first;
-                    dcfg.end   = mesh_bp_.bounds[dd].second;
-                }
-                else {
-                    dcfg.start = 0.0;
-                    dcfg.end   = 1.0;
-                }
+                dcfg.start = mesh_bp_.bounds[dd].first;
+                dcfg.end   = mesh_bp_.bounds[dd].second;
 
                 cfg.geometry.dims.push_back(dcfg);
             }

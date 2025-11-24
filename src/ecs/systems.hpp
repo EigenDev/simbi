@@ -299,7 +299,7 @@ namespace simbi::ecs {
             std::uint64_t lvl
         ) const
         {
-            constexpr auto dims = Sim::rank;
+            constexpr std::uint64_t rank = Sim::rank;
 
             auto& meta    = sim.metadata();
             const auto dt = meta.level_dts[lvl];
@@ -310,7 +310,7 @@ namespace simbi::ecs {
                 auto exec    = sim.partition_executor(lvl, pp);
 
                 // compute fluxes for each direction
-                for (std::uint64_t dir = 0; dir < dims; ++dir) {
+                for (std::uint64_t dir = 0; dir < rank; ++dir) {
                     // face domain for this direction
                     auto face_domain = part.owned_domain;
                     face_domain.fin[dir] += 1;
