@@ -1,3 +1,9 @@
+# =============================================================================
+# simbi/cli/commands/plot.py
+#
+# plot command for visualizing simulation checkpoints.
+# dispatches to appropriate visualization functions based on plot type.
+# =============================================================================
 import sys
 from argparse import Namespace, _SubParsersAction
 from typing import Optional

@@ -1,12 +1,19 @@
+# =============================================================================
+# parsing.py
+#
+# parses raw hdf5 data into structured ProcessedData.
+# handles metadata extraction, field mapping, and body reconstruction.
+# =============================================================================
 from dataclasses import asdict
 from typing import Any, Optional
 
 import numpy as np
 from numpy.typing import NDArray
 
-from simbi.core.types.bodies import BodyCapability
+from simbi.types.bodies import BodyCapability
 
-from ..core.types import (
+from ..functional.result import Result
+from ..types import (
     AccretionProperties,
     BaseBody,
     Body,
@@ -22,7 +29,6 @@ from ..core.types import (
     RawHDF5,
     RigidProperties,
 )
-from ..functional.result import Result
 
 Array = NDArray[np.floating]
 

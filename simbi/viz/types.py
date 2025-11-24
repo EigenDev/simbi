@@ -6,8 +6,8 @@ from typing import Sequence, TypeVar
 from pydantic import BaseModel, field_validator
 from typing_extensions import Optional
 
-from simbi.core.types import Array, HierarchyData
-from simbi.core.types.bodies import (
+from simbi.types import Array, HierarchyData
+from simbi.types.bodies import (
     Body,
     BodySystemConfig,
     ImmersedBodyConfig,

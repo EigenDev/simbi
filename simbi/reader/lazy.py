@@ -1,13 +1,24 @@
+# =============================================================================
+# lazy.py
+#
+# lazy field evaluation for simulation data.
+# SimData wraps ProcessedData and computes derived fields on-demand.
+#
+# usage:
+#   data = read_simulation("file.h5")
+#   rho = data.fields["rho"]        # direct access
+#   mach = data.fields["mach"]      # computed on first access
+# =============================================================================
 from typing import Any, Optional
 
-from ..core.types import (
+from ..types import (
     Array,
     HierarchyData,
     MeshConfig,
     Metadata,
     ProcessedData,
 )
-from ..core.types.bodies import Body
+from ..types.bodies import Body
 from .computation import create_computation_pipeline
 
 

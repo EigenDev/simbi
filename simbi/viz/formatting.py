@@ -4,7 +4,7 @@ from matplotlib.axes import Axes
 from matplotlib.colorbar import Colorbar
 from matplotlib.figure import Figure
 
-from simbi.tools.utility import get_field_str
+from simbi.viz.utility import get_field_str
 
 from .config import StyleConfig
 

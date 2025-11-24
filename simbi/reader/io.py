@@ -1,10 +1,16 @@
+# =============================================================================
+# io.py
+#
+# low-level hdf5 file operations.
+# handles opening files and extracting raw data structures.
+# =============================================================================
 from typing import Any
 
 import h5py
 import numpy as np
 
-from ..core.types import Array, RawHDF5
 from ..functional.result import Result
+from ..types import Array, RawHDF5
 
 
 def open_file(filename: str) -> Result[h5py.File]:

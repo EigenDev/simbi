@@ -1,3 +1,9 @@
+# =============================================================================
+# simbi/cli/utils/type_checker.py
+#
+# optional mypy type checking for user configuration scripts.
+# runs strict type checking before simulation to catch errors early.
+# =============================================================================
 import subprocess
 import sys
 import time

@@ -1,114 +1,110 @@
+# =============================================================================
+# kepler.py
+#
+# thin ring of matter in keplerian orbit.
+# tests angular momentum conservation and numerical viscosity.
+# =============================================================================
 import math
 from pathlib import Path
 from typing import Any
 
 from pydantic import computed_field
 
-from simbi.core.config.base_config import SimbiBaseConfig
-from simbi.core.config.fields import SimbiField
-from simbi.core.types.bodies import (
-    BodyCapability,
-    GravitationalProperties,
-    ImmersedBodyConfig,
-)
-from simbi.core.types.input import (
+from simbi import ProblemParam, SimbiProblem
+from simbi.types import (
     BoundaryCondition,
     CellSpacing,
     CoordSystem,
     Regime,
     Solver,
 )
-from simbi.core.types.typing import (
-    GasStateGenerator,
-    InitialStateType,
+from simbi.types.bodies import (
+    BodyCapability,
+    GravitationalProperties,
+    ImmersedBodyConfig,
 )
+from simbi.types.typing import GasStateGenerator, InitialStateType
 
 
-class KeplerianRingTest(SimbiBaseConfig):
-    """
-    A thin ring of matter in Keplerian orbit.
-    Tests angular momentum conservation and numerical viscosity.
-    """
+class KeplerianRingTest(SimbiProblem):
+    """thin ring of matter in keplerian orbit."""
 
-    # Configuration parameters with defaults
-    buffer_width: float = SimbiField(
-        0.2, description="Width of buffer zone (fraction of outer radius)"
+    # physics
+    adiabatic_index: float = ProblemParam(
+        1.0, description="adiabatic index (isothermal)"
+    )
+    buffer_width: float = ProblemParam(
+        0.2, description="width of buffer zone (fraction of outer radius)"
+    )
+    buffer_damp_time: float = ProblemParam(
+        0.1, description="damping timescale (orbital periods at r=1)"
     )
 
-    buffer_damp_time: float = SimbiField(
-        0.1, description="Damping timescale (orbital periods at r=1)"
+    # domain
+    resolution: tuple[int, int] = ProblemParam(
+        (256, 256), cli=True, description="grid resolution"
+    )
+    bounds: list[tuple[float, float]] = ProblemParam(
+        [(-2.0, 2.0), (-2.0, 2.0)], description="domain boundaries"
+    )
+    coord_system: CoordSystem = ProblemParam(
+        CoordSystem.CARTESIAN, description="coordinate system"
+    )
+    regime: Regime = ProblemParam(
+        Regime.NEWTONIAN, description="physics regime"
+    )
+    x1_spacing: CellSpacing = ProblemParam(
+        CellSpacing.LINEAR, description="grid spacing in x1 direction"
     )
 
-    # Required fields from SimbiBaseConfig
-    resolution: tuple[int, int] = SimbiField(
-        (256, 256), description="Grid resolution"
+    # numerics
+    solver: Solver = ProblemParam(Solver.HLLE, description="numerical solver")
+    boundary_conditions: BoundaryCondition = ProblemParam(
+        BoundaryCondition.OUTFLOW, description="boundary conditions"
     )
+    cfl_number: float = ProblemParam(0.25, description="cfl condition number")
 
-    bounds: list[tuple[float, float]] = SimbiField(
-        [(-2.0, 2.0), (-2.0, 2.0)], description="Domain boundaries"
+    # simulation control
+    data_directory: Path = ProblemParam(
+        Path("data/kepler/"),
+        cli=True,
+        checkpoint_safe=True,
+        description="output data directory",
     )
-
-    coord_system: CoordSystem = SimbiField(
-        CoordSystem.CARTESIAN, description="Coordinate system"
+    end_time: float = ProblemParam(
+        20.0 * math.pi,
+        cli=True,
+        checkpoint_safe=True,
+        description="simulation end time (10 orbits)",
     )
-
-    regime: Regime = SimbiField(Regime.NEWTONIAN, description="Physics regime")
-
-    adiabatic_index: float = SimbiField(
-        1.0, description="Adiabatic index (isothermal)"
-    )
-
-    # Optional fields with non-default values
-    solver: Solver = SimbiField(Solver.HLLE, description="Numerical solver")
-
-    data_directory: Path = SimbiField(
-        Path("data/kepler/"), description="Output data directory"
-    )
-
-    cfl_number: float = SimbiField(0.25, description="CFL condition number")
-
-    boundary_conditions: BoundaryCondition = SimbiField(
-        BoundaryCondition.OUTFLOW, description="Boundary conditions"
-    )
-
-    x1_spacing: CellSpacing = SimbiField(
-        CellSpacing.LINEAR, description="Grid spacing in x1 direction"
-    )
-
-    end_time: float = SimbiField(
-        20.0 * math.pi, description="Simulation end time (10 orbits)"
-    )
-
-    checkpoint_interval: float = SimbiField(
-        0.2 * math.pi, description="Checkpoint interval (1/100 of end time)"
+    checkpoint_interval: float = ProblemParam(
+        0.2 * math.pi,
+        cli=True,
+        checkpoint_safe=True,
+        description="checkpoint interval",
     )
 
     def __init__(self, **data: Any) -> None:
         super().__init__(**data)
-        # Initialize parameter values after super().__init__
         self._initialize_parameters()
 
     def _initialize_parameters(self) -> None:
-        """Initialize parameters after object creation"""
-
-        # Calculate buffer parameters
-        self._calculate_buffer_parameters()
-
-    def _calculate_buffer_parameters(self) -> None:
-        """Calculate buffer zone parameters"""
         r_outer = min(abs(self.bounds[0][1]), abs(self.bounds[1][1]))
         r_buffer = r_outer * (1.0 - self.buffer_width)
 
-        # Orbital period at r=1
         G = 1.0
         M = 1.0
         T_orb = 2.0 * math.pi * math.sqrt(1.0**3 / (G * M))
 
-        self._buffer_parameters = {
-            "r_buffer": r_buffer,
-            "r_outer": r_outer,
-            "damp_time": self.buffer_damp_time * T_orb,
-        }
+        object.__setattr__(
+            self,
+            "_buffer_parameters",
+            {
+                "r_buffer": r_buffer,
+                "r_outer": r_outer,
+                "damp_time": self.buffer_damp_time * T_orb,
+            },
+        )
 
     @computed_field
     @property
@@ -118,13 +114,11 @@ class KeplerianRingTest(SimbiBaseConfig):
     @computed_field
     @property
     def buffer_parameters(self) -> dict[str, float]:
-        """Get buffer parameters"""
         return self._buffer_parameters
 
     @computed_field
     @property
     def immersed_bodies(self) -> list[ImmersedBodyConfig]:
-        """Define immersed bodies"""
         dx = (self.bounds[0][1] - self.bounds[0][0]) / self.resolution[0]
         softening_length = 2.0 * dx
         return [
@@ -141,14 +135,7 @@ class KeplerianRingTest(SimbiBaseConfig):
         ]
 
     def initial_primitive_state(self) -> InitialStateType:
-        """Generate initial primitive state for Keplerian disk with pressure support.
-
-        The velocity is corrected to account for pressure gradient forces,
-        ensuring a balanced initial state for the ring.
-
-        Returns:
-            Generator function that yields primitive variables (density, vx, vy, pressure)
-        """
+        """generate initial primitive state for keplerian disk."""
 
         def gas_state() -> GasStateGenerator:
             nx, ny = self.resolution
@@ -158,41 +145,32 @@ class KeplerianRingTest(SimbiBaseConfig):
             dx = (xmax - xmin) / nx
             dy = (ymax - ymin) / ny
 
-            # Ring parameters
-            r0 = 1.0  # ring central radius
-            dr = 0.1  # ring width (gaussian sigma)
-            M_0 = 1.0  # central mass
-            G = 1.0  # gravitational constant
+            r0 = 1.0
+            dr = 0.1
+            M_0 = 1.0
+            G = 1.0
 
-            # Background state
             sigma_min = 1e-8
             sigma_peak = 1.0
 
-            # Sound speed parameter
             cs_0 = self.ambient_sound_speed
             cs_squared = cs_0 * cs_0
 
-            # Buffer parameters
-            r_buffer = self._buffer_parameters["r_buffer"]
-            r_outer = self._buffer_parameters["r_outer"]
-
-            # Small threshold to avoid division by zero
             epsilon = 1e-10
 
-            for j in range(ny):
-                y = ymin + (j + 0.5) * dy
-                for i in range(nx):
-                    x = xmin + (i + 0.5) * dx
+            for jj in range(ny):
+                y = ymin + (jj + 0.5) * dy
+                for ii in range(nx):
+                    x = xmin + (ii + 0.5) * dx
                     r = math.sqrt(x**2 + y**2)
 
-                    # Avoid division by zero
                     if r < epsilon:
-                        # At exact center, set minimal values
                         sigma = sigma_min
                         vx = 0.0
                         vy = 0.0
                         p = sigma * cs_squared
                         yield (sigma, vx, vy, p)
+                        continue
 
                     sigma = sigma_min + sigma_peak * math.exp(
                         -((r - r0) ** 2) / (2 * dr**2)
@@ -201,7 +179,6 @@ class KeplerianRingTest(SimbiBaseConfig):
                     vx = -v_k * (y / r)
                     vy = +v_k * (x / r)
 
-                    # Isothermal pressure (cs = constant)
                     p = sigma * cs_squared
 
                     yield (sigma, vx, vy, p)

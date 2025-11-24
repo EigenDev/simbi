@@ -1,9 +1,14 @@
+# =============================================================================
+# mignone_bodo.py
+#
+# mignone & bodo (2005), relativistic test problems on 1d mesh.
+# =============================================================================
 from dataclasses import dataclass
-from typing import Any, Generator, Iterator
+from typing import Any, Iterator
 
-from simbi import SimbiBaseConfig, SimbiField
-from simbi.core.types.input import CoordSystem, Regime
-from simbi.typing import InitialStateType
+from simbi import ProblemParam, SimbiProblem
+from simbi.types import CoordSystem, Regime
+from simbi.types.typing import GasStateGenerator, InitialStateType
 
 
 @dataclass(frozen=True)
@@ -18,48 +23,60 @@ class ShockTubeState:
         yield self.p
 
 
-class MignoneBodo(SimbiBaseConfig):
-    """
-    Mignone & Bodo (2005), Relativistic Test Problems on 1D Mesh
-    """
+class MignoneBodo(SimbiProblem):
+    """mignone & bodo (2005), relativistic test problems on 1d mesh."""
 
-    resolution: int = SimbiField(1000, description="resolution of grid zones")
-    adiabatic_index: float = SimbiField(
-        4.0 / 3.0, description="Adiabatic gas index"
+    # physics
+    adiabatic_index: float = ProblemParam(
+        4.0 / 3.0, description="adiabatic gas index"
     )
-    problem: int = SimbiField(
-        1, description="test problem to compute", choices=[1, 2]
+    problem: int = ProblemParam(
+        1, cli=True, description="test problem to compute (1 or 2)"
     )
 
-    bounds: list[tuple[float, float]] = SimbiField(
-        [(0.0, 1.0)], description="Domain boundaries"
+    # domain
+    resolution: int = ProblemParam(
+        1000, cli=True, description="grid resolution"
     )
+    bounds: list[tuple[float, float]] = ProblemParam(
+        [(0.0, 1.0)], description="domain boundaries"
+    )
+    coord_system: CoordSystem = ProblemParam(
+        CoordSystem.CARTESIAN, description="coordinate system"
+    )
+    regime: Regime = ProblemParam(Regime.SRHD, description="physics regime")
 
-    coord_system: CoordSystem = SimbiField(
-        CoordSystem.CARTESIAN, description="Coordinate system"
+    # simulation control
+    end_time: float = ProblemParam(
+        0.4, cli=True, checkpoint_safe=True, description="simulation end time"
     )
-    regime: Regime = SimbiField(Regime.SRHD, description="Physics regime")
 
     def __init__(self, **data: Any) -> None:
         super().__init__(**data)
-        self._problem_state = {
-            1: (
-                ShockTubeState(1.0, 0.0, 1.0),
-                ShockTubeState(0.1, 0.0, 0.125),
-            ),
-            2: (
-                ShockTubeState(1.0, -0.2, 0.4),
-                ShockTubeState(1.0, +0.2, 0.4),
-            ),
-        }
+        object.__setattr__(
+            self,
+            "_problem_state",
+            {
+                1: (
+                    ShockTubeState(1.0, 0.0, 1.0),
+                    ShockTubeState(0.1, 0.0, 0.125),
+                ),
+                2: (
+                    ShockTubeState(1.0, -0.2, 0.4),
+                    ShockTubeState(1.0, +0.2, 0.4),
+                ),
+            },
+        )
 
     def initial_primitive_state(self) -> InitialStateType:
-        def gas_state() -> Generator[tuple[float, ...], None, None]:
+        """generate initial primitive state for mignone & bodo shock tube."""
+
+        def gas_state() -> GasStateGenerator:
             ni = self.resolution
             xextent = self.bounds[0][1] - self.bounds[0][0]
             dx = xextent / ni
-            for i in range(ni):
-                xi = self.bounds[0][0] + i * dx
+            for ii in range(ni):
+                xi = self.bounds[0][0] + ii * dx
                 if xi < 0.5 * xextent:
                     rho, v, p = self._problem_state[self.problem][0]
                 else:

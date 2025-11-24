@@ -1,11 +1,15 @@
+# =============================================================================
+# mub09.py
+#
+# mignone, ugliano, & bodo (2009), 1d srmhd test problems.
+# =============================================================================
 from dataclasses import dataclass
 from functools import partial
 from typing import Any, Iterator, cast
 
-from simbi.core.config.base_config import SimbiBaseConfig
-from simbi.core.config.fields import SimbiField
-from simbi.core.types.input import CellSpacing, CoordSystem, Regime, Solver
-from simbi.core.types.typing import (
+from simbi import ProblemParam, SimbiProblem
+from simbi.types import CellSpacing, CoordSystem, Regime, Solver
+from simbi.types.typing import (
     GasStateGenerator,
     InitialStateType,
     MHDStateGenerators,
@@ -31,134 +35,121 @@ class MHDState:
         yield self.p
 
 
-class MUB09(SimbiBaseConfig):
-    """
-    Mignone, Ugliano, & Bodo (2009), 1D SRMHD test problems.
-    """
+class MUB09(SimbiProblem):
+    """mignone, ugliano, & bodo (2009), 1d srmhd test problems."""
 
-    # Configuration parameters
-    adiabatic_index: float = SimbiField(
-        5.0 / 3.0, description="Adiabatic index"
+    # physics
+    adiabatic_index: float = ProblemParam(
+        5.0 / 3.0, description="adiabatic index"
     )
-
-    problem: str = SimbiField(
+    problem: str = ProblemParam(
         "contact",
-        description="Problem type from Mignone, Ugliano, & Bodo (2009)",
-        choices=[
-            "contact",
-            "rotational",
-            "st-1",
-            "st-2",
-            "st-3",
-            "st-4",
-        ],
+        cli=True,
+        description="problem type (contact, rotational, st-1..st-4)",
     )
 
-    # Required fields from SimbiBaseConfig
-    resolution: tuple[int, int, int] = SimbiField(
-        (100, 1, 1), description="Grid resolution"
+    # domain
+    resolution: tuple[int, int, int] = ProblemParam(
+        (100, 1, 1), cli=True, description="grid resolution"
+    )
+    bounds: list[tuple[float, float]] = ProblemParam(
+        [(0.0, 1.0)], description="domain boundaries"
+    )
+    coord_system: CoordSystem = ProblemParam(
+        CoordSystem.CARTESIAN, description="coordinate system"
+    )
+    regime: Regime = ProblemParam(Regime.SRMHD, description="physics regime")
+
+    # numerics
+    solver: Solver = ProblemParam(Solver.HLLD, description="numerical solver")
+    x1_spacing: CellSpacing = ProblemParam(
+        CellSpacing.LINEAR, description="grid spacing in x1 direction"
     )
 
-    bounds: list[tuple[float, float]] = SimbiField(
-        [(0.0, 1.0)], description="Domain boundaries"
-    )
-
-    coord_system: CoordSystem = SimbiField(
-        CoordSystem.CARTESIAN, description="Coordinate system"
-    )
-    regime: Regime = SimbiField(Regime.SRMHD, description="Physics regime")
-    solver: Solver = SimbiField(Solver.HLLD, description="Numerical solver")
-
-    # Optional customizations
-    x1_spacing: CellSpacing = SimbiField(
-        CellSpacing.LINEAR, description="Grid spacing in x1 direction"
+    # simulation control
+    end_time: float = ProblemParam(
+        0.4, cli=True, checkpoint_safe=True, description="simulation end time"
     )
 
     def __init__(self, **data: Any) -> None:
         super().__init__(**data)
-        # Initialize problem states dictionary
-        self._problem_states = {
-            "contact": (
-                MHDState(10.0, 0.0, 0.7, 0.2, 1.0, 5.0, 1.0, 0.5),
-                MHDState(1.00, 0.0, 0.7, 0.2, 1.0, 5.0, 1.0, 0.5),
-            ),
-            "rotational": (
-                MHDState(1.0, 0.4, -0.3, 0.5, 1.0, 2.4, 1.0, -1.6),
-                MHDState(
-                    1.0,
-                    0.377347,
-                    -0.482389,
-                    0.424190,
-                    1.0,
-                    2.4,
-                    -0.1,
-                    -2.178213,
+        object.__setattr__(
+            self,
+            "_problem_states",
+            {
+                "contact": (
+                    MHDState(10.0, 0.0, 0.7, 0.2, 1.0, 5.0, 1.0, 0.5),
+                    MHDState(1.00, 0.0, 0.7, 0.2, 1.0, 5.0, 1.0, 0.5),
                 ),
-            ),
-            "st-1": (
-                MHDState(1.000, 0.0, 0.0, 0.0, 1.0, 0.5, +1.0, 0.0),
-                MHDState(0.125, 0.0, 0.0, 0.0, 0.1, 0.5, -1.0, 0.0),
-            ),
-            "st-2": (
-                MHDState(1.08, +0.40, +0.3, 0.2, 0.95, 2.0, +0.3, 0.3),
-                MHDState(1.00, -0.45, -0.2, 0.2, 1.00, 2.0, -0.7, 0.5),
-            ),
-            "st-3": (
-                MHDState(1.0, +0.999, 0.0, 0.0, 0.1, 10.0, +7.0, +7.0),
-                MHDState(1.0, -0.999, 0.0, 0.0, 0.1, 10.0, -7.0, -7.0),
-            ),
-            "st-4": (
-                MHDState(1.0, 0.0, 0.3, 0.4, 5.0, 1.0, 6.0, 2.0),
-                MHDState(0.9, 0.0, 0.0, 0.0, 5.3, 1.0, 5.0, 2.0),
-            ),
-        }
+                "rotational": (
+                    MHDState(1.0, 0.4, -0.3, 0.5, 1.0, 2.4, 1.0, -1.6),
+                    MHDState(
+                        1.0,
+                        0.377347,
+                        -0.482389,
+                        0.424190,
+                        1.0,
+                        2.4,
+                        -0.1,
+                        -2.178213,
+                    ),
+                ),
+                "st-1": (
+                    MHDState(1.000, 0.0, 0.0, 0.0, 1.0, 0.5, +1.0, 0.0),
+                    MHDState(0.125, 0.0, 0.0, 0.0, 0.1, 0.5, -1.0, 0.0),
+                ),
+                "st-2": (
+                    MHDState(1.08, +0.40, +0.3, 0.2, 0.95, 2.0, +0.3, 0.3),
+                    MHDState(1.00, -0.45, -0.2, 0.2, 1.00, 2.0, -0.7, 0.5),
+                ),
+                "st-3": (
+                    MHDState(1.0, +0.999, 0.0, 0.0, 0.1, 10.0, +7.0, +7.0),
+                    MHDState(1.0, -0.999, 0.0, 0.0, 0.1, 10.0, -7.0, -7.0),
+                ),
+                "st-4": (
+                    MHDState(1.0, 0.0, 0.3, 0.4, 5.0, 1.0, 6.0, 2.0),
+                    MHDState(0.9, 0.0, 0.0, 0.0, 5.3, 1.0, 5.0, 2.0),
+                ),
+            },
+        )
 
     def initial_primitive_state(self) -> InitialStateType:
-        """Generate initial primitive state for SRMHD shock tube.
-
-        Returns:
-            Tuple of generator functions for gas state and B-fields
-        """
+        """generate initial primitive state for srmhd shock tube."""
 
         def gas_state() -> GasStateGenerator:
-            """Generate gas state variables"""
             ni, nj, nk = self.resolution
             state = self._problem_states[self.problem]
             xmin, xmax = self.bounds[0]
             xextent = xmax - xmin
             dx = xextent / ni
 
-            for k in range(nk):
-                for j in range(nj):
-                    for i in range(ni):
-                        xi = xmin + (i + 0.5) * dx  # Cell center
+            for kk in range(nk):
+                for jj in range(nj):
+                    for ii in range(ni):
+                        xi = xmin + (ii + 0.5) * dx
                         if xi < 0.5 * xextent:
-                            yield tuple(state[0])  # Left state
+                            yield tuple(state[0])
                         else:
-                            yield tuple(state[1])  # Right state
+                            yield tuple(state[1])
 
         def bfield(bn: str) -> GasStateGenerator:
-            """Generate B-field component values"""
             state = self._problem_states[self.problem]
             ni, nj, nk = self.resolution
             xmin, xmax = self.bounds[0]
             xextent = xmax - xmin
             dx = xextent / ni
 
-            # Adjust dimensions based on which field component
-            for k in range(nk + (bn == "b3")):
-                for j in range(nj + (bn == "b2")):
-                    for i in range(ni + (bn == "b1")):
-                        xi = xmin + i * dx
+            for kk in range(nk + (bn == "b3")):
+                for jj in range(nj + (bn == "b2")):
+                    for ii in range(ni + (bn == "b1")):
+                        xi = xmin + ii * dx
                         if xi < 0.5 * xextent:
-                            yield getattr(state[0], bn)  # Left state
+                            yield getattr(state[0], bn)
                         else:
-                            yield getattr(state[1], bn)  # Right state
+                            yield getattr(state[1], bn)
 
-        # Create partial functions for each B-field component
         bx_gen = partial(bfield, "b1")
         by_gen = partial(bfield, "b2")
         bz_gen = partial(bfield, "b3")
 
-        # Return tuple of generator functions
         return cast(MHDStateGenerators, (gas_state, bx_gen, by_gen, bz_gen))

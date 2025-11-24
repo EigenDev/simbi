@@ -1,39 +1,40 @@
-from simbi.core.config.base_config import SimbiBaseConfig
-from simbi.core.config.fields import SimbiField
-from simbi.core.types.input import CoordSystem, Regime
-from simbi.core.types.typing import GasStateGenerator, InitialStateType
+# =============================================================================
+# marti_muller_3d.py
+#
+# marti & muller (2003), relativistic shock tube problem on 3d mesh.
+# =============================================================================
+from simbi import ProblemParam, SimbiProblem
+from simbi.types import CoordSystem, Regime
+from simbi.types.typing import GasStateGenerator, InitialStateType
 
 
-class MartiMuller3D(SimbiBaseConfig):
-    """
-    Marti & Muller (2003), Relativistic Shock Tube Problem on 3D Mesh
-    """
+class MartiMuller3D(SimbiProblem):
+    """marti & muller (2003), relativistic shock tube problem on 3d mesh."""
 
-    # Required fields from SimbiBaseConfig
-    resolution: tuple[int, int, int] = SimbiField(
-        (100, 100, 100), description="Grid resolution"
+    # physics
+    adiabatic_index: float = ProblemParam(
+        4.0 / 3.0, description="adiabatic index"
     )
 
-    bounds: list[tuple[float, float]] = SimbiField(
-        [(0.0, 1.0), (0.0, 1.0), (0.0, 1.0)], description="Domain boundaries"
+    # domain
+    resolution: tuple[int, int, int] = ProblemParam(
+        (100, 100, 100), cli=True, description="grid resolution"
     )
-
-    coord_system: CoordSystem = SimbiField(
-        CoordSystem.CARTESIAN, description="Coordinate system"
+    bounds: list[tuple[float, float]] = ProblemParam(
+        [(0.0, 1.0), (0.0, 1.0), (0.0, 1.0)], description="domain boundaries"
     )
+    coord_system: CoordSystem = ProblemParam(
+        CoordSystem.CARTESIAN, description="coordinate system"
+    )
+    regime: Regime = ProblemParam(Regime.SRHD, description="physics regime")
 
-    regime: Regime = SimbiField(Regime.SRHD, description="Physics regime")
-
-    adiabatic_index: float = SimbiField(
-        4.0 / 3.0, description="Adiabatic index"
+    # simulation control
+    end_time: float = ProblemParam(
+        0.4, cli=True, checkpoint_safe=True, description="simulation end time"
     )
 
     def initial_primitive_state(self) -> InitialStateType:
-        """Generate initial primitive state for 3D Marti & Muller shock tube.
-
-        Returns:
-            Generator function that yields primitive variables
-        """
+        """generate initial primitive state for 3d marti & muller shock tube."""
 
         def gas_state() -> GasStateGenerator:
             nx, ny, nz = self.resolution
@@ -41,25 +42,13 @@ class MartiMuller3D(SimbiBaseConfig):
             xextent = xmax - xmin
             dx = xextent / nx
 
-            for k in range(nz):
-                for j in range(ny):
-                    for i in range(nx):
-                        xi = xmin + (i + 0.5) * dx  # Cell center
+            for kk in range(nz):
+                for jj in range(ny):
+                    for ii in range(nx):
+                        xi = xmin + (ii + 0.5) * dx
                         if xi <= 0.5 * xextent:
-                            yield (
-                                10.0,
-                                0.0,
-                                0.0,
-                                0.0,
-                                13.33,
-                            )  # Left state: (rho, vx, vy, vz, p)
+                            yield (10.0, 0.0, 0.0, 0.0, 13.33)
                         else:
-                            yield (
-                                1.0,
-                                0.0,
-                                0.0,
-                                0.0,
-                                1e-10,
-                            )  # Right state: (rho, vx, vy, vz, p)
+                            yield (1.0, 0.0, 0.0, 0.0, 1e-10)
 
         return gas_state

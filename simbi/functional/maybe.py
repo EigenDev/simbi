@@ -1,6 +1,14 @@
-from typing import TypeVar, Generic, Callable, Optional, Any, Union
+# =============================================================================
+# maybe.py
+#
+# maybe monad for optional value handling.
+# wraps values that may or may not exist, with safe chaining via map/bind.
+#
+# usage:
+#   Maybe.of(value).map(transform).bind(async_op).unwrap()
+# =============================================================================
 from dataclasses import dataclass
-from functools import wraps
+from typing import Callable, Generic, Optional, TypeVar
 
 T = TypeVar("T")
 U = TypeVar("U")
@@ -39,7 +47,9 @@ class Maybe(Generic[T]):
             result = f(self._value)
             if not isinstance(result, Maybe):
                 raise TypeError(f"Function must return Maybe, got {type(result)}")
-            return result
+                raise TypeError(
+                    f"Function must return Maybe, got {type(result)}"
+                )
         except Exception as e:
             return Maybe(None, e)
 

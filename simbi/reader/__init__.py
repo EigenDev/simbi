@@ -1,7 +1,18 @@
+# =============================================================================
+# simbi/reader/__init__.py
+#
+# simulation data loading with lazy field evaluation.
+# primary interface: read_simulation(filename) -> SimData
+#
+# SimData provides:
+#   - direct access to primitive fields (rho, p, v1, etc.)
+#   - lazy computation of derived fields (W, energy, mach, etc.)
+#   - automatic dependency resolution
+# =============================================================================
 from functools import partial
 
-from ..core.types import ProcessedData
 from ..functional.result import Result
+from ..types import ProcessedData
 from .io import open_file, read_raw_data
 from .lazy import SimData
 from .parsing import parse_data

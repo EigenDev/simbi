@@ -1,3 +1,13 @@
+# =============================================================================
+# utilities.py
+#
+# functional programming combinators and utilities.
+# provides compose, pipe, curry, and other fp primitives.
+#
+# usage:
+#   result = pipe(data, parse, validate, transform)
+#   process = compose(transform, validate, parse)
+# =============================================================================
 from collections import defaultdict
 from copy import deepcopy
 from functools import lru_cache, partial, reduce

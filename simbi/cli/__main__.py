@@ -1,3 +1,9 @@
+# =============================================================================
+# simbi/cli/__main__.py
+#
+# entry point for `python -m simbi.cli` or the `simbi` console script.
+# parses command line arguments and dispatches to the appropriate subcommand.
+# =============================================================================
 from .simbi_parser import SimbiParser
 
 

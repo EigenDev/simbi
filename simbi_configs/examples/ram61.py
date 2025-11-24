@@ -1,62 +1,58 @@
-from simbi.core.config.base_config import SimbiBaseConfig
-from simbi.core.config.fields import SimbiField
-from simbi.core.types.input import CellSpacing, CoordSystem, Regime
-from simbi.core.types.typing import GasStateGenerator, InitialStateType
+# =============================================================================
+# ram61.py
+#
+# shock with non-zero transverse velocity on both sides in 2d.
+# adapted from zhang and macfadyen (2006) section 6.1.
+# note: hard test, may fail.
+# =============================================================================
+from simbi import ProblemParam, SimbiProblem
+from simbi.types import CellSpacing, CoordSystem, Regime
+from simbi.types.typing import GasStateGenerator, InitialStateType
 
 
-class Ram61(SimbiBaseConfig):
-    """(Hard Test: Fails)
-    Shock with non-zero transverse velocity on both sides in 2D with 1 Partition
-    This setup was adapted from Zhang and MacFadyen (2006) section 6.1
-    """
+class Ram61(SimbiProblem):
+    """shock with transverse velocity on both sides, zhang & macfadyen (2006) 6.1."""
 
-    # Required fields from SimbiBaseConfig
-    resolution: tuple[int, int] = SimbiField(
-        (400, 400), description="Grid resolution"
+    # physics
+    adiabatic_index: float = ProblemParam(
+        5.0 / 3.0, description="adiabatic index"
     )
 
-    bounds: list[tuple[float, float]] = SimbiField(
-        [(0.0, 1.0), (0.0, 1.0)], description="Domain boundaries"
+    # domain
+    resolution: tuple[int, int] = ProblemParam(
+        (400, 400), cli=True, description="grid resolution"
+    )
+    bounds: list[tuple[float, float]] = ProblemParam(
+        [(0.0, 1.0), (0.0, 1.0)], description="domain boundaries"
+    )
+    coord_system: CoordSystem = ProblemParam(
+        CoordSystem.CARTESIAN, description="coordinate system"
+    )
+    regime: Regime = ProblemParam(Regime.SRHD, description="physics regime")
+    x1_spacing: CellSpacing = ProblemParam(
+        CellSpacing.LINEAR, description="grid spacing in x1 direction"
     )
 
-    coord_system: CoordSystem = SimbiField(
-        CoordSystem.CARTESIAN, description="Coordinate system"
+    # simulation control
+    end_time: float = ProblemParam(
+        0.4, cli=True, checkpoint_safe=True, description="simulation end time"
     )
-
-    regime: Regime = SimbiField(Regime.SRHD, description="Physics regime")
-
-    adiabatic_index: float = SimbiField(
-        5.0 / 3.0, description="Adiabatic index"
-    )
-
-    # Optional customizations
-    x1_spacing: CellSpacing = SimbiField(
-        CellSpacing.LINEAR, description="Grid spacing in x1 direction"
-    )
-
-    default_end_time: float = SimbiField(0.4, description="Simulation end time")
 
     def initial_primitive_state(self) -> InitialStateType:
-        """Generate initial primitive state for RAM61 shock.
-
-        Returns:
-            Generator function that yields primitive variables
-        """
+        """generate initial primitive state for ram61 shock."""
 
         def gas_state() -> GasStateGenerator:
             nx, ny = self.resolution
             xmin, xmax = self.bounds[0]
             dx = (xmax - xmin) / nx
 
-            for j in range(ny):
-                for i in range(nx):
-                    x = xmin + (i + 0.5) * dx  # Cell center
+            for jj in range(ny):
+                for ii in range(nx):
+                    x = xmin + (ii + 0.5) * dx
 
-                    # Both sides have same density and transverse velocity,
-                    # but very different pressures
-                    if i < nx // 2:
-                        yield (1.0, 0.0, 0.90, 1e3)  # High pressure
+                    if ii < nx // 2:
+                        yield (1.0, 0.0, 0.90, 1e3)
                     else:
-                        yield (1.0, 0.0, 0.90, 1e-2)  # Low pressure
+                        yield (1.0, 0.0, 0.90, 1e-2)
 
         return gas_state

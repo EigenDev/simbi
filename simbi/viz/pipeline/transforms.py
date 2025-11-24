@@ -10,7 +10,7 @@ from typing import Any, Callable, Literal, Optional, Sequence
 
 import numpy as np
 
-from simbi.core.types import ProcessedData
+from simbi.types import ProcessedData
 from simbi.reader import SimData, parse_data, read_raw_data
 
 from ..config import VisualizationConfig

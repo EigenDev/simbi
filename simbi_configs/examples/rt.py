@@ -1,82 +1,81 @@
+# =============================================================================
+# rt.py
+#
+# rayleigh-taylor instability in newtonian fluid.
+# heavier fluid on top of lighter fluid with gravity.
+# =============================================================================
 import math
 from pathlib import Path
 
 from pydantic import computed_field
 
 import simbi.expression as expr
-from simbi.core.config.base_config import SimbiBaseConfig
-from simbi.core.config.fields import SimbiField
-from simbi.core.types.input import (
-    BoundaryCondition,
-    CoordSystem,
-    Regime,
-    Solver,
-)
-from simbi.core.types.typing import (
+from simbi import ProblemParam, SimbiProblem
+from simbi.types import BoundaryCondition, CoordSystem, Regime, Solver
+from simbi.types.typing import (
     ExpressionDict,
     GasStateGenerator,
     InitialStateType,
 )
 
 
-class RayleighTaylor(SimbiBaseConfig):
-    """
-    Rayleigh Taylor problem in Newtonian Fluid
-    """
+class RayleighTaylor(SimbiProblem):
+    """rayleigh-taylor instability in newtonian fluid."""
 
-    # Configuration parameters for domain and resolution
-    resolution: tuple[int, int] = SimbiField(
-        (200, 600), description="Grid resolution (x, y)"
+    # physics
+    adiabatic_index: float = ProblemParam(
+        7.0 / 5.0, description="adiabatic index"
+    )
+    rhoU: float = ProblemParam(2.0, description="upper layer density")
+    rhoD: float = ProblemParam(1.0, description="lower layer density")
+    p0: float = ProblemParam(2.5, description="reference pressure")
+    g0: float = ProblemParam(
+        0.1, cli=True, description="gravitational acceleration"
+    )
+    vamp: float = ProblemParam(
+        0.01, description="velocity perturbation amplitude"
     )
 
-    bounds: list[tuple[float, float]] = SimbiField(
-        [(-0.25, 0.25), (-0.75, 0.75)], description="Domain boundaries"
+    # domain
+    resolution: tuple[int, int] = ProblemParam(
+        (200, 600), cli=True, description="grid resolution (x, y)"
+    )
+    bounds: list[tuple[float, float]] = ProblemParam(
+        [(-0.25, 0.25), (-0.75, 0.75)], description="domain boundaries"
+    )
+    coord_system: CoordSystem = ProblemParam(
+        CoordSystem.CARTESIAN, description="coordinate system"
+    )
+    regime: Regime = ProblemParam(
+        Regime.NEWTONIAN, description="physics regime"
     )
 
-    # Physical parameters as fields
-    rhoU: float = SimbiField(2.0, description="Upper layer density")
-    rhoD: float = SimbiField(1.0, description="Lower layer density")
-    p0: float = SimbiField(2.5, description="Reference pressure")
-    g0: float = SimbiField(0.1, description="Gravitational acceleration")
-    vamp: float = SimbiField(
-        0.01, description="Velocity perturbation amplitude"
-    )
-
-    # Required fields from SimbiBaseConfig
-    coord_system: CoordSystem = SimbiField(
-        CoordSystem.CARTESIAN, description="Coordinate system"
-    )
-
-    regime: Regime = SimbiField(Regime.NEWTONIAN, description="Physics regime")
-
-    adiabatic_index: float = SimbiField(
-        7.0 / 5.0, description="Adiabatic index"
-    )
-
-    # Optional customizations
-    boundary_conditions: list[BoundaryCondition] = SimbiField(
+    # numerics
+    boundary_conditions: list[BoundaryCondition] = ProblemParam(
         [BoundaryCondition.PERIODIC, BoundaryCondition.REFLECTING],
-        description="Boundary conditions [x, y]",
+        description="boundary conditions [x, y]",
     )
+    solver: Solver = ProblemParam(Solver.HLLC, description="numerical solver")
 
-    solver: Solver = SimbiField(Solver.HLLC, description="Numerical solver")
-
-    data_directory: Path = SimbiField(
-        Path("data/rt_config"), description="Output data directory"
+    # simulation control
+    data_directory: Path = ProblemParam(
+        Path("data/rt_config"),
+        cli=True,
+        checkpoint_safe=True,
+        description="output data directory",
+    )
+    end_time: float = ProblemParam(
+        10.0, cli=True, checkpoint_safe=True, description="simulation end time"
     )
 
     @computed_field
     @property
     def ymidpoint(self) -> float:
-        """Calculate middle of y domain"""
+        """calculate middle of y domain."""
         return 0.5 * (self.bounds[1][0] + self.bounds[1][1])
 
     def initial_primitive_state(self) -> InitialStateType:
-        """Generate initial primitive state for Rayleigh-Taylor instability.
-
-        Returns:
-            Generator function that yields primitive variables
-        """
+        """generate initial primitive state for rayleigh-taylor instability."""
 
         def gas_state() -> GasStateGenerator:
             nx, ny = self.resolution
@@ -90,21 +89,18 @@ class RayleighTaylor(SimbiBaseConfig):
 
             ymid = self.ymidpoint
 
-            for j in range(ny):
-                y = ymin + (j + 0.5) * dy  # Cell center
-                for i in range(nx):
-                    x = xmin + (i + 0.5) * dx  # Cell center
+            for jj in range(ny):
+                y = ymin + (jj + 0.5) * dy
+                for ii in range(nx):
+                    x = xmin + (ii + 0.5) * dx
 
-                    # Density stratification - heavier fluid on top
                     if y <= ymid:
-                        rho = self.rhoD  # Lower density
+                        rho = self.rhoD
                     else:
-                        rho = self.rhoU  # Upper (heavier) density
+                        rho = self.rhoU
 
-                    # Hydrostatic pressure profile
                     p = self.p0 - self.g0 * rho * y
 
-                    # Velocity perturbation
                     vy = (
                         self.vamp
                         * 0.25
@@ -119,10 +115,9 @@ class RayleighTaylor(SimbiBaseConfig):
     @computed_field
     @property
     def gravity_source_expressions(self) -> ExpressionDict:
-        """Define gravity source terms"""
+        """define gravity source terms."""
         graph = expr.ExprGraph()
 
-        # Constant gravity in the negative y direction
         x_comp = expr.constant(0.0, graph)
         y_comp = expr.constant(-self.g0, graph)
 

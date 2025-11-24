@@ -1,3 +1,9 @@
+# =============================================================================
+# simbi/cli/base_parser.py
+#
+# base argument parser with enhanced error handling and subcommand support.
+# provides better help messages when commands are missing or malformed.
+# =============================================================================
 import sys
 from argparse import ArgumentParser, Namespace
 from typing import Any, Optional, Sequence
@@ -69,7 +75,9 @@ class BaseParser(ArgumentParser):
             parsed_args, argv = super().parse_known_args(args, namespace)
             self.command = getattr(parsed_args, "command", "")
             setattr(parsed_args, "main_parser", self)
-            setattr(parsed_args, "active_parser", self._subparser_map[self.command])
+            setattr(
+                parsed_args, "active_parser", self._subparser_map[self.command]
+            )
             if parsed_args:
                 return parsed_args, argv
         except Exception:

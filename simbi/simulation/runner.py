@@ -1,185 +1,386 @@
-"""
-Simulation execution.
+# =============================================================================
+# runner.py
+#
+# functional simulation runner for simbi.
+# converts SimbiProblem to backend format and executes simulation.
+#
+# usage:
+#   from simbi.simulation import run
+#   problem = SodProblem(resolution=1000, end_time=0.2)
+#   run(problem, compute_mode="cpu")
+# =============================================================================
+from __future__ import annotations
 
-This module provides components for running simulations with the Pybind11 backend.
-"""
-
+import dataclasses
 import importlib
 import os
-from dataclasses import dataclass
+from pathlib import Path
 from types import ModuleType
-from typing import Optional, Sequence, cast
+from typing import TYPE_CHECKING, Any, Optional, Sequence
 
-from simbi.core.serialization.executor import SimulationExecutor
-from simbi.functional.helpers import print_progress
-from simbi.io.logging import logger
-from simbi.io.summary import print_simulation_parameters
-from simbi.simulation.base import BaseProblemConfig
-
-from .state_init import (
-    SimulationState,
-    load_or_initialize_state,
-    validate_generator_output,
+from simbi.types.input import BoundaryCondition
+from simbi.types.typing import (
+    GasStateFunction,
+    GasStateGenerator,
+    StaggeredBFieldGenerator,
 )
 
+if TYPE_CHECKING:
+    from .problem import SimbiProblem
 
-@dataclass
-class SimulationRunner:
+
+# =============================================================================
+# execution dict conversion
+# =============================================================================
+def to_execution_dict(problem: SimbiProblem) -> dict[str, Any]:
     """
-    Manages the execution of a simulation.
+    convert problem config to dict for C++ backend.
 
-    This class orchestrates the initialization, execution, and output
-    handling for a simulation.
-
-    Attributes:
-        config: The configuration for the simulation
-        state: The current simulation state (lightweight - just generators)
+    this produces the exact format expected by backend.run_simulation().
     """
+    # get all model fields
+    model_dict = problem.model_dump()
 
-    config: BaseProblemConfig
-    state: Optional[SimulationState] = None
+    # ensure data_directory is string with trailing slash
+    data_dir = model_dict.get("data_directory", "data/")
+    if isinstance(data_dir, Path):
+        data_dir = str(data_dir)
+    if not data_dir.endswith("/"):
+        data_dir += "/"
+    model_dict["data_directory"] = data_dir
 
-    def initialize(self) -> "SimulationRunner":
-        """
-        Initialize the simulation state.
+    # add computed fields
+    computed_fields = [
+        "dimensionality",
+        "is_mhd",
+        "isothermal",
+        "nvars",
+        "is_relativistic",
+        "mesh_motion",
+        "is_homologous",
+        "dlogt",
+        "locally_isothermal",
+        "ambient_sound_speed",
+        "shakura_sunyaev_alpha",
+        "viscosity",
+    ]
+    for field in computed_fields:
+        if hasattr(problem, field):
+            model_dict[field] = getattr(problem, field)
 
-        This is now very lightweight - just extracts generator functions.
+    # add body system if present
+    body_system = problem.body_system
+    if body_system and dataclasses.is_dataclass(body_system):
+        model_dict["body_system"] = dataclasses.asdict(body_system)
+    elif not body_system:
+        model_dict.pop("body_system", None)
 
-        Returns:
-            Self for method chaining
-        """
-        self.state = load_or_initialize_state(self.config)
-        self.config = self.state.config
-        return self
+    # add immersed bodies if present
+    immersed = problem.immersed_bodies
+    if immersed:
+        model_dict["immersed_bodies"] = [
+            dataclasses.asdict(b) if dataclasses.is_dataclass(b) else b
+            for b in immersed
+        ]
 
-    def validate(self) -> "SimulationRunner":
-        """
-        Validate generator output (optional diagnostic step).
+    # process bounds to separate x1, x2, x3 bounds
+    bounds = problem.bounds
+    dim = problem.dimensionality
 
-        Returns:
-            Self for method chaining
+    x1bounds = bounds[0] if len(bounds) > 0 else (0.0, 1.0)
+    x2bounds = bounds[1] if len(bounds) > 1 else (0.0, 1.0)
+    x3bounds = bounds[2] if len(bounds) > 2 else (0.0, 1.0)
 
-        Raises:
-            ValueError: If generator produces invalid output
-        """
-        valid, error = validate_generator_output(self.config)
-        if not valid:
-            raise ValueError(f"Generator validation failed: {error}")
+    model_dict.pop("bounds", None)
+    model_dict["x1_bounds"] = x1bounds
+    model_dict["x2_bounds"] = x2bounds
+    model_dict["x3_bounds"] = x3bounds
 
-        logger.info("✓ Generator validation passed")
-        return self
+    # process boundary conditions
+    bcs = _process_boundary_conditions(problem.boundary_conditions, dim)
+    model_dict["boundary_conditions"] = bcs
 
-    def _configure_backend(
-        self, compute_mode: str = "cpu"
-    ) -> tuple[Optional[ModuleType], Optional[Sequence[int]]]:
-        """
-        Configure and load the appropriate backend.
+    # convert paths to strings
+    for key, value in list(model_dict.items()):
+        if isinstance(value, Path):
+            model_dict[key] = str(value)
 
-        Args:
-            compute_mode: Backend compute mode ('cpu', 'omp', or 'gpu')
+    # nullify callables (c++ has own implementations)
+    for key, value in list(model_dict.items()):
+        if callable(value):
+            model_dict[key] = None
 
-        Returns:
-            Tuple of (backend module, GPU block dimensions if applicable)
-        """
-        runtime_block_dims: Optional[Sequence[int]] = None
+    # normalize resolution to 3d array
+    resolution = model_dict["resolution"]
+    if isinstance(resolution, int):
+        model_dict["resolution"] = [resolution, 1, 1]
+    elif len(resolution) == 1:
+        model_dict["resolution"] = [resolution[0], 1, 1]
+    elif len(resolution) == 2:
+        model_dict["resolution"] = [resolution[0], resolution[1], 1]
 
-        # Configure block dimensions for GPU
-        if compute_mode == "gpu":
-            dims = {1: (128, 1, 1), 2: (16, 16, 1), 3: (4, 4, 4)}
-            dim = min(3, self.config.dimensionality)
-            block_dims = dims[dim]
-
-            # Set environment variables if not already set
-            if "BLOCK_X" not in os.environ:
-                os.environ["BLOCK_X"] = str(block_dims[0])
-                os.environ["GPU_BLOCK_Y"] = str(block_dims[1])
-                os.environ["GPU_BLOCK_Z"] = str(block_dims[2])
-
-            runtime_block_dims = (
-                int(os.environ.get("BLOCK_X", block_dims[0])),
-                int(os.environ.get("GPU_BLOCK_Y", block_dims[1])),
-                int(os.environ.get("GPU_BLOCK_Z", block_dims[2])),
-            )
-
-        # Import the appropriate module
-        lib_mode = "cpu" if compute_mode in ["cpu", "omp"] else "gpu"
-        try:
-            simulation_module = importlib.import_module(
-                f"simbi.libs.{lib_mode}_ext"
-            )
-            return simulation_module, runtime_block_dims
-        except ImportError as e:
-            logger.info(f"Error loading simulation backend: {e}")
-            logger.info(
-                "Running in demo mode - no actual simulation will be executed"
-            )
-            return None, None
-
-    def run(self, compute_mode: str = "cpu") -> None:
-        """
-        Run the simulation.
-
-        Args:
-            compute_mode: Backend compute mode ('cpu', 'omp', or 'gpu')
-        """
-        if self.state is None:
-            self.initialize()
-            self.state = cast(SimulationState, self.state)
-
-        # Convert configuration to execution format
-        execution_dict = SimulationExecutor.to_execution_dict(self.config)
-
-        # Configure backend
-        backend, gpu_block_dims = self._configure_backend(compute_mode)
-        if backend is None:
-            logger.info("Demo mode: Simulation would execute with parameters:")
-            for key, value in sorted(execution_dict.items()):
-                logger.info(f"  {key}: {value}")
-            return
-
-        print_simulation_parameters(execution_dict, gpu_block_dims)
-        print_progress()
-
-        # Get fresh iterators for C++
-        prim_iterator = self.state.fresh_primitive_iterator()
-        bfield_iterators = self.state.fresh_bfield_iterators() or []
-
-        # Create scale factor functions
-        scale_factor = self.config.scale_factor or (lambda t: 1.0)
-        scale_factor_derivative = self.config.scale_factor_derivative or (
-            lambda t: 0.0
-        )
-
-        backend.run_simulation(
-            prim_gen=prim_iterator,
-            staggered_bfields=bfield_iterators,
-            sim_info=execution_dict,
-            a=scale_factor,
-            adot=scale_factor_derivative,
-        )
+    return model_dict
 
 
-def run_simulation(
-    config: BaseProblemConfig,
+def _process_boundary_conditions(
+    boundary_conditions: str | Sequence[str],
+    effective_dim: int,
+) -> list[str]:
+    """process and normalize boundary conditions."""
+    if isinstance(boundary_conditions, str):
+        return [boundary_conditions] * (2 * effective_dim)
+
+    bcs = list(boundary_conditions)
+    num_bcs = len(bcs)
+    num_faces = 2 * effective_dim
+
+    # one bc per dimension (same for inner and outer)
+    if num_bcs == effective_dim:
+        return [bc for bc in bcs for _ in range(2)]
+
+    # one bc for each face
+    if num_bcs == num_faces:
+        return bcs
+
+    # single bc for all faces
+    if num_bcs == 1:
+        return bcs * num_faces
+
+    # extrapolate missing
+    missing = num_faces - num_bcs
+    return bcs + [BoundaryCondition.OUTFLOW] * missing
+
+
+# =============================================================================
+# generator handling
+# =============================================================================
+def _is_mhd_generator(gen: Any) -> bool:
+    """check if generator is mhd (tuple of 4 generators)."""
+    return not callable(gen) and len(gen) == 4
+
+
+def _get_primitive_iterator(problem: SimbiProblem) -> GasStateGenerator:
+    """get fresh primitive state iterator from problem."""
+    initial_state = problem.initial_primitive_state()
+
+    if _is_mhd_generator(initial_state):
+        gas_gen_func = initial_state[0]
+        return gas_gen_func()
+    else:
+        gas_gen_func: GasStateFunction = initial_state
+        return gas_gen_func()
+
+
+def _get_bfield_iterators(
+    problem: SimbiProblem,
+) -> list[StaggeredBFieldGenerator]:
+    """get fresh b-field iterators for mhd, or empty list for hydro."""
+    initial_state = problem.initial_primitive_state()
+
+    if _is_mhd_generator(initial_state):
+        _, bx_gen, by_gen, bz_gen = initial_state
+        return [bx_gen(), by_gen(), bz_gen()]
+
+    return []
+
+
+# =============================================================================
+# backend loading
+# =============================================================================
+def _load_backend(compute_mode: str) -> Optional[ModuleType]:
+    """load the appropriate backend module."""
+    lib_mode = "cpu" if compute_mode in ["cpu", "omp"] else "gpu"
+    try:
+        return importlib.import_module(f"simbi.libs.{lib_mode}_ext")
+    except ImportError as e:
+        print(f"warning: could not load {lib_mode} backend: {e}")
+        return None
+
+
+def _configure_gpu_blocks(dimensionality: int) -> tuple[int, int, int]:
+    """configure gpu block dimensions if not already set."""
+    dims = {1: (128, 1, 1), 2: (16, 16, 1), 3: (4, 4, 4)}
+    dim = min(3, dimensionality)
+    default_blocks = dims[dim]
+
+    if "BLOCK_X" not in os.environ:
+        os.environ["BLOCK_X"] = str(default_blocks[0])
+        os.environ["GPU_BLOCK_Y"] = str(default_blocks[1])
+        os.environ["GPU_BLOCK_Z"] = str(default_blocks[2])
+
+    return (
+        int(os.environ.get("BLOCK_X", default_blocks[0])),
+        int(os.environ.get("GPU_BLOCK_Y", default_blocks[1])),
+        int(os.environ.get("GPU_BLOCK_Z", default_blocks[2])),
+    )
+
+
+# =============================================================================
+# main entry point
+# =============================================================================
+def run(
+    problem: SimbiProblem,
     compute_mode: str = "cpu",
     validate: bool = False,
 ) -> None:
     """
-    Run a simulation with the given configuration.
+    run a simulation with the given problem configuration.
 
-    Args:
-        config: The simulation configuration
-        compute_mode: Backend compute mode ('cpu', 'omp', or 'gpu')
-        validate: Whether to validate generator output before running
+    args:
+        problem: the problem configuration
+        compute_mode: "cpu", "omp", or "gpu"
+        validate: if True, validate generator output before running
 
-    Example:
-        >>> from simbi.problems import SodProblem
-        >>> config = SodProblem(resolution=1000, end_time=0.2)
-        >>> run_simulation(config, compute_mode='cpu', validate=True)
+    example:
+        >>> from simbi.simulation import SimbiProblem, ProblemParam, run
+        >>> class Sod(SimbiProblem):
+        ...     resolution: int = ProblemParam(1000, cli=True)
+        ...     # ... other fields ...
+        ...     def initial_primitive_state(self):
+        ...         def gen():
+        ...             for i in range(self.resolution):
+        ...                 yield (1.0, 0.0, 1.0) if i < 500 else (0.125, 0.0, 0.1)
+        ...         return gen
+        >>> run(Sod(bounds=[(0, 1)], ...), compute_mode="cpu")
     """
-    runner = SimulationRunner(config)
+    from .checkpoint import merge_with_checkpoint
 
+    # handle checkpoint if specified
+    if problem.checkpoint_file:
+        checkpoint_path = Path(problem.checkpoint_file)
+        if not checkpoint_path.exists():
+            raise FileNotFoundError(f"checkpoint not found: {checkpoint_path}")
+        problem = merge_with_checkpoint(problem, checkpoint_path)
+
+    # ensure data directory exists
+    data_dir = Path(problem.data_directory)
+    if not data_dir.exists():
+        data_dir.mkdir(parents=True, exist_ok=True)
+
+    # validate generator if requested
     if validate:
-        runner.validate()
+        errors = _validate_generator(problem)
+        if errors:
+            raise ValueError(f"generator validation failed: {errors}")
 
-    runner.run(compute_mode=compute_mode)
+    # convert to execution dict
+    exec_dict = to_execution_dict(problem)
+
+    # configure gpu if needed
+    gpu_blocks = None
+    if compute_mode == "gpu":
+        gpu_blocks = _configure_gpu_blocks(problem.dimensionality)
+
+    # load backend
+    backend = _load_backend(compute_mode)
+    if backend is None:
+        print("demo mode: simulation would execute with:")
+        for key, value in sorted(exec_dict.items()):
+            print(f"  {key}: {value}")
+        return
+
+    # print simulation info
+    _print_simulation_info(exec_dict, gpu_blocks)
+
+    # get fresh iterators
+    prim_iterator = _get_primitive_iterator(problem)
+    bfield_iterators = _get_bfield_iterators(problem)
+
+    # get scale factor functions
+    scale_factor = problem.scale_factor or (lambda t: 1.0)
+    scale_factor_derivative = problem.scale_factor_derivative or (lambda t: 0.0)
+
+    # run simulation
+    backend.run_simulation(
+        prim_gen=prim_iterator,
+        staggered_bfields=bfield_iterators,
+        sim_info=exec_dict,
+        a=scale_factor,
+        adot=scale_factor_derivative,
+    )
+
+
+def _validate_generator(
+    problem: SimbiProblem, num_samples: int = 10
+) -> Optional[str]:
+    """validate that generator produces correctly-shaped output."""
+    try:
+        initial_state = problem.initial_primitive_state()
+
+        if _is_mhd_generator(initial_state):
+            gas_gen_func, bx_gen, by_gen, bz_gen = initial_state
+            gas_iter = gas_gen_func()
+
+            for _ in range(num_samples):
+                values = next(gas_iter)
+                if not hasattr(values, "__len__"):
+                    return f"generator must yield sequences, got {type(values)}"
+                if len(values) < 5:
+                    return f"mhd generator must yield at least 5 values, got {len(values)}"
+                try:
+                    [float(v) for v in values]
+                except (ValueError, TypeError) as e:
+                    return f"all values must be numeric: {e}"
+
+            for name, gen_func in [
+                ("Bx", bx_gen),
+                ("By", by_gen),
+                ("Bz", bz_gen),
+            ]:
+                b_iter = gen_func()
+                for _ in range(num_samples):
+                    value = next(b_iter)
+                    try:
+                        float(value)
+                    except (ValueError, TypeError):
+                        return f"{name} generator must yield numeric values"
+        else:
+            gas_gen_func: GasStateFunction = initial_state
+            gas_iter = gas_gen_func()
+
+            expected_min = problem.dimensionality + 2
+            for _ in range(num_samples):
+                values = next(gas_iter)
+                if not hasattr(values, "__len__"):
+                    return f"generator must yield sequences, got {type(values)}"
+                if len(values) < expected_min:
+                    return f"generator must yield at least {expected_min} values, got {len(values)}"
+                try:
+                    [float(v) for v in values]
+                except (ValueError, TypeError) as e:
+                    return f"all values must be numeric: {e}"
+
+        return None
+
+    except StopIteration:
+        return f"generator exhausted after {num_samples} samples"
+    except Exception as e:
+        return f"unexpected error: {e}"
+
+
+def _print_simulation_info(
+    exec_dict: dict[str, Any],
+    gpu_blocks: Optional[tuple[int, int, int]] = None,
+) -> None:
+    """print simulation parameters."""
+    # defer to existing print function if available
+    try:
+        from simbi.functional.helpers import print_progress
+
+        # summary moved to deprecated, use fallback
+        raise ImportError("use fallback")
+    except ImportError:
+        # fallback to simple print
+        print("=" * 60)
+        print("simulation parameters:")
+        print("=" * 60)
+        for key in [
+            "resolution",
+            "regime",
+            "coord_system",
+            "end_time",
+            "cfl_number",
+        ]:
+            if key in exec_dict:
+                print(f"  {key}: {exec_dict[key]}")
+        print("=" * 60)

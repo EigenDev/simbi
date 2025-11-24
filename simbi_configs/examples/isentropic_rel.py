@@ -1,41 +1,27 @@
+# =============================================================================
+# isentropic_rel.py
+#
+# relativistic isentropic pulse in 1d, entropy conserving.
+# =============================================================================
 from dataclasses import dataclass
 from typing import Any, Callable, Sequence
 
 import numpy as np
 from numpy.typing import NDArray
-from pydantic import validator
+from pydantic import field_validator
 
-from simbi.core.config.base_config import SimbiBaseConfig
-from simbi.core.config.fields import SimbiField
-from simbi.core.types.input import (
-    BoundaryCondition,
-    CellSpacing,
-    CoordSystem,
-    Regime,
-)
-from simbi.core.types.typing import GasStateGenerator, InitialStateType
+from simbi import ProblemParam, SimbiProblem
+from simbi.types import BoundaryCondition, CellSpacing, CoordSystem, Regime
+from simbi.types.typing import GasStateGenerator, InitialStateType
 
-# Constants
+# constants
 ALPHA_MAX = 2.0
 ALPHA_MIN = 1e-3
 
 
-def range_limited_float(
-    min_val: float, max_val: float
-) -> Callable[[float], float]:
-    """Creates a validator function for float within range"""
-
-    def validate_range(v: float) -> float:
-        if v < min_val or v > max_val:
-            raise ValueError(f"Value must be between {min_val} and {max_val}")
-        return v
-
-    return validate_range
-
-
 @dataclass(frozen=True)
 class IsentropicWaveParams:
-    """Physical parameters for isentropic wave"""
+    """physical parameters for isentropic wave."""
 
     rho_ref: float = 1.0
     p_ref: float = 1.0
@@ -43,12 +29,11 @@ class IsentropicWaveParams:
     def make_wave_function(
         self,
     ) -> Callable[[NDArray[np.float64]], NDArray[np.float64]]:
-        """Create wave shape function"""
         return lambda x: np.sin(2 * np.pi * x)
 
 
 class IsentropicState:
-    """State calculator for isentropic wave"""
+    """state calculator for isentropic wave."""
 
     def __init__(
         self, params: IsentropicWaveParams, adiabatic_index: float, alpha: float
@@ -58,21 +43,18 @@ class IsentropicState:
         self.alpha = alpha
 
     def density(self, x: NDArray[np.float64]) -> NDArray[np.float64]:
-        """Calculate density at position x"""
         wave = self.params.make_wave_function()
         return 1.0 + self.alpha * wave(x)
 
     def sound_speed(
         self, rho: NDArray[np.float64] | float, p: NDArray[np.float64] | float
     ) -> NDArray[np.float64]:
-        """Calculate sound speed"""
         h = 1.0 + self.adiabatic_index * p / (
             rho * (self.adiabatic_index - 1.0)
         )
         return np.sqrt(self.adiabatic_index * p / (rho * h))
 
     def pressure(self, rho: NDArray[np.float64]) -> NDArray[np.float64]:
-        """Calculate pressure"""
         return (
             self.params.p_ref
             * (rho / self.params.rho_ref) ** self.adiabatic_index
@@ -81,72 +63,73 @@ class IsentropicState:
     def velocity(
         self, rho: NDArray[np.float64], p: NDArray[np.float64]
     ) -> NDArray[np.float64]:
-        """Calculate velocity"""
         cs_ref = self.sound_speed(self.params.rho_ref, self.params.p_ref)
         cs = self.sound_speed(rho, p)
         return 2.0 / (self.adiabatic_index - 1.0) * (cs - cs_ref)
 
 
-class IsentropicRelWave(SimbiBaseConfig):
-    """Relativistic Isentropic Pulse in 1D, Entropy conserving"""
+class IsentropicRelWave(SimbiProblem):
+    """relativistic isentropic pulse in 1d, entropy conserving."""
 
-    adiabatic_index: float = SimbiField(
-        4.0 / 3.0, description="Adiabatic gas index"
+    # physics
+    adiabatic_index: float = ProblemParam(
+        4.0 / 3.0, description="adiabatic gas index"
+    )
+    alpha: float = ProblemParam(0.5, cli=True, description="wave amplitude")
+
+    # domain
+    resolution: int = ProblemParam(
+        1000, cli=True, description="grid resolution"
+    )
+    bounds: Sequence[Sequence[float]] = ProblemParam(
+        [(0.0, 1.0)], description="domain boundaries"
+    )
+    coord_system: CoordSystem = ProblemParam(
+        CoordSystem.CARTESIAN, description="coordinate system"
+    )
+    regime: Regime = ProblemParam(Regime.SRHD, description="physics regime")
+    x1_spacing: CellSpacing = ProblemParam(
+        CellSpacing.LINEAR, description="grid spacing in x1 direction"
     )
 
-    alpha: float = SimbiField(0.5, description="Wave amplitude")
-
-    # Required fields from SimbiBaseConfig
-    resolution: int = SimbiField(1000, description="Grid resolution")
-
-    bounds: Sequence[Sequence[float]] = SimbiField(
-        [(0.0, 1.0)], description="Domain boundaries"
+    # numerics
+    boundary_conditions: BoundaryCondition = ProblemParam(
+        BoundaryCondition.PERIODIC, description="boundary conditions"
     )
 
-    coord_system: CoordSystem = SimbiField(
-        CoordSystem.CARTESIAN, description="Coordinate system"
+    # simulation control
+    end_time: float = ProblemParam(
+        1.0, cli=True, checkpoint_safe=True, description="simulation end time"
     )
 
-    regime: Regime = SimbiField(Regime.SRHD, description="Physics regime")
-
-    # Optional customizations with non-default values
-    x1_spacing: CellSpacing = SimbiField(
-        CellSpacing.LINEAR, description="Grid spacing in x1 direction"
-    )
-
-    boundary_conditions: BoundaryCondition = SimbiField(
-        BoundaryCondition.PERIODIC, description="Boundary conditions"
-    )
-
-    # Validators
-    @validator("alpha")
+    @field_validator("alpha")
+    @classmethod
     def validate_alpha(cls, v: float) -> float:
-        """Validate alpha is within range"""
-        return range_limited_float(ALPHA_MIN, ALPHA_MAX)(v)
+        if v < ALPHA_MIN or v > ALPHA_MAX:
+            raise ValueError(
+                f"alpha must be between {ALPHA_MIN} and {ALPHA_MAX}"
+            )
+        return v
 
     def __init__(self, **data: Any) -> None:
         super().__init__(**data)
-        self._wave_params = IsentropicWaveParams()
-        self._state = IsentropicState(
-            self._wave_params, self.adiabatic_index, self.alpha
-        )
+        wave_params = IsentropicWaveParams()
+        state = IsentropicState(wave_params, self.adiabatic_index, self.alpha)
+        object.__setattr__(self, "_wave_params", wave_params)
+        object.__setattr__(self, "_state", state)
 
     def initial_primitive_state(self) -> InitialStateType:
-        """Generate initial primitive state for isentropic wave.
-
-        Returns:
-            Generator function that yields primitive variables
-        """
+        """generate initial primitive state for isentropic wave."""
 
         def gas_state() -> GasStateGenerator:
             nx = self.resolution
             dx = (self.bounds[0][1] - self.bounds[0][0]) / nx
-            x = np.fromiter((i * dx for i in range(nx)), dtype=np.float64)
+            x = np.fromiter((ii * dx for ii in range(nx)), dtype=np.float64)
             rho = self._state.density(x)
             p = self._state.pressure(rho)
             v = self._state.velocity(rho, p)
 
-            for i in range(nx):
-                yield (rho[i], v[i], p[i])
+            for ii in range(nx):
+                yield (rho[ii], v[ii], p[ii])
 
         return gas_state

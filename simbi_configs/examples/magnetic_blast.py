@@ -1,22 +1,26 @@
+# =============================================================================
+# magnetic_blast.py
+#
+# cylindrical relativistic magnetized blast wave.
+# =============================================================================
 import math
 from functools import partial
 
-from simbi.core.config.base_config import SimbiBaseConfig
-from simbi.core.config.fields import SimbiField
-from simbi.core.types.input import (
+from simbi import ProblemParam, SimbiProblem
+from simbi.types import (
     BoundaryCondition,
     CellSpacing,
     CoordSystem,
     Regime,
     Solver,
 )
-from simbi.core.types.typing import (
+from simbi.types.typing import (
     GasStateGenerator,
     InitialStateType,
     StaggeredBFieldGenerator,
 )
 
-# Constants for the blast wave setup
+# constants for the blast wave setup
 XMIN = -6.0
 XMAX = 6.0
 P_EXP = 1.0
@@ -25,58 +29,47 @@ R_EXP = 0.08
 R_STOP = 1.0
 
 
-class MagneticBomb(SimbiBaseConfig):
-    """The Magnetic Bomb
-    Launch a cylindrical relativistic magnetized blast wave
-    """
+class MagneticBomb(SimbiProblem):
+    """cylindrical relativistic magnetized blast wave."""
 
-    # Configuration parameters
-    rho0: float = SimbiField(1.0e-4, description="Density scale")
-    p0: float = SimbiField(3.0e-5, description="Pressure scale")
-    b0: float = SimbiField(0.1, description="Magnetic field scale")
+    # physics
+    adiabatic_index: float = ProblemParam(
+        4.0 / 3.0, description="adiabatic index"
+    )
+    rho0: float = ProblemParam(1.0e-4, cli=True, description="density scale")
+    p0: float = ProblemParam(3.0e-5, cli=True, description="pressure scale")
+    b0: float = ProblemParam(0.1, cli=True, description="magnetic field scale")
 
-    # Required fields from SimbiBaseConfig
-    resolution: tuple[int, int] = SimbiField(
-        (256, 256), description="Grid resolution"
+    # domain
+    resolution: tuple[int, int] = ProblemParam(
+        (256, 256), cli=True, description="grid resolution"
+    )
+    bounds: list[tuple[float, float]] = ProblemParam(
+        [(XMIN, XMAX), (XMIN, XMAX)], description="domain boundaries"
+    )
+    coord_system: CoordSystem = ProblemParam(
+        CoordSystem.CARTESIAN, description="coordinate system"
+    )
+    regime: Regime = ProblemParam(Regime.SRMHD, description="physics regime")
+
+    # numerics
+    solver: Solver = ProblemParam(Solver.HLLE, description="numerical solver")
+    boundary_conditions: list[BoundaryCondition] = ProblemParam(
+        [BoundaryCondition.OUTFLOW], description="boundary conditions"
+    )
+    x1_spacing: CellSpacing = ProblemParam(
+        CellSpacing.LINEAR, description="grid spacing in x1 direction"
     )
 
-    bounds: list[tuple[float, float]] = SimbiField(
-        [(XMIN, XMAX), (XMIN, XMAX)], description="Domain boundaries"
+    # simulation control
+    start_time: float = ProblemParam(0.0, description="simulation start time")
+    end_time: float = ProblemParam(
+        4.0, cli=True, checkpoint_safe=True, description="simulation end time"
     )
-
-    coord_system: CoordSystem = SimbiField(
-        CoordSystem.CARTESIAN, description="Coordinate system"
-    )
-
-    regime: Regime = SimbiField(Regime.SRMHD, description="Physics regime")
-
-    adiabatic_index: float = SimbiField(
-        4.0 / 3.0, description="Adiabatic index"
-    )
-
-    # Optional customizations with non-default values
-    solver: Solver = SimbiField(Solver.HLLE, description="Numerical solver")
-
-    boundary_conditions: list[BoundaryCondition] = SimbiField(
-        [BoundaryCondition.OUTFLOW], description="Boundary conditions"
-    )
-
-    x1_spacing: CellSpacing = SimbiField(
-        CellSpacing.LINEAR, description="Grid spacing in x1 direction"
-    )
-
-    start_time: float = SimbiField(0.0, description="Simulation start time")
-
-    end_time: float = SimbiField(4.0, description="Simulation end time")
 
     def initial_primitive_state(self) -> InitialStateType:
-        """Generate initial primitive state for magnetic blast wave.
+        """generate initial primitive state for magnetic blast wave."""
 
-        Returns:
-            Tuple of generator functions for gas state and B-fields
-        """
-
-        # Gas state generator for density, velocity, and pressure
         def gas_state() -> GasStateGenerator:
             ni, nj = self.resolution
             nk = 1
@@ -90,18 +83,16 @@ class MagneticBomb(SimbiBaseConfig):
             pslope = (P_EXP - pre_amb) / (R_STOP - R_EXP)
             rhoslope = (RHO_EXP - rho_amb) / (R_STOP - R_EXP)
 
-            for k in range(nk):
-                for j in range(nj):
-                    y = ybounds[0] + (j + 0.5) * dy
-                    for i in range(ni):
-                        x = xbounds[0] + (i + 0.5) * dx
+            for kk in range(nk):
+                for jj in range(nj):
+                    y = ybounds[0] + (jj + 0.5) * dy
+                    for ii in range(ni):
+                        x = xbounds[0] + (ii + 0.5) * dx
                         r = math.sqrt(x**2 + y**2)
 
                         if r < R_EXP:
-                            # Inside explosion region
                             yield (RHO_EXP, 0.0, 0.0, 0.0, P_EXP)
                         elif r > R_EXP and r < R_STOP:
-                            # Transition region
                             yield (
                                 RHO_EXP - rhoslope * (r - R_EXP),
                                 0.0,
@@ -110,28 +101,22 @@ class MagneticBomb(SimbiBaseConfig):
                                 P_EXP - pslope * (r - R_EXP),
                             )
                         else:
-                            # Ambient region
                             yield (rho_amb, 0.0, 0.0, 0.0, pre_amb)
 
-        # B-field generator function
         def b_field(bn: str) -> StaggeredBFieldGenerator:
-            """Generate B-field component values"""
             ni, nj = self.resolution
             nk = 1
 
-            # Different grid sizes for different components due to staggering
-            for k in range(nk + (bn == "bz")):
-                for j in range(nj + (bn == "by")):
-                    for i in range(ni + (bn == "bx")):
+            for kk in range(nk + (bn == "bz")):
+                for jj in range(nj + (bn == "by")):
+                    for ii in range(ni + (bn == "bx")):
                         if bn == "bx":
                             yield float(self.b0)
                         else:
                             yield 0.0
 
-        # Create partial functions for each B-field component
         bx_gen = partial(b_field, "bx")
         by_gen = partial(b_field, "by")
         bz_gen = partial(b_field, "bz")
 
-        # Return tuple of generator functions
         return (gas_state, bx_gen, by_gen, bz_gen)

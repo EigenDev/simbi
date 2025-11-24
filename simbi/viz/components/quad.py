@@ -14,7 +14,7 @@ from matplotlib.collections import QuadMesh
 from matplotlib.figure import Figure
 from pydantic import ValidationInfo, field_validator
 
-from simbi.core.types.bodies import Body
+from simbi.types.bodies import Body
 
 from ..config import StyleConfig
 from ..types import Array, ColorRange, FieldData

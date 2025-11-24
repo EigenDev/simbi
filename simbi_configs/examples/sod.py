@@ -1,64 +1,55 @@
-from typing import Sequence
+# =============================================================================
+# sod.py
+#
+# sod's shock tube problem in 1d newtonian fluid.
+# classic riemann problem with discontinuous initial conditions.
+# =============================================================================
+from simbi import ProblemParam, SimbiProblem
+from simbi.types import CellSpacing, CoordSystem, Regime
+from simbi.types.typing import GasStateGenerator, InitialStateType
 
-from simbi.core.config.base_config import SimbiBaseConfig
-from simbi.core.config.fields import SimbiField
-from simbi.core.types.input import CellSpacing, CoordSystem, Regime
-from simbi.core.types.typing import GasStateGenerator, InitialStateType
 
+class SodProblem(SimbiProblem):
+    """sod's shock tube problem in 1d newtonian fluid."""
 
-class SodProblem(SimbiBaseConfig):
-    """
-    Sod's Shock Tube Problem in 1D Newtonian Fluid
-    """
-
-    # Define basic configuration parameters
-    adiabatic_index: float = SimbiField(
-        5.0 / 3.0, description="Adiabatic gas index"
+    # physics
+    adiabatic_index: float = ProblemParam(
+        5.0 / 3.0, description="adiabatic gas index"
     )
 
-    # Required fields that we need to implement
-    resolution: int = SimbiField(1000, description="Grid resolution")
-    bounds: Sequence[Sequence[float]] = SimbiField(
-        [(0.0, 1.0)], description="Domain boundaries"
+    # domain
+    resolution: int = ProblemParam(
+        1000000, cli=True, description="grid resolution"
     )
-    coord_system: CoordSystem = SimbiField(
-        CoordSystem.CARTESIAN, description="Coordinate system"
+    bounds: list[tuple[float, float]] = ProblemParam(
+        [(0.0, 1.0)], description="domain boundaries"
     )
-    regime: Regime = SimbiField(Regime.NEWTONIAN, description="Physics regime")
-
-    # Optional customizations (with defaults from SimbiBaseConfig)
-    x1_spacing: CellSpacing = SimbiField(
-        CellSpacing.LINEAR, description="Grid spacing in x1 direction"
+    coord_system: CoordSystem = ProblemParam(
+        CoordSystem.CARTESIAN, description="coordinate system"
+    )
+    regime: Regime = ProblemParam(
+        Regime.NEWTONIAN, description="physics regime"
+    )
+    x1_spacing: CellSpacing = ProblemParam(
+        CellSpacing.LINEAR, description="grid spacing in x1 direction"
     )
 
-    # fmr_enabled: bool = SimbiField(True, description="Enable FMR for testing")
-    # fmr_max_levels: int = SimbiField(2, description="Use 2 levels for testing")
-    # fmr_buffer_size: int = SimbiField(2, description="2-cell buffer")
-
-    # # Define a single refinement region around the discontinuity
-    # fmr_regions: list[list[float]] = SimbiField(
-    #     [[0.4, 0.6]],  # Single region around x=0.5 where the discontinuity is
-    #     description="Refinement region around discontinuity",
-    # )
-
-    # # Define refinement ratio
-    # fmr_ratios: list[int] = SimbiField(
-    #     [2],  # 2x refinement for the single region
-    #     description="Refinement ratio for the region",
-    # )
+    # simulation control
+    end_time: float = ProblemParam(
+        0.2, cli=True, checkpoint_safe=True, description="simulation end time"
+    )
+    checkpoint_interval: float = ProblemParam(
+        0.1, cli=True, checkpoint_safe=True, description="checkpoint interval"
+    )
 
     def initial_primitive_state(self) -> InitialStateType:
-        """Generate initial primitive state for Sod shock tube.
-
-        Returns:
-            Generator function that yields primitive variables
-        """
+        """generate initial primitive state for sod shock tube."""
 
         def gas_state() -> GasStateGenerator:
             nx = self.resolution
             dx = (self.bounds[0][1] - self.bounds[0][0]) / nx
-            for i in range(nx):
-                if i * dx < 0.5:
+            for ii in range(nx):
+                if ii * dx < 0.5:
                     yield (1.0, 0.0, 1.0)
                 else:
                     yield (0.125, 0.0, 0.1)

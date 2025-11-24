@@ -1,66 +1,69 @@
+# =============================================================================
+# thermal_bomb_3d.py
+#
+# relativistic blast wave on a 3d spherical logarithmic mesh.
+# variable zones per decade in radius.
+# =============================================================================
 import math
 from typing import Any
 
-from simbi import compute_num_polar_zones
-from simbi.core.config.base_config import SimbiBaseConfig
-from simbi.core.config.fields import SimbiField
-from simbi.core.types.input import (
+from simbi import ProblemParam, SimbiProblem, compute_num_polar_zones
+from simbi.types import (
     BoundaryCondition,
     CellSpacing,
     CoordSystem,
     Regime,
     Solver,
 )
-from simbi.core.types.typing import GasStateGenerator, InitialStateType
+from simbi.types.typing import GasStateGenerator, InitialStateType
 
-# Constants
+# constants
 RHO_AMB = 1.0
 T_AMB = 1e-10
 NU = 3.0
 
 
-class ThermalBomb3D(SimbiBaseConfig):
-    """The Thermal Bomb
-    Launch a relativistic blast wave on a 3D Spherical Logarithmic mesh with variable zones per decade in radius
-    """
+class ThermalBomb3D(SimbiProblem):
+    """relativistic blast wave on 3d spherical logarithmic mesh."""
 
-    # Configuration parameters
-    e0: float = SimbiField(10.0, description="Energy scale")
-    rho0: float = SimbiField(1.0, description="Density scale")
-    rinit: float = SimbiField(0.1, description="Initial grid radius")
-    rend: float = SimbiField(1.0, description="Radial extent")
-    k: float = SimbiField(0.0, description="Density power law exponent")
-    zpd: int = SimbiField(64, description="Number of radial zones per decade")
-    full_sphere: bool = SimbiField(
-        False, description="Flag for full sphere computation"
+    # physics
+    adiabatic_index: float = ProblemParam(
+        4.0 / 3.0, description="adiabatic index"
+    )
+    e0: float = ProblemParam(10.0, cli=True, description="energy scale")
+    rho0: float = ProblemParam(1.0, description="density scale")
+    k: float = ProblemParam(
+        0.0, cli=True, description="density power law exponent"
     )
 
-    # Required fields from SimbiBaseConfig - will be set during __init__
-    resolution: tuple[int, int, int] = SimbiField(
-        (0, 0, 0), description="Grid resolution (calculated)"
+    # domain parameters
+    rinit: float = ProblemParam(
+        0.1, cli=True, description="initial grid radius"
+    )
+    rend: float = ProblemParam(1.0, cli=True, description="radial extent")
+    zpd: int = ProblemParam(64, cli=True, description="radial zones per decade")
+    full_sphere: bool = ProblemParam(
+        False, cli=True, description="flag for full sphere computation"
     )
 
-    bounds: list[tuple[float, float]] = SimbiField(
+    # domain (computed during init)
+    resolution: tuple[int, int, int] = ProblemParam(
+        (0, 0, 0), description="grid resolution (calculated)"
+    )
+    bounds: list[tuple[float, float]] = ProblemParam(
         [(0.0, 0.0), (0.0, 0.0), (0.0, 0.0)],
-        description="Domain boundaries (calculated)",
+        description="domain boundaries (calculated)",
     )
-
-    coord_system: CoordSystem = SimbiField(
-        CoordSystem.SPHERICAL, description="Coordinate system"
+    coord_system: CoordSystem = ProblemParam(
+        CoordSystem.SPHERICAL, description="coordinate system"
     )
+    regime: Regime = ProblemParam(Regime.SRHD, description="physics regime")
 
-    regime: Regime = SimbiField(Regime.SRHD, description="Physics regime")
-
-    adiabatic_index: float = SimbiField(
-        4.0 / 3.0, description="Adiabatic index"
+    # numerics
+    x1_spacing: CellSpacing = ProblemParam(
+        CellSpacing.LOG, description="grid spacing in radial direction"
     )
-
-    # Optional customizations
-    x1_spacing: CellSpacing = SimbiField(
-        CellSpacing.LOG, description="Grid spacing in radial direction"
-    )
-
-    boundary_conditions: list[BoundaryCondition] = SimbiField(
+    boundary_conditions: list[BoundaryCondition] = ProblemParam(
         [
             BoundaryCondition.REFLECTING,
             BoundaryCondition.OUTFLOW,
@@ -69,74 +72,62 @@ class ThermalBomb3D(SimbiBaseConfig):
             BoundaryCondition.PERIODIC,
             BoundaryCondition.PERIODIC,
         ],
-        description="Boundary conditions for 3D (6 faces)",
+        description="boundary conditions for 3d (6 faces)",
     )
+    solver: Solver = ProblemParam(Solver.HLLC, description="numerical solver")
 
-    solver: Solver = SimbiField(Solver.HLLC, description="Numerical solver")
-
-    start_time: float = SimbiField(0.0, description="Simulation start time")
-
-    end_time: float = SimbiField(1.0, description="Simulation end time")
+    # simulation control
+    start_time: float = ProblemParam(0.0, description="simulation start time")
+    end_time: float = ProblemParam(
+        1.0, cli=True, checkpoint_safe=True, description="simulation end time"
+    )
 
     def __init__(self, **data: Any) -> None:
         super().__init__(**data)
 
-        # Calculate number of radial zones based on zones per decade
         ndec = math.log10(self.rend / self.rinit)
-        self._nr = round(self.zpd * ndec)
+        nr = round(self.zpd * ndec)
 
-        # Set theta boundaries based on full_sphere flag
-        self._theta_min = 0
-        self._theta_max = math.pi if self.full_sphere else 0.5 * math.pi
+        theta_min = 0
+        theta_max = math.pi if self.full_sphere else 0.5 * math.pi
+        phi_min = 0
+        phi_max = 2.0 * math.pi
 
-        # Set phi boundaries for full 3D
-        self._phi_min = 0
-        self._phi_max = 2.0 * math.pi
-
-        # Calculate number of polar zones
-        self._npolar = compute_num_polar_zones(
+        npolar = compute_num_polar_zones(
             rmin=float(self.rinit),
             rmax=float(self.rend),
-            nr=self._nr,
-            theta_bounds=(self._theta_min, self._theta_max),
+            nr=nr,
+            theta_bounds=(theta_min, theta_max),
             zpd=int(self.zpd),
         )
+        nphi = npolar
 
-        # Set number of azimuthal zones equal to polar zones
-        self._nphi = self._npolar
-
-        # Update resolution and bounds fields
-        self.resolution = (self._nr, self._npolar, self._nphi)
-        self.bounds = [
-            (self.rinit, self.rend),
-            (self._theta_min, self._theta_max),
-            (self._phi_min, self._phi_max),
-        ]
+        object.__setattr__(self, "resolution", (nr, npolar, nphi))
+        object.__setattr__(
+            self,
+            "bounds",
+            [
+                (self.rinit, self.rend),
+                (theta_min, theta_max),
+                (phi_min, phi_max),
+            ],
+        )
 
     def initial_primitive_state(self) -> InitialStateType:
-        """Generate initial primitive state for the 3D thermal bomb.
-
-        Returns:
-            Generator function that yields primitive variables
-        """
+        """generate initial primitive state for the 3d thermal bomb."""
 
         def gas_state() -> GasStateGenerator:
             nr, npolar, nphi = self.resolution
             explosion_radius = self.rinit * 1.5
             dlogr = math.log10(self.rend / self.rinit) / nr
 
-            for k in range(nphi):
-                for j in range(npolar):
-                    for i in range(nr):
-                        # Logarithmic radial grid
-                        r = self.rinit * 10 ** (i * dlogr)
-
-                        # Density with power law profile
+            for kk in range(nphi):
+                for jj in range(npolar):
+                    for ii in range(nr):
+                        r = self.rinit * 10 ** (ii * dlogr)
                         rho = RHO_AMB * r ** (-self.k)
 
-                        # Pressure inside vs. outside the explosion region
                         if r <= explosion_radius:
-                            # Energy deposition inside explosion radius
                             pre = (self.adiabatic_index - 1.0) * (
                                 3.0
                                 * self.e0
@@ -145,10 +136,8 @@ class ThermalBomb3D(SimbiBaseConfig):
                                 / explosion_radius**NU
                             )
                         else:
-                            # Ambient conditions outside explosion radius
                             pre = T_AMB * rho
 
-                        # 3D primitive variables (rho, vr, vtheta, vphi, p)
                         yield (rho, 0.0, 0.0, 0.0, pre)
 
         return gas_state

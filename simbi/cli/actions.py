@@ -1,14 +1,26 @@
-from argparse import Action, ArgumentParser, Namespace, SUPPRESS
-from typing import Optional, Any, Sequence
+# =============================================================================
+# simbi/cli/actions.py
+#
+# custom argparse actions for cli arguments.
+# includes actions for compute mode selection, gpu block dimensions,
+# version printing, and config discovery.
+# =============================================================================
+from argparse import SUPPRESS, Action, ArgumentParser, Namespace
 from pathlib import Path
-from ..detail import bcolors
+from typing import Any, Optional, Sequence
+
+from .utils.colors import bcolors
 
 
 class ComputeModeAction(Action):
     """Sets computation mode (cpu/gpu/omp)"""
 
-    def __init__(self, option_strings: Sequence[str], dest: str, **kwargs: Any) -> None:
-        super().__init__(option_strings, dest, nargs=0, default=SUPPRESS, **kwargs)
+    def __init__(
+        self, option_strings: Sequence[str], dest: str, **kwargs: Any
+    ) -> None:
+        super().__init__(
+            option_strings, dest, nargs=0, default=SUPPRESS, **kwargs
+        )
 
     def __call__(
         self,
@@ -86,7 +98,9 @@ class print_available_configs(Action):
         option_string: str | None = None,
     ):
         available_configs = get_available_configs()
-        available_configs = sorted([Path(conf).stem for conf in available_configs])
+        available_configs = sorted(
+            [Path(conf).stem for conf in available_configs]
+        )
 
         print(
             "Available configs are:\n{}".format(

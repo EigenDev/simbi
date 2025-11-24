@@ -5,7 +5,7 @@ from matplotlib.axes import Axes
 from matplotlib.figure import Figure
 from matplotlib.lines import Line2D
 
-from simbi.tools.utility import get_field_str
+from simbi.viz.utility import get_field_str
 
 from ..config import StyleConfig
 from ..types import Array, FieldData

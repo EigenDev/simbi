@@ -1,5 +1,14 @@
+# =============================================================================
+# result.py
+#
+# result monad for error handling without exceptions.
+# represents either success (Ok) or failure (Err), with safe chaining.
+#
+# usage:
+#   Result.ok(value).and_then(process).map(transform).unwrap()
+# =============================================================================
 from dataclasses import dataclass
-from typing import Callable, Generic, Self, TypeVar, Any
+from typing import Any, Callable, Generic, Self, TypeVar
 
 T = TypeVar("T")
 U = TypeVar("U")

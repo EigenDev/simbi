@@ -6,7 +6,7 @@ from typing import Literal, Optional
 
 from typing_extensions import Any
 
-from simbi.tools.utility import get_dimensionality
+from simbi.viz.utility import get_dimensionality
 from simbi.viz.components.coord_binning import CoordinateProfileProps
 from simbi.viz.components.quad import QuadPlotProps
 from simbi.viz.config import (
@@ -57,7 +57,7 @@ def validate_plot_type(
         return plot_type  # type: ignore[return-value]
 
     try:
-        from simbi.tools.utility import get_dimensionality
+        from simbi.viz.utility import get_dimensionality
 
         ndim = get_dimensionality(files) if files else 1
         return "line" if ndim == 1 else "multidim"

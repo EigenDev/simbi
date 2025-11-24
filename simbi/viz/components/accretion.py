@@ -11,7 +11,7 @@ from matplotlib.lines import Line2D
 from scipy.stats import binned_statistic
 
 from simbi.functional.helpers import find_nearest
-from simbi.tools.utility import get_field_str
+from simbi.viz.utility import get_field_str
 
 from ..config import StyleConfig
 from ..formatters.line import format_line_plot_axes

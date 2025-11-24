@@ -1,5 +1,12 @@
+# =============================================================================
+# simbi/cli/commands/afterglow.py
+#
+# afterglow command for computing radiation from simulation data.
+# delegates to the afterglow.radiation module.
+# =============================================================================
 from argparse import Namespace
 from typing import Optional
+
 from ..utils.formatter import HelpFormatter
 
 

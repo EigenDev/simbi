@@ -1,15 +1,20 @@
+# =============================================================================
+# quad_shocktube.py
+#
+# sod's shock tube problem in 2d with 4 partitions.
+# adapted from zhang and macfadyen (2006) section 4.8.
+# =============================================================================
 from dataclasses import dataclass
 from typing import Iterator
 
-from simbi.core.config.base_config import SimbiBaseConfig
-from simbi.core.config.fields import SimbiField
-from simbi.core.types.input import CellSpacing, CoordSystem, Regime
-from simbi.core.types.typing import GasStateGenerator, InitialStateType
+from simbi import ProblemParam, SimbiProblem
+from simbi.types import CellSpacing, CoordSystem, Regime
+from simbi.types.typing import GasStateGenerator, InitialStateType
 
 
 @dataclass
 class ShockTubeState:
-    """Dataclass for Shock Tube State"""
+    """dataclass for shock tube state."""
 
     rho: float
     v1: float
@@ -23,44 +28,36 @@ class ShockTubeState:
         yield self.p
 
 
-class SodProblemQuad(SimbiBaseConfig):
-    """
-    Sod's Shock Tube Problem in 2D Newtonian Fluid with 4 Partitions
-    This setup was adapted from Zhang and MacFadyen (2006) section 4.8 pg. 11
-    """
+class SodProblemQuad(SimbiProblem):
+    """sod's shock tube in 2d with 4 partitions, zhang & macfadyen (2006) 4.8."""
 
-    # Required fields from SimbiBaseConfig
-    resolution: tuple[int, int] = SimbiField(
-        (256, 256), description="Grid resolution"
+    # physics
+    adiabatic_index: float = ProblemParam(
+        5.0 / 3.0, description="adiabatic index"
     )
 
-    bounds: list[tuple[float, float]] = SimbiField(
-        [(0.0, 1.0), (0.0, 1.0)], description="Domain boundaries"
+    # domain
+    resolution: tuple[int, int] = ProblemParam(
+        (256, 256), cli=True, description="grid resolution"
+    )
+    bounds: list[tuple[float, float]] = ProblemParam(
+        [(0.0, 1.0), (0.0, 1.0)], description="domain boundaries"
+    )
+    coord_system: CoordSystem = ProblemParam(
+        CoordSystem.CARTESIAN, description="coordinate system"
+    )
+    regime: Regime = ProblemParam(Regime.SRHD, description="physics regime")
+    x1_spacing: CellSpacing = ProblemParam(
+        CellSpacing.LINEAR, description="grid spacing in x1 direction"
     )
 
-    coord_system: CoordSystem = SimbiField(
-        CoordSystem.CARTESIAN, description="Coordinate system"
+    # simulation control
+    end_time: float = ProblemParam(
+        0.4, cli=True, checkpoint_safe=True, description="simulation end time"
     )
-
-    regime: Regime = SimbiField(Regime.SRHD, description="Physics regime")
-
-    adiabatic_index: float = SimbiField(
-        5.0 / 3.0, description="Adiabatic index"
-    )
-
-    # Optional customizations
-    x1_spacing: CellSpacing = SimbiField(
-        CellSpacing.LINEAR, description="Grid spacing in x1 direction"
-    )
-
-    end_time: float = SimbiField(0.4, description="Simulation end time")
 
     def initial_primitive_state(self) -> InitialStateType:
-        """Generate initial primitive state for quadrant shock tube.
-
-        Returns:
-            Generator function that yields primitive variables
-        """
+        """generate initial primitive state for quadrant shock tube."""
 
         def gas_state() -> GasStateGenerator:
             ni, nj = self.resolution
@@ -72,35 +69,25 @@ class SodProblemQuad(SimbiBaseConfig):
             dx = xextent / ni
             dy = yextent / nj
 
-            # Define the four quadrant states
-            bottom_left = ShockTubeState(
-                0.5, 0.0, 0.0, 1.0
-            )  # Bottom-left: High density
-            top_left = ShockTubeState(
-                0.1, 0.9, 0.0, 1.0
-            )  # Top-left: Rightward velocity
-            bottom_right = ShockTubeState(
-                0.1, 0.0, 0.9, 1.0
-            )  # Bottom-right: Upward velocity
-            top_right = ShockTubeState(
-                0.1, 0.0, 0.0, 0.01
-            )  # Top-right: Low pressure
+            bottom_left = ShockTubeState(0.5, 0.0, 0.0, 1.0)
+            top_left = ShockTubeState(0.1, 0.9, 0.0, 1.0)
+            bottom_right = ShockTubeState(0.1, 0.0, 0.9, 1.0)
+            top_right = ShockTubeState(0.1, 0.0, 0.0, 0.01)
 
-            for j in range(nj):
-                y = ymin + (j + 0.5) * dy  # Cell center
-                for i in range(ni):
-                    x = xmin + (i + 0.5) * dx  # Cell center
+            for jj in range(nj):
+                y = ymin + (jj + 0.5) * dy
+                for ii in range(ni):
+                    x = xmin + (ii + 0.5) * dx
 
-                    # Determine which quadrant the cell is in
                     if x < 0.5 * xextent:
                         if y < 0.5 * yextent:
-                            yield tuple(bottom_left)  # Bottom-left
+                            yield tuple(bottom_left)
                         else:
-                            yield tuple(top_left)  # Top-left
+                            yield tuple(top_left)
                     else:
                         if y < 0.5 * yextent:
-                            yield tuple(bottom_right)  # Bottom-right
+                            yield tuple(bottom_right)
                         else:
-                            yield tuple(top_right)  # Top-right
+                            yield tuple(top_right)
 
         return gas_state

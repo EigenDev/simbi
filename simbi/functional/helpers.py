@@ -1,4 +1,17 @@
+# =============================================================================
+# helpers.py
+#
+# numerical and geometry helper functions for simbi.
+# includes cell volume calculations, coordinate utilities, and progress bars.
+#
+# key functions:
+#   - calc_cell_volume: compute cell volumes for any coordinate system
+#   - calc_centroid: compute cell centroids
+#   - find_nearest: find nearest value in array
+#   - compute_num_polar_zones: calculate polar zone count for spherical grids
+# =============================================================================
 import linecache
+import logging
 import math
 import os
 import sys
@@ -19,7 +32,7 @@ from typing import (
 import numpy as np
 from numpy.typing import NDArray
 
-from ..io.logging import logger
+logger = logging.getLogger("simbi")
 
 __all__ = [
     "calc_centroid",

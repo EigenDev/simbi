@@ -1,13 +1,19 @@
-from .commands import run, plot, afterglow, touch
-from .actions import print_the_version
-from .utils.formatter import HelpFormatter
-from .base_parser import BaseParser
-from typing import Any
+# =============================================================================
+# simbi_parser.py
+#
+# main cli parser for simbi.
+# =============================================================================
 from argparse import ArgumentParser
+from typing import Any
+
+from .actions import print_the_version
+from .base_parser import BaseParser
+from .commands import plot, run
+from .utils.formatter import HelpFormatter
 
 
 class SimbiParser(BaseParser):
-    """Main parser for simbi CLI"""
+    """main parser for simbi cli."""
 
     command: str = ""
 
@@ -15,12 +21,11 @@ class SimbiParser(BaseParser):
         super().__init__(
             prog="simbi",
             usage="%(prog)s <command> <input> [options]",
-            description="Relativistic magneto-gas dynamics module",
+            description="relativistic magneto-gas dynamics simulation framework",
             formatter_class=HelpFormatter,
             add_help=False,
         )
         self.add_argument("--version", action=print_the_version)
-        # Specify parser_class to prevent recursion
         self.subparsers = self.add_subparsers(
             dest="command",
             parser_class=ArgumentParser,
@@ -31,7 +36,5 @@ class SimbiParser(BaseParser):
         self._add_subcommands()
 
     def _add_subcommands(self) -> None:
-        plot.setup_parser(self.subparsers)
         run.setup_parser(self.subparsers)
-        afterglow.setup_parser(self.subparsers)
-        touch.setup_parser(self.subparsers)
+        plot.setup_parser(self.subparsers)

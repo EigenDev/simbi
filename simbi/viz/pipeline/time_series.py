@@ -4,7 +4,7 @@ import numpy as np
 from numpy.typing import NDArray
 
 from simbi.reader.lazy import SimData
-from simbi.tools.utility import get_field_str
+from simbi.viz.utility import get_field_str
 
 from ..config import VisualizationConfig
 from ..types import Array, FieldData, PlotData

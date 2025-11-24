@@ -1,20 +1,12 @@
-from .reader import read_simulation
-from .core.config.base_config import SimbiBaseConfig
-from .core.config.fields import SimbiField
-from .core.types.bodies import (
-    BinaryComponentConfig,
-    BinaryConfig,
-    GravitationalSystemConfig,
-    ImmersedBodyConfig,
-)
-
-from .core.types.typing import (
-    GasStateGenerator,
-    InitialStateType,
-    MHDStateGenerators,
-)
-
-from .detail import bcolors
+# =============================================================================
+# simbi - relativistic hydrodynamics simulation framework
+#
+# primary exports:
+#   - SimbiProblem, ProblemParam, run: for defining and running simulations
+#   - read_simulation: for loading simulation data
+#   - viz: for visualization
+# =============================================================================
+# utilities
 from .functional.helpers import (
     calc_any_mean,
     calc_cell_volume,
@@ -22,23 +14,57 @@ from .functional.helpers import (
     compute_num_polar_zones,
     find_nearest,
 )
-from .io import logging
-from .simulator import Hydro
 
-from .libs.rad_hydro import py_calc_fnu, py_log_events
-from .tools.utility import get_dimensionality
+# data loading
+from .reader import read_simulation
+
+# core simulation api
+from .simulation import (
+    ProblemParam,
+    SimbiProblem,
+    run,
+)
+
+# types for problem definition
+from .types.bodies import (
+    BinaryComponentConfig,
+    BinaryConfig,
+    GravitationalSystemConfig,
+    ImmersedBodyConfig,
+)
+from .types.input import (
+    BoundaryCondition,
+    CellSpacing,
+    CoordSystem,
+    Reconstruction,
+    Regime,
+    Solver,
+    TimeStepping,
+)
+from .types.typing import (
+    GasStateGenerator,
+    InitialStateType,
+    MHDStateGenerators,
+)
 from .version import __version_tuple__
 
-logger = logging.logger
+# optional: backend extensions (may not be available)
+try:
+    from .libs.rad_hydro import py_calc_fnu, py_log_events
+except ImportError:
+    py_calc_fnu = None
+    py_log_events = None
 
+__version__ = ".".join(map(str, __version_tuple__))
 
 __all__ = [
-    "SimbiBaseConfig",
-    "Hydro",
+    # core api
+    "SimbiProblem",
+    "ProblemParam",
+    "run",
+    # data
     "read_simulation",
-    "py_calc_fnu",
-    "py_log_events",
-    "get_dimensionality",
+    # types
     "InitialStateType",
     "GasStateGenerator",
     "MHDStateGenerators",
@@ -46,12 +72,22 @@ __all__ = [
     "GravitationalSystemConfig",
     "BinaryConfig",
     "BinaryComponentConfig",
-    "bcolors",
+    "BoundaryCondition",
+    "CellSpacing",
+    "CoordSystem",
+    "Reconstruction",
+    "Regime",
+    "Solver",
+    "TimeStepping",
+    # utilities
     "calc_cell_volume",
     "find_nearest",
     "compute_num_polar_zones",
     "calc_centroid",
     "calc_any_mean",
-    "SimbiField",
+    # optional
+    "py_calc_fnu",
+    "py_log_events",
+    # version
+    "__version__",
 ]
-__version__ = ".".join(map(str, __version_tuple__))

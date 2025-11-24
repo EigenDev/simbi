@@ -1,39 +1,228 @@
-from typing import Any, Callable
+# =============================================================================
+# computation.py
+#
+# derived field computation for simulation data.
+# contains all physics calculations needed for post-processing.
+# =============================================================================
+from enum import Enum, IntEnum
+from typing import Any, Callable, Sequence
 
 import numpy as np
 
-from ..core.types import Array, ProcessedData
-from ..physics.calculations import (
-    VectorComponent,
-    enthalpy_density,
-    four_velocity,
-    labframe_energy_density,
-    labframe_momentum,
-    lorentz_factor,
-    magnetic_pressure,
-    magnetization,
-    spec_enthalpy,
-    total_pressure,
-)
+from ..types import Array, ProcessedData
 
 ComputeFunc = Callable[[dict[str, Any]], Array]
 
 
+# =============================================================================
+# physics primitives
+# =============================================================================
+class VectorComponent(IntEnum):
+    X1 = 0
+    X2 = 1
+    X3 = 2
+
+
+class VectorMode(Enum):
+    Magnitude = "magnitude"
+    All = "all"
+
+
+def _dot_product(a: Sequence[Array], b: Sequence[Array]) -> Array:
+    """dot product of two vector fields."""
+    return np.sum([a[ii] * b[ii] for ii in range(len(a))], axis=0)
+
+
+def lorentz_factor(
+    velocity: Sequence[Array], regime: str, using_gamma_beta: bool = False
+) -> Array | float:
+    """compute lorentz factor from velocity."""
+    vsquared = _dot_product(velocity, velocity)
+    if regime != "newtonian" and np.any(vsquared >= 1.0):
+        raise ValueError("velocity exceeds speed of light")
+
+    if regime == "newtonian":
+        return 1.0
+    elif not using_gamma_beta:
+        return np.asarray(1.0 / np.sqrt(1.0 - vsquared))
+    else:
+        return np.asarray(np.sqrt(1.0 + vsquared))
+
+
+def four_velocity(
+    velocity: Sequence[Array], regime: str, component: int
+) -> Array:
+    """compute four-velocity component."""
+    W = lorentz_factor(velocity, regime)
+    return np.asarray(velocity[component] * W)
+
+
+def spec_enthalpy(
+    adiabatic_index: float, rho: Array, pressure: Array, regime: str
+) -> Array | float:
+    """compute specific enthalpy."""
+    if regime == "newtonian":
+        if adiabatic_index == 1.0:
+            return 1.0 + pressure / rho
+        return 1.0
+    return 1.0 + adiabatic_index * pressure / (rho * (adiabatic_index - 1.0))
+
+
+def _enthalpy(
+    rho: Array, pre: Array, gamma: float, regime: str
+) -> Array | float:
+    """compute enthalpy per particle."""
+    if regime == "newtonian":
+        return 1.0
+    return 1.0 + gamma * pre / (rho * (gamma - 1.0))
+
+
+def labframe_density(
+    rho: Array, velocity: Sequence[Array], regime: str
+) -> Array:
+    """compute lab-frame density."""
+    return rho * lorentz_factor(velocity, regime)
+
+
+def labframe_energy_density(
+    rho: Array,
+    pre: Array,
+    vel: Sequence[Array],
+    bfield: Sequence[Array],
+    gamma: float,
+    regime: str = "newtonian",
+) -> Array:
+    """compute lab-frame energy density."""
+    vsq = sum(v**2 for v in vel)
+
+    if regime == "newtonian":
+        if gamma == 1.0:
+            return pre / rho
+        return pre / (gamma - 1.0) + 0.5 * rho * vsq
+
+    W = 1.0 / np.sqrt(1.0 - vsq)
+    h = _enthalpy(rho, pre, gamma, regime)
+
+    if regime == "srhd":
+        return np.asarray(rho * W**2 * h - pre - rho * W)
+
+    if regime == "srmhd":
+        bsq = sum(b**2 for b in bfield)
+        vdb = _dot_product(vel, bfield)
+        return np.asarray(
+            rho * W**2 * h - pre - rho * W + 0.5 * (bsq + vsq * bsq - vdb**2)
+        )
+
+    raise NotImplementedError(f"regime '{regime}' not implemented")
+
+
+def labframe_momentum(
+    rho: Array,
+    pre: Array,
+    vel: Sequence[Array],
+    bfield: Sequence[Array],
+    gamma: float,
+    regime: str = "newtonian",
+    mode: VectorMode | VectorComponent = VectorMode.All,
+) -> Array:
+    """compute lab-frame momentum."""
+    if regime == "newtonian":
+        mom_vec = np.asarray(rho) * np.asarray(vel)
+    elif "sr" in regime:
+        h = _enthalpy(rho, pre, gamma, regime)
+        D = labframe_density(rho, vel, regime)
+        W = lorentz_factor(vel, regime)
+
+        magnetic_part: Array | float = 0.0
+        if regime == "srmhd":
+            bsq = np.array(sum(b**2 for b in bfield), dtype=float)
+            vdb = _dot_product(vel, bfield)
+            magnetic_part = np.array(
+                [bsq * v - vdb * b for v, b in zip(vel, bfield)]
+            ).squeeze()
+
+        mom_vec = D * h * W * np.asarray(vel) + magnetic_part
+    else:
+        raise NotImplementedError(f"regime '{regime}' not implemented")
+
+    if mode == VectorMode.Magnitude:
+        return np.asarray(np.sqrt(np.sum(mom_vec**2, axis=0)))
+    elif mode == VectorMode.All:
+        return mom_vec
+    else:
+        return np.asarray(mom_vec[int(mode.value)])
+
+
+def magnetic_pressure(
+    bfields: Sequence[Array], velocity: Sequence[Array], regime: str
+) -> Array:
+    """compute magnetic pressure."""
+    bsq: Array = np.sum([b**2 for b in bfields], axis=0)
+    if regime == "srmhd":
+        W = 1.0 / np.sqrt(1.0 - _dot_product(velocity, velocity))
+        vdb = _dot_product(velocity, bfields)
+        bsq = bsq / W**2 + vdb**2
+    return 0.5 * bsq
+
+
+def total_pressure(
+    pre: Array, bfields: Sequence[Array], velocity: Sequence[Array], regime: str
+) -> Array:
+    """compute total pressure (gas + magnetic)."""
+    if "mhd" not in regime:
+        return pre
+    return pre + magnetic_pressure(bfields, velocity, regime)
+
+
+def enthalpy_density(
+    rho: Array,
+    pre: Array,
+    bfields: Sequence[Array],
+    velocity: Sequence[Array],
+    adiabatic_index: float,
+    regime: str = "newtonian",
+) -> Array:
+    """compute enthalpy density."""
+    if regime == "newtonian":
+        return rho
+    elif regime == "srhd":
+        return rho * _enthalpy(rho, pre, adiabatic_index, regime)
+    elif regime == "srmhd":
+        return rho * _enthalpy(
+            rho, pre, adiabatic_index, regime
+        ) + 2.0 * magnetic_pressure(bfields, velocity, regime)
+    raise NotImplementedError(f"regime '{regime}' not implemented")
+
+
+def magnetization(rho: Array, bfields: Sequence[Array]) -> Array:
+    """compute magnetization sigma = b^2 / rho."""
+    return np.asarray(_dot_product(bfields, bfields) / rho)
+
+
+# =============================================================================
+# computation pipeline factory
+# =============================================================================
 def create_computation_pipeline(data: ProcessedData) -> dict[str, ComputeFunc]:
+    """
+    create a pipeline of derived field computations.
+
+    returns a dict mapping field names to compute functions.
+    each function takes fields dict and returns computed array.
+    """
     ndim = data.metadata.dimensions
     regime = data.metadata.regime
     gamma = data.metadata.adiabatic_index
 
     def get_velocities(fields: dict[str, Array]) -> list[Array]:
-        return [fields[f"v{i}"] for i in range(1, ndim + 1)]
+        return [fields[f"v{ii}"] for ii in range(1, ndim + 1)]
 
     def get_b_fields(fields: dict[str, Array]) -> list[Array]:
         return [
-            fields.get(f"b{i}", np.zeros_like(fields["rho"]))
-            for i in range(1, ndim + 1)
+            fields.get(f"b{ii}", np.zeros_like(fields["rho"]))
+            for ii in range(1, ndim + 1)
         ]
 
-    # Basic derived fields
+    # basic derived fields
     def compute_W(fields: dict[str, Array]) -> Array | float:
         return lorentz_factor(get_velocities(fields), regime)
 
@@ -43,7 +232,7 @@ def create_computation_pipeline(data: ProcessedData) -> dict[str, ComputeFunc]:
     def compute_velocity_magnitude(fields: dict[str, Array]) -> Array:
         if ndim == 1:
             return fields["v1"]
-        return np.sqrt(sum(fields[f"v{i}"] ** 2 for i in range(1, ndim + 1)))
+        return np.sqrt(sum(fields[f"v{ii}"] ** 2 for ii in range(1, ndim + 1)))
 
     def compute_four_velocity_magnitude(fields: dict[str, Array]) -> Array:
         if ndim == 1:
@@ -52,7 +241,6 @@ def create_computation_pipeline(data: ProcessedData) -> dict[str, ComputeFunc]:
         W = lorentz_factor(get_velocities(fields), regime)
         return v_mag * W
 
-    # Four-velocity components
     def compute_u_component(
         component: int,
     ) -> Callable[[dict[str, Array]], Array]:
@@ -61,7 +249,6 @@ def create_computation_pipeline(data: ProcessedData) -> dict[str, ComputeFunc]:
 
         return _compute
 
-    # Momentum components
     def compute_momentum_component(
         component: int,
     ) -> Callable[[dict[str, Array]], Array]:
@@ -93,14 +280,10 @@ def create_computation_pipeline(data: ProcessedData) -> dict[str, ComputeFunc]:
                 return 0.5 * (view[:, 1:, :] + view[:, :-1, :])
             elif field_name == "b3":
                 return 0.5 * (view[1:, :, :] + view[:-1, :, :])
-            else:
-                raise ValueError(
-                    f"Invalid magnetic field component: {field_name}"
-                )
+            raise ValueError(f"invalid b-field component: {field_name}")
 
         return _compute
 
-    # Energy and thermodynamics
     def compute_energy(fields: dict[str, Array]) -> Array:
         return labframe_energy_density(
             fields["rho"],
@@ -124,7 +307,6 @@ def create_computation_pipeline(data: ProcessedData) -> dict[str, ComputeFunc]:
             regime,
         )
 
-    # Magnetic fields and pressures
     def compute_magnetization(fields: dict[str, Array]) -> Array:
         return magnetization(fields["rho"], get_b_fields(fields))
 
@@ -138,13 +320,11 @@ def create_computation_pipeline(data: ProcessedData) -> dict[str, ComputeFunc]:
             get_b_fields(fields), get_velocities(fields), regime
         )
 
-    # Mach number
     def compute_mach_number(fields: dict[str, Array]) -> Array:
         v_mag = compute_velocity_magnitude(fields)
-        sound_speed = np.sqrt(gamma * fields["p"] / fields["rho"])
-        return np.asanyarray(v_mag / sound_speed)
+        cs = np.sqrt(gamma * fields["p"] / fields["rho"])
+        return np.asanyarray(v_mag / cs)
 
-    # Tracer density
     def compute_chi_density(fields: dict[str, Array]) -> Array:
         return (
             fields["rho"]
@@ -153,42 +333,9 @@ def create_computation_pipeline(data: ProcessedData) -> dict[str, ComputeFunc]:
         )
 
     def angular_momentum_density(level_data: dict[str, Array]) -> Array:
-        """Compute angular momentum density L = r x S."""
-        x = getattr(level_data, "mesh").x1c
-        y = getattr(level_data, "mesh").x2c
-        Sx = labframe_momentum(
-            level_data["rho"],
-            level_data["p"],
-            get_velocities(level_data),
-            get_b_fields(level_data),
-            gamma,
-            regime,
-            VectorComponent(0),
-        )
-        Sy = labframe_momentum(
-            level_data["rho"],
-            level_data["p"],
-            get_velocities(level_data),
-            get_b_fields(level_data),
-            gamma,
-            regime,
-            VectorComponent(1),
-        )
-        Lz = x * Sy - y * Sx
-        return np.asarray(Lz)
-
-    def specific_angular_momentum(
-        level_data: dict[str, Array],
-    ) -> Array:
-        """
-        Compute specific angular momentum l_z = (Integral L_z dz) / (Integral rho dz).
-        This returns a 2D array.
-        """
+        """compute angular momentum density L = r x S."""
         mesh = getattr(level_data, "mesh")
-        x = mesh.x1c
-        y = mesh.x2c
-
-        # Get momentum components
+        x, y = mesh.x1c, mesh.x2c
         Sx = labframe_momentum(
             level_data["rho"],
             level_data["p"],
@@ -207,38 +354,54 @@ def create_computation_pipeline(data: ProcessedData) -> dict[str, ComputeFunc]:
             regime,
             VectorComponent(1),
         )
+        return np.asarray(x * Sy - y * Sx)
 
-        # ang momentum density
+    def specific_angular_momentum(level_data: dict[str, Array]) -> Array:
+        """compute specific angular momentum."""
+        mesh = getattr(level_data, "mesh")
+        x, y = mesh.x1c, mesh.x2c
+        Sx = labframe_momentum(
+            level_data["rho"],
+            level_data["p"],
+            get_velocities(level_data),
+            get_b_fields(level_data),
+            gamma,
+            regime,
+            VectorComponent(0),
+        )
+        Sy = labframe_momentum(
+            level_data["rho"],
+            level_data["p"],
+            get_velocities(level_data),
+            get_b_fields(level_data),
+            gamma,
+            regime,
+            VectorComponent(1),
+        )
         Lz = x * Sy - y * Sx
-
         den = level_data["rho"]
 
         if den.ndim == 3:
             dz = mesh.x3v[1:] - mesh.x3v[:-1]
             Sigma = np.sum(den * dz, axis=0)
-            Lz_integrated = np.sum(Lz * dz, axis=0)
-            return np.asarray(Lz_integrated / (Sigma + np.finfo(float).tiny))
-        elif den.ndim == 2:
-            return np.asarray(Lz / (den + np.finfo(float).tiny))
-        else:
-            raise ValueError(f"Density has unexpected dimension: {den.ndim}")
+            Lz_int = np.sum(Lz * dz, axis=0)
+            return np.asarray(Lz_int / (Sigma + np.finfo(float).tiny))
+        return np.asarray(Lz / (den + np.finfo(float).tiny))
 
     def surface_density(level_data: dict[str, Any]) -> Array:
         den = level_data["rho"]
         if den.ndim == 3:
             mesh = getattr(level_data, "mesh")
             dz = mesh.x3v[1:] - mesh.x3v[:-1]
-            den = np.sum(den * dz, axis=0)
+            return np.asarray(np.sum(den * dz, axis=0))
         return np.asarray(den)
 
     def mass_flux(level_data: dict[str, Any]) -> Array:
-        """Compute mass flux through spherical shells."""
+        """compute mass flux through spherical shells."""
         mesh = getattr(level_data, "mesh")
-        x = mesh.x1c
-        y = mesh.x2c
-        # Radial velocity
-        vx = level_data["v1"]
-        vy = level_data["v2"]
+        x, y = mesh.x1c, mesh.x2c
+        vx, vy = level_data["v1"], level_data["v2"]
+
         if vx.ndim == 3:
             z = mesh.x3c
             r = np.sqrt(x**2 + y**2 + z**2)
@@ -251,49 +414,32 @@ def create_computation_pipeline(data: ProcessedData) -> dict[str, ComputeFunc]:
         return np.asarray(4.0 * np.pi * r**2 * level_data["rho"] * vr)
 
     def compute_divergence(level_data: dict[str, Array]) -> Array:
-        """
-        Computes the divergence of the velocity field: div(v) = dvx/dx + dvy/dy + dvz/dz
-        Assumes x1 (vx) is axis=ndim-1, x2 (vy) is axis=ndim-2, x3 (vz) is axis=0
-        """
+        """compute velocity divergence."""
         mesh = getattr(level_data, "mesh")
-        vx = level_data["v1"]
-        vy = level_data["v2"]
-        x = mesh.x1c
-        y = mesh.x2c
+        vx, vy = level_data["v1"], level_data["v2"]
+        x, y = mesh.x1c, mesh.x2c
 
-        # d/dx1 of v1
         dvx_dx = np.gradient(vx, x, axis=ndim - 1)
-        # d/dx2 of v2
         dvy_dy = np.gradient(vy, y, axis=ndim - 2)
 
         if ndim == 3:
             vz = level_data["v3"]
             z = mesh.x3c
-            # d/dx3 of v3
             dvz_dz = np.gradient(vz, z, axis=0)
             return np.asarray(dvx_dx + dvy_dy + dvz_dz)
-        else:
-            return np.asarray(dvx_dx + dvy_dy)
+        return np.asarray(dvx_dx + dvy_dy)
 
     def compute_vorticity_z(level_data: dict[str, Array]) -> Array:
-        """
-        Computes the z-component of vorticity: vort_z = dvy/dx - dvx/dy
-        Assumes x1 (vx) is axis=ndim-1, x2 (vy) is axis=ndim-2
-        """
+        """compute z-component of vorticity."""
         mesh = getattr(level_data, "mesh")
-        vx = level_data["v1"]
-        vy = level_data["v2"]
-        x = mesh.x1c
-        y = mesh.x2c
+        vx, vy = level_data["v1"], level_data["v2"]
+        x, y = mesh.x1c, mesh.x2c
 
-        # d/dx1 of v2
         dvy_dx = np.gradient(vy, x, axis=ndim - 1)
-        # d/dx2 of v1
         dvx_dy = np.gradient(vx, y, axis=ndim - 2)
-
         return np.asarray(dvy_dx - dvx_dy)
 
-    # Build the pipeline
+    # build pipeline
     pipeline: dict[str, Any] = {
         "W": compute_W,
         "D": compute_D,
@@ -315,13 +461,13 @@ def create_computation_pipeline(data: ProcessedData) -> dict[str, ComputeFunc]:
         "div_v": compute_divergence,
     }
 
-    # Add component fields
-    for i in range(1, ndim + 1):
-        pipeline[f"u{i}"] = compute_u_component(i - 1)
-        pipeline[f"m{i}"] = compute_momentum_component(i - 1)
+    # add component fields
+    for ii in range(1, ndim + 1):
+        pipeline[f"u{ii}"] = compute_u_component(ii - 1)
+        pipeline[f"m{ii}"] = compute_momentum_component(ii - 1)
 
     if data.metadata.is_mhd:
-        for i in range(1, ndim + 1):
-            pipeline[f"b{i}_mean"] = compute_b_mean_component(i)
+        for ii in range(1, ndim + 1):
+            pipeline[f"b{ii}_mean"] = compute_b_mean_component(ii)
 
     return pipeline
