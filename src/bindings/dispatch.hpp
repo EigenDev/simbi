@@ -643,18 +643,11 @@ namespace simbi::dispatch {
         using namespace ecs::creation;
 
         // extract dispatch parameters from config
-        auto regime_str = config::try_read<std::string>(config, "regime")
-                              .unwrap_or("newtonian");
-        auto geometry_str =
-            config::try_read<std::string>(config, "coord_system")
-                .unwrap_or("cartesian");
-        auto solver_str =
-            config::try_read<std::string>(config, "solver").unwrap_or("hllc");
-        auto rec_str = config::try_read<std::string>(config, "reconstruct")
-                           .unwrap_or("plm");
-
-        // infer dimensionality
-        auto dims = infer_dimensionality(config);
+        auto regime_str   = config.at("regime").get<std::string>();
+        auto geometry_str = config.at("coord_system").get<std::string>();
+        auto solver_str   = config.at("solver").get<std::string>();
+        auto rec_str      = config.at("reconstruction").get<std::string>();
+        auto dims         = config.at("dimensionality").get<std::uint64_t>();
 
         // convert to enums
         auto regime         = deserialize<regime_t>(regime_str);
