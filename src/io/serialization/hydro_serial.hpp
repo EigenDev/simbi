@@ -11,6 +11,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <iostream>
 #include <string>
 #include <string_view>
 
@@ -96,11 +97,12 @@ namespace simbi::io {
             // magnetic field components for mhd primitives
             if constexpr (requires(Primitive p) { p.mag; }) {
                 for (std::uint64_t dd = 0; dd < Rank; ++dd) {
+                    const auto lidx = Rank - 1 - dd;
                     write_field_component(
                         g,
                         "b" + std::to_string(dd + 1) + "_mean",
                         prim,
-                        [dd](const auto& p) { return p.mag[dd]; },
+                        [lidx](const auto& p) { return p.mag[lidx]; },
                         policy
                     );
                 }
@@ -150,6 +152,7 @@ namespace simbi::io {
                     // magnetic field components for mhd primitives
                     if constexpr (requires(Primitive p) { p.mag; }) {
                         for (std::uint64_t dd = 0; dd < Rank; ++dd) {
+                            const auto lidx = Rank - 1 - dd;
                             std::string name =
                                 "b" + std::to_string(dd + 1) + "_mean";
                             if (group_exists(g, name)) {
@@ -157,7 +160,7 @@ namespace simbi::io {
                                     g,
                                     name,
                                     field,
-                                    [dd](auto& p, real v) { p.mag[dd] = v; }
+                                    [lidx](auto& p, real v) { p.mag[lidx] = v; }
                                 );
                             }
                         }
@@ -195,11 +198,12 @@ namespace simbi::io {
             // magnetic field components for mhd conserved
             if constexpr (requires(Conserved u) { u.mag; }) {
                 for (std::uint64_t dd = 0; dd < Rank; ++dd) {
+                    const auto lidx = Rank - 1 - dd;
                     write_field_component(
                         g,
                         "B" + std::to_string(dd + 1) + "_mean",
                         cons,
-                        [dd](const auto& u) { return u.mag[dd]; },
+                        [lidx](const auto& u) { return u.mag[lidx]; },
                         policy
                     );
                 }
@@ -246,11 +250,12 @@ namespace simbi::io {
                             std::string name =
                                 "B" + std::to_string(dd + 1) + "_mean";
                             if (group_exists(g, name)) {
+                                const auto lidx = Rank - 1 - dd;
                                 read_field_component(
                                     g,
                                     name,
                                     field,
-                                    [dd](auto& u, real v) { u.mag[dd] = v; }
+                                    [lidx](auto& u, real v) { u.mag[lidx] = v; }
                                 );
                             }
                         }
@@ -284,14 +289,15 @@ namespace simbi::io {
             auto g = parent.createGroup("magnetic");
 
             for (std::uint64_t dd = 0; dd < Rank; ++dd) {
-                if (bfield[dd].domain().size() == 0) {
+                const auto lidx = Rank - 1 - dd;
+                if (bfield[lidx].domain().size() == 0) {
                     continue;
                 }
 
                 write_scalar_field(
                     g,
                     "B" + std::to_string(dd + 1),
-                    bfield[dd],
+                    bfield[lidx],
                     policy
                 );
             }
@@ -309,8 +315,9 @@ namespace simbi::io {
                 if (!group_exists(g, name)) {
                     continue;
                 }
+                const auto lidx = Rank - 1 - dd;
 
-                bfield[dd] = read_scalar_field<Rank>(g, name);
+                bfield[lidx] = read_scalar_field<Rank>(g, name);
             }
 
             return bfield;

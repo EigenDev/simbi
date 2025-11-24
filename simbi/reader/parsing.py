@@ -403,8 +403,11 @@ def parse_metadata_v2(attrs: dict[str, Any]) -> Metadata:
     )
 
 
-def parse_data(raw: RawHDF5, unpad: bool = True) -> Result[ProcessedData]:
+def parse_data(
+    raw: RawHDF5, unpad: bool = True
+) -> Result[ProcessedData, Exception]:
     """Parse raw HDF5 data into structured format"""
+    print("Parsing raw data into structured ProcessedData...")
     try:
         attrs = raw.attributes
 

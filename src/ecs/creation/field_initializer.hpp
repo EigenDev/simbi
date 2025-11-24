@@ -175,20 +175,22 @@ namespace simbi::ecs::creation {
                 active_domain
             );
 
+            auto exec = sim.partition_executor(lvl, 0);
+
             // initialize magnetic field (mhd only)
             if constexpr (R == regime_t::MHD || R == regime_t::RMHD) {
                 vector_t<grid::domain_t<Rank>, Rank> face_domains;
                 for (std::uint64_t dir = 0; dir < Rank; ++dir) {
-                    auto staggered_domain = full_domain;
+                    auto staggered_domain = active_domain;
                     staggered_domain.fin[dir] += 1;
                     // staggered is extended by 1 in
                     // transverse directions
-                    for (std::uint64_t dd = 0; dd < Rank; ++dd) {
-                        if (dd != dir) {
-                            staggered_domain.start[dd] -= 1;
-                            staggered_domain.fin[dd] += 1;
-                        }
-                    }
+                    // for (std::uint64_t dd = 0; dd < Rank; ++dd) {
+                    //     if (dd != dir) {
+                    //         staggered_domain.start[dd] -= 1;
+                    //         staggered_domain.fin[dd] += 1;
+                    //     }
+                    // }
 
                     auto staggered_active = active_domain;
                     staggered_active.fin[dir] += 1;
@@ -205,23 +207,29 @@ namespace simbi::ecs::creation {
                 // state
                 auto& mesh  = sim.mesh(lvl);
                 auto motion = ecs::get_motion_state(sim);
-                auto exec   = sim.partition_executor(lvl, 0);
                 ecs::with_block_geometry<Sim::coord_system>(
                     mesh,
                     motion,
-                    [&](const auto& block_geo) {
-                        em::interpolate_magnetic_fields(
-                            exec,
-                            fields,
+                    [&exec, face_domains, active_domain, fields](
+                        const auto& block_geo
+                    ) {
+                        auto bavg = interpolate_face_to_cell_magnetic(
+                            fields.bfield,
                             block_geo,
                             face_domains,
                             active_domain
                         );
+                        auto prims = fields.prim[active_domain];
+                        prims      = prims
+                                    .enum_map([bavg](auto coord, auto p) {
+                                        p.mag = bavg(coord);
+                                        return p;
+                                    })
+                                    .with(exec);
                     }
                 );
             }
 
-            auto exec = sim.partition_executor(lvl, 0);
             // convert primitives to conserved
             fields.cons = fields.prim
                               .map([gamma](auto prim) {

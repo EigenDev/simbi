@@ -1,61 +1,72 @@
 # =============================================================================
 # simbi/reader/__init__.py
 #
-# simulation data loading with lazy field evaluation.
-# primary interface: read_simulation(filename) -> SimData
+# clean checkpoint reader using io_v2.
 #
-# SimData provides:
-#   - direct access to primitive fields (rho, p, v1, etc.)
-#   - lazy computation of derived fields (W, energy, mach, etc.)
-#   - automatic dependency resolution
+# usage:
+#   from simbi.reader import read_checkpoint
+#   checkpoint = read_checkpoint("file.h5").unwrap()
+#
+#   # or use compatibility wrapper
+#   from simbi.reader import read_simulation
+#   data = read_simulation("file.h5")
 # =============================================================================
-from functools import partial
 
-from ..functional.result import Result
-from ..types import ProcessedData
-from .io import open_file, read_raw_data
-from .lazy import SimData
-from .parsing import parse_data
-
-
-def load_simulation(filename: str, unpad: bool) -> Result[SimData]:
-    """
-    Load simulation data with lazy field evaluation.
-
-    Returns Result[SimData] where SimData provides:
-    - Direct access to primitive fields (rho, p, v1, etc.)
-    - Lazy computation of derived fields (W, energy, mach, etc.)
-    - Automatic dependency resolution
-    """
-    partial_parse = partial(parse_data, unpad=unpad)
-    return (
-        open_file(filename)
-        .and_then(read_raw_data)
-        .and_then(partial_parse)
-        .map(SimData)
-    )
+from ..functional import Err, Ok, Result
+from .adapter import SimData
+from .io_v2 import (
+    Checkpoint,
+    Domain,
+    FieldData,
+    HydroFields,
+    LevelData,
+    MeshGeometry,
+    Metadata,
+    PartitionData,
+    get_base_fields,
+    read_checkpoint,
+)
 
 
 def read_simulation(filename: str, unpad: bool = True) -> SimData:
     """
-    Convenience function that loads simulation or raises exception.
+    compatibility wrapper for old read_simulation api.
 
-    Equivalent to load_simulation(filename).value but throws on error.
+    loads a checkpoint file and returns a SimData adapter that provides
+    the legacy interface (.metadata, .bodies, .get_field, etc).
+
+    args:
+        filename: path to checkpoint file
+        unpad: ignored (kept for api compatibility)
+
+    returns:
+        SimData adapter wrapping Checkpoint
+
+    example:
+        data = read_simulation("checkpoint.h5")
+        rho = data.get_field("rho")
+        time = data.metadata.time
     """
-    result = load_simulation(filename, unpad)
-    if result.error:
-        raise result.error
-
-    if result.value is not None:
-        return result.value
-    else:
-        raise ValueError("No simulation data found in file")
+    checkpoint = read_checkpoint(filename).unwrap()
+    return SimData(checkpoint)
 
 
 __all__ = [
-    "load_simulation",
+    # main api
+    "read_checkpoint",
     "read_simulation",
-    "SimData",
-    "ProcessedData",
+    "get_base_fields",
+    # types
+    "Checkpoint",
+    "LevelData",
+    "PartitionData",
+    "HydroFields",
+    "FieldData",
+    "Domain",
+    "MeshGeometry",
+    "Metadata",
+    # functional
     "Result",
+    "Ok",
+    "Err",
 ]

@@ -1,10 +1,12 @@
-import numpy as np
 import argparse
+
 import h5py
-from numpy.typing import NDArray
-from astropy.cosmology import FlatLambdaCDM
-from simbi import compute_num_polar_zones, read_simulation
+import numpy as np
 from astropy import units
+from astropy.cosmology import FlatLambdaCDM
+from numpy.typing import NDArray
+
+from simbi import compute_num_polar_zones, read_simulation
 
 cosmo = FlatLambdaCDM(
     H0=70 * units.km / units.s / units.Mpc, Tcmb0=2.725 * units.K, Om0=0.3
@@ -47,7 +49,9 @@ def read_afterglow_library_data(filename: str) -> dict:
 
     if filename.endswith(".h5"):
         data_dict["fnu"] = {nu_val: fnu[i, :] for i, nu_val in enumerate(nu)}
-        data_dict["spectra"] = {tday_val: fnu[:, i] for i, tday_val in enumerate(tday)}
+        data_dict["spectra"] = {
+            tday_val: fnu[:, i] for i, tday_val in enumerate(tday)
+        }
 
         if "fnu2" in locals():
             data_dict["fnu_pcj"] = {
@@ -58,7 +62,9 @@ def read_afterglow_library_data(filename: str) -> dict:
             }
     else:
         data_dict["fnu"] = {nu_val: fnu[:, i] for i, nu_val in enumerate(nu)}
-        data_dict["spectra"] = {tday_val: fnu[i, :] for i, tday_val in enumerate(tday)}
+        data_dict["spectra"] = {
+            tday_val: fnu[i, :] for i, tday_val in enumerate(tday)
+        }
 
     return data_dict
 
@@ -94,7 +100,11 @@ def calc_rhat(
     theta: NDArray[np.floating], phi: NDArray[np.floating] | float
 ) -> NDArray:
     return np.array(
-        [np.sin(theta) * np.cos(phi), np.sin(theta) * np.sin(phi), np.cos(theta)]
+        [
+            np.sin(theta) * np.cos(phi),
+            np.sin(theta) * np.sin(phi),
+            np.cos(theta),
+        ]
     )
 
 
@@ -170,8 +180,12 @@ def get_tbin_edges(
     t_beg = setup_init.time * time_scale
     t_end = setup_final.time * time_scale
 
-    generate_pseudo_mesh(args, mesh_init, full_sphere=True, full_threed=not at_pole)
-    generate_pseudo_mesh(args, mesh_final, full_sphere=True, full_threed=not at_pole)
+    generate_pseudo_mesh(
+        args, mesh_init, full_sphere=True, full_threed=not at_pole
+    )
+    generate_pseudo_mesh(
+        args, mesh_final, full_sphere=True, full_threed=not at_pole
+    )
     rhat = calc_rhat(mesh_init["xx2"], mesh_init["xx3"] * (at_pole ^ 1))
 
     # Place observer along chosen axis

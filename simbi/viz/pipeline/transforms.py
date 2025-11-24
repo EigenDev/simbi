@@ -10,8 +10,7 @@ from typing import Any, Callable, Literal, Optional, Sequence
 
 import numpy as np
 
-from simbi.reader import SimData, parse_data, read_raw_data
-from simbi.types import ProcessedData
+from simbi.reader.adapter import SimData
 
 from ..config import VisualizationConfig
 from ..figure import Figure
@@ -179,21 +178,58 @@ def prepare_field_level(
 ) -> FieldData:
     """
     Prepares a single FieldData object for a specific level.
-    NO slicing is performed.
+    Automatically squeezes singleton dimensions for quasi-1D/2D data.
     """
     values = data.get_field(field_name, level)
     mesh = data.level_mesh(level)
 
+    # detect if field is face-centered by comparing shape to mesh
+    # mesh shape is (nz, ny, nx) in storage order
+    mesh_shape = mesh.shape
+    is_face_centered = any(
+        values.shape[i] == mesh_shape[i] + 1 for i in range(values.ndim)
+    )
+
+    if is_face_centered:
+        # average face-centered field to cell centers
+        # determine which axis is staggered
+        for axis in range(values.ndim):
+            if values.shape[axis] == mesh_shape[axis] + 1:
+                # average along this axis
+                slices_left = [slice(None)] * values.ndim
+                slices_right = [slice(None)] * values.ndim
+                slices_left[axis] = slice(None, -1)
+                slices_right[axis] = slice(1, None)
+                values = 0.5 * (
+                    values[tuple(slices_left)] + values[tuple(slices_right)]
+                )
+                break
+
     # Get the full domain, in data-storage order (e.g., nz, ny, nx)
+    # use cell centers for all fields now
     full_domain = [getattr(mesh, f"x{i}v") for i in range(values.ndim, 0, -1)]
+
+    # convert vertices to cell centers
+    full_domain = [0.5 * (coords[1:] + coords[:-1]) for coords in full_domain]
 
     assert values.ndim == len(full_domain), (
         f"Data dim ({values.ndim}) mismatch with domain dim ({len(full_domain)})"
     )
 
+    # squeeze singleton dimensions for quasi-1D/2D cases
+    # keep only dimensions where size > 1
+    non_singleton_axes = [i for i in range(values.ndim) if values.shape[i] > 1]
+
+    if len(non_singleton_axes) != values.ndim:
+        # squeeze the values
+        values = values.squeeze()
+
+        # keep only non-singleton domain axes
+        full_domain = [full_domain[i] for i in non_singleton_axes]
+
     name = f"{field_name}_L{level}" if level > 0 else field_name
 
-    # Return the full-dimensional data
+    # return dimensionally-reduced data for quasi-1D/2D
     return FieldData(name=name, values=values, domain=list(full_domain))
 
 
@@ -236,22 +272,19 @@ def extract_field(field_name: str) -> Callable[[SimData], Array]:
 
 def load_data(file_path: str) -> SimData:
     """
-    Load simulation data from a file.
+    load simulation data from a file using io_v2.
 
     Args:
-        file_path: Path to the simulation data file
+        file_path: path to the checkpoint file
 
     Returns:
-        Loaded simulation data
+        SimData adapter wrapping Checkpoint
     """
-    import h5py
+    from simbi.reader import read_checkpoint
+    from simbi.reader.adapter import SimData
 
-    data: ProcessedData
-    with h5py.File(file_path, "r") as file:
-        raw_data = read_raw_data(file).unwrap()
-        data = parse_data(raw_data).unwrap()
-
-    return SimData(data)
+    checkpoint = read_checkpoint(file_path).unwrap()
+    return SimData(checkpoint)
 
 
 def get_effective_dimensions(data: SimData, config: VisualizationConfig) -> int:

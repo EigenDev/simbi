@@ -3,7 +3,7 @@ from typing import Any, Optional, Sequence
 import numpy as np
 from numpy.typing import NDArray
 
-from simbi.reader.lazy import SimData
+from simbi.reader.adapter import SimData
 from simbi.viz.utility import get_field_str
 
 from ..config import VisualizationConfig

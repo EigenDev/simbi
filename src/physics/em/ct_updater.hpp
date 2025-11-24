@@ -427,9 +427,10 @@ namespace simbi::em {
         );
         auto u_p = state.cons[cell_domain];
 
-        u_p = u_p.enum_map(
-                     [bavg](auto coord, auto u) {
-                         u.mag = bavg(coord);
+        u_p = u_p.zip(
+                     bavg,
+                     [](auto u, auto bmean) {
+                         u.mag = bmean;
                          return u;
                      }
         ).with(exec);
@@ -532,24 +533,22 @@ namespace simbi::em {
     // edge_comp: which E component (0=Ez, 1=Ey, 2=Ex in array-index order)
     template <std::uint64_t EdgeComp, typename FluxField, typename PrimField>
     struct compute_edge_efield_op_t {
+        using perm_t = decltype(efield_permutation<EdgeComp>());
         FluxField fluxes;
         PrimField prims;
 
         DEV auto operator()(auto edge_coord) const
         {
-            // get the permutation that extracts this E component
-            constexpr auto perm = efield_permutation<EdgeComp>();
-
             // convert to doubled coordinates for stencil computation
             auto edge_doubled = to_doubled_coord(edge_coord);
 
             // gather face E-fields, cell-center E-fields, and density fluxes
-            auto flux_coords = flux_stencil<decltype(perm)>(edge_doubled);
-            auto prim_coords = prim_stencil<decltype(perm)>(edge_doubled);
+            auto flux_coords = flux_stencil<perm_t>(edge_doubled);
+            auto prim_coords = prim_stencil<perm_t>(edge_doubled);
 
-            auto ef    = face_efields<decltype(perm)>(fluxes, flux_coords);
-            auto ec    = center_efields<decltype(perm)>(prims, prim_coords);
-            auto densf = den_fluxes<decltype(perm)>(fluxes, flux_coords);
+            auto ef    = face_efields<perm_t>(fluxes, flux_coords);
+            auto ec    = center_efields<perm_t>(prims, prim_coords);
+            auto densf = den_fluxes<perm_t>(fluxes, flux_coords);
 
             return ct_contact_formula(ef, ec, densf);
         }
@@ -561,18 +560,20 @@ namespace simbi::em {
         typename Executor,
         typename HydroState,
         typename EdgeDomain,
+        typename FaceDomains,
         typename Domain>
     void compute_edge_efield_component(
         Executor& exec,
         HydroState& state,
         const EdgeDomain& edge_domain,
+        const FaceDomains& face_domains,
         const Domain& cell_domain
     )
     {
         const auto fluxes = vector_t{
-          state.flux[0][state.flux[0].domain()],
-          state.flux[1][state.flux[1].domain()],
-          state.flux[2][state.flux[2].domain()]
+          state.flux[0][face_domains[0]],
+          state.flux[1][face_domains[1]],
+          state.flux[2][face_domains[2]]
         };
         const auto prims = state.prim[cell_domain];
 
@@ -595,11 +596,13 @@ namespace simbi::em {
         typename Executor,
         typename HydroState,
         typename EdgeDomains,
+        typename FaceDomains,
         typename Domain>
     void compute_edge_efields(
         Executor& exec,
         HydroState& state,
         const EdgeDomains& edge_domains,
+        const FaceDomains& face_domains,
         const Domain& cell_domain
     )
     {
@@ -607,18 +610,21 @@ namespace simbi::em {
             exec,
             state,
             edge_domains[0],
+            face_domains,
             cell_domain
         );
         compute_edge_efield_component<1>(
             exec,
             state,
             edge_domains[1],
+            face_domains,
             cell_domain
         );
         compute_edge_efield_component<2>(
             exec,
             state,
             edge_domains[2],
+            face_domains,
             cell_domain
         );
     }
@@ -628,6 +634,8 @@ namespace simbi::em {
     // reads pre-computed edge E-fields instead of computing on-the-fly
     // ========================================================================
 
+    // operator to update B from stored edge E-fields
+    // gathers E values at face edges and uses discrete_curl from ct_geom.hpp
     template <magnetic_comp_t MagComp, typename EField, typename Geometry>
     struct ct_update_from_efield_op_t {
         EField efield;
@@ -636,37 +644,36 @@ namespace simbi::em {
 
         DEV auto operator()(auto face_coord) const
         {
-            // gather edge E values for curl computation
-            // for B_d update, we need E from the two transverse directions
-            constexpr auto comp = static_cast<std::uint64_t>(MagComp);
+            // gather stored E-field values at the 4 edges bounding this face
+            // and arrange them in the format expected by discrete_curl
+            constexpr auto perm_list = permutation_list<MagComp>();
 
-            // the two transverse axes
-            constexpr std::uint64_t t1 = (comp + 1) % 3;
-            constexpr std::uint64_t t2 = (comp + 2) % 3;
+            auto gather_edge_emfs = [&]<typename Perm>(Perm) {
+                // get the two edge coords for this permutation (doubled coords)
+                auto edge_coords_doubled =
+                    gen_edge_coords<MagComp, Perm>(face_coord);
 
-            // edge E values at the 4 edges of this face
-            // E_t1 at edges parallel to t1 (varies in t2)
-            // E_t2 at edges parallel to t2 (varies in t1)
-            auto c00 = face_coord;
-            auto c01 = face_coord;
-            c01[t2] += 1;
-            auto c10 = face_coord;
-            c10[t1] += 1;
-            auto c11 = face_coord;
-            c11[t1] += 1;
-            c11[t2] += 1;
+                // convert doubled coords to array indices
+                auto edge_coords = vector_t<iarray<3>, 2>{
+                  to_array_index_coord(edge_coords_doubled[0]),
+                  to_array_index_coord(edge_coords_doubled[1])
+                };
 
-            // for curl: dE_t2/dt1 - dE_t1/dt2
-            real e_t1_lo = efield[t1](c00);
-            real e_t1_hi = efield[t1](c10);
-            real e_t2_lo = efield[t2](c00);
-            real e_t2_hi = efield[t2](c01);
+                // which E component does this permutation extract?
+                constexpr auto e_comp = Perm::e_field_component();
 
-            // get scale factors for proper curl
-            const auto h = geometry.scale_factors(face_coord);
+                // return the two E values at these edges
+                return vector_t<real, 2>{
+                  efield[e_comp](edge_coords[0]),
+                  efield[e_comp](edge_coords[1])
+                };
+            };
 
-            real curl =
-                (e_t2_hi - e_t2_lo) / h[t1] - (e_t1_hi - e_t1_lo) / h[t2];
+            // map over both permutations to get edge_emfs[2][2]
+            auto edge_emfs = map_permutations(perm_list, gather_edge_emfs);
+
+            // use the geometry-aware discrete_curl
+            real curl = discrete_curl<MagComp>(edge_emfs, face_coord, geometry);
 
             return -dt * curl;
         }

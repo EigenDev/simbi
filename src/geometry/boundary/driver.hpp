@@ -49,7 +49,7 @@ namespace simbi::geometry {
             use_metric_t<Metric>,
             const GeoService& g,
             const VM& v,
-            real t
+            const real t
         )
             : geo_service(g), vm(v), time(t)
         {
@@ -188,6 +188,20 @@ namespace simbi::geometry {
                                 exec
                             );
                     };
+
+                    // ---------------------------------------------------------
+                    // thin dimension override (Quasi-(1D/2D) support)
+                    // ---------------------------------------------------------
+                    // if the global dimension is 1, we must force a direct copy
+                    // (periodic) to populate ghosts for transverse flux
+                    // calculations in CT. standard bcs (like reflect) fail for
+                    // depth > 1.
+                    if (global_dims[dd] == 1) {
+                        execute_static(
+                            periodic_map_t{dd, geometry.start[dd], 1}
+                        );
+                        return;
+                    }
 
                     // dispatch
                     switch (bc_type) {

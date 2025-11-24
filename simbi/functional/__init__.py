@@ -30,7 +30,7 @@ from .helpers import (
     to_tuple_of_tuples,
 )
 from .maybe import Maybe
-from .result import Result
+from .result import Err, Ok, Result
 from .utilities import (
     compose,
     curry,
@@ -49,6 +49,8 @@ __all__ = [
     # monads
     "Maybe",
     "Result",
+    "Ok",
+    "Err",
     # fp utilities
     "compose",
     "pipe",

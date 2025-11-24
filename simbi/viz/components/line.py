@@ -114,7 +114,7 @@ class LinePlotComponent(Component):
 
         ax = self.ax
 
-        x_data = 0.5 * (data.domain[0][1:] + data.domain[0][:-1])
+        x_data = data.domain[0]
         y_data = data.values
 
         line_style = _create_line_style(self.props)

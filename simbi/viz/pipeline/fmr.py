@@ -3,8 +3,8 @@ from typing import Sequence
 
 import numpy as np
 
+from simbi.reader.adapter import SimData
 from simbi.types import MeshConfig
-from simbi.reader.lazy import SimData
 
 from ..types import Array, FieldData
 from .transforms import (

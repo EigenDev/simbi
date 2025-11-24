@@ -468,6 +468,7 @@ namespace simbi::ecs::creation {
                 // allocate fields on the allocated domain (includes ghosts)
                 fields_t fields = allocate_partition<Conserved, Primitive>(
                     part.allocated_domain,
+                    part.owned_domain,
                     phys_bp,
                     amr_bp,
                     loc
@@ -486,7 +487,8 @@ namespace simbi::ecs::creation {
         template <typename Conserved, typename Primitive>
         static partition_fields_t<Conserved, Primitive, Rank>
         allocate_partition(
-            const grid::domain_t<Rank>& domain,
+            const grid::domain_t<Rank>& allocated_domain,
+            const grid::domain_t<Rank>& active_domain,
             const physics_blueprint_t& phys_bp,
             const amr_blueprint_t& amr_bp,
             het::locality_t loc
@@ -495,12 +497,12 @@ namespace simbi::ecs::creation {
             partition_fields_t<Conserved, Primitive, Rank> fields;
 
             // primary state fields
-            fields.cons = grid::field_t<Conserved, Rank>(domain, loc);
-            fields.prim = grid::field_t<Primitive, Rank>(domain, loc);
+            fields.cons = grid::field_t<Conserved, Rank>(allocated_domain, loc);
+            fields.prim = grid::field_t<Primitive, Rank>(allocated_domain, loc);
 
             // flux fields (face-centered, one extra cell in each direction)
             for (std::uint64_t dd = 0; dd < Rank; ++dd) {
-                auto flux_domain = domain;
+                auto flux_domain = active_domain;
                 flux_domain.fin[dd] += 1;   // n+1 faces for n cells
                 if constexpr (is_mhd_conserved_c<Conserved>) {
                     // for MHD, extend faces in transverse directions
@@ -518,8 +520,14 @@ namespace simbi::ecs::creation {
             // flux averaging for amr subcycling
             if (amr_bp.enabled) {
                 for (std::uint64_t dd = 0; dd < Rank; ++dd) {
-                    auto flux_domain = domain;
+                    auto flux_domain = active_domain;
                     flux_domain.fin[dd] += 1;
+                    for (std::uint64_t tt = 0; tt < Rank; ++tt) {
+                        if (tt != dd) {
+                            flux_domain.start[tt] -= 1;
+                            flux_domain.fin[tt] += 1;
+                        }
+                    }
                     fields.flux_avg[dd] =
                         grid::field_t<Conserved, Rank>(flux_domain, loc);
                 }
@@ -528,7 +536,7 @@ namespace simbi::ecs::creation {
             // magnetic field (face-centered, mhd only)
             if (phys_bp.is_mhd) {
                 for (std::uint64_t dd = 0; dd < Rank; ++dd) {
-                    auto bfield_domain = domain;
+                    auto bfield_domain = active_domain;
                     bfield_domain.fin[dd] += 1;
                     fields.bfield[dd] =
                         grid::field_t<real, Rank>(bfield_domain, loc);
@@ -537,7 +545,7 @@ namespace simbi::ecs::creation {
                 // electric field (edge-centered, for constrained transport)
                 // efield[d] has +1 in both transverse dimensions
                 for (std::uint64_t dd = 0; dd < Rank; ++dd) {
-                    auto efield_domain = domain;
+                    auto efield_domain = active_domain;
                     for (std::uint64_t tt = 0; tt < Rank; ++tt) {
                         if (tt != dd) {
                             efield_domain.fin[tt] += 1;
@@ -550,7 +558,7 @@ namespace simbi::ecs::creation {
                 // efield averaging for amr subcycling
                 if (amr_bp.enabled) {
                     for (std::uint64_t dd = 0; dd < Rank; ++dd) {
-                        auto efield_domain = domain;
+                        auto efield_domain = active_domain;
                         for (std::uint64_t tt = 0; tt < Rank; ++tt) {
                             if (tt != dd) {
                                 efield_domain.fin[tt] += 1;

@@ -1,6 +1,6 @@
 from typing import Optional, Sequence
 
-from simbi.reader.lazy import SimData
+from simbi.reader.adapter import SimData
 
 from ..config import VisualizationConfig
 from ..types import CoordSystem, FieldData, PlotData
@@ -39,7 +39,6 @@ def prepare_fields(
     all_fields: list[FieldData] = []
     for field_name in field_names:
         if use_composite:
-            print(f"Preparing composite field for '{field_name}'")
             # Prepare one composite field
             field_data = prepare_composite_field(
                 data, field_name, active_levels, ndim

@@ -3,7 +3,7 @@ from typing import Sequence
 import numpy as np
 from scipy.stats import binned_statistic
 
-from simbi.reader.lazy import SimData
+from simbi.reader.adapter import SimData
 
 from ..config import VisualizationConfig
 from ..types import Array, CoordSystem, FieldData, PlotData

@@ -302,6 +302,33 @@ namespace simbi::ecs {
     };
 
     // =========================================================================
+    // compute electric fields system
+    // computes edge-centered E-fields from fluxes and primitives
+    // and stores them in partition_fields.efield
+    // =========================================================================
+    struct compute_efield_system_t {
+        template <typename Sim>
+        void operator()(Sim& sim, std::uint64_t lvl) const
+        {
+            for (std::uint64_t pp = 0; pp < sim.num_partitions(lvl); ++pp) {
+                auto& fields = sim.partition_hydro(lvl, pp);
+                auto& part   = sim.partition(lvl, pp);
+                auto exec    = sim.partition_executor(lvl, pp);
+
+                // computes E = avg(Flux) + contact_terms
+                // stores into fields.efield
+                em::compute_edge_efields(
+                    exec,
+                    fields,
+                    part.edge_domains,
+                    part.face_domains,
+                    part.owned_domain
+                );
+            }
+        }
+    };
+
+    // =========================================================================
     // flux computation system
     // =========================================================================
     struct flux_system_t {
@@ -327,6 +354,9 @@ namespace simbi::ecs {
 
                 // compute fluxes for each direction
                 for (std::uint64_t dir = 0; dir < rank; ++dir) {
+                    // note: passing owned_domain for primitives, but iterating
+                    // over flux domain (includes ghosts). this works because
+                    // primitive view allows access to underlying storage.
                     auto flux_comp = cfd::compute_fluxes(
                         fields.prim[part.owned_domain],
                         // full dace domain included transverse ghosts
@@ -407,6 +437,13 @@ namespace simbi::ecs {
             auto& sources = sim.sources();
             const auto dt = meta.level_dts[lvl];
 
+            // compiles away when not MHD
+            // computes edge E-fields from fluxes and primitives
+            // using states W^n and F^n
+            if constexpr (Sim::is_mhd) {
+                compute_efield_system_t{}(sim, lvl);
+            }
+
             for (std::uint64_t pp = 0; pp < sim.num_partitions(lvl); ++pp) {
                 auto& fields = sim.partition_hydro(lvl, pp);
                 auto& part   = sim.partition(lvl, pp);
@@ -430,12 +467,14 @@ namespace simbi::ecs {
                              .with(exec);
 
                 if constexpr (Sim::is_mhd) {
-                    // update magnetic fields via constrained transport
-                    em::update_magnetic_fields(
+                    // update magnetic fields using the STORED E-fields
+                    // also handles energy correction
+                    em::update_magnetic_fields_from_efield(
                         exec,
                         fields,
                         block_geo,
                         part.face_domains,
+                        part.edge_domains,
                         part.owned_domain,
                         dt
                     );
@@ -470,6 +509,10 @@ namespace simbi::ecs {
             auto& meta    = sim.metadata();
             auto& sources = sim.sources();
             const auto dt = meta.level_dts[lvl];
+
+            if constexpr (Sim::is_mhd) {
+                compute_efield_system_t{}(sim, lvl);
+            }
 
             for (std::uint64_t pp = 0; pp < sim.num_partitions(lvl); ++pp) {
                 auto& fields = sim.partition_hydro(lvl, pp);
@@ -506,11 +549,14 @@ namespace simbi::ecs {
                 if constexpr (Sim::is_mhd) {
                     // update magnetic fields via constrained transport (stage
                     // 1)
-                    em::update_magnetic_fields(
+                    // update magnetic fields using the stored E-fields
+                    // also handles energy correction
+                    em::update_magnetic_fields_from_efield(
                         exec,
                         fields,
                         block_geo,
                         part.face_domains,
+                        part.edge_domains,
                         part.owned_domain,
                         dt
                     );
@@ -546,6 +592,10 @@ namespace simbi::ecs {
             auto& sources = sim.sources();
             const auto dt = meta.level_dts[lvl];
 
+            if constexpr (Sim::is_mhd) {
+                compute_efield_system_t{}(sim, lvl);
+            }
+
             for (std::uint64_t pp = 0; pp < sim.num_partitions(lvl); ++pp) {
                 auto& fields    = sim.partition_hydro(lvl, pp);
                 auto& part      = sim.partition(lvl, pp);
@@ -580,14 +630,17 @@ namespace simbi::ecs {
                 if constexpr (Sim::is_mhd) {
                     // update magnetic fields via constrained transport (stage
                     // 2)
-                    em::update_magnetic_fields(
-                        exec,
-                        fields,
-                        block_geo,
-                        part.face_domains,
-                        part.owned_domain,
-                        dt
-                    );
+                    // update magnetic fields using the stored E-fields
+                    // also handles energy correction
+                    // em::update_magnetic_fields_from_efield(
+                    //     exec,
+                    //     fields,
+                    //     block_geo,
+                    //     part.face_domains,
+                    //     part.edge_domains,
+                    //     part.owned_domain,
+                    //     dt
+                    // );
 
                     // correct energy density for updated B field
                     em::update_energy_density(

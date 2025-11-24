@@ -10,7 +10,6 @@ import matplotlib.pyplot as plt
 import numpy as np
 from numpy.typing import NDArray
 
-from simbi.reader.io import read_raw_data
 from simbi.types.input import CoordSystem
 
 from ..functional.helpers import find_nearest
@@ -213,32 +212,14 @@ def flatten_fully(
 
 
 def get_dimensionality(files: Union[list[str], dict[int, list[str]]]) -> int:
-    import h5py
+    """get effective dimensionality from checkpoint files using io_v2."""
+    from simbi.reader import read_checkpoint
 
     dims = []
 
     def all_equal(x: list[int]) -> bool:
         return x.count(x[0]) == len(x)
 
-    def extract_shape(raw: Any, attrs: dict[str, Any]) -> tuple[int, ...]:
-        """Extract shape from mesh_config, handling both v1 and v2 formats"""
-        mesh_data = raw.groups.get("mesh_config", {})
-
-        # v2 format uses global_cells
-        if "global_cells" in mesh_data:
-            return tuple(int(x) for x in mesh_data["global_cells"])
-
-        # v1 format uses shape directly
-        if "shape" in mesh_data:
-            return tuple(int(x) for x in mesh_data["shape"])
-
-        # fallback to resolution from attributes
-        res = attrs.get("resolution", (1,))
-        if isinstance(res, str):
-            return tuple(int(x) for x in res.split(","))
-        return tuple(int(x) for x in res)
-
-    ndim: int = 0
     if isinstance(files, dict):
         import itertools
 
@@ -246,19 +227,20 @@ def get_dimensionality(files: Union[list[str], dict[int, list[str]]]) -> int:
 
     files = list(filter(bool, files))
     for file in files:
-        with h5py.File(file, "r") as hf:
-            dat = read_raw_data(hf)
-            if dat.is_ok:
-                raw = dat.unwrap()
-                shape = extract_shape(raw, raw.attributes)
-                dims.append(sum(int(r) > 1 for r in shape))
+        result = read_checkpoint(file)
+        if result.is_ok():
+            checkpoint = result.value
+            # get shape from mesh geometry - global_cells is (nz, ny, nx)
+            mesh = checkpoint.levels[0].mesh
+            shape = mesh.global_cells
+            dims.append(sum(int(r) > 1 for r in shape))
+        else:
+            raise ValueError(f"failed to read {file}: {result.error}")
 
     if dims and all_equal(dims):
-        ndim = dims[0]
+        return dims[0]
     else:
-        raise ValueError("Inconsistent dimensionality across files.")
-
-    return ndim
+        raise ValueError("inconsistent dimensionality across files.")
 
 
 def get_colors(
