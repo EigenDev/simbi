@@ -59,18 +59,18 @@ namespace simbi::cfd {
     struct flux_divergence_op_t {
         using flux_t      = typename Fluxes::value_type;
         using conserved_t = std::remove_cvref_t<typename flux_t::value_type>;
-        static constexpr std::uint64_t dims = Fluxes::rank;
+        static constexpr std::uint64_t rank = Fluxes::rank;
 
         Fluxes fluxes;
         Geometry geometry;
 
-        DEV constexpr auto operator()(iarray<dims> coord) const
+        DEV constexpr auto operator()(iarray<rank> coord) const
         {
             conserved_t divergence{};
             const auto dv = geometry.volume(coord);
 
-            for (std::uint64_t dir = 0; dir < dims; ++dir) {
-                const auto offset     = unit_vectors::array_offset<dims>(dir);
+            for (std::uint64_t dir = 0; dir < rank; ++dir) {
+                const auto offset     = unit_vectors::array_offset<rank>(dir);
                 const auto coord_plus = coord + offset;
 
                 // flux at left and right faces
@@ -116,7 +116,7 @@ namespace simbi::cfd {
     // =========================================================================
     template <typename GravitySource, typename PrimField, typename Geometry>
     struct gravity_source_op_t {
-        static constexpr auto dims = PrimField::rank;
+        static constexpr std::uint64_t rank = PrimField::rank;
         using prim_t      = std::remove_cvref_t<typename PrimField::value_type>;
         using conserved_t = typename prim_t::counterpart_t;
 
@@ -126,7 +126,7 @@ namespace simbi::cfd {
         real time;
         real gamma;
 
-        DEV constexpr auto operator()(iarray<dims> coord) const
+        DEV constexpr auto operator()(iarray<rank> coord) const
         {
             if (!gravity_source || !gravity_source->enabled) {
                 return conserved_t{};
@@ -166,7 +166,7 @@ namespace simbi::cfd {
     // =========================================================================
     template <typename HydroSource, typename ConsField, typename Geometry>
     struct hydro_source_op_t {
-        static constexpr auto dims = ConsField::rank;
+        static constexpr std::uint64_t rank = ConsField::rank;
         using conserved_t = std::remove_cvref_t<typename ConsField::value_type>;
 
         const HydroSource* hydro_source;
@@ -174,7 +174,7 @@ namespace simbi::cfd {
         Geometry geometry;
         real time;
 
-        DEV constexpr auto operator()(iarray<dims> coord) const
+        DEV constexpr auto operator()(iarray<rank> coord) const
         {
             if (!hydro_source || !hydro_source->enabled) {
                 return conserved_t{};
@@ -212,7 +212,7 @@ namespace simbi::cfd {
     // =========================================================================
     template <typename PrimField, typename Geometry>
     struct geometric_source_op_t {
-        static constexpr auto dims = PrimField::rank;
+        static constexpr std::uint64_t rank = PrimField::rank;
         using prim_t      = std::remove_cvref_t<typename PrimField::value_type>;
         using conserved_t = typename prim_t::counterpart_t;
 
@@ -220,7 +220,7 @@ namespace simbi::cfd {
         Geometry geometry;
         real gamma;
 
-        DEV constexpr auto operator()(iarray<dims> coord) const
+        DEV constexpr auto operator()(iarray<rank> coord) const
         {
             const auto primitive = prims(coord);
 
@@ -248,7 +248,7 @@ namespace simbi::cfd {
     // =========================================================================
     template <typename PrimField, typename Geometry, typename CfdOps>
     struct compute_fluxes_op_t {
-        static constexpr auto dims = PrimField::rank;
+        static constexpr std::uint64_t rank = PrimField::rank;
 
         PrimField prims;
         Geometry geometry;
@@ -259,14 +259,14 @@ namespace simbi::cfd {
         shockwave_limiter_t shock_smoother;
         std::uint64_t dir;
 
-        DEV auto operator()(iarray<dims> coord) const
+        DEV auto operator()(iarray<rank> coord) const
         {
             // create stencil for reconstruction
             const auto stenc = make_stencil<CfdOps::rec_t>(prims, coord, dir);
             const auto [pl, pr] = ops.reconstruct(stenc, plm_theta);
 
             // normal vector
-            const auto nhat = unit_vectors::ehat<dims>(dir);
+            const auto nhat = unit_vectors::ehat<rank>(dir);
 
             // face grid velocity (moving mesh)
             const auto vface = geometry.face_grid_velocity(coord, dir);
@@ -287,13 +287,13 @@ namespace simbi::cfd {
 
       private:
         DEV auto compute_viscous_flux(
-            iarray<dims> coord,
+            iarray<rank> coord,
             std::uint64_t flux_dir,
             real rhoL,
             real rhoR
         ) const
         {
-            const auto offset     = unit_vectors::array_offset<dims>(flux_dir);
+            const auto offset     = unit_vectors::array_offset<rank>(flux_dir);
             const auto left_cell  = coord - offset;
             const auto right_cell = coord;
 
@@ -301,47 +301,47 @@ namespace simbi::cfd {
             auto stress_right = compute_stress_tensor(right_cell, rhoR);
 
             // average to interface
-            vector_t<vector_t<real, dims>, dims> avg_stress;
-            for (std::uint64_t ii = 0; ii < dims; ++ii) {
-                for (std::uint64_t jj = 0; jj < dims; ++jj) {
+            vector_t<vector_t<real, rank>, rank> avg_stress;
+            for (std::uint64_t ii = 0; ii < rank; ++ii) {
+                for (std::uint64_t jj = 0; jj < rank; ++jj) {
                     avg_stress[ii][jj] =
                         0.5 * (stress_left[ii][jj] + stress_right[ii][jj]);
                 }
             }
 
             // extract flux for this direction
-            vector_t<real, dims> stress_flux{};
-            const auto ldd = dims - 1 - flux_dir;
-            for (std::uint64_t ii = 0; ii < dims; ++ii) {
+            vector_t<real, rank> stress_flux{};
+            const auto ldd = rank - 1 - flux_dir;
+            for (std::uint64_t ii = 0; ii < rank; ++ii) {
                 stress_flux[ii] = avg_stress[ii][ldd];
             }
 
             return stress_flux;
         }
 
-        DEV auto compute_stress_tensor(iarray<dims> coord, real rho) const
+        DEV auto compute_stress_tensor(iarray<rank> coord, real rho) const
         {
             // velocity gradient tensor
-            vector_t<vector_t<real, dims>, dims> dv_dx{};
+            vector_t<vector_t<real, rank>, rank> dv_dx{};
             const auto h = geometry.scale_factors(coord);
 
-            for (std::uint64_t dd = 0; dd < dims; ++dd) {
-                const auto ldd    = dims - 1 - dd;
-                const auto offset = unit_vectors::array_offset<dims>(ldd);
+            for (std::uint64_t dd = 0; dd < rank; ++dd) {
+                const auto ldd    = rank - 1 - dd;
+                const auto offset = unit_vectors::array_offset<rank>(ldd);
                 const real dx     = h[ldd];
 
                 const auto v_plus  = prims(coord + offset).vel;
                 const auto v_minus = prims(coord - offset).vel;
                 const auto dv      = (v_plus - v_minus) / (2.0 * dx);
 
-                for (std::uint64_t ii = 0; ii < dims; ++ii) {
+                for (std::uint64_t ii = 0; ii < rank; ++ii) {
                     dv_dx[ii][dd] = dv[ii];
                 }
             }
 
             // divergence
             real div_v = 0.0;
-            for (std::uint64_t ii = 0; ii < dims; ++ii) {
+            for (std::uint64_t ii = 0; ii < rank; ++ii) {
                 div_v += dv_dx[ii][ii];
             }
 
@@ -349,9 +349,9 @@ namespace simbi::cfd {
             const auto mu = rho * viscosity;
 
             // stress tensor
-            vector_t<vector_t<real, dims>, dims> sigma;
-            for (std::uint64_t ii = 0; ii < dims; ++ii) {
-                for (std::uint64_t jj = 0; jj < dims; ++jj) {
+            vector_t<vector_t<real, rank>, rank> sigma;
+            for (std::uint64_t ii = 0; ii < rank; ++ii) {
+                for (std::uint64_t jj = 0; jj < rank; ++jj) {
                     if (ii == jj) {
                         sigma[ii][jj] =
                             2.0 * mu * (dv_dx[ii][jj] - div_v / 3.0);
@@ -411,11 +411,11 @@ namespace simbi::cfd {
         const Sources& sources
     )
     {
-        constexpr auto dims = Rank;
+        constexpr std::uint64_t rank = Rank;
 
         // build face domain array
         vector_t<grid::domain_t<Rank>, Rank> face_domains;
-        for (std::uint64_t dd = 0; dd < dims; ++dd) {
+        for (std::uint64_t dd = 0; dd < rank; ++dd) {
             face_domains[dd] = active_domain;
             face_domains[dd].fin[dd] += 1;
         }
