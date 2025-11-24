@@ -23,6 +23,7 @@
 //   );
 // =============================================================================
 
+#include "base/concepts.hpp"
 #include "compat.hpp"
 #include "containers/vector.hpp"
 #include "ecs/blueprints.hpp"
@@ -210,6 +211,19 @@ namespace simbi::ecs::creation {
                     auto face_dom = part.owned_domain;
                     face_dom.fin[dd] += 1;
                     part.face_domains[dd] = face_dom;
+                }
+
+                // edge-centered domains (for mhd constrained transport)
+                // each edge_domain[d] has one extra cell in both transverse
+                // dims
+                for (std::uint64_t dd = 0; dd < Rank; ++dd) {
+                    auto edge_dom = part.owned_domain;
+                    for (std::uint64_t tt = 0; tt < Rank; ++tt) {
+                        if (tt != dd) {
+                            edge_dom.fin[tt] += 1;
+                        }
+                    }
+                    part.edge_domains[dd] = edge_dom;
                 }
 
                 // create stream for this partition's device
@@ -488,6 +502,15 @@ namespace simbi::ecs::creation {
             for (std::uint64_t dd = 0; dd < Rank; ++dd) {
                 auto flux_domain = domain;
                 flux_domain.fin[dd] += 1;   // n+1 faces for n cells
+                if constexpr (is_mhd_conserved_c<Conserved>) {
+                    // for MHD, extend faces in transverse directions
+                    for (std::uint64_t tt = 0; tt < Rank; ++tt) {
+                        if (tt != dd) {
+                            flux_domain.start[tt] -= 1;
+                            flux_domain.fin[tt] += 1;
+                        }
+                    }
+                }
                 fields.flux[dd] =
                     grid::field_t<Conserved, Rank>(flux_domain, loc);
             }
@@ -509,6 +532,33 @@ namespace simbi::ecs::creation {
                     bfield_domain.fin[dd] += 1;
                     fields.bfield[dd] =
                         grid::field_t<real, Rank>(bfield_domain, loc);
+                }
+
+                // electric field (edge-centered, for constrained transport)
+                // efield[d] has +1 in both transverse dimensions
+                for (std::uint64_t dd = 0; dd < Rank; ++dd) {
+                    auto efield_domain = domain;
+                    for (std::uint64_t tt = 0; tt < Rank; ++tt) {
+                        if (tt != dd) {
+                            efield_domain.fin[tt] += 1;
+                        }
+                    }
+                    fields.efield[dd] =
+                        grid::field_t<real, Rank>(efield_domain, loc);
+                }
+
+                // efield averaging for amr subcycling
+                if (amr_bp.enabled) {
+                    for (std::uint64_t dd = 0; dd < Rank; ++dd) {
+                        auto efield_domain = domain;
+                        for (std::uint64_t tt = 0; tt < Rank; ++tt) {
+                            if (tt != dd) {
+                                efield_domain.fin[tt] += 1;
+                            }
+                        }
+                        fields.efield_avg[dd] =
+                            grid::field_t<real, Rank>(efield_domain, loc);
+                    }
                 }
             }
 

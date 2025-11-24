@@ -412,16 +412,16 @@ namespace simbi::cfd {
         constexpr std::uint64_t rank = Rank;
 
         // build face domain array
-        vector_t<grid::domain_t<Rank>, Rank> face_domains;
+        vector_t<grid::domain_t<Rank>, Rank> active_face_domains;
         for (std::uint64_t dd = 0; dd < rank; ++dd) {
-            face_domains[dd] = active_domain;
-            face_domains[dd].fin[dd] += 1;
+            active_face_domains[dd] = active_domain;
+            active_face_domains[dd].fin[dd] += 1;
         }
 
         return flux_divergence(
                    state.flux,
                    active_domain,
-                   face_domains,
+                   active_face_domains,
                    geometry
                ) +
                gravity_sources(

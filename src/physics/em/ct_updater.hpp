@@ -505,6 +505,268 @@ namespace simbi::em {
         );
     }
 
+    // ========================================================================
+    // EDGE E-FIELD COMPUTATION
+    // computes and stores edge-centered electric fields from face fluxes
+    // ========================================================================
+
+    // helper to get the correct permutation for computing E component
+    // IJ_permutation: e_field_component = 0 (E_z)
+    // IK_permutation: e_field_component = 1 (E_y)
+    // JK_permutation: e_field_component = 2 (E_x)
+    template <std::uint64_t EComp>
+    constexpr auto efield_permutation()
+    {
+        if constexpr (EComp == 0) {
+            return IJ_permutation{};
+        }
+        else if constexpr (EComp == 1) {
+            return IK_permutation{};
+        }
+        else {
+            return JK_permutation{};
+        }
+    }
+
+    // operator that computes E at edges parallel to a given axis
+    // edge_comp: which E component (0=Ez, 1=Ey, 2=Ex in array-index order)
+    template <std::uint64_t EdgeComp, typename FluxField, typename PrimField>
+    struct compute_edge_efield_op_t {
+        FluxField fluxes;
+        PrimField prims;
+
+        DEV auto operator()(auto edge_coord) const
+        {
+            // get the permutation that extracts this E component
+            constexpr auto perm = efield_permutation<EdgeComp>();
+
+            // convert to doubled coordinates for stencil computation
+            auto edge_doubled = to_doubled_coord(edge_coord);
+
+            // gather face E-fields, cell-center E-fields, and density fluxes
+            auto flux_coords = flux_stencil<decltype(perm)>(edge_doubled);
+            auto prim_coords = prim_stencil<decltype(perm)>(edge_doubled);
+
+            auto ef    = face_efields<decltype(perm)>(fluxes, flux_coords);
+            auto ec    = center_efields<decltype(perm)>(prims, prim_coords);
+            auto densf = den_fluxes<decltype(perm)>(fluxes, flux_coords);
+
+            return ct_contact_formula(ef, ec, densf);
+        }
+    };
+
+    // compute edge E-field for a single component
+    template <
+        std::uint64_t EdgeComp,
+        typename Executor,
+        typename HydroState,
+        typename EdgeDomain,
+        typename Domain>
+    void compute_edge_efield_component(
+        Executor& exec,
+        HydroState& state,
+        const EdgeDomain& edge_domain,
+        const Domain& cell_domain
+    )
+    {
+        const auto fluxes = vector_t{
+          state.flux[0][state.flux[0].domain()],
+          state.flux[1][state.flux[1].domain()],
+          state.flux[2][state.flux[2].domain()]
+        };
+        const auto prims = state.prim[cell_domain];
+
+        using op_t = compute_edge_efield_op_t<
+            EdgeComp,
+            std::decay_t<decltype(fluxes)>,
+            std::decay_t<decltype(prims)>>;
+
+        auto efield_view = state.efield[EdgeComp][edge_domain];
+
+        efield_view = efield_view
+                          .space_map([op = op_t{fluxes, prims}](auto coord) {
+                              return op(coord);
+                          })
+                          .with(exec);
+    }
+
+    // compute all edge E-fields from face fluxes and primitives
+    template <
+        typename Executor,
+        typename HydroState,
+        typename EdgeDomains,
+        typename Domain>
+    void compute_edge_efields(
+        Executor& exec,
+        HydroState& state,
+        const EdgeDomains& edge_domains,
+        const Domain& cell_domain
+    )
+    {
+        compute_edge_efield_component<0>(
+            exec,
+            state,
+            edge_domains[0],
+            cell_domain
+        );
+        compute_edge_efield_component<1>(
+            exec,
+            state,
+            edge_domains[1],
+            cell_domain
+        );
+        compute_edge_efield_component<2>(
+            exec,
+            state,
+            edge_domains[2],
+            cell_domain
+        );
+    }
+
+    // ========================================================================
+    // CT UPDATE FROM STORED E-FIELDS
+    // reads pre-computed edge E-fields instead of computing on-the-fly
+    // ========================================================================
+
+    template <magnetic_comp_t MagComp, typename EField, typename Geometry>
+    struct ct_update_from_efield_op_t {
+        EField efield;
+        real dt;
+        Geometry geometry;
+
+        DEV auto operator()(auto face_coord) const
+        {
+            // gather edge E values for curl computation
+            // for B_d update, we need E from the two transverse directions
+            constexpr auto comp = static_cast<std::uint64_t>(MagComp);
+
+            // the two transverse axes
+            constexpr std::uint64_t t1 = (comp + 1) % 3;
+            constexpr std::uint64_t t2 = (comp + 2) % 3;
+
+            // edge E values at the 4 edges of this face
+            // E_t1 at edges parallel to t1 (varies in t2)
+            // E_t2 at edges parallel to t2 (varies in t1)
+            auto c00 = face_coord;
+            auto c01 = face_coord;
+            c01[t2] += 1;
+            auto c10 = face_coord;
+            c10[t1] += 1;
+            auto c11 = face_coord;
+            c11[t1] += 1;
+            c11[t2] += 1;
+
+            // for curl: dE_t2/dt1 - dE_t1/dt2
+            real e_t1_lo = efield[t1](c00);
+            real e_t1_hi = efield[t1](c10);
+            real e_t2_lo = efield[t2](c00);
+            real e_t2_hi = efield[t2](c01);
+
+            // get scale factors for proper curl
+            const auto h = geometry.scale_factors(face_coord);
+
+            real curl =
+                (e_t2_hi - e_t2_lo) / h[t1] - (e_t1_hi - e_t1_lo) / h[t2];
+
+            return -dt * curl;
+        }
+    };
+
+    template <
+        magnetic_comp_t MagComp,
+        typename Executor,
+        typename HydroState,
+        typename Geometry,
+        typename FaceDomain,
+        typename EdgeDomains>
+    void update_magnetic_from_efield(
+        Executor& exec,
+        HydroState& state,
+        const Geometry& geometry,
+        const FaceDomain& face_domain,
+        const EdgeDomains& edge_domains,
+        real dt
+    )
+    {
+        constexpr auto comp = static_cast<std::uint64_t>(MagComp);
+
+        const auto efield = vector_t{
+          state.efield[0][edge_domains[0]],
+          state.efield[1][edge_domains[1]],
+          state.efield[2][edge_domains[2]]
+        };
+
+        using op_t = ct_update_from_efield_op_t<
+            MagComp,
+            std::decay_t<decltype(efield)>,
+            Geometry>;
+
+        auto bfield = state.bfield[comp][face_domain];
+
+        bfield =
+            bfield
+                .enum_map(
+                    [op = op_t{efield, dt, geometry}](auto coord, auto b_old) {
+                        return b_old + op(coord);
+                    }
+                )
+                .with(exec);
+    }
+
+    // high-level interface using stored E-fields
+    template <
+        typename Executor,
+        typename HydroState,
+        typename Geometry,
+        typename FaceDomains,
+        typename EdgeDomains,
+        typename CellDomain>
+    void update_magnetic_fields_from_efield(
+        Executor& exec,
+        HydroState& state,
+        const Geometry& geometry,
+        const FaceDomains& face_domains,
+        const EdgeDomains& edge_domains,
+        const CellDomain& cell_domain,
+        real dt
+    )
+    {
+        // magnetic_comp_t::I = 2 (Bx), J = 1 (By), K = 0 (Bz)
+        // face_domains[d] corresponds to faces normal to axis d
+        // so face_domains[comp] is the correct domain for B_comp
+        update_magnetic_from_efield<magnetic_comp_t::K>(
+            exec,
+            state,
+            geometry,
+            face_domains[0],
+            edge_domains,
+            dt
+        );
+        update_magnetic_from_efield<magnetic_comp_t::J>(
+            exec,
+            state,
+            geometry,
+            face_domains[1],
+            edge_domains,
+            dt
+        );
+        update_magnetic_from_efield<magnetic_comp_t::I>(
+            exec,
+            state,
+            geometry,
+            face_domains[2],
+            edge_domains,
+            dt
+        );
+        interpolate_magnetic_fields(
+            exec,
+            state,
+            geometry,
+            face_domains,
+            cell_domain
+        );
+    }
+
 }   // namespace simbi::em
 
 #endif   // MHD_NLOGIC_HPP

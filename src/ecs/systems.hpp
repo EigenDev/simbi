@@ -327,13 +327,10 @@ namespace simbi::ecs {
 
                 // compute fluxes for each direction
                 for (std::uint64_t dir = 0; dir < rank; ++dir) {
-                    // face domain for this direction
-                    auto face_domain = part.owned_domain;
-                    face_domain.fin[dir] += 1;
-
                     auto flux_comp = cfd::compute_fluxes(
-                        fields.prim[part.allocated_domain],
-                        face_domain,
+                        fields.prim[part.owned_domain],
+                        // full dace domain included transverse ghosts
+                        fields.flux[dir].domain(),
                         block_geo,
                         ops,
                         meta.gamma,
@@ -344,9 +341,13 @@ namespace simbi::ecs {
                     );
 
                     // execute and store
-                    fields.flux[dir][face_domain] = flux_comp.with(exec);
+                    fields.flux[dir] = flux_comp.with(exec);
 
                     if (accumulate_fluxes && sim.has_refinement()) {
+                        // active face domain for this direction
+                        auto face_domain = part.owned_domain;
+                        face_domain.fin[dir] += 1;
+
                         // accumulate time-weighted flux for reflux
                         auto flux_view = fields.flux[dir][face_domain];
                         auto avg_view  = fields.flux_avg[dir][face_domain];

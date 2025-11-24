@@ -123,40 +123,37 @@ class MeshConfig:
     @property
     def x1v(self) -> Array:
         """Get x1 coordinates"""
-        dims = self.effective_dimensions
         if self.spacing_types[0] == CellSpacing.LINEAR:
             return np.linspace(
-                self.bounds_min[0], self.bounds_max[0], self.shape[dims - 1] + 1
+                self.bounds_min[0], self.bounds_max[0], self.shape[-1] + 1
             )
         else:
             return np.geomspace(
-                self.bounds_min[0], self.bounds_max[0], self.shape[dims - 1] + 1
+                self.bounds_min[0], self.bounds_max[0], self.shape[-1] + 1
             )
 
     @property
     def x2v(self) -> Array:
         """Get x2 coordinates"""
-        dims = self.effective_dimensions
         if self.spacing_types[1] == CellSpacing.LINEAR:
             return np.linspace(
-                self.bounds_min[1], self.bounds_max[1], self.shape[dims - 2] + 1
+                self.bounds_min[1], self.bounds_max[1], self.shape[-2] + 1
             )
         else:
             return np.geomspace(
-                self.bounds_min[1], self.bounds_max[1], self.shape[dims - 2] + 1
+                self.bounds_min[1], self.bounds_max[1], self.shape[-2] + 1
             )
 
     @property
     def x3v(self) -> Array:
         """Get x3 coordinates"""
-        dims = self.effective_dimensions
         if self.spacing_types[2] == CellSpacing.LINEAR:
             return np.linspace(
-                self.bounds_min[2], self.bounds_max[2], self.shape[dims - 3] + 1
+                self.bounds_min[2], self.bounds_max[2], self.shape[-3] + 1
             )
         else:
             return np.geomspace(
-                self.bounds_min[2], self.bounds_max[2], self.shape[dims - 3] + 1
+                self.bounds_min[2], self.bounds_max[2], self.shape[-3] + 1
             )
 
     @property

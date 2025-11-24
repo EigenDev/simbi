@@ -181,6 +181,14 @@ namespace simbi::ecs::creation {
                 for (std::uint64_t dir = 0; dir < Rank; ++dir) {
                     auto staggered_domain = full_domain;
                     staggered_domain.fin[dir] += 1;
+                    // staggered is extended by 1 in
+                    // transverse directions
+                    for (std::uint64_t dd = 0; dd < Rank; ++dd) {
+                        if (dd != dir) {
+                            staggered_domain.start[dd] -= 1;
+                            staggered_domain.fin[dd] += 1;
+                        }
+                    }
 
                     auto staggered_active = active_domain;
                     staggered_active.fin[dir] += 1;

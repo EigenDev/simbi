@@ -83,6 +83,11 @@ namespace simbi::ecs {
         // face_domains[d] has one extra cell in dimension d
         vector_t<grid::domain_t<Rank>, Rank> face_domains;
 
+        // edge-centered domains for each direction (for mhd constrained
+        // transport) edge_domains[d] has one extra cell in both transverse
+        // dimensions
+        vector_t<grid::domain_t<Rank>, Rank> edge_domains;
+
         // execution stream for this partition's kernels
         // each partition gets its own stream to enable concurrent execution
         het::exec::stream_t stream;
@@ -207,7 +212,17 @@ namespace simbi::ecs {
         vector_t<grid::field_t<Conserved, Rank>, Rank> flux_avg;
 
         // face-centered magnetic field components (mhd only)
+        // bfield[d] stores B_d at faces normal to axis d
         vector_t<grid::field_t<real, Rank>, Rank> bfield;
+
+        // edge-centered electric field components (mhd only)
+        // efield[d] stores E_d at edges parallel to axis d
+        // used for constrained transport with amr
+        vector_t<grid::field_t<real, Rank>, Rank> efield;
+
+        // time-averaged electric fields for subcycling at coarse-fine
+        // boundaries
+        vector_t<grid::field_t<real, Rank>, Rank> efield_avg;
     };
 
     // -----------------------------------------------------------------------------
