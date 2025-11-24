@@ -18,9 +18,7 @@ class SodProblem(SimbiProblem):
     )
 
     # domain
-    resolution: int = ProblemParam(
-        1000000, cli=True, description="grid resolution"
-    )
+    resolution: int = ProblemParam(100, cli=True, description="grid resolution")
     bounds: list[tuple[float, float]] = ProblemParam(
         [(0.0, 1.0)], description="domain boundaries"
     )
