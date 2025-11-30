@@ -56,15 +56,15 @@ namespace simbi::grid {
             iarray<Rank> strides,
             domain_t<Rank> dom
         )
-            : base_type(ptr, shape, dom.start, strides), domain_(dom)
+            : base_type({ptr, shape, dom.start, strides}), domain_(dom)
         {
         }
 
-        const T& operator()(const iarray<Rank>& coord) const
+        DUAL const T& operator()(const iarray<Rank>& coord) const
         {
             return base_type::operator()(coord);
         }
-        T& operator[](const iarray<Rank>& coord)
+        DUAL T& operator[](const iarray<Rank>& coord)
         {
             return base_type::operator[](coord);
         }

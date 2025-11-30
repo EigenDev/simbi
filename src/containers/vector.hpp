@@ -745,8 +745,10 @@ namespace simbi {
         os << "[";
         for (std::uint64_t ii = 0; ii < Rank; ++ii) {
             os << v[ii];
-            if (ii < Rank - 1) {
-                os << ", ";
+            if constexpr (Rank > 1) {
+                if (ii < Rank - 1) {
+                    os << ", ";
+                }
             }
         }
         os << "]";

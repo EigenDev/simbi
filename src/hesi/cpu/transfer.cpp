@@ -1,4 +1,5 @@
 #include "hesi/backend/transfer.hpp"
+#include <cstdint>
 #include <cstring>
 
 namespace simbi::het::backend {

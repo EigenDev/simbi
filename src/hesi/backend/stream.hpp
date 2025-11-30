@@ -5,10 +5,22 @@
 
 #include <cstdint>
 
+#if defined(CUDA_ENABLED)
+#include <cuda_runtime.h>
+#elif defined(HIP_ENABLED)
+#include <hip/hip_runtime.h>
+#endif
+
 namespace simbi::het::backend {
 
     // opaque stream handle (backend-specific)
+#if defined(CUDA_ENABLED)
+    using stream_handle_t = cudaStream_t;
+#elif defined(HIP_ENABLED)
+    using stream_handle_t = hipStream_t;
+#else
     using stream_handle_t = void*;
+#endif
 
     // create stream for given backend
     stream_handle_t

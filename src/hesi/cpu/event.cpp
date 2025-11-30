@@ -1,34 +1,35 @@
 #include "hesi/backend/event.hpp"
+#include "hesi/backend/stream.hpp"
 
 namespace simbi::het::backend {
 
-    void* create_event_cpu()
+    event_handle_t create_event_cpu()
     {
         // cpu has no event concept, return sentinel
         return nullptr;
     }
 
-    void destroy_event_cpu(void*)
+    void destroy_event_cpu(event_handle_t)
     {
         // noop
     }
 
-    void record_event_cpu(void*, void*)
+    void record_event_cpu(event_handle_t, stream_handle_t)
     {
         // noop
     }
 
-    void wait_event_cpu(void*, void*)
+    void wait_event_cpu(stream_handle_t, event_handle_t)
     {
         // noop
     }
 
-    void synchronize_event_cpu(void*)
+    void synchronize_event_cpu(event_handle_t)
     {
         // noop
     }
 
-    bool query_event_cpu(void*)
+    bool query_event_cpu(event_handle_t)
     {
         // always complete
         return true;

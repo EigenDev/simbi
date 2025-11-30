@@ -21,8 +21,8 @@ sources = files(
 )
 
 cpu_sources = files(
-'hesi/cpu/event.cpp',
-'hesi/cpu/memory.cpp',
-'hesi/cpu/stream.cpp',
-'hesi/cpu/transfer.cpp',
+  'hesi/cpu/event.cpp',
+  'hesi/cpu/memory.cpp',
+  'hesi/cpu/stream.cpp',
+  'hesi/cpu/transfer.cpp',
 )

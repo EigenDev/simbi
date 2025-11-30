@@ -26,20 +26,20 @@ namespace simbi::het::backend {
         const void* src,
         locality_t src_loc,
         std::size_t bytes,
-        void* stream
+        stream_handle_t stream
     );
     void fill_cuda(void* dst, std::uint8_t value, std::size_t bytes);
     exec::token_t fill_async_cuda(
         void* dst,
         std::uint8_t value,
         std::size_t bytes,
-        void* stream
+        stream_handle_t stream
     );
     void prefetch_cuda(
         const void* ptr,
         locality_t target,
         std::size_t bytes,
-        void* stream
+        stream_handle_t stream
     );
     bool can_access_peer_cuda(locality_t from, locality_t to);
     void enable_peer_access_cuda(locality_t from, locality_t to);
@@ -59,20 +59,20 @@ namespace simbi::het::backend {
         const void* src,
         locality_t src_loc,
         std::size_t bytes,
-        void* stream
+        stream_handle_t stream
     );
     void fill_hip(void* dst, std::uint8_t value, std::size_t bytes);
     exec::token_t fill_async_hip(
         void* dst,
         std::uint8_t value,
         std::size_t bytes,
-        void* stream
+        stream_handle_t stream
     );
     void prefetch_hip(
         const void* ptr,
         locality_t target,
         std::size_t bytes,
-        void* stream
+        stream_handle_t stream
     );
     bool can_access_peer_hip(locality_t from, locality_t to);
     void enable_peer_access_hip(locality_t from, locality_t to);
@@ -128,7 +128,7 @@ namespace simbi::het::backend {
         const void* src,
         locality_t src_loc,
         std::size_t bytes,
-        void* stream_handle,
+        stream_handle_t stream_handle,
         backend_type_t stream_backend
     )
     {
@@ -203,7 +203,7 @@ namespace simbi::het::backend {
         locality_t dst_loc,
         std::uint8_t value,
         std::size_t bytes,
-        void* stream_handle,
+        stream_handle_t stream_handle,
         backend_type_t stream_backend
     )
     {
@@ -239,7 +239,7 @@ namespace simbi::het::backend {
         const void* ptr,
         locality_t target_loc,
         std::size_t bytes,
-        void* stream_handle,
+        stream_handle_t stream_handle,
         backend_type_t stream_backend
     )
     {

@@ -6,27 +6,30 @@
 
 namespace simbi::het::backend {
 
-    void* create_event_cuda()
+    event_handle_t create_event_cuda()
     {
         cudaEvent_t event;
         check_error<cuda_backend_t>(cudaEventCreate(&event), "event create");
-        return static_cast<void*>(event);
+        return event;
     }
 
-    void destroy_event_cuda(void* handle)
+    void destroy_event_cuda(event_handle_t handle)
     {
         if (!handle) {
             return;
         }
 
-        auto event = static_cast<cudaEvent_t>(handle);
+        auto event = handle;
         check_error<cuda_backend_t>(cudaEventDestroy(event), "event destroy");
     }
 
-    void record_event_cuda(void* event_handle, void* stream_handle)
+    void record_event_cuda(
+        event_handle_t event_handle,
+        stream_handle_t stream_handle
+    )
     {
-        auto event  = static_cast<cudaEvent_t>(event_handle);
-        auto stream = static_cast<cudaStream_t>(stream_handle);
+        auto event  = event_handle;
+        auto stream = stream_handle;
 
         check_error<cuda_backend_t>(
             cudaEventRecord(event, stream),
@@ -34,10 +37,11 @@ namespace simbi::het::backend {
         );
     }
 
-    void wait_event_cuda(void* stream_handle, void* event_handle)
+    void
+    wait_event_cuda(stream_handle_t stream_handle, event_handle_t event_handle)
     {
-        auto stream = static_cast<cudaStream_t>(stream_handle);
-        auto event  = static_cast<cudaEvent_t>(event_handle);
+        auto stream = stream_handle;
+        auto event  = event_handle;
 
         check_error<cuda_backend_t>(
             cudaStreamWaitEvent(stream, event, 0),
@@ -45,26 +49,26 @@ namespace simbi::het::backend {
         );
     }
 
-    void synchronize_event_cuda(void* handle)
+    void synchronize_event_cuda(event_handle_t handle)
     {
         if (!handle) {
             return;
         }
 
-        auto event = static_cast<cudaEvent_t>(handle);
+        auto event = handle;
         check_error<cuda_backend_t>(
             cudaEventSynchronize(event),
             "event synchronize"
         );
     }
 
-    bool query_event_cuda(void* handle)
+    bool query_event_cuda(event_handle_t handle)
     {
         if (!handle) {
             return true;
         }
 
-        auto event      = static_cast<cudaEvent_t>(handle);
+        auto event      = handle;
         cudaError_t err = cudaEventQuery(event);
 
         if (err == cudaSuccess) {

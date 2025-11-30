@@ -25,7 +25,7 @@ namespace simbi::het::backend::cpu {
 namespace simbi::het::backend::cuda {
     template <std::uint64_t Rank, typename Functor>
     void parallel_for(
-        void* stream,   // cudaStream_t as void*
+        stream_handle_t stream,   // cudaStream_t via stream_handle_t
         const exec::launch_policy_t& policy,
         const grid::domain_t<Rank>& domain,
         Functor&& f
@@ -37,7 +37,7 @@ namespace simbi::het::backend::cuda {
 namespace simbi::het::backend::hip {
     template <std::uint64_t Rank, typename Functor>
     void parallel_for(
-        void* stream,   // hipStream_t as void*
+        stream_handle_t stream,   // hipStream_t via stream_handle_t
         const exec::launch_policy_t& policy,
         const grid::domain_t<Rank>& domain,
         Functor&& f

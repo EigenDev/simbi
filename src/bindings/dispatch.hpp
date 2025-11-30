@@ -171,14 +171,15 @@ namespace simbi::dispatch {
                 blueprints.physics.gamma
             );
 
-            // configure moving mesh if enabled
-            if (blueprints.mesh.moving_mesh) {
-                mesh_motion_config_t motion_config;
-                motion_config.scale_factor            = scale_factor;
-                motion_config.scale_factor_derivative = scale_factor_derivative;
-                motion_config.homologous = blueprints.mesh.homologous_expansion;
-                sim.registry.add(sim.global, std::move(motion_config));
-            }
+            // // configure moving mesh if enabled
+            // if (blueprints.mesh.moving_mesh) {
+            //     mesh_motion_config_t motion_config;
+            //     motion_config.scale_factor            = scale_factor;
+            //     motion_config.scale_factor_derivative =
+            //     scale_factor_derivative; motion_config.homologous =
+            //     blueprints.mesh.homologous_expansion;
+            //     sim.registry.add(sim.global, std::move(motion_config));
+            // }
 
             // create operations bundle
             const auto ops = cfd::cfd_operations_t<R, D, S, Rec, EoS>{};

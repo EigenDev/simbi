@@ -26,7 +26,7 @@ namespace simbi::het::backend {
         const void* src,
         locality_t src_loc,
         std::size_t bytes,
-        void* stream_handle,   // native stream (cudaStream_t, etc)
+        stream_handle_t stream_handle,   // native stream (cudaStream_t, etc)
         backend_type_t stream_backend
     );
 
@@ -40,7 +40,7 @@ namespace simbi::het::backend {
         locality_t dst_loc,
         std::uint8_t value,
         std::size_t bytes,
-        void* stream_handle,
+        stream_handle_t stream_handle,
         backend_type_t stream_backend
     );
 
@@ -49,7 +49,7 @@ namespace simbi::het::backend {
         const void* ptr,
         locality_t target_loc,
         std::size_t bytes,
-        void* stream_handle,
+        stream_handle_t stream_handle,
         backend_type_t stream_backend
     );
 

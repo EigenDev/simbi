@@ -6,30 +6,30 @@
 
 namespace simbi::het::backend {
 
-    // forward declarations
-    void* create_event_cpu();
-    void destroy_event_cpu(void* handle);
-    void record_event_cpu(void* event, void* stream);
-    void wait_event_cpu(void* stream, void* event);
-    void synchronize_event_cpu(void* handle);
-    bool query_event_cpu(void* handle);
+    // forward declarations (use canonical handle typedefs)
+    event_handle_t create_event_cpu();
+    void destroy_event_cpu(event_handle_t handle);
+    void record_event_cpu(event_handle_t event, stream_handle_t stream);
+    void wait_event_cpu(stream_handle_t stream, event_handle_t event);
+    void synchronize_event_cpu(event_handle_t handle);
+    bool query_event_cpu(event_handle_t handle);
 
 #ifdef CUDA_ENABLED
-    void* create_event_cuda();
-    void destroy_event_cuda(void* handle);
-    void record_event_cuda(void* event, void* stream);
-    void wait_event_cuda(void* stream, void* event);
-    void synchronize_event_cuda(void* handle);
-    bool query_event_cuda(void* handle);
+    event_handle_t create_event_cuda();
+    void destroy_event_cuda(event_handle_t handle);
+    void record_event_cuda(event_handle_t event, stream_handle_t stream);
+    void wait_event_cuda(stream_handle_t stream, event_handle_t event);
+    void synchronize_event_cuda(event_handle_t handle);
+    bool query_event_cuda(event_handle_t handle);
 #endif
 
 #ifdef HIP_ENABLED
-    void* create_event_hip();
-    void destroy_event_hip(void* handle);
-    void record_event_hip(void* event, void* stream);
-    void wait_event_hip(void* stream, void* event);
-    void synchronize_event_hip(void* handle);
-    bool query_event_hip(void* handle);
+    event_handle_t create_event_hip();
+    void destroy_event_hip(event_handle_t handle);
+    void record_event_hip(event_handle_t event, stream_handle_t stream);
+    void wait_event_hip(stream_handle_t stream, event_handle_t event);
+    void synchronize_event_hip(event_handle_t handle);
+    bool query_event_hip(event_handle_t handle);
 #endif
 
     event_handle_t create_event(backend_type_t backend)

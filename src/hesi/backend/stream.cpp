@@ -5,24 +5,24 @@
 
 namespace simbi::het::backend {
 
-    // forward declarations
-    void* create_stream_cpu();
-    void destroy_stream_cpu(void* handle);
-    void synchronize_stream_cpu(void* handle);
-    bool query_stream_cpu(void* handle);
+    // forward declarations (use platform-native handle type)
+    stream_handle_t create_stream_cpu();
+    void destroy_stream_cpu(stream_handle_t handle);
+    void synchronize_stream_cpu(stream_handle_t handle);
+    bool query_stream_cpu(stream_handle_t handle);
 
 #ifdef CUDA_ENABLED
-    void* create_stream_cuda(std::int32_t device_id);
-    void destroy_stream_cuda(void* handle);
-    void synchronize_stream_cuda(void* handle);
-    bool query_stream_cuda(void* handle);
+    stream_handle_t create_stream_cuda(std::int32_t device_id);
+    void destroy_stream_cuda(stream_handle_t handle);
+    void synchronize_stream_cuda(stream_handle_t handle);
+    bool query_stream_cuda(stream_handle_t handle);
 #endif
 
 #ifdef HIP_ENABLED
-    void* create_stream_hip(std::int32_t device_id);
-    void destroy_stream_hip(void* handle);
-    void synchronize_stream_hip(void* handle);
-    bool query_stream_hip(void* handle);
+    stream_handle_t create_stream_hip(std::int32_t device_id);
+    void destroy_stream_hip(stream_handle_t handle);
+    void synchronize_stream_hip(stream_handle_t handle);
+    bool query_stream_hip(stream_handle_t handle);
 #endif
 
     stream_handle_t

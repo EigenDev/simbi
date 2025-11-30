@@ -44,8 +44,8 @@ namespace simbi::fp {
 
     template <typename F, typename G>
     struct compose_t {
-        F f;
-        G g;
+        mutable F f;
+        mutable G g;
 
         template <typename Arg>
         constexpr DUAL auto operator()(Arg&& arg) const -> decltype(auto)

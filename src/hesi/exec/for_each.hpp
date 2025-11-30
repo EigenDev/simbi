@@ -6,6 +6,7 @@
 #include "grid/domain.hpp"
 #include "hesi/backend/parallel_for.hpp"
 #include "hesi/core/types.hpp"
+#include "hesi/cuda/parallel_for.hpp"
 #include "hesi/exec/executor.hpp"
 #include "hesi/exec/policy.hpp"
 #include "hesi/exec/token.hpp"

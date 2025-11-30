@@ -6,7 +6,7 @@
 
 namespace simbi::het::backend {
 
-    void* create_stream_cuda(std::int32_t device_id)
+    stream_handle_t create_stream_cuda(std::int32_t device_id)
     {
         if (device_id >= 0) {
             check_error<cuda_backend_t>(
@@ -18,42 +18,42 @@ namespace simbi::het::backend {
         cudaStream_t stream;
         check_error<cuda_backend_t>(cudaStreamCreate(&stream), "stream create");
 
-        return static_cast<void*>(stream);
+        return stream;
     }
 
-    void destroy_stream_cuda(void* handle)
+    void destroy_stream_cuda(stream_handle_t handle)
     {
         if (!handle) {
             return;
         }
 
-        auto stream = static_cast<cudaStream_t>(handle);
+        auto stream = handle;
         check_error<cuda_backend_t>(
             cudaStreamDestroy(stream),
             "stream destroy"
         );
     }
 
-    void synchronize_stream_cuda(void* handle)
+    void synchronize_stream_cuda(stream_handle_t handle)
     {
         if (!handle) {
             return;
         }
 
-        auto stream = static_cast<cudaStream_t>(handle);
+        auto stream = handle;
         check_error<cuda_backend_t>(
             cudaStreamSynchronize(stream),
             "stream synchronize"
         );
     }
 
-    bool query_stream_cuda(void* handle)
+    bool query_stream_cuda(stream_handle_t handle)
     {
         if (!handle) {
             return true;
         }
 
-        auto stream     = static_cast<cudaStream_t>(handle);
+        auto stream     = handle;
         cudaError_t err = cudaStreamQuery(stream);
 
         if (err == cudaSuccess) {

@@ -4,10 +4,22 @@
 #include "hesi/backend/stream.hpp"
 #include "hesi/core/types.hpp"
 
+#if defined(CUDA_ENABLED)
+#include <cuda_runtime.h>
+#elif defined(HIP_ENABLED)
+#include <hip/hip_runtime.h>
+#endif
+
 namespace simbi::het::backend {
 
     // opaque event handle (backend-specific)
+#if defined(CUDA_ENABLED)
+    using event_handle_t = cudaEvent_t;
+#elif defined(HIP_ENABLED)
+    using event_handle_t = hipEvent_t;
+#else
     using event_handle_t = void*;
+#endif
 
     // create event for given backend
     event_handle_t create_event(backend_type_t backend);

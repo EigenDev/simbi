@@ -72,7 +72,7 @@ namespace simbi::het::backend {
         const void* src,
         locality_t src_loc,
         std::size_t bytes,
-        cudaStream_t stream
+        stream_handle_t stream
     )
     {
         if (bytes == 0) {
@@ -130,7 +130,7 @@ namespace simbi::het::backend {
         void* dst,
         std::uint8_t value,
         std::size_t bytes,
-        cudaStream_t stream
+        stream_handle_t stream
     )
     {
         if (bytes == 0) {
@@ -158,7 +158,7 @@ namespace simbi::het::backend {
         const void* ptr,
         locality_t target_loc,
         std::size_t bytes,
-        cudaStream_t stream
+        stream_handle_t stream
     )
     {
         if (bytes == 0) {
@@ -175,7 +175,7 @@ namespace simbi::het::backend {
                 bytes,
                 cudaMemLocation{.id = device},
                 0,
-                static_cast<cudaStream_t>(stream)
+                stream
             ),
             "prefetch"
         );

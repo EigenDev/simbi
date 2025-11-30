@@ -48,6 +48,7 @@ gpu_settings = {
     + [
       '-x', 'cu',
       '-dc',
+      '-rdc=true',
       '--extended-lambda',
       '--expt-relaxed-constexpr',
       # '-w',
@@ -59,7 +60,7 @@ gpu_settings = {
       '-DCUDA_ENABLED',
     ],
     'link_args': [f'-L@cuda_root@/lib64', '-lcudart'],
-    'inter_link_args': ['-dlink', '-Xcompiler', '-fPIC'],
+    'inter_link_args': ['-dlink', '-rdc=true', '-Xcompiler', '-fPIC'],
     'extra_link_args': ['-lcudadevrt'],
     'gpu_dependency': cuda,
   },
@@ -89,7 +90,7 @@ if hip.found() or cuda.found()
 
   # Compile GPU sources
   gpu_objs = []
-  foreach src : sources + gpu_sources
+  foreach src : sources + gpu_sources + cpu_sources
     gpu_objs += [
       custom_target(
         # include parent directory name so targets are unique (e.g. cuda_event_o vs backend_event_o)

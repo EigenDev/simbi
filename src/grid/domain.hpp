@@ -125,8 +125,10 @@ namespace simbi::grid {
         os << "Domain(";
         for (std::uint64_t ii = 0; ii < Rank; ++ii) {
             os << d.start[ii] << ":" << d.fin[ii];
-            if (ii < Rank - 1) {
-                os << ", ";
+            if constexpr (Rank > 1) {
+                if (ii < Rank - 1) {
+                    os << ", ";
+                }
             }
         }
         os << ")";
