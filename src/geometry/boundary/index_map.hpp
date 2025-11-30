@@ -13,12 +13,12 @@ namespace simbi::geometry {
     // maps any index outside [min, max] to the nearest edge
     // -------------------------------------------------------------------------
     struct clamp_map_t {
-        std::int64_t dim_;
+        std::uint64_t dim_;
         std::int64_t min_val_;   // global start index of active domain
         std::int64_t max_val_;   // global end index (exclusive) - 1
 
         DUAL constexpr clamp_map_t(
-            std::int64_t dim,
+            std::uint64_t dim,
             std::int64_t min_val,
             std::int64_t max_val
         )
@@ -46,10 +46,10 @@ namespace simbi::geometry {
     // formula: src = 2 * pivot - 1 - dst
     // -------------------------------------------------------------------------
     struct mirror_map_t {
-        std::int64_t dim_;
+        std::uint64_t dim_;
         std::int64_t pivot_term_;   // precomputed: 2 * face_index - 1
 
-        DUAL constexpr mirror_map_t(std::int64_t dim, std::int64_t face_idx)
+        DUAL constexpr mirror_map_t(std::uint64_t dim, std::int64_t face_idx)
             : dim_(dim), pivot_term_(2 * face_idx - 1)
         {
         }
@@ -69,12 +69,12 @@ namespace simbi::geometry {
     // wraps coordinate into [start, start + len)
     // -------------------------------------------------------------------------
     struct periodic_map_t {
-        std::int64_t dim_;
+        std::uint64_t dim_;
         std::int64_t start_;
         std::int64_t len_;
 
         DUAL constexpr periodic_map_t(
-            std::int64_t dim,
+            std::uint64_t dim,
             std::int64_t start,
             std::int64_t len
         )
@@ -95,6 +95,52 @@ namespace simbi::geometry {
             }
 
             ret[dim_] = start_ + val;
+            return ret;
+        }
+    };
+
+    // -------------------------------------------------------------------------
+    // multi-dimensional boundary map
+    // applies boundary conditions in multiple dimensions simultaneously
+    // used for edges and corners
+    // -------------------------------------------------------------------------
+    template <std::uint64_t Rank>
+    struct multidim_map_t {
+        iarray<Rank> active_dims_;   // 1 if this dimension applies a map
+        iarray<Rank> map_types_;     // 0=none, 1=periodic, 2=mirror, 3=clamp
+        iarray<Rank> starts_;        // domain starts for periodic
+        iarray<Rank> lens_;          // domain lengths for periodic
+        iarray<Rank> pivots_;        // pivot points for mirror
+        iarray<Rank> clamp_vals_;    // clamp values for outflow
+
+        DUAL auto operator()(const iarray<Rank>& coord) const
+        {
+            auto ret = coord;
+            for (std::uint64_t dd = 0; dd < Rank; ++dd) {
+                if (!active_dims_[dd]) {
+                    continue;
+                }
+
+                switch (map_types_[dd]) {
+                    case 1: {   // periodic
+                        std::int64_t val = ret[dd] - starts_[dd];
+                        val              = val % lens_[dd];
+                        if (val < 0) {
+                            val += lens_[dd];
+                        }
+                        ret[dd] = starts_[dd] + val;
+                        break;
+                    }
+                    case 2: {   // mirror
+                        ret[dd] = pivots_[dd] - ret[dd];
+                        break;
+                    }
+                    case 3: {   // clamp
+                        ret[dd] = clamp_vals_[dd];
+                        break;
+                    }
+                }
+            }
             return ret;
         }
     };

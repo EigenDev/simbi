@@ -7,13 +7,14 @@
 #include "geometry/visit.hpp"
 #include "grid/boundary.hpp"
 #include "grid/connectivity.hpp"
-#include "grid/domain.hpp"
 #include "grid/field.hpp"
+#include "grid/ghost.hpp"
 #include "grid/mesh_config.hpp"
 #include "grid/patch_id.hpp"
 #include "grid/skeleton.hpp"
 #include "index_map.hpp"
 
+#include <cstddef>
 #include <cstdint>
 
 namespace simbi::geometry {
@@ -126,6 +127,7 @@ namespace simbi::geometry {
         )
         {
             using namespace grid::domain_algebra;
+            using namespace grid::boundary;
 
             const auto* block_info = skeleton.get_block(id);
             if (!block_info) {
@@ -136,208 +138,276 @@ namespace simbi::geometry {
             const auto& global_dims = config.global_cells;
 
             // -----------------------------------------------------------------
-            // dimensional cascade: x -> y -> z
+            // ghost region analysis: faces, edges, corners
             // -----------------------------------------------------------------
-            for (std::int64_t dd = Rank - 1; dd >= 0; --dd) {
+            auto ghost_regions =
+                grid::boundary::analyze_ghost_regions(field.domain(), geometry);
 
-                // define working extent (cascade logic)
-                grid::domain_t<Rank> transverse_domain = geometry;
-                const auto& allocated_domain           = field.domain();
+            // -----------------------------------------------------------------
+            // process each ghost region
+            // -----------------------------------------------------------------
+            for (const auto& ghost : ghost_regions) {
+                // collect boundary info for all contact dimensions
+                struct contact_info_t {
+                    std::uint64_t dim;
+                    grid::side_t side;
+                    grid::boundary_type_t bc_type;
+                };
+                vector_t<contact_info_t, Rank> contacts;
+                std::size_t num_contacts = 0;
 
-                for (std::uint64_t k = dd + 1; k < Rank; ++k) {
-                    transverse_domain.start[k] = allocated_domain.start[k];
-                    transverse_domain.fin[k]   = allocated_domain.fin[k];
+                for (std::uint64_t dd = 0; dd < Rank; ++dd) {
+                    using face_side = face_side_t;
+                    if (ghost.directions[dd] == face_side::none) {
+                        continue;
+                    }
+
+                    auto side = (ghost.directions[dd] == face_side::minus)
+                                    ? grid::side_t::left
+                                    : grid::side_t::right;
+                    const auto& conn = block_info->get_face(dd, side);
+
+                    // periodic boundaries are neighbor connections with
+                    // wrapping
+                    bool is_periodic_wrap = false;
+                    if (conn.is_connected() && conn.is_conforming()) {
+                        auto neighbor = conn.single_neighbor();
+                        auto my_coord = id.coords[dd];
+                        auto nb_coord = neighbor.coords[dd];
+                        auto blocks_per_dim =
+                            config.global_cells[dd] / config.block_size[dd];
+
+                        // single block: wraps to itself
+                        if (blocks_per_dim == 1) {
+                            is_periodic_wrap = (my_coord == nb_coord);
+                        }
+                        // multi-block: wraps to opposite edge
+                        else {
+                            is_periodic_wrap =
+                                (side == grid::side_t::left && my_coord == 0 &&
+                                 nb_coord == blocks_per_dim - 1) ||
+                                (side == grid::side_t::right &&
+                                 my_coord == blocks_per_dim - 1 &&
+                                 nb_coord == 0);
+                        }
+                    }
+
+                    // skip internal partition boundaries
+                    if (!conn.is_physical() && !is_periodic_wrap) {
+                        continue;
+                    }
+
+                    // determine BC type
+                    auto bc_type = is_periodic_wrap
+                                       ? grid::boundary_type_t::periodic
+                                       : conn.boundary_type();
+
+                    contacts[num_contacts++] = {dd, side, bc_type};
+                }
+
+                if (num_contacts == 0) {
+                    continue;
+                }
+
+                // use first contact for physics policy
+                auto primary_dd      = contacts[0].dim;
+                auto primary_side    = contacts[0].side;
+                auto primary_bc_type = contacts[0].bc_type;
+                const auto& primary_conn =
+                    block_info->get_face(primary_dd, primary_side);
+
+                // -------------------------------------------------------------
+                // special case: spherical pole (single contact only)
+                // -------------------------------------------------------------
+                if (num_contacts == 1 &&
+                    primary_bc_type == grid::boundary_type_t::reflect) {
+
+                    bool is_pole                            = false;
+                    constexpr std::uint64_t theta_array_dim = Rank - 2;
+
+                    if constexpr (Rank >= 2) {
+                        if constexpr (is_dynamic_context_c<Context>) {
+                            if (primary_conn.has_metric_info() &&
+                                primary_dd == theta_array_dim) {
+                                is_pole = primary_conn.is_pole();
+                            }
+                        }
+                    }
+
+                    if (is_pole) {
+                        std::int64_t phi_start = 0;
+                        std::int64_t phi_len   = 0;
+
+                        if constexpr (Rank >= 3) {
+                            constexpr std::uint64_t phi_dim = Rank - 3;
+                            phi_start = geometry.start[phi_dim];
+                            phi_len   = global_dims[phi_dim];
+                        }
+
+                        std::int64_t pivot =
+                            (primary_side == grid::side_t::left)
+                                ? geometry.start[primary_dd]
+                                : geometry.fin[primary_dd];
+
+                        auto pole_map = spherical_pole_map_t<Rank>{
+                          pivot,
+                          phi_start,
+                          phi_len
+                        };
+
+                        auto phys_op = [=] DUAL(const T& val) {
+                            return physics_policy.apply(
+                                val,
+                                primary_dd,
+                                primary_side,
+                                primary_bc_type
+                            );
+                        };
+
+                        field[ghost.domain] = field[ghost.domain]
+                                                  .remap(pole_map)
+                                                  .map(phys_op)
+                                                  .with(exec);
+                        continue;
+                    }
                 }
 
                 // -------------------------------------------------------------
-                // process sides
+                // special case: thin dimension override
                 // -------------------------------------------------------------
-                auto process_side = [&](grid::side_t side) {
-                    const auto& conn = block_info->get_face(dd, side);
-
-                    if (!conn.is_physical()) {
-                        return;
-                    }
-
-                    const auto bc_type = conn.boundary_type();
-
-                    // define ghost box
-                    grid::domain_t<Rank> ghost_box = transverse_domain;
-
-                    if (side == grid::side_t::left) {
-                        ghost_box.start[dd] = allocated_domain.start[dd];
-                        ghost_box.fin[dd]   = geometry.start[dd];
-                    }
-                    else {
-                        ghost_box.start[dd] = geometry.fin[dd];
-                        ghost_box.fin[dd]   = allocated_domain.fin[dd];
-                    }
-
-                    if (ghost_box.empty()) {
-                        return;
-                    }
-
-                    // helper to execute standard static boundaries
-                    auto execute_static = [&](auto&& map_op) {
-                        auto phys_op = [=] DUAL(const T& val) {
-                            return physics_policy.apply(val, dd, side, bc_type);
-                        };
-
-                        field[ghost_box] =
-                            field[ghost_box].remap(map_op).map(phys_op).with(
-                                exec
-                            );
+                if (num_contacts == 1 && global_dims[primary_dd] == 1) {
+                    auto periodic_map = periodic_map_t{
+                      primary_dd,
+                      geometry.start[primary_dd],
+                      global_dims[primary_dd]
                     };
 
-                    // ---------------------------------------------------------
-                    // thin dimension override (Quasi-(1D/2D) support)
-                    // ---------------------------------------------------------
-                    // if the global dimension is 1, we must force a direct copy
-                    // (periodic) to populate ghosts for transverse flux
-                    // calculations in CT. standard bcs (like reflect) fail for
-                    // depth > 1.
-                    if (global_dims[dd] == 1) {
-                        execute_static(
-                            periodic_map_t{
-                              dd,
-                              geometry.start[dd],
-                              global_dims[dd]
+                    auto phys_op = [=] DUAL(const T& val) {
+                        return physics_policy.apply(
+                            val,
+                            primary_dd,
+                            primary_side,
+                            primary_bc_type
+                        );
+                    };
+
+                    field[ghost.domain] = field[ghost.domain]
+                                              .remap(periodic_map)
+                                              .map(phys_op)
+                                              .with(exec);
+                    continue;
+                }
+
+                // -------------------------------------------------------------
+                // special case: dynamic boundary (single contact only)
+                // -------------------------------------------------------------
+                if (num_contacts == 1 &&
+                    primary_bc_type == grid::boundary_type_t::dynamic) {
+
+                    if constexpr (is_dynamic_context_c<Context>) {
+                        geometry::visit_block_geometry<Rank>(
+                            context.geo_service,
+                            id,
+                            [&](const auto&... maps) {
+                                auto block_geo =
+                                    typename Context::metric_type(maps...);
+
+                                auto dyn_op = dynamic_boundary_op_t<
+                                    T,
+                                    decltype(block_geo),
+                                    typename Context::vm_type,
+                                    Rank>{block_geo, context.vm, context.time};
+
+                                std::int64_t edge =
+                                    (primary_side == grid::side_t::left)
+                                        ? geometry.start[primary_dd]
+                                        : geometry.fin[primary_dd] - 1;
+
+                                auto clamp =
+                                    clamp_map_t{primary_dd, edge, edge + 1};
+
+                                field[ghost.domain] = field[ghost.domain]
+                                                          .remap(clamp)
+                                                          .enum_map(dyn_op)
+                                                          .with(exec);
                             }
                         );
-                        return;
                     }
+                    else {
+                        // fallback to outflow
+                        std::int64_t edge = (primary_side == grid::side_t::left)
+                                                ? geometry.start[primary_dd]
+                                                : geometry.fin[primary_dd] - 1;
+                        auto clamp = clamp_map_t{primary_dd, edge, edge + 1};
 
-                    // dispatch
-                    switch (bc_type) {
-                        case grid::boundary_type_t::outflow: {
-                            std::int64_t edge = (side == grid::side_t::left)
-                                                    ? geometry.start[dd]
-                                                    : geometry.fin[dd] - 1;
-                            execute_static(clamp_map_t{dd, edge, edge + 1});
-                            break;
-                        }
-                        case grid::boundary_type_t::reflect: {
-                            // check if this is a spherical pole boundary
-                            bool is_pole                            = false;
-                            constexpr std::uint64_t theta_array_dim = Rank - 2;
-
-                            if constexpr (Rank >= 2) {
-                                if constexpr (is_dynamic_context_c<Context>) {
-                                    if (conn.has_metric_info() &&
-                                        dd == theta_array_dim) {
-                                        is_pole = conn.is_pole();
-                                    }
-                                }
-                            }
-
-                            std::int64_t pivot = (side == grid::side_t::left)
-                                                     ? geometry.start[dd]
-                                                     : geometry.fin[dd];
-
-                            if (is_pole) {
-                                // use spherical pole map for proper geometry
-                                std::int64_t phi_start = 0;
-                                std::int64_t phi_len   = 0;
-
-                                if constexpr (Rank >= 3) {
-                                    constexpr std::uint64_t phi_dim = Rank - 3;
-                                    phi_start = geometry.start[phi_dim];
-                                    phi_len   = global_dims[phi_dim];
-                                }
-
-                                auto pole_map = spherical_pole_map_t<Rank>{
-                                  pivot,
-                                  phi_start,
-                                  phi_len
-                                };
-
-                                auto phys_op = [=] DUAL(const T& val) {
-                                    return physics_policy
-                                        .apply(val, dd, side, bc_type);
-                                };
-
-                                field[ghost_box] = field[ghost_box]
-                                                       .remap(pole_map)
-                                                       .map(phys_op)
-                                                       .with(exec);
-                            }
-                            else {
-                                execute_static(mirror_map_t{dd, pivot});
-                            }
-                            break;
-                        }
-                        case grid::boundary_type_t::periodic: {
-                            execute_static(
-                                periodic_map_t{
-                                  dd,
-                                  geometry.start[dd],
-                                  global_dims[dd]
-                                }
+                        auto phys_op = [=] DUAL(const T& val) {
+                            return physics_policy.apply(
+                                val,
+                                primary_dd,
+                                primary_side,
+                                primary_bc_type
                             );
+                        };
+
+                        field[ghost.domain] =
+                            field[ghost.domain].remap(clamp).map(phys_op).with(
+                                exec
+                            );
+                    }
+                    continue;
+                }
+
+                // -------------------------------------------------------------
+                // general case: build multi-dimensional map
+                // -------------------------------------------------------------
+                multidim_map_t<Rank> map;
+                map.active_dims_.fill(0);
+                map.map_types_.fill(0);
+                map.starts_.fill(0);
+                map.lens_.fill(0);
+                map.pivots_.fill(0);
+                map.clamp_vals_.fill(0);
+
+                for (std::size_t ii = 0; ii < num_contacts; ++ii) {
+                    auto dd      = contacts[ii].dim;
+                    auto side    = contacts[ii].side;
+                    auto bc_type = contacts[ii].bc_type;
+
+                    map.active_dims_[dd] = 1;
+
+                    switch (bc_type) {
+                        case grid::boundary_type_t::periodic:
+                            map.map_types_[dd] = 1;
+                            map.starts_[dd]    = geometry.start[dd];
+                            map.lens_[dd]      = global_dims[dd];
                             break;
-                        }
-                        case grid::boundary_type_t::dynamic: {
-                            if constexpr (is_dynamic_context_c<Context>) {
-                                // visit geometry to resolve specific metric
-                                // type (uniform vs log vs user-defined)
-                                geometry::visit_block_geometry<Rank>(
-                                    context.geo_service,
-                                    id,
-                                    [&](const auto&... maps) {
-                                        auto block_geo =
-                                            typename Context::metric_type(
-                                                maps...
-                                            );
 
-                                        // construct the dynamic operator
-                                        // captures geo, vm, and time
-                                        auto dyn_op = dynamic_boundary_op_t<
-                                            T,
-                                            decltype(block_geo),
-                                            typename Context::vm_type,
-                                            Rank>{
-                                          block_geo,
-                                          context.vm,
-                                          context.time
-                                        };
+                        case grid::boundary_type_t::reflect:
+                            map.map_types_[dd] = 2;
+                            map.pivots_[dd]    = 2 * (side == grid::side_t::left
+                                                          ? geometry.start[dd]
+                                                          : geometry.fin[dd]) -
+                                              1;
+                            break;
 
-                                        // clamp indices to edge to get interior
-                                        // state
-                                        std::int64_t edge =
-                                            (side == grid::side_t::left)
-                                                ? geometry.start[dd]
-                                                : geometry.fin[dd] - 1;
+                        case grid::boundary_type_t::outflow:
+                            map.map_types_[dd]  = 3;
+                            map.clamp_vals_[dd] = (side == grid::side_t::left)
+                                                      ? geometry.start[dd]
+                                                      : geometry.fin[dd] - 1;
+                            break;
 
-                                        auto clamp =
-                                            clamp_map_t{dd, edge, edge + 1};
-
-                                        // Execute:
-                                        // > remap(clamp) -> gets U_interior
-                                        // > enum_map(dynOp) -> uses  GhostCoord
-                                        // + U_interior -> U_new
-                                        field[ghost_box] = field[ghost_box]
-                                                               .remap(clamp)
-                                                               .enum_map(dyn_op)
-                                                               .with(exec);
-                                    }
-                                );
-                                break;
-                            }
-                            else {
-                                // default to outflow if no dynamic context
-                                std::int64_t edge = (side == grid::side_t::left)
-                                                        ? geometry.start[dd]
-                                                        : geometry.fin[dd] - 1;
-                                execute_static(clamp_map_t{dd, edge, edge + 1});
-                                break;
-                            }
-                        }
                         default: break;
                     }
+                }
+
+                auto phys_op = [=] DUAL(const T& val) {
+                    return physics_policy
+                        .apply(val, primary_dd, primary_side, primary_bc_type);
                 };
 
-                process_side(grid::side_t::left);
-                process_side(grid::side_t::right);
+                field[ghost.domain] =
+                    field[ghost.domain].remap(map).map(phys_op).with(exec);
             }
         }
     };
