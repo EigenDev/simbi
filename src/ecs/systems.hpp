@@ -206,7 +206,7 @@ namespace simbi::ecs {
             }
 
             // exchange halos between partitions
-            // sim.exchange_halos(lvl);
+            sim.exchange_halos(lvl);
         }
 
       private:
