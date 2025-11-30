@@ -6,11 +6,11 @@ from matplotlib.axes import Axes
 from matplotlib.figure import Figure as MplFigure
 from mpl_toolkits.axes_grid1 import make_axes_locatable
 
-from simbi.viz.utility import get_field_str, map_coordinate_label
 from simbi.viz.components.coord_binning import (
     CoordinateProfileComponent,
 )
 from simbi.viz.components.time_series import TimeSeriesPlotComponent
+from simbi.viz.utility import get_field_str, map_coordinate_label
 
 from . import formatting
 from .components import (
@@ -56,6 +56,19 @@ class Figure:
             # The component renders its artist
             artist_dict = component.render(data, self.config.style)
             rendered_artists.append(artist_dict)
+
+            # set axis limits for quad/polygon plots since relim() doesn't work on mesh collections
+            if isinstance(component, (QuadPlotComponent, PolygonPlotComponent)):
+                if isinstance(data, FieldData) and data.domain:
+                    x_data = (
+                        data.domain[1]
+                        if len(data.domain) > 1
+                        else data.domain[0]
+                    )
+                    y_data = data.domain[0] if len(data.domain) > 1 else None
+                    main_ax.set_xlim(x_data.min(), x_data.max())
+                    if y_data is not None:
+                        main_ax.set_ylim(y_data.min(), y_data.max())
 
         main_ax.relim()
         main_ax.autoscale_view()
