@@ -345,17 +345,17 @@ namespace simbi::em {
         // compute ex
         auto e1    = state.efield[2];
         auto e1_op = ex_stencil(fluxes, prims, edge_domains[2]);
-        e1 = e1.zip(e1_op, [](auto _, auto enp) { return enp; }).with(exec);
+        e1         = e1_op.map([](auto enp) { return enp; }).with(exec);
 
         // compute ey
         auto e2    = state.efield[1];
         auto e2_op = ey_stencil(fluxes, prims, edge_domains[1]);
-        e2 = e2.zip(e2_op, [](auto _, auto enp) { return enp; }).with(exec);
+        e2         = e2_op.map([](auto enp) { return enp; }).with(exec);
 
         // compute ez
         auto e3    = state.efield[0];
         auto e3_op = ez_stencil(fluxes, prims, edge_domains[0]);
-        e3 = e3.zip(e3_op, [](auto _, auto enp) { return enp; }).with(exec);
+        e3         = e3_op.map([](auto enp) { return enp; }).with(exec);
     }
 
     // =========================================================================
