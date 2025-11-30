@@ -44,7 +44,7 @@ namespace simbi::het::mem {
                         src,
                         bytes,
                         cudaMemcpyDeviceToDevice,
-                        stream.native()
+                        static_cast<cudaStream_t>(stream.native())
                     ),
                     "async memory copy"
                 );
@@ -58,7 +58,7 @@ namespace simbi::het::mem {
                         src,
                         bytes,
                         hipMemcpyDeviceToDevice,
-                        stream.native()
+                        static_cast<hipStream_t>(stream.native())
                     ),
                     "async memory copy"
                 );
@@ -78,7 +78,7 @@ namespace simbi::het::mem {
                         src,
                         static_cast<int>(src_loc.device_id),
                         bytes,
-                        stream.native()
+                        static_cast<cudaStream_t>(stream.native())
                     ),
                     "async peer memory copy"
                 );
@@ -93,7 +93,7 @@ namespace simbi::het::mem {
                         src,
                         static_cast<int>(src_loc.device_id),
                         bytes,
-                        stream.native()
+                        static_cast<hipStream_t>(stream.native())
                     ),
                     "async peer memory copy"
                 );
@@ -111,7 +111,7 @@ namespace simbi::het::mem {
                         src,
                         bytes,
                         cudaMemcpyHostToDevice,
-                        stream.native()
+                        static_cast<cudaStream_t>(stream.native())
                     ),
                     "async memory copy"
                 );
@@ -124,7 +124,7 @@ namespace simbi::het::mem {
                         src,
                         bytes,
                         hipMemcpyHostToDevice,
-                        stream.native()
+                        static_cast<hipStream_t>(stream.native())
                     ),
                     "async memory copy"
                 );
@@ -142,7 +142,7 @@ namespace simbi::het::mem {
                         src,
                         bytes,
                         cudaMemcpyDeviceToHost,
-                        stream.native()
+                        static_cast<cudaStream_t>(stream.native())
                     ),
                     "async memory copy"
                 );
@@ -155,7 +155,7 @@ namespace simbi::het::mem {
                         src,
                         bytes,
                         hipMemcpyDeviceToHost,
-                        stream.native()
+                        static_cast<hipStream_t>(stream.native())
                     ),
                     "async memory copy"
                 );
@@ -300,7 +300,12 @@ namespace simbi::het::mem {
 #if defined(CUDA_ENABLED)
         else if (dst_loc.backend == backend_type_t::cuda) {
             check_error<cuda_backend_t>(
-                cudaMemsetAsync(dst, value, bytes, stream.native()),
+                cudaMemsetAsync(
+                    dst,
+                    value,
+                    bytes,
+                    static_cast<cudaStream_t>(stream.native())
+                ),
                 "async memset"
             );
         }
@@ -450,7 +455,13 @@ namespace simbi::het::mem {
                 return;   // noop
             }
             check_error<cuda_backend_t>(
-                cudaMemPrefetchAsync(ptr, bytes, device, stream.native()),
+                cudaMemPrefetchAsync(
+                    ptr,
+                    bytes,
+                    cudaMemLocation{.id = device},
+                    0,
+                    static_cast<cudaStream_t>(stream.native())
+                ),
                 "memprefetch async"
             );
         }

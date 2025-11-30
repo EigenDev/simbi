@@ -2,6 +2,7 @@
 #define HET_LAUNCHER_HPP
 
 #include "compat.hpp"
+#include "hesi/core/error_handling.hpp"
 #include "hesi/core/primitives.hpp"
 #include "hesi/core/types.hpp"
 #include "hesi/exec/policy.hpp"
@@ -97,7 +98,7 @@ namespace simbi::het::exec::detail {
                 grid,
                 block,
                 policy.shared_mem_bytes,
-                stream.native()>>>(f);
+                static_cast<cudaStream_t>(stream.native())>>>(f);
 #if defined(CUDA_ENABLED)
             check_error<cuda_backend_t>(cudaGetLastError(), "kernel launch");
 #elif defined(HIP_ENABLED)

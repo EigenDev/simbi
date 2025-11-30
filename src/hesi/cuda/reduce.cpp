@@ -4,6 +4,7 @@
 #ifdef CUDA_ENABLED
 #include "grid/domain.hpp"
 #include "hesi/core/error_handling.hpp"
+#include "hesi/core/primitives.hpp"
 #include "hesi/cuda/primitives.hpp"
 #include <cuda_runtime.h>
 
@@ -25,8 +26,8 @@ namespace simbi::het::backend::cuda {
         extern __shared__ char smem_bytes[];
         T* shared = reinterpret_cast<T*>(smem_bytes);
 
-        auto ctx = dgrid::this_thread();
-        auto grp = dgrid::this_sub_group();
+        auto ctx = dgrid::ctx();
+        auto grp = het::this_sub_group();
 
         // grid-stride accumulation
         T acc = identity;
@@ -75,8 +76,8 @@ namespace simbi::het::backend::cuda {
         extern __shared__ char smem_bytes[];
         T* shared = reinterpret_cast<T*>(smem_bytes);
 
-        auto ctx = dgrid::this_thread();
-        auto grp = dgrid::this_sub_group();
+        auto ctx = dgrid::ctx();
+        auto grp = het::this_sub_group();
 
         // each thread processes subset of partial results
         T acc = identity;
@@ -126,8 +127,8 @@ namespace simbi::het::backend::cuda {
         extern __shared__ char smem_bytes[];
         T* shared = reinterpret_cast<T*>(smem_bytes);
 
-        auto ctx        = dgrid::this_thread();
-        auto grp        = dgrid::this_sub_group();
+        auto ctx        = dgrid::ctx();
+        auto grp        = het::this_sub_group();
         auto domain     = comp.domain();
         std::uint64_t n = domain.size();
 
@@ -181,7 +182,7 @@ namespace simbi::het::backend::cuda {
 
         constexpr std::uint64_t block_size = 256;
         std::uint64_t grid_size =
-            std::min((n + block_size - 1) / block_size, 1024ULL);
+            std::min<std::uint64_t>((n + block_size - 1) / block_size, 1024);
         std::size_t smem = (block_size / 32) * sizeof(T);
 
         // allocate temp buffer for partial results
@@ -244,7 +245,7 @@ namespace simbi::het::backend::cuda {
 
         constexpr std::uint64_t block_size = 256;
         std::uint64_t grid_size =
-            std::min((n + block_size - 1) / block_size, 1024ULL);
+            std::min<std::uint64_t>((n + block_size - 1) / block_size, 1024);
         std::size_t smem = (block_size / 32) * sizeof(T);
 
         // allocate temp buffer

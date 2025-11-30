@@ -11,7 +11,7 @@ namespace simbi::het::backend::cuda {
     template <typename T, typename BinaryOp>
     DEV T warp_reduce(T value, BinaryOp op)
     {
-        auto grp = dgrid::this_sub_group();
+        auto grp = het::this_sub_group();
 
         for (int offset = grp.size() / 2; offset > 0; offset /= 2) {
             T other = grp.shuffle_down(value, offset);
@@ -28,8 +28,8 @@ namespace simbi::het::backend::cuda {
         extern __shared__ char smem_bytes[];
         T* shared = reinterpret_cast<T*>(smem_bytes);
 
-        auto ctx = dgrid::this_thread();
-        auto grp = dgrid::this_sub_group();
+        auto ctx = dgrid::ctx();
+        auto grp = het::this_sub_group();
 
         // warp reduce
         T warp_val = warp_reduce(value, op);

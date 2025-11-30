@@ -106,7 +106,10 @@ namespace simbi::het::backend {
         // create token and record completion
         auto token = exec::token_t::create(backend_type_t::cuda);
         check_error<cuda_backend_t>(
-            cudaEventRecord(token.event_->native(), stream),
+            cudaEventRecord(
+                static_cast<cudaEvent_t>(token.event_->native()),
+                stream
+            ),
             "event record after copy"
         );
 
@@ -141,7 +144,10 @@ namespace simbi::het::backend {
 
         auto token = exec::token_t::create(backend_type_t::cuda);
         check_error<cuda_backend_t>(
-            cudaEventRecord(token.event_->native(), stream),
+            cudaEventRecord(
+                static_cast<cudaEvent_t>(token.event_->native()),
+                stream
+            ),
             "event record after fill"
         );
 
@@ -164,7 +170,13 @@ namespace simbi::het::backend {
                          : static_cast<int>(target_loc.device_id);
 
         check_error<cuda_backend_t>(
-            cudaMemPrefetchAsync(ptr, bytes, device, stream),
+            cudaMemPrefetchAsync(
+                ptr,
+                bytes,
+                cudaMemLocation{.id = device},
+                0,
+                static_cast<cudaStream_t>(stream)
+            ),
             "prefetch"
         );
     }

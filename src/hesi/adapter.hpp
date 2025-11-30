@@ -5,7 +5,7 @@
 // visible to user code. All backend dispatch is handled internally.
 //
 // Usage:
-//   #include "het/adapter.hpp"
+//   #include "hesi/adapter.hpp"
 //
 //   het::stream_t stream(het::backend_type_t::cuda, 0);
 //   het::executor_t exec(std::move(stream));
@@ -158,6 +158,9 @@ namespace simbi::het {
             int compute_capability_major;
             int compute_capability_minor;
             int multiprocessor_count;
+            int warp_size;
+            int bus_width;
+            int shared_memory_per_block;
         };
 
         inline device_info_t query_device(int device_id)
@@ -172,6 +175,10 @@ namespace simbi::het {
             info.compute_capability_major = prop.major;
             info.compute_capability_minor = prop.minor;
             info.multiprocessor_count     = prop.multiProcessorCount;
+            info.warp_size                = 32;
+            info.bus_width                = prop.memoryBusWidth;
+            info.shared_memory_per_block  = prop.sharedMemPerBlock;
+
 #elif defined(HIP_ENABLED)
             hipDeviceProp_t prop;
             hipGetDeviceProperties(&prop, device_id);
@@ -180,6 +187,9 @@ namespace simbi::het {
             info.compute_capability_major = prop.major;
             info.compute_capability_minor = prop.minor;
             info.multiprocessor_count     = prop.multiProcessorCount;
+            info.warp_size                = 64;
+            info.bus_width                = prop.memoryBusWidth;
+            info.shared_memory_per_block  = prop.sharedMemPerBlock;
 #else
             (void) device_id;
             info.name                     = "CPU";
@@ -262,16 +272,5 @@ namespace simbi::het {
     }
 
 }   // namespace simbi::het
-
-// -----------------------------------------------------------------------------
-// Backward Compatibility (optional - remove if not needed)
-// -----------------------------------------------------------------------------
-namespace simbi {
-    // allow simbi::executor_t as alias
-    using het::block_t;
-    using het::executor_t;
-    using het::stream_t;
-    using het::token_t;
-}   // namespace simbi
 
 #endif   // HET_ADAPTER_HPP

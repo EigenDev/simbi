@@ -145,6 +145,12 @@ namespace simbi::het::device {
                 ),
                 "get device properties"
             );
+            int clockRateKHz = 0;
+            cudaDeviceGetAttribute(
+                &clockRateKHz,
+                cudaDevAttrClockRate,
+                static_cast<int>(loc.device_id)
+            );
 
             props.name                    = cuda_props.name;
             props.total_memory            = cuda_props.totalGlobalMem;
@@ -161,8 +167,8 @@ namespace simbi::het::device {
             props.max_block_dims[2]    = cuda_props.maxThreadsDim[2];
             props.compute_capability_major = cuda_props.major;
             props.compute_capability_minor = cuda_props.minor;
-            props.clock_rate_khz           = cuda_props.clockRate;
-            props.memory_clock_rate_khz    = cuda_props.memoryClockRate;
+            props.clock_rate_khz           = clockRateKHz;
+            props.memory_clock_rate_khz    = clockRateKHz;
             props.memory_bus_width_bits    = cuda_props.memoryBusWidth;
             props.l2_cache_size            = cuda_props.l2CacheSize;
             props.unified_addressing       = cuda_props.unifiedAddressing;

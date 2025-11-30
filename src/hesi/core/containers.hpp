@@ -13,7 +13,7 @@ namespace simbi::het {
         T1 first;
         T2 second;
 
-        DUAL constexpr pair_t() = default;
+        constexpr pair_t() = default;
         DUAL constexpr pair_t(const T1& a, const T2& b) : first(a), second(b) {}
     };
 }   // namespace simbi::het

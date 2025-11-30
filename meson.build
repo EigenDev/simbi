@@ -70,7 +70,7 @@ general_dependencies = [
 #CPU Extension Module
 py3.extension_module(
   'cpu_ext',
-  ['src/bindings/cpu_binding.cpp'] + sources,
+  ['src/bindings/cpu_binding.cpp'] + sources + cpu_sources,
   include_directories: [all_inc],
   dependencies: general_dependencies,
   install: true,

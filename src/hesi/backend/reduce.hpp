@@ -155,7 +155,7 @@ namespace simbi::het::backend {
 #include "hesi/cpu/reduce.hpp"
 
 #ifdef CUDA_ENABLED
-#include "hesi/cuda/reduce.cuh"
+#include "hesi/backend/reduce.hpp"
 #endif
 
 #endif

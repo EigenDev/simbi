@@ -2,6 +2,7 @@
 #define HET_COMM_TRANSFER_OPS_HPP
 
 #include "compat.hpp"
+#include "containers/vector.hpp"
 #include "grid/domain.hpp"
 #include "hesi/exec/executor.hpp"
 #include "hesi/exec/for_each.hpp"
@@ -48,7 +49,7 @@ namespace simbi::het::comm {
             exec::gpu_t{},
             exec,
             region,
-            [=] DUAL(auto coord) {
+            [=] DUAL(iarray<Rank> coord) {
                 std::uint64_t idx = region.coord_to_linear(coord);
                 buffer[idx]       = view(coord);
             }
@@ -68,7 +69,7 @@ namespace simbi::het::comm {
             exec::gpu_t{},
             exec,
             region,
-            [=] DUAL(auto coord) {
+            [=] DUAL(iarray<Rank> coord) {
                 std::uint64_t idx = region.coord_to_linear(coord);
                 view(coord)       = buffer[idx];
             }
@@ -89,7 +90,7 @@ namespace simbi::het::comm {
             exec::gpu_t{},
             exec,
             src_region,
-            [=] DUAL(auto src_coord) mutable {
+            [=] DUAL(iarray<Rank> src_coord) mutable {
                 auto offset         = src_coord - src_region.start;
                 auto dst_coord      = dst_region.start + offset;
                 dst_view[dst_coord] = src_view(src_coord);

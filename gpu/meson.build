@@ -32,6 +32,14 @@ endif
 
 gpu_arch = get_option('gpu_arch').strip()
 
+gpu_sources = files(
+  '../src/hesi/cuda/event.cpp',
+  '../src/hesi/cuda/stream.cpp',
+  '../src/hesi/cuda/memory.cpp',
+  '../src/hesi/cuda/transfer.cpp',
+  '../src/hesi/cuda/reduce.cpp',
+)
+
 gpu_settings = {
   'nvidia': {
     'compiler': 'nvcc',
@@ -81,12 +89,14 @@ if hip.found() or cuda.found()
 
   # Compile GPU sources
   gpu_objs = []
-  foreach src : sources
+  foreach src : sources + gpu_sources
     gpu_objs += [
       custom_target(
-        fs.name(src) + '_gpu_obj',
+        # include parent directory name so targets are unique (e.g. cuda_event_o vs backend_event_o)
+        fs.name(fs.parent(src)) + '_' + fs.name(src) + '_gpu_obj',
         input: src,
-        output: '@BASENAME@.o',
+        # make produced object filename unique by prefixing with parent dir
+        output: fs.name(fs.parent(src)) + '_@BASENAME@.o',
         command: [
           gpu_compiler,
           include_flags,

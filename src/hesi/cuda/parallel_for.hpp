@@ -89,9 +89,11 @@ namespace simbi::het::backend::cuda {
         if (domain.empty()) {
             return;   // nothing to do
         }
+        const dim3 grid  = {policy.grid.x, policy.grid.y, policy.grid.z};
+        const dim3 block = {policy.block.x, policy.block.y, policy.block.z};
 
         parallel_for_kernel<Rank, Functor>
-            <<<policy.grid, policy.block, policy.shared_mem_bytes, stream>>>(
+            <<<grid, block, policy.shared_mem_bytes, stream>>>(
                 domain,
                 std::forward<Functor>(f)
             );

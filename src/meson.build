@@ -11,10 +11,6 @@ sources = files(
   'hesi/backend/memory.cpp',
   'hesi/backend/stream.cpp',
   'hesi/backend/transfer.cpp',
-  'hesi/cpu/event.cpp',
-  'hesi/cpu/memory.cpp',
-  'hesi/cpu/stream.cpp',
-  'hesi/cpu/transfer.cpp',
   'io/console/statistics.cpp',
   'io/exceptions.cpp',
   'io/tabulate/table.cpp',
@@ -22,4 +18,11 @@ sources = files(
   'physics/em/zero.cpp',
   'physics/ib/factory.cpp',
   'utility/helpers.cpp',
+)
+
+cpu_sources = files(
+'hesi/cpu/event.cpp',
+'hesi/cpu/memory.cpp',
+'hesi/cpu/stream.cpp',
+'hesi/cpu/transfer.cpp',
 )

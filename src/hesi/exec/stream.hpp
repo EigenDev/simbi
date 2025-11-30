@@ -21,7 +21,7 @@ namespace simbi::het::exec {
             backend_type_t backend = backend_type_t::cpu,
             std::int32_t device_id = 0
         )
-            : backend_(backend), locality_(backend, device_id)
+            : backend_(backend), locality_({backend, device_id})
         {
             if (backend_ == backend_type_t::cpu) {
                 handle_        = nullptr;

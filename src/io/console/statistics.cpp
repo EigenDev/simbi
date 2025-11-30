@@ -1,5 +1,6 @@
 #include "io/console/statistics.hpp"
 #include "compat.hpp"
+#include "hesi/device/queries.hpp"
 #include "io/tabulate/table.hpp"
 
 #include <cstddef>
@@ -12,7 +13,6 @@
 #include <vector>
 
 #if GPU_ENABLED
-#include "het/adapter.hpp"
 real gpu_theoretical_bw = 1.0;
 #endif
 
@@ -350,6 +350,7 @@ namespace simbi {
         // display system information using PrettyTable
         void display_system_info()
         {
+            using namespace het::device;
             std::cout << std::string(104, '=') << "\n";
 
             // initialize common settings
@@ -512,7 +513,8 @@ namespace simbi {
                     io::table_factory_t::create_system_info_table();
                 gpu_table.set_title("GPU Information");
 
-                auto dev_count = hetero::device::get_device_count();
+                auto dev_count = get_device_count(het::backend_type_t::cuda);
+                auto loc       = het::locality_t(het::backend_type_t::cuda, 0);
 
                 if (dev_count == 0) {
                     // set table header for no GPU case
@@ -528,17 +530,17 @@ namespace simbi {
                     gpu_table.set_column_alignment(1, io::Alignment::Left);
 
                     // we'll show info for the first GPU
-                    auto props = hetero::device::get_device_properties(0);
+                    auto props = get_properties(loc);
 
                     // add GPU details
                     gpu_table.add_row({"Device Name", props.name});
                     gpu_table.add_row(
                         {"Compute Capability",
-                         std::to_string(props.major) + "." +
-                             std::to_string(props.minor)}
+                         std::to_string(props.compute_capability_major) + "." +
+                             std::to_string(props.compute_capability_minor)}
                     );
                     gpu_table.add_row(
-                        {"Global Memory", format_bytes(props.totalGlobalMem)}
+                        {"Global Memory", format_bytes(props.total_memory)}
                     );
 
                     std::ostringstream mem_clock;
@@ -554,40 +556,40 @@ namespace simbi {
 
                     gpu_table.add_row(
                         {"Memory Bus Width",
-                         std::to_string(props.memoryBusWidth) + " bits"}
+                         std::to_string(props.memory_bus_width_bits) + " bits"}
                     );
 
                     std::ostringstream bandwidth;
                     bandwidth << std::fixed << std::setprecision(1)
                               << (2.0 * mem_clock_rate *
-                                  (props.memoryBusWidth / 8) / 1.0e6)
+                                  (props.memory_bus_width_bits / 8) / 1.0e6)
                               << " GB/s";
                     gpu_table.add_row({"Peak Bandwidth", bandwidth.str()});
 
                     gpu_table.add_row(
                         {"Shared Memory/Block",
-                         format_bytes(props.sharedMemPerBlock)}
+                         format_bytes(props.shared_memory_per_block)}
                     );
                     gpu_table.add_row(
-                        {"Warp Size", std::to_string(props.warpSize)}
+                        {"Warp Size", std::to_string(props.warp_size)}
                     );
                     gpu_table.add_row(
                         {"Max Threads/Block",
-                         std::to_string(props.maxThreadsPerBlock)}
+                         std::to_string(props.max_threads_per_block)}
                     );
 
                     std::ostringstream block_dim;
-                    block_dim << "[" << props.maxThreadsDim[0] << ", "
-                              << props.maxThreadsDim[1] << ", "
-                              << props.maxThreadsDim[2] << "]";
+                    block_dim << "[" << props.max_block_dims[0] << ", "
+                              << props.max_block_dims[1] << ", "
+                              << props.max_block_dims[2] << "]";
                     gpu_table.add_row(
                         {"Max Block Dimensions", block_dim.str()}
                     );
 
                     std::ostringstream grid_dim;
-                    grid_dim << "[" << props.maxGridSize[0] << ", "
-                             << props.maxGridSize[1] << ", "
-                             << props.maxGridSize[2] << "]";
+                    grid_dim << "[" << props.max_grid_size[0] << ", "
+                             << props.max_grid_size[1] << ", "
+                             << props.max_grid_size[2] << "]";
                     gpu_table.add_row({"Max Grid Dimensions", grid_dim.str()});
                 }
 

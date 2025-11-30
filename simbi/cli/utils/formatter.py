@@ -6,4 +6,4 @@
 try:
     from rich_argparse import RichHelpFormatter as HelpFormatter
 except ImportError:
-    pass
+    from argparse import HelpFormatter

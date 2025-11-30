@@ -9,8 +9,8 @@
 #include "execution/executor.hpp"
 #include "execution/future.hpp"
 #include "field.hpp"
-#include "het/adapter.hpp"
-#include "het/core/types.hpp"
+#include "hesi/adapter.hpp"
+#include "hesi/core/types.hpp"
 #include "memory/device.hpp"
 
 #include <algorithm>
