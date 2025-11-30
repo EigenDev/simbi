@@ -23,7 +23,7 @@
 #include "grid/field.hpp"
 // #include "hesi/adapter.hpp"
 #include "hesi/core/types.hpp"
-#include "physics/em/ct_updater.hpp"
+#include "physics/em/api.hpp"
 #include "physics/hydro/physics.hpp"
 #include "utility/enums.hpp"
 
@@ -221,10 +221,13 @@ namespace simbi::ecs::creation {
                         );
                         auto prims = fields.prim[active_domain];
                         prims      = prims
-                                    .enum_map([bavg](auto coord, auto p) {
-                                        p.mag = bavg(coord);
-                                        return p;
-                                    })
+                                    .zip(
+                                        bavg,
+                                        [](auto p, auto bmean) {
+                                            p.mag = bmean;
+                                            return p;
+                                        }
+                                    )
                                     .with(exec);
                     }
                 );

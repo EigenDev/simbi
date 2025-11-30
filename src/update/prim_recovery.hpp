@@ -4,6 +4,7 @@
 #include "compat.hpp"
 #include "physics/hydro/conversion.hpp"
 
+#include <iostream>
 namespace simbi::hydro {
     /**
      *

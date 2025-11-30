@@ -26,7 +26,7 @@
 #include "grid/amr/flux_correction.hpp"
 #include "grid/connectivity.hpp"
 #include "io/exceptions.hpp"
-#include "physics/em/ct_updater.hpp"
+#include "physics/em/api.hpp"
 #include "physics/hydro/boundary_policy.hpp"
 #include "physics/ib/diagnostics.hpp"
 #include "update/prim_recovery.hpp"
@@ -206,7 +206,7 @@ namespace simbi::ecs {
             }
 
             // exchange halos between partitions
-            sim.exchange_halos(lvl);
+            // sim.exchange_halos(lvl);
         }
 
       private:
@@ -437,9 +437,6 @@ namespace simbi::ecs {
             auto& sources = sim.sources();
             const auto dt = meta.level_dts[lvl];
 
-            // compiles away when not MHD
-            // computes edge E-fields from fluxes and primitives
-            // using states W^n and F^n
             if constexpr (Sim::is_mhd) {
                 compute_efield_system_t{}(sim, lvl);
             }
@@ -467,26 +464,13 @@ namespace simbi::ecs {
                              .with(exec);
 
                 if constexpr (Sim::is_mhd) {
-                    // update magnetic fields using the STORED E-fields
-                    // also handles energy correction
-                    em::update_magnetic_fields_from_efield(
+                    em::update_magnetic_fields(
                         exec,
                         fields,
                         block_geo,
                         part.face_domains,
-                        part.edge_domains,
                         part.owned_domain,
                         dt
-                    );
-
-                    // correct energy density for updated B field
-                    em::update_energy_density(
-                        exec,
-                        fields.cons,
-                        fields.bfield,
-                        block_geo,
-                        part.face_domains,
-                        part.owned_domain
                     );
                 }
             }
@@ -509,7 +493,6 @@ namespace simbi::ecs {
             auto& meta    = sim.metadata();
             auto& sources = sim.sources();
             const auto dt = meta.level_dts[lvl];
-
             if constexpr (Sim::is_mhd) {
                 compute_efield_system_t{}(sim, lvl);
             }
@@ -523,11 +506,10 @@ namespace simbi::ecs {
                 if (!sim.has_workspace(lvl, pp)) {
                     sim.create_workspace(lvl, pp);
                 }
-                auto& workspace = sim.workspace(lvl, pp);
+                auto& ws = sim.workspace(lvl, pp);
 
                 // store u^n
-                workspace.u_n =
-                    fields.cons.map([](auto u) { return u; }).with(exec);
+                ws.u_n = fields.cons.map([](auto u) { return u; }).with(exec);
 
                 // compute L(u^n)
                 auto k1 = cfd::godunov_op(
@@ -547,29 +529,13 @@ namespace simbi::ecs {
                              .with(exec);
 
                 if constexpr (Sim::is_mhd) {
-                    // update magnetic fields via constrained transport (stage
-                    // 1)
-                    // update magnetic fields using the stored E-fields
-                    // also handles energy correction
-                    em::update_magnetic_fields_from_efield(
-                        exec,
-                        fields,
-                        block_geo,
-                        part.face_domains,
-                        part.edge_domains,
-                        part.owned_domain,
-                        dt
-                    );
-
-                    // correct energy density for updated B field
-                    em::update_energy_density(
-                        exec,
-                        fields.cons,
-                        fields.bfield,
-                        block_geo,
-                        part.face_domains,
-                        part.owned_domain
-                    );
+                    // save E^n for rk2 stage 2
+                    for (std::uint64_t dd = 0; dd < Sim::rank; ++dd) {
+                        ws.e_n[dd] =
+                            fields.efield[dd].map(
+                                                 [](auto e) { return e; }
+                            ).with(exec);
+                    }
                 }
             }
         }
@@ -593,14 +559,15 @@ namespace simbi::ecs {
             const auto dt = meta.level_dts[lvl];
 
             if constexpr (Sim::is_mhd) {
+                // compute E^{*}
                 compute_efield_system_t{}(sim, lvl);
             }
 
             for (std::uint64_t pp = 0; pp < sim.num_partitions(lvl); ++pp) {
-                auto& fields    = sim.partition_hydro(lvl, pp);
-                auto& part      = sim.partition(lvl, pp);
-                auto& workspace = sim.workspace(lvl, pp);
-                auto exec       = sim.partition_executor(lvl, pp);
+                auto& fields = sim.partition_hydro(lvl, pp);
+                auto& part   = sim.partition(lvl, pp);
+                auto& ws     = sim.workspace(lvl, pp);
+                auto exec    = sim.partition_executor(lvl, pp);
 
                 // compute L(u*)
                 auto k2 = cfd::godunov_op(
@@ -612,7 +579,7 @@ namespace simbi::ecs {
                 );
 
                 // u^{n+1} = 0.5 * u^n + 0.5 * (u* + dt * L(u*))
-                auto u_n    = workspace.u_n[part.owned_domain];
+                auto u_n    = ws.u_n[part.owned_domain];
                 auto u_star = fields.cons[part.owned_domain];
 
                 u_n = u_n.enum_map(
@@ -624,32 +591,30 @@ namespace simbi::ecs {
                 ).with(exec);
 
                 // copy result back
-                fields.cons =
-                    workspace.u_n.map([](auto u) { return u; }).with(exec);
+                fields.cons = ws.u_n.map([](auto u) { return u; }).with(exec);
 
                 if constexpr (Sim::is_mhd) {
-                    // update magnetic fields via constrained transport (stage
-                    // 2)
-                    // update magnetic fields using the stored E-fields
-                    // also handles energy correction
-                    // em::update_magnetic_fields_from_efield(
-                    //     exec,
-                    //     fields,
-                    //     block_geo,
-                    //     part.face_domains,
-                    //     part.edge_domains,
-                    //     part.owned_domain,
-                    //     dt
-                    // );
+                    // compute E^{n+1/2} = 0.5 * (E^n + E^*)
+                    for (std::uint64_t dd = 0; dd < Sim::rank; ++dd) {
+                        auto en = fields.efield[dd];
+                        en      = ws.e_n[dd]
+                                 .zip(
+                                     en,
+                                     [](auto e_n, auto e_star) {
+                                         return 0.5 * (e_n + e_star);
+                                     }
+                                 )
+                                 .with(exec);
+                    }
 
-                    // correct energy density for updated B field
-                    em::update_energy_density(
+                    // update magnetic fields using rk2 E-fields
+                    em::update_magnetic_fields(
                         exec,
-                        fields.cons,
-                        fields.bfield,
+                        fields,
                         block_geo,
                         part.face_domains,
-                        part.owned_domain
+                        part.owned_domain,
+                        dt
                     );
                 }
             }

@@ -219,7 +219,7 @@ namespace simbi {
 
     constexpr auto comp_wave_speed = wave_speed_estimate_t::MIGNONE_AND_BODO_05;
     constexpr auto comp_ct_type    = ct_algo_t ::CONTACT;
-    constexpr auto comp_slope_limiter = LIMITER::MINMOD;
+    constexpr auto comp_slope_limiter = LIMITER::VAN_LEER;
 
     // register BiMaps for enum serialization and deserialization
     REGISTER_ENUM_BIMAP(

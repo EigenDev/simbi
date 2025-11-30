@@ -8,7 +8,6 @@
 #include "ct_geom.hpp"
 #include "functional/fp.hpp"
 #include "geometry/metrics.hpp"
-#include "grid/domain.hpp"
 #include "physics/em/electromagnetism.hpp"
 #include "utility/enums.hpp"
 
@@ -133,12 +132,11 @@ namespace simbi::em {
             coord[Permutation::vertical_axis] += v_offset;
             return to_array_index_coord(coord);
         };
-        constexpr auto half = 1;
         return vector_t{
-          make_flux_coord(half, +1),
-          make_flux_coord(half, -1),
-          make_flux_coord(+1, half),
-          make_flux_coord(-1, half)
+          make_flux_coord(0, +1),
+          make_flux_coord(0, -1),
+          make_flux_coord(+1, 0),
+          make_flux_coord(-1, 0)
         };
     }
 
@@ -154,9 +152,9 @@ namespace simbi::em {
         };
 
         return vector_t{
-          make_prim_coord(+1, +1),
-          make_prim_coord(-1, +1),
-          make_prim_coord(+1, -1),
+          make_prim_coord(0, 0),
+          make_prim_coord(-1, 0),
+          make_prim_coord(0, -1),
           make_prim_coord(-1, -1)
         };
     }
@@ -300,7 +298,7 @@ namespace simbi::em {
               dt,
               geometry
           ),
-          grid::extents(face_domain[comp].shape())
+          face_domain[comp]
         };
     }
 
@@ -361,7 +359,7 @@ namespace simbi::em {
             bfield[0][face_domains[0]],
             geometry
           },
-          grid::extents(cell_domain.shape())
+          cell_domain
         };
     }
 
@@ -559,13 +557,11 @@ namespace simbi::em {
         std::uint64_t EdgeComp,
         typename Executor,
         typename HydroState,
-        typename EdgeDomain,
         typename FaceDomains,
         typename Domain>
     void compute_edge_efield_component(
         Executor& exec,
         HydroState& state,
-        const EdgeDomain& edge_domain,
         const FaceDomains& face_domains,
         const Domain& cell_domain
     )
@@ -582,7 +578,7 @@ namespace simbi::em {
             std::decay_t<decltype(fluxes)>,
             std::decay_t<decltype(prims)>>;
 
-        auto efield_view = state.efield[EdgeComp][edge_domain];
+        auto efield_view = state.efield[EdgeComp];
 
         efield_view = efield_view
                           .space_map([op = op_t{fluxes, prims}](auto coord) {
@@ -595,13 +591,11 @@ namespace simbi::em {
     template <
         typename Executor,
         typename HydroState,
-        typename EdgeDomains,
         typename FaceDomains,
         typename Domain>
     void compute_edge_efields(
         Executor& exec,
         HydroState& state,
-        const EdgeDomains& edge_domains,
         const FaceDomains& face_domains,
         const Domain& cell_domain
     )
@@ -609,21 +603,18 @@ namespace simbi::em {
         compute_edge_efield_component<0>(
             exec,
             state,
-            edge_domains[0],
             face_domains,
             cell_domain
         );
         compute_edge_efield_component<1>(
             exec,
             state,
-            edge_domains[1],
             face_domains,
             cell_domain
         );
         compute_edge_efield_component<2>(
             exec,
             state,
-            edge_domains[2],
             face_domains,
             cell_domain
         );

@@ -347,7 +347,7 @@ namespace simbi::helpers {
     template <typename T>
     DUAL bool goes_to_zero(T val)
     {
-        return (val * val) < global::epsilon;
+        return std::abs(val) < global::epsilon;
     }
 
     template <typename T>
@@ -675,10 +675,10 @@ namespace simbi::helpers {
         T p = c - b * b / 3.0;
         T q = 2.0 * b * b * b / 27.0 - b * c / 3.0 + d;
 
-        if (p == 0.0) {
+        if (goes_to_zero(p)) {
             return std::pow(q, 1.0 / 3.0);
         }
-        if (q == 0.0) {
+        if (goes_to_zero(q)) {
             return 0.0;
         }
 
@@ -712,7 +712,7 @@ namespace simbi::helpers {
                 0.0625 * b * b * c,
             -0.125 * q * q
         );
-        if (q == 0.0) {
+        if (goes_to_zero(q)) {
             if (m < 0.0) {
                 return 0;
             };
@@ -727,7 +727,7 @@ namespace simbi::helpers {
                 res[nroots++] = -0.25 * b - 0.5 * (sqrt_2m + delta);
             }
 
-            if (-m - p == 0.0) {
+            if (goes_to_zero(-m - p)) {
                 res[nroots++] = -0.25 * b - 0.5 * sqrt_2m;
                 res[nroots++] = -0.25 * b + 0.5 * sqrt_2m;
             }
@@ -761,7 +761,7 @@ namespace simbi::helpers {
 
         constexpr auto zero = static_cast<std::int64_t>(0);
         if constexpr (platform::is_gpu) {
-            iterativeQuickSort(res, zero, static_cast<std::int64_t>(3));
+            iterativeQuickSort(res, zero, nroots - 1);
         }
         else {
             recursiveQuickSort(res, zero, nroots - 1);

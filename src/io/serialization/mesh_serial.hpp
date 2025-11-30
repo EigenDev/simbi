@@ -46,7 +46,7 @@ namespace simbi::io {
             write_dataset(g, "block_size", block_size, dims, policy);
 
             // ghost width
-            write_attribute(g, "ghost_width", mesh.ghost_width);
+            write_attribute(g, "halo_width", mesh.halo_width);
 
             // geometry config
             write_geometry_config(g, mesh.geometry, policy);
@@ -73,7 +73,7 @@ namespace simbi::io {
             }
 
             // ghost width
-            mesh.ghost_width = read_attribute<std::int64_t>(g, "ghost_width");
+            mesh.halo_width = read_attribute<std::int64_t>(g, "halo_width");
 
             // geometry config
             mesh.geometry = read_geometry_config(g);

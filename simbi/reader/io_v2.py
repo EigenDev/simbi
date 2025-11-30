@@ -368,7 +368,7 @@ def read_mesh_geometry(mesh_group: h5py.Group) -> Result[MeshGeometry, str]:
     """read mesh configuration."""
     try:
         global_cells = tuple(mesh_group["global_cells"][()])
-        halo_radius = int(mesh_group.attrs.get("ghost_width", 2))
+        halo_radius = int(mesh_group.attrs.get("halo_width", 2))
 
         # read geometry
         if "geometry" not in mesh_group:

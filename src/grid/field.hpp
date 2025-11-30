@@ -189,7 +189,7 @@ namespace simbi::grid {
 
         // default
         field_t() = default;
-        // allocates memory for domain + ghost_width
+        // allocates memory for domain + halo_width
         field_t(
             const domain_t<Rank>& domain,
             het::locality_t loc = het::locality_t::host()

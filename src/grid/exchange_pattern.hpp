@@ -29,17 +29,17 @@ namespace simbi::grid {
             const domain_t<Rank>& geom,
             std::int64_t dim,
             side_t side,
-            std::int64_t ghost_width
+            std::int64_t halo_width
         )
         {
             // ... (same as before) ...
             domain_t<Rank> slice = geom;
             if (side == side_t::right) {
-                slice.start[dim] = geom.fin[dim] - ghost_width;
+                slice.start[dim] = geom.fin[dim] - halo_width;
                 slice.fin[dim]   = geom.fin[dim];
             }
             else {
-                slice.fin[dim]   = geom.start[dim] + ghost_width;
+                slice.fin[dim]   = geom.start[dim] + halo_width;
                 slice.start[dim] = geom.start[dim];
             }
             return slice;
@@ -48,7 +48,7 @@ namespace simbi::grid {
         template <std::uint64_t Rank>
         static std::vector<transfer_op_t<Rank>> create(
             const skeleton_t<Rank>& skeleton,
-            std::int64_t ghost_width,
+            std::int64_t halo_width,
             const amr::geometry_calculator_t& geo_calc   // NEW dependency
         )
         {
@@ -66,12 +66,8 @@ namespace simbi::grid {
                         }
 
                         // my full face slice (in my level coords)
-                        auto my_slice = compute_halo_slice(
-                            info.geometry,
-                            d,
-                            s,
-                            ghost_width
-                        );
+                        auto my_slice =
+                            compute_halo_slice(info.geometry, d, s, halo_width);
 
                         for (const auto& neighbor_id : conn.neighbors) {
                             transfer_op_t<Rank> op;

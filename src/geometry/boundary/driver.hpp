@@ -89,16 +89,16 @@ namespace simbi::geometry {
         // operator()
         // signature matches enum_map: (coordinate, value) -> new_value
         // ---------------------------------------------------------------------
-        // idx: the ghost cell index (provided by enum_map)
+        // idx: the ghost cell index
         // interior_state: the state at the nearest active edge (provided by
         // remap)
         DUAL T
         operator()(const iarray<Rank>& idx, const T& interior_state) const
         {
-            // 1. geometry: convert index to physical position
+            // geometry: convert index to physical position
             auto phys_pos = geometry.centroid(idx);
 
-            // 2. physics: execute the vm
+            // physics: execute the vm
             // apply(position, interior_state, time)
             return vm.apply(phys_pos, interior_state, time);
         }
@@ -138,13 +138,13 @@ namespace simbi::geometry {
             // -----------------------------------------------------------------
             // dimensional cascade: x -> y -> z
             // -----------------------------------------------------------------
-            for (std::uint64_t dd = 0; dd < Rank; ++dd) {
+            for (std::int64_t dd = Rank - 1; dd >= 0; --dd) {
 
                 // define working extent (cascade logic)
                 grid::domain_t<Rank> transverse_domain = geometry;
                 const auto& allocated_domain           = field.domain();
 
-                for (std::uint64_t k = 0; k < dd; ++k) {
+                for (std::uint64_t k = dd + 1; k < Rank; ++k) {
                     transverse_domain.start[k] = allocated_domain.start[k];
                     transverse_domain.fin[k]   = allocated_domain.fin[k];
                 }
@@ -198,7 +198,11 @@ namespace simbi::geometry {
                     // depth > 1.
                     if (global_dims[dd] == 1) {
                         execute_static(
-                            periodic_map_t{dd, geometry.start[dd], 1}
+                            periodic_map_t{
+                              dd,
+                              geometry.start[dd],
+                              global_dims[dd]
+                            }
                         );
                         return;
                     }
@@ -213,10 +217,53 @@ namespace simbi::geometry {
                             break;
                         }
                         case grid::boundary_type_t::reflect: {
+                            // check if this is a spherical pole boundary
+                            bool is_pole                            = false;
+                            constexpr std::uint64_t theta_array_dim = Rank - 2;
+
+                            if constexpr (Rank >= 2) {
+                                if constexpr (is_dynamic_context_c<Context>) {
+                                    if (conn.has_metric_info() &&
+                                        dd == theta_array_dim) {
+                                        is_pole = conn.is_pole();
+                                    }
+                                }
+                            }
+
                             std::int64_t pivot = (side == grid::side_t::left)
                                                      ? geometry.start[dd]
                                                      : geometry.fin[dd];
-                            execute_static(mirror_map_t{dd, pivot});
+
+                            if (is_pole) {
+                                // use spherical pole map for proper geometry
+                                std::int64_t phi_start = 0;
+                                std::int64_t phi_len   = 0;
+
+                                if constexpr (Rank >= 3) {
+                                    constexpr std::uint64_t phi_dim = Rank - 3;
+                                    phi_start = geometry.start[phi_dim];
+                                    phi_len   = global_dims[phi_dim];
+                                }
+
+                                auto pole_map = spherical_pole_map_t<Rank>{
+                                  pivot,
+                                  phi_start,
+                                  phi_len
+                                };
+
+                                auto phys_op = [=] DUAL(const T& val) {
+                                    return physics_policy
+                                        .apply(val, dd, side, bc_type);
+                                };
+
+                                field[ghost_box] = field[ghost_box]
+                                                       .remap(pole_map)
+                                                       .map(phys_op)
+                                                       .with(exec);
+                            }
+                            else {
+                                execute_static(mirror_map_t{dd, pivot});
+                            }
                             break;
                         }
                         case grid::boundary_type_t::periodic: {

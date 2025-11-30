@@ -411,6 +411,13 @@ namespace simbi::ecs {
                 fields.cons.locality()
             );
 
+            for (std::uint64_t dd = 0; dd < Rank; ++dd) {
+                ws.e_n[dd] = grid::field_t<real, Rank>(
+                    part.edge_domains[dd],
+                    fields.cons.locality()
+                );
+            }
+
             registry.add<workspace_t>(decomp.partition_entities[part_id], ws);
         }
 

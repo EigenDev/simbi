@@ -24,7 +24,7 @@ namespace simbi::em {
         return new_flux;
     }
 
-    template <is_mhd_primitive_c prim_t, std::uint64_t Rank = prim_t::rank>
+    template <is_mhd_primitive_c prim_t>
     DEV constexpr auto electric_field(const prim_t& prim)
     {
         return -vecops::cross(prim.vel, prim.mag);

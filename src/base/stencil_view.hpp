@@ -22,7 +22,7 @@ namespace simbi::base::stencils {
         using stencil_values_t             = vector_t<value_type, stencil_size>;
 
         const field_type& field_;
-        iarray<Rank> base_coord_;
+        iarray<Rank> face_coord_;
         std::uint64_t direction_;
 
         stencil_values_t DEV left_values() const
@@ -50,11 +50,11 @@ namespace simbi::base::stencils {
         {
             stencil_values_t values;
             for (std::uint64_t ii = 0; ii < stencil_size; ++ii) {
-                iarray<Rank> coord = base_coord_;
+                iarray<Rank> cell_coord = face_coord_;
                 for (std::uint64_t d = 0; d < Rank; ++d) {
-                    coord[d] += pattern[ii][d];
+                    cell_coord[d] += pattern[ii][d];
                 }
-                values[ii] = field_(coord);
+                values[ii] = field_(cell_coord);
             }
             return values;
         }

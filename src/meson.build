@@ -19,6 +19,7 @@ sources = files(
   'io/exceptions.cpp',
   'io/tabulate/table.cpp',
   'physics/em/contact.cpp',
+  'physics/em/zero.cpp',
   'physics/ib/factory.cpp',
   'utility/helpers.cpp',
 )

@@ -154,34 +154,19 @@ class SimData:
             field = partition.hydro.primitives[field_name]
             return field.interior(halo).data
 
-        # handle face-centered magnetic fields - return raw (will be squeezed by viz)
+        # handle face-centered magnetic fields - return raw face data
+        # averaging to cell centers is handled by viz pipeline
         if (
             partition.hydro.has_magnetic
             and field_name in partition.hydro.magnetic
         ):
-            # return face-centered data as-is (viz will handle dimension squeezing)
             return partition.hydro.magnetic[field_name].data
 
-        # handle derived fields (b1_mean, b2_mean, b3_mean)
+        # legacy support for _mean suffix (now handled by viz pipeline)
         if field_name.endswith("_mean") and partition.hydro.has_magnetic:
             base_name = field_name.replace("_mean", "")
             if base_name in partition.hydro.magnetic:
-                # magnetic fields have no ghosts - just average
-                b_faces = partition.hydro.magnetic[base_name].data
-
-                if base_name == "b1":
-                    # b1: (nz, ny, nx+1) -> (nz, ny, nx)
-                    b_cells = 0.5 * (b_faces[..., 1:] + b_faces[..., :-1])
-                elif base_name == "b2":
-                    # b2: (nz, ny+1, nx) -> (nz, ny, nx)
-                    b_cells = 0.5 * (b_faces[:, 1:, :] + b_faces[:, :-1, :])
-                elif base_name == "b3":
-                    # b3: (nz+1, ny, nx) -> (nz, ny, nx)
-                    b_cells = 0.5 * (b_faces[1:, :, :] + b_faces[:-1, :, :])
-                else:
-                    raise ValueError(f"unknown magnetic field: {base_name}")
-
-                return b_cells
+                return partition.hydro.magnetic[base_name].data
 
         raise KeyError(f"field '{field_name}' not found")
 

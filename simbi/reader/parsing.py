@@ -344,7 +344,7 @@ def parse_mesh_config_v2(
         bounds_min.insert(0, 0.0)
         bounds_max.insert(0, 1.0)
 
-    halo_radius = int(mesh_data.get("ghost_width", attrs.get("halo_radius", 0)))
+    halo_radius = int(mesh_data.get("halo_width", attrs.get("halo_radius", 0)))
 
     # spacing types from metadata
     spacing_types = (

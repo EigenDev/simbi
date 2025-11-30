@@ -27,8 +27,8 @@ int main()
     grid::domain_t<1> alloc_domain({-1}, {11});
     grid::field_t<real, 1> u(alloc_domain, loc);
 
-    std::int64_t ghost_width = 1;
-    auto interior            = alloc_domain.contract(ghost_width);
+    std::int64_t halo_width = 1;
+    auto interior           = alloc_domain.contract(halo_width);
 
     u           = compute::constant(alloc_domain, 0.0).with(exec);
     u[interior] = compute::constant(interior, 1.0).with(exec);

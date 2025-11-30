@@ -265,6 +265,7 @@ namespace simbi::evolution {
             }
 
             // === stage 2: u* -> u^{n+1} ===
+            ghost_fill_system_t{}(sim, lvl);
             c2p_system_t{}(sim, lvl);
             flux_system_t{
               .accumulate_fluxes = (lvl > 0)

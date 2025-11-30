@@ -236,6 +236,9 @@ namespace simbi::ecs {
         // state at the beginning of the timestep
         grid::field_t<Conserved, Rank> u_n;
 
+        // efield at beginning of the timestep
+        vector_t<grid::field_t<real, Rank>, Rank> e_n;
+
         // intermediate state for multi-stage methods
         grid::field_t<Conserved, Rank> u_star;
     };

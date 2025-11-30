@@ -24,17 +24,15 @@ namespace simbi::grid::creation {
     template <std::uint64_t Rank>
     struct mesh_setup_t {
 
-        static mesh_config_t<Rank> create_config(
-            const ecs::mesh_blueprint_t<Rank>& bp,
-            std::int64_t ghost_width = 2
-        )
+        static mesh_config_t<Rank>
+        create_config(const ecs::mesh_blueprint_t<Rank>& bp)
         {
             using namespace simbi::geometry;
             mesh_config_t<Rank> config;
 
             // topology
             config.global_cells = bp.active_resolution;
-            config.ghost_width  = ghost_width;
+            config.halo_width   = bp.halo_width;
 
             // boundaries
             // blueprint provides a vector of strings.

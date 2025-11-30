@@ -655,8 +655,8 @@ namespace simbi::ecs::builders {
                 }
             }
 
-            cfg.block_size  = cfg.global_cells;
-            cfg.ghost_width = mesh_bp_.halo_width;
+            cfg.block_size = cfg.global_cells;
+            cfg.halo_width = mesh_bp_.halo_width;
 
             // boundaries
             // blueprint provides strings packed as [left, right, left,

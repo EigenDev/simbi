@@ -60,7 +60,7 @@ class MagneticShockTube(SimbiProblem):
 
     # domain
     resolution: tuple[int, int, int] = ProblemParam(
-        (100, 1, 1), cli=True, description="grid resolution"
+        (1600, 1, 1), cli=True, description="grid resolution"
     )
     bounds: list[tuple[float, float]] = ProblemParam(
         [(0.0, 1.0)], description="domain boundaries"
@@ -72,7 +72,7 @@ class MagneticShockTube(SimbiProblem):
 
     # numerics
     solver: Solver = ProblemParam(
-        Solver.HLLD, description="solver type for mhd"
+        Solver.HLLE, description="solver type for mhd"
     )
     x1_spacing: CellSpacing = ProblemParam(
         CellSpacing.LINEAR, description="grid spacing in x1 direction"

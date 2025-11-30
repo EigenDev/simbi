@@ -41,6 +41,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <iostream>
 
 namespace simbi::ecs::creation {
     // -----------------------------------------------------------------------------
@@ -233,6 +234,15 @@ namespace simbi::ecs::creation {
                 // mpi rank info
                 part.rank_id.node   = decomp_bp.mpi_rank;
                 part.rank_id.device = part.device_id;
+
+                // std::cout << "Created partition " << part_idx << " on device
+                // "
+                //           << part.device_id << " with "
+                //           << "owned domain " << part.owned_domain << " and "
+                //           << "allocated domain " << part.allocated_domain
+                //           << "edge domain " << part.edge_domains
+                //           << "face domain " << part.face_domains << "\n";
+                // std::cin.get();
 
                 decomp.partitions.push_back(std::move(part));
                 ++part_idx;

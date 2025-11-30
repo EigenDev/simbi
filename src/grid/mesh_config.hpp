@@ -52,7 +52,7 @@ namespace simbi::grid {
         boundary_set_t<Rank> boundaries;
 
         // ghost cells
-        std::int64_t ghost_width = 2;
+        std::int64_t halo_width;
     };
 
 }   // namespace simbi::grid

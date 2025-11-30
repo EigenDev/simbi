@@ -37,7 +37,7 @@ int main()
 
     // setup: 4x4 active interior with 1-cell ghost ring
     grid::domain_t<2> alloc_domain{{-1, -1}, {5, 5}};
-    std::uint64_t ghost_width = 1;
+    std::uint64_t halo_width = 1;
 
     auto backend = het::info::is_gpu ? het::backend_type_t::cuda
                                      : het::backend_type_t::cpu;
@@ -59,7 +59,7 @@ int main()
     // configure block with mixed boundaries
     block_info_t<2> block;
     block.id       = patch_id_t{0, {0, 0, 0}};
-    block.geometry = alloc_domain.contract(ghost_width);
+    block.geometry = alloc_domain.contract(halo_width);
     block.set_boundary(0, side_t::left, boundary_type_t::reflect);
     block.set_boundary(0, side_t::right, boundary_type_t::outflow);
     block.set_boundary(1, side_t::left, boundary_type_t::periodic);

@@ -2,7 +2,7 @@
 #define CFD_OPS_HPP
 
 // =============================================================================
-// ncfd.hpp
+// cfd.hpp
 //
 // cfd operations using block_geometry_t instead of mesh_config.
 // all operations are lazy computations that compose with the field algebra.
@@ -19,6 +19,7 @@
 #include "containers/state_ops.hpp"
 #include "containers/vector.hpp"
 #include "grid/domain.hpp"
+#include "io/exceptions.hpp"
 #include "physics/ib/body.hpp"
 #include "physics/ib/body_delta.hpp"
 #include "physics/ib/diagnostics.hpp"

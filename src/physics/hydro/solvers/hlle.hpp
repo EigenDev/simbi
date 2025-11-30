@@ -10,6 +10,8 @@
 #include "physics/hydro/wave_speeds.hpp"
 #include "utility/enums.hpp"
 
+#include <iostream>
+
 namespace simbi::hydro {
     using namespace simbi::em;
     template <is_hydro_primitive_c primitive_t>
@@ -27,6 +29,14 @@ namespace simbi::hydro {
         const auto fL       = to_flux(primL, nhat, gamma);
         const auto fR       = to_flux(primR, nhat, gamma);
         const auto [sL, sR] = extremal_speeds(primL, primR, nhat, gamma);
+        // if constexpr (primitive_t::rank == 3) {
+        //     if (nhat[1] == 1 && primL.rho == primR.rho && (sL != sR)) {
+        //         std::cout << "HLLE face normal: " << nhat << "\n";
+        //         std::cout << "sL: " << sL << ", sR: " << sR << "\n";
+        //         std::cout << "primL: " << primL << "\n";
+        //         std::cout << "primR: " << primR << "\n";
+        //     }
+        // }
 
         auto net_flux = [&]() {
             if (sL >= vface) {
@@ -39,9 +49,9 @@ namespace simbi::hydro {
             }
             else {
                 // intermediate state
-                auto wsfac = 1.0 / (sR - sL);
-                auto f_hll = (fL * sR - fR * sL + (uR - uL) * sR * sL) * wsfac;
-                auto u_hll = (uR * sR - uL * sL - fR + fL) * wsfac;
+                auto f_hll =
+                    (fL * sR - fR * sL + (uR - uL) * sR * sL) / (sR - sL);
+                auto u_hll = (uR * sR - uL * sL - fR + fL) / (sR - sL);
                 return f_hll - u_hll * vface;
             }
         }();

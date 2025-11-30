@@ -1,9 +1,9 @@
 #ifndef STATE_STRUCTS_HPP
 #define STATE_STRUCTS_HPP
 
+#include "base/concepts.hpp"
 #include "compat.hpp"
 #include "containers/vector.hpp"
-#include "state_ops.hpp"
 #include "utility/enums.hpp"
 
 #include <cstdint>
@@ -317,6 +317,87 @@ namespace simbi::structs {
         os << c.mom << ", " << c.nrg << ", " << c.mag << ", " << c.chi << " )";
         return os;
     }
+
+    template <is_hydro_primitive_c T, is_hydro_primitive_c U>
+    DEV constexpr bool operator==(const T& a, const U& b) noexcept
+    {
+        if constexpr (T::rank != U::rank) {
+            return false;
+        }
+        for (std::uint64_t ii = 0; ii < T::nmem; ++ii) {
+            if (a[ii] != b[ii]) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    template <is_hydro_conserved_c T, is_hydro_conserved_c U>
+    DEV constexpr bool operator==(const T& a, const U& b) noexcept
+    {
+        if constexpr (T::rank != U::rank) {
+            return false;
+        }
+        for (std::uint64_t ii = 0; ii < T::nmem; ++ii) {
+            if (a[ii] != b[ii]) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    template <is_hydro_primitive_c T, is_hydro_primitive_c U>
+    DEV constexpr bool operator!=(const T& a, const U& b) noexcept
+    {
+        return !(a == b);
+    }
+
+    template <is_hydro_conserved_c T, is_hydro_conserved_c U>
+    DEV constexpr bool operator!=(const T& a, const U& b) noexcept
+    {
+        return !(a == b);
+    }
+
+    template <is_mhd_primitive_c T, is_mhd_primitive_c U>
+    DEV constexpr bool operator==(const T& a, const U& b) noexcept
+    {
+        if constexpr (T::rank != U::rank) {
+            return false;
+        }
+        for (std::uint64_t ii = 0; ii < T::nmem; ++ii) {
+            if (a[ii] != b[ii]) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    template <is_mhd_conserved_c T, is_mhd_conserved_c U>
+    DEV constexpr bool operator==(const T& a, const U& b) noexcept
+    {
+        if constexpr (T::rank != U::rank) {
+            return false;
+        }
+        for (std::uint64_t ii = 0; ii < T::nmem; ++ii) {
+            if (a[ii] != b[ii]) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    template <is_mhd_primitive_c T, is_mhd_primitive_c U>
+    DEV constexpr bool operator!=(const T& a, const U& b) noexcept
+    {
+        return !(a == b);
+    }
+
+    template <is_mhd_conserved_c T, is_mhd_conserved_c U>
+    DEV constexpr bool operator!=(const T& a, const U& b) noexcept
+    {
+        return !(a == b);
+    }
+
 }   // namespace simbi::structs
 
 #endif   // STATE_VALUE_HPP

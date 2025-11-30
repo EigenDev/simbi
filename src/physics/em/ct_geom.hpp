@@ -25,45 +25,54 @@ namespace simbi::em {
     )
     {
         // get cell widths from geometry
-        const auto h = geo.scale_factors(face_coord);
+        const auto h = geo.metric.cell_widths(face_coord);
 
-        if constexpr (MagComp == magnetic_comp_t::K) {   // Bz
-            const auto& iedge = edge_emfs[0];            // Ex(i, j±1/2, k-1/2)
-            const auto& jedge = edge_emfs[1];            // Ey(i±1/2, j, k-1/2)
-            const real ei_l   = iedge[0];
-            const real ei_r   = iedge[1];
+        if constexpr (MagComp == magnetic_comp_t::K) {   // Bz (comp 0)
+            // for Bz: t1=1 (y), t2=2 (x)
+            // edge_emfs[0] = Ey, edge_emfs[1] = Ex
+            const auto& iedge = edge_emfs[0];   // Ex
+            const auto& jedge = edge_emfs[1];   // Ey
             const real ej_l   = jedge[0];
             const real ej_r   = jedge[1];
+            const real ei_l   = iedge[0];
+            const real ei_r   = iedge[1];
 
             const real dxi = h[2];   // i-direction (x)
             const real dxj = h[1];   // j-direction (y)
 
+            // curl(E)_z = dEy/dx - dEx/dy
             return ((ej_r - ej_l) / dxi) - ((ei_r - ei_l) / dxj);
         }
-        else if constexpr (MagComp == magnetic_comp_t::J) {   // By
-            const auto& kedge = edge_emfs[0];
-            const auto& iedge = edge_emfs[1];
-            const real ei_l   = iedge[0];
-            const real ei_r   = iedge[1];
+        else if constexpr (MagComp == magnetic_comp_t::J) {   // By (comp 1)
+            // for By: t1=0 (z), t2=2 (x)
+            // edge_emfs[0] = Ez, edge_emfs[1] = Ex
+            const auto& kedge = edge_emfs[0];   // Ez
+            const auto& iedge = edge_emfs[1];   // Ex
             const real ek_l   = kedge[0];
             const real ek_r   = kedge[1];
+            const real ei_l   = iedge[0];
+            const real ei_r   = iedge[1];
 
             const real dxk = h[0];   // k-direction (z)
             const real dxi = h[2];   // i-direction (x)
 
+            // curl(E)_y = dEx/dz - dEz/dx
             return ((ei_r - ei_l) / dxk) - ((ek_r - ek_l) / dxi);
         }
-        else {   // Bx
-            const auto& jedge = edge_emfs[0];
-            const auto& kedge = edge_emfs[1];
-            const real ek_l   = kedge[0];
-            const real ek_r   = kedge[1];
+        else {   // Bx (comp 2)
+            // for Bx: t1=1 (y), t2=0 (z)
+            // edge_emfs[0] = Ey, edge_emfs[1] = Ez
+            const auto& jedge = edge_emfs[0];   // Ey
+            const auto& kedge = edge_emfs[1];   // Ez
             const real ej_l   = jedge[0];
             const real ej_r   = jedge[1];
+            const real ek_l   = kedge[0];
+            const real ek_r   = kedge[1];
 
             const real dxj = h[1];   // j-direction (y)
             const real dxk = h[0];   // k-direction (z)
 
+            // curl(E)_x = dEz/dy - dEy/dz
             return ((ek_r - ek_l) / dxj) - ((ej_r - ej_l) / dxk);
         }
     }
