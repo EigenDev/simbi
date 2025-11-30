@@ -2,6 +2,7 @@
 #define HET_EXECUTOR_HPP
 
 #include "detail/launcher.hpp"
+#include "grid/domain.hpp"
 #include "hesi/core/types.hpp"
 #include "policy.hpp"
 #include "stream.hpp"
@@ -29,7 +30,7 @@ namespace simbi::het::exec {
         }
 
         template <std::uint64_t Rank>
-        dim3_t get_hint(const std::string& key) const
+        dim3_t get_hint(const std::string& key, grid::domain_t<Rank> dom) const
         {
             // future: implement a hint storage system
             // for now, return default tile sizes
@@ -38,9 +39,24 @@ namespace simbi::het::exec {
                     return dim3_t{64, 1, 1};
                 }
                 else if constexpr (Rank == 2) {
+                    // sometimes we are doing a 2D problem,
+                    // but the domain is such that one dimension is small
+                    // (e.g., a thin slice). In that case, use a different tile
+                    // size. Heuristic: if one dimension is less than 16, use a
+                    // taller tile. This helps improve occupancy.
+                    if (dom.shape()[0] < 16) {
+                        return dim3_t{64, 1, 1};
+                    }
                     return dim3_t{16, 16, 1};
                 }
                 else if constexpr (Rank == 3) {
+                    // quasi-1D problems require different tiling
+                    if (dom.shape()[0] < 16 && dom.shape()[1] < 16) {
+                        return dim3_t{64, 1, 1};
+                    }
+                    else if (dom.shape()[0] < 16) {
+                        return dim3_t{16, 16, 1};
+                    }
                     return dim3_t{8, 8, 8};
                 }
             }

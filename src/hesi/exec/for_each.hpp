@@ -119,7 +119,7 @@ namespace simbi::het::exec {
         if (exec.backend() == backend_type_t::cpu) {
             // check if openmp available
             if (global::use_omp) {
-                auto tile = exec.get_hint<Rank>("cpu_tile");
+                auto tile = exec.get_hint<Rank>("cpu_tile", domain);
                 parallel_for(openmp_t{tile}, domain, std::forward<F>(f));
             }
             else {
