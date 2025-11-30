@@ -272,7 +272,7 @@ def extract_field(field_name: str) -> Callable[[SimData], Array]:
 
 def load_data(file_path: str) -> SimData:
     """
-    load simulation data from a file using io_v2.
+    load simulation data from a file using io.
 
     Args:
         file_path: path to the checkpoint file

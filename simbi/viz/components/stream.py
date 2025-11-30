@@ -23,7 +23,7 @@ class StreamPlotProps(ComponentProps):
 
     color: str = "white"
     linewidth: float = 0.5
-    density: float | Tuple[float, float] = 10.0
+    density: float | Tuple[float, float] = 1.0
     arrowstyle: str = "->"
     arrowsize: float = 1.0
     alpha: float = 0.6
@@ -77,19 +77,19 @@ class StreamPlotComponent(Component):
 
         # streamplot needs 1D coordinate arrays, not 2D meshgrids.
         # we assume the pipeline gives us pcolormesh-style "edge" coordinates
-        x_edges, y_edges = u_field.domain
+        x, y = u_field.domain
         u_values, v_values = u_field.values, v_field.values
 
         # We plot on cell *centers*.
-        x_centers = (x_edges[:-1] + x_edges[1:]) / 2
-        y_centers = (y_edges[:-1] + y_edges[1:]) / 2
+        # x_centers = (x_edges[:-1] + x_edges[1:]) / 2
+        # y_centers = (y_edges[:-1] + y_edges[1:]) / 2
 
         # streamplot expects U, V to be (N, M)
         # and x, y to be (M,) and (N,)
         # Our data is (N, M) and our centers are (M,) and (N,)
         # This matches the matplotlib convention.
 
-        return x_centers, y_centers, u_values, v_values
+        return x, y, u_values, v_values
 
     def render(
         self, data: List[FieldData], style: StyleConfig

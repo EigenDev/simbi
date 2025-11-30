@@ -212,7 +212,7 @@ def flatten_fully(
 
 
 def get_dimensionality(files: Union[list[str], dict[int, list[str]]]) -> int:
-    """get effective dimensionality from checkpoint files using io_v2."""
+    """get effective dimensionality from checkpoint files using io."""
     from simbi.reader import read_checkpoint
 
     dims = []

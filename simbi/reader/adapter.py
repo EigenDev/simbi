@@ -1,14 +1,14 @@
 # =============================================================================
 # adapter.py
 #
-# adapter to make io_v2.Checkpoint compatible with visualization pipeline.
+# adapter to make io.Checkpoint compatible with visualization pipeline.
 # provides the interface viz expects without the old lazy evaluation system.
 # =============================================================================
 
 import numpy as np
 from numpy.typing import NDArray
 
-from .io_v2 import Checkpoint, MeshGeometry, get_base_fields
+from .io import Checkpoint, MeshGeometry, get_base_fields
 
 
 class MeshAdapter:
@@ -122,7 +122,7 @@ class SimData:
 
     def hierarchy(self):
         """access AMR hierarchy info."""
-        # TODO: implement once hierarchy parsing is added to io_v2
+        # TODO: implement once hierarchy parsing is added to io
         return None
 
     def get_field(self, field_name: str, level: int = 0) -> NDArray:

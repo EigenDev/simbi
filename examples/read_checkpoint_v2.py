@@ -1,5 +1,5 @@
 """
-example usage of the new io_v2 reader.
+example usage of the new io reader.
 
 demonstrates:
 - loading checkpoints with Result types
@@ -9,8 +9,7 @@ demonstrates:
 - working with multi-partition data
 """
 
-
-from simbi.reader.io_v2 import get_base_fields, read_checkpoint
+from simbi.reader.io import get_base_fields, read_checkpoint
 
 
 def example_basic_usage(filename: str):
@@ -230,7 +229,9 @@ def example_amr_multi_level(filename: str):
 
             # access field from this partition
             rho = partition.hydro.primitives["rho"]
-            print(f"      rho: {rho.shape}, range [{rho.data.min():.2e}, {rho.data.max():.2e}]")
+            print(
+                f"      rho: {rho.shape}, range [{rho.data.min():.2e}, {rho.data.max():.2e}]"
+            )
             print(
                 f"      rho: {rho.shape}, range [{rho.data.min():.2e}, {rho.data.max():.2e}]"
             )

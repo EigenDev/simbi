@@ -1,7 +1,7 @@
 # =============================================================================
 # simbi/reader/__init__.py
 #
-# clean checkpoint reader using io_v2.
+# clean checkpoint reader using io.
 #
 # usage:
 #   from simbi.reader import read_checkpoint
@@ -14,7 +14,7 @@
 
 from ..functional import Err, Ok, Result
 from .adapter import SimData
-from .io_v2 import (
+from .io import (
     Checkpoint,
     Domain,
     FieldData,
