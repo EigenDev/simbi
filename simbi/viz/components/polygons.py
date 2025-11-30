@@ -6,7 +6,7 @@ a single, 1D FieldData object where the domain is a list of patches
 and the values are a list of corresponding colors.
 """
 
-from typing import Any, Optional, Sequence
+from typing import Optional, Sequence
 
 from matplotlib.axes import Axes
 from matplotlib.collections import PolyCollection
@@ -16,7 +16,7 @@ from pydantic import ValidationInfo, field_validator
 from simbi.types.bodies import Body
 
 from ..config import StyleConfig
-from ..types import ColorRange, FieldData
+from ..types import ColorRange, FieldData, RenderResult
 from .interface import Component, ComponentProps
 from .quad import _create_color_normalization
 
@@ -92,7 +92,7 @@ class PolygonPlotComponent(Component):
             self._poly_collection.set_edgecolors(edge_color)
             self._poly_collection.set_linewidths(edge_width)
 
-    def render(self, data: FieldData, style: StyleConfig) -> dict[str, Any]:
+    def render(self, data: FieldData, style: StyleConfig) -> RenderResult:
         """
         Render the polygons with guaranteed 1D polygon data.
         `data` is a *single* FieldData object.
@@ -153,7 +153,10 @@ class PolygonPlotComponent(Component):
         self.ax.autoscale_view()
         self.ax.set_aspect("equal", adjustable="box")
 
-        return {"collection": self._poly_collection}
+        return RenderResult(
+            artists={"collection": self._poly_collection},
+            metadata={"mappable": self._poly_collection},
+        )
 
     def draw_bodies(
         self, bodies: dict[str, Body], zorder: int, axes: Sequence[str]

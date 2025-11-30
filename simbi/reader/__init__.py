@@ -26,6 +26,7 @@ from .io import (
     get_base_fields,
     read_checkpoint,
 )
+from .logging import logger
 
 
 def read_simulation(filename: str, unpad: bool = True) -> SimData:
@@ -69,4 +70,6 @@ __all__ = [
     "Result",
     "Ok",
     "Err",
+    # logging
+    "logger",
 ]

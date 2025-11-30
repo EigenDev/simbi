@@ -6,7 +6,6 @@ from typing import Literal, Optional
 
 from typing_extensions import Any
 
-from simbi.viz.utility import get_dimensionality
 from simbi.viz.components.coord_binning import CoordinateProfileProps
 from simbi.viz.components.quad import QuadPlotProps
 from simbi.viz.config import (
@@ -19,6 +18,7 @@ from simbi.viz.config import (
     TimeSeriesConfig,
     VisualizationConfig,
 )
+from simbi.viz.utility import get_dimensionality
 
 from ..styling import ThemeManager
 from ..styling.theme import ThemeConfig
@@ -187,6 +187,7 @@ def time_series_config_from_args(args: Namespace) -> TimeSeriesConfig:
 def animation_config_from_args(args: Namespace) -> AnimationConfig:
     """Build AnimationConfig from command line arguments."""
     return AnimationConfig(
+        total_frames=len(getattr(args, "files", [])),
         frame_rate=getattr(args, "frame_rate", 30),
         save_all_frames=getattr(args, "save_all_frames", False),
     )

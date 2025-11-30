@@ -49,7 +49,7 @@ def to_execution_dict(problem: SimbiProblem) -> dict[str, Any]:
         data_dir += "/"
     model_dict["data_directory"] = data_dir
 
-    # add computed fields
+    # add computed fields (honor explicit problem attributes, then derive sensible defaults)
     computed_fields = [
         "dimensionality",
         "is_mhd",
@@ -67,6 +67,65 @@ def to_execution_dict(problem: SimbiProblem) -> dict[str, Any]:
     for field in computed_fields:
         if hasattr(problem, field):
             model_dict[field] = getattr(problem, field)
+
+    # normalize regime to a lowercase string and put back into model_dict
+    regime = model_dict.get("regime")
+    if hasattr(regime, "value"):
+        regime = regime.value
+    if isinstance(regime, bytes):
+        try:
+            regime = regime.decode("utf-8")
+        except Exception:
+            regime = str(regime)
+    regime = (regime or "").lower()
+    model_dict["regime"] = regime
+
+    # derive is_mhd / is_relativistic from regime when not explicitly provided
+    # - any regime string containing 'mhd' is considered mhd
+    # - regimes starting with 'sr' or containing 'relativ' or 'rmhd' are considered relativistic
+    model_dict.setdefault("is_mhd", "mhd" in regime)
+    model_dict.setdefault(
+        "is_relativistic",
+        bool(
+            regime.startswith("sr") or "relativ" in regime or "rmhd" in regime
+        ),
+    )
+
+    # derive isothermal from adiabatic_index (gamma) if not explicitly provided
+    gamma_val = model_dict.get("adiabatic_index", model_dict.get("gamma", None))
+    try:
+        if gamma_val is not None:
+            model_dict.setdefault("isothermal", float(gamma_val) == 1.0)
+    except Exception:
+        # leave isothermal absent if gamma cannot be parsed
+        pass
+
+    # ensure dimensionality exists (prefer explicit dimensionality, else infer from resolution)
+    if (
+        "dimensionality" not in model_dict
+        or model_dict.get("dimensionality") is None
+    ):
+        res = model_dict.get("resolution")
+        if isinstance(res, (list, tuple)):
+            # if resolution provided as [nx, ny, nz] or similar
+            # effective dimensionality is number of entries >1 up to 3
+            eff = sum(1 for x in res if x and int(x) > 1)
+            model_dict["dimensionality"] = max(1, eff)
+        else:
+            model_dict["dimensionality"] = int(
+                model_dict.get("dimensionality", 1)
+            )
+
+    # derive a conservative nvars if missing:
+    # density (1) + momentum (dim) + energy (1) [+ bfields (3) if mhd] [+ chi (1) if present]
+    if "nvars" not in model_dict or model_dict.get("nvars") is None:
+        dim = int(model_dict.get("dimensionality", 1))
+        nvars = 1 + dim + 1
+        if model_dict.get("is_mhd"):
+            nvars += 3
+        if "chi" in model_dict or hasattr(problem, "chi"):
+            nvars += 1
+        model_dict["nvars"] = nvars
 
     # add body system if present
     body_system = problem.body_system
@@ -366,9 +425,12 @@ def _print_simulation_info(
     # defer to existing print function if available
     try:
         from simbi.functional.helpers import print_progress
+        from simbi.reader.rich_summary import print_rich_simulation_parameters
 
-        # summary moved to deprecated, use fallback
-        raise ImportError("use fallback")
+        params = exec_dict
+        params["gpu_block_dims"] = gpu_blocks
+        print_rich_simulation_parameters(params)
+        print_progress()  # articificial progress bar for startup
     except ImportError:
         # fallback to simple print
         print("=" * 60)

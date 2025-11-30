@@ -15,7 +15,7 @@ from pydantic import ValidationInfo, field_validator
 from simbi.viz.utility import get_field_str
 
 from ..config import StyleConfig
-from ..types import Array, FieldData
+from ..types import Array, FieldData, RenderResult
 from .interface import Component, ComponentProps
 
 
@@ -96,10 +96,11 @@ class LinePlotComponent(Component):
             style = _create_line_style(self.props)
             _update_line_style(self._line, style, self.props.label)
 
-    def render(self, data: FieldData, style: StyleConfig) -> list[Line2D]:
+    def render(self, data: FieldData, style: StyleConfig) -> RenderResult:
         """
         Render the line plot with guaranteed 1D data.
         `data` is a *single* FieldData object.
+        Returns a RenderResult containing the created line artist and metadata.
         """
         if not self._initialized:
             raise RuntimeError(
@@ -140,7 +141,9 @@ class LinePlotComponent(Component):
         # We pass 0 as field_index since data is now just this field
         # format_line_plot_axes(ax, data, 0, style)
 
-        return [self._line]
+        return RenderResult(
+            artists={"line": self._line}, metadata={"label": level_label}
+        )
 
     def cleanup(self) -> None:
         """Clean up resources."""

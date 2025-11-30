@@ -16,7 +16,7 @@ from simbi.viz.utility import get_field_str
 from ..config import StyleConfig
 from ..formatters.line import format_line_plot_axes
 from ..formatters.multidim import format_multidim_plot_axes
-from ..types import FieldData, PlotData
+from ..types import FieldData, PlotData, RenderResult
 from .interface import Component, ComponentProps
 
 
@@ -97,26 +97,31 @@ class AccretionAnalysisComponent(Component):
             self._lines = []
             self.ax.cla()
 
-    def render(self, data: PlotData, style: StyleConfig) -> None:
-        """Render the appropriate analysis."""
+    def render(self, data: PlotData, style: StyleConfig) -> RenderResult:
+        """Render the appropriate analysis and return a RenderResult describing created artists."""
         if not self._initialized or self.ax is None:
             raise RuntimeError("Component not initialized")
 
+        # Dispatch to the selected analysis and collect returned RenderResult
+        result: RenderResult | None = None
         match self.props.analysis_type:
             case AnalysisType.ANGULAR_MOMENTUM:
-                self._plot_angular_momentum(data, style)
+                result = self._plot_angular_momentum(data, style)
             case AnalysisType.MASS_FLUX:
-                self._plot_mass_flux_profile(data, style)
+                result = self._plot_mass_flux_profile(data, style)
             case AnalysisType.QUIVER:
-                # Note: Quiver/Streamlines already use the heatmap's
-                # "composed" data, so they are *implicitly* level-aware,
-                # but they use the *downsampled* leaf cells.
-                # A true high-res quiver would be a different challenge.
-                self._plot_density_with_quiver(data, style)
+                # Quiver/Streamlines operate on a heatmap + overlay; return mesh + vector artists
+                result = self._plot_density_with_quiver(data, style)
             case AnalysisType.STREAMLINES:
-                self._plot_density_with_streamlines(data, style)
+                result = self._plot_density_with_streamlines(data, style)
             case AnalysisType.RADIAL_PROFILE:
-                self._plot_radial_profile(data, style)  # Added new plot
+                result = self._plot_radial_profile(data, style)
+
+        # Ensure a RenderResult is always returned
+        if isinstance(result, RenderResult):
+            return result
+        else:
+            return RenderResult(artists={}, metadata={})
 
     def _get_stitched_leaf_data(
         self, data: PlotData, field_names: list[str]
@@ -252,21 +257,19 @@ class AccretionAnalysisComponent(Component):
 
     def _plot_angular_momentum(
         self, data: PlotData, style: StyleConfig
-    ) -> None:
-        """Plot the MASS-WEIGHTED specific angular momentum profile."""
+    ) -> RenderResult:
+        """Plot the MASS-WEIGHTED specific angular momentum profile and return artists."""
         if self.ax is None or self.props.radial_config is None:
-            return
+            return RenderResult(artists={}, metadata={})
 
         # Get stitched leaf cell data for all levels
-        # Assuming 2D data and field names "j_spec" and "Sigma"
-        # This will find "j_spec_L0", "j_spec_L1", etc.
         try:
             stitched_data = self._get_stitched_leaf_data(
                 data, ["j_spec", "Sigma"]
             )
         except ValueError as e:
             print(f"Error stitching data: {e}")
-            return
+            return RenderResult(artists={}, metadata={})
 
         x_flat = stitched_data["x_flat"]
         y_flat = stitched_data["y_flat"]
@@ -300,32 +303,39 @@ class AccretionAnalysisComponent(Component):
         mu = q / (1.0 + q) ** 2
         bin_centers = 0.5 * (bin_edges[1:] + bin_edges[:-1])
         jref = (G * M * bin_centers) ** (0.5)
-        # jref = (G * mu * a) ** 0.5 / M
 
         good_bins = ~np.isnan(mean_ell_mass_weighted)
-        self.ax.plot(
+        main_lines = self.ax.plot(
             bin_centers[good_bins], (mean_ell_mass_weighted / jref)[good_bins]
         )
-        self.ax.axvline(1.0, color="gray", linestyle="--", linewidth=0.5)
-        self.ax.axvline(5.0, color="gray", linestyle="--", linewidth=0.5)
-        # self.ax.axvline(0.1, color="gray", linestyle="--", linewidth=0.5)
+        vline1 = self.ax.axvline(
+            1.0, color="gray", linestyle="--", linewidth=0.5
+        )
+        vline2 = self.ax.axvline(
+            5.0, color="gray", linestyle="--", linewidth=0.5
+        )
+
+        # format and return artists
         format_line_plot_axes(self.ax, data, 0, style)
+        return RenderResult(
+            artists={"lines": main_lines, "vlines": [vline1, vline2]},
+            metadata={"label": "j_spec_mass_weighted"},
+        )
 
     def _plot_mass_flux_profile(
         self, data: PlotData, style: StyleConfig
-    ) -> None:
-        """Plot the mass flux profile M_dot(r) in spherical shells."""
+    ) -> RenderResult:
+        """Plot the mass flux profile M_dot(r) in spherical shells and return artists."""
         if self.ax is None or self.props.radial_config is None:
-            return
+            return RenderResult(artists={}, metadata={})
 
-        # get stiched 3D leaf cell data for all levels
         try:
             stitched_data = self._get_stitched_leaf_data(
                 data, ["rho", "v1", "v2", "v3"]
             )
         except ValueError as e:
             print(f"Error stitching data: {e}")
-            return
+            return RenderResult(artists={}, metadata={})
 
         x_flat = stitched_data["x_flat"]
         y_flat = stitched_data["y_flat"]
@@ -359,36 +369,43 @@ class AccretionAnalysisComponent(Component):
         # Plotting
         good_bins = ~np.isnan(mass_flux_profile)
         norm = 14  # 445
-        self.ax.plot(
+        main_lines = self.ax.plot(
             bin_centers[good_bins], mass_flux_profile[good_bins] / norm
         )
-        print(len(mass_flux_profile))
 
         self.ax.set_xlabel("Radius (r/a)")
         self.ax.set_ylabel("Mass Flux $\\dot{M}$ (normalized)")
-        self.ax.axhline(0, color="gray", linestyle="--", linewidth=0.5)
-        self.ax.axvline(1.0, color="gray", linestyle="--", linewidth=0.5)
-        self.ax.axvline(0.5, color="gray", linestyle="--", linewidth=0.5)
-        # self.ax.axvline(5.0, color="gray", linestyle="--", linewidth=0.5)
-        # self.ax.axvline(10.0, color="gray", linestyle="--", linewidth=0.5)
+        vline0 = self.ax.axhline(0, color="gray", linestyle="--", linewidth=0.5)
+        vline1 = self.ax.axvline(
+            1.0, color="gray", linestyle="--", linewidth=0.5
+        )
+        vline2 = self.ax.axvline(
+            0.5, color="gray", linestyle="--", linewidth=0.5
+        )
+
         format_line_plot_axes(self.ax, data, 0, style)
+        return RenderResult(
+            artists={"lines": main_lines, "vlines": [vline0, vline1, vline2]},
+            metadata={"label": "mdot"},
+        )
 
-    def _plot_radial_profile(self, data: PlotData, style: StyleConfig) -> None:
-        """Plot the spherically-averaged volume density profile."""
+    def _plot_radial_profile(
+        self, data: PlotData, style: StyleConfig
+    ) -> RenderResult:
+        """Plot the spherically-averaged volume density profile and return artists."""
         if self.ax is None or self.props.radial_config is None:
-            return
+            return RenderResult(artists={}, metadata={})
 
-        # get stiched 3D leaf cell data for all levels
         field_name = data.fields[0].name.split("_L")[0]
         try:
             stitched_data = self._get_stitched_leaf_data(data, [field_name])
         except ValueError as e:
             print(f"Error stitching data: {e}")
-            return
+            return RenderResult(artists={}, metadata={})
 
         x_flat = stitched_data["x_flat"]
         y_flat = stitched_data["y_flat"]
-        z_flat = stitched_data["z_flat"]
+        z_flat = stitched_data.get("z_flat", np.zeros_like(x_flat))
         rho_flat = stitched_data[f"{field_name}_flat"]
 
         # calc r for *all leaf cells*
@@ -405,28 +422,27 @@ class AccretionAnalysisComponent(Component):
 
         bin_centers = 0.5 * (bin_edges[1:] + bin_edges[:-1])
         good_bins = ~np.isnan(mean_var)
-        self.ax.plot(bin_centers[good_bins], mean_var[good_bins])
+        main_lines = self.ax.plot(bin_centers[good_bins], mean_var[good_bins])
 
         field_str = get_field_str(field_name)
-        # strip field of surrounding $$
         if field_str.startswith("$") and field_str.endswith("$"):
             field_str = field_str[1:-1]
         self.ax.set_xlabel("Radius (r/a)")
         self.ax.set_ylabel(f"$\\langle {field_str} \\rangle$")
-        # self.ax.set_title("Spherically-Averaged Density Profile")
         self.ax.set_xscale("log")
         self.ax.set_yscale("log")
         r_sonic = 0.5
-        self.ax.axvline(1.0, color="gray", linestyle="--", linewidth=0.5)
-        self.ax.axvline(r_sonic, color="gray", linestyle="--", linewidth=0.5)
+        vline1 = self.ax.axvline(
+            1.0, color="gray", linestyle="--", linewidth=0.5
+        )
+        vline2 = self.ax.axvline(
+            r_sonic, color="gray", linestyle="--", linewidth=0.5
+        )
+        ref_lines = []
         if field_name in ["rho", "v"]:
-            # plot the r^(-3/2) reference line
             ref_distance = 0.1
             ref_max = 0.5
-            if field_name == "rho":
-                power = -1.5
-            else:
-                power = -0.5
+            power = -1.5 if field_name == "rho" else -0.5
 
             r_ref = bin_centers[good_bins]
             ref_idx = find_nearest(r_ref, ref_distance)[0] + 1
@@ -434,8 +450,7 @@ class AccretionAnalysisComponent(Component):
             var_ref = mean_var[good_bins][ref_idx] * (
                 r_ref / r_ref[ref_idx]
             ) ** (power)
-            print(r_ref[ref_idx : ren_idx + 1])
-            self.ax.plot(
+            ref_lines = self.ax.plot(
                 r_ref[ref_idx:ren_idx],
                 var_ref[ref_idx:ren_idx] * (1.5),
                 linestyle="--",
@@ -443,19 +458,25 @@ class AccretionAnalysisComponent(Component):
                 label=r"$r^{-3/2}$",
             )
 
-        # format_line_plot_axes(self.ax, data, 0, style)
+        return RenderResult(
+            artists={
+                "lines": main_lines,
+                "vlines": [vline1, vline2],
+                "refs": ref_lines,
+            },
+            metadata={"label": field_name},
+        )
 
     def _plot_density_with_quiver(
         self, data: PlotData, style: StyleConfig
-    ) -> None:
-        """Plot Log(Density) with a velocity quiver overlay."""
+    ) -> RenderResult:
+        """Plot Log(Density) with a velocity quiver overlay and return mesh+quiver artists."""
         if self.ax is None:
-            return
+            return RenderResult(artists={}, metadata={})
 
         x_verts_1d = data.fields[0].domain[-2]  # shape (Nx + 1,)
         y_verts_1d = data.fields[0].domain[-1]  # shape (Ny + 1,)
 
-        #
         sigma_2d = data.fields[0].values
         vx_2d = data.fields[1].values
         vy_2d = data.fields[2].values
@@ -471,8 +492,6 @@ class AccretionAnalysisComponent(Component):
         )
 
         # Downsample Velocity for Quiver
-
-        # we need the 2D *centers* for the quiver locations
         x_centers_1d = 0.5 * (x_verts_1d[1:] + x_verts_1d[:-1])
         y_centers_1d = 0.5 * (y_verts_1d[1:] + y_verts_1d[:-1])
         xv_2d_cen, yv_2d_cen = np.meshgrid(
@@ -486,7 +505,7 @@ class AccretionAnalysisComponent(Component):
         vx_sparse = vx_2d[::skip, ::skip]
         vy_sparse = vy_2d[::skip, ::skip]
 
-        self.ax.quiver(
+        quiv = self.ax.quiver(
             x_coords_sparse,
             y_coords_sparse,
             vx_sparse,
@@ -498,13 +517,16 @@ class AccretionAnalysisComponent(Component):
 
         self.ax.set_aspect("equal")
         format_multidim_plot_axes(self.ax, self.fig, mesh, data, 0, style)
+        return RenderResult(
+            artists={"mesh": mesh, "quiver": quiv}, metadata={"mappable": mesh}
+        )
 
     def _plot_density_with_streamlines(
         self, data: PlotData, style: StyleConfig
-    ) -> None:
-        """Plot Log(Density) heatmap with a velocity streamline overlay."""
+    ) -> RenderResult:
+        """Plot Log(Density) heatmap with a velocity streamline overlay and return artists."""
         if self.ax is None:
-            return
+            return RenderResult(artists={}, metadata={})
 
         x_verts_1d = data.fields[0].domain[-2]  # e.g., shape (Nx + 1,)
         y_verts_1d = data.fields[0].domain[-1]  # e.g., shape (Ny + 1,)
@@ -530,7 +552,7 @@ class AccretionAnalysisComponent(Component):
 
         # streamplot expects (M, N) data, where M=len(y) and N=len(x).
         # This requires transposing the velocity data.
-        self.ax.streamplot(
+        sp = self.ax.streamplot(
             x_centers_1d,  # 1D array of x-coords (shape Nx)
             y_centers_1d,  # 1D array of y-coords (shape Ny)
             vx_2d.T,  # 2D array of u-velocity (shape Ny, Nx)
@@ -546,6 +568,10 @@ class AccretionAnalysisComponent(Component):
         self.ax.set_xlim(x_centers_1d[0], x_centers_1d[-1])
         self.ax.set_ylim(y_centers_1d[0], y_centers_1d[-1])
         format_multidim_plot_axes(self.ax, self.fig, mesh, data, 0, style)
+        return RenderResult(
+            artists={"mesh": mesh, "streamplot": sp},
+            metadata={"mappable": mesh},
+        )
 
     @property
     def initialized(self) -> bool:

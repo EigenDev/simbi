@@ -325,12 +325,33 @@ def calc_dlogt(tmin: float, tmax: float, ncheckpoints: int) -> float:
 
 
 def progressbar(
-    it: range, prefix: str = "", size: int = 100, out: TextIO = sys.stdout
+    it: range,
+    prefix: str = "",
+    size: Optional[int] = 100,
+    out: TextIO = sys.stdout,
 ) -> Generator[int, None, None]:
     count = len(it)
 
+    # allow size to be None to auto-compute from terminal width
+    if size is None:
+        try:
+            import shutil
+
+            cols = shutil.get_terminal_size().columns
+            # reserve space for prefix and counters like " {j}/{count}"
+            reserve = len(prefix) + len(f" {count}/{count}") + 4
+            computed = cols - reserve
+            # keep a reasonable minimum width
+            size = max(10, computed)
+        except Exception:
+            size = 100
+
     def show(j: int) -> None:
-        x = int(size * j / count)
+        # protect against division by zero or tiny counts
+        if count <= 0:
+            x = 0
+        else:
+            x = int(size * j / count)
         print(
             f"{prefix}[{'█' * x}{('.' * (size - x))}] {j}/{count}",
             end="\r",
@@ -345,15 +366,76 @@ def progressbar(
     print("\n", flush=True, file=out)
 
 
-def print_progress() -> None:
-    try:
-        from rich.progress import track
+def print_progress(
+    total: int = 150,
+    description: str = "Loading...",
+    sleep_time: float = 0.01,
+    console: Optional[Any] = None,
+) -> None:
+    """
+    show a short loading animation. prefer a shared rich progress factory when available,
+    otherwise fall back to constructing a rich Progress, and finally fall back to the
+    ascii progressbar implementation.
 
-        for _ in track(range(150), description="Loading..."):
-            sleep(0.01)
-    except ImportError:
-        for _ in progressbar(range(150), "Loading: ", 60):
-            sleep(0.01)
+    - total: number of steps in the demo loading animation
+    - description: task description shown in the progress display
+    - sleep_time: delay between simulated steps (useful for tests)
+    - console: optional console instance to bind the progress display to
+    """
+    # try the project's shared progress bar factory first (keeps UI consistent)
+    try:
+        try:
+            # prefer the central factory if available
+            from simbi.reader.progress import create_progress_bar
+
+            # ensure we have a console to pass in
+            try:
+                from rich.console import Console
+
+                console_obj = console or Console()
+            except Exception:
+                console_obj = console
+
+            # create_progress_bar returns a Progress instance/context
+            with create_progress_bar(console_obj) as progress:
+                task = progress.add_task(description, total=total)
+                for _ in range(total):
+                    sleep(sleep_time)
+                    progress.update(task, advance=1)
+            return
+        except Exception:
+            # fall back to constructing a rich Progress locally
+            from rich.console import Console
+            from rich.progress import (
+                BarColumn,
+                Progress,
+                SpinnerColumn,
+                TextColumn,
+                TimeElapsedColumn,
+                TimeRemainingColumn,
+            )
+
+            console_obj = console or Console()
+            with Progress(
+                SpinnerColumn(),
+                TextColumn("[bold blue]{task.description}"),
+                BarColumn(bar_width=None, pulse=False),
+                TextColumn("[progress.percentage]{task.percentage:>3.0f}%"),
+                TimeElapsedColumn(),
+                TimeRemainingColumn(),
+                console=console_obj,
+                expand=True,
+                transient=True,
+            ) as progress:
+                task = progress.add_task(description, total=total)
+                for _ in range(total):
+                    sleep(sleep_time)
+                    progress.update(task, advance=1)
+            return
+    except Exception:
+        # final fallback: ascii progress bar sized to terminal width
+        for _ in progressbar(range(total), description + ": ", None):
+            sleep(sleep_time)
 
 
 def find_nearest(arr: NDArray[Any], val: Any) -> Any:

@@ -62,31 +62,25 @@ def execute(args: Namespace, _: Optional[list] = None) -> None:
     }
     pass_through_kwargs["show"] = not getattr(args, "no_show", False)
 
-    # 5. Handle Animation
-    if is_animation:
-        raise NotImplementedError(
-            "Animation support is not yet implemented in the refactored API."
-        )
-        # api.animate(
-        #     config=config,
-        #     files=args.files,
-        #     fields=args.fields,
-        #     plot_type=plot_type,
-        #     save_as=args.save_as,
-        #     frame_rate=config.animation.frame_rate,  # Get from config
-        #     setup=args.setup,
-        #     theme=args.theme,
-        #     **pass_through_kwargs,
-        # )
-    else:
-        plot_dispatch = {
-            "line": api.plot,
-            "multidim": api.plot,
-            "coordinate_bin": api.plot_coordinate_profile,
-            "time_series": api.plot_time_series,
-            # "histogram": api.plot_histogram,
-        }
+    plot_dispatch = {
+        "line": api.plot,
+        "multidim": api.plot,
+        "coordinate_bin": api.plot_coordinate_profile,
+        "time_series": api.plot_time_series,
+        # "histogram": api.plot_histogram,
+    }
 
+    if is_animation:
+        api.animate(
+            config=config,
+            files=args.files,
+            fields=args.fields,
+            save_as=args.save_as,
+            setup=args.setup,
+            theme=args.theme,
+            **pass_through_kwargs,
+        )
+    else:
         plot_func = plot_dispatch.get(plot_type)
         if plot_func is None:
             print(f"Error: Unknown plot type '{plot_type}'")

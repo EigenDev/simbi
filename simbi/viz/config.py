@@ -168,6 +168,7 @@ class AnimationConfig(BaseModel):
         save_all_frames: Whether to save all frames
     """
 
+    total_frames: int
     frame_rate: int = 30
     save_all_frames: bool = False
 

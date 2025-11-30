@@ -6,7 +6,7 @@ a list of two 2D FieldData objects (U, V) and will render them
 as a stream plot.
 """
 
-from typing import Any, List, Optional, Tuple
+from typing import List, Optional, Tuple
 
 from matplotlib.axes import Axes
 from matplotlib.figure import Figure
@@ -14,7 +14,7 @@ from matplotlib.streamplot import StreamplotSet
 from pydantic import ValidationInfo, field_validator
 
 from ..config import StyleConfig
-from ..types import Array, FieldData
+from ..types import Array, FieldData, RenderResult
 from .interface import Component, ComponentProps
 
 
@@ -91,9 +91,7 @@ class StreamPlotComponent(Component):
 
         return x, y, u_values, v_values
 
-    def render(
-        self, data: List[FieldData], style: StyleConfig
-    ) -> dict[str, Any]:
+    def render(self, data: List[FieldData], style: StyleConfig) -> RenderResult:
         """
         Render the stream plot.
         `data` is a *list* of FieldData objects [U, V].
@@ -121,7 +119,10 @@ class StreamPlotComponent(Component):
             # alpha=self.props.alpha,
         )
 
-        return {"streamplot": self._streamplot}
+        return RenderResult(
+            artists={"streamplot": self._streamplot},
+            metadata={"is_vector": True},
+        )
 
     def cleanup(self) -> None:
         if self._streamplot:

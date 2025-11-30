@@ -6,7 +6,7 @@ a list of two 2D FieldData objects (U, V) and will render them
 as a quiver plot.
 """
 
-from typing import Any, List, Optional
+from typing import List, Optional
 
 import numpy as np
 from matplotlib.axes import Axes
@@ -15,7 +15,7 @@ from matplotlib.quiver import Quiver
 from pydantic import ValidationInfo, field_validator
 
 from ..config import StyleConfig
-from ..types import Array, FieldData
+from ..types import Array, FieldData, RenderResult
 from .interface import Component, ComponentProps
 
 
@@ -101,11 +101,9 @@ class QuiverPlotComponent(Component):
 
         return X_sparse, Y_sparse, U_sparse, V_sparse
 
-    def render(
-        self, data: List[FieldData], style: StyleConfig
-    ) -> dict[str, Any]:
+    def render(self, data: List[FieldData], style: StyleConfig) -> RenderResult:
         """
-        Render the quiver plot.
+        Render the quiver plot and return a RenderResult.
         'data' is a list of FieldData objects [U, V].
         """
         if not self._initialized:
@@ -130,7 +128,9 @@ class QuiverPlotComponent(Component):
             alpha=self.props.alpha,
         )
 
-        return {"quiver": self._quiver}
+        return RenderResult(
+            artists={"quiver": self._quiver}, metadata={"is_vector": True}
+        )
 
     def cleanup(self) -> None:
         if self._quiver:

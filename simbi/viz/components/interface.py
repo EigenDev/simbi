@@ -1,12 +1,13 @@
 """Component interface definitions."""
 
-from typing import Any, Generic, Protocol, TypeVar
+from typing import Generic, Protocol, TypeVar
 
 from matplotlib.axes import Axes
 from matplotlib.figure import Figure
 from pydantic import BaseModel
 
 from ..config import StyleConfig
+from ..types import RenderResult
 
 # --- TypeVars ---
 P = TypeVar("P", bound="ComponentProps")  # Generic for Props
@@ -42,8 +43,8 @@ class Component(Protocol, Generic[P, D]):
         """Update component properties."""
         ...
 
-    def render(self, data: D, style: StyleConfig) -> Any:
-        """Render the component with the given data."""
+    def render(self, data: D, style: StyleConfig) -> RenderResult:
+        """Render the component with the given data and return a RenderResult."""
         ...
 
     def cleanup(self) -> None:

@@ -8,7 +8,7 @@ from matplotlib.lines import Line2D
 from simbi.viz.utility import get_field_str
 
 from ..config import StyleConfig
-from ..types import Array, FieldData
+from ..types import Array, FieldData, RenderResult
 from .interface import Component, ComponentProps
 
 
@@ -40,6 +40,10 @@ class CoordinateProfileProps(ComponentProps):
 class CoordinateProfileComponent(Component[CoordinateProfileProps, FieldData]):
     """
     Renders a 1D radial profile and adds analysis-specific formatting.
+
+    Note: components now return a RenderResult object. This ensures the
+    Figure/Formatter can reliably inspect artists and metadata for
+    colorbar/legend/label decisions.
     """
 
     def __init__(self, props: CoordinateProfileProps):
@@ -62,8 +66,8 @@ class CoordinateProfileComponent(Component[CoordinateProfileProps, FieldData]):
         # We would re-render if props change
         pass
 
-    def render(self, data: FieldData, style: StyleConfig) -> List[Line2D]:
-        """Render the radial profile with guaranteed 1D data."""
+    def render(self, data: FieldData, style: StyleConfig) -> RenderResult:
+        """Render the radial profile with guaranteed 1D data and return a RenderResult."""
         if not self._initialized:
             raise RuntimeError("Component not initialized.")
 
@@ -90,7 +94,11 @@ class CoordinateProfileComponent(Component[CoordinateProfileProps, FieldData]):
         # --- Apply Special Formatting ---
         self._format_axes(r_bins, values, data.name)
 
-        return [self._main_line] + self._ref_lines
+        # return a RenderResult so the Figure/Formatter can inspect artists and metadata
+        return RenderResult(
+            artists={"line": self._main_line, "refs": self._ref_lines},
+            metadata={"label": field_str},
+        )
 
     def _format_axes(self, r_bins: Array, values: Array, field_name: str):
         """Apply analysis-specific formatting."""

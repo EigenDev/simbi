@@ -5,7 +5,7 @@ This component is a "simple" renderer. It expects to be given
 a single, 2D FieldData object and will render it as a pcolormesh.
 """
 
-from typing import Any, Literal, Optional, Sequence
+from typing import Literal, Optional, Sequence
 
 import matplotlib.colors as mcolors
 import numpy as np
@@ -17,7 +17,7 @@ from pydantic import ValidationInfo, field_validator
 from simbi.types.bodies import Body
 
 from ..config import StyleConfig
-from ..types import Array, ColorRange, FieldData
+from ..types import Array, ColorRange, FieldData, RenderResult
 from .interface import Component, ComponentProps
 
 LOGICAL_AXIS_MAP = {"x1": 0, "x2": 1, "x3": 2}
@@ -124,10 +124,13 @@ class QuadPlotComponent(Component):
         else:
             self._clear_mesh_grid()
 
-    def render(self, data: FieldData, style: StyleConfig) -> dict[str, Any]:
+    def render(self, data: FieldData, style: StyleConfig) -> RenderResult:
         """
         Render the Quadensional plot with guaranteed 2D data.
         `data` is a *single* FieldData object.
+
+        Returns:
+            RenderResult containing the created matplotlib artists and optional metadata.
         """
         if not self._initialized:
             raise RuntimeError(
@@ -182,7 +185,9 @@ class QuadPlotComponent(Component):
         self.last_x = x
         self.last_y = y
         self.ax.set_aspect("equal", adjustable="box")
-        return {"mesh": self._mesh}
+        return RenderResult(
+            artists={"mesh": self._mesh}, metadata={"mappable": self._mesh}
+        )
 
     def _update_mesh(self, x: Array, y: Array, values: Array) -> None:
         """Update existing mesh with new data (for animation)."""

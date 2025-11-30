@@ -7,7 +7,7 @@ from matplotlib.lines import Line2D
 from pydantic import ValidationInfo, field_validator
 
 from ..config import StyleConfig
-from ..types import Array, FieldData
+from ..types import Array, FieldData, RenderResult
 from .interface import Component, ComponentProps
 
 
@@ -106,8 +106,8 @@ class TimeSeriesPlotComponent(Component[TimeSeriesPlotProps, FieldData]):
             labels = [f"{base_label}_{i}" for i in range(num_lines)]
         return labels
 
-    def render(self, data: FieldData, style: StyleConfig) -> List[Line2D]:
-        """Render the time_series plot with 1D or 2D data."""
+    def render(self, data: FieldData, style: StyleConfig) -> RenderResult:
+        """Render the time_series plot with 1D or 2D data and return a RenderResult."""
         if not self._initialized:
             raise RuntimeError("Component not initialized.")
 
@@ -170,7 +170,10 @@ class TimeSeriesPlotComponent(Component[TimeSeriesPlotProps, FieldData]):
                 )[0]
                 all_rendered_lines.append(trend_line)
 
-        return all_rendered_lines
+        # return a RenderResult containing all created line artists and labels metadata
+        return RenderResult(
+            artists={"lines": all_rendered_lines}, metadata={"labels": labels}
+        )
 
     def cleanup(self) -> None:
         """Clean up resources."""

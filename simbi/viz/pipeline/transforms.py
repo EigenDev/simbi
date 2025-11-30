@@ -152,24 +152,6 @@ def execute_slice(
     return transposed_values, new_domain
 
 
-def create_field_data(
-    name: str,
-    values: Array,
-    domain: Sequence[Array],
-    slice_plan: SlicePlan,
-) -> FieldData:
-    """Create a FieldData object from raw arrays."""
-    print(
-        f"Creating FieldData: {name}, shape={values.shape}, domain_sizes={[len(d) for d in domain]}"
-    )
-    return FieldData(
-        name=name,
-        values=values,
-        domain=list(domain),
-        axis_names=slice_plan.final_axis_names,
-    )
-
-
 def prepare_field_level(
     data: SimData,
     field_name: str,
@@ -229,8 +211,23 @@ def prepare_field_level(
 
     name = f"{field_name}_L{level}" if level > 0 else field_name
 
+    # if effective dim is less than current dim, further squeeze
+    # the axis map needs to be considered here. We might have a 3D
+    # problem, but symmetry results in a quasi-2D or quasi-1D dataset.
+    # We must carefully select the axis names accordingly.
+    axis_names = [INV_AXIS_MAP[i] for i in non_singleton_axes]
+    if effective_dim < 3:
+        axis_names = ["x1", "x2"]
+
     # return dimensionally-reduced data for quasi-1D/2D
-    return FieldData(name=name, values=values, domain=list(full_domain))
+    return FieldData(
+        name=name,
+        values=values,
+        domain=list(full_domain),
+        axis_names=axis_names,
+        coord_system=CoordSystem(data.metadata.coord_system),
+        time=data.metadata.time,
+    )
 
 
 def prepare_figure(
@@ -239,11 +236,17 @@ def prepare_figure(
     projection: Literal["polar", "cartesian"] | None = None,
     nlvls: int = 1,
     coord_system: CoordSystem = CoordSystem.CARTESIAN,
+    formatter: Optional[object] = None,
 ) -> Figure:
-    """Create and prepare a figure based on configuration."""
+    """Create and prepare a figure based on configuration.
+
+    Accepts an optional `formatter` argument which will be forwarded to the
+    Figure constructor. This allows callers (and tests) to inject a custom
+    formatter instance or policy.
+    """
     import matplotlib.pyplot as plt
 
-    config.theme.apply(nfields=len(config.plot.fields) * nlvls, nfiles=nfiles)
+    config.theme.apply(nfields=len(config.plot.fields) * nlvls)
     if projection == "polar":
         fig, ax = plt.subplots(
             1,
@@ -256,7 +259,8 @@ def prepare_figure(
         fig = plt.figure(figsize=config.style.fig_size)
         ax = fig.add_subplot(111)
 
-    figure = Figure(config)
+    # pass optional formatter into the Figure so it can control layout policy
+    figure = Figure(config, formatter=formatter)
 
     figure.fig = fig
     figure.axes["main"] = ax
@@ -364,9 +368,11 @@ def _compose_pcolormesh(fields_2d: list[FieldData]) -> FieldData:
     # Return a new 2D FieldData object
     return FieldData(
         name=base_field.name,
+        time=base_field.time,
         values=composited_values,
         domain=base_field.domain,
-        # ndim=2,
+        axis_names=base_field.axis_names,
+        coord_system=base_field.coord_system,
     )
 
 
@@ -435,6 +441,8 @@ def _compose_polygons(fields_2d: Sequence[FieldData]) -> FieldData:
         values=np.array(all_values),
         domain=np.array(all_patches),
         axis_names=axis_names,
+        coord_system=fields_2d[0].coord_system,
+        time=fields_2d[0].time,
     )
 
 
