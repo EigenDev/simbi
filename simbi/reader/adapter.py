@@ -8,6 +8,8 @@
 import numpy as np
 from numpy.typing import NDArray
 
+from simbi.reader.computation import create_computation_pipeline
+
 from .io import Checkpoint, MeshGeometry, get_base_fields
 
 
@@ -80,12 +82,27 @@ class SimData:
 
     provides dict-like access to fields and metadata properties
     that the viz pipeline expects.
+
+    additions:
+    - caching of derived field evaluations per (field, level)
+    - fast membership checks via available_fields()
+    - listing of available derived fields
     """
 
     def __init__(self, checkpoint: Checkpoint):
         self._checkpoint = checkpoint
         self._base_fields = None  # lazy load on first access
         self._mesh_adapters = {}  # cache mesh adapters per level
+
+        # derived fields pipeline (objects exposing evaluate(level) -> array)
+        self._derived_fields = create_computation_pipeline(checkpoint)
+
+        # cache derived field names for quick membership tests
+        # pipeline values may be callables/objects; keys give names
+        self._derived_names = set(self._derived_fields.keys())
+
+        # cache for evaluated derived fields: (field_name, level) -> ndarray
+        self._derived_cache: dict[tuple[str, int], NDArray] = {}
 
     @property
     def checkpoint(self) -> Checkpoint:
@@ -125,17 +142,52 @@ class SimData:
         # TODO: implement once hierarchy parsing is added to io
         return None
 
-    def get_field(self, field_name: str, level: int = 0) -> NDArray:
-        """
-        get a field by name from a specific level.
+    def list_derived_fields(self) -> list[str]:
+        """return sorted list of available derived field names."""
+        return sorted(self._derived_names)
 
-        handles both primitive fields and derived fields like b1_mean.
+    def available_fields(self, level: int = 0) -> set[str]:
+        """
+        return set of available field names at a given level.
+
+        includes base primitive fields (unpad) and derived field names.
         """
         if level >= self.num_levels:
             raise ValueError(
                 f"level {level} doesn't exist (num_levels={self.num_levels})"
             )
 
+        # base primitives (single-partition assumption)
+        level_data = self._checkpoint.levels[level]
+        if level_data.num_partitions != 1:
+            # fall back to derived names only if partitioning is complex
+            return set(self._derived_names)
+
+        partition = level_data.partitions[0]
+        halo = level_data.mesh.halo_radius
+
+        base_names = set(partition.hydro.primitives.keys())
+
+        # also expose face-centered magnetic names if present
+        if partition.hydro.magnetic is not None:
+            base_names.update(partition.hydro.magnetic.keys())
+
+        return base_names.union(self._derived_names)
+
+    def get_field(self, field_name: str, level: int = 0) -> NDArray:
+        """
+        get a field by name from a specific level.
+
+        handles both primitive fields and derived fields like b1_mean.
+
+        Uses caching for derived field evaluations.
+        """
+        if level >= self.num_levels:
+            raise ValueError(
+                f"level {level} doesn't exist (num_levels={self.num_levels})"
+            )
+
+        # quick membership test without constructing base dict
         level_data = self._checkpoint.levels[level]
 
         # assume single partition for now
@@ -157,18 +209,26 @@ class SimData:
         # handle face-centered magnetic fields - return raw face data
         # averaging to cell centers is handled by viz pipeline
         if (
-            partition.hydro.has_magnetic
+            partition.hydro.magnetic is not None
             and field_name in partition.hydro.magnetic
         ):
             return partition.hydro.magnetic[field_name].data
 
-        # legacy support for _mean suffix (now handled by viz pipeline)
-        if field_name.endswith("_mean") and partition.hydro.has_magnetic:
-            base_name = field_name.replace("_mean", "")
-            if base_name in partition.hydro.magnetic:
-                return partition.hydro.magnetic[base_name].data
+        # derived field handling with caching
+        if field_name not in self._derived_names:
+            raise KeyError(f"field '{field_name}' not found")
 
-        raise KeyError(f"field '{field_name}' not found")
+        cache_key = (field_name, level)
+        if cache_key in self._derived_cache:
+            return self._derived_cache[cache_key]
+
+        # evaluate and cache
+        derived_obj = self._derived_fields[field_name]
+        val = derived_obj.evaluate(level)
+        # ensure numpy array and cache
+        arr = np.asarray(val)
+        self._derived_cache[cache_key] = arr
+        return arr
 
     def level_mesh(self, level: int):
         """get mesh for a specific level with coordinate arrays."""
@@ -183,6 +243,7 @@ class SimData:
     def __getitem__(self, field_name: str) -> NDArray:
         """dict-like access to base level fields."""
         if self._base_fields is None:
+            # load and cache base-level primitives (unpad)
             self._base_fields = get_base_fields(self._checkpoint, unpad=True)
 
         # try base fields first
@@ -194,8 +255,14 @@ class SimData:
 
     def __contains__(self, field_name: str) -> bool:
         """check if field exists."""
-        try:
-            self[field_name]
+        # faster path: check cached base fields and derived names
+        if self._base_fields is not None and field_name in self._base_fields:
             return True
-        except KeyError:
+        if field_name in self._derived_names:
+            return True
+
+        # fall back to attempting to enumerate available fields for level 0
+        try:
+            return field_name in self.available_fields(level=0)
+        except Exception:
             return False
