@@ -1,13 +1,12 @@
 #ifndef HYDRO_HLLC_HPP
 #define HYDRO_HLLC_HPP
 
-#include "base/concepts.hpp"                 // for is_hydro_primitive_c
-#include "compat.hpp"                        // for DEV macro
-#include "containers/vector.hpp"             // for vector_like_c
-#include "physics/em/electromagnetism.hpp"   // for shift_electric_field
-#include "physics/hydro/solvers/hlle.hpp"    // for hlle_flux
-#include "physics/hydro/wave_speeds.hpp"     // for extremal_speeds
-#include "utility/enums.hpp"                 // for shockwave_limiter_t
+#include "base/concepts.hpp"                // for is_hydro_primitive_c
+#include "compat.hpp"                       // for DEV macro
+#include "containers/vector.hpp"            // for vector_like_c
+#include "physics/hydro/solvers/hlle.hpp"   // for hlle_flux
+#include "physics/hydro/wave_speeds.hpp"    // for extremal_speeds
+#include "utility/enums.hpp"                // for shockwave_limiter_t
 #include "utility/helpers.hpp"   // for goes_to_zero, sgn, vecops::dot, vecops::norm
 
 #include <algorithm>   // for std::max, std::min
@@ -533,7 +532,6 @@ namespace simbi::hydro::rmhd {
             net_flux.chi = primL.chi * net_flux.den;
         }
 
-        net_flux = shift_electric_field(net_flux, nhat);
         return net_flux;
     }
 }   // namespace simbi::hydro::rmhd

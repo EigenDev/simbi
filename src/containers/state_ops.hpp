@@ -156,19 +156,40 @@ namespace simbi::structs {
 
         // apply function only to gas variables
         if constexpr (!traits_t::is_isothermal) {
-            func(
-                traits_t::density(result),
-                traits_t::momentum_or_velocity(result),
-                traits_t::energy_or_pressure(result),
-                traits_t::passive_scalar(result)
-            );
+            if constexpr (traits_t::has_magnetic_field) {
+                func(
+                    traits_t::density(result),
+                    traits_t::momentum_or_velocity(result),
+                    traits_t::energy_or_pressure(result),
+                    traits_t::magnetic_field(result),
+                    traits_t::passive_scalar(result)
+                );
+            }
+            else {
+                func(
+                    traits_t::density(result),
+                    traits_t::momentum_or_velocity(result),
+                    traits_t::energy_or_pressure(result),
+                    traits_t::passive_scalar(result)
+                );
+            }
         }
         else {
-            func(
-                traits_t::density(result),
-                traits_t::momentum_or_velocity(result),
-                traits_t::passive_scalar(result)
-            );
+            if constexpr (traits_t::has_magnetic_field) {
+                func(
+                    traits_t::density(result),
+                    traits_t::momentum_or_velocity(result),
+                    traits_t::magnetic_field(result),
+                    traits_t::passive_scalar(result)
+                );
+            }
+            else {
+                func(
+                    traits_t::density(result),
+                    traits_t::momentum_or_velocity(result),
+                    traits_t::passive_scalar(result)
+                );
+            }
         }
 
         return result;
@@ -199,7 +220,16 @@ namespace simbi::structs {
                     traits_t::momentum_or_velocity(op.other);
                 std::get<2>(var_tuple) +=
                     traits_t::energy_or_pressure(op.other);
-                std::get<3>(var_tuple) += traits_t::passive_scalar(op.other);
+                if constexpr (traits_t::has_magnetic_field) {
+                    std::get<3>(var_tuple) +=
+                        traits_t::magnetic_field(op.other);
+                    std::get<4>(var_tuple) +=
+                        traits_t::passive_scalar(op.other);
+                }
+                else {
+                    std::get<3>(var_tuple) +=
+                        traits_t::passive_scalar(op.other);
+                }
             }
             else {
                 // for isothermal: density, momentum, passive scalar (skip
@@ -208,7 +238,16 @@ namespace simbi::structs {
                 std::get<0>(var_tuple) += traits_t::density(op.other);
                 std::get<1>(var_tuple) +=
                     traits_t::momentum_or_velocity(op.other);
-                std::get<2>(var_tuple) += traits_t::passive_scalar(op.other);
+                if constexpr (traits_t::has_magnetic_field) {
+                    std::get<2>(var_tuple) +=
+                        traits_t::magnetic_field(op.other);
+                    std::get<3>(var_tuple) +=
+                        traits_t::passive_scalar(op.other);
+                }
+                else {
+                    std::get<2>(var_tuple) +=
+                        traits_t::passive_scalar(op.other);
+                }
             }
         });
     }
@@ -343,6 +382,9 @@ namespace simbi::structs {
             traits_t::energy_or_pressure(lhs) +=
                 traits_t::energy_or_pressure(rhs);
         }
+        if constexpr (traits_t::has_magnetic_field) {
+            traits_t::magnetic_field(lhs) += traits_t::magnetic_field(rhs);
+        }
 
         traits_t::passive_scalar(lhs) += traits_t::passive_scalar(rhs);
 
@@ -361,6 +403,9 @@ namespace simbi::structs {
         if constexpr (!traits_t::is_isothermal) {
             traits_t::energy_or_pressure(lhs) -=
                 traits_t::energy_or_pressure(rhs);
+        }
+        if constexpr (traits_t::has_magnetic_field) {
+            traits_t::magnetic_field(lhs) -= traits_t::magnetic_field(rhs);
         }
 
         traits_t::passive_scalar(lhs) -= traits_t::passive_scalar(rhs);

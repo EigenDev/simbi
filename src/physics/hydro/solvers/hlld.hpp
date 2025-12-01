@@ -3,8 +3,7 @@
 
 #include "base/concepts.hpp"   // for is_hydro_primitive_c, is_mhd_primitive_c
 #include "compat.hpp"          // for global::epsilon
-#include "containers/vector.hpp"             // for vector_t
-#include "physics/em/electromagnetism.hpp"   // for to_flux, to_conserved, to_primitive
+#include "containers/vector.hpp"   // for vector_t
 #include "physics/hydro/conversion.hpp"
 #include "physics/hydro/physics.hpp"   // for to_flux, to_conserved, to_primitive
 #include "physics/hydro/wave_speeds.hpp"   // for wave_speeds
@@ -363,7 +362,6 @@ namespace simbi::hydro::rmhd {
             net_flux.chi = primL.chi * net_flux.den;
         }
 
-        net_flux = shift_electric_field(net_flux, nhat);
         return net_flux;
     };
 }   // namespace simbi::hydro::rmhd

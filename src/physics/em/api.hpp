@@ -9,6 +9,7 @@
 #include "geometry/metrics.hpp"
 #include "grid/field.hpp"
 #include "physics/em/electromagnetism.hpp"
+#include "physics/hydro/conversion.hpp"
 #include "utility/enums.hpp"
 #include "zero.hpp"
 
@@ -27,20 +28,38 @@ namespace simbi::em {
         DEV auto operator()(argument_type coord) const
         {
             const auto [kk, jj, ii] = coord;
+            // fy
+            auto fn = shift_electric_field(
+                fluxes[1](iarray<3>{kk - 0, jj, ii}),
+                unit_vector_t<3>{0, 1, 0}
+            );
+            auto fs = shift_electric_field(
+                fluxes[1](iarray<3>{kk - 1, jj, ii}),
+                unit_vector_t<3>{0, 1, 0}
+            );
+            // fz
+            auto fe = shift_electric_field(
+                fluxes[0](iarray<3>{kk, jj - 0, ii}),
+                unit_vector_t<3>{0, 0, 1}
+            );
+            auto fw = shift_electric_field(
+                fluxes[0](iarray<3>{kk, jj - 1, ii}),
+                unit_vector_t<3>{0, 0, 1}
+            );
 
             // north/south use fz (flux[0]), east/west use fy (flux[1])
             auto face_ex = vector_t<real, 4>{
-              fluxes[1](iarray<3>{kk - 0, jj, ii}).mag[0],   // north fy
-              fluxes[1](iarray<3>{kk - 1, jj, ii}).mag[0],   // south fy
-              fluxes[0](iarray<3>{kk, jj - 0, ii}).mag[0],   // east fz
-              fluxes[0](iarray<3>{kk, jj - 1, ii}).mag[0]    // west fz
+              fn.mag[0],   // north fy
+              fs.mag[0],   // south fy
+              fe.mag[0],   // east fz
+              fw.mag[0]    // west fz
             };
 
             auto density_flux = vector_t<real, 4>{
-              fluxes[1](iarray<3>{kk - 0, jj, ii}).den,   // north fy
-              fluxes[1](iarray<3>{kk - 1, jj, ii}).den,   // south fy
-              fluxes[0](iarray<3>{kk, jj - 0, ii}).den,   // east fz
-              fluxes[0](iarray<3>{kk, jj - 1, ii}).den    // west fz
+              fn.den,   // north fy
+              fs.den,   // south fy
+              fe.den,   // east fz
+              fw.den    // west fz
             };
 
             // cell centers: ne, nw, se, sw
@@ -87,19 +106,37 @@ namespace simbi::em {
         DEV auto operator()(argument_type coord) const
         {
             const auto [kk, jj, ii] = coord;
+            // fx
+            auto fn = shift_electric_field(
+                fluxes[2](iarray<3>{kk - 0, jj, ii}),
+                unit_vector_t<3>{1, 0, 0}
+            );
+            auto fs = shift_electric_field(
+                fluxes[2](iarray<3>{kk - 1, jj, ii}),
+                unit_vector_t<3>{1, 0, 0}
+            );
+            // fz
+            auto fe = shift_electric_field(
+                fluxes[0](iarray<3>{kk, jj, ii - 0}),
+                unit_vector_t<3>{0, 0, 1}
+            );
+            auto fw = shift_electric_field(
+                fluxes[0](iarray<3>{kk, jj, ii - 1}),
+                unit_vector_t<3>{0, 0, 1}
+            );
 
             auto face_ey = vector_t<real, 4>{
-              fluxes[2](iarray<3>{kk - 0, jj, ii}).mag[1],   // north fx
-              fluxes[2](iarray<3>{kk - 1, jj, ii}).mag[1],   // south fx
-              fluxes[0](iarray<3>{kk, jj, ii - 0}).mag[1],   // east fz
-              fluxes[0](iarray<3>{kk, jj, ii - 1}).mag[1]    // west fz
+              fn.mag[1],   // north fx
+              fs.mag[1],   // south fx
+              fe.mag[1],   // east fz
+              fw.mag[1]    // west fz
             };
 
             auto density_flux = vector_t<real, 4>{
-              fluxes[2](iarray<3>{kk - 0, jj, ii}).den,   // north fx
-              fluxes[2](iarray<3>{kk - 1, jj, ii}).den,   // south fx
-              fluxes[0](iarray<3>{kk, jj, ii - 0}).den,   // east fz
-              fluxes[0](iarray<3>{kk, jj, ii - 1}).den    // west fz
+              fn.den,   // north fx
+              fs.den,   // south fx
+              fe.den,   // east fz
+              fw.den    // west fz
             };
 
             auto cell_ey = vector_t<real, 4>{
@@ -145,19 +182,37 @@ namespace simbi::em {
         DEV auto operator()(argument_type coord) const
         {
             const auto [kk, jj, ii] = coord;
+            // fx
+            auto fn = shift_electric_field(
+                fluxes[2](iarray<3>{kk, jj - 0, ii}),
+                unit_vector_t<3>{1, 0, 0}
+            );
+            auto fs = shift_electric_field(
+                fluxes[2](iarray<3>{kk, jj - 1, ii}),
+                unit_vector_t<3>{1, 0, 0}
+            );
+            // fy
+            auto fe = shift_electric_field(
+                fluxes[1](iarray<3>{kk, jj, ii - 0}),
+                unit_vector_t<3>{0, 1, 0}
+            );
+            auto fw = shift_electric_field(
+                fluxes[1](iarray<3>{kk, jj, ii - 1}),
+                unit_vector_t<3>{0, 1, 0}
+            );
 
             auto face_ez = vector_t<real, 4>{
-              fluxes[2](iarray<3>{kk, jj - 0, ii}).mag[2],   // north fx
-              fluxes[2](iarray<3>{kk, jj - 1, ii}).mag[2],   // south fx
-              fluxes[1](iarray<3>{kk, jj, ii - 0}).mag[2],   // east fy
-              fluxes[1](iarray<3>{kk, jj, ii - 1}).mag[2]    // west fy
+              fn.mag[2],   // north fx
+              fs.mag[2],   // south fx
+              fe.mag[2],   // east fy
+              fw.mag[2]    // west fy
             };
 
             auto density_flux = vector_t<real, 4>{
-              fluxes[2](iarray<3>{kk, jj - 0, ii}).den,   // north fx
-              fluxes[2](iarray<3>{kk, jj - 1, ii}).den,   // south fx
-              fluxes[1](iarray<3>{kk, jj, ii - 0}).den,   // east fy
-              fluxes[1](iarray<3>{kk, jj, ii - 1}).den    // west fy
+              fn.den,   // north fx
+              fs.den,   // south fx
+              fe.den,   // east fy
+              fw.den    // west fy
             };
 
             auto cell_ez = vector_t<real, 4>{
@@ -519,11 +574,11 @@ namespace simbi::em {
                          // since my Godunov does not affect the cell-centered
                          // magnetic fields, we do not need to update the energy
                          // here.
-                         // const auto b_old = u.mag;
-                         u.mag = b_new;
-                         // const auto e_old = 0.5 * vecops::dot(b_old, b_old);
-                         // const auto e_new = 0.5 * vecops::dot(b_new, b_new);
-                         // u.nrg += (e_new - e_old);
+                         const auto b_old = u.mag;
+                         u.mag            = b_new;
+                         const auto e_old = 0.5 * vecops::dot(b_old, b_old);
+                         const auto e_new = 0.5 * vecops::dot(b_new, b_new);
+                         u.nrg += (e_new - e_old);
                          return u;
                      }
         ).with(exec);

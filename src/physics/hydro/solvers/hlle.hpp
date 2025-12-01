@@ -5,12 +5,9 @@
 #include "base/concepts.hpp"
 #include "compat.hpp"
 #include "containers/vector.hpp"
-#include "physics/em/electromagnetism.hpp"
 #include "physics/hydro/physics.hpp"
 #include "physics/hydro/wave_speeds.hpp"
 #include "utility/enums.hpp"
-
-#include <iostream>
 
 namespace simbi::hydro {
     using namespace simbi::em;
@@ -29,14 +26,6 @@ namespace simbi::hydro {
         const auto fL       = to_flux(primL, nhat, gamma);
         const auto fR       = to_flux(primR, nhat, gamma);
         const auto [sL, sR] = extremal_speeds(primL, primR, nhat, gamma);
-        // if constexpr (primitive_t::rank == 3) {
-        //     if (nhat[1] == 1 && primL.rho == primR.rho && (sL != sR)) {
-        //         std::cout << "HLLE face normal: " << nhat << "\n";
-        //         std::cout << "sL: " << sL << ", sR: " << sR << "\n";
-        //         std::cout << "primL: " << primL << "\n";
-        //         std::cout << "primR: " << primR << "\n";
-        //     }
-        // }
 
         auto net_flux = [&]() {
             if (sL >= vface) {
@@ -62,13 +51,6 @@ namespace simbi::hydro {
         }
         else {
             net_flux.chi = primL.chi * net_flux.den;
-        }
-
-        if constexpr (is_mhd_primitive_c<primitive_t>) {
-            // move the electric fields in the flux variable
-            // this is a hack to avoid changing the flux type.
-            // the electric field is just -nhat x F_B
-            net_flux = shift_electric_field(net_flux, nhat);
         }
 
         return net_flux;
