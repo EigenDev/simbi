@@ -363,13 +363,13 @@ namespace simbi::body::expr {
     // factory helpers
     // ========================================================================
     template <typename Primitive, typename Geometry>
-    auto make_grav_op(const Primitive& prim, const Geometry& geo)
+    DEV auto make_grav_op(const Primitive& prim, const Geometry& geo)
     {
         return grav_op_t<Primitive, Geometry>{prim, geo};
     }
 
     template <typename Primitive, typename Geometry>
-    auto make_accretion_op(
+    DEV auto make_accretion_op(
         const Primitive& prim,
         const Geometry& geo,
         real gamma,
@@ -380,7 +380,8 @@ namespace simbi::body::expr {
     }
 
     template <typename Primitive, typename Geometry>
-    auto make_rigid_op(const Primitive& prim, const Geometry& geo, real gamma)
+    DEV auto
+    make_rigid_op(const Primitive& prim, const Geometry& geo, real gamma)
     {
         return rigid_op_t<Primitive, Geometry>{prim, geo, gamma};
     }

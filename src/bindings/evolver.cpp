@@ -57,11 +57,11 @@ namespace simbi::hydrostate {
                     pipeline.configure(lvl);
                 }
 
-                // evolution::run(
-                //     sim,
-                //     [&](auto&) { pipeline.step_all(); },
-                //     evo_state
-                // );
+                evolution::run(
+                    sim,
+                    [&](auto&) { pipeline.step_all(); },
+                    evo_state
+                );
             }
         );
     }

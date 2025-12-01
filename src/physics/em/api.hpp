@@ -7,6 +7,7 @@
 #include "containers/vector.hpp"
 #include "ct_geom.hpp"
 #include "geometry/metrics.hpp"
+#include "grid/field.hpp"
 #include "physics/em/electromagnetism.hpp"
 #include "utility/enums.hpp"
 #include "zero.hpp"
@@ -61,7 +62,7 @@ namespace simbi::em {
 
     // factory
     template <typename FluxField, typename PrimField, typename EdgeDomain>
-    inline auto ex_stencil(
+    auto ex_stencil(
         const FluxField& fluxes,
         const PrimField& prims,
         const EdgeDomain& domain
@@ -201,7 +202,8 @@ namespace simbi::em {
         using argument_type                 = iarray<3>;
         static constexpr std::uint64_t rank = 3;
 
-        EField efield;
+        EField ey;
+        EField ez;
         Geometry geometry;
 
         DEV auto operator()(argument_type coord) const
@@ -210,14 +212,14 @@ namespace simbi::em {
 
             // ey edges (comp 1): left/right in k direction
             auto ey_vals = vector_t<real, 2>{
-              efield[1](iarray<3>{kk + 0, jj, ii}),
-              efield[1](iarray<3>{kk + 1, jj, ii})
+              ey(iarray<3>{kk + 0, jj, ii}),
+              ey(iarray<3>{kk + 1, jj, ii})
             };
 
             // ez edges (comp 0): left/right in j direction
             auto ez_vals = vector_t<real, 2>{
-              efield[0](iarray<3>{kk, jj + 0, ii}),
-              efield[0](iarray<3>{kk, jj + 1, ii})
+              ez(iarray<3>{kk, jj + 0, ii}),
+              ez(iarray<3>{kk, jj + 1, ii})
             };
 
             auto edge_emfs = vector_t<vector_t<real, 2>, 2>{ey_vals, ez_vals};
@@ -238,7 +240,7 @@ namespace simbi::em {
     )
     {
         return compute::computation_t{
-          bx_curl_t<EField, Geometry>{efield, geometry},
+          bx_curl_t{efield[1].view(), efield[0].view(), geometry},
           domain
         };
     }
@@ -250,7 +252,8 @@ namespace simbi::em {
         using argument_type                 = iarray<3>;
         static constexpr std::uint64_t rank = 3;
 
-        EField efield;
+        EField ez;
+        EField ex;
         Geometry geometry;
 
         DEV auto operator()(argument_type coord) const
@@ -259,14 +262,14 @@ namespace simbi::em {
 
             // ez edges (comp 0): left/right in i direction
             auto ez_vals = vector_t<real, 2>{
-              efield[0](iarray<3>{kk, jj, ii + 0}),
-              efield[0](iarray<3>{kk, jj, ii + 1})
+              ez(iarray<3>{kk, jj, ii + 0}),
+              ez(iarray<3>{kk, jj, ii + 1})
             };
 
             // ex edges (comp 2): left/right in k direction
             auto ex_vals = vector_t<real, 2>{
-              efield[2](iarray<3>{kk + 0, jj, ii}),
-              efield[2](iarray<3>{kk + 1, jj, ii})
+              ex(iarray<3>{kk + 0, jj, ii}),
+              ex(iarray<3>{kk + 1, jj, ii})
             };
 
             auto edge_emfs = vector_t<vector_t<real, 2>, 2>{ez_vals, ex_vals};
@@ -287,7 +290,7 @@ namespace simbi::em {
     )
     {
         return compute::computation_t{
-          by_curl_t<EField, Geometry>{efield, geometry},
+          by_curl_t{efield[0].view(), efield[2].view(), geometry},
           domain
         };
     }
@@ -299,7 +302,8 @@ namespace simbi::em {
         using argument_type                 = iarray<3>;
         static constexpr std::uint64_t rank = 3;
 
-        EField efield;
+        EField ex;
+        EField ey;
         Geometry geometry;
 
         DEV auto operator()(argument_type coord) const
@@ -308,14 +312,14 @@ namespace simbi::em {
 
             // ey edges (comp 1): left/right in ii direction
             auto ey_vals = vector_t<real, 2>{
-              efield[1](iarray<3>{kk, jj, ii + 0}),
-              efield[1](iarray<3>{kk, jj, ii + 1})
+              ey(iarray<3>{kk, jj, ii + 0}),
+              ey(iarray<3>{kk, jj, ii + 1})
             };
 
             // ex edges (comp 2): left/right in j direction
             auto ex_vals = vector_t<real, 2>{
-              efield[2](iarray<3>{kk, jj + 0, ii}),
-              efield[2](iarray<3>{kk, jj + 1, ii})
+              ex(iarray<3>{kk, jj + 0, ii}),
+              ex(iarray<3>{kk, jj + 1, ii})
             };
 
             auto edge_emfs = vector_t<vector_t<real, 2>, 2>{ex_vals, ey_vals};
@@ -329,14 +333,14 @@ namespace simbi::em {
 
     // factory for bz_curl_t
     template <typename EField, typename Geometry, typename FaceDomain>
-    DEV auto bz_curl_op(
+    auto bz_curl_op(
         const EField& efield,
         const Geometry& geometry,
         const FaceDomain& domain
     )
     {
         return compute::computation_t{
-          bz_curl_t<EField, Geometry>{efield, geometry},
+          bz_curl_t{efield[2].view(), efield[1].view(), geometry},
           domain
         };
     }
@@ -369,17 +373,17 @@ namespace simbi::em {
         // compute ex
         auto e1    = state.efield[2];
         auto e1_op = ex_stencil(fluxes, prims, edge_domains[2]);
-        e1         = e1_op.map([](auto enp) { return enp; }).with(exec);
+        e1 = e1_op.map([] DEV(real enp) -> real { return enp; }).with(exec);
 
         // compute ey
         auto e2    = state.efield[1];
         auto e2_op = ey_stencil(fluxes, prims, edge_domains[1]);
-        e2         = e2_op.map([](auto enp) { return enp; }).with(exec);
+        e2 = e2_op.map([] DEV(real enp) -> real { return enp; }).with(exec);
 
         // compute ez
         auto e3    = state.efield[0];
         auto e3_op = ez_stencil(fluxes, prims, edge_domains[0]);
-        e3         = e3_op.map([](auto enp) { return enp; }).with(exec);
+        e3 = e3_op.map([] DEV(real enp) -> real { return enp; }).with(exec);
     }
 
     // =========================================================================
@@ -462,7 +466,9 @@ namespace simbi::em {
         const Domain& cell_domain
     )
     {
-        auto bavg = interpolate_face_to_cell_magnetic(
+        using cons_t                 = typename ConsField::value_type;
+        constexpr std::uint64_t Rank = ConsField::rank;
+        auto bavg                    = interpolate_face_to_cell_magnetic(
             bfields,
             geometry,
             face_domains,
@@ -472,7 +478,7 @@ namespace simbi::em {
 
         u_p = u_p.zip(
                      bavg,
-                     [](auto u, auto bv) {
+                     [] DEV(cons_t u, vector_t<real, Rank> bv) -> real {
                          const auto bmean = u.mag;
                          const auto e_old = 0.5 * vecops::dot(bmean, bmean);
                          const auto e_new = 0.5 * vecops::dot(bv, bv);
@@ -496,7 +502,10 @@ namespace simbi::em {
         const Domain& cell_domain
     )
     {
-        auto bavg = interpolate_face_to_cell_magnetic(
+        using cons_field_t           = decltype(state.cons);
+        using cons_t                 = typename cons_field_t::value_type;
+        constexpr std::uint64_t Rank = cons_t::rank;
+        auto bavg                    = interpolate_face_to_cell_magnetic(
             state.bfield,
             geometry,
             face_domains,
@@ -506,7 +515,7 @@ namespace simbi::em {
 
         u_p = u_p.zip(
                      bavg,
-                     [](auto u, auto b_new) {
+                     [] DEV(cons_t u, vector_t<real, Rank> b_new) -> cons_t {
                          // since my Godunov does not affect the cell-centered
                          // magnetic fields, we do not need to update the energy
                          // here.
@@ -538,19 +547,19 @@ namespace simbi::em {
         // update bx (comp 2)
         auto b1    = state.bfield[2][face_domains[2]];
         auto b1_op = bx_curl_op(state.efield, geometry, face_domains[2]);
-        b1         = b1.zip(b1_op, [dt](auto b, auto curl_e) {
+        b1         = b1.zip(b1_op, [dt] DEV(real b, real curl_e) -> real {
                    return b - dt * curl_e;
                }).with(exec);
 
         auto b2    = state.bfield[1][face_domains[1]];
         auto b2_op = by_curl_op(state.efield, geometry, face_domains[1]);
-        b2         = b2.zip(b2_op, [dt](auto b, auto curl_e) {
+        b2         = b2.zip(b2_op, [dt] DEV(real b, real curl_e) -> real {
                    return b - dt * curl_e;
                }).with(exec);
 
         auto b3    = state.bfield[0][face_domains[0]];
         auto b3_op = bz_curl_op(state.efield, geometry, face_domains[0]);
-        b3         = b3.zip(b3_op, [dt](auto b, auto curl_e) {
+        b3         = b3.zip(b3_op, [dt] DEV(real b, real curl_e) -> real {
                    return b - dt * curl_e;
                }).with(exec);
 
@@ -562,8 +571,6 @@ namespace simbi::em {
             face_domains,
             cell_domain
         );
-
-        // std::cin.get();
     }
 
 }   // namespace simbi::em

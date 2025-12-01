@@ -4,6 +4,7 @@
 #include "compat.hpp"
 #include "hesi/core/types.hpp"
 
+#include <atomic>
 #include <cstddef>
 #include <cstdint>
 
@@ -216,9 +217,8 @@ namespace simbi::het {
                 return atomicAdd(addr, val);
             }
 #else
-            T old = *addr;
-            *addr += val;
-            return old;
+            std::atomic_ref<T> ref(*addr);
+            return ref.fetch_add(val);
 #endif
         }
 
@@ -228,8 +228,10 @@ namespace simbi::het {
 #if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
             return atomicMin(addr, val);
 #else
-            T old = *addr;
-            *addr = (*addr < val) ? *addr : val;
+            std::atomic_ref<T> ref(*addr);
+            T old = ref.load();
+            while (val < old && !ref.compare_exchange_weak(old, val))
+                ;
             return old;
 #endif
         }

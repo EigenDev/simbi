@@ -110,7 +110,7 @@ namespace simbi::grid::amr {
                                      const iarray<Rank>& coord,
                                      const T& u,
                                      const T& df
-                                 ) {
+                                 ) -> T {
                     real inv_vol = 1.0 / geometry.volume(coord);
                     return u + df * inv_vol;
                 };
@@ -120,11 +120,11 @@ namespace simbi::grid::amr {
                     coarse[region]
                         .zip(
                             *reg,
-                            [](const T& u, const T& df) {
+                            [] DEV(const T& u, const T& df) {
                                 return std::make_pair(u, df);
                             }
                         )
-                        .enum_map([reflux_op](
+                        .enum_map([reflux_op] DEV(
                                       const iarray<Rank>& coord,
                                       const std::pair<T, T>& p
                                   ) {

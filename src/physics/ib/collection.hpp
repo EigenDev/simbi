@@ -89,14 +89,14 @@ namespace simbi::body {
         vector_t<sink_properties_t<Rank>, MaxBodies> properties;
         std::size_t count{0};
 
-        const auto& operator[](std::uint64_t idx) const
+        DUAL const auto& operator[](std::uint64_t idx) const
         {
             return properties[idx];
         }
 
-        auto& operator[](std::uint64_t idx) { return properties[idx]; }
+        DUAL auto& operator[](std::uint64_t idx) { return properties[idx]; }
 
-        bool empty() const { return count == 0; }
+        DUAL bool empty() const { return count == 0; }
     };
 
     template <std::uint64_t Rank>

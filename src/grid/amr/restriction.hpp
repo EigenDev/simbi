@@ -19,15 +19,16 @@ namespace simbi::grid::amr {
     // -------------------------------------------------------------------------
     template <typename FineComp, std::uint64_t Rank>
     struct restrict_average_t {
-        using vec_type = iarray<Rank>;
-        using U        = typename FineComp::value_type;
-        using T        = std::remove_cv_t<std::remove_reference_t<U>>;
+        using value_type = std::remove_cv_t<
+            std::remove_reference_t<typename FineComp::value_type>>;
+        using argument_type                 = iarray<Rank>;
+        static constexpr std::uint64_t rank = Rank;
 
         FineComp fine_comp_;
-        vec_type ratio_;
+        argument_type ratio_;
         double inv_volume_;
 
-        DUAL restrict_average_t(FineComp fine, vec_type ratio)
+        DUAL restrict_average_t(FineComp fine, argument_type ratio)
             : fine_comp_(std::move(fine)), ratio_(ratio), inv_volume_(1.0)
         {
             for (std::uint64_t ii = 0; ii < Rank; ++ii) {
@@ -37,14 +38,14 @@ namespace simbi::grid::amr {
 
         // input: coarse coordinate
         // action: loops over fine children and averages
-        DUAL T operator()(const vec_type& coarse_coord) const
+        DUAL value_type operator()(const argument_type& coarse_coord) const
         {
-            vec_type fine_base;
+            argument_type fine_base;
             for (std::uint64_t d = 0; d < Rank; ++d) {
                 fine_base[d] = coarse_coord[d] * ratio_[d];
             }
 
-            T sum{};
+            value_type sum{};
 
             // manual loop unrolling for typical dimensions
             // we cannot use recursion easily in a device lambda/functor
@@ -87,20 +88,21 @@ namespace simbi::grid::amr {
     // -------------------------------------------------------------------------
     template <typename FineComp, std::uint64_t Rank>
     struct restrict_injection_t {
-        using vec_type = iarray<Rank>;
-        using T        = typename FineComp::value_type;
+        using value_type                    = typename FineComp::value_type;
+        using argument_type                 = iarray<Rank>;
+        static constexpr std::uint64_t rank = Rank;
 
         FineComp fine_comp_;
-        vec_type ratio_;
+        argument_type ratio_;
 
-        DUAL restrict_injection_t(FineComp fine, vec_type ratio)
+        DUAL restrict_injection_t(FineComp fine, argument_type ratio)
             : fine_comp_(std::move(fine)), ratio_(ratio)
         {
         }
 
-        DUAL T operator()(const vec_type& coarse_coord) const
+        DUAL value_type operator()(const argument_type& coarse_coord) const
         {
-            vec_type fine_coord;
+            argument_type fine_coord;
             for (std::uint64_t d = 0; d < Rank; ++d) {
                 fine_coord[d] = coarse_coord[d] * ratio_[d];
             }

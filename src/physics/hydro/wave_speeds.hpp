@@ -44,7 +44,7 @@ namespace simbi::hydro {
         DEV constexpr auto max() const { return right; }
         // structured bindings support
         template <std::size_t Index>
-        std::tuple_element_t<Index, wave_speeds_t>& get()
+        DEV std::tuple_element_t<Index, wave_speeds_t>& get()
         {
             if constexpr (Index == 0) {
                 return left;
@@ -61,7 +61,7 @@ namespace simbi::hydro {
         }
 
         template <std::size_t Index>
-        const std::tuple_element_t<Index, wave_speeds_t>& get() const
+        DEV const std::tuple_element_t<Index, wave_speeds_t>& get() const
         {
             if constexpr (Index == 0) {
                 return left;

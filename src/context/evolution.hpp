@@ -223,8 +223,8 @@ namespace simbi::evolution {
             // advance this level
             euler_system_t<Ops>{ops}(sim, block_geo, lvl);
 
-            // apply body effects (all levels compute, only authoritative passes
-            // diagnostics)
+            // apply body effects (all levels compute, only authoritative
+            // passes diagnostics)
             body_effects_system_t<Sim::rank>{}(
                 sim,
                 block_geo,

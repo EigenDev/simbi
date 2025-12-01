@@ -174,6 +174,7 @@ namespace simbi::grid {
     {
       public:
         using value_type                    = T;
+        using argument_type                 = iarray<Rank>;
         using view_type                     = field_view_t<T, Rank>;
         using coord_type                    = typename domain_t<Rank>::coord_t;
         static constexpr std::uint64_t rank = Rank;

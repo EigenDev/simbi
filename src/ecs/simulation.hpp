@@ -237,6 +237,30 @@ namespace simbi::ecs {
         }
 
         // -------------------------------------------------------------------------
+        // partition flux register
+        // -------------------------------------------------------------------------
+        const auto& flux_register(std::uint64_t lvl) const
+        {
+            return registry.get<flux_register_component_t<conserved_t, Rank>>(
+                levels[lvl]
+            );
+        }
+
+        auto& flux_register(std::uint64_t lvl)
+        {
+            return registry.get<flux_register_component_t<conserved_t, Rank>>(
+                levels[lvl]
+            );
+        }
+
+        bool has_flux_register(std::uint64_t lvl) const
+        {
+            return registry.has<flux_register_component_t<conserved_t, Rank>>(
+                levels[lvl]
+            );
+        }
+
+        // -------------------------------------------------------------------------
         // with_geometry
         //
         // invokes a callback with the block geometry for a level.

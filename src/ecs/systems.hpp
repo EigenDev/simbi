@@ -342,6 +342,7 @@ namespace simbi::ecs {
             std::uint64_t lvl
         ) const
         {
+            using cons_t                 = typename Sim::conserved_t;
             constexpr std::uint64_t rank = Sim::rank;
 
             auto& meta    = sim.metadata();
@@ -381,14 +382,15 @@ namespace simbi::ecs {
                         // accumulate time-weighted flux for reflux
                         auto flux_view = fields.flux[dir][face_domain];
                         auto avg_view  = fields.flux_avg[dir][face_domain];
-                        avg_view       = avg_view
-                                       .zip(
-                                           flux_view,
-                                           [dt](auto avg, auto f) {
-                                               return avg + f * dt;
-                                           }
-                                       )
-                                       .with(exec);
+                        avg_view =
+                            avg_view
+                                .zip(
+                                    flux_view,
+                                    [dt] DEV(cons_t avg, cons_t f) -> cons_t {
+                                        return avg + f * dt;
+                                    }
+                                )
+                                .with(exec);
                     }
                 }
             }
@@ -402,6 +404,7 @@ namespace simbi::ecs {
         template <typename Sim>
         void operator()(Sim& sim, std::uint64_t lvl) const
         {
+            using cons_t = typename Sim::conserved_t;
             if (!sim.has_refinement()) {
                 return;
             }
@@ -411,10 +414,10 @@ namespace simbi::ecs {
                 auto exec    = sim.partition_executor(lvl, pp);
 
                 for (std::uint64_t dir = 0; dir < Sim::rank; ++dir) {
-                    fields.flux_avg[dir] =
-                        fields.flux_avg[dir].map(
-                                                [](auto f) { return f * 0.0; }
-                        ).with(exec);
+                    auto ff = fields.flux_avg[dir];
+                    ff      = ff.map([] DEV(cons_t f) -> cons_t {
+                               return f * 0.0;
+                           }).with(exec);
                 }
             }
         }
@@ -432,6 +435,7 @@ namespace simbi::ecs {
         operator()(Sim& sim, const Geometry& block_geo, std::uint64_t lvl) const
         {
             using namespace simbi::structs;
+            using cons_t = typename Sim::conserved_t;
 
             auto& meta    = sim.metadata();
             auto& sources = sim.sources();
@@ -458,9 +462,12 @@ namespace simbi::ecs {
                 // u^{n+1} = u^n + dt * L(u^n)
                 auto u_view = fields.cons[part.owned_domain];
                 u_view      = u_view
-                             .enum_map([ell, dt](auto coord, auto u) {
-                                 return u | add_gas(ell(coord) * dt);
-                             })
+                             .zip(
+                                 ell,
+                                 [dt] DEV(cons_t u, cons_t dudt) -> cons_t {
+                                     return u | add_gas(dudt * dt);
+                                 }
+                             )
                              .with(exec);
 
                 if constexpr (Sim::is_mhd) {
@@ -489,6 +496,7 @@ namespace simbi::ecs {
         operator()(Sim& sim, const Geometry& block_geo, std::uint64_t lvl) const
         {
             using namespace simbi::structs;
+            using cons_t = typename Sim::conserved_t;
 
             auto& meta    = sim.metadata();
             auto& sources = sim.sources();
@@ -509,7 +517,8 @@ namespace simbi::ecs {
                 auto& ws = sim.workspace(lvl, pp);
 
                 // store u^n
-                ws.u_n = fields.cons.map([](auto u) { return u; }).with(exec);
+                ws.u_n =
+                    fields.cons.map([] DEV(cons_t u) { return u; }).with(exec);
 
                 // compute L(u^n)
                 auto k1 = cfd::godunov_op(
@@ -523,18 +532,21 @@ namespace simbi::ecs {
                 // u* = u^n + dt * L(u^n)
                 auto u_star = fields.cons[part.owned_domain];
                 u_star      = u_star
-                             .enum_map([k1, dt](auto coord, auto u) {
-                                 return u | add_gas(k1(coord) * dt);
-                             })
+                             .zip(
+                                 k1,
+                                 [dt] DEV(cons_t u, cons_t us) {
+                                     return u | add_gas(us * dt);
+                                 }
+                             )
                              .with(exec);
 
                 if constexpr (Sim::is_mhd) {
                     // save E^n for rk2 stage 2
                     for (std::uint64_t dd = 0; dd < Sim::rank; ++dd) {
                         ws.e_n[dd] =
-                            fields.efield[dd].map(
-                                                 [](auto e) { return e; }
-                            ).with(exec);
+                            fields.efield[dd]
+                                .map([] DEV(real e) -> real { return e; })
+                                .with(exec);
                     }
                 }
             }
@@ -553,6 +565,8 @@ namespace simbi::ecs {
         operator()(Sim& sim, const Geometry& block_geo, std::uint64_t lvl) const
         {
             using namespace simbi::structs;
+            constexpr std::uint64_t Rank = Sim::rank;
+            using cons_t                 = typename Sim::conserved_t;
 
             auto& meta    = sim.metadata();
             auto& sources = sim.sources();
@@ -583,7 +597,9 @@ namespace simbi::ecs {
                 auto u_star = fields.cons[part.owned_domain];
 
                 u_n = u_n.enum_map(
-                             [u_star, k2, dt](auto coord, auto u) {
+                             [u_star,
+                              k2,
+                              dt] DEV(iarray<Rank> coord, cons_t u) -> cons_t {
                                  return u | scale_gas(0.5) |
                                         add_gas(0.5 * u_star(coord)) |
                                         add_gas(0.5 * dt * k2(coord));
@@ -591,7 +607,10 @@ namespace simbi::ecs {
                 ).with(exec);
 
                 // copy result back
-                fields.cons = ws.u_n.map([](auto u) { return u; }).with(exec);
+                fields.cons =
+                    ws.u_n.map(
+                              [] DEV(cons_t u) -> cons_t { return u; }
+                    ).with(exec);
 
                 if constexpr (Sim::is_mhd) {
                     // compute E^{n+1/2} = 0.5 * (E^n + E^*)
@@ -600,7 +619,7 @@ namespace simbi::ecs {
                         en      = ws.e_n[dd]
                                  .zip(
                                      en,
-                                     [](auto e_n, auto e_star) {
+                                     [] DEV(real e_n, real e_star) -> real {
                                          return 0.5 * (e_n + e_star);
                                      }
                                  )
@@ -793,10 +812,7 @@ namespace simbi::ecs {
             // get or create flux register component for the fine level
             auto& decomp = sim.decomposition(fine_lvl);
 
-            if (!sim.registry
-                     .template has<flux_register_component_t<cons_t, Rank>>(
-                         sim.level_entity(fine_lvl)
-                     )) {
+            if (!sim.has_flux_register(fine_lvl)) {
                 flux_register_component_t<cons_t, Rank> flux_regs;
                 flux_regs.ratio = ratio;
 
@@ -835,21 +851,13 @@ namespace simbi::ecs {
         ) const
         {
             constexpr auto Rank = Sim::rank;
-            using cons_t        = typename Sim::conserved_t;
 
             // get flux register for the fine level
-            if (!sim.registry
-                     .template has<flux_register_component_t<cons_t, Rank>>(
-                         sim.level_entity(fine_lvl)
-                     )) {
+            if (!sim.has_flux_register(fine_lvl)) {
                 return;
             }
 
-            auto& flux_regs =
-                sim.registry
-                    .template get<flux_register_component_t<cons_t, Rank>>(
-                        sim.level_entity(fine_lvl)
-                    );
+            auto& flux_regs = sim.flux_register(fine_lvl);
 
             // for each coarse partition that borders fine region
             for (std::uint64_t cp = 0; cp < sim.num_partitions(coarse_lvl);
@@ -890,25 +898,17 @@ namespace simbi::ecs {
         void operator()(Sim& sim, std::uint64_t fine_lvl, real dt) const
         {
             constexpr auto Rank = Sim::rank;
-            using cons_t        = typename Sim::conserved_t;
 
             if (fine_lvl == 0) {
                 return;
             }
 
             // get flux register
-            if (!sim.registry
-                     .template has<flux_register_component_t<cons_t, Rank>>(
-                         sim.level_entity(fine_lvl)
-                     )) {
+            if (!sim.has_flux_register(fine_lvl)) {
                 return;
             }
 
-            auto& flux_regs =
-                sim.registry
-                    .template get<flux_register_component_t<cons_t, Rank>>(
-                        sim.level_entity(fine_lvl)
-                    );
+            auto& flux_regs = sim.flux_register(fine_lvl);
 
             const auto coarse_lvl = fine_lvl - 1;
 
@@ -959,26 +959,16 @@ namespace simbi::ecs {
         template <typename Sim>
         void operator()(Sim& sim, std::uint64_t fine_lvl) const
         {
-            constexpr auto Rank = Sim::rank;
-            using cons_t        = typename Sim::conserved_t;
-
             if (fine_lvl == 0) {
                 return;
             }
 
             // get flux register
-            if (!sim.registry
-                     .template has<flux_register_component_t<cons_t, Rank>>(
-                         sim.level_entity(fine_lvl)
-                     )) {
+            if (!sim.has_flux_register(fine_lvl)) {
                 return;
             }
 
-            auto& flux_regs =
-                sim.registry
-                    .template get<flux_register_component_t<cons_t, Rank>>(
-                        sim.level_entity(fine_lvl)
-                    );
+            auto& flux_regs = sim.flux_register(fine_lvl);
 
             const auto coarse_lvl = fine_lvl - 1;
             auto& mesh_cfg        = sim.mesh(coarse_lvl);
@@ -1005,49 +995,6 @@ namespace simbi::ecs {
                     }
                 }
             );
-        }
-    };
-
-    // =========================================================================
-    // clear flux registers (before new coarse step)
-    // =========================================================================
-    struct clear_flux_registers_system_t {
-        template <typename Sim>
-        void operator()(Sim& sim, std::uint64_t fine_lvl) const
-        {
-            constexpr auto Rank = Sim::rank;
-            using cons_t        = typename Sim::conserved_t;
-
-            if (fine_lvl == 0) {
-                return;
-            }
-
-            if (!sim.registry
-                     .template has<flux_register_component_t<cons_t, Rank>>(
-                         sim.level_entity(fine_lvl)
-                     )) {
-                return;
-            }
-
-            // re-initialize registers (cheapest way to clear)
-            auto& flux_regs =
-                sim.registry
-                    .template get<flux_register_component_t<cons_t, Rank>>(
-                        sim.level_entity(fine_lvl)
-                    );
-
-            const auto coarse_lvl = fine_lvl - 1;
-            auto& coarse_decomp   = sim.decomposition(coarse_lvl);
-
-            for (std::uint64_t cp = 0; cp < coarse_decomp.num_partitions();
-                 ++cp) {
-                auto& coarse_part = coarse_decomp.partitions[cp];
-                flux_regs.registers[cp] =
-                    grid::amr::flux_register_t<cons_t, Rank>(
-                        coarse_part.owned_domain,
-                        flux_regs.ratio
-                    );
-            }
         }
     };
 
@@ -1133,6 +1080,7 @@ namespace simbi::ecs {
             if (!sim.has_bodies()) {
                 return;
             }
+            using cons_t = typename Sim::conserved_t;
 
             const auto& bodies = sim.bodies();
             auto& meta         = sim.metadata();
@@ -1160,9 +1108,12 @@ namespace simbi::ecs {
                 // apply to conservative variables
                 auto u_view = fields.cons[part.owned_domain];
                 u_view      = u_view
-                             .enum_map([effects](auto coord, auto u) {
-                                 return u | add_gas(effects(coord));
-                             })
+                             .zip(
+                                 effects,
+                                 [] DEV(cons_t u, cons_t du) -> cons_t {
+                                     return u | add_gas(du);
+                                 }
+                             )
                              .with(exec);
             }
         }
