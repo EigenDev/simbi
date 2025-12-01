@@ -14,7 +14,7 @@ def _get_stitched_leaf_data(
     data: PlotData, field_names: list[str]
 ) -> dict[str, np.ndarray]:
     """
-    Stitch all FMR levels into high-resolution flat arrays of leaf cells.
+    Stitch all refined levels into high-resolution flat arrays of leaf cells.
 
     This is the core of the level-aware 3D analysis.
     Now also returns cell volumes for proper weighting.
@@ -302,7 +302,7 @@ def create_coordinate_profile_data(
     """
     The pipeline for coordinate profile analysis.
 
-    Stitches 3D FMR data and computes spherically averaged profiles.
+    Stitches 3D refined data and computes spherically averaged profiles.
     """
 
     # This is our "contract":
@@ -316,15 +316,15 @@ def create_coordinate_profile_data(
         else:
             prerequisite_fields.add(name)
 
-    # Load all full-dim FMR levels for the prerequisites
-    fmr_plot_data = PlotData(
+    # Load all full-dim refinement levels for the prerequisites
+    refined_plot_data = PlotData(
         fields=prepare_fields(data, list(prerequisite_fields), config),
         # ... (other PlotData fields) ...
     )
 
     # Stitch all prerequisite fields into flat arrays
     stitched_data = _get_stitched_leaf_data(
-        fmr_plot_data, list(prerequisite_fields)
+        refined_plot_data, list(prerequisite_fields)
     )
 
     # Run the requested analyses

@@ -30,6 +30,7 @@ from simbi.types.input import (
     CellSpacing,
     CoordSystem,
     Reconstruction,
+    RefinementMode,
     Regime,
     Solver,
     SubCycleMode,
@@ -162,19 +163,28 @@ class SimbiProblem(BaseModel):
     )
 
     # =========================================================================
-    # fmr (fixed mesh refinement)
+    # refinement / fmr settings (fixed mesh refinement only for now)
     # =========================================================================
-    fmr_enabled: bool = ProblemParam(False, description="enable fmr")
-    fmr_max_levels: int = ProblemParam(1, description="max refinement levels")
-    fmr_regions: list[list[float]] = ProblemParam(
+    refinement_enabled: bool = ProblemParam(
+        False, description="enable mesh refinement"
+    )
+    refinement_max_levels: int = ProblemParam(
+        1, description="max refinement levels"
+    )
+    refinement_regions: list[list[float]] = ProblemParam(
         [], description="refinement regions"
     )
-    fmr_ratios: list[int] = ProblemParam([], description="refinement ratios")
-    fmr_substeps: list[int] = ProblemParam(
+    refinement_ratios: list[int] = ProblemParam(
+        [], description="refinement ratios"
+    )
+    refinement_substeps: list[int] = ProblemParam(
         [1], description="substeps per level"
     )
-    fmr_subcycling_mode: SubCycleMode = ProblemParam(
+    refinement_subcycling_mode: SubCycleMode = ProblemParam(
         SubCycleMode.NONE, description="subcycling mode"
+    )
+    refinement_mode: RefinementMode = ProblemParam(
+        RefinementMode.FIXED, description="refinement mode"
     )
 
     # =========================================================================
@@ -401,37 +411,44 @@ class SimbiProblem(BaseModel):
         return self
 
     @model_validator(mode="after")
-    def _validate_fmr(self) -> SimbiProblem:
-        """validate fmr configuration."""
-        if not self.fmr_enabled:
+    def _validate_refinement(self) -> SimbiProblem:
+        """validate refinement configuration."""
+        if not self.refinement_enabled:
             return self
 
-        if not self.fmr_regions:
-            raise ValueError("fmr_regions required when fmr_enabled=True")
-
-        expected_levels = self.fmr_max_levels - 1
-        if len(self.fmr_regions) != expected_levels:
+        if not self.refinement_regions:
             raise ValueError(
-                f"expected {expected_levels} fmr_regions, got {len(self.fmr_regions)}"
+                "refinement_regions required when refinement_enabled=True"
             )
 
-        if len(self.fmr_ratios) != expected_levels:
+        expected_levels = self.refinement_max_levels - 1
+        if len(self.refinement_regions) != expected_levels:
             raise ValueError(
-                f"expected {expected_levels} fmr_ratios, got {len(self.fmr_ratios)}"
+                f"expected {expected_levels} refinement_regions, got {len(self.refinement_regions)}"
+            )
+
+        if len(self.refinement_ratios) != expected_levels:
+            raise ValueError(
+                f"expected {expected_levels} refinement_ratios, got {len(self.refinement_ratios)}"
             )
 
         expected_coords = 2 * self.dimensionality
-        for ii, region in enumerate(self.fmr_regions):
+        for ii, region in enumerate(self.refinement_regions):
             if len(region) != expected_coords:
                 raise ValueError(
-                    f"fmr_region[{ii}] has {len(region)} coords, expected {expected_coords}"
+                    f"refinement_region[{ii}] has {len(region)} coords, expected {expected_coords}"
                 )
 
-        if self.fmr_subcycling_mode == SubCycleMode.ADAPTIVE:
-            if len(self.fmr_substeps) != expected_levels:
+        if self.refinement_subcycling_mode == SubCycleMode.ADAPTIVE:
+            if len(self.refinement_substeps) != expected_levels:
                 raise ValueError(
-                    "fmr_substeps must match fmr_max_levels - 1 for adaptive mode"
+                    "refinement_substeps must match refinement_max_levels - 1 for adaptive mode"
                 )
+
+        if self.refinement_mode == RefinementMode.ADAPTIVE:
+            raise NotImplementedError(
+                "adaptive refinement mode not yet supported"
+            )
 
         return self
 

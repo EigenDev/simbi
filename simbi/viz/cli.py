@@ -456,18 +456,18 @@ def setup_parser(parser: argparse.ArgumentParser) -> None:
         default=None,
         metavar="KEY=VALUE",
     )
-    # fmr-specific
+    # refinement-specific
     parser.add_argument(
         "--active-levels",
         nargs="+",
         type=int,
-        help="Active FMR levels to display",
+        help="Active refinement levels to display",
         default=None,
     )
     parser.add_argument(
         "--composite-view",
         action=argparse.BooleanOptionalAction,
-        help="Use composite view for FMR data",
+        help="Use composite view for refined data",
         default=False,
     )
     parser.add_argument(

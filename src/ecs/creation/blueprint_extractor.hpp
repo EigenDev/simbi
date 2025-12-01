@@ -324,20 +324,24 @@ namespace simbi::ecs::creation {
         {
             amr_blueprint_t bp;
 
-            bp.enabled = read_or_default<bool>(config, "fmr_enabled", false);
+            bp.enabled =
+                read_or_default<bool>(config, "refinement_enabled", false);
 
             if (!bp.enabled) {
                 bp.max_levels = 1;
                 return bp;
             }
 
-            bp.max_levels =
-                read_or_default<std::uint64_t>(config, "fmr_max_levels", 1);
+            bp.max_levels = read_or_default<std::uint64_t>(
+                config,
+                "refinement_max_levels",
+                1
+            );
 
             // refinement ratios
             auto ratios = config::try_read<std::vector<std::uint64_t>>(
                 config,
-                "fmr_ratios"
+                "refinement_ratios"
             );
             if (ratios.has_value()) {
                 bp.refinement_ratios = *ratios;
@@ -352,7 +356,7 @@ namespace simbi::ecs::creation {
             // refinement regions
             auto regions = config::try_read<std::vector<std::vector<real>>>(
                 config,
-                "raw_fmr_regions"
+                "raw_refinement_regions"
             );
             if (regions.has_value()) {
                 bp.static_refinement_regions = *regions;

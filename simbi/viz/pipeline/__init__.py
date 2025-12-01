@@ -1,6 +1,6 @@
 from .conversion import config_from_args
-from .fmr import compute_refinement_boxes, prepare_composite_field
 from .plot_data import create_plot_data
+from .refinement import compute_refinement_boxes, prepare_composite_field
 from .transforms import (
     load_data,
     prepare_field_level,

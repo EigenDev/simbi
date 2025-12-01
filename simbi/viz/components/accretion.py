@@ -127,7 +127,7 @@ class AccretionAnalysisComponent(Component):
         self, data: PlotData, field_names: list[str]
     ) -> dict[str, np.ndarray]:
         """
-        Stitch all FMR levels into high-resolution flat arrays of leaf cells.
+        Stitch all refined levels into high-resolution flat arrays of leaf cells.
 
         This is the core of the level-aware analysis. It adapts the logic
         from your _render_polygons to build analysis arrays instead of patches.

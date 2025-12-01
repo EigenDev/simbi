@@ -242,7 +242,7 @@ def parse_diagnostics(groups: dict[str, Any]) -> BodyDiagnostics | None:
 
 
 def parse_hierarchy(groups: dict[str, Any]) -> Optional[HierarchyData]:
-    """Parse FMR hierarchy information from HDF5 groups"""
+    """Parse refinement hierarchy information from HDF5 groups"""
     if "hierarchy" not in groups:
         return None
 
@@ -461,10 +461,10 @@ def parse_data(
         # get base level fields
         fields = preprocess_fields(raw.fields, mesh, metadata, unpad)
 
-        # parse FMR hierarchy if present
+        # parse refinement hierarchy if present
         hierarchy = parse_hierarchy(raw.groups)
 
-        # parse additional levels if we have FMR data
+        # parse additional levels if we have refinement data
         levels = None
         if hierarchy:
             levels = []

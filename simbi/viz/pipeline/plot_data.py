@@ -4,7 +4,7 @@ from simbi.reader.adapter import SimData
 
 from ..config import VisualizationConfig
 from ..types import CoordSystem, FieldData, PlotData
-from .fmr import (
+from .refinement import (
     prepare_composite_field,
 )
 from .transforms import (
@@ -19,21 +19,24 @@ def prepare_fields(
     data: SimData, field_names: Sequence[str], config: VisualizationConfig
 ) -> list[FieldData]:
     """
-    Handles FMR logic to produce a list of full-dimensional fields.
+    Handles refinement logic to produce a list of full-dimensional fields.
     """
     ndim = get_effective_dimensions(
         data, config
     )  # Assuming you have this helper
 
-    # Get FMR settings from the config
+    # Get refinement settings from the config
     active_levels = {0}
-    if hasattr(config, "fmr") and config.fmr.active_levels is not None:
-        active_levels.update(config.fmr.active_levels)
+    if (
+        hasattr(config, "refinement")
+        and config.refinement.active_levels is not None
+    ):
+        active_levels.update(config.refinement.active_levels)
 
     use_composite = False
-    if hasattr(config, "fmr"):
+    if hasattr(config, "refinement"):
         use_composite = data.has_refinement() and getattr(
-            config.fmr, "composite_view", False
+            config.refinement, "composite_view", False
         )
 
     all_fields: list[FieldData] = []
@@ -98,10 +101,10 @@ def create_plot_data(
     """
     The main pipeline function.
 
-    > Prepares full-dim FMR levels (respecting composite_view).
+    > Prepares full-dim refinement levels (respecting composite_view).
     > Applies optional slicing.
     """
-    # Handles FMR logic (gets full-dim fields)
+    # Handles refinement logic (gets full-dim fields)
     full_dim_fields = prepare_fields(data, field_names, config)
 
     # Get slice spec from config

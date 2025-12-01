@@ -191,7 +191,7 @@ class PlotData(BaseModel):
         time: simulation time (float)
         dimensions: Number of spatial dimensions in the simulation
         coord_system: Coordinate system used
-        hierarchy: optional AMR hierarchy data (for FMR-aware components)
+        hierarchy: optional AMR hierarchy data (for refinement-aware components)
     """
 
     fields: Sequence[FieldData]
@@ -211,8 +211,8 @@ class PlotData(BaseModel):
             raise ValueError(f"Dimensions must be between 1 and 3, got {v}")
         return v
 
-    def has_fmr(self) -> bool:
-        """Check if this plot data contains FMR levels"""
+    def has_refinement(self) -> bool:
+        """Check if this plot data contains refinement levels"""
         return self.hierarchy is not None
 
     def get_level_fields(self, level: int) -> list[FieldData]:

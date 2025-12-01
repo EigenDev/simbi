@@ -18,10 +18,10 @@ TABLE_WIDTH = None
 
 
 class RichSimulationSummary:
-    """We're now gonna use Rich for beautiful terminal output"""
+    """we're now gonna use Rich for beautiful terminal output"""
 
     def __init__(self, console: Console | None = None) -> None:
-        """Initialize the Rich console and styling options
+        """initialize the rich console and styling options
 
         - console: optional rich.Console to render into (useful for tests)
         - computes self.table_width from the active console so tables and panels
@@ -66,7 +66,7 @@ class RichSimulationSummary:
         }
 
     def show_loading_animation(self) -> None:
-        """Show a loading animation while preparing the summary"""
+        """show a loading animation while preparing the summary"""
         with Progress(
             SpinnerColumn(),
             TextColumn("[bold blue]Preparing simulation summary..."),
@@ -80,10 +80,9 @@ class RichSimulationSummary:
                 time.sleep(0.001)  # simulated work :)
 
     def create_header(self) -> Panel:
-        """Create a stylish header for the simulation summary"""
+        """create a stylish header for the simulation summary"""
         title_text = Text(
-            "SIMBI SIMULATION PARAMETERS",
-            style=self.styles["header"],
+            "SIMBI SIMULATION PARAMETERS", style=self.styles["header"]
         )
         title_text.justify = "center"
 
@@ -98,14 +97,19 @@ class RichSimulationSummary:
     def create_parameter_table(
         self, category: str, params: dict[str, Any]
     ) -> Table:
-        """Create a rich table for a specific parameter category"""
-        # get appropriate box style for this category or default to ROUNDED
+        """create a rich table for a specific parameter category"""
+        # get appropriate box style for this category or default to rounded
         box_style = self.boxes.get(category, box.ROUNDED)
 
         active_params = any(p for p in params.values())
         if not active_params:
-            # if no parameters are active, return an empty table
-            return Table(box=box_style, title=category, width=TABLE_WIDTH)
+            # if no parameters are active, return an empty table with the configured width
+            return Table(
+                box=box_style,
+                title=category,
+                width=self.table_width,
+                title_justify="center",
+            )
 
         # determine style based on category
         if "Grid" in category:
@@ -133,6 +137,7 @@ class RichSimulationSummary:
             expand=False,
             show_lines=True,
             width=self.table_width,
+            title_justify="center",
         )
 
         # add columns
@@ -180,7 +185,7 @@ class RichSimulationSummary:
         return table
 
     def _format_parameter_value(self, value: Any) -> str:
-        """Format parameter values nicely based on their type"""
+        """format parameter values nicely based on their type"""
         if isinstance(value, (list, tuple)):
             if all(isinstance(x, (int, float)) for x in value):
                 # format numeric arrays with precision
@@ -206,7 +211,7 @@ class RichSimulationSummary:
             return str(value)
 
     def _get_parameter_description(self, param_name: str) -> str:
-        """Get description for a parameter (placeholder - would be better with actual descriptions)"""
+        """get description for a parameter (placeholder - would be better with actual descriptions)"""
         descriptions = {
             "nx": "Number of cells in x1-direction",
             "ny": "Number of cells in x2-direction",
@@ -255,7 +260,7 @@ class RichSimulationSummary:
         return descriptions.get(param_name, "")
 
     def create_statistics_panel(self, stats: dict[str, Any]) -> Panel:
-        """Create a visually appealing panel for simulation statistics"""
+        """create a visually appealing panel for simulation statistics"""
         stats_table = Table(box=box.SIMPLE_HEAD, width=self.table_width)
 
         # add memory usage with visual indicators
@@ -302,16 +307,19 @@ class RichSimulationSummary:
                 f"X: {gpu_dims[0]}, Y: {gpu_dims[1]}, Z: {gpu_dims[2]}",
                 "",
             )
+
         return Panel(
             stats_table,
             title="Simulation Statistics",
             border_style="bright_blue",
             box=box.DOUBLE,
             padding=(1, 2),
+            width=self.table_width,
+            title_align="center",
         )
 
     def _create_memory_usage_bar(self, memory_gb: float) -> Text:
-        """Create a visual memory usage indicator"""
+        """create a visual memory usage indicator"""
         # create a bar representing memory usage
         bar_length = 20
 
@@ -325,7 +333,7 @@ class RichSimulationSummary:
         else:
             color = "red"
 
-        # scale to max 64GB for visualization purposes
+        # scale to max 64gb for visualization purposes
         filled = min(math.ceil(memory_gb / 64 * bar_length), bar_length)
         empty = bar_length - filled
 
@@ -334,12 +342,9 @@ class RichSimulationSummary:
         return bar
 
     def generate_and_display(self, params: dict[str, Any]) -> None:
-        """Generate and display a beautiful parameter summary using Rich"""
+        """generate and display a beautiful parameter summary using rich"""
         # optionally show loading animation
-        self.show_loading_animation()
-
-        # clear the console for a clean display
-        # self.console.clear()
+        # self.show_loading_animation()
 
         # display the header
         self.console.print(self.create_header())
@@ -371,7 +376,7 @@ class RichSimulationSummary:
         # create tables for each parameter category
         tables = []
         for category, info in organized_params.items():
-            if info["params"]:  # Only add if there are parameters
+            if info["params"]:  # only add if there are parameters
                 table = self.create_parameter_table(
                     info["title"], info["params"]
                 )
@@ -394,7 +399,7 @@ class RichSimulationSummary:
             memory_bytes += 2 * ncons * zbytes
         stats["estimated_memory_gb"] = memory_bytes / 1024**3
         stats["cells_per_dim"] = (ni, nj, nk)
-        if params["gpu_block_dims"] is not None:
+        if params.get("gpu_block_dims") is not None:
             stats["gpu_block_dims"] = tuple(params["gpu_block_dims"])
 
         # create statistics panel
@@ -405,6 +410,8 @@ class RichSimulationSummary:
         if self.console.size.width > 110 and len(tables) > 1:
             left = tables[::2]
             right = tables[1::2]
+            # when printing side-by-side, tables may need to be narrower than full width
+            # note: if you want strict side-by-side fitting, consider passing a smaller width to each table
             for l, r in zip(left, right):
                 # print paired tables side-by-side
                 self.console.print(l, r)
@@ -423,13 +430,16 @@ class RichSimulationSummary:
         )
         footer_text.justify = "center"
         footer_panel = Panel(
-            footer_text, box=box.DOUBLE, border_style="bright_cyan"
+            footer_text,
+            box=box.DOUBLE,
+            border_style="bright_cyan",
+            width=self.table_width,
         )
         self.console.print(footer_panel)
 
 
 # function to use as an entry point
 def print_rich_simulation_parameters(params: dict[str, Any]) -> None:
-    """Print a beautiful simulation parameter summary using Rich"""
+    """print a beautiful simulation parameter summary using rich"""
     rich_summary = RichSimulationSummary()
     rich_summary.generate_and_display(params)

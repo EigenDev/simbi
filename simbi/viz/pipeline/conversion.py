@@ -11,9 +11,9 @@ from simbi.viz.components.quad import QuadPlotProps
 from simbi.viz.config import (
     AnimationConfig,
     CoordinateHistConfig,
-    FMRConfig,
     HistogramConfig,
     PlotConfig,
+    RefinementConfig,
     StyleConfig,
     TimeSeriesConfig,
     VisualizationConfig,
@@ -139,9 +139,9 @@ def style_config_from_args(args: Namespace) -> StyleConfig:
     )
 
 
-def fmr_config_from_args(args: Namespace) -> FMRConfig:
-    """Build FMRConfig from command line arguments."""
-    return FMRConfig(
+def refinement_config_from_args(args: Namespace) -> RefinementConfig:
+    """Build RefinementConfig from command line arguments."""
+    return RefinementConfig(
         composite_view=args.composite_view,
         active_levels=set(args.active_levels or []),
     )
@@ -203,7 +203,7 @@ def config_from_args(args: Namespace) -> VisualizationConfig:
     return VisualizationConfig(
         plot=plot_config_from_args(args),
         style=style_config_from_args(args),
-        fmr=fmr_config_from_args(args),
+        refinement=refinement_config_from_args(args),
         histogram=histogram_config_from_args(args),
         time_series=time_series_config_from_args(args),
         coordinate=coordinate_config_from_args(args),

@@ -53,8 +53,8 @@ class StyleConfig(BaseModel):
     }
 
 
-class FMRConfig(BaseModel):
-    """Configuration for FMR (Fixed Mesh Refinement) plots."""
+class RefinementConfig(BaseModel):
+    """Configuration for refinement (Fixed Mesh Refinement) plots."""
 
     composite_view: bool = False
     active_levels: Optional[set[int]] = None
@@ -205,7 +205,7 @@ class VisualizationConfig(BaseModel):
 
     plot: PlotConfig
     style: StyleConfig = Field(default_factory=StyleConfig)
-    fmr: FMRConfig = Field(default_factory=FMRConfig)
+    refinement: RefinementConfig = Field(default_factory=RefinementConfig)
     histogram: HistogramConfig = Field(default_factory=HistogramConfig)
     time_series: TimeSeriesConfig = Field(default_factory=TimeSeriesConfig)
     coordinate: CoordinateHistConfig = Field(

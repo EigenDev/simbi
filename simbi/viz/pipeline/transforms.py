@@ -320,14 +320,14 @@ def _compose_pcolormesh(fields_2d: list[FieldData]) -> FieldData:
     """
     Composes 2D fields for pcolormesh rendering.
 
-    If FMR, this "squashes" fine levels onto the base grid.
+    If refined, this "squashes" fine levels onto the base grid.
     If Unigrid, this is a no-op.
     """
     # Unigrid case: Just return the single 2D field.
     if len(fields_2d) == 1:
         return fields_2d[0]
 
-    # FMR case: Start with the base level (L0)
+    # refined case: Start with the base level (L0)
     base_field = fields_2d[0]
     base_x, base_y = base_field.domain
     composited_values = base_field.values.copy()
@@ -453,7 +453,7 @@ def compose_2d_render(
     """
     Composes a list of 2D fields into a single renderable FieldData object.
 
-    This is the "stitching" step for 2D FMR or polygon plots.
+    This is the "stitching" step for 2D refined or polygon plots.
     """
     if not fields_2d:
         raise ValueError("Cannot compose an empty list of fields.")

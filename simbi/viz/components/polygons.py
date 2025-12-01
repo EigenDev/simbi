@@ -55,7 +55,7 @@ class PolygonPlotProps(ComponentProps):
 
 class PolygonPlotComponent(Component):
     """
-    A "simple" renderer for 2D FMR data as polygons.
+    A "simple" renderer for 2D refined data as polygons.
     Expects 1D FieldData adhering to the "Polygon Contract".
     """
 

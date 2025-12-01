@@ -48,12 +48,12 @@ def plot(
     scalar_fields = scalar_plot_data.fields
     nlvls = 1
     nlvls += sum("_L" in x.name for x in scalar_fields)
-    is_fmr = nlvls > 1
+    is_refined = nlvls > 1
 
     final_scalar_fields_to_render: Sequence[FieldData] = []
     if scalar_fields:
         is_2d = scalar_fields[0].ndim == 2
-        if is_2d and is_fmr:
+        if is_2d and is_refined:
             final_scalar_fields_to_render = [_compose_polygons(scalar_fields)]
         else:
             final_scalar_fields_to_render = scalar_fields
@@ -134,7 +134,7 @@ def plot(
     if vector_fields:
         vector_plot_data = create_plot_data(sim_data, vector_fields, config)
 
-        # We can't render FMR levels for vectors. We must squash.
+        # We can't render refinement levels for vectors. We must squash.
         vi_levels = [
             f
             for f in vector_plot_data.fields
@@ -147,7 +147,7 @@ def plot(
         ]
 
         # Always squash vectors to a single pcolormesh grid
-        # This works for both composite_view and FMR.
+        # This works for both composite_view and refinement.
         v1_field = _compose_pcolormesh(vi_levels)
         v2_field = _compose_pcolormesh(vj_levels)
 
@@ -206,12 +206,12 @@ def animate(
     scalar_fields = scalar_plot_data.fields
     nlvls = 1
     nlvls += sum("_L" in x.name for x in scalar_fields)
-    is_fmr = nlvls > 1
+    is_refined = nlvls > 1
 
     final_scalar_fields_to_render: Sequence[FieldData] = []
     if scalar_fields:
         is_2d = scalar_fields[0].ndim == 2
-        if is_2d and is_fmr:
+        if is_2d and is_refined:
             final_scalar_fields_to_render = [_compose_polygons(scalar_fields)]
         else:
             final_scalar_fields_to_render = scalar_fields
@@ -293,7 +293,7 @@ def animate(
     if vector_fields:
         vector_plot_data = create_plot_data(sim_data, vector_fields, config)
 
-        # We can't render FMR levels for vectors. We must squash.
+        # We can't render refinement levels for vectors. We must squash.
         vi_levels = [
             f
             for f in vector_plot_data.fields
@@ -306,7 +306,7 @@ def animate(
         ]
 
         # Always squash vectors to a single pcolormesh grid
-        # This works for both composite_view and FMR.
+        # This works for both composite_view and refinement.
         v1_field = _compose_pcolormesh(vi_levels)
         v2_field = _compose_pcolormesh(vj_levels)
 
@@ -363,7 +363,7 @@ def plot_coordinate_profile(
     # Use the first file for snapshot analysis
     sim_data = load_data(files[0])
 
-    # Call the pipeline to do the 3D FMR stitching and binning
+    # Call the pipeline to do the 3D refinement stitching and binning
     plot_data = create_coordinate_profile_data(sim_data, fields, config)
 
     if not plot_data.fields:

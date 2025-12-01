@@ -76,6 +76,17 @@ class SubCycleMode(str, ExtendedEnum):
     NONE = "none"
 
 
+class RefinementMode(str, ExtendedEnum):
+    FIXED = "fixed"
+    ADAPTIVE = "adaptive"
+
+
+class RefinementCriterion(str, ExtendedEnum):
+    GRADIENT = "gradient"
+    VALUE = "value"
+    CUSTOM = "custom"
+
+
 @dataclass(frozen=True)
 class Metadata:
     """Structured simulation metadata"""
@@ -222,7 +233,7 @@ class ProcessedData:
     body_system: BodySystemConfig | list[ImmersedBodyConfig] | None = None
 
     @property
-    def has_fmr(self) -> bool:
+    def has_refinement(self) -> bool:
         return self.hierarchy is not None and self.levels is not None
 
     @property
@@ -242,13 +253,13 @@ class ProcessedData:
             Tuple of (fields, mesh) for the requested level
 
         Raises:
-            ValueError: If level_id is invalid or data isn't FMR
+            ValueError: If level_id is invalid or data isn't refined
         """
         if level_id == 0:
             return (self.fields, self.mesh)
 
-        if not self.has_fmr:
-            raise ValueError("Not an FMR dataset")
+        if not self.has_refinement:
+            raise ValueError("Not an refinement dataset")
 
         if not self.levels or level_id >= len(self.levels):
             raise ValueError(f"Invalid level ID: {level_id}")
@@ -261,7 +272,7 @@ class ProcessedData:
 
         Returns None if this is the finest level.
         """
-        if not self.has_fmr or not self.hierarchy:
+        if not self.has_refinement or not self.hierarchy:
             return None
 
         if level_id >= len(self.hierarchy.ref_ratios):
