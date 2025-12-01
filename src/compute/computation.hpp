@@ -1,6 +1,7 @@
 #ifndef COMPUTATION_HPP
 #define COMPUTATION_HPP
 
+#include "base/concepts.hpp"
 #include "compat.hpp"
 #include "containers/vector.hpp"
 #include "functional/fp.hpp"
@@ -15,7 +16,8 @@
 namespace simbi::compute {
 
     // forward declarations
-    template <std::uint64_t Rank, typename F>
+    template <std::uint64_t Rank, concepts::computable F>
+        requires(F::rank == Rank)
     struct computation_t;
 
     namespace detail {
@@ -66,9 +68,11 @@ namespace simbi::compute {
 
     // pure lazy computation graph - no memory, no device knowledge
     // immutable, composable, device-agnostic
-    template <std::uint64_t Rank, typename F>
+    template <std::uint64_t Rank, concepts::computable F>
+        requires(F::rank == Rank)
     struct computation_t {
-        using value_type = detail::computation_value_t<F, Rank>;
+        using value_type                    = typename F::value_type;
+        using argument_type                 = typename F::argument_type;
         static constexpr std::uint64_t rank = Rank;
 
         F func;
@@ -93,14 +97,12 @@ namespace simbi::compute {
         constexpr const grid::domain_t<Rank>& domain() const { return domain_; }
 
         // evaluation - this is what makes it a computation
-        constexpr DUAL decltype(auto)
-        operator()(const coordinate_t<Rank>& coord) const
+        constexpr DUAL value_type operator()(argument_type coord) const
         {
             return func(coord);
         }
 
-        constexpr DUAL decltype(auto)
-        operator[](const coordinate_t<Rank>& coord) const
+        constexpr DUAL value_type operator[](argument_type coord) const
         {
             return func(coord);
         }
@@ -163,7 +165,8 @@ namespace simbi::compute {
 
         // zip: combine two computations element-wise
         // binary_op(f(coord), g(coord))
-        template <typename G, typename BinaryOp>
+        template <concepts::computable G, typename BinaryOp>
+            requires(G::rank == Rank)
         auto zip(const computation_t<Rank, G>& other, BinaryOp op) const
         {
             using namespace grid::domain_algebra;

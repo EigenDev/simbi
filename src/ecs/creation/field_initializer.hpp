@@ -107,6 +107,17 @@ namespace simbi::ecs::creation {
         return field;
     }
 
+    struct mean_magnetic_functor_t {
+        template <typename PrimField, std::uint64_t Rank>
+        DEV PrimField
+        operator()(PrimField prim, vector_t<real, Rank> bavg) const
+        {
+            PrimField p = prim;
+            p.mag       = bavg;
+            return p;
+        }
+    };
+
     // =============================================================================
     // field_initializer_t
     // =============================================================================
@@ -168,12 +179,27 @@ namespace simbi::ecs::creation {
             auto full_domain   = part.allocated_domain;
             auto active_domain = part.owned_domain;
 
-            // initialize primitives from generator
-            fields.prim = from_generator<primitive_t, Rank>(
+            // initialize primitives from a host-local generator and then clone
+            // to the partition locality. create host-local prims explicitly so
+            // the initializer remains small and contained; perform a
+            // synchronous clone for single-device testing.
+            auto host_prim = from_generator<primitive_t, Rank>(
                 prim_gen,
                 full_domain,
-                active_domain
+                active_domain,
+                het::locality_t::host()
             );
+
+            // determine partition locality from the partition's stream
+            auto part_loc = part.stream.locality();
+
+            if (host_prim.locality() == part_loc) {
+                fields.prim = std::move(host_prim);
+            }
+            else {
+                // synchronous clone into partition-local storage
+                fields.prim = host_prim.clone(part_loc);
+            }
 
             auto exec = sim.partition_executor(lvl, 0);
 
@@ -195,11 +221,18 @@ namespace simbi::ecs::creation {
                     auto staggered_active = active_domain;
                     staggered_active.fin[dir] += 1;
 
-                    fields.bfield[dir] = from_generator<real, Rank>(
+                    auto host_bn = from_generator<real, Rank>(
                         bfield_gens[dir],
                         staggered_domain,
                         staggered_active
                     );
+                    if (host_bn.locality() == part_loc) {
+                        fields.bfield[dir] = std::move(host_bn);
+                    }
+                    else {
+                        // synchronous clone into partition-local storage
+                        fields.bfield[dir] = host_bn.clone(part_loc);
+                    }
                     face_domains[dir] = staggered_active;
                 }
 
@@ -220,25 +253,19 @@ namespace simbi::ecs::creation {
                             active_domain
                         );
                         auto prims = fields.prim[active_domain];
-                        prims      = prims
-                                    .zip(
-                                        bavg,
-                                        [](auto p, auto bmean) {
-                                            p.mag = bmean;
-                                            return p;
-                                        }
-                                    )
+                        prims      = prims.zip(bavg, mean_magnetic_functor_t{})
                                     .with(exec);
                     }
                 );
             }
 
             // convert primitives to conserved
-            fields.cons = fields.prim
-                              .map([gamma](auto prim) {
-                                  return hydro::to_conserved(prim, gamma);
-                              })
-                              .with(exec);
+            fields.cons =
+                fields.prim
+                    .map([gamma] DEV(primitive_t prim) -> conserved_t {
+                        return hydro::to_conserved(prim, gamma);
+                    })
+                    .with(exec);
         }
 
         // -------------------------------------------------------------------------
@@ -274,7 +301,7 @@ namespace simbi::ecs::creation {
 
             child_fields.prim = prolonged_prim.with(exec);
 
-            // prolong magnetic fields for mhd
+            // // prolong magnetic fields for mhd
             if constexpr (R == regime_t::MHD || R == regime_t::RMHD) {
                 for (std::uint64_t dir = 0; dir < Rank; ++dir) {
                     if (parent_fields.bfield[dir].domain().size() == 0) {
@@ -288,7 +315,8 @@ namespace simbi::ecs::creation {
                     child_fields.bfield[dir] = prolonged_b.with(exec);
                 }
 
-                // interpolate prolonged face B to cell-centered conserved state
+                // interpolate prolonged face B to cell-centered conserved
+                // state
                 auto& child_part = sim.partition(lvl, 0);
                 auto& child_mesh = sim.mesh(lvl);
                 auto motion      = ecs::get_motion_state(sim);
@@ -297,23 +325,26 @@ namespace simbi::ecs::creation {
                     child_mesh,
                     motion,
                     [&](const auto& block_geo) {
-                        em::interpolate_magnetic_fields(
-                            exec,
-                            child_fields,
+                        auto bavg = interpolate_face_to_cell_magnetic(
+                            child_fields.bfield,
                             block_geo,
                             child_part.face_domains,
                             child_part.owned_domain
                         );
+                        auto prims = child_fields.prim[child_part.owned_domain];
+                        prims      = prims.zip(bavg, mean_magnetic_functor_t{})
+                                    .with(exec);
                     }
                 );
             }
 
-            // // convert prolonged primitives to conserved
-            child_fields.cons = child_fields.prim
-                                    .map([gamma](auto prim) {
-                                        return hydro::to_conserved(prim, gamma);
-                                    })
-                                    .with(exec);
+            // convert prolonged primitives to conserved
+            child_fields.cons =
+                child_fields.prim
+                    .map([gamma] DEV(primitive_t prim) -> conserved_t {
+                        return hydro::to_conserved(prim, gamma);
+                    })
+                    .with(exec);
         }
     };
 

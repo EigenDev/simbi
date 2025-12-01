@@ -276,7 +276,7 @@ namespace simbi::geometry {
                 // special case: thin dimension override
                 // -------------------------------------------------------------
                 if (num_contacts == 1 && global_dims[primary_dd] == 1) {
-                    auto periodic_map = periodic_map_t{
+                    auto periodic_map = periodic_map_t<Rank>{
                       primary_dd,
                       geometry.start[primary_dd],
                       global_dims[primary_dd]
@@ -323,8 +323,11 @@ namespace simbi::geometry {
                                         ? geometry.start[primary_dd]
                                         : geometry.fin[primary_dd] - 1;
 
-                                auto clamp =
-                                    clamp_map_t{primary_dd, edge, edge + 1};
+                                auto clamp = clamp_map_t<Rank>{
+                                  primary_dd,
+                                  edge,
+                                  edge + 1
+                                };
 
                                 field[ghost.domain] = field[ghost.domain]
                                                           .remap(clamp)
@@ -338,7 +341,8 @@ namespace simbi::geometry {
                         std::int64_t edge = (primary_side == grid::side_t::left)
                                                 ? geometry.start[primary_dd]
                                                 : geometry.fin[primary_dd] - 1;
-                        auto clamp = clamp_map_t{primary_dd, edge, edge + 1};
+                        auto clamp =
+                            clamp_map_t<Rank>{primary_dd, edge, edge + 1};
 
                         auto phys_op = [=] DUAL(const T& val) {
                             return physics_policy.apply(

@@ -193,6 +193,11 @@ namespace simbi {
         constexpr Platform BuildPlatform =
             build::platform::is_gpu ? Platform::GPU : Platform::CPU;
 
+        constexpr Runtime BuildRuntime =
+            build::platform::is_cuda  ? Runtime::CUDA
+            : build::platform::is_hip ? Runtime::ROCM
+                                      : Runtime::CPU;
+
         // convert from new warp size constant
         constexpr std::uint64_t WARP_SIZE = build::constants::warp_size;
 

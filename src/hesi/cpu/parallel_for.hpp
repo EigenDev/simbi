@@ -59,13 +59,13 @@ namespace simbi::het::backend::cpu {
         // decompose domain into tiles
         auto shape = domain.shape();
 
-        std::uint64_t tx = std::max<std::uint64_t>(1, tile_size.x);
-        std::uint64_t ty = std::max<std::uint64_t>(1, tile_size.y);
-        std::uint64_t tz = std::max<std::uint64_t>(1, tile_size.z);
+        std::uint64_t tx = std::max<std::uint32_t>(1, tile_size.x);
+        std::uint64_t ty = std::max<std::uint32_t>(1, tile_size.y);
+        std::uint64_t tz = std::max<std::uint32_t>(1, tile_size.z);
 
-        std::uint64_t sx = (Rank >= 1) ? shape[Rank - 1] : 1;
-        std::uint64_t sy = (Rank >= 2) ? shape[Rank - 2] : 1;
-        std::uint64_t sz = (Rank == 3) ? shape[0] : 1;
+        std::uint32_t sx = (Rank >= 1) ? shape[Rank - 1] : 1;
+        std::uint32_t sy = (Rank >= 2) ? shape[Rank - 2] : 1;
+        std::uint32_t sz = (Rank == 3) ? shape[0] : 1;
 
         if constexpr (Rank == 1) {
             sx = shape[0];
@@ -74,9 +74,9 @@ namespace simbi::het::backend::cpu {
         }
 
         dim3_t num_tiles{
-          (sx + tx - 1) / tx,
-          (sy + ty - 1) / ty,
-          (sz + tz - 1) / tz
+          static_cast<std::uint32_t>((sx + tx - 1) / tx),
+          static_cast<std::uint32_t>((sy + ty - 1) / ty),
+          static_cast<std::uint32_t>((sz + tz - 1) / tz)
         };
 
 #pragma omp parallel for collapse(3)

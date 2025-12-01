@@ -113,6 +113,17 @@ namespace simbi::het::exec {
         }
     };
 
+    static inline stream_t make_a_default_stream()
+    {
+#if defined(CUDA_ENABLED)
+        return stream_t(backend_type_t::cuda, 0);
+#elif defined(HIP_ENABLED)
+        return stream_t(backend_type_t::hip, 0);
+#else
+        return stream_t(backend_type_t::cpu, 0);
+#endif
+    }
+
 }   // namespace simbi::het::exec
 
 #endif

@@ -21,20 +21,21 @@ namespace simbi::grid::amr {
     // -------------------------------------------------------------------------
     template <typename CoarseComp, std::uint64_t Rank>
     struct prolong_constant_t {
-        using vec_type = iarray<Rank>;
-        using T        = typename CoarseComp::value_type;
+        using value_type                    = typename CoarseComp::value_type;
+        using argument_type                 = iarray<Rank>;
+        static constexpr std::uint64_t rank = Rank;
 
         CoarseComp coarse_comp_;
-        vec_type ratio_;
+        argument_type ratio_;
 
-        DUAL prolong_constant_t(CoarseComp comp, vec_type ratio)
+        DUAL prolong_constant_t(CoarseComp comp, argument_type ratio)
             : coarse_comp_(std::move(comp)), ratio_(ratio)
         {
         }
 
-        DUAL T operator()(const vec_type& fine_coord) const
+        DUAL value_type operator()(const argument_type& fine_coord) const
         {
-            vec_type coarse_coord;
+            argument_type coarse_coord;
             for (std::uint64_t d = 0; d < Rank; ++d) {
                 // handle negative coords via floor division
                 if (fine_coord[d] >= 0) {
@@ -56,14 +57,15 @@ namespace simbi::grid::amr {
     // -------------------------------------------------------------------------
     template <typename CoarseComp, std::uint64_t Rank>
     struct prolong_linear_t {
-        using vec_type = iarray<Rank>;
-        using T        = std::remove_cvref_t<typename CoarseComp::value_type>;
+        using value_type = std::remove_cvref_t<typename CoarseComp::value_type>;
+        using argument_type                 = iarray<Rank>;
+        static constexpr std::uint64_t rank = Rank;
 
         CoarseComp coarse_comp_;
-        vec_type ratio_;
+        argument_type ratio_;
         vector_t<real, Rank> inv_ratio_;
 
-        DUAL prolong_linear_t(CoarseComp comp, vec_type ratio)
+        DUAL prolong_linear_t(CoarseComp comp, argument_type ratio)
             : coarse_comp_(std::move(comp)), ratio_(ratio)
         {
             for (std::uint64_t d = 0; d < Rank; ++d) {
@@ -71,9 +73,9 @@ namespace simbi::grid::amr {
             }
         }
 
-        DUAL T operator()(const vec_type& fine_coord) const
+        DUAL value_type operator()(const argument_type& fine_coord) const
         {
-            vec_type coarse_coord;
+            argument_type coarse_coord;
             vector_t<real, Rank> normalized_offset;
 
             // map fine -> coarse and calculate sub-cell offset
@@ -100,23 +102,23 @@ namespace simbi::grid::amr {
             }
 
             // get base value
-            T val = coarse_comp_(coarse_coord);
+            value_type val = coarse_comp_(coarse_coord);
 
             // add gradient corrections
             // central difference slope
             for (std::uint64_t dd = 0; dd < Rank; ++dd) {
-                vec_type left  = coarse_coord;
-                vec_type right = coarse_coord;
+                argument_type left  = coarse_coord;
+                argument_type right = coarse_coord;
                 left[dd] -= 1;
                 right[dd] += 1;
 
-                T v_left  = coarse_comp_(left);
-                T v_right = coarse_comp_(right);
+                value_type v_left  = coarse_comp_(left);
+                value_type v_right = coarse_comp_(right);
 
                 // centered slope (unlimited for now, can inject limiter later)
-                T slope = (v_right - v_left) * 0.5;
+                value_type slope = (v_right - v_left) * 0.5;
 
-                if constexpr (is_hydro_primitive_c<T>) {
+                if constexpr (is_hydro_primitive_c<value_type>) {
                     val = val | structs::add_gas(slope * normalized_offset[dd]);
                 }
                 else {
@@ -139,9 +141,9 @@ namespace simbi::grid::amr {
     {
         auto start = d.start;
         auto fin   = d.fin;
-        for (std::uint64_t i = 0; i < Rank; ++i) {
-            start[i] *= ratio[i];
-            fin[i] *= ratio[i];
+        for (std::uint64_t ii = 0; ii < Rank; ++ii) {
+            start[ii] *= ratio[ii];
+            fin[ii] *= ratio[ii];
         }
         return {start, fin};
     }

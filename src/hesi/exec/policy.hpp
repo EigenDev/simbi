@@ -33,8 +33,8 @@ namespace simbi::het::exec {
         static launch_policy_t
         linear(T total_threads, T block_size = block_config_t::default_block_1d)
         {
-            std::uint64_t b = block_size;
-            std::uint64_t g = std::min<std::uint64_t>(
+            std::uint32_t b = block_size;
+            std::uint32_t g = std::min<std::uint64_t>(
                 (total_threads + b - 1) / b,
                 (T) block_config_t::max_grid_dim
             );
@@ -49,10 +49,10 @@ namespace simbi::het::exec {
             dim3_t block_dim = block_config_t::default_block_2d
         )
         {
-            auto gx = static_cast<std::uint64_t>(
+            auto gx = static_cast<std::uint32_t>(
                 (width + block_dim.x - 1) / block_dim.x
             );
-            auto gy = static_cast<std::uint64_t>(
+            auto gy = static_cast<std::uint32_t>(
                 (height + block_dim.y - 1) / block_dim.x
             );
             return launch_policy_t({gx, gy, 1}, block_dim);
@@ -62,13 +62,13 @@ namespace simbi::het::exec {
         static launch_policy_t
         volume(T width, T height, T depth, dim3_t block_dim = {8, 8, 8})
         {
-            auto gx = static_cast<std::uint64_t>(
+            auto gx = static_cast<std::uint32_t>(
                 (width + block_dim.x - 1) / block_dim.x
             );
-            auto gy = static_cast<std::uint64_t>(
+            auto gy = static_cast<std::uint32_t>(
                 (height + block_dim.y - 1) / block_dim.y
             );
-            auto gz = static_cast<std::uint64_t>(
+            auto gz = static_cast<std::uint32_t>(
                 (depth + block_dim.z - 1) / block_dim.z
             );
             return launch_policy_t({gx, gy, gz}, block_dim);

@@ -12,7 +12,12 @@ namespace simbi::geometry {
     // clamp map (outflow / zero-gradient)
     // maps any index outside [min, max] to the nearest edge
     // -------------------------------------------------------------------------
+    template <std::uint64_t Rank>
     struct clamp_map_t {
+        using value_type                    = iarray<Rank>;
+        using argument_type                 = iarray<Rank>;
+        static constexpr std::uint64_t rank = Rank;
+
         std::uint64_t dim_;
         std::int64_t min_val_;   // global start index of active domain
         std::int64_t max_val_;   // global end index (exclusive) - 1
@@ -26,8 +31,7 @@ namespace simbi::geometry {
         {
         }
 
-        template <std::uint64_t Rank>
-        DUAL auto operator()(const iarray<Rank>& coord) const
+        DUAL value_type operator()(argument_type coord) const
         {
             auto ret = coord;
             if (ret[dim_] < min_val_) {
@@ -45,7 +49,12 @@ namespace simbi::geometry {
     // pivots coordinate around a face
     // formula: src = 2 * pivot - 1 - dst
     // -------------------------------------------------------------------------
+    template <std::uint64_t Rank>
     struct mirror_map_t {
+        using value_type                    = iarray<Rank>;
+        using argument_type                 = iarray<Rank>;
+        static constexpr std::uint64_t rank = Rank;
+
         std::uint64_t dim_;
         std::int64_t pivot_term_;   // precomputed: 2 * face_index - 1
 
@@ -54,8 +63,7 @@ namespace simbi::geometry {
         {
         }
 
-        template <std::uint64_t Rank>
-        DUAL auto operator()(const iarray<Rank>& coord) const
+        DUAL value_type operator()(argument_type coord) const
         {
             auto ret = coord;
             // standard reflection formula for 0-based indexing
@@ -68,7 +76,12 @@ namespace simbi::geometry {
     // periodic map (wrap)
     // wraps coordinate into [start, start + len)
     // -------------------------------------------------------------------------
+    template <std::uint64_t Rank>
     struct periodic_map_t {
+        using value_type                    = iarray<Rank>;
+        using argument_type                 = iarray<Rank>;
+        static constexpr std::uint64_t rank = Rank;
+
         std::uint64_t dim_;
         std::int64_t start_;
         std::int64_t len_;
@@ -82,8 +95,7 @@ namespace simbi::geometry {
         {
         }
 
-        template <std::uint64_t Rank>
-        DUAL auto operator()(const iarray<Rank>& coord) const
+        DUAL value_type operator()(argument_type coord) const
         {
             auto ret         = coord;
             std::int64_t val = ret[dim_] - start_;
@@ -106,6 +118,10 @@ namespace simbi::geometry {
     // -------------------------------------------------------------------------
     template <std::uint64_t Rank>
     struct multidim_map_t {
+        using value_type                    = iarray<Rank>;
+        using argument_type                 = iarray<Rank>;
+        static constexpr std::uint64_t rank = Rank;
+
         iarray<Rank> active_dims_;   // 1 if this dimension applies a map
         iarray<Rank> map_types_;     // 0=none, 1=periodic, 2=mirror, 3=clamp
         iarray<Rank> starts_;        // domain starts for periodic
@@ -113,7 +129,7 @@ namespace simbi::geometry {
         iarray<Rank> pivots_;        // pivot points for mirror
         iarray<Rank> clamp_vals_;    // clamp values for outflow
 
-        DUAL auto operator()(const iarray<Rank>& coord) const
+        DUAL value_type operator()(argument_type coord) const
         {
             auto ret = coord;
             for (std::uint64_t dd = 0; dd < Rank; ++dd) {
@@ -162,6 +178,10 @@ namespace simbi::geometry {
     // -------------------------------------------------------------------------
     template <std::uint64_t Rank>
     struct spherical_pole_map_t {
+        using value_type                    = iarray<Rank>;
+        using argument_type                 = iarray<Rank>;
+        static constexpr std::uint64_t rank = Rank;
+
         std::int64_t theta_pivot_;   // precomputed: 2*pole_idx - 1
         std::int64_t phi_start_;     // for wrapping phi after rotation
         std::int64_t phi_len_;       // phi domain length
@@ -177,7 +197,7 @@ namespace simbi::geometry {
         {
         }
 
-        DUAL auto operator()(const iarray<Rank>& coord) const
+        DUAL value_type operator()(argument_type coord) const
         {
             auto ret = coord;
 

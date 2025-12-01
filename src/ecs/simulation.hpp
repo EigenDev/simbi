@@ -272,23 +272,6 @@ namespace simbi::ecs {
             );
         }
 
-        // =========================================================================
-        // backward-compatible accessors (single-device / partition 0)
-        // =========================================================================
-
-        // -------------------------------------------------------------------------
-        // hydro (legacy)
-        //
-        // returns fields for partition 0 of a level.
-        // use partition_hydro() for multi-device code.
-        // -------------------------------------------------------------------------
-        auto& hydro(std::uint64_t lvl) { return partition_hydro(lvl, 0); }
-
-        const auto& hydro(std::uint64_t lvl) const
-        {
-            return partition_hydro(lvl, 0);
-        }
-
         // -------------------------------------------------------------------------
         // mesh
         //
@@ -469,42 +452,6 @@ namespace simbi::ecs {
         const auto& diagnostics() const
         {
             return registry.get<body_info_t<Rank>>(global).diagnostics;
-        }
-
-        // =========================================================================
-        // legacy accessors (deprecated, for migration)
-        // =========================================================================
-
-        // old execution_space accessor - use partition() instead
-        [[deprecated("use partition() instead")]]
-        auto& execution_space(std::uint64_t lvl)
-        {
-            return registry.get<execution_space_t<Rank>>(levels[lvl]);
-        }
-
-        // old rk_workspace accessor - use workspace() instead
-        [[deprecated("use has_workspace(lvl, part_id) instead")]]
-        bool has_rk_workspace(std::uint64_t lvl) const
-        {
-            return has_workspace(lvl, 0);
-        }
-
-        [[deprecated("use create_workspace(lvl, part_id) instead")]]
-        void create_rk_workspace(std::uint64_t lvl)
-        {
-            create_workspace(lvl, 0);
-        }
-
-        [[deprecated("use workspace(lvl, part_id) instead")]]
-        auto& rk_workspace(std::uint64_t lvl)
-        {
-            return workspace(lvl, 0);
-        }
-
-        [[deprecated("use workspace(lvl, part_id) instead")]]
-        const auto& rk_workspace(std::uint64_t lvl) const
-        {
-            return workspace(lvl, 0);
         }
     };
 

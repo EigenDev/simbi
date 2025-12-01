@@ -78,7 +78,7 @@ namespace simbi::het::exec {
 
         // record completion
         auto token = token_t::create(exec.backend());
-        token.event_->record(exec.stream());
+        token.record(exec.stream());
         return token;
     }
 
@@ -86,6 +86,19 @@ namespace simbi::het::exec {
     // form 2: reduce with domain + mapper
     // used when we compute on-the-fly from coordinates
     // =========================================================================
+
+    // wrapper mapper in computation interface
+    template <std::uint64_t Rank, typename Mapper>
+    struct computation_wrapper_t {
+        grid::domain_t<Rank> dom;
+        Mapper map;
+
+        // static constexpr std::uint64_t rank = Rank;
+        DUAL auto operator()(iarray<Rank> coord) const { return map(coord); }
+
+        DUAL const grid::domain_t<Rank>& domain() const { return dom; }
+    };
+
     template <
         std::uint64_t Rank,
         typename T,
@@ -103,21 +116,7 @@ namespace simbi::het::exec {
         T identity = T{}
     )
     {
-        // wrapper mapper in computation interface
-        struct computation_wrapper_t {
-            grid::domain_t<Rank> dom;
-            Mapper map;
-
-            // static constexpr std::uint64_t rank = Rank;
-            DUAL auto operator()(iarray<Rank> coord) const
-            {
-                return map(coord);
-            }
-
-            const grid::domain_t<Rank>& domain() const { return dom; }
-        };
-
-        computation_wrapper_t comp{domain, mapper};
+        computation_wrapper_t<Rank, Mapper> comp{domain, mapper};
 
         // delegate to Form 1
         return reduce(exec, comp, result_buffer, init, op, identity);
@@ -173,7 +172,7 @@ namespace simbi::het::exec {
         );
 
         auto token = token_t::create(exec.backend());
-        token.event_->record(exec.stream());
+        token.record(exec.stream());
         return token;
     }
 
@@ -266,13 +265,13 @@ namespace simbi::het::exec {
             comp,
             result_ptr,
             init,
-            [](const auto& val) { return val; },
+            [] DEV(const auto& val) { return val; },
             op,
             identity
         );
 
         auto token = token_t::create(exec.backend());
-        token.event_->record(exec.stream());
+        token.record(exec.stream());
         return token;
     }
 

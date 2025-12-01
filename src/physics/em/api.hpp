@@ -16,10 +16,14 @@ namespace simbi::em {
     // needs 4 fluxes and 4 cell centers
     template <typename FluxField, typename PrimField>
     struct ex_stencil_t {
+        using value_type                    = real;
+        using argument_type                 = iarray<3>;
+        static constexpr std::uint64_t rank = 3;
+
         FluxField fluxes;
         PrimField prims;
 
-        DEV auto operator()(const iarray<3>& coord) const
+        DEV auto operator()(argument_type coord) const
         {
             const auto [kk, jj, ii] = coord;
 
@@ -72,10 +76,14 @@ namespace simbi::em {
     // ey at edge[k,j,i] is at physical {k-1/2, j, i-1/2}
     template <typename FluxField, typename PrimField>
     struct ey_stencil_t {
+        using value_type                    = real;
+        using argument_type                 = iarray<3>;
+        static constexpr std::uint64_t rank = 3;
+
         FluxField fluxes;
         PrimField prims;
 
-        DEV auto operator()(const iarray<3>& coord) const
+        DEV auto operator()(argument_type coord) const
         {
             const auto [kk, jj, ii] = coord;
 
@@ -126,10 +134,14 @@ namespace simbi::em {
     // ez at edge[k,j,i] is at physical {k, j-1/2, i-1/2}
     template <typename FluxField, typename PrimField>
     struct ez_stencil_t {
+        using value_type                    = real;
+        using argument_type                 = iarray<3>;
+        static constexpr std::uint64_t rank = 3;
+
         FluxField fluxes;
         PrimField prims;
 
-        DEV auto operator()(const iarray<3>& coord) const
+        DEV auto operator()(argument_type coord) const
         {
             const auto [kk, jj, ii] = coord;
 
@@ -185,10 +197,14 @@ namespace simbi::em {
     // needs ey and ez edges bounding this face
     template <typename EField, typename Geometry>
     struct bx_curl_t {
+        using value_type                    = real;
+        using argument_type                 = iarray<3>;
+        static constexpr std::uint64_t rank = 3;
+
         EField efield;
         Geometry geometry;
 
-        DEV auto operator()(const iarray<3>& coord) const
+        DEV auto operator()(argument_type coord) const
         {
             const auto [kk, jj, ii] = coord;
 
@@ -230,10 +246,14 @@ namespace simbi::em {
     // by face[k,j,i] at physical {k, j-1/2, i}
     template <typename EField, typename Geometry>
     struct by_curl_t {
+        using value_type                    = real;
+        using argument_type                 = iarray<3>;
+        static constexpr std::uint64_t rank = 3;
+
         EField efield;
         Geometry geometry;
 
-        DEV auto operator()(const iarray<3>& coord) const
+        DEV auto operator()(argument_type coord) const
         {
             const auto [kk, jj, ii] = coord;
 
@@ -275,10 +295,14 @@ namespace simbi::em {
     // bz face[k,j,i] at physical {k-1/2, j, i}
     template <typename EField, typename Geometry>
     struct bz_curl_t {
+        using value_type                    = real;
+        using argument_type                 = iarray<3>;
+        static constexpr std::uint64_t rank = 3;
+
         EField efield;
         Geometry geometry;
 
-        DEV auto operator()(const iarray<3>& coord) const
+        DEV auto operator()(argument_type coord) const
         {
             const auto [kk, jj, ii] = coord;
 
@@ -363,6 +387,10 @@ namespace simbi::em {
     // =========================================================================
     template <typename Bfield, typename Geometry>
     struct interpolate_magnetic_op_t {
+        using value_type                    = vector_t<real, 3>;
+        using argument_type                 = iarray<3>;
+        static constexpr std::uint64_t rank = 3;
+
         Bfield b1;
         Bfield b2;
         Bfield b3;
@@ -385,7 +413,7 @@ namespace simbi::em {
             }
         }
 
-        DEV auto operator()(auto coord) const
+        DEV value_type operator()(argument_type coord) const
         {
             return vector_t<real, 3>{
               get_face_avg(b1, coord, 2),

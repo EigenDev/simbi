@@ -1,6 +1,7 @@
 #ifndef FP_TOOKKIT_HPP
 #define FP_TOOKKIT_HPP
 
+#include "base/concepts.hpp"
 #include "compat.hpp"
 
 #include <algorithm>
@@ -26,6 +27,37 @@ namespace simbi {
 
 namespace simbi::fp {
     // ========================================================================
+    // computable protocol
+    // ========================================================================
+    //
+    // functors that participate in computation graphs must satisfy the
+    // computable concept (defined in base/concepts.hpp):
+    //
+    //   template <typename T>
+    //   concept computable = requires {
+    //       typename T::value_type;      // semantic output type
+    //       typename T::argument_type;   // input type
+    //       { T::rank };                 // spatial dimensionality
+    //   } && requires(const T& t, typename T::argument_type arg) {
+    //       { t(arg) } -> std::convertible_to<typename T::value_type>;
+    //   };
+    //
+    // why this matters:
+    //   - nvcc cannot handle std::invoke_result_t through deep template chains
+    //   - explicit type metadata bypasses broken template instantiation
+    //   - enables zip, compose, and other combinators to work on cuda
+    //
+    // protocol-aware functors in this file:
+    //   - compose_t<F, G>           (if G is computable)
+    //   - zip_t<F, G, BinaryOp>     (requires both F, G computable)
+    //   - select_t<Pred, A, B>      (requires A, B computable)
+    //   - offset_transform_t<Rank>
+    //   - domain_predicate_t<Rank>
+    //   - contains_op_t<Rank>
+    //
+    // ========================================================================
+
+    // ========================================================================
     // core concepts
     // ========================================================================
 
@@ -42,12 +74,38 @@ namespace simbi::fp {
     // composition: (f (of) g)(x) = f(g(x))
     // ========================================================================
 
+    // compose: adapts to whether G is computable
     template <typename F, typename G>
     struct compose_t {
+        // provide protocol types if G is computable
+        using argument_type = std::conditional_t<
+            concepts::computable<G>,
+            typename G::argument_type,
+            void>;
+
+        using value_type = std::conditional_t<
+            concepts::computable<G>,
+            std::invoke_result_t<F, typename G::value_type>,
+            void>;
+
+        static constexpr std::uint64_t rank =
+            concepts::computable<G> ? G::rank : 0;
+
         mutable F f;
         mutable G g;
 
+        // computable path
         template <typename Arg>
+            requires concepts::computable<G> &&
+                     std::same_as<Arg, typename G::argument_type>
+        constexpr DUAL value_type operator()(Arg arg) const
+        {
+            return f(g(arg));
+        }
+
+        // non-computable path
+        template <typename Arg>
+            requires(!concepts::computable<G>)
         constexpr DUAL auto operator()(Arg&& arg) const -> decltype(auto)
         {
             return f(g(std::forward<Arg>(arg)));
@@ -94,19 +152,23 @@ namespace simbi::fp {
     // selection: pred(x) ? a(x) : b(x)
     // ========================================================================
     template <typename Pred, typename A, typename B>
+        requires concepts::computable<A> && concepts::computable<B>
     struct select_t {
+        using argument_type                 = typename A::argument_type;
+        using value_type                    = typename A::value_type;
+        static constexpr std::uint64_t rank = A::rank;
+
         Pred pred;
         A a;
         B b;
 
-        template <typename Arg>
-        constexpr DUAL auto operator()(Arg&& arg) const
+        constexpr DUAL value_type operator()(argument_type arg) const
         {
-            if (pred(std::forward<Arg>(arg))) {
-                return a(std::forward<Arg>(arg));
+            if (pred(arg)) {
+                return a(arg);
             }
             else {
-                return b(std::forward<Arg>(arg));
+                return b(arg);
             }
         }
     };
@@ -126,22 +188,66 @@ namespace simbi::fp {
     // ========================================================================
 
     template <typename F, typename G, typename BinaryOp>
+        requires concepts::computable<F> && concepts::computable<G>
     struct zip_t {
-        F f;
-        G g;
-        BinaryOp op;
+        using argument_type = typename F::argument_type;
+        using value_type    = std::invoke_result_t<
+               BinaryOp,
+               typename F::value_type,
+               typename G::value_type>;
+        static constexpr std::uint64_t rank = F::rank;
 
-        template <typename Arg>
-        constexpr DUAL auto operator()(Arg&& arg) const -> decltype(auto)
+        mutable F f;
+        mutable G g;
+        mutable BinaryOp op;
+
+        constexpr DUAL value_type operator()(argument_type arg) const
         {
             return op(f(arg), g(arg));
         }
     };
 
+    // adapter for the case where the left functor is not protocol-computable
+    // but is callable with the right functor's argument_type. this allows
+    // using polymorphic callables such as identity_t for coordinate-producing
+    // functions while keeping the computable metadata coming from G.
     template <typename F, typename G, typename BinaryOp>
+        requires(!concepts::computable<F>) && concepts::computable<G>
+    struct zip_adapter_t {
+        using argument_type = typename G::argument_type;
+        using left_result_t = std::invoke_result_t<F, argument_type>;
+        using value_type    = std::
+            invoke_result_t<BinaryOp, left_result_t, typename G::value_type>;
+        static constexpr std::uint64_t rank = G::rank;
+
+        mutable F f;
+        mutable G g;
+        mutable BinaryOp op;
+
+        constexpr DUAL value_type operator()(argument_type arg) const
+        {
+            return op(f(arg), g(arg));
+        }
+    };
+
+    // factory overloads: choose the appropriate wrapper based on whether
+    // the left functor satisfies the computable protocol.
+    template <typename F, typename G, typename BinaryOp>
+        requires concepts::computable<F> && concepts::computable<G>
     constexpr auto zip(F f, G g, BinaryOp op)
     {
         return zip_t<F, G, BinaryOp>{std::move(f), std::move(g), std::move(op)};
+    }
+
+    template <typename F, typename G, typename BinaryOp>
+        requires(!concepts::computable<F>) && concepts::computable<G>
+    constexpr auto zip(F f, G g, BinaryOp op)
+    {
+        return zip_adapter_t<F, G, BinaryOp>{
+          std::move(f),
+          std::move(g),
+          std::move(op)
+        };
     }
 
     // ========================================================================
@@ -243,9 +349,13 @@ namespace simbi::fp {
 
     template <std::uint64_t Rank>
     struct offset_transform_t {
+        using value_type                    = coordinate_t<Rank>;
+        using argument_type                 = coordinate_t<Rank>;
+        static constexpr std::uint64_t rank = Rank;
+
         coordinate_t<Rank> offset;
 
-        constexpr DUAL auto operator()(coordinate_t<Rank> coord) const
+        constexpr DUAL value_type operator()(argument_type coord) const
         {
             return offset + coord;
         }
@@ -259,9 +369,13 @@ namespace simbi::fp {
 
     template <std::uint64_t Rank>
     struct domain_predicate_t {
+        using value_type                    = bool;
+        using argument_type                 = coordinate_t<Rank>;
+        static constexpr std::uint64_t rank = Rank;
+
         domain_t<Rank> domain;
 
-        constexpr DUAL bool operator()(coordinate_t<Rank> coord) const
+        constexpr DUAL value_type operator()(argument_type coord) const
         {
             return domain.contains(coord);
         }
@@ -277,6 +391,7 @@ namespace simbi::fp {
     // identity and constants
     // ========================================================================
 
+    // identity_t: returns argument unchanged (polymorphic)
     struct identity_t {
         template <typename T>
         constexpr DUAL auto operator()(T&& t) const -> decltype(auto)
@@ -285,6 +400,7 @@ namespace simbi::fp {
         }
     };
 
+    // constant_t: returns same value for any argument (polymorphic)
     template <typename T>
     struct constant_t {
         T value;
@@ -316,9 +432,13 @@ namespace simbi::fp {
     // domain operations
     template <std::uint64_t Rank>
     struct contains_op_t {
+        using value_type                    = bool;
+        using argument_type                 = coordinate_t<Rank>;
+        static constexpr std::uint64_t rank = Rank;
+
         domain_t<Rank> domain;
 
-        constexpr DEV bool operator()(coordinate_t<Rank> coord) const
+        constexpr DEV value_type operator()(argument_type coord) const
         {
             return domain.contains(coord);
         }
@@ -1151,6 +1271,22 @@ namespace simbi::fp {
             std::forward<Second>(second)
         );
     }
+
+    // ========================================================================
+    // protocol verification
+    // ========================================================================
+    //
+    // note: static assertions for computable protocol are done in files
+    // that include this header after vector_t is fully defined (e.g.,
+    // computation.hpp, field.hpp).
+    //
+    // to manually verify protocol compliance after vector_t is available:
+    //   static_assert(concepts::computable<offset_transform_t<3>>);
+    //   static_assert(concepts::computable<domain_predicate_t<3>>);
+    //   static_assert(concepts::computable<contains_op_t<3>>);
+    //
+    // ========================================================================
+
 }   // namespace simbi::fp
 
 #endif   // FP_TOOLKIT_HPP

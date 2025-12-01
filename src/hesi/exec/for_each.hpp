@@ -103,7 +103,7 @@ namespace simbi::het::exec {
 
         // record completion
         auto token = token_t::create(exec.backend());
-        token.event_->record(exec.stream());
+        token.record(exec.stream());
 
         return token;
     }

@@ -42,7 +42,10 @@ namespace simbi::het::backend::cuda {
                  yy += stride_y) {
                 for (std::int64_t xx = start_x; xx < domain.shape()[1];
                      xx += stride_x) {
-                    iarray<2> coord{yy + domain.start[0], xx + domain.start[1]};
+                    iarray<2> coord{
+                      static_cast<std::int64_t>(yy) + domain.start[0],
+                      static_cast<std::int64_t>(xx) + domain.start[1]
+                    };
                     f(coord);
                 }
             }
@@ -66,9 +69,9 @@ namespace simbi::het::backend::cuda {
                     for (std::uint64_t xx = start_x; xx < domain.shape()[2];
                          xx += stride_x) {
                         iarray<3> coord{
-                          zz + domain.start[0],
-                          yy + domain.start[1],
-                          xx + domain.start[2]
+                          static_cast<std::int64_t>(zz) + domain.start[0],
+                          static_cast<std::int64_t>(yy) + domain.start[1],
+                          static_cast<std::int64_t>(xx) + domain.start[2]
                         };
                         f(coord);
                     }

@@ -329,7 +329,7 @@ namespace simbi::het::device {
         }
 
         // calc grid size
-        std::uint64_t grid_size = (total_threads + block_size - 1) / block_size;
+        std::uint32_t grid_size = (total_threads + block_size - 1) / block_size;
 
         return dim3_t{grid_size, 1, 1};
     }

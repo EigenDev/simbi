@@ -23,6 +23,7 @@
 //       .build();
 // =============================================================================
 
+#include "compat.hpp"
 #include "containers/vector.hpp"
 #include "decomposition.hpp"
 #include "ecs/blueprints.hpp"
@@ -38,6 +39,7 @@
 #include "grid/mesh_config.hpp"
 #include "grid/patch_id.hpp"
 #include "grid/skeleton.hpp"
+#include "hesi/adapter.hpp"
 #include "hesi/core/types.hpp"
 #include "io/h5_serializable.hpp"
 #include "io/serialization/all.hpp"
@@ -79,8 +81,30 @@ namespace simbi::ecs::builders {
         // optional bodies config (immersed boundary objects)
         bodies_blueprint_t bodies_bp_;
 
-        // optional locality override (defaults to host)
-        het::locality_t base_locality_{het::locality_t::host()};
+        // optional locality override:
+        // default base locality is chosen at runtime based on detected devices.
+        // prefer the compiled backend (cuda/hip) when devices are available,
+        // otherwise fall back to host. callers may override via
+        // configure_locality().
+        het::locality_t base_locality_ = []() {
+            if constexpr (platform::is_cuda) {
+                int n = het::info::device_count();
+                if (n > 0) {
+                    return het::locality_t{het::backend_type_t::cuda, 0};
+                }
+                return het::locality_t::host();
+            }
+            else if constexpr (platform::is_hip) {
+                int n = het::info::device_count();
+                if (n > 0) {
+                    return het::locality_t{het::backend_type_t::hip, 0};
+                }
+                return het::locality_t::host();
+            }
+            else {
+                return het::locality_t::host();
+            }
+        }();
 
         // =========================================================================
         // configuration methods (fluent interface)

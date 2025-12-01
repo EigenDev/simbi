@@ -83,7 +83,7 @@ namespace simbi::timestep {
             domain,
             std::numeric_limits<real>::max(),
             kernel,
-            [](real a, real b) { return helpers::my_min(a, b); },
+            [] DEV(real a, real b) { return helpers::my_min(a, b); },
             std::numeric_limits<real>::max()
         );
     }

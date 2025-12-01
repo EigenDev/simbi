@@ -63,16 +63,19 @@ namespace simbi::het {
 
     // template <std::unsigned_integral T = std::uint64_t>
     struct dim3_t {
-        std::uint64_t x, y, z;
+        std::uint32_t x, y, z;
         constexpr dim3_t(
-            std::uint64_t x = 1,
-            std::uint64_t y = 1,
-            std::uint64_t z = 1
+            std::uint32_t x = 1,
+            std::uint32_t y = 1,
+            std::uint32_t z = 1
         )
             : x(x), y(y), z(z)
         {
         }
-        constexpr std::uint64_t volume() const { return x * y * z; }
+        constexpr std::uint64_t volume() const
+        {
+            return static_cast<std::uint64_t>(x) * y * z;
+        }
     };
 
     // for multi-dimensional indexing in functional kernels

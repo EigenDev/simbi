@@ -48,14 +48,14 @@ namespace simbi::hydrostate {
             bfield_gens,
             scale_factor,
             scale_factor_derivative,
-            [](auto&, const auto&) {
+            [](auto& sim, const auto& ops) {
                 // rev up those fryers
-                // auto evo_state =
-                //     evolution::initialize(sim, "Cool Simulation [TM]");
-                // auto pipeline = evolution::hydro_pipeline_t{sim, ops};
-                // for (std::uint64_t lvl = 0; lvl < sim.num_levels(); ++lvl) {
-                //     pipeline.configure(lvl);
-                // }
+                auto evo_state =
+                    evolution::initialize(sim, "Cool Simulation [TM]");
+                auto pipeline = evolution::hydro_pipeline_t{sim, ops};
+                for (std::uint64_t lvl = 0; lvl < sim.num_levels(); ++lvl) {
+                    pipeline.configure(lvl);
+                }
 
                 // evolution::run(
                 //     sim,

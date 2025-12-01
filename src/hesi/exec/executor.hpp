@@ -83,7 +83,7 @@ namespace simbi::het::exec {
 
             // record completion
             auto new_token = token_t::create(stream_.backend());
-            new_token.event_->record(stream_);
+            new_token.record(stream_);
 
             return new_token;
         }
@@ -95,7 +95,7 @@ namespace simbi::het::exec {
             detail::launch(stream_, policy, std::forward<Functor>(f));
 
             auto new_token = token_t::create(stream_.backend());
-            new_token.event_->record(stream_);
+            new_token.record(stream_);
 
             return new_token;
         }

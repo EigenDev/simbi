@@ -135,6 +135,39 @@ namespace simbi::concepts {
         { T::handle_type };
     };
 
+    // =============================================================================
+    // computation protocol concepts
+    // =============================================================================
+
+    // helper concepts for detection (prefixed to avoid conflicts with
+    // traits.hpp)
+    template <typename T>
+    concept has_computable_value_type = requires { typename T::value_type; };
+
+    template <typename T>
+    concept has_computable_argument_type =
+        requires { typename T::argument_type; };
+
+    template <typename T>
+    concept has_computable_rank = requires {
+        { T::rank } -> std::convertible_to<std::uint64_t>;
+    };
+
+    template <typename T>
+    concept already_computable =
+        has_computable_value_type<T> && has_computable_argument_type<T> &&
+        has_computable_rank<T>;
+
+    // core computable: any callable with explicit type metadata
+    template <typename T>
+    concept computable = requires {
+        typename T::value_type;
+        typename T::argument_type;
+        { T::rank } -> std::convertible_to<std::uint64_t>;
+    } && requires(const T& comp, typename T::argument_type arg) {
+        { comp(arg) } -> std::convertible_to<typename T::value_type>;
+    };
+
 }   // namespace simbi::concepts
 
 #endif

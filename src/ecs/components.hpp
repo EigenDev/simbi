@@ -501,42 +501,6 @@ namespace simbi::ecs {
     template <std::uint64_t Rank, geometry_t G>
     using mesh_geometry_t = partition_geometry_t<Rank, G>;
 
-    // =============================================================================
-    // legacy components (kept for compatibility, may be removed)
-    // =============================================================================
-
-    // old skeleton component (now part of level_decomposition_t)
-    template <std::uint64_t Rank>
-    struct skeleton_component_t {
-        grid::skeleton_t<Rank> skeleton;
-    };
-
-    // old execution space (replaced by partition_t)
-    template <std::uint64_t Rank>
-    struct execution_space_t {
-        grid::domain_t<Rank> spatial_region;
-        het::executor_t executor;
-        std::int64_t device_id;
-        std::vector<std::uint64_t> active_levels;
-        std::vector<grid::domain_t<Rank>> level_domains;
-    };
-
-    // old rk workspace (replaced by partition_workspace_t)
-    template <typename Sim>
-    struct rk_workspace_component_t {
-        using cons_field_t = decltype(std::declval<Sim>().hydro(0).cons);
-
-        cons_field_t u_n;
-        cons_field_t u_star;
-
-        rk_workspace_component_t() = default;
-
-        rk_workspace_component_t(const Sim& sim, std::uint64_t lvl)
-            : u_n(sim.hydro(lvl).cons.clone())
-        {
-        }
-    };
-
 }   // namespace simbi::ecs
 
 #endif

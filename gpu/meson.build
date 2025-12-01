@@ -37,7 +37,6 @@ gpu_sources = files(
   '../src/hesi/cuda/stream.cpp',
   '../src/hesi/cuda/memory.cpp',
   '../src/hesi/cuda/transfer.cpp',
-  '../src/hesi/cuda/reduce.cpp',
 )
 
 gpu_settings = {

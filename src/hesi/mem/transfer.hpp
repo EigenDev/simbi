@@ -172,7 +172,7 @@ namespace simbi::het::mem {
 
         // record completion event
         auto tok = exec::token_t::create(stream.backend());
-        tok.event_->record(stream);
+        tok.record(stream);
         return tok;
     }
 
@@ -319,7 +319,7 @@ namespace simbi::het::mem {
 #endif
 
         auto tok = exec::token_t::create(stream.backend());
-        tok.event_->record(stream);
+        tok.record(stream);
         return tok;
     }
 

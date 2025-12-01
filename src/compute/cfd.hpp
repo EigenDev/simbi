@@ -6,11 +6,6 @@
 //
 // cfd operations using block_geometry_t instead of mesh_config.
 // all operations are lazy computations that compose with the field algebra.
-//
-// key changes from cfd.hpp:
-//   - geometry provides: volume(), face_area(), centroid(), scale_factors()
-//   - geometry also provides: face_grid_velocity() for moving mesh
-//   - no mesh:: namespace calls, geometry is self-contained
 // =============================================================================
 
 #include "base/stencil_view.hpp"
@@ -33,8 +28,8 @@
 
 namespace simbi::cfd {
     using namespace base::stencils;
-    using namespace simbi::body::expr;
-    using namespace simbi::body;
+    using namespace body::expr;
+    using namespace body;
 
     // =========================================================================
     // geometry concept
@@ -56,8 +51,10 @@ namespace simbi::cfd {
     // =========================================================================
     template <typename Fluxes, typename Geometry>
     struct flux_divergence_op_t {
-        using flux_t      = typename Fluxes::value_type;
-        using conserved_t = std::remove_cvref_t<typename flux_t::value_type>;
+        using flux_t        = typename Fluxes::value_type;
+        using conserved_t   = std::remove_cvref_t<typename flux_t::value_type>;
+        using value_type    = conserved_t;
+        using argument_type = iarray<Fluxes::rank>;
         static constexpr std::uint64_t rank = Fluxes::rank;
 
         Fluxes fluxes;
@@ -118,6 +115,8 @@ namespace simbi::cfd {
         static constexpr std::uint64_t rank = PrimField::rank;
         using prim_t      = std::remove_cvref_t<typename PrimField::value_type>;
         using conserved_t = typename prim_t::counterpart_t;
+        using value_type  = conserved_t;
+        using argument_type = iarray<PrimField::rank>;
 
         const GravitySource* gravity_source;
         PrimField prims;
@@ -167,6 +166,8 @@ namespace simbi::cfd {
     struct hydro_source_op_t {
         static constexpr std::uint64_t rank = ConsField::rank;
         using conserved_t = std::remove_cvref_t<typename ConsField::value_type>;
+        using value_type  = conserved_t;
+        using argument_type = iarray<ConsField::rank>;
 
         const HydroSource* hydro_source;
         ConsField cons;
@@ -214,6 +215,8 @@ namespace simbi::cfd {
         static constexpr std::uint64_t rank = PrimField::rank;
         using prim_t      = std::remove_cvref_t<typename PrimField::value_type>;
         using conserved_t = typename prim_t::counterpart_t;
+        using value_type  = conserved_t;
+        using argument_type = iarray<PrimField::rank>;
 
         PrimField prims;
         Geometry geometry;
@@ -247,6 +250,10 @@ namespace simbi::cfd {
     // =========================================================================
     template <typename PrimField, typename Geometry, typename CfdOps>
     struct compute_fluxes_op_t {
+        using prim_t      = std::remove_cvref_t<typename PrimField::value_type>;
+        using conserved_t = typename prim_t::counterpart_t;
+        using value_type  = conserved_t;
+        using argument_type                 = iarray<PrimField::rank>;
         static constexpr std::uint64_t rank = PrimField::rank;
 
         PrimField prims;
@@ -455,16 +462,18 @@ namespace simbi::cfd {
     struct body_effects_op_t {
         using prim_t      = std::remove_cvref_t<typename PrimField::value_type>;
         using conserved_t = prim_t::counterpart_t;
-        static constexpr std::uint64_t Rank = PrimField::rank;
+        using value_type  = conserved_t;
+        using argument_type                 = iarray<PrimField::rank>;
+        static constexpr std::uint64_t rank = PrimField::rank;
 
         Bodies bodies;
         PrimField prims;
         Geometry geometry;
-        body::body_diagnostics_t<Rank>* diagnostics;
+        body::body_diagnostics_t<rank>* diagnostics;
         real gamma;
         real dt;
 
-        DEV constexpr auto operator()(iarray<Rank> coord) const
+        DEV constexpr auto operator()(iarray<rank> coord) const
         {
             conserved_t total_effect{};
             if (bodies.empty()) {
@@ -477,7 +486,7 @@ namespace simbi::cfd {
 
             bodies.visit_all([&](const auto& body) {
                 using body_type = std::decay_t<decltype(body)>;
-                body_delta_t<Rank> delta{
+                body_delta_t<rank> delta{
                   .idx          = body.idx,
                   .force_delta  = {},
                   .torque_delta = {},

@@ -54,8 +54,8 @@ namespace simbi::comm::detail {
 #endif
 
         // record completion event on the stream and return the token
-        auto t = token::create(backend);
-        t.event_->record(exec.stream());
+        auto t = token_t::create(backend);
+        t.record(exec.stream());
         return t;
 
 #else

@@ -42,6 +42,9 @@ namespace simbi::grid {
     template <typename T, std::uint64_t Rank>
     struct field_view_t : public het::view_t<T, Rank> {
         using value_type                    = T;
+        using reference_type                = T&;
+        using const_reference_type          = const T&;
+        using argument_type                 = iarray<Rank>;
         using base_type                     = het::view_t<T, Rank>;
         static constexpr std::uint64_t rank = Rank;
 
@@ -335,6 +338,91 @@ namespace simbi::grid {
 
         // direct pointer access (use with caution)
         T* data() const { return static_cast<T*>(storage_->data()); }
+
+        // ---------------------------------------------------------------------
+        // cloning helpers
+        // - clone(target) performs a synchronous clone/move into the requested
+        //   locality and returns a field_t usable on that locality.
+        // - clone_async(target, stream, out) prepares `out` to receive the
+        //   cloned storage and returns a token that completes when the copy
+        //   finishes. the caller may schedule kernels on the same stream and
+        //   rely on stream ordering.
+        // ---------------------------------------------------------------------
+
+        // synchronous clone (convenience)
+        field_t clone(het::locality_t target) const
+        {
+            // quick path: same locality -> shallow copy
+            if (storage_->locality() == target) {
+                return *this;
+            }
+
+            // host move optimization: if target is host and we are sole owner
+            // and already host-local, perform an ownership transfer
+            if (target.backend == het::backend_type_t::cpu &&
+                storage_.use_count() == 1 &&
+                storage_->locality().backend == het::backend_type_t::cpu) {
+                field_t out;
+                out.storage_ = std::move(storage_);
+                out.domain_  = domain_;
+                return out;
+            }
+
+            // otherwise allocate a destination handle on the target and perform
+            // a blocking copy
+            auto dst = het::mem::make_handle(
+                storage_->size(),
+                target,
+                (target.backend == het::backend_type_t::cpu)
+                    ? het::memory_type_t::host_visible
+                    : het::memory_type_t::device_local
+            );
+
+            het::mem::copy_handle_sync(dst, storage_, storage_->size());
+
+            field_t out;
+            out.storage_ = std::move(dst);
+            out.domain_  = domain_;
+            return out;
+        }
+
+        // asynchronous clone: prepares `out` and returns a token that completes
+        // when the transfer to `target` on `stream` finishes. `out` will own
+        // the destination handle immediately; the returned token tracks the
+        // copy completion.
+        het::exec::token_t clone_async(
+            het::locality_t target,
+            het::exec::stream_t& stream,
+            field_t& out
+        ) const
+        {
+            // shallow-copy fast path
+            if (storage_->locality() == target) {
+                out = *this;
+                return het::exec::token_t::immediate(target.backend);
+            }
+
+            // allocate destination handle
+            auto dst = het::mem::make_handle(
+                storage_->size(),
+                target,
+                (target.backend == het::backend_type_t::cpu)
+                    ? het::memory_type_t::host_visible
+                    : het::memory_type_t::device_local
+            );
+
+            // transfer ownership of the handle into the output field
+            out.storage_ = dst;
+            out.domain_  = domain_;
+
+            // schedule async copy into out.storage_ and return the token
+            return het::mem::copy_handle_async(
+                out.storage_,
+                storage_,
+                storage_->size(),
+                stream
+            );
+        }
 
       private:
         // constructs a view for the target domain pointing into storage

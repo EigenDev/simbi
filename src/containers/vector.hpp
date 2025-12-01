@@ -39,11 +39,13 @@ namespace simbi {
             using T        = typename Vec1::value_type;
             using U        = typename Vec2::value_type;
             using result_t = detail::promote_t<T, U>;
-            return fp::zip(a, b) |
-                   fp::unpack_map([](auto l, auto m) -> result_t {
-                       return m * l;
-                   }) |
-                   fp::sum;
+            // traditional loop for compatibility
+            result_t result = static_cast<result_t>(0);
+            for (std::uint64_t ii = 0; ii < Vec1::rank; ++ii) {
+                result +=
+                    static_cast<result_t>(a[ii]) * static_cast<result_t>(b[ii]);
+            }
+            return result;
         }
 
         // norm

@@ -25,7 +25,8 @@ namespace simbi::het::backend::cpu {
 #ifdef CUDA_ENABLED
 namespace simbi::het::backend::cuda {
     template <typename T, typename BinaryOp>
-    void reduce_range(void*, const T*, T*, std::uint64_t, T, BinaryOp, T);
+    void
+    reduce_range(cudaStream_t, const T*, T*, std::uint64_t, T, BinaryOp, T);
 
     template <
         typename Computation,
@@ -33,7 +34,7 @@ namespace simbi::het::backend::cuda {
         typename TransformOp,
         typename BinaryOp>
     void transform_reduce(
-        void*,
+        cudaStream_t,
         const Computation&,
         T*,
         T,
@@ -155,7 +156,7 @@ namespace simbi::het::backend {
 #include "hesi/cpu/reduce.hpp"
 
 #ifdef CUDA_ENABLED
-#include "hesi/backend/reduce.hpp"
+#include "hesi/cuda/reduce.hpp"
 #endif
 
 #endif

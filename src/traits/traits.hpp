@@ -49,50 +49,12 @@
 #ifndef TRAITS_HPP
 #define TRAITS_HPP
 
-#include <cstddef>
-#include <functional>
-#include <tuple>
 #include <type_traits>
 
 //==========================================================================
 //                  PRIMITIVE TYPE TRAITS
 //==========================================================================
 namespace simbi {
-    template <typename T>
-    struct is_primitive {
-        static const bool value = false;
-    };
-
-    template <typename T>
-    struct is_relativistic {
-        static const bool value = false;
-    };
-
-    template <typename T>
-    struct is_relativistic_mhd {
-        static const bool value = false;
-    };
-
-    template <typename T>
-    struct is_mhd {
-        static const bool value = false;
-    };
-
-    template <typename F, typename T>
-    struct has_index_param {
-      private:
-        template <typename U>
-        static auto test(
-            int
-        ) -> decltype(std::declval<U>()(std::declval<T>(), std::size_t{}), std::true_type{});
-
-        template <typename>
-        static auto test(...) -> std::false_type;
-
-      public:
-        static constexpr bool value = decltype(test<F>(0))::value;
-    };
-
     template <typename T>
     class maybe_t;
 
@@ -108,95 +70,6 @@ namespace simbi {
 
     template <typename T>
     inline constexpr bool is_maybe_v = is_maybe<std::decay_t<T>>::value;
-
-    // check if type has value_type member
-    template <typename T, typename = void>
-    struct has_value_type : std::false_type {
-    };
-
-    template <typename T>
-    struct has_value_type<T, std::void_t<typename T::value_type>>
-        : std::true_type {
-    };
-
-    // get value_type safely
-    template <typename T, typename Enable = void>
-    struct get_value_type {
-        using type = T;   // fallback to T if no value_type
-    };
-
-    template <typename T>
-    struct get_value_type<T, std::enable_if_t<has_value_type<T>::value>> {
-        using type = typename T::value_type;
-    };
-
-    // Helper alias
-    template <typename T>
-    using get_value_type_t = typename get_value_type<T>::type;
-
-    template <typename Array>
-    struct array_value_type {
-        using type = typename std::decay_t<Array>::value_type;
-    };
-
-    template <typename Array>
-    struct array_raw_type {
-        using type = typename std::decay_t<Array>::raw_type;
-    };
-
-    template <typename T>
-    inline constexpr bool is_primitive_v = is_primitive<T>::value;
-
-    template <typename T>
-    struct is_conserved {
-        static const bool value = false;
-    };
-
-    template <typename T>
-    inline constexpr bool is_conserved_v = is_conserved<T>::value;
-
-    template <typename T>
-    inline constexpr bool is_mhd_v = is_mhd<T>::value;
-    template <typename T>
-    inline constexpr bool is_relativistic_mhd_v = is_relativistic_mhd<T>::value;
-
-    template <typename T>
-    struct function_traits;
-
-    // specialization for regular function types
-    template <typename Ret, typename... Args>
-    struct function_traits<Ret(Args...)> {
-        using return_type                  = Ret;
-        using signature                    = Ret(Args...);
-        static constexpr std::size_t arity = sizeof...(Args);
-
-        // get argument type by index
-        template <std::size_t I>
-        using arg_type = std::tuple_element_t<I, std::tuple<Args...>>;
-    };
-
-    // specialization for function pointers
-    template <typename Ret, typename... Args>
-    struct function_traits<Ret (*)(Args...)> : function_traits<Ret(Args...)> {
-    };
-
-    // specialization for member function pointers
-    template <typename Class, typename Ret, typename... Args>
-    struct function_traits<Ret (Class::*)(Args...)>
-        : function_traits<Ret(Args...)> {
-    };
-
-    // specialization for const member function pointers
-    template <typename Class, typename Ret, typename... Args>
-    struct function_traits<Ret (Class::*)(Args...) const>
-        : function_traits<Ret(Args...)> {
-    };
-
-    // specialization for std::function
-    template <typename Ret, typename... Args>
-    struct function_traits<std::function<Ret(Args...)>>
-        : function_traits<Ret(Args...)> {
-    };
 }   // namespace simbi
 
 #endif
