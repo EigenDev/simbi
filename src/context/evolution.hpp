@@ -140,7 +140,9 @@ namespace simbi::evolution {
                 checkpoint::save(sim, state.progress);
             }
         }
-
+        if (!state.should_stop) {
+            state.progress.table.set_progress(100);
+        }
         progress::finalize(state.progress);
 
         if (state.stats.count > 0) {

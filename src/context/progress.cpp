@@ -87,7 +87,6 @@ namespace simbi::progress {
 
     void finalize(progress_state_t& state)
     {
-        state.table.set_progress(100);
         state.table.refresh();
         std::cout << "Simulation completed.\n";
     }
