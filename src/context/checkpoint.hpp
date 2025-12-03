@@ -11,10 +11,11 @@
 
 namespace simbi::checkpoint {
 
-    struct checkpoint_schedule_t {
-        real checkpoint_time;
-        real checkpoint_interval;
-        real dlogt;
+    struct checkpoint_schedule_t
+    {
+        real          checkpoint_time;
+        real          checkpoint_interval;
+        real          dlogt;
         std::uint64_t checkpoint_index;
 
         bool should_checkpoint(real current_time) const
@@ -31,14 +32,12 @@ namespace simbi::checkpoint {
             // interval. if the checkpoint interval is 0 then the interval
             // is set to the current time.
             if (dlogt != 0) {
-                checkpoint_time =
-                    time * std::pow(10.0, std::floor(std::log10(time) + dlogt));
+                checkpoint_time = time * std::pow(10.0, std::floor(std::log10(time) + dlogt));
             }
             else {
                 static auto round_place = 1.0 / checkpoint_interval;
                 checkpoint_time =
-                    checkpoint_interval +
-                    std::floor(time * round_place + 0.5) / round_place;
+                    checkpoint_interval + std::floor(time * round_place + 0.5) / round_place;
             }
             checkpoint_index += 1;
         }
@@ -50,13 +49,9 @@ namespace simbi::checkpoint {
     };
 
     template <typename Sim>
-    void save(
-        Sim& sim,
-        progress::progress_state_t& progress,
-        const io::write_policy_t& policy = {}
-    )
+    void save(Sim& sim, progress::progress_state_t& progress, const io::write_policy_t& policy = {})
     {
-        auto& meta          = sim.metadata();
+        auto&      meta     = sim.metadata();
         const auto filename = io::compute_checkpoint_filename(
             meta.data_dir,
             meta.checkpoint_identifier(),
@@ -68,9 +63,7 @@ namespace simbi::checkpoint {
             sim.in_failure_state
         );
 
-        progress.table.post_info(
-            "[Writing checkpoint to path: " + filename + "]"
-        );
+        progress.table.post_info("[Writing checkpoint to path: " + filename + "]");
         progress.table.print();
 
         io::write_checkpoint(sim, filename, policy);
@@ -80,10 +73,12 @@ namespace simbi::checkpoint {
 
         // reset diagnostics for next checkpoint interval
         if constexpr (requires { sim.diagnostics(); }) {
-            sim.diagnostics()->reset();
+            if (sim.has_bodies()) {
+                sim.diagnostics()->reset();
+            }
         }
     }
 
-}   // namespace simbi::checkpoint
+} // namespace simbi::checkpoint
 
 #endif
