@@ -118,13 +118,15 @@ namespace simbi::body::factory {
         auto body_type = detail::determine_body_type(props);
 
         if (body_type == "black_hole") {
-            auto softening  = try_read<real>(props, "softening_length").value();
-            auto sink_rate  = try_read<real>(props, "sink_rate").value();
-            auto sink_delta = try_read<real>(props, "sink_delta").value();
+            auto grav = props.at("gravitational").template get<config_dict_t>();
+            auto accr = props.at("accretion").template get<config_dict_t>();
+            auto softening  = try_read<real>(grav, "softening_length").value();
+            auto sink_rate  = try_read<real>(accr, "sink_rate").value();
+            auto sink_delta = try_read<real>(accr, "sink_delta").value();
             auto accr_radius =
-                try_read<real>(props, "accretion_radius").unwrap_or(radius);
+                try_read<real>(accr, "accretion_radius").unwrap_or(radius);
             auto total_accreted =
-                try_read<real>(props, "total_accreted_mass").unwrap_or(real{0});
+                try_read<real>(accr, "total_accreted_mass").unwrap_or(real{0});
 
             return make_black_hole<Rank>(
                 idx,
@@ -142,9 +144,12 @@ namespace simbi::body::factory {
             );
         }
         else if (body_type == "planet") {
-            auto inertia = try_read<real>(props, "inertia").value();
+            // auto grav = props.at("gravitational").template
+            // get<config_dict_t>();
+            auto rigid   = props.at("rigid").template get<config_dict_t>();
+            auto inertia = try_read<real>(rigid, "inertia").value();
             bool no_slip =
-                try_read<bool>(props, "apply_no_slip").unwrap_or(true);
+                try_read<bool>(rigid, "apply_no_slip").unwrap_or(true);
 
             return make_planet<Rank>(
                 idx,
@@ -158,7 +163,8 @@ namespace simbi::body::factory {
             );
         }
         else if (body_type == "gravitational") {
-            auto softening = try_read<real>(props, "softening_length").value();
+            auto grav = props.at("gravitational").template get<config_dict_t>();
+            auto softening = try_read<real>(grav, "softening_length").value();
 
             return make_gravitational_body<Rank>(
                 idx,
@@ -171,9 +177,10 @@ namespace simbi::body::factory {
             );
         }
         else if (body_type == "rigid_sphere") {
-            auto inertia = try_read<real>(props, "inertia").value();
+            auto rigid   = props.at("rigid").template get<config_dict_t>();
+            auto inertia = try_read<real>(rigid, "inertia").value();
             bool no_slip =
-                try_read<bool>(props, "apply_no_slip").unwrap_or(true);
+                try_read<bool>(rigid, "apply_no_slip").unwrap_or(true);
 
             return make_rigid_sphere<Rank>(
                 idx,

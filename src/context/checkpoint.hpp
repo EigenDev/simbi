@@ -56,7 +56,7 @@ namespace simbi::checkpoint {
         const io::write_policy_t& policy = {}
     )
     {
-        const auto& meta    = sim.metadata();
+        auto& meta          = sim.metadata();
         const auto filename = io::compute_checkpoint_filename(
             meta.data_dir,
             meta.checkpoint_identifier(),
@@ -74,6 +74,14 @@ namespace simbi::checkpoint {
         progress.table.print();
 
         io::write_checkpoint(sim, filename, policy);
+
+        // update prev_checkpoint_time after successful write
+        meta.prev_checkpoint_time = meta.time;
+
+        // reset diagnostics for next checkpoint interval
+        if constexpr (requires { sim.diagnostics(); }) {
+            sim.diagnostics()->reset();
+        }
     }
 
 }   // namespace simbi::checkpoint

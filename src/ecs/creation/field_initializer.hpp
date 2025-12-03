@@ -260,8 +260,8 @@ namespace simbi::ecs::creation {
             }
 
             // convert primitives to conserved
-            fields.cons =
-                fields.prim
+            fields.cons[active_domain] =
+                fields.prim[active_domain]
                     .map([gamma] DEV(primitive_t prim) -> conserved_t {
                         return hydro::to_conserved(prim, gamma);
                     })

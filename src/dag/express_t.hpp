@@ -22,7 +22,7 @@ namespace simbi::state {
     struct gravity_source_tag;
 
     template <std::uint64_t Rank>
-    struct expression_t : public managed_t<platform::is_gpu> {
+    struct expression_t : public managed_t {
         bool enabled;
         std::int64_t register_count;
         store_t<expression::ExprNode> nodes;

@@ -65,7 +65,6 @@ namespace simbi {
      * srp: provide a consistent interface for memory management
      * across CPU and GPU, with optional GPU managed memory.
      */
-    template <bool gpu_managed = global::managed_memory>
     class managed_t
     {
       public:
@@ -73,7 +72,7 @@ namespace simbi {
 
         static void* operator new(std::size_t len)
         {
-            if constexpr (gpu_managed) {
+            if constexpr (platform::is_gpu) {
                 void* ptr;
 // Use raw API for custom allocators - bypass RAII wrapper
 #ifdef CUDA_ENABLED
@@ -92,7 +91,7 @@ namespace simbi {
 
         static void operator delete(void* ptr) noexcept
         {
-            if constexpr (gpu_managed) {
+            if constexpr (platform::is_gpu) {
 #ifdef CUDA_ENABLED
                 cudaDeviceSynchronize();
                 cudaFree(ptr);

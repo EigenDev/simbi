@@ -194,97 +194,175 @@ namespace simbi::evolution {
         // ---------------------------------------------------------------------
         // euler driver
         // ---------------------------------------------------------------------
-        template <typename Geometry>
-        void
-        advance_level_euler(const Geometry& block_geo, std::uint64_t lvl) const
+        void advance_level_euler(std::uint64_t lvl) const
         {
             using namespace ecs;
+            auto& meta     = sim.metadata();
+            auto motion    = get_motion_state(sim);
+            auto& mesh_cfg = sim.mesh(lvl);
 
-            // prep: fill ghosts, recover primitives
-            ghost_fill_system_t{}(sim, lvl);
-            c2p_system_t{}(sim, lvl);
+            with_block_geometry<Sim::coord_system>(
+                mesh_cfg,
+                motion,
+                [&](const auto& block_geo) {
+                    ghost_fill_system_t{}(sim, lvl);
+                    c2p_system_t{}(sim, lvl);
 
-            // compute fluxes
-            flux_system_t{
-              .accumulate_fluxes = (lvl > 0)
-            }(sim, ops, block_geo, lvl);
-            // subcycle finer level
+                    flux_system_t{}(sim, ops, block_geo, lvl);
+
+                    euler_system_t<Ops>{ops}(sim, block_geo, lvl);
+                }
+            );
+
             if (lvl < sim.num_levels() - 1) {
-                const auto nsteps = get_substeps(lvl + 1);
+                const auto nsteps     = get_substeps(lvl + 1);
+                const auto fine_level = lvl + 1;
+                const auto dt_fine    = meta.level_dts[fine_level];
+                const auto dt_coarse  = meta.level_dts[lvl];
 
-                zero_flux_buffer_system_t{}(sim, lvl + 1);
+                // zero flux registers at start of coarse timestep
+                zero_flux_registers_system_t{}(sim, fine_level);
+
+                // accumulate coarse flux at interface
+                accumulate_coarse_flux_system_t{}(
+                    sim,
+                    lvl,
+                    fine_level,
+                    dt_coarse
+                );
 
                 for (std::uint64_t substep = 0; substep < nsteps; ++substep) {
-                    advance_level_euler(block_geo, lvl + 1);
-                    restriction_system_t{}(sim, lvl + 1);
+                    if (nsteps > 1) {
+                        // ghost fill logic for subcycling...
+                        real alpha = (static_cast<real>(substep) + 1.0) /
+                                     static_cast<real>(nsteps);
+                        time_interpolated_ghost_fill_system_t{
+                          alpha
+                        }(sim, fine_level);
+                    }
+                    advance_level_euler(fine_level);
+
+                    // accumulate fine flux at interface
+                    accumulate_fine_flux_system_t{}(sim, fine_level, dt_fine);
                 }
 
-                reflux_system_t{}(sim, lvl + 1);
+                // restriction: inject fine interior back to coarse
+                restriction_system_t{}(sim, fine_level);
+
+                // apply flux correction to coarse level
+                reflux_system_t{}(sim, fine_level);
             }
-
-            // advance this level
-            euler_system_t<Ops>{ops}(sim, block_geo, lvl);
-
-            // apply body effects (all levels compute, only authoritative
-            // passes diagnostics)
-            body_effects_system_t<Sim::rank>{}(
-                sim,
-                block_geo,
-                lvl,
-                sim.metadata().level_dts[lvl]
-            );
 
             // sync partitions
             synchronize_system_t{}(sim, lvl);
         }
 
-        // ---------------------------------------------------------------------
+        // =============================================================================
         // rk2 driver (berger-colella)
-        // ---------------------------------------------------------------------
-        template <typename Geometry>
-        void
-        advance_level_rk2(const Geometry& block_geo, std::uint64_t lvl) const
+        // =============================================================================
+        void advance_level_rk2(std::uint64_t lvl) const
         {
             using namespace ecs;
+            auto& meta     = sim.metadata();
+            auto& mesh_cfg = sim.mesh(lvl);
+            auto motion    = get_motion_state(sim);
+            const auto dt  = meta.level_dts[lvl];
 
-            // === stage 1: u^n -> u* ===
-            ghost_fill_system_t{}(sim, lvl);
-            c2p_system_t{}(sim, lvl);
-            flux_system_t{.accumulate_fluxes = false}(sim, ops, block_geo, lvl);
-            rk2_stage1_system_t<Ops>{ops}(sim, block_geo, lvl);
+            with_block_geometry<Sim::coord_system>(
+                mesh_cfg,
+                motion,
+                [&](const auto& block_geo) {
+                    // === STAGE 1: u^n -> u* ===
+                    ghost_fill_system_t{.use_coarse_u_n = true}(sim, lvl);
+                    c2p_system_t{}(sim, lvl);
 
-            // === subcycle fine level ===
-            if (lvl < sim.num_levels() - 1) {
-                const auto nsteps = get_substeps(lvl + 1);
-                zero_flux_buffer_system_t{}(sim, lvl + 1);
+                    flux_system_t{}(sim, ops, block_geo, lvl);   // F(u^n)
 
-                for (std::uint64_t substep = 0; substep < nsteps; ++substep) {
-                    advance_level_rk2(block_geo, lvl + 1);
-                    restriction_system_t{}(sim, lvl + 1);
+                    // accumulate this level's flux into parent's register
+                    if (lvl > 0) {
+                        accumulate_fine_flux_system_t{}(sim, lvl, 0.5 * dt);
+                    }
+
+                    if (lvl < sim.num_levels() - 1) {
+                        const auto fine_level = lvl + 1;
+                        zero_flux_registers_system_t{}(sim, fine_level);
+                        // accumulate coarse F(u^n) (0.5 * dt)
+                        accumulate_coarse_flux_system_t{}(
+                            sim,
+                            lvl,
+                            fine_level,
+                            0.5 * dt
+                        );
+                    }
+
+                    rk2_stage1_system_t<Ops>{ops}(sim, block_geo, lvl);
+
+                    // === RECURSION ===
+                    if (lvl < sim.num_levels() - 1) {
+                        const auto fine_level = lvl + 1;
+                        const auto nsteps     = get_substeps(fine_level);
+
+                        for (std::uint64_t substep = 0; substep < nsteps;
+                             ++substep) {
+                            // not: use simple ghost fill if nsteps == 1 (NONE
+                            // mode)
+                            if (nsteps > 1) {
+                                // ghost fill logic for subcycling...
+                                real alpha =
+                                    (static_cast<real>(substep) + 0.5) /
+                                    static_cast<real>(nsteps);
+                                time_interpolated_ghost_fill_system_t{
+                                  alpha
+                                }(sim, fine_level);
+                            }
+                            else {
+                                // for none mode, just let the next recursive
+                                // call handle ghosts, or call ghost_fill here
+                                // if needed manually. Standard practice: The
+                                // recursive call starts with ghost_fill.
+                            }
+
+                            advance_level_rk2(fine_level);
+                        }
+                    }
+
+                    // === STAGE 2: u* -> u^{n+1} ===
+                    ghost_fill_system_t{.use_coarse_u_n = true}(sim, lvl);
+                    c2p_system_t{}(sim, lvl);
+
+                    flux_system_t{}(sim, ops, block_geo, lvl);   // F(u*)
+
+                    // accumulate this level's flux into parent's register
+                    if (lvl > 0) {
+                        accumulate_fine_flux_system_t{}(sim, lvl, 0.5 * dt);
+                    }
+
+                    if (lvl < sim.num_levels() - 1) {
+                        const auto fine_level = lvl + 1;
+                        // accumulate coarse F(u*) (0.5 * dt)
+                        accumulate_coarse_flux_system_t{}(
+                            sim,
+                            lvl,
+                            fine_level,
+                            0.5 * dt
+                        );
+                    }
+
+                    rk2_stage2_system_t<Ops>{ops}(sim, block_geo, lvl);
+
+                    // === REFLUX AND SYNCHRONIZE ===
+                    if (lvl < sim.num_levels() - 1) {
+                        // apply reflux to fix conservation at boundaries
+                        reflux_system_t{}(sim, lvl + 1);
+
+                        // perform restriction to sync the grids for the
+                        // next step. The coarse grid has finished its RK2 step,
+                        // so it is safe to overwrite.
+                        restriction_system_t{}(sim, lvl + 1);
+                    }
                 }
-
-                reflux_system_t{}(sim, lvl + 1);
-            }
-
-            // === stage 2: u* -> u^{n+1} ===
-            ghost_fill_system_t{}(sim, lvl);
-            c2p_system_t{}(sim, lvl);
-            flux_system_t{
-              .accumulate_fluxes = (lvl > 0)
-            }(sim, ops, block_geo, lvl);
-
-            rk2_stage2_system_t<Ops>{ops}(sim, block_geo, lvl);
-
-            // apply body effects (all levels compute, only authoritative passes
-            // diagnostics)
-            body_effects_system_t<Sim::rank>{}(
-                sim,
-                block_geo,
-                lvl,
-                sim.metadata().level_dts[lvl]
             );
 
-            // sync partitions
             synchronize_system_t{}(sim, lvl);
         }
 
@@ -312,7 +390,7 @@ namespace simbi::evolution {
             using namespace ecs;
             ghost_fill_system_t{}(sim, lvl);
             c2p_system_t{}(sim, lvl);
-            timestep_system_t{}(sim);
+            init_flux_registers_system_t{}(sim, lvl);
         }
 
         // ---------------------------------------------------------------------
@@ -323,35 +401,24 @@ namespace simbi::evolution {
             using namespace ecs;
             auto& meta = sim.metadata();
 
-            // compute all level timesteps
             timestep_system_t{}(sim);
 
-            // build geometry once per timestep and advance
-            auto motion    = get_motion_state(sim);
-            auto& mesh_cfg = sim.mesh(0);
+            sink_cache_system_t{}(sim);
 
-            with_block_geometry<Sim::coord_system>(
-                mesh_cfg,
-                motion,
-                [&](const auto& block_geo) {
-                    if (meta.timestepping == timestepping_t::RK2) {
-                        advance_level_rk2(block_geo, 0);
-                    }
-                    else if (meta.timestepping == timestepping_t::EULER) {
-                        advance_level_euler(block_geo, 0);
-                    }
-                    else {
-                        throw std::runtime_error(
-                            "that timestepping method is not implemented."
-                        );
-                    }
-                }
-            );
+            if (meta.timestepping == timestepping_t::RK2) {
+                advance_level_rk2(0);
+            }
+            else if (meta.timestepping == timestepping_t::EULER) {
+                advance_level_euler(0);
+            }
+            else {
+                throw std::runtime_error(
+                    "that timestepping method is not implemented."
+                );
+            }
 
-            // advance global time
             meta.time += meta.global_dt;
 
-            // evolve bodies (if any)
             if (sim.has_bodies()) {
                 body::evolve_bodies(sim);
             }

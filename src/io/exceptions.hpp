@@ -135,6 +135,10 @@ namespace simbi {
         std::atomic<ErrorCode> first_error_code{ErrorCode::NONE};
         std::atomic<std::uint64_t> first_error_index{0};
 
+        // coordinate storage (non-atomic, only written by winning thread)
+        std::int64_t error_coord[3]{0, 0, 0};    // index space coordinates
+        real error_position[3]{0.0, 0.0, 0.0};   // physical space coordinates
+
         // try to consume budget - returns true if this thread "wins"
         bool try_consume()
         {
@@ -151,6 +155,30 @@ namespace simbi {
             error_captured.store(false);
             first_error_code.store(ErrorCode::NONE);
             first_error_index.store(0);
+            for (int i = 0; i < 3; ++i) {
+                error_coord[i]    = 0;
+                error_position[i] = 0.0;
+            }
+        }
+
+        std::string format_error_message() const
+        {
+            auto code = first_error_code.load();
+            if (code == ErrorCode::NONE) {
+                return "No error";
+            }
+
+            std::string msg = "Simulation failed: ";
+            msg += helpers::error_code_to_string(code);
+            msg += " at index (";
+            msg += std::to_string(error_coord[0]) + ", ";
+            msg += std::to_string(error_coord[1]) + ", ";
+            msg += std::to_string(error_coord[2]) + ")";
+            msg += ", position (";
+            msg += std::to_string(error_position[0]) + ", ";
+            msg += std::to_string(error_position[1]) + ", ";
+            msg += std::to_string(error_position[2]) + ")";
+            return msg;
         }
     };
 

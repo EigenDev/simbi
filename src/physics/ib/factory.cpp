@@ -14,22 +14,29 @@ namespace simbi::body::factory {
         // check if config has gravitational properties
         bool has_gravitational_config(const config_dict_t& props)
         {
-            return config::try_read<real>(props, "softening_length")
+            auto gravity =
+                config::try_read<config_dict_t>(props, "gravitational").value();
+
+            return config::try_read<real>(gravity, "softening_length")
                 .has_value();
         }
 
         // check if config has accretion properties
         bool has_accretion_config(const config_dict_t& props)
         {
-            return config::try_read<real>(props, "sink_rate").has_value() ||
-                   config::try_read<bool>(props, "is_an_accretor")
+            auto accretion =
+                config::try_read<config_dict_t>(props, "accretion").value();
+            return config::try_read<real>(accretion, "sink_rate").has_value() ||
+                   config::try_read<bool>(accretion, "is_an_accretor")
                        .unwrap_or(false);
         }
 
         // check if config has rigid properties
         bool has_rigid_config(const config_dict_t& props)
         {
-            return config::try_read<real>(props, "inertia").has_value();
+            auto rigid =
+                config::try_read<config_dict_t>(props, "rigid_body").value();
+            return config::try_read<real>(rigid, "inertia").has_value();
         }
 
         // determine body type from config

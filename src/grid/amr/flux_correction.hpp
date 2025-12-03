@@ -27,8 +27,8 @@ namespace simbi::grid::amr {
 
         // one register per face direction
         std::vector<std::unique_ptr<field_type>> registers_;
-        domain_t<Rank> coarse_domain_;
-        iarray<Rank> ratio_;
+        domain_t<Rank>                           coarse_domain_;
+        iarray<Rank>                             ratio_;
 
       public:
         flux_register_t(const domain_t<Rank>& domain, iarray<Rank> ratio)
@@ -64,17 +64,29 @@ namespace simbi::grid::amr {
             return registers_[idx].get();
         }
 
+        // zero all registers
+        void zero_all(het::exec::executor_t& exec)
+        {
+            for (auto& reg : registers_) {
+                if (reg) {
+                    *reg = computation(*reg).map([] DUAL(const T&) { return T{}; }).with(exec);
+                }
+            }
+        }
+
         // ---------------------------------------------------------------------
         // accumulation logic
         // ---------------------------------------------------------------------
 
-        // coarse: R = -F * dt
+        // coarse: R += -F * dt * area
+        template <typename Geometry>
         void accumulate_coarse(
             het::exec::executor_t& exec,
-            const field_type& coarse_flux,
-            std::size_t dim,
-            side_t side,
-            real dt
+            const field_type&      coarse_flux,
+            const Geometry&        geometry,
+            std::size_t            dim,
+            side_t                 side,
+            real                   dt
         )
         {
             auto* reg = get_register(dim, side);
@@ -83,22 +95,41 @@ namespace simbi::grid::amr {
             }
 
             // we read from the coarse flux at the register's domain
-            // computation: r = -flux * dt
             auto flux_slice = coarse_flux[reg->domain()];
 
-            // assignment triggers kernel
-            *reg = computation(flux_slice)
-                       .map([dt] DUAL(const T& f) { return f * (-dt); })
-                       .with(exec);
+            // perform additive update: reg = reg + (-flux * dt * area)
+            auto current_val = computation(*reg);
+            auto flux_comp   = computation(flux_slice);
+
+            auto update = current_val.enum_map([dt, dim, side, geometry, flux_comp] DUAL(
+                                                   const iarray<Rank>& coord,
+                                                   const T&            curr
+                                               ) {
+                auto f = flux_comp(coord);
+                // compute face area at the interface
+                real area;
+                if (side == side_t::left) {
+                    area = geometry.face_area(coord, dim);
+                }
+                else {
+                    auto rc = coord + unit_vectors::array_offset<Rank>(dim);
+                    area    = geometry.face_area(rc, dim);
+                }
+                return curr + f * (-dt * area);
+            });
+
+            *reg = update.with(exec);
         }
 
-        // fine: R += average(F) * dt
+        // fine: R += average(F * area) * dt
+        template <typename Geometry>
         void accumulate_fine(
             het::exec::executor_t& exec,
-            const field_type& fine_flux,
-            std::size_t dim,
-            side_t side,
-            real dt
+            const field_type&      fine_flux,
+            const Geometry&        geometry,
+            std::size_t            dim,
+            side_t                 side,
+            real                   dt
         )
         {
             auto* reg = get_register(dim, side);
@@ -106,31 +137,42 @@ namespace simbi::grid::amr {
                 return;
             }
 
-            // restrict fine flux to coarse domain
-            // this returns a computation defined on the coarse equivalent of
-            // the fine domain
-            auto restricted_flux = restrict(computation(fine_flux), ratio_);
-
-            // intersect with register
-            // the fine flux might cover the whole patch, but we only want the
-            // face
-            auto face_flux = restricted_flux.at(reg->domain());
-
-            // update logic: current + new * dt
-            // zip the current register value with the incoming flux
-            auto current_val = computation(*reg);
-
-            auto update = current_val.zip(
-                face_flux,
-                [dt] DUAL(const T& curr, const T& flux_avg) {
-                    return curr + flux_avg * dt;
+            // multiply fine flux by fine face area before restricting
+            // this creates F * A at fine resolution
+            auto fine_flux_area = computation(fine_flux).enum_map(
+                [dim, side, geometry] DUAL(const iarray<Rank>& fine_coord, const T& f) -> T {
+                    // fine_coord is in fine index space
+                    // compute face area at fine resolution
+                    real area;
+                    if (side == side_t::left) {
+                        area = geometry.face_area(fine_coord, dim);
+                    }
+                    else {
+                        auto rc = fine_coord + unit_vectors::array_offset<Rank>(dim);
+                        area    = geometry.face_area(rc, dim);
+                    }
+                    return f * area;
                 }
             );
+
+            // now restrict F*A to coarse domain (conservative averaging)
+            auto restricted_flux_area = restrict(fine_flux_area, ratio_);
+
+            // intersect with register
+            auto face_flux_area = restricted_flux_area.at(reg->domain());
+
+            // update: current + average(F*A) * dt
+            auto current_val = computation(*reg);
+
+            auto update =
+                current_val.zip(face_flux_area, [dt] DUAL(const T& curr, const T& fa_avg) {
+                    return curr + fa_avg * dt;
+                });
 
             *reg = update.with(exec);
         }
     };
 
-}   // namespace simbi::grid::amr
+} // namespace simbi::grid::amr
 
-#endif   // GRID_AMR_FLUX_CORRECTION_HPP
+#endif // GRID_AMR_FLUX_CORRECTION_HPP

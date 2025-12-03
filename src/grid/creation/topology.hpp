@@ -47,7 +47,7 @@ namespace simbi::grid::creation {
                 const auto& region = amr_bp.static_refinement_regions[lvl - 1];
 
                 hierarchy.push_back(
-                    build_refined_level(root_bp, region, ratio, lvl)
+                    build_refined_level(root_bp, amr_bp, region, ratio, lvl)
                 );
             }
 
@@ -57,6 +57,7 @@ namespace simbi::grid::creation {
       private:
         static skeleton_t<Rank> build_refined_level(
             const ecs::mesh_blueprint_t<Rank>& root_bp,
+            const ecs::amr_blueprint_t& amr_bp,
             const std::vector<real>& refinement_region,
             std::uint64_t refinement_ratio,
             std::uint64_t child_level
@@ -68,6 +69,7 @@ namespace simbi::grid::creation {
             auto parent_domain = physical_to_parent_domain(
                 refinement_region,
                 root_bp,
+                amr_bp,
                 child_level - 1
             );
 
@@ -102,29 +104,42 @@ namespace simbi::grid::creation {
         static domain_t<Rank> physical_to_parent_domain(
             const std::vector<real>& bounds,
             const ecs::mesh_blueprint_t<Rank>& root_bp,
+            const ecs::amr_blueprint_t& amr_bp,
             std::uint64_t parent_level
         )
         {
             iarray<Rank> start, fin;
 
             for (std::uint64_t dd = 0; dd < Rank; ++dd) {
-                real phys_start = bounds[2 * dd];
-                real phys_end   = bounds[2 * dd + 1];
+                // bounds are in logical order (x1, x2, x3)
+                // but we need array order (x3, x2, x1 for 3d)
+                std::uint64_t logical_dim = Rank - 1 - dd;
+                real phys_start           = bounds[2 * logical_dim];
+                real phys_end             = bounds[2 * logical_dim + 1];
+                // use root domain bounds for global coordinates
+                real root_domain_start = root_bp.bounds[dd].first;
+                real root_domain_len =
+                    root_bp.bounds[dd].second - root_domain_start;
 
-                real domain_start = root_bp.bounds[dd].first;
-                real domain_end   = root_bp.bounds[dd].second;
-                real domain_len   = domain_end - domain_start;
+                // compute parent's cell size from root
+                std::int64_t root_cells = root_bp.active_resolution[dd];
+                real root_cell_size =
+                    root_domain_len / static_cast<real>(root_cells);
 
-                std::int64_t root_cells   = root_bp.active_resolution[dd];
-                std::int64_t parent_cells = root_cells * (1 << parent_level);
+                real parent_cell_size = root_cell_size;
+                for (std::uint64_t ll = 0; ll < parent_level; ++ll) {
+                    std::uint64_t ratio = (ll < amr_bp.refinement_ratios.size())
+                                              ? amr_bp.refinement_ratios[ll]
+                                              : 2;
+                    parent_cell_size /= ratio;
+                }
 
-                real cell_size = domain_len / static_cast<real>(parent_cells);
-
+                // compute global indices in parent's index space
                 start[dd] = static_cast<std::int64_t>(
-                    (phys_start - domain_start) / cell_size
+                    (phys_start - root_domain_start) / parent_cell_size
                 );
                 fin[dd] = static_cast<std::int64_t>(
-                    (phys_end - domain_start) / cell_size
+                    (phys_end - root_domain_start) / parent_cell_size
                 );
             }
 
@@ -134,6 +149,7 @@ namespace simbi::grid::creation {
         static domain_t<Rank>
         scale_domain_up(const domain_t<Rank>& d, std::uint64_t ratio)
         {
+            // scale to child's global index space (no shift)
             return domain_t<Rank>{
               d.start * static_cast<std::int64_t>(ratio),
               d.fin * static_cast<std::int64_t>(ratio)

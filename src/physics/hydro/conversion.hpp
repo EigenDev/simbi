@@ -12,6 +12,7 @@
 
 #include <cmath>     // for abs, isfinite, sqrt
 #include <cstdint>   // for std::uint64_t
+#include <iostream>
 
 namespace simbi::hydro::newtonian {
     using namespace eos;

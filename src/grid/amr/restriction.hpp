@@ -1,12 +1,15 @@
 #ifndef GRID_AMR_RESTRICTION_HPP
 #define GRID_AMR_RESTRICTION_HPP
 
+#include "base/concepts.hpp"
 #include "compat.hpp"
 #include "compute/computation.hpp"
+#include "containers/state_ops.hpp"
 #include "containers/vector.hpp"
 #include "grid/domain.hpp"
 
 #include <cstdint>
+#include <iostream>
 #include <type_traits>
 
 namespace simbi::grid::amr {
@@ -40,6 +43,7 @@ namespace simbi::grid::amr {
         // action: loops over fine children and averages
         DUAL value_type operator()(const argument_type& coarse_coord) const
         {
+            using namespace structs;
             argument_type fine_base;
             for (std::uint64_t d = 0; d < Rank; ++d) {
                 fine_base[d] = coarse_coord[d] * ratio_[d];
@@ -51,27 +55,75 @@ namespace simbi::grid::amr {
             // we cannot use recursion easily in a device lambda/functor
             // without more template machinery
             if constexpr (Rank == 1) {
-                for (std::int64_t i = 0; i < ratio_[0]; ++i) {
-                    sum = sum + fine_comp_({fine_base[0] + i});
+                bool first_iter = true;
+                for (std::int64_t ii = 0; ii < ratio_[0]; ++ii) {
+                    if (first_iter) {
+                        sum        = fine_comp_({fine_base[0] + ii});
+                        first_iter = false;
+                        continue;
+                    }
+                    if constexpr (is_hydro_conserved_c<value_type>) {
+                        sum = sum | add_gas(fine_comp_({fine_base[0] + ii}));
+                    }
+                    else {
+                        sum = sum + fine_comp_({fine_base[0] + ii});
+                    }
                 }
             }
             else if constexpr (Rank == 2) {
-                for (std::int64_t j = 0; j < ratio_[1]; ++j) {
-                    for (std::int64_t i = 0; i < ratio_[0]; ++i) {
-                        sum = sum +
-                              fine_comp_({fine_base[0] + i, fine_base[1] + j});
+                bool first_iter = true;
+                for (std::int64_t jj = 0; jj < ratio_[1]; ++jj) {
+                    for (std::int64_t ii = 0; ii < ratio_[0]; ++ii) {
+                        if (first_iter) {
+                            sum = fine_comp_(
+                                {fine_base[0] + ii, fine_base[1] + jj}
+                            );
+                            first_iter = false;
+                            continue;
+                        }
+                        if constexpr (is_hydro_conserved_c<value_type>) {
+                            sum =
+                                sum | add_gas(fine_comp_(
+                                          {fine_base[0] + ii, fine_base[1] + jj}
+                                      ));
+                        }
+                        else {
+                            sum =
+                                sum + fine_comp_(
+                                          {fine_base[0] + ii, fine_base[1] + jj}
+                                      );
+                        }
                     }
                 }
             }
             else if constexpr (Rank == 3) {
-                for (std::int64_t k = 0; k < ratio_[2]; ++k) {
-                    for (std::int64_t j = 0; j < ratio_[1]; ++j) {
-                        for (std::int64_t i = 0; i < ratio_[0]; ++i) {
-                            sum = sum + fine_comp_(
-                                            {fine_base[0] + i,
-                                             fine_base[1] + j,
-                                             fine_base[2] + k}
-                                        );
+                bool first_iter = true;
+                for (std::int64_t kk = 0; kk < ratio_[2]; ++kk) {
+                    for (std::int64_t jj = 0; jj < ratio_[1]; ++jj) {
+                        for (std::int64_t ii = 0; ii < ratio_[0]; ++ii) {
+                            if (first_iter) {
+                                sum = fine_comp_(
+                                    {fine_base[0] + ii,
+                                     fine_base[1] + jj,
+                                     fine_base[2] + kk}
+                                );
+                                first_iter = false;
+                                continue;
+                            }
+                            if constexpr (is_hydro_conserved_c<value_type>) {
+                                sum = sum | add_gas(fine_comp_(
+                                                {fine_base[0] + ii,
+                                                 fine_base[1] + jj,
+                                                 fine_base[2] + kk}
+                                            ));
+                            }
+                            else {
+                                sum = sum + fine_comp_(
+                                                {fine_base[0] + ii,
+                                                 fine_base[1] + jj,
+                                                 fine_base[2] + kk}
+                                            );
+                            }
                         }
                     }
                 }
@@ -115,17 +167,27 @@ namespace simbi::grid::amr {
     // -------------------------------------------------------------------------
 
     // helper to scale domain down
+    // requires aligned domains: start and end must be divisible by ratio
     template <std::uint64_t Rank>
     constexpr grid::domain_t<Rank>
     scale_domain_down(const grid::domain_t<Rank>& d, const iarray<Rank>& ratio)
     {
         auto start = d.start;
         auto fin   = d.fin;
-        for (std::uint64_t i = 0; i < Rank; ++i) {
-            // assuming integer alignment (snapped grid)
-            // otherwise floor/ceil logic might be needed for bounds
-            start[i] /= ratio[i];
-            fin[i] /= ratio[i];
+        for (std::uint64_t ii = 0; ii < Rank; ++ii) {
+            // verify alignment: fine domain must snap to coarse grid
+            if (start[ii] % ratio[ii] != 0 || fin[ii] % ratio[ii] != 0) {
+#ifndef __CUDA_ARCH__
+                throw std::runtime_error(
+                    "scale_domain_down: fine domain not aligned to coarse "
+                    "grid. "
+                    "For refined levels, ghost width must be a multiple of the "
+                    "refinement ratio."
+                );
+#endif
+            }
+            start[ii] /= ratio[ii];
+            fin[ii] /= ratio[ii];
         }
         return {start, fin};
     }

@@ -44,6 +44,7 @@
 #include "io/h5_serializable.hpp"
 #include "io/serialization/all.hpp"
 #include "physics/ib/collection.hpp"
+#include "physics/ib/diagnostics.hpp"
 #include "physics/ib/factory.hpp"
 #include "utility/bimap.hpp"
 #include "utility/enums.hpp"
@@ -337,7 +338,6 @@ namespace simbi::ecs::builders {
                         *decomp_bp_,
                         mesh_bp_,
                         phys_bp_,
-                        amr_bp_,
                         sim.registry,
                         base_locality_
                     );
@@ -348,7 +348,6 @@ namespace simbi::ecs::builders {
                         skeleton,
                         mesh_bp_,
                         phys_bp_,
-                        amr_bp_,
                         sim.registry,
                         base_locality_
                     );
@@ -556,6 +555,13 @@ namespace simbi::ecs::builders {
                     sim.global,
                     immersed_bodies_t<Rank>{std::move(*collection)}
                 );
+                sim.registry.add(
+                    sim.global,
+                    body_info_t<Rank>{
+                      .diagnostics =
+                          body::create_diagnostics_accumulator<Rank>()
+                    }
+                );
             }
         }
 
@@ -585,7 +591,6 @@ namespace simbi::ecs::builders {
                         *decomp_bp_,
                         mesh_bp_,
                         phys_bp_,
-                        amr_bp_,
                         sim.registry,
                         base_locality_
                     );
@@ -597,7 +602,6 @@ namespace simbi::ecs::builders {
                         skeleton,
                         mesh_bp_,
                         phys_bp_,
-                        amr_bp_,
                         sim.registry,
                         base_locality_
                     );
@@ -667,8 +671,8 @@ namespace simbi::ecs::builders {
             // and we manually convert them into array order (nz, ny, nx)
             grid::mesh_config_t<Rank> cfg;
 
-            // compute resolution for this level (apply refinement ratios)
-            // already in array order
+            // compute hypothetical full-domain resolution at this level
+            // for global coordinate system
             cfg.global_cells = mesh_bp_.active_resolution;
             for (std::uint64_t ll = 0; ll < lvl; ++ll) {
                 std::uint64_t ratio = (ll < amr_bp_.refinement_ratios.size())
@@ -710,6 +714,7 @@ namespace simbi::ecs::builders {
             }
 
             // dimension configs (bounds and spacing type)
+            // all levels use root domain bounds for global coordinate system
             for (std::uint64_t dd = 0; dd < Rank; ++dd) {
                 geometry::dimension_config_t dcfg;
                 dcfg.type = geometry::map_type_t::uniform;
@@ -718,6 +723,7 @@ namespace simbi::ecs::builders {
                     dcfg.type = geometry::map_type_t::log;
                 }
 
+                // all levels use root bounds (global coordinates)
                 dcfg.start = mesh_bp_.bounds[dd].first;
                 dcfg.end   = mesh_bp_.bounds[dd].second;
 

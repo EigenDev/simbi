@@ -95,20 +95,6 @@ namespace simbi {
                 false;
 #endif
 
-            inline constexpr bool progress_bar =
-#if PROGRESS_BAR
-                true;
-#else
-                false;
-#endif
-
-            inline constexpr bool shared_memory =
-#if SHARED_MEMORY
-                platform::is_gpu;
-#else
-                false;
-#endif
-
             inline constexpr bool debug =
 #ifdef DEBUG
                 true;
@@ -207,24 +193,15 @@ namespace simbi {
                                               : Velocity::Beta;
 
         // other feature flag conversions
-        constexpr bool progress_bar_enabled = build::features::progress_bar;
-        constexpr bool debug_mode           = build::features::debug;
-        constexpr bool bounds_checking      = build::features::bounds_checking;
-        constexpr bool col_major            = build::features::column_major;
-        constexpr bool on_sm                = build::features::shared_memory;
+        constexpr bool debug_mode      = build::features::debug;
+        constexpr bool bounds_checking = build::features::bounds_checking;
+        constexpr bool col_major       = build::features::column_major;
 
         // epsilon conversion
         constexpr build::types::real epsilon = build::constants::epsilon;
 
         // four velocity flag - this is redundant and should be removed
         constexpr bool using_four_velocity = build::features::four_velocity;
-
-// backward compatibility for managed memory
-#if MANAGED_MEMORY
-        constexpr bool managed_memory = true;
-#else
-        constexpr bool managed_memory = false;
-#endif
 
         // these shortcuts are actually useful - keep them
         constexpr bool on_gpu = build::platform::is_gpu;

@@ -138,10 +138,14 @@ namespace simbi::io {
         {
             auto level_group = file.createGroup("level_" + std::to_string(lvl));
 
-            // mesh config for this level
+            // write mesh config with global coordinate system
+            // global_cells is the hypothetical full-domain resolution
+            // used for coordinate mapping, not the actual patch size
+            auto mesh_cfg = sim.mesh(lvl);
+
             h5_serializable<grid::mesh_config_t<Sim::rank>>::write(
                 level_group,
-                sim.mesh(lvl),
+                mesh_cfg,
                 policy
             );
 
@@ -192,10 +196,54 @@ namespace simbi::io {
         {
             if constexpr (requires { sim.has_bodies(); }) {
                 if (sim.has_bodies()) {
+                    // consolidate diagnostics and merge into bodies
+                    auto bodies_copy = sim.bodies();
+
+                    if constexpr (requires { sim.diagnostics(); }) {
+                        auto& diag  = sim.diagnostics();
+                        auto deltas = diag->consolidate();
+
+                        // compute dt since last checkpoint
+                        const auto& meta = sim.metadata();
+                        const real dt_checkpoint =
+                            meta.time - meta.prev_checkpoint_time;
+
+                        // merge accumulated deltas into body state
+                        for (std::size_t ii = 0; ii < bodies_copy.size();
+                             ++ii) {
+                            std::visit(
+                                [&](auto& body) {
+                                    const auto& delta = deltas[ii];
+                                    body.force        = delta.force_delta;
+                                    body.torque       = delta.torque_delta;
+
+                                    // update accretion properties if body has
+                                    // them
+                                    using body_type =
+                                        std::decay_t<decltype(body)>;
+                                    if constexpr (body_type::
+                                                      template has_capability_v<
+                                                          body::capabilities::
+                                                              accretion_tag>) {
+                                        auto& accr = std::get<
+                                            body::accretion_component_t>(
+                                            body.capabilities
+                                        );
+                                        accr.total_accreted_mass +=
+                                            delta.mass_delta;
+                                        accr.accretion_rate =
+                                            delta.mass_delta / dt_checkpoint;
+                                    }
+                                },
+                                bodies_copy.bodies_[ii]
+                            );
+                        }
+                    }
+
                     using collection_t = body::body_collection_t<Sim::rank>;
                     h5_serializable<collection_t>::write(
                         file,
-                        sim.bodies(),
+                        bodies_copy,
                         policy
                     );
                 }

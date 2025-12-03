@@ -47,7 +47,7 @@ namespace simbi::timestep {
             return std::numeric_limits<real>::max();
         }
 
-        auto kernel = [=] DUAL(const iarray<Rank>& coord) {
+        auto kernel = [=] DUAL(const iarray<Rank>& coord) -> real {
             const auto p = prim(coord);
 
             // scale factors h_i account for curvilinear coordinates

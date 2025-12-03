@@ -86,7 +86,7 @@ namespace simbi::em {
     )
     {
         const auto position = geo.centroid(face_coord);
-        const real r        = position[2];
+        const real r        = position[0];
         const real theta    = position[1];
 
         if constexpr (MagComp == magnetic_comp_t::I) {   // Br
@@ -168,7 +168,7 @@ namespace simbi::em {
     )
     {
         const auto position = geo.centroid(face_coord);
-        const real r        = position[2];
+        const real r        = position[0];
 
         if constexpr (MagComp == magnetic_comp_t::I) {   // Br
             const auto& jedge = edge_emfs[0];

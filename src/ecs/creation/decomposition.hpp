@@ -42,6 +42,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <iostream>
+#include <sstream>
 
 namespace simbi::ecs::creation {
     // -----------------------------------------------------------------------------
@@ -70,7 +71,6 @@ namespace simbi::ecs::creation {
             const decomposition_blueprint_t<Rank>& decomp_bp,
             const mesh_blueprint_t<Rank>& mesh_bp,
             const physics_blueprint_t& phys_bp,
-            const amr_blueprint_t& amr_bp,
             registry_t& registry,
             het::locality_t base_locality = het::locality_t::host()
         )
@@ -102,7 +102,6 @@ namespace simbi::ecs::creation {
             allocate_partition_fields<Conserved, Primitive>(
                 decomp,
                 phys_bp,
-                amr_bp,
                 registry,
                 base_locality
             );
@@ -121,21 +120,37 @@ namespace simbi::ecs::creation {
             const grid::skeleton_t<Rank>& skeleton,
             const mesh_blueprint_t<Rank>& mesh_bp,
             const physics_blueprint_t& phys_bp,
-            const amr_blueprint_t& amr_bp,
             registry_t& registry,
             het::locality_t base_locality = het::locality_t::host()
         )
         {
             decomposition_blueprint_t<Rank> decomp_bp;
             decomp_bp.topology_dims.fill(1);
-            decomp_bp.halo_width = mesh_bp.halo_width;
+
+            // for refined levels, ensure halo_width is aligned to refinement
+            // ratio this prevents unaligned ghost boundaries (e.g., PCM with
+            // ratio=2)
+            std::int64_t halo_width = mesh_bp.halo_width;
+            if (!skeleton.empty()) {
+                auto first_block    = skeleton.begin()->second;
+                std::uint64_t level = first_block.id.level;
+
+                if (level > 0) {
+                    // assume refinement ratio = 2 (could extract from
+                    // level_info if needed) round up halo_width to next
+                    // multiple of ratio
+                    constexpr std::uint64_t ratio = 2;
+                    halo_width = ((halo_width + ratio - 1) / ratio) * ratio;
+                }
+            }
+
+            decomp_bp.halo_width = halo_width;
 
             return build<Conserved, Primitive>(
                 skeleton,
                 decomp_bp,
                 mesh_bp,
                 phys_bp,
-                amr_bp,
                 registry,
                 base_locality
             );
@@ -234,15 +249,6 @@ namespace simbi::ecs::creation {
                 // mpi rank info
                 part.rank_id.node   = decomp_bp.mpi_rank;
                 part.rank_id.device = part.device_id;
-
-                // std::cout << "Created partition " << part_idx << " on device
-                // "
-                //           << part.device_id << " with "
-                //           << "owned domain " << part.owned_domain << " and "
-                //           << "allocated domain " << part.allocated_domain
-                //           << "edge domain " << part.edge_domains
-                //           << "face domain " << part.face_domains << "\n";
-                // std::cin.get();
 
                 decomp.partitions.push_back(std::move(part));
                 ++part_idx;
@@ -460,7 +466,6 @@ namespace simbi::ecs::creation {
         static void allocate_partition_fields(
             level_decomposition_t<Rank>& decomp,
             const physics_blueprint_t& phys_bp,
-            const amr_blueprint_t& amr_bp,
             registry_t& registry,
             het::locality_t base_locality
         )
@@ -476,11 +481,14 @@ namespace simbi::ecs::creation {
                 het::locality_t loc{base_locality.backend, part.device_id};
 
                 // allocate fields on the allocated domain (includes ghosts)
-                fields_t fields = allocate_partition<Conserved, Primitive>(
+                // wrap allocation in a try/catch so we can emit diagnostic info
+                // if the underlying allocator fails (helps diagnose huge or
+                // miscomputed allocation requests).
+                fields_t fields;
+                fields = allocate_partition<Conserved, Primitive>(
                     part.allocated_domain,
                     part.owned_domain,
                     phys_bp,
-                    amr_bp,
                     loc
                 );
 
@@ -500,7 +508,6 @@ namespace simbi::ecs::creation {
             const grid::domain_t<Rank>& allocated_domain,
             const grid::domain_t<Rank>& active_domain,
             const physics_blueprint_t& phys_bp,
-            const amr_blueprint_t& amr_bp,
             het::locality_t loc
         )
         {
@@ -527,22 +534,6 @@ namespace simbi::ecs::creation {
                     grid::field_t<Conserved, Rank>(flux_domain, loc);
             }
 
-            // flux averaging for amr subcycling
-            if (amr_bp.enabled) {
-                for (std::uint64_t dd = 0; dd < Rank; ++dd) {
-                    auto flux_domain = active_domain;
-                    flux_domain.fin[dd] += 1;
-                    for (std::uint64_t tt = 0; tt < Rank; ++tt) {
-                        if (tt != dd) {
-                            flux_domain.start[tt] -= 1;
-                            flux_domain.fin[tt] += 1;
-                        }
-                    }
-                    fields.flux_avg[dd] =
-                        grid::field_t<Conserved, Rank>(flux_domain, loc);
-                }
-            }
-
             // magnetic field (face-centered, mhd only)
             if (phys_bp.is_mhd) {
                 for (std::uint64_t dd = 0; dd < Rank; ++dd) {
@@ -563,20 +554,6 @@ namespace simbi::ecs::creation {
                     }
                     fields.efield[dd] =
                         grid::field_t<real, Rank>(efield_domain, loc);
-                }
-
-                // efield averaging for amr subcycling
-                if (amr_bp.enabled) {
-                    for (std::uint64_t dd = 0; dd < Rank; ++dd) {
-                        auto efield_domain = active_domain;
-                        for (std::uint64_t tt = 0; tt < Rank; ++tt) {
-                            if (tt != dd) {
-                                efield_domain.fin[tt] += 1;
-                            }
-                        }
-                        fields.efield_avg[dd] =
-                            grid::field_t<real, Rank>(efield_domain, loc);
-                    }
                 }
             }
 

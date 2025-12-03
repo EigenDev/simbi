@@ -54,11 +54,11 @@ namespace simbi::ecs {
         std::vector<std::string> spacing;
 
         // halo width
-        std::uint64_t halo_width;
+        std::uint64_t halo_width{0};
 
         // mesh motion flags
-        bool moving_mesh;
-        bool homologous_expansion;
+        bool moving_mesh{false};
+        bool homologous_expansion{false};
     };
 
     // -----------------------------------------------------------------------------

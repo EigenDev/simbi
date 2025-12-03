@@ -208,9 +208,6 @@ namespace simbi::ecs {
         // flux[d] stores the flux through faces normal to dimension d
         vector_t<grid::field_t<Conserved, Rank>, Rank> flux;
 
-        // time-averaged fluxes for subcycling at coarse-fine boundaries
-        vector_t<grid::field_t<Conserved, Rank>, Rank> flux_avg;
-
         // face-centered magnetic field components (mhd only)
         // bfield[d] stores B_d at faces normal to axis d
         vector_t<grid::field_t<real, Rank>, Rank> bfield;
@@ -219,10 +216,6 @@ namespace simbi::ecs {
         // efield[d] stores E_d at edges parallel to axis d
         // used for constrained transport with amr
         vector_t<grid::field_t<real, Rank>, Rank> efield;
-
-        // time-averaged electric fields for subcycling at coarse-fine
-        // boundaries
-        vector_t<grid::field_t<real, Rank>, Rank> efield_avg;
     };
 
     // -----------------------------------------------------------------------------

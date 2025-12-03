@@ -60,6 +60,11 @@ namespace simbi::io {
             write_attribute(g, "dt", meta.global_dt);
             write_attribute(g, "dlogt", meta.dlogt);
             write_attribute(g, "checkpoint_interval", meta.checkpoint_interval);
+            write_attribute(
+                g,
+                "prev_checkpoint_time",
+                meta.prev_checkpoint_time
+            );
             write_attribute(g, "ambient_sound_speed", meta.ambient_sound_speed);
 
             // int tracking
@@ -146,6 +151,16 @@ namespace simbi::io {
             meta.dlogt     = read_attribute<real>(g, "dlogt");
             meta.checkpoint_interval =
                 read_attribute<real>(g, "checkpoint_interval");
+
+            // prev_checkpoint_time (may not exist in old files)
+            if (attribute_exists(g, "prev_checkpoint_time")) {
+                meta.prev_checkpoint_time =
+                    read_attribute<real>(g, "prev_checkpoint_time");
+            }
+            else {
+                meta.prev_checkpoint_time = 0.0;
+            }
+
             meta.ambient_sound_speed =
                 read_attribute<real>(g, "ambient_sound_speed");
 

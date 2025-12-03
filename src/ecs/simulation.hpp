@@ -231,7 +231,7 @@ namespace simbi::ecs {
         // use this to launch kernels on the partition's device.
         // -------------------------------------------------------------------------
         het::exec::executor_t
-        partition_executor(std::uint64_t lvl, std::uint64_t part_id)
+        partition_executor(std::uint64_t lvl, std::uint64_t part_id) const
         {
             return het::exec::executor_t{partition(lvl, part_id).stream};
         }

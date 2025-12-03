@@ -601,7 +601,7 @@ namespace simbi {
 #endif
 
             // add space to scroll the screen up before simulation starts
-            const auto vspace = global::on_sm ? 42 : 40;
+            const auto vspace = global::on_gpu ? 42 : 40;
             std::cout << std::string(vspace, '\n');
         }
 

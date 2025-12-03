@@ -44,10 +44,10 @@ namespace simbi::geometry {
         else if constexpr (is_spherical_c<metric_t>) {
             // retrieve coordinates
             auto centroid = metric.centroid(idx);
-            real r        = centroid[Rank - 1];
+            real r        = centroid[0];
             real theta    = [=]() {
                 if constexpr (Rank > 1) {
-                    return centroid[Rank - 2];
+                    return centroid[1];
                 }
                 else {
                     return 0.5 * std::numbers::pi;
@@ -112,7 +112,7 @@ namespace simbi::geometry {
         // cylindrical (r, phi, z)
         else if constexpr (is_cylindrical_c<metric_t>) {
             auto centroid = metric.centroid(idx);
-            real r        = centroid[rank - 1];
+            real r        = centroid[0];
             if (r < global::epsilon) {
                 return cons_t{};
             }

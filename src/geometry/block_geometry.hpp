@@ -42,6 +42,16 @@ namespace simbi::geometry {
             }
             return a_dot;   // uniform translation
         }
+
+        static motion_state_t static_mesh()
+        {
+            return geometry::motion_state_t{
+              .is_moving     = false,
+              .is_homologous = false,
+              .a             = 1.0,
+              .a_dot         = 0.0
+            };
+        }
     };
 
     // -------------------------------------------------------------------------

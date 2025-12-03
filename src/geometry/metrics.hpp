@@ -153,12 +153,12 @@ namespace simbi::geometry {
             constexpr std::uint64_t x2i = Rank - 2;
             constexpr std::uint64_t x3i = Rank - 3;
 
-            c[x1i] = x1_map.center(idx[x1i]);
+            c[0] = x1_map.center(idx[x1i]);
             if constexpr (Rank > 1) {
-                c[x2i] = x2_map.center(idx[x2i]);
+                c[1] = x2_map.center(idx[x2i]);
             }
             if constexpr (Rank > 2) {
-                c[x3i] = x3_map.center(idx[x3i]);
+                c[2] = x3_map.center(idx[x3i]);
             }
             return c;
         }
@@ -167,14 +167,14 @@ namespace simbi::geometry {
         DUAL vector_t<real, Rank>
         to_cartesian(const vector_t<real, Rank>& vec) const
         {
-            // identity
+            // identity (mapped to logical order)
             return vec;
         }
         template <std::uint64_t Rank>
         DUAL vector_t<real, Rank>
         from_cartesian(const vector_t<real, Rank>& vec) const
         {
-            // identity
+            // identity (the input is in logical order already)
             return vec;
         }
     };
@@ -388,12 +388,12 @@ namespace simbi::geometry {
             // the 'coordinate center' r_i+1/2 specialized physics might need
             // volume-weighted centroids. for now, returning coordinate centers.
             vector_t<real, Rank> c;
-            c[x1i] = r_map.center(idx[x1i]);
+            c[0] = r_map.center(idx[x1i]);
             if constexpr (Rank > 1) {
-                c[x2i] = theta_map.center(idx[x2i]);
+                c[1] = theta_map.center(idx[x2i]);
             }
             if constexpr (Rank > 2) {
-                c[x3i] = phi_map.center(idx[x3i]);
+                c[2] = phi_map.center(idx[x3i]);
             }
             return c;
         }
@@ -402,6 +402,7 @@ namespace simbi::geometry {
         DUAL vector_t<real, Rank>
         to_cartesian(const vector_t<real, Rank>& vec) const
         {
+            // reverse the vector to (r, theta, phi) order
             return vecops::spherical_to_cartesian(vec);
         }
 
@@ -620,17 +621,17 @@ namespace simbi::geometry {
             // might need volume-weighted centroids. for now, returning
             // coordinate centers.
             vector_t<real, Rank> c;
-            c[x1i] = r_map.center(idx[x1i]);
+            c[0] = r_map.center(idx[x1i]);
             if constexpr (Rank > 1) {
                 if constexpr (std::is_same_v<CylType, axis_cylindrical_tag>) {
-                    c[x2i] = z_map.center(idx[x2i]);
+                    c[1] = z_map.center(idx[x2i]);
                 }
                 else {
-                    c[x2i] = phi_map.center(idx[x2i]);
+                    c[1] = phi_map.center(idx[x2i]);
                 }
             }
             if constexpr (Rank > 2) {
-                c[x3i] = z_map.center(idx[x3i]);
+                c[2] = z_map.center(idx[x3i]);
             }
             return c;
         }
@@ -639,6 +640,7 @@ namespace simbi::geometry {
         DUAL vector_t<real, Rank>
         to_cartesian(const vector_t<real, Rank>& vec) const
         {
+            // need to reverse logical order for conversion
             return vecops::cylindrical_to_cartesian(vec);
         }
 
@@ -646,6 +648,8 @@ namespace simbi::geometry {
         DUAL vector_t<real, Rank>
         from_cartesian(const vector_t<real, Rank>& vec) const
         {
+            // converting back from cartesian is already in logical
+            // order, so no reverse needed
             return vecops::cartesian_to_cylindrical(vec);
         }
     };

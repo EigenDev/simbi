@@ -276,20 +276,24 @@ namespace simbi::ecs::creation {
         {
             execution_blueprint_t bp;
 
-            bp.start_time = read_or_default<real>(config, "start_time", 0.0);
+            bp.start_time =
+                require_field<real>(config, "start_time", "execution");
             bp.end_time = require_field<real>(config, "end_time", "execution");
 
             bp.checkpoint_interval =
-                read_or_default<real>(config, "checkpoint_interval", 0.1);
-            bp.dlogt = read_or_default<real>(config, "dlogt", 0.0);
+                require_field<real>(config, "checkpoint_interval", "execution");
+            bp.dlogt = require_field<real>(config, "dlogt", "execution");
 
-            bp.data_directory = read_or_default<std::string>(
+            bp.data_directory = require_field<std::string>(
                 config,
                 "data_directory",
-                "./data"
+                "execution"
             );
-            bp.start_index =
-                read_or_default<std::uint64_t>(config, "checkpoint_index", 0);
+            bp.start_index = require_field<std::uint64_t>(
+                config,
+                "checkpoint_index",
+                "execution"
+            );
             bp.restart_file =
                 read_or_default<std::string>(config, "checkpoint_file", "");
             auto resolution = require_field<std::vector<std::int64_t>>(
@@ -332,51 +336,42 @@ namespace simbi::ecs::creation {
                 return bp;
             }
 
-            bp.max_levels = read_or_default<std::uint64_t>(
+            bp.max_levels = require_field<std::uint64_t>(
                 config,
                 "refinement_max_levels",
-                1
+                "amr"
             );
 
             // refinement ratios
-            auto ratios = config::try_read<std::vector<std::uint64_t>>(
+            auto ratios = require_field<std::vector<std::uint64_t>>(
                 config,
-                "refinement_ratios"
+                "refinement_ratios",
+                "amr"
             );
-            if (ratios.has_value()) {
-                bp.refinement_ratios = *ratios;
-            }
-            else {
-                // default to ratio 2 for all levels
-                for (std::uint64_t ii = 1; ii < bp.max_levels; ++ii) {
-                    bp.refinement_ratios.push_back(2);
-                }
-            }
+            bp.refinement_ratios = ratios;
 
             // refinement regions
-            auto regions = config::try_read<std::vector<std::vector<real>>>(
+            auto regions = require_field<std::vector<std::vector<real>>>(
                 config,
-                "raw_refinement_regions"
+                "refinement_regions",
+                "amr"
             );
-            if (regions.has_value()) {
-                bp.static_refinement_regions = *regions;
-            }
+            bp.static_refinement_regions = regions;
 
             // subcycling
-            auto mode_str = read_or_default<std::string>(
+            auto mode_str = require_field<std::string>(
                 config,
-                "subcycling_mode",
-                "standard"
+                "refinement_subcycling_mode",
+                "amr"
             );
             bp.subcycling_mode = deserialize<subcycling_mode_t>(mode_str);
 
-            auto substeps = config::try_read<std::vector<std::uint64_t>>(
+            auto substeps = require_field<std::vector<std::uint64_t>>(
                 config,
-                "substeps"
+                "refinement_substeps",
+                "amr"
             );
-            if (substeps.has_value()) {
-                bp.manual_substeps = *substeps;
-            }
+            bp.manual_substeps = substeps;
 
             // validation
             if (bp.enabled && bp.max_levels > 1) {

@@ -3,6 +3,7 @@
 
 #include "compat.hpp"
 #include "compute/computation.hpp"
+#include "containers/state_ops.hpp"
 #include "containers/vector.hpp"
 #include "grid/algebra.hpp"
 #include "grid/amr/flux_correction.hpp"
@@ -12,6 +13,8 @@
 #include "grid/field.hpp"
 
 #include <cstdint>
+#include <iostream>
+#include <utility>
 
 namespace simbi::grid::amr {
 
@@ -34,21 +37,39 @@ namespace simbi::grid::amr {
         using namespace grid::domain_algebra;
 
         // identify ghost regions
-        // ghosts = total_domain - active_domain
-        // we use the difference set algebra we built earlier
         auto ghost_regions = difference(fine.domain(), fine_active_domain);
+        // std::cout << "fine domain: " << fine.domain() << "\n";
+        // std::cout << "active domain: " << fine_active_domain << "\n";
+        // std::cout << "coarse domain: " << coarse.domain() << "\n";
+        // for (const auto& box : ghost_regions) {
+        //     std::cout << "ghost box: " << box << "\n";
+        // }
+        // std::cin.get();
 
         // construct lazy prolongator
         // this creates a computation defined on the fine global index space
         // prolong(coarse) covers the entire fine domain logically
-        auto prolong_op = prolong<2>(coarse.view(), refinement_ratio);
+        auto prolong_op = prolong<3>(coarse.view(), refinement_ratio);
+
+        // verify proper nesting: coarse must cover all ghost regions
+        for (const auto& ghost_box : ghost_regions) {
+            auto coarse_equiv = scale_domain_down(ghost_box, refinement_ratio);
+            using namespace grid::domain_algebra;
+            auto overlap = intersection(coarse.domain(), coarse_equiv);
+            if (overlap != coarse_equiv) {
+                throw std::runtime_error(
+                    "fill_fine_ghosts: coarse grid does not cover fine ghost "
+                    "region (proper nesting violated)"
+                );
+            }
+        }
 
         // execute fill for each ghost region
         for (const auto& ghost_box : ghost_regions) {
             // assignment triggers the fused kernel:
             // fine[ghost] = prolong(coarse)[ghost]
             // the computation engine handles the coordinate mapping internally
-            fine[ghost_box] = computation(fine.domain(), prolong_op).with(exec);
+            fine[ghost_box] = prolong_op.with(exec);
         }
     }
 
@@ -80,11 +101,20 @@ namespace simbi::grid::amr {
         coarse[update_region] = restrict_op.with(exec);
     }
 
-    // -------------------------------------------------------------------------
-    // flux correction (reflux)
-    // -------------------------------------------------------------------------
-    // applies the accumulated flux mismatch in the register to the coarse
-    // state. u_coarse += flux_mismatch / cell_volume
+    // overload for field_view_t
+    template <typename T, std::uint64_t Rank, typename Exec>
+    void restrict_to_coarse(
+        field_t<T, Rank>& coarse,
+        const field_view_t<T, Rank>& fine_view,
+        const iarray<Rank>& refinement_ratio,
+        Exec& exec
+    )
+    {
+        auto restrict_op   = restrict(computation(fine_view), refinement_ratio);
+        auto update_region = restrict_op.domain();
+        coarse[update_region] = restrict_op.with(exec);
+    }
+
     template <typename T, std::uint64_t Rank, typename Geometry, typename Exec>
     void apply_flux_correction(
         field_t<T, Rank>& coarse,
@@ -93,8 +123,11 @@ namespace simbi::grid::amr {
         Exec& exec
     )
     {
+        using namespace structs;
         // iterate over all face directions
         for (std::uint64_t dd = 0; dd < Rank; ++dd) {
+
+            // iterate over left and right registers separately
             for (auto side : {side_t::left, side_t::right}) {
                 auto* reg = flux_reg.get_register(dd, side);
                 if (!reg) {
@@ -103,25 +136,24 @@ namespace simbi::grid::amr {
 
                 auto region = reg->domain();
 
-                // reflux kernel: u_new = u_old + flux_mismatch / volume
-                // geometry.volume(coord) gives the proper cell volume for
-                // curvilinear coordinates (spherical, cylindrical, etc.)
+                // register now contains (F * dt * area)
+                // apply: u += (F * dt * area) / volume
                 auto reflux_op = [geometry] DUAL(
                                      const iarray<Rank>& coord,
                                      const T& u,
-                                     const T& df
+                                     const T& dfa
                                  ) -> T {
                     real inv_vol = 1.0 / geometry.volume(coord);
-                    return u + df * inv_vol;
+                    return u | add_gas(dfa * inv_vol);
                 };
 
-                // use enum_map to get coordinate + values
+                // apply the kernel
                 coarse[region] =
                     coarse[region]
                         .zip(
                             *reg,
-                            [] DEV(const T& u, const T& df) {
-                                return std::make_pair(u, df);
+                            [] DEV(const T& u, const T& dfa) {
+                                return std::make_pair(u, dfa);
                             }
                         )
                         .enum_map([reflux_op] DEV(

@@ -360,14 +360,50 @@ namespace simbi::compute {
     template <std::uint64_t Rank>
     auto identity(const grid::domain_t<Rank>& domain)
     {
-        return computation_t{fp::identity, domain};
+        // adapter functor satisfying simbi::concepts::computable
+        struct identity_functor_t {
+            using value_type    = coordinate_t<Rank>;
+            using argument_type = coordinate_t<Rank>;
+            enum {
+                rank = Rank
+            };
+
+            DUAL value_type operator()(argument_type coord) const
+            {
+                return coord;
+            }
+        };
+
+        return computation_t<Rank, identity_functor_t>{
+          identity_functor_t{},
+          domain
+        };
     }
 
     // constant computation: returns same value everywhere
     template <std::uint64_t Rank, typename T>
     auto constant(const grid::domain_t<Rank>& domain, T value)
     {
-        return computation_t{fp::constant(value), domain};
+        // adapter functor satisfying simbi::concepts::computable
+        struct constant_functor_t {
+            using value_type    = T;
+            using argument_type = coordinate_t<Rank>;
+            enum {
+                rank = Rank
+            };
+
+            T v;
+
+            constant_functor_t() = default;
+            explicit constant_functor_t(T vv) : v(std::move(vv)) {}
+
+            DUAL value_type operator()(argument_type) const { return v; }
+        };
+
+        return computation_t<Rank, constant_functor_t>{
+          constant_functor_t{std::move(value)},
+          domain
+        };
     }
 
     // -------------------------------------------------------------------------

@@ -12,6 +12,7 @@
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
+#include <iostream>
 
 namespace simbi::body::expr {
     using namespace simbi::hydro;
@@ -33,7 +34,7 @@ namespace simbi::body::expr {
             const auto cell_pos =
                 geometry.metric.to_cartesian(geometry.centroid(coord));
 
-            // gravitational physics
+            // gravitational physics (all in cartesian)
             const auto r_vec = cell_pos - body.position;
             const auto r_mag = r_vec.norm();
 
@@ -41,20 +42,28 @@ namespace simbi::body::expr {
             const auto softening_sq = softening * softening;
             const auto r_eff        = std::sqrt(r_mag * r_mag + softening_sq);
 
-            // gravitational acceleration (G = 1)
-            const auto g_cart  = body.mass * r_vec / (r_eff * r_eff * r_eff);
-            const auto g_accel = -geometry.metric.from_cartesian(g_cart);
+            // gravitational acceleration in cartesian (G = 1)
+            const auto g_cart = -body.mass * r_vec / (r_eff * r_eff * r_eff);
+
+            // convert to coordinate basis for momentum update
+            const auto g_coord = geometry.metric.from_cartesian(g_cart);
 
             // fluid changes
             const auto density = labframe_density(prim);
-            const auto dp_dt   = density * g_accel;
-            const auto dE_dt   = vecops::dot(prim.vel, dp_dt);
+            const auto dp_dt   = density * g_coord;
+
+            // energy change: need consistent velocity basis
+            // convert prim.vel to cartesian for dot product with cartesian
+            // force
+            const auto vel_cart   = geometry.metric.to_cartesian(prim.vel);
+            const auto force_cart = density * g_cart;
+            const auto dE_dt      = vecops::dot(vel_cart, force_cart);
 
             return std::make_pair(
                 conserved_t{0.0, dp_dt, dE_dt},
                 body_delta_t<Rank>{
                   .idx          = body.idx,
-                  .force_delta  = -dp_dt * geometry.volume(coord),
+                  .force_delta  = -force_cart * geometry.volume(coord),
                   .torque_delta = {},
                   .mass_delta   = 0.0
                 }
