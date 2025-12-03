@@ -146,7 +146,9 @@ def load_checkpoint_metadata(
         tuple of (metadata, body_system_config)
     """
     data = read_simulation(str(checkpoint_path), unpad=False)
-    body_system = _bodies_to_system(data.metadata.system_info, data.bodies)
+    body_system = _bodies_to_system(
+        data.metadata.system_info, data.body_collection
+    )
     return data.metadata, body_system
 
 
