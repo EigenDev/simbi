@@ -5,8 +5,8 @@
 # wraps pydantic Field with cli and checkpoint metadata.
 #
 # usage:
-#   resolution: int = ProblemParam(1000, cli=True, description="grid resolution")
-#   cfl_number: float = ProblemParam(0.4, cli=True, checkpoint_safe=True)
+#   resolution: Annotated[int, ProblemParam(1000, cli=True, description="grid resolution")]
+#   cfl_number: Annotated[float, ProblemParam(0.4, cli=True, checkpoint_safe=True)]
 # =============================================================================
 from dataclasses import dataclass
 from typing import Any, Optional
@@ -50,24 +50,24 @@ def ProblemParam(
 
     examples:
         # required field, not cli-configurable, must match checkpoint
-        bounds: Sequence[Sequence[float]] = ProblemParam(..., description="domain bounds")
+        bounds: Annotated[Sequence[Sequence[float]], ProblemParam(..., description="domain bounds")]
 
         # optional with default, cli-configurable, safe to override on restart
-        cfl_number: float = ProblemParam(0.4, cli=True, checkpoint_safe=True)
+        cfl_number: Annotated[float, ProblemParam(0.4, cli=True, checkpoint_safe=True)]
 
         # optional with default, cli-configurable, must match checkpoint
-        resolution: int = ProblemParam(1000, cli=True, checkpoint_safe=False)
+        resolution: Annotated[int, ProblemParam(1000, cli=True, checkpoint_safe=False)]
     """
     metadata = ParamMetadata(
         cli=cli,
         checkpoint_safe=checkpoint_safe,
         cli_name=cli_name,
     )
-
+    extra: dict[str, Any] = {"param_metadata": metadata}
     return Field(
         default=default,
         description=description,
-        json_schema_extra={"param_metadata": metadata},
+        json_schema_extra=extra,
         **field_kwargs,
     )
 
