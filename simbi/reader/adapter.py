@@ -16,8 +16,9 @@ from .io import Checkpoint, MeshGeometry, get_base_fields
 class MeshAdapter:
     """adapter to add coordinate arrays to MeshGeometry."""
 
-    def __init__(self, mesh: MeshGeometry):
+    def __init__(self, mesh: MeshGeometry, owned_domain=None):
         self._mesh = mesh
+        self._owned_domain = owned_domain
         self._coords_cache = {}
 
     def _generate_coords(self, axis: int) -> NDArray:
@@ -25,10 +26,28 @@ class MeshAdapter:
         if axis in self._coords_cache:
             return self._coords_cache[axis]
 
-        # get bounds and number of cells
-        xmin, xmax = self._mesh.dims[axis]
-        ncells = self._mesh.global_cells[axis]
+        # get root bounds and hypothetical full-domain cell count
+        root_xmin, root_xmax = self._mesh.dims[axis]
+        global_cells = self._mesh.global_cells[axis]
         spacing_type = self._mesh.spacing_types[axis]
+
+        # if we have owned_domain, compute actual patch bounds
+        if self._owned_domain is not None:
+            # owned_domain indices in global coordinate system
+            start_idx = self._owned_domain[0][axis]  # owned_start
+            end_idx = self._owned_domain[1][axis]  # owned_fin
+
+            # compute actual number of cells in this patch
+            ncells = end_idx - start_idx
+
+            # compute patch physical bounds from global coordinates
+            dx = (root_xmax - root_xmin) / global_cells
+            xmin = root_xmin + start_idx * dx
+            xmax = root_xmin + end_idx * dx
+        else:
+            # base level: use root bounds and global cells
+            xmin, xmax = root_xmin, root_xmax
+            ncells = global_cells
 
         # generate coordinates based on spacing type
         if spacing_type == "linear":
@@ -133,7 +152,7 @@ class SimData:
         return self._checkpoint.has_refinement
 
     @property
-    def bodies(self):
+    def body_collection(self):
         """access bodies (if present)."""
         return self._checkpoint.bodies
 
@@ -174,11 +193,14 @@ class SimData:
 
         return base_names.union(self._derived_names)
 
-    def get_field(self, field_name: str, level: int = 0) -> NDArray:
+    def get_field(
+        self, field_name: str, level: int = 0, crop_to_owned: bool = False
+    ) -> NDArray:
         """
         get a field by name from a specific level.
 
         handles both primitive fields and derived fields like b1_mean.
+        stitches together multi-partition data.
 
         Uses caching for derived field evaluations.
         """
@@ -187,57 +209,151 @@ class SimData:
                 f"level {level} doesn't exist (num_levels={self.num_levels})"
             )
 
-        # quick membership test without constructing base dict
         level_data = self._checkpoint.levels[level]
-
-        # assume single partition for now
-        # TODO: handle multi-partition by stitching
-        if level_data.num_partitions != 1:
-            raise NotImplementedError(
-                f"multi-partition support not yet implemented "
-                f"(level {level} has {level_data.num_partitions} partitions)"
-            )
-
-        partition = level_data.partitions[0]
         halo = level_data.mesh.halo_radius
 
-        # handle primitive fields
-        if field_name in partition.hydro.primitives:
-            field = partition.hydro.primitives[field_name]
-            return field.interior(halo).data
+        # single partition case
+        if level_data.num_partitions == 1:
+            partition = level_data.partitions[0]
+            owned = partition.owned_domain
+            global_shape = level_data.mesh.global_cells
 
-        # handle face-centered magnetic fields - return raw face data
-        # averaging to cell centers is handled by viz pipeline
-        if (
-            partition.hydro.magnetic is not None
-            and field_name in partition.hydro.magnetic
-        ):
-            return partition.hydro.magnetic[field_name].data
+            # check if this is a refined level (owned != full domain)
+            is_refined_subset = not all(
+                owned.start[ii] == 0 and owned.fin[ii] == global_shape[ii]
+                for ii in range(owned.ndim)
+            )
 
-        # derived field handling with caching
-        if field_name not in self._derived_names:
-            raise KeyError(f"field '{field_name}' not found")
+            # get field data
+            field_data = None
+            if field_name in partition.hydro.primitives:
+                field = partition.hydro.primitives[field_name]
+                field_data = field.interior(halo).data
+            elif (
+                partition.hydro.magnetic is not None
+                and field_name in partition.hydro.magnetic
+            ):
+                field_data = partition.hydro.magnetic[field_name].data
+            elif field_name in self._derived_names:
+                # derived field handling
+                cache_key = (field_name, level)
+                if cache_key in self._derived_cache:
+                    field_data = self._derived_cache[cache_key]
+                else:
+                    derived_obj = self._derived_fields[field_name]
+                    val = derived_obj.evaluate(level)
+                    field_data = np.asarray(val)
+                    self._derived_cache[cache_key] = field_data
+            else:
+                raise KeyError(f"field '{field_name}' not found")
 
-        cache_key = (field_name, level)
-        if cache_key in self._derived_cache:
-            return self._derived_cache[cache_key]
+            # C++ serialization now writes mesh config that matches the data
+            # (refined levels have mesh.global_cells = owned region size)
+            # so no embedding/cropping logic needed - just return the data
+            return field_data
 
-        # evaluate and cache
-        derived_obj = self._derived_fields[field_name]
-        val = derived_obj.evaluate(level)
-        # ensure numpy array and cache
-        arr = np.asarray(val)
-        self._derived_cache[cache_key] = arr
-        return arr
+        # multi-partition stitching
+        return self._stitch_partitions(field_name, level)
 
-    def level_mesh(self, level: int):
-        """get mesh for a specific level with coordinate arrays."""
+    def _stitch_partitions(self, field_name: str, level: int) -> NDArray:
+        """
+        stitch together multi-partition field data for a given level.
+
+        returns full mesh-sized array with refined regions populated
+        and unrefined regions filled with zeros (or ambient values).
+        """
+        level_data = self._checkpoint.levels[level]
+        halo = level_data.mesh.halo_radius
+        global_shape = level_data.mesh.global_cells
+
+        # allocate output array for FULL mesh domain
+        result = np.zeros(global_shape, dtype=np.float64)
+
+        # check if field exists in any partition
+        found_field = False
+        for partition in level_data.partitions:
+            if field_name in partition.hydro.primitives:
+                found_field = True
+                break
+            if (
+                partition.hydro.magnetic is not None
+                and field_name in partition.hydro.magnetic
+            ):
+                found_field = True
+                break
+
+        if not found_field:
+            # try derived fields
+            if field_name in self._derived_names:
+                # derived fields not yet supported for multi-partition
+                raise NotImplementedError(
+                    f"derived field '{field_name}' not supported "
+                    f"for multi-partition levels"
+                )
+            raise KeyError(f"field '{field_name}' not found in any partition")
+
+        # stitch each partition into global array
+        for partition in level_data.partitions:
+            # get owned domain (without ghost zones)
+            owned = partition.owned_domain
+
+            # create slice for global array
+            slices = tuple(
+                slice(owned.start[ii], owned.fin[ii])
+                for ii in range(owned.ndim)
+            )
+
+            # get field data from this partition
+            field_data = None
+            if field_name in partition.hydro.primitives:
+                field = partition.hydro.primitives[field_name]
+                field_data = field.interior(halo).data
+            elif (
+                partition.hydro.magnetic is not None
+                and field_name in partition.hydro.magnetic
+            ):
+                field_data = partition.hydro.magnetic[field_name].data
+
+            if field_data is not None:
+                result[slices] = field_data
+
+        return result
+
+    def get_owned_domain(self, level: int):
+        """get the owned domain for a given level (for cropping refined regions)."""
         if level >= self.num_levels:
             raise ValueError(f"level {level} doesn't exist")
-        if level not in self._mesh_adapters:
-            self._mesh_adapters[level] = MeshAdapter(
-                self._checkpoint.levels[level].mesh
+        level_data = self._checkpoint.levels[level]
+        if level_data.num_partitions != 1:
+            raise NotImplementedError(
+                "get_owned_domain not supported for multi-partition levels"
             )
+        return level_data.partitions[0].owned_domain
+
+    def level_mesh(self, level: int, crop_to_owned: bool = False):
+        """
+        get mesh for a specific level with coordinate arrays.
+
+        for refined levels, computes actual patch physical bounds from
+        owned_domain indices and global coordinate system.
+        """
+        if level >= self.num_levels:
+            raise ValueError(f"level {level} doesn't exist")
+
+        if level not in self._mesh_adapters:
+            level_data = self._checkpoint.levels[level]
+
+            # for refined levels, pass owned_domain for coordinate computation
+            owned_domain = None
+            if level > 0 and level_data.partitions:
+                # get owned domain from first partition
+                part = level_data.partitions[0]
+                owned_domain = (part.owned_domain.start, part.owned_domain.fin)
+
+            self._mesh_adapters[level] = MeshAdapter(
+                level_data.mesh, owned_domain=owned_domain
+            )
+
         return self._mesh_adapters[level]
 
     def __getitem__(self, field_name: str) -> NDArray:
