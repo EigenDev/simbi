@@ -38,7 +38,8 @@ namespace simbi::body {
     // binary system parameters
     // ========================================================================
 
-    struct binary_parameters_t {
+    struct binary_parameters_t
+    {
         real total_mass;
         real semi_major;
         real eccentricity;
@@ -47,43 +48,41 @@ namespace simbi::body {
         bool is_circular_orbit;
         bool prescribed_motion;
 
-        static auto from_config(const config_dict_t& props)
-            -> binary_parameters_t
+        static auto from_config(const config_dict_t& props) -> binary_parameters_t
         {
             auto total_mass   = try_read<real>(props, "total_mass");
             auto semi_major   = try_read<real>(props, "semi_major");
             auto eccentricity = try_read<real>(props, "eccentricity");
             auto mass_ratio   = try_read<real>(props, "mass_ratio");
 
-            auto orbital_period =
-                real{2} * std::numbers::pi_v<real> *
-                std::sqrt((semi_major * semi_major * semi_major) / total_mass);
+            auto orbital_period = real{2} * std::numbers::pi_v<real> *
+                                  std::sqrt((semi_major * semi_major * semi_major) / total_mass);
 
             bool is_circular = (eccentricity < real{1e-10});
 
             return {
-              .total_mass        = total_mass,
-              .semi_major        = semi_major,
-              .eccentricity      = eccentricity,
-              .mass_ratio        = mass_ratio,
-              .orbital_period    = orbital_period,
-              .is_circular_orbit = is_circular,
-              .prescribed_motion = true
+                .total_mass        = total_mass,
+                .semi_major        = semi_major,
+                .eccentricity      = eccentricity,
+                .mass_ratio        = mass_ratio,
+                .orbital_period    = orbital_period,
+                .is_circular_orbit = is_circular,
+                .prescribed_motion = true
             };
         }
     };
 
     template <std::uint64_t Rank, std::uint64_t MaxBodies = 2>
-    struct body_collection_t {
+    struct body_collection_t
+    {
         static constexpr std::uint64_t rank = Rank;
 
         vector_t<body_variant_t<Rank>, MaxBodies> bodies_;
-        std::optional<binary_parameters_t> binary_params_;
-        std::optional<sink_cache_t<Rank>> sink_cache;
-        std::size_t size_        = 0;
-        std::string system_name_ = "Untitled";
-        std::string reference_frame_ =
-            "inertial";   // or "corotating" or "stationary"
+        std::optional<binary_parameters_t>        binary_params_;
+        std::optional<sink_cache_t<Rank>>         sink_cache;
+        std::size_t                               size_        = 0;
+        std::string                               system_name_ = "Untitled";
+        std::string reference_frame_ = "inertial"; // or "corotating" or "stationary"
 
         template <typename Body>
         constexpr auto add(Body&& body) &&
@@ -118,8 +117,7 @@ namespace simbi::body {
 
         constexpr auto with_reference_frame(std::string frame) &&
         {
-            if (frame != "inertial" && frame != "corotating" &&
-                frame != "stationary") {
+            if (frame != "inertial" && frame != "corotating" && frame != "stationary") {
                 throw std::runtime_error("Invalid reference frame: " + frame);
             }
             reference_frame_ = std::move(frame);
@@ -138,18 +136,32 @@ namespace simbi::body {
             return std::move(*this);
         }
 
-        constexpr auto
-        with_system_config(const binary_parameters_t& params) const&
+        constexpr auto with_system_config(const binary_parameters_t& params) const&
         {
             auto result = *this;
             return std::move(result).with_system_config(params);
         }
 
-        constexpr std::size_t size() const { return size_; }
-        constexpr std::size_t capacity() const { return MaxBodies; }
-        constexpr bool empty() const { return size_ == 0; }
-        constexpr bool full() const { return size_ == MaxBodies; }
-        constexpr const std::string& name() const { return system_name_; }
+        constexpr std::size_t size() const
+        {
+            return size_;
+        }
+        constexpr std::size_t capacity() const
+        {
+            return MaxBodies;
+        }
+        constexpr bool empty() const
+        {
+            return size_ == 0;
+        }
+        constexpr bool full() const
+        {
+            return size_ == MaxBodies;
+        }
+        constexpr const std::string& name() const
+        {
+            return system_name_;
+        }
         constexpr const std::string& reference_frame() const
         {
             return reference_frame_;
@@ -162,8 +174,14 @@ namespace simbi::body {
             return *binary_params_;
         }
 
-        constexpr auto begin() const { return bodies_.begin(); }
-        constexpr auto end() const { return bodies_.begin() + size_; }
+        constexpr auto begin() const
+        {
+            return bodies_.begin();
+        }
+        constexpr auto end() const
+        {
+            return bodies_.begin() + size_;
+        }
 
         constexpr const auto& operator[](std::size_t idx) const
         {
@@ -271,18 +289,18 @@ namespace simbi::body {
         const vector_t<real, Rank>& vel1,
         const vector_t<real, Rank>& pos2,
         const vector_t<real, Rank>& vel2,
-        real mass1,
-        real mass2,
-        real radius1,
-        real radius2,
-        real softening1,
-        real softening2,
-        real sink_rate1   = 0.0,
-        real sink_rate2   = 0.0,
-        real accr_radius1 = 0.0,
-        real accr_radius2 = 0.0,
-        real sink_delta1  = 1.0,
-        real sink_delta2  = 1.0
+        real                        mass1,
+        real                        mass2,
+        real                        radius1,
+        real                        radius2,
+        real                        softening1,
+        real                        softening2,
+        real                        sink_rate1   = 0.0,
+        real                        sink_rate2   = 0.0,
+        real                        accr_radius1 = 0.0,
+        real                        accr_radius2 = 0.0,
+        real                        sink_delta1  = 1.0,
+        real                        sink_delta2  = 1.0
     )
     {
         if (sink_rate1 > 0.0 && sink_rate2 > 0.0) {
@@ -316,14 +334,8 @@ namespace simbi::body {
         else if (sink_rate1 <= 0.0 && sink_rate2 <= 0.0) {
             // this is a binary gravitational system
             return make_body_collection<Rank, MaxBodies>()
-                .add(
-                    make_gravitational_body<
-                        Rank>(pos1, vel1, mass1, radius1, softening1)
-                )
-                .add(
-                    make_gravitational_body<
-                        Rank>(pos2, vel2, mass2, radius2, softening2)
-                );
+                .add(make_gravitational_body<Rank>(pos1, vel1, mass1, radius1, softening1))
+                .add(make_gravitational_body<Rank>(pos2, vel2, mass2, radius2, softening2));
         }
         else {
             // this is a mixed system with one gravitational and one
@@ -342,17 +354,11 @@ namespace simbi::body {
                             accr_radius1
                         )
                     )
-                    .add(
-                        make_gravitational_body<
-                            Rank>(pos2, vel2, mass2, radius2, softening2)
-                    );
+                    .add(make_gravitational_body<Rank>(pos2, vel2, mass2, radius2, softening2));
             }
             else {
                 return make_body_collection<Rank, MaxBodies>()
-                    .add(
-                        make_gravitational_body<
-                            Rank>(pos1, vel1, mass1, radius1, softening1)
-                    )
+                    .add(make_gravitational_body<Rank>(pos1, vel1, mass1, radius1, softening1))
                     .add(
                         make_black_hole<Rank>(
                             pos2,
@@ -372,25 +378,21 @@ namespace simbi::body {
     namespace collection_ops {
         // map operation over collection
         template <typename Func>
-        struct map_bodies_t {
+        struct map_bodies_t
+        {
             Func func_;
 
             template <typename Collection>
             constexpr auto operator()(const Collection& collection) const
             {
                 // returns array of results
-                vector_t<
-                    std::invoke_result_t<Func, decltype(*collection.begin())>,
-                    2>
-                    results;
-                std::size_t idx = 0;
+                vector_t<std::invoke_result_t<Func, decltype(*collection.begin())>, 2> results;
+                std::size_t                                                            idx = 0;
 
-                collection.visit_all([&](const auto& body) {
-                    results[idx++] = func_(body);
-                });
+                collection.visit_all([&](const auto& body) { results[idx++] = func_(body); });
 
-                return results;   // or return a view/span of first 'idx'
-                                  // elements
+                return results; // or return a view/span of first 'idx'
+                                // elements
             }
         };
 
@@ -402,7 +404,8 @@ namespace simbi::body {
 
         // filter operation
         template <typename Predicate>
-        struct filter_bodies_t {
+        struct filter_bodies_t
+        {
             Predicate pred_;
 
             template <typename Collection>
@@ -424,11 +427,9 @@ namespace simbi::body {
         template <typename Predicate>
         constexpr auto filter_bodies(Predicate&& pred)
         {
-            return filter_bodies_t<std::decay_t<Predicate>>{
-              std::forward<Predicate>(pred)
-            };
+            return filter_bodies_t<std::decay_t<Predicate>>{std::forward<Predicate>(pred)};
         }
-    }   // namespace collection_ops
-}   // namespace simbi::body
+    } // namespace collection_ops
+} // namespace simbi::body
 
 #endif
