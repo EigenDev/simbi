@@ -23,17 +23,17 @@ namespace simbi::io {
     // =========================================================================
     inline std::string compute_checkpoint_filename(
         const std::string& data_dir,
-        real checkpoint_id,
-        std::uint64_t checkpoint_index,
-        std::uint64_t checkpoint_zones,
-        real time,
-        real dlogt,
-        bool was_interrupted,
-        bool in_failure_state
+        real               checkpoint_id,
+        std::uint64_t      checkpoint_index,
+        std::uint64_t      checkpoint_zones,
+        real               time,
+        real               dlogt,
+        bool               was_interrupted,
+        bool               in_failure_state
     )
     {
         using namespace helpers;
-        static std::int64_t tchunk_order_of_mag = 2;
+        static std::int64_t   tchunk_order_of_mag = 2;
         std::filesystem::path dir(data_dir);
 
         const auto data_directory      = data_dir;
@@ -62,16 +62,16 @@ namespace simbi::io {
             tnow = format_real(checkpoint_id);
         }
 
-        return data_directory +
-               string_format("%d.chkpt." + tnow + ".h5", checkpoint_zones);
+        return data_directory + string_format("%d.chkpt." + tnow + ".h5", checkpoint_zones);
     }
 
     // =========================================================================
     // checkpoint writer
     // =========================================================================
     template <typename Sim>
-    struct checkpoint_writer_t {
-        const Sim& sim;
+    struct checkpoint_writer_t
+    {
+        const Sim&     sim;
         write_policy_t policy;
 
         void write(const std::string& filename) const
@@ -125,11 +125,7 @@ namespace simbi::io {
                 write_attribute(lg, "num_partitions", sim.num_partitions(lvl));
 
                 if (lvl > 0) {
-                    write_attribute(
-                        lg,
-                        "refinement_ratio",
-                        sim.level_info(lvl).refinement_ratio
-                    );
+                    write_attribute(lg, "refinement_ratio", sim.level_info(lvl).refinement_ratio);
                 }
             }
         }
@@ -143,35 +139,22 @@ namespace simbi::io {
             // used for coordinate mapping, not the actual patch size
             auto mesh_cfg = sim.mesh(lvl);
 
-            h5_serializable<grid::mesh_config_t<Sim::rank>>::write(
-                level_group,
-                mesh_cfg,
-                policy
-            );
+            h5_serializable<grid::mesh_config_t<Sim::rank>>::write(level_group, mesh_cfg, policy);
 
             // per-partition hydro data
             for (std::uint64_t pp = 0; pp < sim.num_partitions(lvl); ++pp) {
-                auto part_group =
-                    level_group.createGroup("partition_" + std::to_string(pp));
+                auto part_group = level_group.createGroup("partition_" + std::to_string(pp));
 
                 // partition topology
                 write_partition_info(part_group, lvl, pp);
 
                 // hydro fields
                 using fields_t = typename Sim::fields_t;
-                h5_serializable<fields_t>::write(
-                    part_group,
-                    sim.partition_hydro(lvl, pp),
-                    policy
-                );
+                h5_serializable<fields_t>::write(part_group, sim.partition_hydro(lvl, pp), policy);
             }
         }
 
-        void write_partition_info(
-            H5::Group& g,
-            std::uint64_t lvl,
-            std::uint64_t pp
-        ) const
+        void write_partition_info(H5::Group& g, std::uint64_t lvl, std::uint64_t pp) const
         {
             const auto& part = sim.partition(lvl, pp);
 
@@ -200,17 +183,15 @@ namespace simbi::io {
                     auto bodies_copy = sim.bodies();
 
                     if constexpr (requires { sim.diagnostics(); }) {
-                        auto& diag  = sim.diagnostics();
-                        auto deltas = diag->consolidate();
+                        auto& diag   = sim.diagnostics();
+                        auto  deltas = diag->consolidate();
 
                         // compute dt since last checkpoint
-                        const auto& meta = sim.metadata();
-                        const real dt_checkpoint =
-                            meta.time - meta.prev_checkpoint_time;
+                        const auto& meta          = sim.metadata();
+                        const real  dt_checkpoint = meta.time - meta.prev_checkpoint_time;
 
                         // merge accumulated deltas into body state
-                        for (std::size_t ii = 0; ii < bodies_copy.size();
-                             ++ii) {
+                        for (std::size_t ii = 0; ii < bodies_copy.size(); ++ii) {
                             std::visit(
                                 [&](auto& body) {
                                     const auto& delta = deltas[ii];
@@ -219,20 +200,14 @@ namespace simbi::io {
 
                                     // update accretion properties if body has
                                     // them
-                                    using body_type =
-                                        std::decay_t<decltype(body)>;
-                                    if constexpr (body_type::
-                                                      template has_capability_v<
-                                                          body::capabilities::
-                                                              accretion_tag>) {
-                                        auto& accr = std::get<
-                                            body::accretion_component_t>(
+                                    using body_type = std::decay_t<decltype(body)>;
+                                    if constexpr (body_type::template has_capability_v<
+                                                      body::capabilities::accretion_tag>) {
+                                        auto& accr = std::get<body::accretion_component_t>(
                                             body.capabilities
                                         );
-                                        accr.total_accreted_mass +=
-                                            delta.mass_delta;
-                                        accr.accretion_rate =
-                                            delta.mass_delta / dt_checkpoint;
+                                        accr.total_accreted_mass += delta.mass_delta;
+                                        accr.accretion_rate = delta.mass_delta / dt_checkpoint;
                                     }
                                 },
                                 bodies_copy.bodies_[ii]
@@ -241,11 +216,7 @@ namespace simbi::io {
                     }
 
                     using collection_t = body::body_collection_t<Sim::rank>;
-                    h5_serializable<collection_t>::write(
-                        file,
-                        bodies_copy,
-                        policy
-                    );
+                    h5_serializable<collection_t>::write(file, bodies_copy, policy);
                 }
             }
         }
@@ -255,7 +226,8 @@ namespace simbi::io {
     // checkpoint reader
     // =========================================================================
     template <typename Sim>
-    struct checkpoint_reader_t {
+    struct checkpoint_reader_t
+    {
         static Sim read(const std::string& filename)
         {
             H5::H5File file(filename, H5F_ACC_RDONLY);
@@ -264,15 +236,11 @@ namespace simbi::io {
             auto version = read_attribute<std::string>(file, "format_version");
 
             // read metadata
-            auto meta =
-                h5_serializable<ecs::simulation_metadata_t<Sim::rank>>::read(
-                    file
-                );
+            auto meta = h5_serializable<ecs::simulation_metadata_t<Sim::rank>>::read(file);
 
             // read hierarchy info
             auto hierarchy_group = file.openGroup("hierarchy");
-            auto num_levels =
-                read_attribute<std::uint64_t>(hierarchy_group, "num_levels");
+            auto num_levels      = read_attribute<std::uint64_t>(hierarchy_group, "num_levels");
 
             // construct simulation (implementation-specific)
             // this is a simplified version - actual implementation
@@ -296,27 +264,21 @@ namespace simbi::io {
         }
 
       private:
-        static void
-        read_level(const H5::H5File& file, Sim& sim, std::uint64_t lvl)
+        static void read_level(const H5::H5File& file, Sim& sim, std::uint64_t lvl)
         {
             auto level_group = file.openGroup("level_" + std::to_string(lvl));
 
             // mesh config
-            auto mesh_cfg =
-                h5_serializable<grid::mesh_config_t<Sim::rank>>::read(
-                    level_group
-                );
+            auto mesh_cfg = h5_serializable<grid::mesh_config_t<Sim::rank>>::read(level_group);
 
             // determine partition count
             auto hierarchy_group = file.openGroup("hierarchy");
-            auto lg = hierarchy_group.openGroup("level_" + std::to_string(lvl));
-            auto num_partitions =
-                read_attribute<std::uint64_t>(lg, "num_partitions");
+            auto lg              = hierarchy_group.openGroup("level_" + std::to_string(lvl));
+            auto num_partitions  = read_attribute<std::uint64_t>(lg, "num_partitions");
 
             // read per-partition data
             for (std::uint64_t pp = 0; pp < num_partitions; ++pp) {
-                auto part_group =
-                    level_group.openGroup("partition_" + std::to_string(pp));
+                auto part_group = level_group.openGroup("partition_" + std::to_string(pp));
 
                 using fields_t = typename Sim::fields_t;
                 auto fields    = h5_serializable<fields_t>::read(part_group);
@@ -331,11 +293,8 @@ namespace simbi::io {
     // =========================================================================
 
     template <typename Sim>
-    void write_checkpoint(
-        const Sim& sim,
-        const std::string& filename,
-        const write_policy_t& policy = {}
-    )
+    void
+    write_checkpoint(const Sim& sim, const std::string& filename, const write_policy_t& policy = {})
     {
         checkpoint_writer_t<Sim>{sim, policy}.write(filename);
     }
@@ -344,11 +303,8 @@ namespace simbi::io {
     void write_checkpoint(const Sim& sim, const write_policy_t& policy = {})
     {
         const auto& meta = sim.metadata();
-        auto filename    = compute_checkpoint_filename(
-            meta.data_dir,
-            meta.checkpoint_identifier(),
-            meta.dlogt
-        );
+        auto        filename =
+            compute_checkpoint_filename(meta.data_dir, meta.checkpoint_identifier(), meta.dlogt);
         write_checkpoint(sim, filename, policy);
     }
 
@@ -358,6 +314,6 @@ namespace simbi::io {
         return checkpoint_reader_t<Sim>::read(filename);
     }
 
-}   // namespace simbi::io
+} // namespace simbi::io
 
-#endif   // IO_CHECKPOINT_HPP
+#endif // IO_CHECKPOINT_HPP
