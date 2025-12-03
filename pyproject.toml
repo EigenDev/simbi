@@ -29,12 +29,12 @@ dependencies = [
     "h5py",
     "pybind11",
     "meson",
-    "mypy",
     "matplotlib",
     "astropy",
     "halo",
     "rich",
     "pydantic",
+    "scipy>=1.15.3",
 ]
 
 [project.optional-dependencies]
@@ -53,7 +53,7 @@ version_scheme = "post-release"
 local_scheme = "no-local-version"
 
 [tool.setuptools.package-data]
-simbi = ["gitrepo_home.txt", "mypy.ini", "tools/*.py", "libs/*.so"]
+simbi = ["gitrepo_home.txt", "libs/*.so"]
 
 [tool.setuptools.dynamic]
 readme = {file = ["README.md"]}
