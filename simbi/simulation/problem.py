@@ -6,7 +6,7 @@
 #
 # usage:
 #   class SodProblem(SimbiProblem):
-#       resolution: int = ProblemParam(1000, cli=True)
+#       resolution: Annotated[int, ProblemParam(1000, cli=True)]
 #       # ...
 #       def initial_primitive_state(self) -> InitialStateType:
 #           ...
@@ -16,7 +16,7 @@ from __future__ import annotations
 import argparse
 from abc import abstractmethod
 from pathlib import Path
-from typing import Any, Callable, ClassVar, Optional, Sequence, Union
+from typing import Annotated, Any, Callable, ClassVar, Optional, Sequence, Union
 
 import numpy as np
 from numpy.typing import NDArray
@@ -62,148 +62,202 @@ class SimbiProblem(BaseModel):
     # =========================================================================
     # required fields - must be provided by subclass or user
     # =========================================================================
-    resolution: Union[int, Sequence[int], NDArray[np.int64]] = ProblemParam(
-        ..., description="grid resolution"
-    )
-    coord_system: CoordSystem = ProblemParam(
-        ..., description="coordinate system"
-    )
-    regime: Regime = ProblemParam(..., description="physics regime")
-    bounds: Sequence[Sequence[float]] = ProblemParam(
-        ..., description="domain bounds"
-    )
-    adiabatic_index: float = ProblemParam(
-        ..., ge=1.0, le=2.0, description="adiabatic index"
-    )
+    resolution: Annotated[
+        Union[int, Sequence[int], NDArray[np.int64]],
+        ProblemParam(..., description="grid resolution"),
+    ]
+    coord_system: Annotated[
+        CoordSystem, ProblemParam(..., description="coordinate system")
+    ]
+    regime: Annotated[Regime, ProblemParam(..., description="physics regime")]
+    bounds: Annotated[
+        Sequence[Sequence[float]],
+        ProblemParam(..., description="domain bounds"),
+    ]
+    adiabatic_index: Annotated[
+        float, ProblemParam(..., ge=1.0, le=2.0, description="adiabatic index")
+    ]
 
     # =========================================================================
     # simulation control - checkpoint_safe=True (can override on restart)
     # =========================================================================
-    end_time: float = ProblemParam(
-        1.0,
-        gt=0.0,
-        cli=True,
-        checkpoint_safe=True,
-        description="simulation end time",
-    )
-    cfl_number: float = ProblemParam(
-        0.1,
-        gt=0.0,
-        le=1.0,
-        cli=True,
-        checkpoint_safe=True,
-        description="cfl condition number",
-    )
-    start_time: float = ProblemParam(
-        0.0, ge=0.0, checkpoint_safe=True, description="simulation start time"
-    )
+    end_time: Annotated[
+        float,
+        ProblemParam(
+            1.0,
+            gt=0.0,
+            cli=True,
+            checkpoint_safe=True,
+            description="simulation end time",
+        ),
+    ]
+    cfl_number: Annotated[
+        float,
+        ProblemParam(
+            0.1,
+            gt=0.0,
+            le=1.0,
+            cli=True,
+            checkpoint_safe=True,
+            description="cfl condition number",
+        ),
+    ]
+    start_time: Annotated[
+        float,
+        ProblemParam(
+            0.0,
+            ge=0.0,
+            checkpoint_safe=True,
+            description="simulation start time",
+        ),
+    ]
 
     # =========================================================================
     # output settings - checkpoint_safe=True
     # =========================================================================
-    data_directory: Path = ProblemParam(
-        Path("data/"),
-        cli=True,
-        checkpoint_safe=True,
-        description="output directory",
-    )
-    checkpoint_interval: float = ProblemParam(
-        0.1,
-        gt=0.0,
-        cli=True,
-        checkpoint_safe=True,
-        description="checkpoint interval",
-    )
-    checkpoint_index: int = ProblemParam(
-        0,
-        ge=0,
-        checkpoint_safe=True,
-        description="checkpoint index for resuming",
-    )
-    checkpoint_file: Optional[str] = ProblemParam(
-        None,
-        cli=True,
-        checkpoint_safe=True,
-        description="checkpoint file to resume from",
-    )
-    log_output: bool = ProblemParam(
-        False, checkpoint_safe=True, description="enable logging to file"
-    )
-    log_checkpoints_tuple: tuple[bool, int] = ProblemParam(
-        (False, 0),
-        checkpoint_safe=True,
-        description="logarithmic output (enabled, num)",
-    )
+    data_directory: Annotated[
+        Path,
+        ProblemParam(
+            Path("data/"),
+            cli=True,
+            checkpoint_safe=True,
+            description="output directory",
+        ),
+    ]
+    checkpoint_interval: Annotated[
+        float,
+        ProblemParam(
+            0.1,
+            gt=0.0,
+            cli=True,
+            checkpoint_safe=True,
+            description="checkpoint interval",
+        ),
+    ]
+    checkpoint_index: Annotated[
+        int,
+        ProblemParam(
+            0,
+            ge=0,
+            checkpoint_safe=True,
+            description="checkpoint index for resuming",
+        ),
+    ]
+    checkpoint_file: Annotated[
+        Optional[str],
+        ProblemParam(
+            None,
+            cli=True,
+            checkpoint_safe=True,
+            description="checkpoint file to resume from",
+        ),
+    ]
+    log_output: Annotated[
+        bool,
+        ProblemParam(
+            False, checkpoint_safe=True, description="enable logging to file"
+        ),
+    ]
+    log_checkpoints_tuple: Annotated[
+        tuple[bool, int],
+        ProblemParam(
+            (False, 0),
+            checkpoint_safe=True,
+            description="logarithmic output (enabled, num)",
+        ),
+    ]
 
     # =========================================================================
     # numerics - checkpoint_safe=False (must match checkpoint)
     # =========================================================================
-    solver: Solver = ProblemParam(
-        Solver.HLLE, cli=True, description="numerical solver"
-    )
-    reconstruction: Reconstruction = ProblemParam(
-        Reconstruction.PLM, cli=True, description="spatial reconstruction"
-    )
-    timestepping: TimeStepping = ProblemParam(
-        TimeStepping.RK2, cli=True, description="time stepping method"
-    )
-    order: Optional[int] = ProblemParam(
-        None, ge=1, le=2, cli=True, description="order of accuracy (1 or 2)"
-    )
-    plm_theta: float = ProblemParam(
-        1.5, gt=0.0, le=2.0, cli=True, description="plm theta parameter"
-    )
-    boundary_conditions: Union[
-        BoundaryCondition, Sequence[BoundaryCondition]
-    ] = ProblemParam("outflow", cli=True, description="boundary conditions")
+    solver: Annotated[
+        Solver,
+        ProblemParam(Solver.HLLE, cli=True, description="numerical solver"),
+    ]
+    reconstruction: Annotated[
+        Reconstruction,
+        ProblemParam(
+            Reconstruction.PLM, cli=True, description="spatial reconstruction"
+        ),
+    ]
+    timestepping: Annotated[
+        TimeStepping,
+        ProblemParam(
+            TimeStepping.RK2, cli=True, description="time stepping method"
+        ),
+    ]
+    order: Annotated[
+        Optional[int],
+        ProblemParam(
+            None, ge=1, le=2, cli=True, description="order of accuracy (1 or 2)"
+        ),
+    ]
+    plm_theta: Annotated[
+        float,
+        ProblemParam(
+            1.5, gt=0.0, le=2.0, cli=True, description="plm theta parameter"
+        ),
+    ]
+    boundary_conditions: Annotated[
+        Union[BoundaryCondition, Sequence[BoundaryCondition]],
+        ProblemParam("outflow", cli=True, description="boundary conditions"),
+    ]
 
     # =========================================================================
     # mesh spacing
     # =========================================================================
-    x1_spacing: CellSpacing = ProblemParam(
-        CellSpacing.LINEAR, description="x1 cell spacing"
-    )
-    x2_spacing: CellSpacing = ProblemParam(
-        CellSpacing.LINEAR, description="x2 cell spacing"
-    )
-    x3_spacing: CellSpacing = ProblemParam(
-        CellSpacing.LINEAR, description="x3 cell spacing"
-    )
+    x1_spacing: Annotated[
+        CellSpacing,
+        ProblemParam(CellSpacing.LINEAR, description="x1 cell spacing"),
+    ]
+    x2_spacing: Annotated[
+        CellSpacing,
+        ProblemParam(CellSpacing.LINEAR, description="x2 cell spacing"),
+    ]
+    x3_spacing: Annotated[
+        CellSpacing,
+        ProblemParam(CellSpacing.LINEAR, description="x3 cell spacing"),
+    ]
 
     # =========================================================================
     # solver options
     # =========================================================================
-    use_quirk_smoothing: bool = ProblemParam(
-        False, cli=True, description="use quirk smoothing"
-    )
-    use_fleischmann_limiter: bool = ProblemParam(
-        False, cli=True, description="use fleischmann low-mach fix"
-    )
+    use_quirk_smoothing: Annotated[
+        bool, ProblemParam(False, cli=True, description="use quirk smoothing")
+    ]
+    use_fleischmann_limiter: Annotated[
+        bool,
+        ProblemParam(
+            False, cli=True, description="use fleischmann low-mach fix"
+        ),
+    ]
 
     # =========================================================================
     # refinement / fmr settings (fixed mesh refinement only for now)
     # =========================================================================
-    refinement_enabled: bool = ProblemParam(
-        False, description="enable mesh refinement"
-    )
-    refinement_max_levels: int = ProblemParam(
-        1, ge=1, description="max refinement levels"
-    )
-    refinement_regions: list[list[float]] = ProblemParam(
-        [], description="refinement regions"
-    )
-    refinement_ratios: list[int] = ProblemParam(
-        [], description="refinement ratios"
-    )
-    refinement_substeps: list[int] = ProblemParam(
-        [1], description="substeps per level"
-    )
-    refinement_subcycling_mode: SubCycleMode = ProblemParam(
-        SubCycleMode.NONE, description="subcycling mode"
-    )
-    refinement_mode: RefinementMode = ProblemParam(
-        RefinementMode.FIXED, description="refinement mode"
-    )
+    refinement_enabled: Annotated[
+        bool, ProblemParam(False, description="enable mesh refinement")
+    ]
+    refinement_max_levels: Annotated[
+        int, ProblemParam(1, ge=1, description="max refinement levels")
+    ]
+    refinement_regions: Annotated[
+        list[list[float]], ProblemParam([], description="refinement regions")
+    ]
+    refinement_ratios: Annotated[
+        list[int], ProblemParam([], description="refinement ratios")
+    ]
+    refinement_substeps: Annotated[
+        list[int], ProblemParam([1], description="substeps per level")
+    ]
+    refinement_subcycling_mode: Annotated[
+        SubCycleMode,
+        ProblemParam(SubCycleMode.NONE, description="subcycling mode"),
+    ]
+    refinement_mode: Annotated[
+        RefinementMode,
+        ProblemParam(RefinementMode.FIXED, description="refinement mode"),
+    ]
 
     # =========================================================================
     # computed properties
@@ -645,6 +699,8 @@ class SimbiProblem(BaseModel):
 
         # parse into existing namespace (if provided)
         parsed, _ = parser.parse_known_args(argv, namespace)
+        if parsed is None:
+            raise ValueError("failed to parse cli arguments for problem")
         return cls.from_namespace(parsed)
 
     @classmethod
