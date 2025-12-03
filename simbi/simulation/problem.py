@@ -72,19 +72,30 @@ class SimbiProblem(BaseModel):
     bounds: Sequence[Sequence[float]] = ProblemParam(
         ..., description="domain bounds"
     )
-    adiabatic_index: float = ProblemParam(..., description="adiabatic index")
+    adiabatic_index: float = ProblemParam(
+        ..., ge=1.0, le=2.0, description="adiabatic index"
+    )
 
     # =========================================================================
     # simulation control - checkpoint_safe=True (can override on restart)
     # =========================================================================
     end_time: float = ProblemParam(
-        1.0, cli=True, checkpoint_safe=True, description="simulation end time"
+        1.0,
+        gt=0.0,
+        cli=True,
+        checkpoint_safe=True,
+        description="simulation end time",
     )
     cfl_number: float = ProblemParam(
-        0.1, cli=True, checkpoint_safe=True, description="cfl condition number"
+        0.1,
+        gt=0.0,
+        le=1.0,
+        cli=True,
+        checkpoint_safe=True,
+        description="cfl condition number",
     )
     start_time: float = ProblemParam(
-        0.0, checkpoint_safe=True, description="simulation start time"
+        0.0, ge=0.0, checkpoint_safe=True, description="simulation start time"
     )
 
     # =========================================================================
@@ -97,10 +108,17 @@ class SimbiProblem(BaseModel):
         description="output directory",
     )
     checkpoint_interval: float = ProblemParam(
-        0.1, cli=True, checkpoint_safe=True, description="checkpoint interval"
+        0.1,
+        gt=0.0,
+        cli=True,
+        checkpoint_safe=True,
+        description="checkpoint interval",
     )
     checkpoint_index: int = ProblemParam(
-        0, checkpoint_safe=True, description="checkpoint index for resuming"
+        0,
+        ge=0,
+        checkpoint_safe=True,
+        description="checkpoint index for resuming",
     )
     checkpoint_file: Optional[str] = ProblemParam(
         None,
@@ -130,10 +148,10 @@ class SimbiProblem(BaseModel):
         TimeStepping.RK2, cli=True, description="time stepping method"
     )
     order: Optional[int] = ProblemParam(
-        None, cli=True, description="order of accuracy (1 or 2)"
+        None, ge=1, le=2, cli=True, description="order of accuracy (1 or 2)"
     )
     plm_theta: float = ProblemParam(
-        1.5, cli=True, description="plm theta parameter"
+        1.5, gt=0.0, le=2.0, cli=True, description="plm theta parameter"
     )
     boundary_conditions: Union[
         BoundaryCondition, Sequence[BoundaryCondition]
@@ -169,7 +187,7 @@ class SimbiProblem(BaseModel):
         False, description="enable mesh refinement"
     )
     refinement_max_levels: int = ProblemParam(
-        1, description="max refinement levels"
+        1, ge=1, description="max refinement levels"
     )
     refinement_regions: list[list[float]] = ProblemParam(
         [], description="refinement regions"
@@ -196,6 +214,8 @@ class SimbiProblem(BaseModel):
         """compute dimensionality from resolution."""
         if self.regime in [Regime.SRMHD]:
             return 3
+        if self.resolution is None:
+            return 3  # default assumption for uninitialized resolution
         if isinstance(self.resolution, int):
             return 1
         return sum(int(d > 1) for d in self.resolution)
@@ -373,6 +393,112 @@ class SimbiProblem(BaseModel):
     # =========================================================================
     # validators
     # =========================================================================
+    @model_validator(mode="before")
+    @classmethod
+    def _parse_cli_types(cls, data: dict) -> dict:
+        """parse cli string inputs to proper types before validation."""
+        if not isinstance(data, dict):
+            return data
+
+        # resolution: "256,256" -> (256, 256)
+        if "resolution" in data and isinstance(data["resolution"], str):
+            parts = data["resolution"].split(",")
+            data["resolution"] = tuple(int(p.strip()) for p in parts)
+
+        # bounds: "[[0,1],[0,1]]" -> [[0, 1], [0, 1]]
+        if "bounds" in data and isinstance(data["bounds"], str):
+            bounds_str = data["bounds"].strip("[]")
+            pairs = bounds_str.split("],[")
+            data["bounds"] = [
+                [float(x.strip()) for x in pair.strip("[]").split(",")]
+                for pair in pairs
+            ]
+
+        # refinement_regions: "[[0,1,0,1],[2,3,2,3]]" -> [[0,1,0,1],[2,3,2,3]]
+        if "refinement_regions" in data and isinstance(
+            data["refinement_regions"], str
+        ):
+            regions_str = data["refinement_regions"].strip("[]")
+            regions = regions_str.split("],[")
+            data["refinement_regions"] = [
+                [float(x.strip()) for x in region.strip("[]").split(",")]
+                for region in regions
+            ]
+
+        # refinement_ratios: "2,2,4" -> [2, 2, 4]
+        if "refinement_ratios" in data and isinstance(
+            data["refinement_ratios"], str
+        ):
+            data["refinement_ratios"] = [
+                int(x.strip()) for x in data["refinement_ratios"].split(",")
+            ]
+
+        # refinement_substeps: "1,2,4" -> [1, 2, 4]
+        if "refinement_substeps" in data and isinstance(
+            data["refinement_substeps"], str
+        ):
+            data["refinement_substeps"] = [
+                int(x.strip()) for x in data["refinement_substeps"].split(",")
+            ]
+
+        # boundary_conditions: "periodic,outflow" -> [BoundaryCondition.PERIODIC, BoundaryCondition.OUTFLOW]
+        if "boundary_conditions" in data and isinstance(
+            data["boundary_conditions"], str
+        ):
+            bc_str = data["boundary_conditions"]
+            if "," in bc_str:
+                data["boundary_conditions"] = [
+                    BoundaryCondition[bc.strip().upper()]
+                    for bc in bc_str.split(",")
+                ]
+            else:
+                data["boundary_conditions"] = BoundaryCondition[
+                    bc_str.strip().upper()
+                ]
+
+        # enum fields: convert string to enum
+        enum_fields = {
+            "solver": Solver,
+            "coord_system": CoordSystem,
+            "regime": Regime,
+            "reconstruction": Reconstruction,
+            "timestepping": TimeStepping,
+            "x1_spacing": CellSpacing,
+            "x2_spacing": CellSpacing,
+            "x3_spacing": CellSpacing,
+            "refinement_subcycling_mode": SubCycleMode,
+            "refinement_mode": RefinementMode,
+        }
+
+        for field_name, enum_type in enum_fields.items():
+            if field_name in data and isinstance(data[field_name], str):
+                data[field_name] = enum_type[data[field_name].upper()]
+
+        # path fields: convert string to Path
+        path_fields = ["data_directory", "checkpoint_file"]
+        for field_name in path_fields:
+            if field_name in data and isinstance(data[field_name], str):
+                data[field_name] = Path(data[field_name])
+
+        return data
+
+    @model_validator(mode="after")
+    def _coerce_refinement_types(self) -> SimbiProblem:
+        """convert refinement_ratios to np.uint64 for c++ backend."""
+        if self.refinement_ratios:
+            object.__setattr__(
+                self,
+                "refinement_ratios",
+                [np.uint64(r) for r in self.refinement_ratios],
+            )
+        if self.refinement_substeps:
+            object.__setattr__(
+                self,
+                "refinement_substeps",
+                [np.uint64(s) for s in self.refinement_substeps],
+            )
+        return self
+
     @model_validator(mode="after")
     def _enforce_order_settings(self) -> SimbiProblem:
         """enforce reconstruction and timestepping based on order parameter."""
