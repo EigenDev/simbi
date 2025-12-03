@@ -134,7 +134,7 @@ def plot(
         elif field_data.ndim == 3:
             raise ValueError(
                 f"Field '{field_data.name}' is 3D. "
-                "The plot API requires a slice. "
+                "The plot API requires an explicit --slice. "
                 "Did you mean to use an analysis tool?"
             )
         else:
@@ -296,7 +296,7 @@ def animate(
         elif field_data.ndim == 3:
             raise ValueError(
                 f"Field '{field_data.name}' is 3D. "
-                "The plot API requires a slice. "
+                "The plot API requires an explicit --slice. "
                 "Did you mean to use an analysis tool?"
             )
         else:
