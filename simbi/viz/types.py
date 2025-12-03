@@ -83,16 +83,15 @@
 # =============================================================================
 """Core type definitions for the visualization system."""
 
+from __future__ import annotations
+
 from enum import Enum
-from typing import Optional as _Optional
-from typing import Sequence, TypeVar
+from typing import Optional, Sequence, TypeVar
 
 from pydantic import BaseModel, field_validator
-from typing_extensions import Optional
 
 from simbi.types import Array, HierarchyData
 from simbi.types.bodies import (
-    Body,
     BodySystemConfig,
     ImmersedBodyConfig,
 )
@@ -132,7 +131,7 @@ class FieldData(BaseModel):
     name: str
     values: Array
     domain: Sequence[Array] | Array
-    time: float
+    time: Optional[float] = None
     coord_system: Optional[CoordSystem] = None
     axis_names: Optional[Sequence[str]] = None
     body_names: Optional[Sequence[str]] = None
@@ -173,7 +172,7 @@ class RenderResult(BaseModel):
     """
 
     artists: dict[str, object]
-    metadata: _Optional[dict[str, object]] = None
+    metadata: Optional[dict[str, object]] = None
 
     model_config = {
         "arbitrary_types_allowed": True,
@@ -195,7 +194,8 @@ class PlotData(BaseModel):
     """
 
     fields: Sequence[FieldData]
-    bodies: dict[str, Body] | None = None
+    # BodyCollection - avoid circular import
+    body_collection: Optional[object] = None
     time: Optional[float] = None
     dimensions: Optional[int] = None
     coord_system: Optional[CoordSystem] = None

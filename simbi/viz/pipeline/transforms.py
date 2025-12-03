@@ -157,13 +157,17 @@ def prepare_field_level(
     field_name: str,
     level: int,
     effective_dim: int,
+    crop_to_owned: bool = False,
 ) -> FieldData:
     """
     Prepares a single FieldData object for a specific level.
     Automatically squeezes singleton dimensions for quasi-1D/2D data.
+
+    If crop_to_owned=True and level > 0, returns only the refined region
+    with appropriate coordinate bounds.
     """
-    values = data.get_field(field_name, level)
-    mesh = data.level_mesh(level)
+    values = data.get_field(field_name, level, crop_to_owned=crop_to_owned)
+    mesh = data.level_mesh(level, crop_to_owned=crop_to_owned)
 
     # detect if field is face-centered by comparing shape to mesh
     # mesh shape is (nz, ny, nx) in storage order
@@ -187,12 +191,11 @@ def prepare_field_level(
                 )
                 break
 
-    # Get the full domain, in data-storage order (e.g., nz, ny, nx)
-    # use cell centers for all fields now
+    # Get the domain, in data-storage order (e.g., nz, ny, nx)
+    # if crop_to_owned=True, mesh already has cropped coordinates
+    # use vertices (edges) for the domain, not cell centers
+    # polygon plots need edges; other plots will extract centers if needed
     full_domain = [getattr(mesh, f"x{i}v") for i in range(values.ndim, 0, -1)]
-
-    # convert vertices to cell centers
-    full_domain = [0.5 * (coords[1:] + coords[:-1]) for coords in full_domain]
 
     assert values.ndim == len(full_domain), (
         f"Data dim ({values.ndim}) mismatch with domain dim ({len(full_domain)})"

@@ -50,10 +50,14 @@ def plot(
     nlvls += sum("_L" in x.name for x in scalar_fields)
     is_refined = nlvls > 1
 
+    # determine render mode
+    use_polygons = is_refined or config.refinement.render_mode == "polygons"
+    force_pcolormesh = config.refinement.render_mode == "pcolormesh"
+
     final_scalar_fields_to_render: Sequence[FieldData] = []
     if scalar_fields:
         is_2d = scalar_fields[0].ndim == 2
-        if is_2d and is_refined:
+        if is_2d and use_polygons and not force_pcolormesh:
             final_scalar_fields_to_render = [_compose_polygons(scalar_fields)]
         else:
             final_scalar_fields_to_render = scalar_fields
@@ -79,7 +83,8 @@ def plot(
     # Dispatch Scalar Components
     cmap_cycle = config.style.cmap
     crange_cycle = config.style.color_range
-    bodies = scalar_plot_data.bodies
+    bodies = scalar_plot_data.body_collection
+
     for i, field_data in enumerate(final_scalar_fields_to_render):
         component: Component
         if field_data.ndim == 1 and field_data.name.endswith("_polygons"):
@@ -104,16 +109,28 @@ def plot(
             )
             component = LinePlotComponent(props)
         elif field_data.ndim == 2:
-            props = QuadPlotProps(
-                cmap=next(cmap_cycle),
-                color_range=next(crange_cycle),
-                log_scale=config.style.log,
-                power=kwargs.get("power", 1.0),
-                shading=kwargs.get("shading", "auto"),
-                alpha=kwargs.get("alpha", 1.0),
-                plot_type=projection,
-            )
-            component = QuadPlotComponent(props, bodies)
+            # use polygons for refinement or if explicitly requested
+            if use_polygons_for_2d:
+                props = PolygonPlotProps(
+                    cmap=next(cmap_cycle),
+                    color_range=next(crange_cycle),
+                    log_scale=config.style.log,
+                    power=kwargs.get("power", 1.0),
+                    alpha=kwargs.get("alpha", 1.0),
+                    show_mesh_grid=kwargs.get("show_grid", False),
+                )
+                component = PolygonPlotComponent(props, bodies)
+            else:
+                props = QuadPlotProps(
+                    cmap=next(cmap_cycle),
+                    color_range=next(crange_cycle),
+                    log_scale=config.style.log,
+                    power=kwargs.get("power", 1.0),
+                    shading=kwargs.get("shading", "auto"),
+                    alpha=kwargs.get("alpha", 1.0),
+                    plot_type=projection,
+                )
+                component = QuadPlotComponent(props, bodies)
         elif field_data.ndim == 3:
             raise ValueError(
                 f"Field '{field_data.name}' is 3D. "
@@ -208,10 +225,14 @@ def animate(
     nlvls += sum("_L" in x.name for x in scalar_fields)
     is_refined = nlvls > 1
 
+    # determine render mode
+    use_polygons = is_refined or config.refinement.render_mode == "polygons"
+    force_pcolormesh = config.refinement.render_mode == "pcolormesh"
+
     final_scalar_fields_to_render: Sequence[FieldData] = []
     if scalar_fields:
         is_2d = scalar_fields[0].ndim == 2
-        if is_2d and is_refined:
+        if is_2d and use_polygons and not force_pcolormesh:
             final_scalar_fields_to_render = [_compose_polygons(scalar_fields)]
         else:
             final_scalar_fields_to_render = scalar_fields
@@ -237,7 +258,7 @@ def animate(
     # Dispatch Scalar Components (initialize only, rendering will be done by Figure.animate)
     cmap_cycle = config.style.cmap
     crange_cycle = config.style.color_range
-    bodies = scalar_plot_data.bodies
+    bodies = scalar_plot_data.body_collection
     for i, field_data in enumerate(final_scalar_fields_to_render):
         component: Component
         if field_data.ndim == 1 and field_data.name.endswith("_polygons"):

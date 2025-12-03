@@ -141,9 +141,26 @@ def style_config_from_args(args: Namespace) -> StyleConfig:
 
 def refinement_config_from_args(args: Namespace) -> RefinementConfig:
     """Build RefinementConfig from command line arguments."""
+    raw_levels = args.active_levels
+
+    # parse active_levels: handle "all" or specific level numbers
+    active_levels: Optional[set[int]] = None
+    if raw_levels:
+        if len(raw_levels) == 1 and raw_levels[0].lower() == "all":
+            # special marker - will be expanded in prepare_fields when we know num_levels
+            active_levels = None  # signals "all levels"
+        else:
+            # parse as integers
+            try:
+                active_levels = set(int(lvl) for lvl in raw_levels)
+            except ValueError:
+                raise ValueError(
+                    f"--active-levels must be integers or 'all', got: {raw_levels}"
+                )
+
     return RefinementConfig(
         composite_view=args.composite_view,
-        active_levels=set(args.active_levels or []),
+        active_levels=active_levels,
     )
 
 

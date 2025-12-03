@@ -115,7 +115,9 @@ class LinePlotComponent(Component):
 
         ax = self.ax
 
-        x_data = data.domain[0]
+        # domain contains vertices (edges), convert to cell centers for line plots
+        x_vertices = data.domain[0]
+        x_data = 0.5 * (x_vertices[1:] + x_vertices[:-1])
         y_data = data.values
 
         line_style = _create_line_style(self.props)

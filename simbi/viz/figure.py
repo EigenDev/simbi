@@ -180,17 +180,29 @@ class Figure:
 
             # set axis limits for quad/polygon plots since relim() doesn't work on mesh collections
             if isinstance(component, (QuadPlotComponent, PolygonPlotComponent)):
-                if isinstance(data, FieldData) and data.domain:
-                    x_data = (
-                        data.domain[1]
-                        if len(data.domain) > 1
-                        else data.domain[0]
-                    )
-                    y_data = data.domain[0] if len(data.domain) > 1 else None
+                if isinstance(data, FieldData) and len(data.domain) > 0:
                     try:
-                        main_ax.set_xlim(x_data.min(), x_data.max())
-                        if y_data is not None:
-                            main_ax.set_ylim(y_data.min(), y_data.max())
+                        # for polygon data, domain contains patches (vertices)
+                        # extract x,y limits from all vertices
+                        if isinstance(component, PolygonPlotComponent):
+                            patches = data.domain
+                            all_x = [v[0] for patch in patches for v in patch]
+                            all_y = [v[1] for patch in patches for v in patch]
+                            main_ax.set_xlim(min(all_x), max(all_x))
+                            main_ax.set_ylim(min(all_y), max(all_y))
+                        else:
+                            # quadmesh: domain contains coordinate arrays
+                            x_data = (
+                                data.domain[1]
+                                if len(data.domain) > 1
+                                else data.domain[0]
+                            )
+                            y_data = (
+                                data.domain[0] if len(data.domain) > 1 else None
+                            )
+                            main_ax.set_xlim(x_data.min(), x_data.max())
+                            if y_data is not None:
+                                main_ax.set_ylim(y_data.min(), y_data.max())
                     except Exception:
                         # don't let domain issues break rendering
                         pass

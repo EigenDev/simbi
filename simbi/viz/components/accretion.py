@@ -130,7 +130,7 @@ class AccretionAnalysisComponent(Component):
         Stitch all refined levels into high-resolution flat arrays of leaf cells.
 
         This is the core of the level-aware analysis. It adapts the logic
-        from your _render_polygons to build analysis arrays instead of patches.
+        from _render_polygons to build analysis arrays instead of patches.
         """
         level_fields_map: dict[str, list[FieldData]] = {}
         all_levels = set()

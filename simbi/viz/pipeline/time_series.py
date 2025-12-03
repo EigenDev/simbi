@@ -19,14 +19,14 @@ def _calculate_time_series_value(
     """
     # Check for special analysis fields
     if field_name in ["mdot", "maccr"]:
-        if data.bodies is None:
+        if data.body_collection is None:
             raise ValueError("No bodies in this run.")
 
         prop = (
             "accretion_rate" if field_name == "mdot" else "total_accreted_mass"
         )
         return np.array(
-            [getattr(v.accretion, prop) for _, v in data.bodies.items()]
+            [getattr(v.accretion, prop) for v in data.body_collection.bodies]
         )
 
     # Standard field calculation
@@ -105,9 +105,9 @@ def create_time_series_data(
         data = load_data(file_path)
         times.append(data.metadata.time)
 
-        if i == 0 and data.bodies:
-            body_names = list(data.bodies.keys())
-            body_names = [f"M_{i}" for i in range(len(body_names))]
+        if i == 0 and data.body_collection:
+            nbodies = list(data.body_collection.bodies)
+            body_names = [f"M_{i}" for i in range(len(nbodies))]
 
         for name in field_names:
             value = _calculate_time_series_value(data, name, weight_field)
@@ -118,9 +118,9 @@ def create_time_series_data(
 
     # if there are two bodies, we label the less massive one M_2
     # and the more massive one M_1
-    if len(body_names) == 2 and data.bodies is not None:
+    if len(body_names) == 2 and data.body_collection is not None:
         masses = []
-        for body in data.bodies.values():
+        for body in data.body_collection.bodies:
             masses.append(body.mass)
         if masses[0] > masses[1]:
             body_names = ["M_1", "M_2"]
@@ -169,7 +169,7 @@ def create_time_series_data(
 
     return PlotData(
         fields=final_fields,
-        bodies=None,  # Not relevant for time series
+        body_collection=None,  # Not relevant for time series
         time=None,  # Not relevant
         dimensions=1,
         coord_system=None,  # Not relevant

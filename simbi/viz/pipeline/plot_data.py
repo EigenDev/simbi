@@ -21,17 +21,24 @@ def prepare_fields(
     """
     Handles refinement logic to produce a list of full-dimensional fields.
     """
-    ndim = get_effective_dimensions(
-        data, config
-    )  # Assuming you have this helper
+    ndim = get_effective_dimensions(data, config)
 
-    # Get refinement settings from the config
-    active_levels = {0}
-    if (
-        hasattr(config, "refinement")
-        and config.refinement.active_levels is not None
-    ):
-        active_levels.update(config.refinement.active_levels)
+    # get refinement settings from config
+    # None signals "all levels", empty set means just base level
+    active_levels_raw = None
+    if hasattr(config, "refinement"):
+        active_levels_raw = config.refinement.active_levels
+
+    # expand "all" (None) to actual set of all levels
+    if active_levels_raw is None:
+        # "all" was requested - use all available levels
+        active_levels = set(range(data.num_levels))
+    elif len(active_levels_raw) == 0:
+        # no levels specified - default to base level only
+        active_levels = {0}
+    else:
+        # specific levels requested
+        active_levels = active_levels_raw
 
     use_composite = False
     if hasattr(config, "refinement"):
@@ -39,22 +46,29 @@ def prepare_fields(
             config.refinement, "composite_view", False
         )
 
+    # determine if we should crop to owned region
+    # crop when visualizing a single refined level only
+    single_level = len(active_levels) == 1
+    crop_to_owned = single_level and not use_composite
+
     all_fields: list[FieldData] = []
     for field_name in field_names:
         if use_composite:
-            # Prepare one composite field
+            # prepare one composite field
             field_data = prepare_composite_field(
                 data, field_name, active_levels, ndim
             )
             all_fields.append(field_data)
         else:
-            # Prepare one field for each active level
+            # prepare one field for each active level
             for level in sorted(active_levels):
                 if level >= data.num_levels:
                     continue
                 try:
+                    # crop to owned region when showing single level
+                    should_crop = crop_to_owned and level > 0
                     field_data = prepare_field_level(
-                        data, field_name, level, ndim
+                        data, field_name, level, ndim, crop_to_owned=should_crop
                     )
                     all_fields.append(field_data)
                 except KeyError:
@@ -68,21 +82,24 @@ def apply_slicing(
 ) -> list[FieldData]:
     """
     Applies a slice_spec to a list of full-dimensional fields.
+
+    Each field may have different resolution (different levels),
+    so slice planning happens per-field using physical coordinates.
     """
     if not slice_spec:
-        # No slicing requested, return the fields as-is
+        # no slicing requested, return the fields as-is
         return fields
 
     sliced_fields: list[FieldData] = []
     for field in fields:
-        print(f"Applying slicing to field '{field.name}'")
-        # Plan and execute the slice
+        # plan and execute the slice for THIS field's domain
+        # find_slice_index uses physical position, so works across levels
         plan = plan_slice(field.domain, slice_spec)
         sliced_values, sliced_domain = execute_slice(
             field.values, field.domain, plan
         )
 
-        # Create a new FieldData object with the sliced data
+        # create a new FieldData object with the sliced data
         sliced_fields.append(
             FieldData(
                 name=field.name,
@@ -118,7 +135,7 @@ def create_plot_data(
     # Package and return the (potentially un-stitched) fields
     return PlotData(
         fields=sliced_fields,
-        bodies=data.bodies,
+        body_collection=data.body_collection,
         time=data.metadata.time,
         dimensions=sliced_fields[0].ndim if sliced_fields else 0,
         coord_system=CoordSystem(data.metadata.coord_system),

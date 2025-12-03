@@ -38,7 +38,7 @@ def _get_stitched_leaf_data(
         raise ValueError("No fields found for any requested name")
 
     # Find all refined regions from L1+
-    is_3d = False
+    is_3d = data.fields[0].values.ndim == 3
     refined_regions = []
     for i in range(1, num_levels):
         field_L_i = level_fields_map[field_names[0]][i]
@@ -248,7 +248,7 @@ def _calculate_coordinate_profile(
     bin_centers = 0.5 * (bin_edges[1:] + bin_edges[:-1])
 
     name = field_name + "_vs_r"
-    return FieldData(name=name, values=mean_val, domain=[bin_centers])
+    return FieldData(name=name, values=mean_val, domain=[bin_centers], time=0.0)
 
 
 def _calculate_mass_flux_profile(
@@ -276,7 +276,10 @@ def _calculate_mass_flux_profile(
     # Volume-weighted mean flux density in each shell
     # \sum(\rho v_r * volume) / \sum(volume)
     weighted_flux, bin_edges, _ = binned_statistic(
-        r_flat, flux_density_flat * volume_flat, statistic="sum", bins=bins
+        r_flat,
+        flux_density_flat * volume_flat,
+        statistic="sum",
+        bins=bins,
     )
     total_volume, _, _ = binned_statistic(
         r_flat, volume_flat, statistic="sum", bins=bins
@@ -293,6 +296,7 @@ def _calculate_mass_flux_profile(
         name=label,
         values=mass_flux_profile,
         domain=[bin_centers],
+        time=0.0,
     )
 
 
@@ -346,7 +350,7 @@ def create_coordinate_profile_data(
 
     return PlotData(
         fields=final_fields,
-        bodies=data.bodies,
+        body_collection=data.body_collection,
         time=data.metadata.time,
         dimensions=1,  # The result is always 1D
         coord_system=CoordSystem(data.metadata.coord_system),

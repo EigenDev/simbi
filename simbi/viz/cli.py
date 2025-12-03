@@ -460,8 +460,7 @@ def setup_parser(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
         "--active-levels",
         nargs="+",
-        type=int,
-        help="Active refinement levels to display",
+        help="Active refinement levels to display (e.g., '0 1' or 'all')",
         default=None,
     )
     parser.add_argument(
