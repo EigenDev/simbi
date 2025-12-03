@@ -3,6 +3,9 @@
 #
 # marti & muller (2003), relativistic shock tube problem on 3d mesh.
 # =============================================================================
+
+from typing import Annotated
+
 from simbi import ProblemParam, SimbiProblem
 from simbi.types import CoordSystem, Regime
 from simbi.types.typing import GasStateGenerator, InitialStateType
@@ -12,26 +15,40 @@ class MartiMuller3D(SimbiProblem):
     """marti & muller (2003), relativistic shock tube problem on 3d mesh."""
 
     # physics
-    adiabatic_index: float = ProblemParam(
-        4.0 / 3.0, description="adiabatic index"
-    )
+    adiabatic_index: Annotated[
+        float, ProblemParam(4.0 / 3.0, description="adiabatic index")
+    ]
 
     # domain
-    resolution: tuple[int, int, int] = ProblemParam(
-        (100, 100, 100), cli=True, description="grid resolution"
-    )
-    bounds: list[tuple[float, float]] = ProblemParam(
-        [(0.0, 1.0), (0.0, 1.0), (0.0, 1.0)], description="domain boundaries"
-    )
-    coord_system: CoordSystem = ProblemParam(
-        CoordSystem.CARTESIAN, description="coordinate system"
-    )
-    regime: Regime = ProblemParam(Regime.SRHD, description="physics regime")
+    resolution: Annotated[
+        tuple[int, int, int],
+        ProblemParam((100, 100, 100), cli=True, description="grid resolution"),
+    ]
+    bounds: Annotated[
+        list[tuple[float, float]],
+        ProblemParam(
+            [(0.0, 1.0), (0.0, 1.0), (0.0, 1.0)],
+            description="domain boundaries",
+        ),
+    ]
+    coord_system: Annotated[
+        CoordSystem,
+        ProblemParam(CoordSystem.CARTESIAN, description="coordinate system"),
+    ]
+    regime: Annotated[
+        Regime, ProblemParam(Regime.SRHD, description="physics regime")
+    ]
 
     # simulation control
-    end_time: float = ProblemParam(
-        0.4, cli=True, checkpoint_safe=True, description="simulation end time"
-    )
+    end_time: Annotated[
+        float,
+        ProblemParam(
+            0.4,
+            cli=True,
+            checkpoint_safe=True,
+            description="simulation end time",
+        ),
+    ]
 
     def initial_primitive_state(self) -> InitialStateType:
         """generate initial primitive state for 3d marti & muller shock tube."""

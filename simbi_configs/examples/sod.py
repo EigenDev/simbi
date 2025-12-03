@@ -4,6 +4,8 @@
 # sod's shock tube problem in 1d newtonian fluid.
 # classic riemann problem with discontinuous initial conditions.
 # =============================================================================
+from typing import Annotated, Sequence
+
 from simbi import ProblemParam, SimbiProblem
 from simbi.types import CellSpacing, CoordSystem, Regime
 from simbi.types.typing import GasStateGenerator, InitialStateType
@@ -13,32 +15,51 @@ class SodProblem(SimbiProblem):
     """sod's shock tube problem in 1d newtonian fluid."""
 
     # physics
-    adiabatic_index: float = ProblemParam(
-        5.0 / 3.0, description="adiabatic gas index"
-    )
+    adiabatic_index: Annotated[
+        float, ProblemParam(5.0 / 3.0, description="adiabatic gas index")
+    ]
 
     # domain
-    resolution: int = ProblemParam(100, cli=True, description="grid resolution")
-    bounds: list[tuple[float, float]] = ProblemParam(
-        [(0.0, 1.0)], description="domain boundaries"
-    )
-    coord_system: CoordSystem = ProblemParam(
-        CoordSystem.CARTESIAN, description="coordinate system"
-    )
-    regime: Regime = ProblemParam(
-        Regime.NEWTONIAN, description="physics regime"
-    )
-    x1_spacing: CellSpacing = ProblemParam(
-        CellSpacing.LINEAR, description="grid spacing in x1 direction"
-    )
+    resolution: Annotated[
+        int, ProblemParam(100, cli=True, description="grid resolution")
+    ]
+    bounds: Annotated[
+        Sequence[Sequence[float]],
+        ProblemParam([(0.0, 1.0)], description="domain boundaries"),
+    ]
+    coord_system: Annotated[
+        CoordSystem,
+        ProblemParam(CoordSystem.CARTESIAN, description="coordinate system"),
+    ]
+    regime: Annotated[
+        Regime, ProblemParam(Regime.NEWTONIAN, description="physics regime")
+    ]
+    x1_spacing: Annotated[
+        CellSpacing,
+        ProblemParam(
+            CellSpacing.LINEAR, description="grid spacing in x1 direction"
+        ),
+    ]
 
     # simulation control
-    end_time: float = ProblemParam(
-        0.2, cli=True, checkpoint_safe=True, description="simulation end time"
-    )
-    checkpoint_interval: float = ProblemParam(
-        0.1, cli=True, checkpoint_safe=True, description="checkpoint interval"
-    )
+    end_time: Annotated[
+        float,
+        ProblemParam(
+            0.2,
+            cli=True,
+            checkpoint_safe=True,
+            description="simulation end time",
+        ),
+    ]
+    checkpoint_interval: Annotated[
+        float,
+        ProblemParam(
+            0.1,
+            cli=True,
+            checkpoint_safe=True,
+            description="checkpoint interval",
+        ),
+    ]
 
     def initial_primitive_state(self) -> InitialStateType:
         """generate initial primitive state for sod shock tube."""

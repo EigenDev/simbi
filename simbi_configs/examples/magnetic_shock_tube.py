@@ -5,7 +5,7 @@
 # =============================================================================
 from dataclasses import dataclass
 from functools import partial
-from typing import Any, Sequence, cast
+from typing import Annotated, Any, Sequence, cast
 
 from pydantic import model_validator
 
@@ -53,75 +53,87 @@ class MagneticShockTube(SimbiProblem):
     """mignone & bodo (2006), relativistic mhd test problems in 1d mesh."""
 
     # physics
-    problem: int = ProblemParam(1, cli=True, description="problem number (1-4)")
-    adiabatic_index: float = ProblemParam(
-        5.0 / 3.0, description="adiabatic index"
-    )
+    problem: Annotated[
+        int, ProblemParam(1, cli=True, description="problem number (1-4)")
+    ]
+    adiabatic_index: Annotated[
+        float, ProblemParam(5.0 / 3.0, description="adiabatic index")
+    ]
 
     # domain
-    resolution: tuple[int, int, int] = ProblemParam(
-        (1600, 1, 1), cli=True, description="grid resolution"
-    )
-    bounds: list[tuple[float, float]] = ProblemParam(
-        [(0.0, 1.0)], description="domain boundaries"
-    )
-    coord_system: CoordSystem = ProblemParam(
-        CoordSystem.CARTESIAN, description="coordinate system"
-    )
-    regime: Regime = ProblemParam(Regime.SRMHD, description="physics regime")
+    resolution: Annotated[
+        tuple[int, int, int],
+        ProblemParam((1600, 1, 1), cli=True, description="grid resolution"),
+    ]
+    bounds: Annotated[
+        list[tuple[float, float]],
+        ProblemParam([(0.0, 1.0)], description="domain boundaries"),
+    ]
+    coord_system: Annotated[
+        CoordSystem,
+        ProblemParam(CoordSystem.CARTESIAN, description="coordinate system"),
+    ]
+    regime: Annotated[
+        Regime, ProblemParam(Regime.SRMHD, description="physics regime")
+    ]
 
     # numerics
-    solver: Solver = ProblemParam(
-        Solver.HLLE, description="solver type for mhd"
-    )
-    x1_spacing: CellSpacing = ProblemParam(
-        CellSpacing.LINEAR, description="grid spacing in x1 direction"
-    )
+    solver: Annotated[
+        Solver, ProblemParam(Solver.HLLE, description="solver type for mhd")
+    ]
+    x1_spacing: Annotated[
+        CellSpacing,
+        ProblemParam(
+            CellSpacing.LINEAR, description="grid spacing in x1 direction"
+        ),
+    ]
 
     # simulation control
-    end_time: float = ProblemParam(
-        0.4, cli=True, checkpoint_safe=True, description="simulation end time"
-    )
+    end_time: Annotated[
+        float,
+        ProblemParam(
+            0.4,
+            cli=True,
+            checkpoint_safe=True,
+            description="simulation end time",
+        ),
+    ]
 
     @model_validator(mode="after")
     def set_adiabatic_index_by_problem(self) -> "MagneticShockTube":
         """set adiabatic index based on problem number."""
         if self.problem == 1:
-            object.__setattr__(self, "adiabatic_index", 2.0)
+            self.adiabatic_index = 2.0
         else:
-            object.__setattr__(self, "adiabatic_index", 5.0 / 3.0)
+            self.adiabatic_index = 5.0 / 3.0
         return self
 
-    def __init__(self, **data: Any) -> None:
-        super().__init__(**data)
-        object.__setattr__(
-            self,
-            "_problem_states",
-            {
-                1: MHDProblemState.create_state(
-                    (1.000, 0.0, 0.0, 0.0, 1.0, 0.5, +1.0, 0.0),
-                    (0.125, 0.0, 0.0, 0.0, 0.1, 0.5, -1.0, 0.0),
-                ),
-                2: MHDProblemState.create_state(
-                    (1.0, 0.0, 0.0, 0.0, 30.0, 5.0, 6.0, 6.0),
-                    (1.0, 0.0, 0.0, 0.0, 1.0, 5.0, 0.7, 0.7),
-                ),
-                3: MHDProblemState.create_state(
-                    (1.0, 0.0, 0.0, 0.0, 1e3, 10.0, 7.0, 7.0),
-                    (1.0, 0.0, 0.0, 0.0, 0.1, 10.0, 0.7, 0.7),
-                ),
-                4: MHDProblemState.create_state(
-                    (1.0, +0.999, 0.0, 0.0, 0.1, 10.0, +7.0, +7.0),
-                    (1.0, -0.999, 0.0, 0.0, 0.1, 10.0, -7.0, -7.0),
-                ),
-            },
-        )
+    @property
+    def problem_states(self, **data: Any) -> dict[int, MHDProblemState]:
+        return {
+            1: MHDProblemState.create_state(
+                (1.000, 0.0, 0.0, 0.0, 1.0, 0.5, +1.0, 0.0),
+                (0.125, 0.0, 0.0, 0.0, 0.1, 0.5, -1.0, 0.0),
+            ),
+            2: MHDProblemState.create_state(
+                (1.0, 0.0, 0.0, 0.0, 30.0, 5.0, 6.0, 6.0),
+                (1.0, 0.0, 0.0, 0.0, 1.0, 5.0, 0.7, 0.7),
+            ),
+            3: MHDProblemState.create_state(
+                (1.0, 0.0, 0.0, 0.0, 1e3, 10.0, 7.0, 7.0),
+                (1.0, 0.0, 0.0, 0.0, 0.1, 10.0, 0.7, 0.7),
+            ),
+            4: MHDProblemState.create_state(
+                (1.0, +0.999, 0.0, 0.0, 0.1, 10.0, +7.0, +7.0),
+                (1.0, -0.999, 0.0, 0.0, 0.1, 10.0, -7.0, -7.0),
+            ),
+        }
 
     def initial_primitive_state(self) -> InitialStateType:
         """generate initial primitive state for mhd shock tube."""
 
         def gas_state() -> GasStateGenerator:
-            state = self._problem_states[self.problem]
+            state = self.problem_states[self.problem]
             ni, nj, nk = self.resolution
             dx = (self.bounds[0][1] - self.bounds[0][0]) / ni
 
@@ -147,7 +159,7 @@ class MagneticShockTube(SimbiProblem):
                             )
 
         def b_field(bn: str) -> StaggeredBFieldGenerator:
-            state = self._problem_states[self.problem]
+            state = self.problem_states[self.problem]
             ni, nj, nk = self.resolution
             dx = (self.bounds[0][1] - self.bounds[0][0]) / ni
 

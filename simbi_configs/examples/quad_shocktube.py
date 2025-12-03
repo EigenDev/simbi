@@ -5,7 +5,7 @@
 # adapted from zhang and macfadyen (2006) section 4.8.
 # =============================================================================
 from dataclasses import dataclass
-from typing import Iterator
+from typing import Annotated, Iterator
 
 from simbi import ProblemParam, SimbiProblem
 from simbi.types import CellSpacing, CoordSystem, Regime
@@ -32,29 +32,43 @@ class SodProblemQuad(SimbiProblem):
     """sod's shock tube in 2d with 4 partitions, zhang & macfadyen (2006) 4.8."""
 
     # physics
-    adiabatic_index: float = ProblemParam(
-        5.0 / 3.0, description="adiabatic index"
-    )
+    adiabatic_index: Annotated[
+        float, ProblemParam(5.0 / 3.0, description="adiabatic index")
+    ]
 
     # domain
-    resolution: tuple[int, int] = ProblemParam(
-        (256, 256), cli=True, description="grid resolution"
-    )
-    bounds: list[tuple[float, float]] = ProblemParam(
-        [(0.0, 1.0), (0.0, 1.0)], description="domain boundaries"
-    )
-    coord_system: CoordSystem = ProblemParam(
-        CoordSystem.CARTESIAN, description="coordinate system"
-    )
-    regime: Regime = ProblemParam(Regime.SRHD, description="physics regime")
-    x1_spacing: CellSpacing = ProblemParam(
-        CellSpacing.LINEAR, description="grid spacing in x1 direction"
-    )
+    resolution: Annotated[
+        tuple[int, int],
+        ProblemParam((256, 256), cli=True, description="grid resolution"),
+    ]
+    bounds: Annotated[
+        list[tuple[float, float]],
+        ProblemParam([(0.0, 1.0), (0.0, 1.0)], description="domain boundaries"),
+    ]
+    coord_system: Annotated[
+        CoordSystem,
+        ProblemParam(CoordSystem.CARTESIAN, description="coordinate system"),
+    ]
+    regime: Annotated[
+        Regime, ProblemParam(Regime.SRHD, description="physics regime")
+    ]
+    x1_spacing: Annotated[
+        CellSpacing,
+        ProblemParam(
+            CellSpacing.LINEAR, description="grid spacing in x1 direction"
+        ),
+    ]
 
     # simulation control
-    end_time: float = ProblemParam(
-        0.4, cli=True, checkpoint_safe=True, description="simulation end time"
-    )
+    end_time: Annotated[
+        float,
+        ProblemParam(
+            0.4,
+            cli=True,
+            checkpoint_safe=True,
+            description="simulation end time",
+        ),
+    ]
 
     def initial_primitive_state(self) -> InitialStateType:
         """generate initial primitive state for quadrant shock tube."""

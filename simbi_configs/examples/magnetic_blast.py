@@ -5,6 +5,7 @@
 # =============================================================================
 import math
 from functools import partial
+from typing import Annotated
 
 from simbi import ProblemParam, SimbiProblem
 from simbi.types import (
@@ -33,39 +34,68 @@ class MagneticBomb(SimbiProblem):
     """cylindrical relativistic magnetized blast wave."""
 
     # physics
-    adiabatic_index: float = ProblemParam(
-        4.0 / 3.0, description="adiabatic index"
-    )
-    rho0: float = ProblemParam(1.0e-4, cli=True, description="density scale")
-    p0: float = ProblemParam(3.0e-5, cli=True, description="pressure scale")
-    b0: float = ProblemParam(0.1, cli=True, description="magnetic field scale")
+    adiabatic_index: Annotated[
+        float, ProblemParam(4.0 / 3.0, description="adiabatic index")
+    ]
+    rho0: Annotated[
+        float, ProblemParam(1.0e-4, cli=True, description="density scale")
+    ]
+    p0: Annotated[
+        float, ProblemParam(3.0e-5, cli=True, description="pressure scale")
+    ]
+    b0: Annotated[
+        float, ProblemParam(0.1, cli=True, description="magnetic field scale")
+    ]
 
     # domain
-    resolution: tuple[int, int] = ProblemParam(
-        (256, 256), cli=True, description="grid resolution"
-    )
-    bounds: list[tuple[float, float]] = ProblemParam(
-        [(XMIN, XMAX), (XMIN, XMAX)], description="domain boundaries"
-    )
-    coord_system: CoordSystem = ProblemParam(
-        CoordSystem.CARTESIAN, description="coordinate system"
-    )
-    regime: Regime = ProblemParam(Regime.SRMHD, description="physics regime")
+    resolution: Annotated[
+        tuple[int, int],
+        ProblemParam((256, 256), cli=True, description="grid resolution"),
+    ]
+    bounds: Annotated[
+        list[tuple[float, float]],
+        ProblemParam(
+            [(XMIN, XMAX), (XMIN, XMAX)], description="domain boundaries"
+        ),
+    ]
+    coord_system: Annotated[
+        CoordSystem,
+        ProblemParam(CoordSystem.CARTESIAN, description="coordinate system"),
+    ]
+    regime: Annotated[
+        Regime, ProblemParam(Regime.SRMHD, description="physics regime")
+    ]
 
     # numerics
-    solver: Solver = ProblemParam(Solver.HLLE, description="numerical solver")
-    boundary_conditions: list[BoundaryCondition] = ProblemParam(
-        [BoundaryCondition.OUTFLOW], description="boundary conditions"
-    )
-    x1_spacing: CellSpacing = ProblemParam(
-        CellSpacing.LINEAR, description="grid spacing in x1 direction"
-    )
+    solver: Annotated[
+        Solver, ProblemParam(Solver.HLLE, description="numerical solver")
+    ]
+    boundary_conditions: Annotated[
+        list[BoundaryCondition],
+        ProblemParam(
+            [BoundaryCondition.OUTFLOW], description="boundary conditions"
+        ),
+    ]
+    x1_spacing: Annotated[
+        CellSpacing,
+        ProblemParam(
+            CellSpacing.LINEAR, description="grid spacing in x1 direction"
+        ),
+    ]
 
     # simulation control
-    start_time: float = ProblemParam(0.0, description="simulation start time")
-    end_time: float = ProblemParam(
-        4.0, cli=True, checkpoint_safe=True, description="simulation end time"
-    )
+    start_time: Annotated[
+        float, ProblemParam(0.0, description="simulation start time")
+    ]
+    end_time: Annotated[
+        float,
+        ProblemParam(
+            4.0,
+            cli=True,
+            checkpoint_safe=True,
+            description="simulation end time",
+        ),
+    ]
 
     def initial_primitive_state(self) -> InitialStateType:
         """generate initial primitive state for magnetic blast wave."""

@@ -5,6 +5,7 @@
 # tests contact discontinuity preservation.
 # =============================================================================
 from pathlib import Path
+from typing import Annotated
 
 from simbi import ProblemParam, SimbiProblem
 from simbi.types import CellSpacing, CoordSystem, Regime, Solver
@@ -15,38 +16,56 @@ class StationaryWaveHLL(SimbiProblem):
     """stationary wave test using hll solver."""
 
     # physics
-    adiabatic_index: float = ProblemParam(
-        5.0 / 3.0, description="adiabatic index"
-    )
+    adiabatic_index: Annotated[
+        float, ProblemParam(5.0 / 3.0, description="adiabatic index")
+    ]
 
     # domain
-    resolution: int = ProblemParam(400, cli=True, description="grid resolution")
-    bounds: list[tuple[float, float]] = ProblemParam(
-        [(0.0, 1.0)], description="domain boundaries"
-    )
-    coord_system: CoordSystem = ProblemParam(
-        CoordSystem.CARTESIAN, description="coordinate system"
-    )
-    regime: Regime = ProblemParam(
-        Regime.NEWTONIAN, description="physics regime"
-    )
-    x1_spacing: CellSpacing = ProblemParam(
-        CellSpacing.LINEAR, description="grid spacing in x1 direction"
-    )
+    resolution: Annotated[
+        int, ProblemParam(400, cli=True, description="grid resolution")
+    ]
+    bounds: Annotated[
+        list[tuple[float, float]],
+        ProblemParam([(0.0, 1.0)], description="domain boundaries"),
+    ]
+    coord_system: Annotated[
+        CoordSystem,
+        ProblemParam(CoordSystem.CARTESIAN, description="coordinate system"),
+    ]
+    regime: Annotated[
+        Regime, ProblemParam(Regime.NEWTONIAN, description="physics regime")
+    ]
+    x1_spacing: Annotated[
+        CellSpacing,
+        ProblemParam(
+            CellSpacing.LINEAR, description="grid spacing in x1 direction"
+        ),
+    ]
 
     # numerics
-    solver: Solver = ProblemParam(Solver.HLLE, description="numerical solver")
+    solver: Annotated[
+        Solver, ProblemParam(Solver.HLLE, description="numerical solver")
+    ]
 
     # simulation control
-    data_directory: Path = ProblemParam(
-        Path("data/stationary/hlle"),
-        cli=True,
-        checkpoint_safe=True,
-        description="output data directory",
-    )
-    end_time: float = ProblemParam(
-        1.0, cli=True, checkpoint_safe=True, description="simulation end time"
-    )
+    data_directory: Annotated[
+        Path,
+        ProblemParam(
+            Path("data/stationary/hlle"),
+            cli=True,
+            checkpoint_safe=True,
+            description="output data directory",
+        ),
+    ]
+    end_time: Annotated[
+        float,
+        ProblemParam(
+            1.0,
+            cli=True,
+            checkpoint_safe=True,
+            description="simulation end time",
+        ),
+    ]
 
     def initial_primitive_state(self) -> InitialStateType:
         """generate initial primitive state for stationary wave."""
@@ -71,12 +90,15 @@ class StationaryWaveHLL(SimbiProblem):
 class StationaryWaveHLLC(StationaryWaveHLL):
     """stationary wave test using hllc solver."""
 
-    solver: Solver = ProblemParam(
-        Solver.HLLC, description="hllc numerical solver"
-    )
-    data_directory: Path = ProblemParam(
-        Path("data/stationary/hllc"),
-        cli=True,
-        checkpoint_safe=True,
-        description="output data directory for hllc solver",
-    )
+    solver: Annotated[
+        Solver, ProblemParam(Solver.HLLC, description="hllc numerical solver")
+    ]
+    data_directory: Annotated[
+        Path,
+        ProblemParam(
+            Path("data/stationary/hllc"),
+            cli=True,
+            checkpoint_safe=True,
+            description="output data directory for hllc solver",
+        ),
+    ]

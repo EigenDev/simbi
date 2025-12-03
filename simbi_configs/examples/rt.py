@@ -6,6 +6,7 @@
 # =============================================================================
 import math
 from pathlib import Path
+from typing import Annotated
 
 from pydantic import computed_field
 
@@ -23,52 +24,73 @@ class RayleighTaylor(SimbiProblem):
     """rayleigh-taylor instability in newtonian fluid."""
 
     # physics
-    adiabatic_index: float = ProblemParam(
-        7.0 / 5.0, description="adiabatic index"
-    )
-    rhoU: float = ProblemParam(2.0, description="upper layer density")
-    rhoD: float = ProblemParam(1.0, description="lower layer density")
-    p0: float = ProblemParam(2.5, description="reference pressure")
-    g0: float = ProblemParam(
-        0.1, cli=True, description="gravitational acceleration"
-    )
-    vamp: float = ProblemParam(
-        0.01, description="velocity perturbation amplitude"
-    )
+    adiabatic_index: Annotated[
+        float, ProblemParam(7.0 / 5.0, description="adiabatic index")
+    ]
+    rhoU: Annotated[float, ProblemParam(2.0, description="upper layer density")]
+    rhoD: Annotated[float, ProblemParam(1.0, description="lower layer density")]
+    p0: Annotated[float, ProblemParam(2.5, description="reference pressure")]
+    g0: Annotated[
+        float,
+        ProblemParam(0.1, cli=True, description="gravitational acceleration"),
+    ]
+    vamp: Annotated[
+        float, ProblemParam(0.01, description="velocity perturbation amplitude")
+    ]
 
     # domain
-    resolution: tuple[int, int] = ProblemParam(
-        (200, 600), cli=True, description="grid resolution (x, y)"
-    )
-    bounds: list[tuple[float, float]] = ProblemParam(
-        [(-0.25, 0.25), (-0.75, 0.75)], description="domain boundaries"
-    )
-    coord_system: CoordSystem = ProblemParam(
-        CoordSystem.CARTESIAN, description="coordinate system"
-    )
-    regime: Regime = ProblemParam(
-        Regime.NEWTONIAN, description="physics regime"
-    )
+    resolution: Annotated[
+        tuple[int, int],
+        ProblemParam(
+            (200, 600), cli=True, description="grid resolution (x, y)"
+        ),
+    ]
+    bounds: Annotated[
+        list[tuple[float, float]],
+        ProblemParam(
+            [(-0.25, 0.25), (-0.75, 0.75)], description="domain boundaries"
+        ),
+    ]
+    coord_system: Annotated[
+        CoordSystem,
+        ProblemParam(CoordSystem.CARTESIAN, description="coordinate system"),
+    ]
+    regime: Annotated[
+        Regime, ProblemParam(Regime.NEWTONIAN, description="physics regime")
+    ]
 
     # numerics
-    boundary_conditions: list[BoundaryCondition] = ProblemParam(
-        [BoundaryCondition.PERIODIC, BoundaryCondition.REFLECTING],
-        description="boundary conditions [x, y]",
-    )
-    solver: Solver = ProblemParam(Solver.HLLC, description="numerical solver")
+    boundary_conditions: Annotated[
+        list[BoundaryCondition],
+        ProblemParam(
+            [BoundaryCondition.PERIODIC, BoundaryCondition.REFLECTING],
+            description="boundary conditions [x, y]",
+        ),
+    ]
+    solver: Annotated[
+        Solver, ProblemParam(Solver.HLLC, description="numerical solver")
+    ]
 
     # simulation control
-    data_directory: Path = ProblemParam(
-        Path("data/rt_config"),
-        cli=True,
-        checkpoint_safe=True,
-        description="output data directory",
-    )
-    end_time: float = ProblemParam(
-        10.0, cli=True, checkpoint_safe=True, description="simulation end time"
-    )
+    data_directory: Annotated[
+        Path,
+        ProblemParam(
+            Path("data/rt_config"),
+            cli=True,
+            checkpoint_safe=True,
+            description="output data directory",
+        ),
+    ]
+    end_time: Annotated[
+        float,
+        ProblemParam(
+            10.0,
+            cli=True,
+            checkpoint_safe=True,
+            description="simulation end time",
+        ),
+    ]
 
-    @computed_field
     @property
     def ymidpoint(self) -> float:
         """calculate middle of y domain."""

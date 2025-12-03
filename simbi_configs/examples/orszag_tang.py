@@ -5,9 +5,9 @@
 # =============================================================================
 import math
 from functools import partial
-from typing import Any
+from typing import Annotated
 
-from pydantic import computed_field
+from pydantic import model_validator
 
 from simbi import ProblemParam, SimbiProblem
 from simbi.types import (
@@ -32,56 +32,77 @@ class OrszagTang(SimbiProblem):
     """the orszag-tang vortex test case."""
 
     # physics
-    adiabatic_index: float = ProblemParam(
-        5.0 / 3.0, description="adiabatic index"
-    )
-    v0: float = ProblemParam(0.5, cli=True, description="velocity scale")
-    b0: float = ProblemParam(1.0, cli=True, description="magnetic field scale")
+    adiabatic_index: Annotated[
+        float, ProblemParam(5.0 / 3.0, description="adiabatic index")
+    ]
+    v0: Annotated[
+        float, ProblemParam(0.5, cli=True, description="velocity scale")
+    ]
+    b0: Annotated[
+        float, ProblemParam(1.0, cli=True, description="magnetic field scale")
+    ]
 
     # domain
-    resolution: tuple[int, int, int] = ProblemParam(
-        (256, 256, 1), cli=True, description="grid resolution"
-    )
-    bounds: list[tuple[float, float]] = ProblemParam(
-        [(XMIN, XMAX), (XMIN, XMAX)], description="domain boundaries"
-    )
-    coord_system: CoordSystem = ProblemParam(
-        CoordSystem.CARTESIAN, description="coordinate system"
-    )
-    regime: Regime = ProblemParam(Regime.SRMHD, description="physics regime")
+    resolution: Annotated[
+        tuple[int, int, int],
+        ProblemParam((256, 256, 1), cli=True, description="grid resolution"),
+    ]
+    bounds: Annotated[
+        list[tuple[float, float]],
+        ProblemParam(
+            [(XMIN, XMAX), (XMIN, XMAX)], description="domain boundaries"
+        ),
+    ]
+    coord_system: Annotated[
+        CoordSystem,
+        ProblemParam(CoordSystem.CARTESIAN, description="coordinate system"),
+    ]
+    regime: Annotated[
+        Regime, ProblemParam(Regime.SRMHD, description="physics regime")
+    ]
 
     # numerics
-    solver: Solver = ProblemParam(Solver.HLLE, description="numerical solver")
-    boundary_conditions: list[BoundaryCondition] = ProblemParam(
-        [BoundaryCondition.PERIODIC], description="boundary conditions"
-    )
-    x1_spacing: CellSpacing = ProblemParam(
-        CellSpacing.LINEAR, description="grid spacing in x1 direction"
-    )
+    solver: Annotated[
+        Solver, ProblemParam(Solver.HLLE, description="numerical solver")
+    ]
+    boundary_conditions: Annotated[
+        list[BoundaryCondition],
+        ProblemParam(
+            [BoundaryCondition.PERIODIC], description="boundary conditions"
+        ),
+    ]
+    x1_spacing: Annotated[
+        CellSpacing,
+        ProblemParam(
+            CellSpacing.LINEAR, description="grid spacing in x1 direction"
+        ),
+    ]
 
     # simulation control
-    start_time: float = ProblemParam(0.0, description="simulation start time")
-    end_time: float = ProblemParam(
-        0.0,
-        cli=True,
-        checkpoint_safe=True,
-        description="simulation end time (auto if 0)",
-    )
+    start_time: Annotated[
+        float, ProblemParam(0.0, description="simulation start time")
+    ]
+    end_time: Annotated[
+        float,
+        ProblemParam(
+            0.0,
+            cli=True,
+            checkpoint_safe=True,
+            description="simulation end time (auto if 0)",
+        ),
+    ]
 
-    def __init__(self, **data: Any) -> None:
-        super().__init__(**data)
-        cs = (self.adiabatic_index - 1.0) / self.adiabatic_index
-        object.__setattr__(self, "_cs", cs)
-
+    @model_validator(mode="after")
+    def compute_defaults(self) -> "OrszagTang":
+        """set end time if not specified."""
         if self.end_time == 0.0:
-            computed_end = (XMAX - XMIN) / cs
-            object.__setattr__(self, "end_time", computed_end)
+            self.end_time = (XMAX - XMIN) / self.cs
+        return self
 
-    @computed_field
     @property
     def cs(self) -> float:
         """sound speed parameter."""
-        return self._cs
+        return (self.adiabatic_index - 1.0) / self.adiabatic_index
 
     def initial_primitive_state(self) -> InitialStateType:
         """generate initial primitive state for orszag-tang vortex."""

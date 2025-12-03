@@ -6,7 +6,7 @@
 # =============================================================================
 import math
 from pathlib import Path
-from typing import Any
+from typing import Annotated
 
 from pydantic import computed_field
 
@@ -30,65 +30,96 @@ class KeplerianRingTest(SimbiProblem):
     """thin ring of matter in keplerian orbit."""
 
     # physics
-    adiabatic_index: float = ProblemParam(
-        1.0, description="adiabatic index (isothermal)"
-    )
-    buffer_width: float = ProblemParam(
-        0.2, description="width of buffer zone (fraction of outer radius)"
-    )
-    buffer_damp_time: float = ProblemParam(
-        0.1, description="damping timescale (orbital periods at r=1)"
-    )
+    adiabatic_index: Annotated[
+        float, ProblemParam(1.0, description="adiabatic index (isothermal)")
+    ]
+    buffer_width: Annotated[
+        float,
+        ProblemParam(
+            0.2, description="width of buffer zone (fraction of outer radius)"
+        ),
+    ]
+    buffer_damp_time: Annotated[
+        float,
+        ProblemParam(
+            0.1, description="damping timescale (orbital periods at r=1)"
+        ),
+    ]
 
     # domain
-    resolution: tuple[int, int] = ProblemParam(
-        (256, 256), cli=True, description="grid resolution"
-    )
-    bounds: list[tuple[float, float]] = ProblemParam(
-        [(-2.0, 2.0), (-2.0, 2.0)], description="domain boundaries"
-    )
-    coord_system: CoordSystem = ProblemParam(
-        CoordSystem.CARTESIAN, description="coordinate system"
-    )
-    regime: Regime = ProblemParam(
-        Regime.NEWTONIAN, description="physics regime"
-    )
-    x1_spacing: CellSpacing = ProblemParam(
-        CellSpacing.LINEAR, description="grid spacing in x1 direction"
-    )
+    resolution: Annotated[
+        tuple[int, int],
+        ProblemParam((256, 256), cli=True, description="grid resolution"),
+    ]
+    bounds: Annotated[
+        list[tuple[float, float]],
+        ProblemParam(
+            [(-2.0, 2.0), (-2.0, 2.0)], description="domain boundaries"
+        ),
+    ]
+    coord_system: Annotated[
+        CoordSystem,
+        ProblemParam(CoordSystem.CARTESIAN, description="coordinate system"),
+    ]
+    regime: Annotated[
+        Regime, ProblemParam(Regime.NEWTONIAN, description="physics regime")
+    ]
+    x1_spacing: Annotated[
+        CellSpacing,
+        ProblemParam(
+            CellSpacing.LINEAR, description="grid spacing in x1 direction"
+        ),
+    ]
 
     # numerics
-    solver: Solver = ProblemParam(Solver.HLLE, description="numerical solver")
-    boundary_conditions: BoundaryCondition = ProblemParam(
-        BoundaryCondition.OUTFLOW, description="boundary conditions"
-    )
-    cfl_number: float = ProblemParam(0.25, description="cfl condition number")
+    solver: Annotated[
+        Solver, ProblemParam(Solver.HLLE, description="numerical solver")
+    ]
+    boundary_conditions: Annotated[
+        BoundaryCondition,
+        ProblemParam(
+            BoundaryCondition.OUTFLOW, description="boundary conditions"
+        ),
+    ]
+    cfl_number: Annotated[
+        float, ProblemParam(0.25, description="cfl condition number")
+    ]
 
     # simulation control
-    data_directory: Path = ProblemParam(
-        Path("data/kepler/"),
-        cli=True,
-        checkpoint_safe=True,
-        description="output data directory",
-    )
-    end_time: float = ProblemParam(
-        20.0 * math.pi,
-        cli=True,
-        checkpoint_safe=True,
-        description="simulation end time (10 orbits)",
-    )
-    checkpoint_interval: float = ProblemParam(
-        0.2 * math.pi,
-        cli=True,
-        checkpoint_safe=True,
-        description="checkpoint interval",
-    )
+    data_directory: Annotated[
+        Path,
+        ProblemParam(
+            Path("data/kepler/"),
+            cli=True,
+            checkpoint_safe=True,
+            description="output data directory",
+        ),
+    ]
+    end_time: Annotated[
+        float,
+        ProblemParam(
+            20.0 * math.pi,
+            cli=True,
+            checkpoint_safe=True,
+            description="simulation end time (10 orbits)",
+        ),
+    ]
+    checkpoint_interval: Annotated[
+        float,
+        ProblemParam(
+            0.2 * math.pi,
+            cli=True,
+            checkpoint_safe=True,
+            description="checkpoint interval",
+        ),
+    ]
 
-    def __init__(self, **data: Any) -> None:
-        super().__init__(**data)
-        self._initialize_parameters()
+    @property
+    def ambient_sound_speed(self) -> float:
+        return 0.01
 
-    def _initialize_parameters(self) -> None:
+    @property
+    def buffer_parameters(self) -> dict[str, float]:
         r_outer = min(abs(self.bounds[0][1]), abs(self.bounds[1][1]))
         r_buffer = r_outer * (1.0 - self.buffer_width)
 
@@ -96,25 +127,11 @@ class KeplerianRingTest(SimbiProblem):
         M = 1.0
         T_orb = 2.0 * math.pi * math.sqrt(1.0**3 / (G * M))
 
-        object.__setattr__(
-            self,
-            "_buffer_parameters",
-            {
-                "r_buffer": r_buffer,
-                "r_outer": r_outer,
-                "damp_time": self.buffer_damp_time * T_orb,
-            },
-        )
-
-    @computed_field
-    @property
-    def ambient_sound_speed(self) -> float:
-        return 0.01
-
-    @computed_field
-    @property
-    def buffer_parameters(self) -> dict[str, float]:
-        return self._buffer_parameters
+        return {
+            "r_buffer": r_buffer,
+            "r_outer": r_outer,
+            "damp_time": self.buffer_damp_time * T_orb,
+        }
 
     @computed_field
     @property

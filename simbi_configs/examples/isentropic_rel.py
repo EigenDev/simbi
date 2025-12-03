@@ -4,7 +4,7 @@
 # relativistic isentropic pulse in 1d, entropy conserving.
 # =============================================================================
 from dataclasses import dataclass
-from typing import Any, Callable, Sequence
+from typing import Annotated, Callable, Sequence
 
 import numpy as np
 from numpy.typing import NDArray
@@ -24,12 +24,21 @@ class IsentropicWaveParams:
     """physical parameters for isentropic wave."""
 
     rho_ref: float = 1.0
-    p_ref: float = 1.0
+    p_ref: float = 100.0
 
     def make_wave_function(
-        self,
+        self, ell: float
     ) -> Callable[[NDArray[np.float64]], NDArray[np.float64]]:
-        return lambda x: np.sin(2 * np.pi * x)
+        # return lambda x: np.sin(2 * np.pi * x)
+        def wave_function(x: NDArray[np.float64]) -> NDArray[np.float64]:
+            wave = np.where(
+                np.abs(x) < ell,
+                ((x / ell) ** 2.0 - 1.0) ** 4,
+                0.0,
+            )
+            return wave
+
+        return wave_function
 
 
 class IsentropicState:
@@ -42,17 +51,11 @@ class IsentropicState:
         self.adiabatic_index = adiabatic_index
         self.alpha = alpha
 
-    def density(self, x: NDArray[np.float64]) -> NDArray[np.float64]:
-        wave = self.params.make_wave_function()
-        return 1.0 + self.alpha * wave(x)
-
-    def sound_speed(
-        self, rho: NDArray[np.float64] | float, p: NDArray[np.float64] | float
+    def density(
+        self, x: NDArray[np.float64], ell: float
     ) -> NDArray[np.float64]:
-        h = 1.0 + self.adiabatic_index * p / (
-            rho * (self.adiabatic_index - 1.0)
-        )
-        return np.sqrt(self.adiabatic_index * p / (rho * h))
+        wave = self.params.make_wave_function(ell)
+        return self.params.rho_ref * (1.0 + self.alpha * wave(x))
 
     def pressure(self, rho: NDArray[np.float64]) -> NDArray[np.float64]:
         return (
@@ -60,47 +63,90 @@ class IsentropicState:
             * (rho / self.params.rho_ref) ** self.adiabatic_index
         )
 
+    def sound_speed(
+        self, rho: NDArray[np.float64] | float, p: NDArray[np.float64] | float
+    ) -> NDArray[np.float64]:
+        # Enthalpy h = 1 + epsilon + p/rho
+        # For ideal gas: h = 1 + (gamma / (gamma - 1)) * (p / rho)
+        h = 1.0 + self.adiabatic_index * p / (
+            rho * (self.adiabatic_index - 1.0)
+        )
+        return np.sqrt(self.adiabatic_index * p / (rho * h))
+
     def velocity(
         self, rho: NDArray[np.float64], p: NDArray[np.float64]
     ) -> NDArray[np.float64]:
-        cs_ref = self.sound_speed(self.params.rho_ref, self.params.p_ref)
+        """
+        Calculates velocity using the exact Relativistic Riemann Invariant.
+        Ref: Zhang & MacFadyen (2006), Section 4.6.
+        """
         cs = self.sound_speed(rho, p)
-        return 2.0 / (self.adiabatic_index - 1.0) * (cs - cs_ref)
+        cs_ref = self.sound_speed(self.params.rho_ref, self.params.p_ref)
+
+        # Sqrt of gamma minus 1
+        sgm1 = np.sqrt(self.adiabatic_index - 1.0)
+
+        # Calculate the relativistic Riemann invariant integral term
+        # A(cs) = (1 / sqrt(g-1)) * arctanh(cs / sqrt(g-1))
+        term_now = (1.0 / sgm1) * np.arctanh(cs / sgm1)
+        term_ref = (1.0 / sgm1) * np.arctanh(cs_ref / sgm1)
+
+        # arctanh(v) = term_now - term_ref
+        # v = tanh(term_now - term_ref)
+        return np.tanh(term_now - term_ref)
 
 
 class IsentropicRelWave(SimbiProblem):
     """relativistic isentropic pulse in 1d, entropy conserving."""
 
     # physics
-    adiabatic_index: float = ProblemParam(
-        4.0 / 3.0, description="adiabatic gas index"
-    )
-    alpha: float = ProblemParam(0.5, cli=True, description="wave amplitude")
+    adiabatic_index: Annotated[
+        float, ProblemParam(5.0 / 3.0, description="adiabatic gas index")
+    ]
+    alpha: Annotated[
+        float, ProblemParam(0.5, cli=True, description="wave amplitude")
+    ]
 
     # domain
-    resolution: int = ProblemParam(
-        1000, cli=True, description="grid resolution"
-    )
-    bounds: Sequence[Sequence[float]] = ProblemParam(
-        [(0.0, 1.0)], description="domain boundaries"
-    )
-    coord_system: CoordSystem = ProblemParam(
-        CoordSystem.CARTESIAN, description="coordinate system"
-    )
-    regime: Regime = ProblemParam(Regime.SRHD, description="physics regime")
-    x1_spacing: CellSpacing = ProblemParam(
-        CellSpacing.LINEAR, description="grid spacing in x1 direction"
-    )
+    resolution: Annotated[
+        int, ProblemParam(1000, cli=True, description="grid resolution")
+    ]
+    bounds: Annotated[
+        Sequence[Sequence[float]],
+        ProblemParam([(-0.35, 1.0)], description="domain boundaries"),
+    ]
+    coord_system: Annotated[
+        CoordSystem,
+        ProblemParam(CoordSystem.CARTESIAN, description="coordinate system"),
+    ]
+    regime: Annotated[
+        Regime, ProblemParam(Regime.SRHD, description="physics regime")
+    ]
+    x1_spacing: Annotated[
+        CellSpacing,
+        ProblemParam(
+            CellSpacing.LINEAR, description="grid spacing in x1 direction"
+        ),
+    ]
 
     # numerics
-    boundary_conditions: BoundaryCondition = ProblemParam(
-        BoundaryCondition.PERIODIC, description="boundary conditions"
-    )
+    boundary_conditions: Annotated[
+        BoundaryCondition,
+        ProblemParam(
+            BoundaryCondition.PERIODIC, description="boundary conditions"
+        ),
+    ]
 
     # simulation control
-    end_time: float = ProblemParam(
-        1.0, cli=True, checkpoint_safe=True, description="simulation end time"
-    )
+    end_time: Annotated[
+        float,
+        ProblemParam(
+            1.0,
+            cli=True,
+            checkpoint_safe=True,
+            description="simulation end time",
+        ),
+    ]
 
     @field_validator("alpha")
     @classmethod
@@ -111,23 +157,33 @@ class IsentropicRelWave(SimbiProblem):
             )
         return v
 
-    def __init__(self, **data: Any) -> None:
-        super().__init__(**data)
-        wave_params = IsentropicWaveParams()
-        state = IsentropicState(wave_params, self.adiabatic_index, self.alpha)
-        object.__setattr__(self, "_wave_params", wave_params)
-        object.__setattr__(self, "_state", state)
+    @property
+    def wave_params(self) -> IsentropicWaveParams:
+        """physical parameters for isentropic wave."""
+        return IsentropicWaveParams()
+
+    @property
+    def state(self) -> IsentropicState:
+        """state calculator for isentropic wave."""
+        return IsentropicState(
+            self.wave_params, self.adiabatic_index, self.alpha
+        )
 
     def initial_primitive_state(self) -> InitialStateType:
         """generate initial primitive state for isentropic wave."""
 
         def gas_state() -> GasStateGenerator:
             nx = self.resolution
-            dx = (self.bounds[0][1] - self.bounds[0][0]) / nx
-            x = np.fromiter((ii * dx for ii in range(nx)), dtype=np.float64)
-            rho = self._state.density(x)
-            p = self._state.pressure(rho)
-            v = self._state.velocity(rho, p)
+            x1 = self.bounds[0][0]
+            x2 = self.bounds[0][1]
+            dx = (x2 - x1) / nx
+
+            # Cell centers: (i + 0.5) * dx
+            x = np.linspace(x1 + 0.5 * dx, x2 - 0.5 * dx, nx)
+            ell = 0.3
+            rho = self.state.density(x, ell)
+            p = self.state.pressure(rho)
+            v = self.state.velocity(rho, p)
 
             for ii in range(nx):
                 yield (rho[ii], v[ii], p[ii])

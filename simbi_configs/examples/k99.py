@@ -5,7 +5,7 @@
 # =============================================================================
 from dataclasses import dataclass
 from functools import partial
-from typing import Any, NamedTuple, Sequence, cast
+from typing import Annotated, NamedTuple, Sequence, cast
 
 import numpy as np
 from numpy.typing import NDArray
@@ -74,188 +74,202 @@ class K99(SimbiProblem):
     """komissarov (1999), 1d srmhd test problems."""
 
     # physics
-    adiabatic_index: float = ProblemParam(
-        4.0 / 3.0, description="adiabatic index"
-    )
-    problem: str = ProblemParam(
-        "fast-shock",
-        cli=True,
-        description="problem type (fast-shock, slow-shock, fast-rarefaction, etc.)",
-    )
+    adiabatic_index: Annotated[
+        float, ProblemParam(4.0 / 3.0, description="adiabatic index")
+    ]
+    problem: Annotated[
+        str,
+        ProblemParam(
+            "fast-shock",
+            cli=True,
+            description="problem type (fast-shock, slow-shock, fast-rarefaction, etc.)",
+        ),
+    ]
 
     # domain
-    resolution: tuple[int, int, int] = ProblemParam(
-        (100, 1, 1), cli=True, description="grid resolution"
-    )
-    bounds: list[tuple[float, float]] = ProblemParam(
-        [(XMIN, XMAX)], description="domain boundaries"
-    )
-    coord_system: CoordSystem = ProblemParam(
-        CoordSystem.CARTESIAN, description="coordinate system"
-    )
-    regime: Regime = ProblemParam(Regime.SRMHD, description="physics regime")
+    resolution: Annotated[
+        tuple[int, int, int],
+        ProblemParam((100, 1, 1), cli=True, description="grid resolution"),
+    ]
+    bounds: Annotated[
+        list[tuple[float, float]],
+        ProblemParam([(XMIN, XMAX)], description="domain boundaries"),
+    ]
+    coord_system: Annotated[
+        CoordSystem,
+        ProblemParam(CoordSystem.CARTESIAN, description="coordinate system"),
+    ]
+    regime: Annotated[
+        Regime, ProblemParam(Regime.SRMHD, description="physics regime")
+    ]
 
     # numerics
-    solver: Solver = ProblemParam(
-        Solver.HLLD, description="solver type for mhd"
-    )
-    x1_spacing: CellSpacing = ProblemParam(
-        CellSpacing.LINEAR, description="grid spacing in x1 direction"
-    )
+    solver: Annotated[
+        Solver, ProblemParam(Solver.HLLD, description="solver type for mhd")
+    ]
+    x1_spacing: Annotated[
+        CellSpacing,
+        ProblemParam(
+            CellSpacing.LINEAR, description="grid spacing in x1 direction"
+        ),
+    ]
 
     # simulation control
-    end_time: float = ProblemParam(
-        1.0, cli=True, checkpoint_safe=True, description="simulation end time"
-    )
+    end_time: Annotated[
+        float,
+        ProblemParam(
+            1.0,
+            cli=True,
+            checkpoint_safe=True,
+            description="simulation end time",
+        ),
+    ]
 
-    def __init__(self, **data: Any) -> None:
-        super().__init__(**data)
-        object.__setattr__(
-            self,
-            "_problem_states",
-            {
-                "fast-shock": MHDProblemState.create_state(
-                    (
-                        1.000,
-                        *MHDProblemState.beta([25.0, 0.0, 0.0]),
-                        1.000,
-                        20.0,
-                        25.02,
-                        0.0,
-                    ),
-                    (
-                        25.48,
-                        *MHDProblemState.beta([1.091, 0.3923, 0.0]),
-                        367.5,
-                        20.0,
-                        49.00,
-                        0.0,
-                    ),
+    @property
+    def problem_states(self) -> dict[str, MHDProblemState]:
+        """available mhd shock tube problem states."""
+        return {
+            "fast-shock": MHDProblemState.create_state(
+                (
+                    1.000,
+                    *MHDProblemState.beta([25.0, 0.0, 0.0]),
+                    1.000,
+                    20.0,
+                    25.02,
+                    0.0,
                 ),
-                "slow-shock": MHDProblemState.create_state(
-                    (
-                        1.000,
-                        *MHDProblemState.beta([1.5300, 0.0, 0.0]),
-                        10.00,
-                        10.0,
-                        18.28,
-                        0.0,
-                    ),
-                    (
-                        3.323,
-                        *MHDProblemState.beta([0.9571, -0.6822, 0.0]),
-                        55.36,
-                        10.0,
-                        14.49,
-                        0.0,
-                    ),
+                (
+                    25.48,
+                    *MHDProblemState.beta([1.091, 0.3923, 0.0]),
+                    367.5,
+                    20.0,
+                    49.00,
+                    0.0,
                 ),
-                "fast-rarefaction": MHDProblemState.create_state(
-                    (
-                        0.100,
-                        *MHDProblemState.beta([-2.000, 0.0, 0.0]),
-                        1.00,
-                        2.0,
-                        0.000,
-                        0.0,
-                    ),
-                    (
-                        0.562,
-                        *MHDProblemState.beta([-0.212, -0.590, 0.0]),
-                        10.0,
-                        2.0,
-                        4.710,
-                        0.0,
-                    ),
+            ),
+            "slow-shock": MHDProblemState.create_state(
+                (
+                    1.000,
+                    *MHDProblemState.beta([1.5300, 0.0, 0.0]),
+                    10.00,
+                    10.0,
+                    18.28,
+                    0.0,
                 ),
-                "slow-rarefaction": MHDProblemState.create_state(
-                    (
-                        1.78e-3,
-                        *MHDProblemState.beta([-0.765, -1.386, 0.0]),
-                        0.1,
-                        1.0,
-                        1.022,
-                        0.0,
-                    ),
-                    (
-                        0.01000,
-                        *MHDProblemState.beta([+0.0, 0.0, 0.0]),
-                        1.0,
-                        1.0,
-                        0.000,
-                        0.0,
-                    ),
+                (
+                    3.323,
+                    *MHDProblemState.beta([0.9571, -0.6822, 0.0]),
+                    55.36,
+                    10.0,
+                    14.49,
+                    0.0,
                 ),
-                "alfven": MHDProblemState.create_state(
-                    (
-                        1.0,
-                        *MHDProblemState.beta([0.0, 0.0, 0.0]),
-                        1.0,
-                        3.0,
-                        3.0000,
-                        0.0,
-                    ),
-                    (
-                        1.0,
-                        *MHDProblemState.beta([3.70, 5.76, 0.0]),
-                        1.0,
-                        3.0,
-                        -6.857,
-                        0.0,
-                    ),
+            ),
+            "fast-rarefaction": MHDProblemState.create_state(
+                (
+                    0.100,
+                    *MHDProblemState.beta([-2.000, 0.0, 0.0]),
+                    1.00,
+                    2.0,
+                    0.000,
+                    0.0,
                 ),
-                "compound": MHDProblemState.create_state(
-                    (
-                        1.0,
-                        *MHDProblemState.beta([0.0, 0.0, 0.0]),
-                        1.0,
-                        3.0,
-                        +3.000,
-                        0.0,
-                    ),
-                    (
-                        1.0,
-                        *MHDProblemState.beta([3.70, 5.76, 0.0]),
-                        1.0,
-                        3.0,
-                        -6.857,
-                        0.0,
-                    ),
+                (
+                    0.562,
+                    *MHDProblemState.beta([-0.212, -0.590, 0.0]),
+                    10.0,
+                    2.0,
+                    4.710,
+                    0.0,
                 ),
-                "st-1": MHDProblemState.create_state(
-                    (1.0, 0.0, 0.0, 0.0, 1e3, 1.0, 0.0, 0.0),
-                    (0.1, 0.0, 0.0, 0.0, 1.0, 1.0, 0.0, 0.0),
+            ),
+            "slow-rarefaction": MHDProblemState.create_state(
+                (
+                    1.78e-3,
+                    *MHDProblemState.beta([-0.765, -1.386, 0.0]),
+                    0.1,
+                    1.0,
+                    1.022,
+                    0.0,
                 ),
-                "st-2": MHDProblemState.create_state(
-                    (1.0, 0.0, 0.0, 0.0, 30.0, 0.0, 20.0, 0.0),
-                    (0.1, 0.0, 0.0, 0.0, 1.00, 0.0, 0.00, 0.0),
+                (
+                    0.01000,
+                    *MHDProblemState.beta([+0.0, 0.0, 0.0]),
+                    1.0,
+                    1.0,
+                    0.000,
+                    0.0,
                 ),
-                "collision": MHDProblemState.create_state(
-                    (
-                        1.0,
-                        *MHDProblemState.beta([+5.0, 0.0, 0.0]),
-                        1.0,
-                        10.0,
-                        +10.0,
-                        0.0,
-                    ),
-                    (
-                        1.0,
-                        *MHDProblemState.beta([-5.0, 0.0, 0.0]),
-                        1.0,
-                        10.0,
-                        -10.0,
-                        0.0,
-                    ),
+            ),
+            "alfven": MHDProblemState.create_state(
+                (
+                    1.0,
+                    *MHDProblemState.beta([0.0, 0.0, 0.0]),
+                    1.0,
+                    3.0,
+                    3.0000,
+                    0.0,
                 ),
-            },
-        )
+                (
+                    1.0,
+                    *MHDProblemState.beta([3.70, 5.76, 0.0]),
+                    1.0,
+                    3.0,
+                    -6.857,
+                    0.0,
+                ),
+            ),
+            "compound": MHDProblemState.create_state(
+                (
+                    1.0,
+                    *MHDProblemState.beta([0.0, 0.0, 0.0]),
+                    1.0,
+                    3.0,
+                    +3.000,
+                    0.0,
+                ),
+                (
+                    1.0,
+                    *MHDProblemState.beta([3.70, 5.76, 0.0]),
+                    1.0,
+                    3.0,
+                    -6.857,
+                    0.0,
+                ),
+            ),
+            "st-1": MHDProblemState.create_state(
+                (1.0, 0.0, 0.0, 0.0, 1e3, 1.0, 0.0, 0.0),
+                (0.1, 0.0, 0.0, 0.0, 1.0, 1.0, 0.0, 0.0),
+            ),
+            "st-2": MHDProblemState.create_state(
+                (1.0, 0.0, 0.0, 0.0, 30.0, 0.0, 20.0, 0.0),
+                (0.1, 0.0, 0.0, 0.0, 1.00, 0.0, 0.00, 0.0),
+            ),
+            "collision": MHDProblemState.create_state(
+                (
+                    1.0,
+                    *MHDProblemState.beta([+5.0, 0.0, 0.0]),
+                    1.0,
+                    10.0,
+                    +10.0,
+                    0.0,
+                ),
+                (
+                    1.0,
+                    *MHDProblemState.beta([-5.0, 0.0, 0.0]),
+                    1.0,
+                    10.0,
+                    -10.0,
+                    0.0,
+                ),
+            ),
+        }
 
     def initial_primitive_state(self) -> InitialStateType:
         """generate initial primitive state for mhd shock tube."""
 
         def gas_state() -> GasStateGenerator:
-            state = self._problem_states[self.problem]
+            state = self.problem_states[self.problem]
             nx = self.resolution[0]
             dx = (self.bounds[0][1] - self.bounds[0][0]) / nx
 
@@ -279,7 +293,7 @@ class K99(SimbiProblem):
                     )
 
         def bfield_generator(field_name: str) -> StaggeredBFieldGenerator:
-            state = self._problem_states[self.problem]
+            state = self.problem_states[self.problem]
             ni, nj, nk = self.resolution
             dx = (self.bounds[0][1] - self.bounds[0][0]) / ni
 

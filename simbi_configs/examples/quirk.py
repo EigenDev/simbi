@@ -8,9 +8,9 @@ import math
 import random
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Iterator
+from typing import Annotated, Iterator
 
-from pydantic import computed_field
+from pydantic import model_validator
 
 from simbi import ProblemParam, SimbiProblem
 from simbi.types import (
@@ -53,89 +53,106 @@ class Quirk(SimbiProblem):
     """quirk's problem - carbuncle instability test."""
 
     # physics
-    adiabatic_index: float = ProblemParam(
-        5.0 / 3.0, description="adiabatic index"
-    )
-    mach_mode: str = ProblemParam(
-        "low", cli=True, description="mach number regime (low or high)"
-    )
+    adiabatic_index: Annotated[
+        float, ProblemParam(5.0 / 3.0, description="adiabatic index")
+    ]
+    mach_mode: Annotated[
+        str,
+        ProblemParam(
+            "low", cli=True, description="mach number regime (low or high)"
+        ),
+    ]
 
     # domain
-    resolution: tuple[int, int] = ProblemParam(
-        (2400, 20), cli=True, description="grid resolution"
-    )
-    bounds: list[tuple[float, float]] = ProblemParam(
-        [(0.0, 2400.0), (0.0, 20.0)], description="domain boundaries"
-    )
-    coord_system: CoordSystem = ProblemParam(
-        CoordSystem.CARTESIAN, description="coordinate system"
-    )
-    regime: Regime = ProblemParam(
-        Regime.NEWTONIAN, description="physics regime"
-    )
-    x1_spacing: CellSpacing = ProblemParam(
-        CellSpacing.LINEAR, description="grid spacing in x1 direction"
-    )
+    resolution: Annotated[
+        tuple[int, int],
+        ProblemParam((2400, 20), cli=True, description="grid resolution"),
+    ]
+    bounds: Annotated[
+        list[tuple[float, float]],
+        ProblemParam(
+            [(0.0, 2400.0), (0.0, 20.0)], description="domain boundaries"
+        ),
+    ]
+    coord_system: Annotated[
+        CoordSystem,
+        ProblemParam(CoordSystem.CARTESIAN, description="coordinate system"),
+    ]
+    regime: Annotated[
+        Regime, ProblemParam(Regime.NEWTONIAN, description="physics regime")
+    ]
+    x1_spacing: Annotated[
+        CellSpacing,
+        ProblemParam(
+            CellSpacing.LINEAR, description="grid spacing in x1 direction"
+        ),
+    ]
 
     # numerics
-    boundary_conditions: list[BoundaryCondition] = ProblemParam(
-        [BoundaryCondition.REFLECTING], description="boundary conditions"
-    )
-    solver: Solver = ProblemParam(Solver.HLLC, description="numerical solver")
-    use_quirk_smoothing: bool = ProblemParam(
-        True, cli=True, description="enable quirk smoothing"
-    )
+    boundary_conditions: Annotated[
+        list[BoundaryCondition],
+        ProblemParam(
+            [BoundaryCondition.REFLECTING], description="boundary conditions"
+        ),
+    ]
+    solver: Annotated[
+        Solver, ProblemParam(Solver.HLLC, description="numerical solver")
+    ]
+    use_quirk_smoothing: Annotated[
+        bool, ProblemParam(True, cli=True, description="enable quirk smoothing")
+    ]
 
     # simulation control
-    end_time: float = ProblemParam(
-        0.0,
-        cli=True,
-        checkpoint_safe=True,
-        description="simulation end time (auto if 0)",
-    )
+    end_time: Annotated[
+        float,
+        ProblemParam(
+            0.0,
+            cli=True,
+            checkpoint_safe=True,
+            description="simulation end time (auto if 0)",
+        ),
+    ]
 
-    def __init__(self, **data: Any) -> None:
-        super().__init__(**data)
-
-        object.__setattr__(
-            self,
-            "_problem_states",
-            {
-                "low": (
-                    QuirkState(
-                        216.0 / 41.0,
-                        (35.0 / 36.0) * math.sqrt(35),
-                        0.0,
-                        251.0 / 6.0,
-                    ),
-                    QuirkState(1.0, 0.0, 0.0, 1.0),
+    @property
+    def problem_states(self) -> dict[str, tuple[QuirkState, QuirkState]]:
+        """accessor for problem states based on mach mode."""
+        return {
+            "low": (
+                QuirkState(
+                    216.0 / 41.0,
+                    (35.0 / 36.0) * math.sqrt(35),
+                    0.0,
+                    251.0 / 6.0,
                 ),
-                "high": (
-                    QuirkState(
-                        160.0 / 27.0, (133.0 / 8.0) * math.sqrt(1.4), 0.0, 466.5
-                    ),
-                    QuirkState(1.0, 0.0, 0.0, 1.0),
+                QuirkState(1.0, 0.0, 0.0, 1.0),
+            ),
+            "high": (
+                QuirkState(
+                    160.0 / 27.0, (133.0 / 8.0) * math.sqrt(1.4), 0.0, 466.5
                 ),
-            },
-        )
+                QuirkState(1.0, 0.0, 0.0, 1.0),
+            ),
+        }
 
+    @model_validator(mode="after")
+    def compute_defaults(self) -> "Quirk":
+        """compute end_time based on mach_mode if not provided."""
         # set end_time based on mach_mode if not provided
         if self.end_time == 0.0:
             computed_end = 330.0 if self.mach_mode == "low" else 100.0
-            object.__setattr__(self, "end_time", computed_end)
+            self.end_time = computed_end
 
-    @computed_field
-    @property
-    def data_directory(self) -> Path:
-        """compute output data directory based on configuration."""
         smoothing_dir = "smoothing" if self.use_quirk_smoothing else "raw"
-        return Path(f"data/quirk/{smoothing_dir}/{self.mach_mode}_mach")
+        self.data_directory = Path(
+            f"data/quirk/{smoothing_dir}/{self.mach_mode}_mach"
+        )
+        return self
 
     def initial_primitive_state(self) -> InitialStateType:
         """generate initial primitive state for quirk problem."""
 
         def gas_state() -> GasStateGenerator:
-            state = self._problem_states[self.mach_mode]
+            state = self.problem_states[self.mach_mode]
             nx, ny = self.resolution
             xmin, xmax = self.bounds[0]
             dx = (xmax - xmin) / nx

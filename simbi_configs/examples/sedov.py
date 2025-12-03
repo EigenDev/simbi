@@ -5,7 +5,9 @@
 # variable zones per decade in radius.
 # =============================================================================
 import math
-from typing import Any
+from typing import Annotated
+
+from pydantic import model_validator
 
 from simbi import ProblemParam, SimbiProblem, compute_num_polar_zones
 from simbi.types import (
@@ -27,92 +29,120 @@ class SedovTaylor(SimbiProblem):
     """sedov-taylor explosion on 2d spherical logarithmic mesh."""
 
     # physics
-    adiabatic_index: float = ProblemParam(
-        5.0 / 3.0, description="adiabatic index"
-    )
-    e0: float = ProblemParam(1.0, cli=True, description="energy scale")
-    rho0: float = ProblemParam(1.0, description="density scale")
-    k: float = ProblemParam(
-        0.0, cli=True, description="density power law exponent"
-    )
+    adiabatic_index: Annotated[
+        float, ProblemParam(5.0 / 3.0, description="adiabatic index")
+    ]
+    e0: Annotated[
+        float, ProblemParam(1.0, cli=True, description="energy scale")
+    ]
+    rho0: Annotated[float, ProblemParam(1.0, description="density scale")]
+    k: Annotated[
+        float,
+        ProblemParam(0.0, cli=True, description="density power law exponent"),
+    ]
 
     # domain parameters
-    rinit: float = ProblemParam(
-        0.1, cli=True, description="initial grid radius"
-    )
-    rend: float = ProblemParam(1.0, cli=True, description="radial extent")
-    zpd: int = ProblemParam(
-        128, cli=True, description="radial zones per decade"
-    )
-    full_sphere: bool = ProblemParam(
-        False, cli=True, description="flag for full sphere computation"
-    )
+    rinit: Annotated[
+        float, ProblemParam(0.1, cli=True, description="initial grid radius")
+    ]
+    rend: Annotated[
+        float, ProblemParam(1.0, cli=True, description="radial extent")
+    ]
+    zpd: Annotated[
+        int, ProblemParam(128, cli=True, description="radial zones per decade")
+    ]
+    full_sphere: Annotated[
+        bool,
+        ProblemParam(
+            False, cli=True, description="flag for full sphere computation"
+        ),
+    ]
 
     # domain (computed during init)
-    resolution: tuple[int, int] = ProblemParam(
-        (0, 0), description="grid resolution (calculated)"
-    )
-    bounds: list[tuple[float, float]] = ProblemParam(
-        [(0.0, 0.0), (0.0, 0.0)], description="domain boundaries (calculated)"
-    )
-    coord_system: CoordSystem = ProblemParam(
-        CoordSystem.SPHERICAL, description="coordinate system"
-    )
-    regime: Regime = ProblemParam(
-        Regime.NEWTONIAN, description="physics regime"
-    )
+    resolution: Annotated[
+        tuple[int, int],
+        ProblemParam((0, 0), description="grid resolution (calculated)"),
+    ]
+    bounds: Annotated[
+        list[tuple[float, float]],
+        ProblemParam(
+            [(0.0, 0.0), (0.0, 0.0)],
+            description="domain boundaries (calculated)",
+        ),
+    ]
+    coord_system: Annotated[
+        CoordSystem,
+        ProblemParam(CoordSystem.SPHERICAL, description="coordinate system"),
+    ]
+    regime: Annotated[
+        Regime, ProblemParam(Regime.NEWTONIAN, description="physics regime")
+    ]
 
     # numerics
-    x1_spacing: CellSpacing = ProblemParam(
-        CellSpacing.LOG, description="grid spacing in radial direction"
-    )
-    boundary_conditions: list[BoundaryCondition] = ProblemParam(
-        [
-            BoundaryCondition.REFLECTING,
-            BoundaryCondition.OUTFLOW,
-            BoundaryCondition.REFLECTING,
-            BoundaryCondition.REFLECTING,
-        ],
-        description="boundary conditions",
-    )
-    solver: Solver = ProblemParam(Solver.HLLC, description="numerical solver")
+    x1_spacing: Annotated[
+        CellSpacing,
+        ProblemParam(
+            CellSpacing.LOG, description="grid spacing in radial direction"
+        ),
+    ]
+    boundary_conditions: Annotated[
+        list[BoundaryCondition],
+        ProblemParam(
+            [
+                BoundaryCondition.REFLECTING,
+                BoundaryCondition.OUTFLOW,
+                BoundaryCondition.REFLECTING,
+                BoundaryCondition.REFLECTING,
+            ],
+            description="boundary conditions",
+        ),
+    ]
+    solver: Annotated[
+        Solver, ProblemParam(Solver.HLLC, description="numerical solver")
+    ]
 
     # simulation control
-    start_time: float = ProblemParam(0.0, description="simulation start time")
-    end_time: float = ProblemParam(
-        1.0, cli=True, checkpoint_safe=True, description="simulation end time"
-    )
+    start_time: Annotated[
+        float, ProblemParam(0.0, description="simulation start time")
+    ]
+    end_time: Annotated[
+        float,
+        ProblemParam(
+            1.0,
+            cli=True,
+            checkpoint_safe=True,
+            description="simulation end time",
+        ),
+    ]
 
-    def __init__(self, **data: Any) -> None:
-        super().__init__(**data)
+    @model_validator(mode="after")
+    def compute_defaults(self) -> "SedovTaylor":
+        """compute resolution and bounds based on input parameters."""
+        if self.resolution is None or self.bounds is None:
+            # set theta boundaries based on full_sphere flag
+            theta_min = 0
+            theta_max = math.pi if self.full_sphere else 0.5 * math.pi
+            if self.bounds is None:
+                self.bounds = [
+                    (self.rinit, self.rend),
+                    (theta_min, theta_max),
+                ]
 
-        # calculate number of radial zones based on zones per decade
-        ndec = math.log10(self.rend / self.rinit)
-        nr = round(self.zpd * ndec)
+            if self.resolution is None:
+                # calculate number of radial zones based on zones per decade
+                ndec = math.log10(self.rend / self.rinit)
+                nr = round(self.zpd * ndec)
+                # calculate number of polar zones
+                npolar = compute_num_polar_zones(
+                    rmin=float(self.rinit),
+                    rmax=float(self.rend),
+                    nr=nr,
+                    theta_bounds=(theta_min, theta_max),
+                    zpd=int(self.zpd),
+                )
+                self.resolution = (nr, npolar)
 
-        # set theta boundaries based on full_sphere flag
-        theta_min = 0
-        theta_max = math.pi if self.full_sphere else 0.5 * math.pi
-
-        # calculate number of polar zones
-        npolar = compute_num_polar_zones(
-            rmin=float(self.rinit),
-            rmax=float(self.rend),
-            nr=nr,
-            theta_bounds=(theta_min, theta_max),
-            zpd=int(self.zpd),
-        )
-
-        # update resolution and bounds fields
-        object.__setattr__(self, "resolution", (nr, npolar))
-        object.__setattr__(
-            self,
-            "bounds",
-            [
-                (self.rinit, self.rend),
-                (theta_min, theta_max),
-            ],
-        )
+        return self
 
     def initial_primitive_state(self) -> InitialStateType:
         """generate initial primitive state for sedov-taylor explosion."""
