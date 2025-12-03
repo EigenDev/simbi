@@ -48,17 +48,16 @@ CURRENT_CACHE_VERSION: Final[str] = "1.0"
 # Default configuration
 DEFAULT_CONFIG: Final[dict[str, str | bool]] = {
     "gpu_compilation": "disabled",
-    "progress_bar": True,
     "column_major": False,
     "precision": "double",
     "install_mode": "default",
     "dev_arch": "",
     "build_dir": "build",
     "four_velocity": False,
-    "shared_memory": True,
     "cpp_version": "c++20",
     "build_type": "release",
     "gpu_platform": "cuda",
+    "build_tests": False,
 }
 
 # Flag overrides
@@ -67,8 +66,7 @@ FLAG_OVERRIDES: Final[dict[str, list[str]]] = {
     "gpu_compilation": ["--gpu-compilation", "--cpu-compilation"],
     "column_major": ["--row-major", "--column-major"],
     "four_velocity": ["--four-velocity", "--no-four-velocity"],
-    "progress_bar": ["--progress-bar", "--no-progress-bar"],
-    "shared_memory": ["--shared-memory", "--no-shared-memory"],
+    "build_tests": ["--build-tests", "--no-build-tests"],
     "install_mode": ["develop", "default"],
     "gpu_platform": ["cuda", "hip", "None"],
     "build_type": ["release", "debug"],
@@ -321,14 +319,13 @@ class BuildConfig:
     """Strongly typed configuration for Simbi build process."""
 
     gpu_compilation: GPUCompilation = "disabled"
-    progress_bar: bool = True
     column_major: bool = False
+    build_tests: bool = False
     precision: str = "double"
     install_mode: InstallMode = "default"
     dev_arch: str = ""
     build_dir: str = "build"
     four_velocity: bool = False
-    shared_memory: bool = True
     cpp_version: CppVersion = "c++20"
     build_type: BuildType = "release"
     gpu_platform: Platform = "cuda"
@@ -1045,9 +1042,8 @@ def configure_build(
         f"-Dcpp_std={config.cpp_version}",
         f"-Dbuildtype={config.build_type}",
         reconfigure,
-        f"-Dprogress_bar={config.progress_bar}",
         f"-Dhdf5_inc={hdf5_include}",
-        f"-Dshared_memory={config.shared_memory}",
+        f"-Dbuild_tests={config.build_tests}",
     ]
 
 
@@ -1424,16 +1420,10 @@ def _add_build_arguments(parser: argparse.ArgumentParser) -> None:
         help="Flag to set four-velocity as the velocity primitive instead of beta",
     )
     parser.add_argument(
-        "--progress-bar",
+        "--build-tests",
         action=argparse.BooleanOptionalAction,
-        default=DEFAULT_CONFIG["progress_bar"],
-        help="Flag to show / hide progress bar",
-    )
-    parser.add_argument(
-        "--shared-memory",
-        action=argparse.BooleanOptionalAction,
-        default=DEFAULT_CONFIG["shared_memory"],
-        help="Flag to enable / disable shared memory for gpu builds",
+        default=DEFAULT_CONFIG["build_tests"],
+        help="Build tests along with the library",
     )
     parser.add_argument(
         "--cpp17",
