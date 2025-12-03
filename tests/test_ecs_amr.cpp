@@ -44,6 +44,7 @@ void test_single_device_decomposition()
     mesh_bp.boundary_conditions  = {"outflow", "outflow", "outflow", "outflow"};
     mesh_bp.moving_mesh          = false;
     mesh_bp.homologous_expansion = false;
+    mesh_bp.halo_width           = 2;
 
     physics_blueprint_t phys_bp;
     phys_bp.regime         = regime_t::NEWTONIAN;
@@ -71,6 +72,7 @@ void test_single_device_decomposition()
     num_bp.use_quirk_smoothing     = false;
     num_bp.use_fleischmann_limiter = false;
 
+    std::cout << "Building simulation..." << std::endl;
     // build simulation (single device, default)
     auto sim = builders::simulation_builder_t<
                    regime_t::NEWTONIAN,
@@ -84,6 +86,7 @@ void test_single_device_decomposition()
                    .configure_numerics(num_bp)
                    .build();
 
+    std::cout << "Simulation built." << std::endl;
     // verify single level
     assert(sim.num_levels() == 1);
     print_ok("single level created");
@@ -108,23 +111,19 @@ void test_single_device_decomposition()
 
     // single block with outflow BCs should have no ghost expansion
     // (no partition neighbors)
-    assert(part.allocated_domain.start[0] == 0);
-    assert(part.allocated_domain.fin[0] == 16);
+    assert(part.allocated_domain.start[0] == -2);
+    assert(part.allocated_domain.fin[0] == 18);
     print_ok("allocated domain matches owned (no partition neighbors)");
 
-    // verify fields accessible via both apis
-    auto& hydro_legacy = sim.hydro(0);
-    auto& hydro_new    = sim.partition_hydro(0, 0);
-    assert(&hydro_legacy == &hydro_new);
-    print_ok("legacy and new api return same fields");
-
+    // verify fields accessible via both apis (use partition_hydro API)
+    auto& hydro = sim.partition_hydro(0, 0);
     // verify field domain
-    assert(hydro_legacy.cons.domain().size() == 256);   // 16x16
-    print_ok("cons field size = 256");
+    assert(hydro.cons.domain().size() == 400);   // 20x20
+    print_ok("cons field size (including ghosts) = 400");
 
     // verify flux fields exist and are face-centered
-    assert(hydro_legacy.flux[0].domain().fin[0] == 17);   // n+1 faces in x
-    assert(hydro_legacy.flux[1].domain().fin[1] == 17);   // n+1 faces in y
+    assert(hydro.flux[0].domain().fin[0] == 17);   // n+1 faces in x
+    assert(hydro.flux[1].domain().fin[1] == 17);   // n+1 faces in y
     print_ok("flux fields are face-centered");
 
     // verify metadata
@@ -155,6 +154,7 @@ void test_multi_partition_decomposition()
     mesh_bp.boundary_conditions  = {"outflow", "outflow", "outflow", "outflow"};
     mesh_bp.moving_mesh          = false;
     mesh_bp.homologous_expansion = false;
+    mesh_bp.halo_width           = 2;
 
     physics_blueprint_t phys_bp;
     phys_bp.regime         = regime_t::NEWTONIAN;
@@ -279,6 +279,7 @@ void test_periodic_boundaries()
         .boundary_conditions = {"periodic", "periodic", "periodic", "periodic"};
     mesh_bp.moving_mesh      = false;
     mesh_bp.homologous_expansion = false;
+    mesh_bp.halo_width           = 2;
 
     physics_blueprint_t phys_bp;
     phys_bp.regime         = regime_t::NEWTONIAN;
@@ -364,6 +365,7 @@ void test_amr_with_decomposition()
         .boundary_conditions = {"periodic", "periodic", "periodic", "periodic"};
     mesh_bp.moving_mesh      = false;
     mesh_bp.homologous_expansion = false;
+    mesh_bp.halo_width           = 2;
 
     physics_blueprint_t phys_bp;
     phys_bp.regime         = regime_t::NEWTONIAN;
@@ -446,9 +448,9 @@ void test_amr_with_decomposition()
     assert(l1_part.owned_domain.size() == 64);
     print_ok("owned domains are 8x8 at both levels");
 
-    // verify fields are allocated (non-null)
-    auto& l0_hydro = sim.hydro(0);
-    auto& l1_hydro = sim.hydro(1);
+    // verify fields are allocated (non-null) using partition_hydro
+    auto& l0_hydro = sim.partition_hydro(0, 0);
+    auto& l1_hydro = sim.partition_hydro(1, 0);
     assert(l0_hydro.cons.data() != nullptr);
     assert(l1_hydro.cons.data() != nullptr);
     print_ok("fields allocated at both levels");

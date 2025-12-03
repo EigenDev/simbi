@@ -1,6 +1,9 @@
 #include "compat.hpp"
 #include "compute/computation.hpp"
 #include "containers/vector.hpp"
+#include "geometry/block_geometry.hpp"
+#include "geometry/coordinate_map.hpp"
+#include "geometry/metrics.hpp"
 #include "grid/algebra.hpp"
 #include "grid/amr/api.hpp"
 #include "grid/amr/flux_correction.hpp"
@@ -9,6 +12,7 @@
 #include "grid/field.hpp"
 #include "hesi/adapter.hpp"
 #include "hesi/core/types.hpp"
+#include "test_helpers.hpp"
 
 #include <cassert>
 #include <cmath>
@@ -17,7 +21,8 @@
 using namespace simbi;
 using namespace simbi::grid;
 
-struct linear_gradient_t {
+struct linear_gradient_t
+{
     DUAL double operator()(const iarray<2>& coord) const
     {
         return static_cast<double>((coord[0] + 0.5) + (coord[1] + 0.5));
@@ -28,16 +33,14 @@ int main()
 {
     std::cout << "testing SMR operations..." << std::endl;
 
-    iarray<2> ratio{2, 2};
+    iarray<2>         ratio{2, 2};
     grid::domain_t<2> coarse_domain{{0, 0}, {8, 8}};
     grid::domain_t<2> fine_active{{4, 4}, {12, 12}};
-    grid::domain_t<2> fine_alloc =
-        domain_algebra::expand(fine_active, iarray<2>{2, 2});
+    grid::domain_t<2> fine_alloc = domain_algebra::expand(fine_active, iarray<2>{2, 2});
 
-    auto backend = het::info::is_gpu ? het::backend_type_t::cuda
-                                     : het::backend_type_t::cpu;
+    auto backend = het::info::is_gpu ? het::backend_type_t::cuda : het::backend_type_t::cpu;
     het::locality_t loc{backend, 0};
-    het::stream_t stream(backend);
+    het::stream_t   stream(backend);
     het::executor_t exec(stream);
 
     field_t<double, 2> coarse(coarse_domain, loc);
@@ -55,9 +58,8 @@ int main()
     std::cout << "  restriction ✓" << std::endl;
 
     // test prolongation
-    coarse =
-        compute::computation(coarse_domain, linear_gradient_t{}).with(exec);
-    fine = compute::constant(fine.domain(), -999.0).with(exec);
+    coarse = test_helpers::make_computation<2>(coarse_domain, linear_gradient_t{}).with(exec);
+    fine   = compute::constant(fine.domain(), -999.0).with(exec);
 
     amr::fill_fine_ghosts(fine, coarse, fine_active, ratio, exec);
 
@@ -67,19 +69,26 @@ int main()
     std::cout << "  prolongation ✓" << std::endl;
 
     // test flux correction
-    grid::domain_t<2> footprint{{2, 2}, {6, 6}};
+    grid::domain_t<2>               footprint{{2, 2}, {6, 6}};
     amr::flux_register_t<double, 2> flux_reg(footprint, ratio);
     flux_reg.initialize_face(0, side_t::left, loc);
+
+    // create uniform cartesian geometry for test
+    auto x1_map = geometry::uniform_map_t(0.0, 1.0);
+    auto x2_map = geometry::uniform_map_t(0.0, 1.0);
+    auto metric = geometry::cartesian_metric_t(x1_map, x2_map);
+    auto motion = geometry::motion_state_t::static_mesh();
+    auto geo    = geometry::block_geometry(metric, motion);
 
     double dt = 0.1;
 
     field_t<double, 2> c_flux(grid::domain_t<2>{{2, 2}, {3, 6}}, loc);
     c_flux = compute::constant(c_flux.domain(), 1.0).with(exec);
-    flux_reg.accumulate_coarse(exec, c_flux, 0, side_t::left, dt);
+    flux_reg.accumulate_coarse(exec, c_flux, geo, 0, side_t::left, dt);
 
     field_t<double, 2> f_flux(grid::domain_t<2>{{4, 4}, {6, 12}}, loc);
     f_flux = compute::constant(f_flux.domain(), 1.2).with(exec);
-    flux_reg.accumulate_fine(exec, f_flux, 0, side_t::left, dt);
+    flux_reg.accumulate_fine(exec, f_flux, geo, 0, side_t::left, dt);
 
     auto* reg = flux_reg.get_register(0, side_t::left);
     assert(std::abs(reg->view()({2, 2}) - 0.02) < 1e-9);

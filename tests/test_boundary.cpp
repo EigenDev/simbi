@@ -11,6 +11,7 @@
 #include "grid/skeleton.hpp"
 #include "hesi/adapter.hpp"
 #include "hesi/core/types.hpp"
+#include "test_helpers.hpp"
 
 #include <cassert>
 #include <cstdint>
@@ -54,7 +55,7 @@ int main()
         return inside ? 10.0 : -999.0;
     };
 
-    u = compute::computation(u.domain(), init).with(exec);
+    u = test_helpers::make_computation<2>(u.domain(), init).with(exec);
 
     // configure block with mixed boundaries
     block_info_t<2> block;

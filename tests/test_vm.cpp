@@ -14,6 +14,7 @@
 #include "grid/skeleton.hpp"
 #include "hesi/adapter.hpp"
 #include "hesi/core/types.hpp"
+#include "test_helpers.hpp"
 
 #include <cassert>
 #include <cmath>
@@ -68,7 +69,7 @@ int main()
     auto init = [](auto coord) {
         return (coord[0] >= 0 && coord[0] < 4) ? 100.0 : -999.0;
     };
-    u = simbi::compute::computation(alloc, init).with(exec);
+    u = test_helpers::make_computation<1>(alloc, init).with(exec);
 
     block_info_t<1> block;
     block.id       = patch_id_t{0, {0, 0, 0}};

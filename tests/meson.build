@@ -1,73 +1,26 @@
 # tests/meson.build
 
-# the executable
-boundary_test_exe = executable(
-  'boundary_test',
-  files('test_boundary.cpp') + sources,
-  include_directories: [
-    all_inc, # Points to src/
-    include_directories('..'),
-  ],
-  dependencies: [openmp_dep, hdf5_dep],
-)
+test_inc = [all_inc, include_directories('..')]
 
-dynamic_boundary_test_exe = executable(
-  'dynamic_boundary_test',
-  files('test_vm.cpp') + sources,
-  include_directories: [
-    all_inc, # Points to src/
-    include_directories('..'),
+# compile each test once, link against shared core library
+foreach test_pair : [
+  ['boundary_test', 'test_boundary.cpp', 'Boundary Logic Check'],
+  [
+    'dynamic_boundary_test',
+    'test_vm.cpp',
+    'Dynamic Boundary Management Check',
   ],
-  dependencies: [openmp_dep, hdf5_dep],
-)
-
-field_test_exe = executable(
-  'field_test',
-  files('test_field.cpp') + sources,
-  include_directories: [
-    all_inc, # Points to src/
-    include_directories('..'),
-  ],
-  dependencies: [openmp_dep, hdf5_dep],
-)
-smr_fuller_test_exe = executable(
-  'smr_fuller_test',
-  files('test_smr.cpp') + sources,
-  include_directories: [
-    all_inc, # Points to src/
-    include_directories('..'),
-  ],
-  dependencies: [openmp_dep, hdf5_dep],
-)
-
-reduction_test_exe = executable(
-  'reduction_test',
-  files('test_reduction.cpp') + sources,
-  include_directories: [
-    all_inc, # Points to src/
-    include_directories('..'),
-  ],
-  dependencies: [openmp_dep, hdf5_dep],
-)
-
-ecs_amr_build_exe = executable(
-  'ecs_amr_build_test',
-  files('test_ecs_amr.cpp') + sources,
-  include_directories: [
-    all_inc, # Points to src/
-    include_directories('..'),
-  ],
-  dependencies: [openmp_dep, hdf5_dep],
-)
-
-# reg it with the test runner
-test('Boundary Logic Check', boundary_test_exe, verbose: true)
-test(
-  'Dynamic Boundary Management Check',
-  dynamic_boundary_test_exe,
-  verbose: true,
-)
-test('Field Operations Check', field_test_exe, verbose: true)
-test('SMR Fuller Functionality Check', smr_fuller_test_exe, verbose: true)
-test('Reduction Operations Check', reduction_test_exe, verbose: true)
-test('ECS AMR Build Check', ecs_amr_build_exe, verbose: true)
+  ['field_test', 'test_field.cpp', 'Field Operations Check'],
+  ['smr_fuller_test', 'test_smr.cpp', 'SMR Fuller Functionality Check'],
+  ['reduction_test', 'test_reduction.cpp', 'Reduction Operations Check'],
+  ['ecs_amr_build_test', 'test_ecs_amr.cpp', 'ECS AMR Build Check'],
+]
+  exe = executable(
+    test_pair[0],
+    files(test_pair[1]),
+    include_directories: test_inc,
+    dependencies: general_dependencies,
+    link_with: simbi_core,
+  )
+  test(test_pair[2], exe, verbose: true)
+endforeach

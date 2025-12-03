@@ -67,12 +67,21 @@ general_dependencies = [
   pybind11_dep,
 ]
 
+# compile once, link many
+simbi_core = static_library(
+  'simbi_core',
+  sources + cpu_sources,
+  include_directories: all_inc,
+  dependencies: general_dependencies,
+)
+
 #CPU Extension Module
 py3.extension_module(
   'cpu_ext',
-  ['src/bindings/cpu_binding.cpp'] + sources + cpu_sources,
+  'src/bindings/cpu_binding.cpp',
   include_directories: [all_inc],
   dependencies: general_dependencies,
+  link_with: simbi_core,
   install: true,
   install_dir: py_install_dir,
 )
@@ -104,6 +113,6 @@ if get_option('gpu_compilation').enabled()
 endif
 
 # Tests
-# if get_option('build_tests')
-#   subdir('tests')
-# endif
+if get_option('build_tests')
+  subdir('tests')
+endif

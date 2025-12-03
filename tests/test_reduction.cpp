@@ -7,6 +7,7 @@
 #include "hesi/core/types.hpp"
 #include "hesi/exec/reduce.hpp"
 #include "hesi/mem/transfer.hpp"
+#include "test_helpers.hpp"
 
 #include <cassert>
 #include <cmath>
@@ -60,7 +61,7 @@ int main()
                    : vector_t<double, 3>{1.0, 0.1, 0.0};
     };
 
-    auto physics = compute::computation(domain, init);
+    auto physics = test_helpers::make_computation<2>(domain, init);
     auto dt_comp = physics.map([=](auto val) {
         return cfl_calculator_t{gamma, dx}(val[0], val[1], val[2]);
     });
