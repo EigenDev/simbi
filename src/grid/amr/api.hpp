@@ -13,7 +13,7 @@
 #include "grid/field.hpp"
 
 #include <cstdint>
-#include <iostream>
+#include <stdexcept>
 #include <utility>
 
 namespace simbi::grid::amr {
@@ -23,28 +23,20 @@ namespace simbi::grid::amr {
     // -------------------------------------------------------------------------
     // ghost cell filling (coarse -> fine)
     // -------------------------------------------------------------------------
-    // fills the ghost regions of the fine field by interpolating from the
-    // coarse field. assumes global indexing alignment.
+    // standard version for memory-backed fields
     template <typename T, std::uint64_t Rank, typename Exec>
     void fill_fine_ghosts(
-        field_t<T, Rank>& fine,
+        field_t<T, Rank>&       fine,
         const field_t<T, Rank>& coarse,
-        const domain_t<Rank>& fine_active_domain,
-        const iarray<Rank>& refinement_ratio,
-        Exec& exec
+        const domain_t<Rank>&   fine_active_domain,
+        const iarray<Rank>&     refinement_ratio,
+        Exec&                   exec
     )
     {
         using namespace grid::domain_algebra;
 
         // identify ghost regions
         auto ghost_regions = difference(fine.domain(), fine_active_domain);
-        // std::cout << "fine domain: " << fine.domain() << "\n";
-        // std::cout << "active domain: " << fine_active_domain << "\n";
-        // std::cout << "coarse domain: " << coarse.domain() << "\n";
-        // for (const auto& box : ghost_regions) {
-        //     std::cout << "ghost box: " << box << "\n";
-        // }
-        // std::cin.get();
 
         // construct lazy prolongator
         // this creates a computation defined on the fine global index space
@@ -73,6 +65,24 @@ namespace simbi::grid::amr {
         }
     }
 
+    // overload for bound_computation_t (lazy interpolated data)
+    template <typename T, std::uint64_t Rank, typename Computation, typename Exec>
+    void fill_fine_ghosts(
+        field_t<T, Rank>&                                   fine,
+        const bound_computation_t<Rank, Computation, Exec>& coarse_bound,
+        const domain_t<Rank>&                               fine_active_domain,
+        const iarray<Rank>&                                 refinement_ratio,
+        Exec&                                               exec
+    )
+    {
+        // materialize the computation into a temporary field
+        auto coarse_temp = field_t<T, Rank>(coarse_bound.comp.domain());
+        coarse_temp      = coarse_bound;
+
+        // call the standard version
+        fill_fine_ghosts(fine, coarse_temp, fine_active_domain, refinement_ratio, exec);
+    }
+
     // -------------------------------------------------------------------------
     // restriction (fine -> coarse)
     // -------------------------------------------------------------------------
@@ -80,10 +90,10 @@ namespace simbi::grid::amr {
     // typically applied to the region covered by the fine grid.
     template <typename T, std::uint64_t Rank, typename Exec>
     void restrict_to_coarse(
-        field_t<T, Rank>& coarse,
+        field_t<T, Rank>&       coarse,
         const field_t<T, Rank>& fine,
-        const iarray<Rank>& refinement_ratio,
-        Exec& exec
+        const iarray<Rank>&     refinement_ratio,
+        Exec&                   exec
     )
     {
         // construct lazy restrictor
@@ -104,23 +114,23 @@ namespace simbi::grid::amr {
     // overload for field_view_t
     template <typename T, std::uint64_t Rank, typename Exec>
     void restrict_to_coarse(
-        field_t<T, Rank>& coarse,
+        field_t<T, Rank>&            coarse,
         const field_view_t<T, Rank>& fine_view,
-        const iarray<Rank>& refinement_ratio,
-        Exec& exec
+        const iarray<Rank>&          refinement_ratio,
+        Exec&                        exec
     )
     {
-        auto restrict_op   = restrict(computation(fine_view), refinement_ratio);
-        auto update_region = restrict_op.domain();
+        auto restrict_op      = restrict(computation(fine_view), refinement_ratio);
+        auto update_region    = restrict_op.domain();
         coarse[update_region] = restrict_op.with(exec);
     }
 
     template <typename T, std::uint64_t Rank, typename Geometry, typename Exec>
     void apply_flux_correction(
-        field_t<T, Rank>& coarse,
+        field_t<T, Rank>&         coarse,
         flux_register_t<T, Rank>& flux_reg,
-        const Geometry& geometry,
-        Exec& exec
+        const Geometry&           geometry,
+        Exec&                     exec
     )
     {
         using namespace structs;
@@ -138,11 +148,8 @@ namespace simbi::grid::amr {
 
                 // register now contains (F * dt * area)
                 // apply: u += (F * dt * area) / volume
-                auto reflux_op = [geometry] DUAL(
-                                     const iarray<Rank>& coord,
-                                     const T& u,
-                                     const T& dfa
-                                 ) -> T {
+                auto reflux_op =
+                    [geometry] DUAL(const iarray<Rank>& coord, const T& u, const T& dfa) -> T {
                     real inv_vol = 1.0 / geometry.volume(coord);
                     return u | add_gas(dfa * inv_vol);
                 };
@@ -152,21 +159,18 @@ namespace simbi::grid::amr {
                     coarse[region]
                         .zip(
                             *reg,
-                            [] DEV(const T& u, const T& dfa) {
-                                return std::make_pair(u, dfa);
+                            [] DEV(const T& u, const T& dfa) { return std::make_pair(u, dfa); }
+                        )
+                        .enum_map(
+                            [reflux_op] DEV(const iarray<Rank>& coord, const std::pair<T, T>& p) {
+                                return reflux_op(coord, p.first, p.second);
                             }
                         )
-                        .enum_map([reflux_op] DEV(
-                                      const iarray<Rank>& coord,
-                                      const std::pair<T, T>& p
-                                  ) {
-                            return reflux_op(coord, p.first, p.second);
-                        })
                         .with(exec);
             }
         }
     }
 
-}   // namespace simbi::grid::amr
+} // namespace simbi::grid::amr
 
-#endif   // GRID_AMR_API_HPP
+#endif // GRID_AMR_API_HPP

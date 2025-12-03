@@ -2,7 +2,7 @@
 #define SYSTEMS_HPP
 
 // =============================================================================
-// nsystems.hpp
+// systems.hpp
 //
 // ecs systems for partition-aware multi-device simulations.
 // each system operates on partitions, using executors for kernel dispatch.
@@ -24,7 +24,6 @@
 #include "geometry/boundary/driver.hpp"
 #include "grid/amr/api.hpp"
 #include "grid/connectivity.hpp"
-#include "io/console/printb.hpp"
 #include "io/exceptions.hpp"
 #include "physics/em/api.hpp"
 #include "physics/hydro/boundary_policy.hpp"
@@ -37,9 +36,9 @@
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
-#include <iostream>
 #include <memory>
 #include <numbers>
+#include <stdexcept>
 
 namespace simbi::ecs {
 
@@ -276,6 +275,9 @@ namespace simbi::ecs {
     {
         // if true, prolongate from workspace.u_n instead of cons
         bool use_coarse_u_n{false};
+        // time interpolation weight: u = (1-alpha)*u_n + alpha*u_current
+        // alpha < 0 disables interpolation
+        real alpha{-1.0};
 
         template <typename Sim>
         void operator()(Sim& sim, std::uint64_t lvl) const
@@ -345,6 +347,7 @@ namespace simbi::ecs {
         template <typename Sim>
         void prolongate_from_coarse(Sim& sim, std::uint64_t fine_lvl) const
         {
+            using cons_t              = typename Sim::conserved_t;
             constexpr auto Rank       = Sim::rank;
             const auto     coarse_lvl = fine_lvl - 1;
             const auto     ref_ratio  = sim.level_info(fine_lvl).refinement_ratio;
@@ -358,7 +361,7 @@ namespace simbi::ecs {
                 auto& fine_part   = sim.partition(fine_lvl, fp);
                 auto  exec        = sim.partition_executor(fine_lvl, fp);
 
-                // find overlapping coarse partition (simplified mapping)
+                // find overlapping coarse partition
                 std::uint64_t cp = 0;
                 if (sim.num_partitions(coarse_lvl) > 1) {
                     cp = fp % sim.num_partitions(coarse_lvl);
@@ -370,9 +373,33 @@ namespace simbi::ecs {
 
                 auto& coarse_fields = sim.partition_hydro(coarse_lvl, cp);
 
-                // choose source field based on flag
-                if (use_coarse_u_n && sim.has_workspace(coarse_lvl, cp)) {
-                    // use stored u^n from workspace (for rk2)
+                // time interpolation enabled and workspace exists?
+                const bool do_interpolation = alpha >= 0.0 && sim.has_workspace(coarse_lvl, cp);
+
+                if (do_interpolation) {
+                    // interpolate between u_n and current state
+                    auto& coarse_ws = sim.workspace(coarse_lvl, cp);
+                    auto  u_interp  = coarse_ws.u_n
+                                        .zip(
+                                            coarse_fields.cons,
+                                            [a = alpha] DEV(cons_t u_n, cons_t u_curr) -> cons_t {
+                                                using namespace simbi::structs;
+                                                return u_n | scale_gas(1.0 - a) |
+                                                       add_gas(u_curr | scale_gas(a));
+                                            }
+                                        )
+                                        .with(exec);
+
+                    grid::amr::fill_fine_ghosts(
+                        fine_fields.cons,
+                        u_interp,
+                        fine_part.owned_domain,
+                        ratio,
+                        exec
+                    );
+                }
+                else if (use_coarse_u_n && sim.has_workspace(coarse_lvl, cp)) {
+                    // use stored u^n from workspace
                     auto& coarse_ws = sim.workspace(coarse_lvl, cp);
                     grid::amr::fill_fine_ghosts(
                         fine_fields.cons,
@@ -383,7 +410,7 @@ namespace simbi::ecs {
                     );
                 }
                 else {
-                    // use current state in cons (default)
+                    // use current state in cons
                     grid::amr::fill_fine_ghosts(
                         fine_fields.cons,
                         coarse_fields.cons,
@@ -393,124 +420,6 @@ namespace simbi::ecs {
                     );
                 }
             }
-        }
-    };
-
-    // =========================================================================
-    // time-interpolated ghost fill system
-    // fills fine ghost cells with time-interpolated coarse data for rk2
-    // subcycling u_interp = (1 - alpha) * u^n + alpha * u^* used between rk2
-    // stage 1 and stage 2 on coarse level
-    // =========================================================================
-    struct time_interpolated_ghost_fill_system_t
-    {
-        real alpha; // interpolation weight [0,1]
-
-        template <typename Sim>
-        void operator()(Sim& sim, std::uint64_t fine_lvl) const
-        {
-            if (fine_lvl == 0) {
-                throw std::runtime_error("time_interpolated_ghost_fill: cannot call on base level");
-            }
-
-            constexpr auto Rank       = Sim::rank;
-            const auto     coarse_lvl = fine_lvl - 1;
-            const auto     ref_ratio  = sim.level_info(fine_lvl).refinement_ratio;
-
-            iarray<Rank> ratio;
-            ratio.fill(static_cast<std::int64_t>(ref_ratio));
-
-            // for each fine partition, prolongate time-interpolated coarse data
-            for (std::uint64_t fp = 0; fp < sim.num_partitions(fine_lvl); ++fp) {
-                auto& fine_fields = sim.partition_hydro(fine_lvl, fp);
-                auto& fine_part   = sim.partition(fine_lvl, fp);
-                auto  exec        = sim.partition_executor(fine_lvl, fp);
-
-                // find overlapping coarse partition
-                std::uint64_t cp = find_coarse_partition(sim, fine_lvl, fp);
-
-                if (cp >= sim.num_partitions(coarse_lvl)) {
-                    continue;
-                }
-
-                auto& coarse_fields = sim.partition_hydro(coarse_lvl, cp);
-
-                // coarse workspace contains u^n
-                if (!sim.has_workspace(coarse_lvl, cp)) {
-                    sim.create_workspace(coarse_lvl, cp);
-                    auto& ws = sim.workspace(coarse_lvl, cp);
-                    ws.u_n   = coarse_fields.cons.map([] DEV(auto c) { return c; }).with(exec);
-                }
-
-                auto& coarse_ws = sim.workspace(coarse_lvl, cp);
-
-                // interpolate: u_interp = (1-alpha)*u^n + alpha*u^*
-                // we'll create a temporary field for the interpolated data
-                using cons_t     = typename Sim::conserved_t;
-                auto u_interp    = coarse_fields.cons;
-                auto u_n_view    = coarse_ws.u_n;
-                auto u_star_view = coarse_fields.cons;
-
-                u_interp =
-                    u_n_view
-                        .zip(
-                            u_star_view,
-                            [a = alpha] DEV(cons_t u_n, cons_t u_star) -> cons_t {
-                                using namespace simbi::structs;
-                                auto x = u_n | scale_gas(1.0 - a) | add_gas(u_star | scale_gas(a));
-                                return x;
-                            }
-                        )
-                        .with(exec);
-
-                // prolongate interpolated coarse data to fine ghosts
-                grid::amr::fill_fine_ghosts(
-                    fine_fields.cons,
-                    u_interp,
-                    fine_part.owned_domain,
-                    ratio,
-                    exec
-                );
-            }
-
-            // exchange halos between fine partitions
-            sim.exchange_halos(fine_lvl);
-        }
-
-      private:
-        template <typename Sim>
-        static std::uint64_t
-        find_coarse_partition(Sim& sim, std::uint64_t fine_lvl, std::uint64_t fine_part_idx)
-        {
-            constexpr auto Rank       = Sim::rank;
-            const auto     coarse_lvl = fine_lvl - 1;
-
-            if (sim.num_partitions(coarse_lvl) == 1) {
-                return 0;
-            }
-
-            // spatial overlap detection
-            const auto   ref_ratio = sim.level_info(fine_lvl).refinement_ratio;
-            iarray<Rank> ratio;
-            ratio.fill(static_cast<std::int64_t>(ref_ratio));
-
-            auto& fine_part = sim.partition(fine_lvl, fine_part_idx);
-            auto  fine_in_coarse_coords =
-                grid::amr::scale_domain_down(fine_part.owned_domain, ratio);
-
-            for (std::uint64_t cp = 0; cp < sim.num_partitions(coarse_lvl); ++cp) {
-                auto& coarse_part = sim.partition(coarse_lvl, cp);
-                using namespace grid::domain_algebra;
-                auto overlap = intersection(coarse_part.owned_domain, fine_in_coarse_coords);
-                if (!overlap.empty()) {
-                    return cp;
-                }
-            }
-
-            throw std::runtime_error(
-                "time_interpolated_ghost_fill: no coarse partition overlaps "
-                "fine partition"
-            );
         }
     };
 
@@ -588,6 +497,31 @@ namespace simbi::ecs {
     // =========================================================================
     // zero flux buffer for a level (before subcycling)
     // =========================================================================
+
+    // =========================================================================
+    // snapshot u^n before subcycling (needed for time interpolation)
+    // =========================================================================
+    struct snapshot_u_n_system_t
+    {
+        template <typename Sim>
+        void operator()(Sim& sim, std::uint64_t lvl) const
+        {
+            using cons_t = typename Sim::conserved_t;
+
+            for (std::uint64_t pp = 0; pp < sim.num_partitions(lvl); ++pp) {
+                auto& fields = sim.partition_hydro(lvl, pp);
+                auto  exec   = sim.partition_executor(lvl, pp);
+
+                if (!sim.has_workspace(lvl, pp)) {
+                    sim.create_workspace(lvl, pp);
+                }
+                auto& ws = sim.workspace(lvl, pp);
+
+                // store u^n for time interpolation
+                ws.u_n = fields.cons.map([] DEV(cons_t u) { return u; }).with(exec);
+            }
+        }
+    };
 
     // =========================================================================
     // euler time integration

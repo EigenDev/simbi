@@ -13,10 +13,10 @@
 #include "hesi/exec/reduce.hpp"
 #include "io/exceptions.hpp"
 #include "traits/traits.hpp"
-#include <functional>
 
 #include <cstddef>
 #include <cstdint>
+#include <functional>
 #include <sstream>
 #include <stdexcept>
 #include <type_traits>
@@ -28,10 +28,10 @@ namespace simbi::grid {
     // forward declaration of the execution driver
     template <typename T, std::uint64_t Rank, typename Expression>
     void commit(
-        het::executor_t& exec,
+        het::executor_t&      exec,
         const domain_t<Rank>& domain,
-        het::view_t<T, Rank> dest,
-        const Expression& expr
+        het::view_t<T, Rank>  dest,
+        const Expression&     expr
     );
 
     // -------------------------------------------------------------------------
@@ -40,7 +40,8 @@ namespace simbi::grid {
     // this is the proxy object that enables u = expr.with(exec)
     // -------------------------------------------------------------------------
     template <typename T, std::uint64_t Rank>
-    struct field_view_t : public het::view_t<T, Rank> {
+    struct field_view_t : public het::view_t<T, Rank>
+    {
         using value_type                    = T;
         using reference_type                = T&;
         using const_reference_type          = const T&;
@@ -53,12 +54,7 @@ namespace simbi::grid {
 
         field_view_t() = default;
 
-        field_view_t(
-            T* ptr,
-            iarray<Rank> shape,
-            iarray<Rank> strides,
-            domain_t<Rank> dom
-        )
+        field_view_t(T* ptr, iarray<Rank> shape, iarray<Rank> strides, domain_t<Rank> dom)
             : base_type({ptr, shape, dom.start, strides}), domain_(dom)
         {
         }
@@ -72,15 +68,20 @@ namespace simbi::grid {
             return base_type::operator[](coord);
         }
 
-        auto as_computation() const { return computation(*this); }
+        auto as_computation() const
+        {
+            return computation(*this);
+        }
 
-        const domain_t<Rank>& domain() const { return domain_; }
+        const domain_t<Rank>& domain() const
+        {
+            return domain_;
+        }
 
         // commitment operator (the execution trigger)
         // allows syntax: view = expr.with(exec)
         template <typename Comp, typename Exec>
-        const field_view_t&
-        operator=(const bound_computation_t<Rank, Comp, Exec>& package) const
+        const field_view_t& operator=(const bound_computation_t<Rank, Comp, Exec>& package) const
         {
             using namespace domain_algebra;
             // strict domain intersection check
@@ -123,8 +124,7 @@ namespace simbi::grid {
                 if constexpr (is_computation_v<decltype(obj)>) {
                     return obj;
                 }
-                else if constexpr (std::
-                                       is_same_v<decltype(obj), field_view_t>) {
+                else if constexpr (std::is_same_v<decltype(obj), field_view_t>) {
                     return computation(obj);
                 }
                 else {
@@ -133,10 +133,7 @@ namespace simbi::grid {
                 }
             };
 
-            return ensure_comp(*this).zip(
-                ensure_comp(other),
-                std::forward<BinaryOp>(op)
-            );
+            return ensure_comp(*this).zip(ensure_comp(other), std::forward<BinaryOp>(op));
         }
 
         // coord map
@@ -194,13 +191,10 @@ namespace simbi::grid {
         // default
         field_t() = default;
         // allocates memory for domain + halo_width
-        field_t(
-            const domain_t<Rank>& domain,
-            het::locality_t loc = het::locality_t::host()
-        )
+        field_t(const domain_t<Rank>& domain, het::locality_t loc = het::locality_t::host())
             : domain_(domain)
         {
-            auto shape                = domain.shape();
+            auto          shape       = domain.shape();
             std::uint64_t total_elems = fp::product(shape);
 
             // allocate via shared handle factory
@@ -223,14 +217,20 @@ namespace simbi::grid {
         field_t(field_t&&)            = default;
         field_t& operator=(field_t&&) = default;
 
-        auto as_computation() const { return computation(view()); }
+        auto as_computation() const
+        {
+            return computation(view());
+        }
 
         // ---------------------------------------------------------------------
         // accessors (views)
         // ---------------------------------------------------------------------
 
         // returns a view of the interior (logical) domain
-        view_type view() const { return make_view(domain_); }
+        view_type view() const
+        {
+            return make_view(domain_);
+        }
 
         // returns a view of a specific subdomain
         // clips request to the physical allocation bounds
@@ -248,7 +248,7 @@ namespace simbi::grid {
         // but restricting the logical domain to 'subdomain'
         field_t slice(const domain_t<Rank>& subdomain) const
         {
-            field_t sub = *this;   // increments ref count
+            field_t sub = *this; // increments ref count
 
             // restrict the logical window
             // note: we intersect with allocated_domain_ to ensure safety
@@ -290,10 +290,7 @@ namespace simbi::grid {
                 }
             };
 
-            return ensure_comp(*this).zip(
-                ensure_comp(other),
-                std::forward<BinaryOp>(op)
-            );
+            return ensure_comp(*this).zip(ensure_comp(other), std::forward<BinaryOp>(op));
         }
 
         template <typename F>
@@ -321,7 +318,10 @@ namespace simbi::grid {
         {
             return view()(coord);
         }
-        T& operator[](const iarray<Rank>& coord) { return view()[coord]; }
+        T& operator[](const iarray<Rank>& coord)
+        {
+            return view()[coord];
+        }
 
         // execution commitment shortcut
         // allows syntax: field = expr.with(exec)
@@ -334,11 +334,20 @@ namespace simbi::grid {
         }
 
         // metadata
-        const domain_t<Rank>& domain() const { return domain_; }
-        het::locality_t locality() const { return storage_->locality(); }
+        const domain_t<Rank>& domain() const
+        {
+            return domain_;
+        }
+        het::locality_t locality() const
+        {
+            return storage_->locality();
+        }
 
         // direct pointer access (use with caution)
-        T* data() const { return static_cast<T*>(storage_->data()); }
+        T* data() const
+        {
+            return static_cast<T*>(storage_->data());
+        }
 
         // ---------------------------------------------------------------------
         // cloning helpers
@@ -360,8 +369,7 @@ namespace simbi::grid {
 
             // host move optimization: if target is host and we are sole owner
             // and already host-local, perform an ownership transfer
-            if (target.backend == het::backend_type_t::cpu &&
-                storage_.use_count() == 1 &&
+            if (target.backend == het::backend_type_t::cpu && storage_.use_count() == 1 &&
                 storage_->locality().backend == het::backend_type_t::cpu) {
                 field_t out;
                 out.storage_ = std::move(storage_);
@@ -374,9 +382,8 @@ namespace simbi::grid {
             auto dst = het::mem::make_handle(
                 storage_->size(),
                 target,
-                (target.backend == het::backend_type_t::cpu)
-                    ? het::memory_type_t::host_visible
-                    : het::memory_type_t::device_local
+                (target.backend == het::backend_type_t::cpu) ? het::memory_type_t::host_visible
+                                                             : het::memory_type_t::device_local
             );
 
             het::mem::copy_handle_sync(dst, storage_, storage_->size());
@@ -387,15 +394,17 @@ namespace simbi::grid {
             return out;
         }
 
+        field_t clone() const
+        {
+            return clone(locality());
+        }
+
         // asynchronous clone: prepares `out` and returns a token that completes
         // when the transfer to `target` on `stream` finishes. `out` will own
         // the destination handle immediately; the returned token tracks the
         // copy completion.
-        het::exec::token_t clone_async(
-            het::locality_t target,
-            het::exec::stream_t& stream,
-            field_t& out
-        ) const
+        het::exec::token_t
+        clone_async(het::locality_t target, het::exec::stream_t& stream, field_t& out) const
         {
             // shallow-copy fast path
             if (storage_->locality() == target) {
@@ -407,9 +416,8 @@ namespace simbi::grid {
             auto dst = het::mem::make_handle(
                 storage_->size(),
                 target,
-                (target.backend == het::backend_type_t::cpu)
-                    ? het::memory_type_t::host_visible
-                    : het::memory_type_t::device_local
+                (target.backend == het::backend_type_t::cpu) ? het::memory_type_t::host_visible
+                                                             : het::memory_type_t::device_local
             );
 
             // transfer ownership of the handle into the output field
@@ -417,12 +425,7 @@ namespace simbi::grid {
             out.domain_  = domain_;
 
             // schedule async copy into out.storage_ and return the token
-            return het::mem::copy_handle_async(
-                out.storage_,
-                storage_,
-                storage_->size(),
-                stream
-            );
+            return het::mem::copy_handle_async(out.storage_, storage_, storage_->size(), stream);
         }
 
       private:
@@ -457,10 +460,10 @@ namespace simbi::grid {
     // -------------------------------------------------------------------------
     template <typename T, std::uint64_t Rank, typename Expression>
     void try_commit(
-        het::executor_t& exec,
+        het::executor_t&      exec,
         const domain_t<Rank>& domain,
-        het::view_t<T, Rank> dest,
-        const Expression& expr
+        het::view_t<T, Rank>  dest,
+        const Expression&     expr
     )
     {
         auto nerrors = het::exec::reduce_sync(
@@ -487,10 +490,10 @@ namespace simbi::grid {
 
     template <typename T, std::uint64_t Rank, typename Expression>
     void direct_commit(
-        het::executor_t& exec,
+        het::executor_t&      exec,
         const domain_t<Rank>& domain,
-        het::view_t<T, Rank> dest,
-        const Expression& expr
+        het::view_t<T, Rank>  dest,
+        const Expression&     expr
     )
     {
         // launch kernel using generic parallel_for
@@ -499,18 +502,16 @@ namespace simbi::grid {
             het::exec::default_t{},
             exec,
             domain,
-            [=] DUAL(const iarray<Rank>& coord) -> void {
-                dest(coord) = expr(coord);
-            }
+            [=] DUAL(const iarray<Rank>& coord) -> void { dest(coord) = expr(coord); }
         );
     }
 
     template <typename T, std::uint64_t Rank, typename Expression>
     void commit(
-        het::executor_t& exec,
+        het::executor_t&      exec,
         const domain_t<Rank>& domain,
-        het::view_t<T, Rank> dest,
-        const Expression& expr
+        het::view_t<T, Rank>  dest,
+        const Expression&     expr
     )
     {
         // check the expression's return type, not the destination field type
@@ -524,6 +525,6 @@ namespace simbi::grid {
         }
     }
 
-}   // namespace simbi::grid
+} // namespace simbi::grid
 
-#endif   // GRID_FIELD_HPP
+#endif // GRID_FIELD_HPP
