@@ -27,6 +27,7 @@
 #include "io/exceptions.hpp"
 #include "physics/em/api.hpp"
 #include "physics/hydro/boundary_policy.hpp"
+#include "physics/ib/collection.hpp"
 #include "physics/ib/diagnostics.hpp"
 #include "update/prim_recovery.hpp"
 #include "update/timestep.hpp"
@@ -126,12 +127,26 @@ namespace simbi::ecs {
             real            dt
         ) const
         {
-            const auto& bodies = sim.bodies();
-            auto&       meta   = sim.metadata();
-            auto&       fields = sim.partition_hydro(lvl, pp);
-            auto&       part   = sim.partition(lvl, pp);
+            auto& meta   = sim.metadata();
+            auto& fields = sim.partition_hydro(lvl, pp);
+            auto& part   = sim.partition(lvl, pp);
+            if (!sim.has_bodies()) {
+                // no bodies: return zero source
+                auto& part = sim.partition(lvl, pp);
+                return cfd::body_effects(
+                    fields.prim[part.owned_domain],
+                    part.owned_domain,
+                    block_geo,
+                    body_collection_t<Rank>{},
+                    null_diag.get(),
+                    meta.gamma,
+                    dt
+                );
+            }
 
-            bool  auth = is_authoritative(sim, lvl);
+            const auto& bodies = sim.bodies();
+            const bool  auth   = is_authoritative(sim, lvl);
+
             auto* diag = auth ? (update_diagnostics ? sim.diagnostics().get() : null_diag.get())
                               : null_diag.get();
 
@@ -567,7 +582,7 @@ namespace simbi::ecs {
                     u_view
                         .zip(
                             ell,
-                            [dt, be] DEV(cons_t u, cons_t dudt) -> cons_t {
+                            [dt] DEV(cons_t u, cons_t dudt) -> cons_t {
                                 return u | add_gas(dudt * dt);
                             }
                         )
@@ -1028,6 +1043,9 @@ namespace simbi::ecs {
         void operator()(Sim& sim, std::uint64_t coarse_lvl, std::uint64_t fine_lvl, real dt) const
         {
             constexpr auto Rank = Sim::rank;
+            if (!sim.has_refinement()) {
+                return;
+            }
 
             // get flux register for the fine level
             if (!sim.has_flux_register(fine_lvl)) {
