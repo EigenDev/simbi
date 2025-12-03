@@ -349,7 +349,9 @@ namespace simbi::evolution {
             using namespace ecs;
             ghost_fill_system_t{}(sim, lvl);
             c2p_system_t{}(sim, lvl);
-            init_flux_registers_system_t{}(sim, lvl);
+            if (sim.has_refinement()) {
+                init_flux_registers_system_t{}(sim, lvl);
+            }
         }
 
         // ---------------------------------------------------------------------
