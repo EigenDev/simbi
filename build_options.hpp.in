@@ -16,7 +16,5 @@
 // Feature flags
 #mesondefine COLUMN_MAJOR
 #mesondefine FOUR_VELOCITY
-#mesondefine PROGRESS_BAR
-#mesondefine SHARED_MEMORY
 
 #endif   // BUILD_OPTIONS_HPP

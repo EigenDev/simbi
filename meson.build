@@ -37,7 +37,7 @@ elif cc.get_id() == 'gcc'
 endif
 #Build configuration
 conf_data = configuration_data()
-foreach opt : ['four_velocity', 'column_major', 'progress_bar', 'shared_memory']
+foreach opt : ['four_velocity', 'column_major']
   conf_data.set10(opt.to_upper(), get_option(opt))
 endforeach
 conf_data.set10('FLOAT_PRECISION', get_option('precision') == 'single')
@@ -104,4 +104,6 @@ if get_option('gpu_compilation').enabled()
 endif
 
 # Tests
-# subdir('tests')
+# if get_option('build_tests')
+#   subdir('tests')
+# endif
