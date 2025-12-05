@@ -29,6 +29,7 @@
 // per-partition, each on its own stream, enabling concurrent execution.
 // =============================================================================
 
+#include "compat.hpp"
 #include "components.hpp"
 #include "entity.hpp"
 #include "geometry/block_geometry.hpp"
@@ -45,7 +46,8 @@
 namespace simbi::ecs {
 
     template <regime_t R, std::uint64_t Rank, geometry_t G, typename EoS>
-    struct simulation_t {
+    struct simulation_t
+    {
         // =========================================================================
         // type aliases
         // =========================================================================
@@ -62,12 +64,11 @@ namespace simbi::ecs {
         // compile-time constants
         // =========================================================================
 
-        static constexpr std::uint64_t rank             = Rank;
-        static constexpr regime_t regime                = R;
+        static constexpr std::uint64_t     rank         = Rank;
+        static constexpr regime_t          regime       = R;
         static constexpr simbi::geometry_t coord_system = G;
-        static constexpr bool is_mhd =
-            (R == regime_t::MHD || R == regime_t::RMHD);
-        static constexpr auto nvars = is_mhd ? 9 : Rank + 3;
+        static constexpr bool              is_mhd = (R == regime_t::MHD || R == regime_t::RMHD);
+        static constexpr auto              nvars  = is_mhd ? 9 : Rank + 3;
 
         // =========================================================================
         // core state
@@ -93,9 +94,15 @@ namespace simbi::ecs {
         // level queries
         // =========================================================================
 
-        std::uint64_t num_levels() const { return levels.size(); }
+        std::uint64_t num_levels() const
+        {
+            return levels.size();
+        }
 
-        bool has_refinement() const { return num_levels() > 1; }
+        bool has_refinement() const
+        {
+            return num_levels() > 1;
+        }
 
         // =========================================================================
         // global component accessors
@@ -111,7 +118,10 @@ namespace simbi::ecs {
             return registry.get<simulation_metadata_t<Rank>>(global);
         }
 
-        auto& sources() { return registry.get<sources_t<Rank>>(global); }
+        auto& sources()
+        {
+            return registry.get<sources_t<Rank>>(global);
+        }
 
         const auto& sources() const
         {
@@ -132,7 +142,10 @@ namespace simbi::ecs {
             return registry.get<level_info_t>(levels[lvl]);
         }
 
-        entity_t level_entity(std::uint64_t lvl) const { return levels[lvl]; }
+        entity_t level_entity(std::uint64_t lvl) const
+        {
+            return levels[lvl];
+        }
 
         auto& refinement(std::uint64_t lvl)
         {
@@ -217,8 +230,7 @@ namespace simbi::ecs {
             return registry.get<fields_t>(decomp.partition_entities[part_id]);
         }
 
-        const auto&
-        partition_hydro(std::uint64_t lvl, std::uint64_t part_id) const
+        const auto& partition_hydro(std::uint64_t lvl, std::uint64_t part_id) const
         {
             const auto& decomp = decomposition(lvl);
             return registry.get<fields_t>(decomp.partition_entities[part_id]);
@@ -230,8 +242,7 @@ namespace simbi::ecs {
         // returns an executor bound to the partition's stream.
         // use this to launch kernels on the partition's device.
         // -------------------------------------------------------------------------
-        het::exec::executor_t
-        partition_executor(std::uint64_t lvl, std::uint64_t part_id) const
+        het::exec::executor_t partition_executor(std::uint64_t lvl, std::uint64_t part_id) const
         {
             return het::exec::executor_t{partition(lvl, part_id).stream};
         }
@@ -241,23 +252,17 @@ namespace simbi::ecs {
         // -------------------------------------------------------------------------
         const auto& flux_register(std::uint64_t lvl) const
         {
-            return registry.get<flux_register_component_t<conserved_t, Rank>>(
-                levels[lvl]
-            );
+            return registry.get<flux_register_component_t<conserved_t, Rank>>(levels[lvl]);
         }
 
         auto& flux_register(std::uint64_t lvl)
         {
-            return registry.get<flux_register_component_t<conserved_t, Rank>>(
-                levels[lvl]
-            );
+            return registry.get<flux_register_component_t<conserved_t, Rank>>(levels[lvl]);
         }
 
         bool has_flux_register(std::uint64_t lvl) const
         {
-            return registry.has<flux_register_component_t<conserved_t, Rank>>(
-                levels[lvl]
-            );
+            return registry.has<flux_register_component_t<conserved_t, Rank>>(levels[lvl]);
         }
 
         // -------------------------------------------------------------------------
@@ -273,11 +278,8 @@ namespace simbi::ecs {
         //   });
         // -------------------------------------------------------------------------
         template <typename Func>
-        decltype(auto) with_geometry(
-            std::uint64_t lvl,
-            const geometry::motion_state_t& motion,
-            Func&& func
-        )
+        decltype(auto)
+        with_geometry(std::uint64_t lvl, const geometry::motion_state_t& motion, Func&& func)
         {
             return ecs::with_block_geometry<coord_system>(
                 level_mesh(lvl).config,
@@ -301,7 +303,10 @@ namespace simbi::ecs {
         //
         // returns mesh config for a level.
         // -------------------------------------------------------------------------
-        auto& mesh(std::uint64_t lvl) { return level_mesh(lvl).config; }
+        auto& mesh(std::uint64_t lvl)
+        {
+            return level_mesh(lvl).config;
+        }
 
         const auto& mesh(std::uint64_t lvl) const
         {
@@ -386,9 +391,7 @@ namespace simbi::ecs {
         bool has_workspace(std::uint64_t lvl, std::uint64_t part_id) const
         {
             const auto& decomp = decomposition(lvl);
-            return registry.has<workspace_t>(
-                decomp.partition_entities[part_id]
-            );
+            return registry.has<workspace_t>(decomp.partition_entities[part_id]);
         }
 
         // -------------------------------------------------------------------------
@@ -409,20 +412,16 @@ namespace simbi::ecs {
 
             // allocate workspace on same device as fields
             workspace_t ws;
-            ws.u_n = grid::field_t<conserved_t, Rank>(
-                part.allocated_domain,
-                fields.cons.locality()
-            );
-            ws.u_star = grid::field_t<conserved_t, Rank>(
-                part.allocated_domain,
-                fields.cons.locality()
-            );
+            ws.u_n =
+                grid::field_t<conserved_t, Rank>(part.allocated_domain, fields.cons.locality());
+            ws.u_star =
+                grid::field_t<conserved_t, Rank>(part.allocated_domain, fields.cons.locality());
 
-            for (std::uint64_t dd = 0; dd < Rank; ++dd) {
-                ws.e_n[dd] = grid::field_t<real, Rank>(
-                    part.edge_domains[dd],
-                    fields.cons.locality()
-                );
+            if constexpr (is_mhd) {
+                for (std::uint64_t dd = 0; dd < Rank; ++dd) {
+                    ws.e_n[dd] =
+                        grid::field_t<real, Rank>(part.edge_domains[dd], fields.cons.locality());
+                }
             }
 
             registry.add<workspace_t>(decomp.partition_entities[part_id], ws);
@@ -436,17 +435,13 @@ namespace simbi::ecs {
         auto& workspace(std::uint64_t lvl, std::uint64_t part_id)
         {
             auto& decomp = decomposition(lvl);
-            return registry.get<workspace_t>(
-                decomp.partition_entities[part_id]
-            );
+            return registry.get<workspace_t>(decomp.partition_entities[part_id]);
         }
 
         const auto& workspace(std::uint64_t lvl, std::uint64_t part_id) const
         {
             const auto& decomp = decomposition(lvl);
-            return registry.get<workspace_t>(
-                decomp.partition_entities[part_id]
-            );
+            return registry.get<workspace_t>(decomp.partition_entities[part_id]);
         }
 
         // =========================================================================
@@ -479,6 +474,6 @@ namespace simbi::ecs {
         }
     };
 
-}   // namespace simbi::ecs
+} // namespace simbi::ecs
 
 #endif
