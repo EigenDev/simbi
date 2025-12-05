@@ -22,10 +22,10 @@ namespace simbi::grid::creation {
     // maps blueprint -> mesh_config_t
     // -------------------------------------------------------------------------
     template <std::uint64_t Rank>
-    struct mesh_setup_t {
+    struct mesh_setup_t
+    {
 
-        static mesh_config_t<Rank>
-        create_config(const ecs::mesh_blueprint_t<Rank>& bp)
+        static mesh_config_t<Rank> create_config(const ecs::mesh_blueprint_t<Rank>& bp)
         {
             using namespace simbi::geometry;
             mesh_config_t<Rank> config;
@@ -47,25 +47,22 @@ namespace simbi::grid::creation {
                 // vector is packed [left, right, left, right...]
                 std::size_t vec_offset = dd * 2;
 
-                auto left_type =
-                    deserialize<boundary_type_t>(bc_strs[vec_offset]);
-                auto right_type =
-                    deserialize<boundary_type_t>(bc_strs[vec_offset + 1]);
+                auto left_type  = deserialize<boundary_type_t>(bc_strs[vec_offset]);
+                auto right_type = deserialize<boundary_type_t>(bc_strs[vec_offset + 1]);
 
                 config.boundaries.set_left(dd, left_type);
                 config.boundaries.set_right(dd, right_type);
             }
 
-            config.geometry.metric =
-                deserialize<metric_type_t>(bp.coord_system);
+            config.geometry.metric = deserialize<metric_type_t>(bp.coord_system);
 
             // geometry configuration
             // we unpack pairs into the config vectors
             for (std::uint64_t dd = 0; dd < Rank; ++dd) {
                 if (dd < bp.bounds.size()) {
-                    auto start = bp.bounds[dd].first;
-                    auto end   = bp.bounds[dd].second;
-                    auto stype = deserialize<map_type_t>(bp.spacing[dd]);
+                    auto               start = bp.bounds[dd].first;
+                    auto               end   = bp.bounds[dd].second;
+                    auto               stype = deserialize<map_type_t>(bp.spacing[dd]);
                     dimension_config_t dim_conf{stype, start, end};
                     config.geometry.dims.push_back(dim_conf);
                 }
@@ -87,10 +84,10 @@ namespace simbi::grid::creation {
     // creates the initial block layout (single block or simple decomposition)
     // -------------------------------------------------------------------------
     template <std::uint64_t Rank>
-    struct skeleton_builder_t {
+    struct skeleton_builder_t
+    {
 
-        static skeleton_t<Rank>
-        build_single_block(const mesh_config_t<Rank>& config)
+        static skeleton_t<Rank> build_single_block(const mesh_config_t<Rank>& config)
         {
             skeleton_t<Rank> skeleton;
 
@@ -105,8 +102,8 @@ namespace simbi::grid::creation {
             block_info_t<Rank> block;
             block.id       = id;
             block.geometry = domain_t<Rank>{
-              iarray<Rank>{},       // start at 0
-              config.global_cells   // end at N
+                iarray<Rank>{},     // start at 0
+                config.global_cells // end at N
             };
 
             // apply physical boundaries
@@ -114,13 +111,23 @@ namespace simbi::grid::creation {
             // unless they are periodic (which is also handled as a BC type
             // here)
             for (std::uint64_t dd = 0; dd < Rank; ++dd) {
-                block
-                    .set_boundary(dd, side_t::left, config.boundaries.left(dd));
-                block.set_boundary(
-                    dd,
-                    side_t::right,
-                    config.boundaries.right(dd)
-                );
+                block.set_boundary(dd, side_t::left, config.boundaries.left(dd));
+                block.set_boundary(dd, side_t::right, config.boundaries.right(dd));
+
+                // attach metric info for spherical theta boundaries
+                if constexpr (Rank >= 2) {
+                    constexpr std::uint64_t theta_array_dim = Rank - 2;
+                    if (dd == theta_array_dim &&
+                        config.geometry.metric == geometry::metric_type_t::spherical) {
+                        // theta is x2 in logical coords, at array index Rank-2
+                        real theta_min = config.geometry.dims[theta_array_dim].start;
+                        real theta_max = config.geometry.dims[theta_array_dim].end;
+
+                        // attach metric info to both left and right theta faces
+                        block.get_face(dd, side_t::left).set_metric_info(theta_min, theta_max);
+                        block.get_face(dd, side_t::right).set_metric_info(theta_min, theta_max);
+                    }
+                }
             }
 
             skeleton.add_block(block);
@@ -128,6 +135,6 @@ namespace simbi::grid::creation {
         }
     };
 
-}   // namespace simbi::grid::creation
+} // namespace simbi::grid::creation
 
-#endif   // GRID_CREATION_SETUP_HPP
+#endif // GRID_CREATION_SETUP_HPP
