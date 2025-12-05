@@ -1,6 +1,7 @@
 from typing import Any, Optional
 
 from matplotlib.axes import Axes
+from matplotlib.collections import PolyCollection, QuadMesh
 from matplotlib.colorbar import Colorbar
 from matplotlib.figure import Figure
 
@@ -247,12 +248,14 @@ class FigureFormatter:
             # check explicit metadata hint first
             if metadata and isinstance(metadata, dict):
                 if (
-                    metadata.get("label")
+                    metadata.get("labels")
+                    or metadata.get("label")
                     or metadata.get("is_line")
                     or metadata.get("is_vector") is False
                 ):
                     has_line_like = True
                     break
+
             # check artist keys and types
             if isinstance(artists, dict):
                 if "line" in artists and artists["line"] is not None:
@@ -280,10 +283,16 @@ class FigureFormatter:
         except Exception:
             pass
 
-        try:
-            remove_spines(main_ax)
-        except Exception:
-            pass
+        # remove top/right spines for cleaner look
+        # but not if plotting multidim plots (e.g, polygons, quadplot)
+        if not any(
+            isinstance(x["collection"], (PolyCollection, QuadMesh))
+            for x in rendered_artists
+        ):
+            try:
+                remove_spines(main_ax)
+            except Exception:
+                pass
 
     def _format_colorbar(
         self, fig: Figure, ax: Axes, artist: Any, field_data: Any

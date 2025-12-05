@@ -14,7 +14,7 @@ from matplotlib.collections import QuadMesh
 from matplotlib.figure import Figure
 from pydantic import ValidationInfo, field_validator
 
-from simbi.types.bodies import Body
+from simbi.reader.io import BodyCollection
 
 from ..config import StyleConfig
 from ..types import Array, ColorRange, FieldData, RenderResult
@@ -90,16 +90,17 @@ class QuadPlotComponent(Component):
     """
 
     def __init__(
-        self, props: QuadPlotProps, bodies: Optional[dict[str, Body]] = None
+        self, props: QuadPlotProps, bodies: Optional[BodyCollection] = None
     ):
         self.props = props
         self._mesh: Optional[QuadMesh] = None
         self._mirror_mesh: Optional[QuadMesh] = None  # For polar plots
         self._initialized: bool = False
+        self._first_render: bool = True
         self.last_x = np.array([])
         self.last_y = np.array([])
         self._mesh_lines: list = []
-        self.bodies: Optional[dict[str, Body]] = bodies
+        self.bodies: Optional[BodyCollection] = bodies
 
     def initialize(self, fig: Figure, ax: Axes) -> None:
         self.fig = fig
@@ -151,6 +152,10 @@ class QuadPlotComponent(Component):
             x, y = data.domain[1], data.domain[0]
             values = data.values
 
+        # compute domain bounds for axis limits
+        x_min, x_max = x.min(), x.max()
+        y_min, y_max = y.min(), y.max()
+
         norm = _create_color_normalization(
             values,
             self.props.color_range,
@@ -184,7 +189,15 @@ class QuadPlotComponent(Component):
 
         self.last_x = x
         self.last_y = y
+
+        # set limits only on first render (preserves CLI limits and user zoom)
+        if self._first_render and self.ax.name != "polar":
+            self.ax.set_xlim(x_min, x_max)
+            self.ax.set_ylim(y_min, y_max)
+            self._first_render = False
+
         self.ax.set_aspect("equal", adjustable="box")
+
         return RenderResult(
             artists={"mesh": self._mesh}, metadata={"mappable": self._mesh}
         )
@@ -229,7 +242,7 @@ class QuadPlotComponent(Component):
                 self._mirror_mesh.set_array(values.ravel())
 
     def draw_bodies(
-        self, bodies: dict[str, Body], zorder: int, axes: Sequence[str]
+        self, body_collection: BodyCollection, zorder: int, axes: Sequence[str]
     ) -> None:
         """Draw immersed bodies on the plot."""
         # This function can be simplified as it no longer
@@ -241,7 +254,7 @@ class QuadPlotComponent(Component):
         n_i = LOGICAL_AXIS_MAP[axes[0]]
         n_j = LOGICAL_AXIS_MAP[axes[1]]
 
-        for _, body in bodies.items():
+        for body in body_collection.bodies:
             radius = body.radius
             if body.accretion is not None:
                 radius = body.accretion.accretion_radius

@@ -60,7 +60,7 @@ def _update_line_style(
 ):
     """Updates an existing line's style and label."""
     if label is not None:
-        line.set_label(get_field_str(label or ""))
+        line.set_label(label)  # label is already formatted
 
     line.set_linewidth(style.get("linewidth", 2.0))
     line.set_alpha(style.get("alpha", 1.0))
@@ -122,7 +122,7 @@ class LinePlotComponent(Component):
 
         line_style = _create_line_style(self.props)
         level_label = self.props.label or data.name
-        if level_label:
+        if level_label and not level_label.startswith("$"):
             if "_L" in level_label:
                 b = level_label.split("_")
                 level_label = get_field_str(b[0]) + "$_{{{0}}}$".format(b[1])
@@ -138,10 +138,6 @@ class LinePlotComponent(Component):
             # Animation update: set new data and style
             _update_line_data(self._line, x_data, y_data)
             _update_line_style(self._line, line_style, level_label)
-
-        # Format axes
-        # We pass 0 as field_index since data is now just this field
-        # format_line_plot_axes(ax, data, 0, style)
 
         return RenderResult(
             artists={"line": self._line}, metadata={"label": level_label}

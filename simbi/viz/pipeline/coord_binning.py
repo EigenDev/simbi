@@ -214,16 +214,24 @@ def _calculate_momentum_terms(
     # 5. Package Results
     return [
         FieldData(
-            name="term_advection", values=term_advection, domain=[bin_centers]
+            name="term_advection",
+            values=term_advection,
+            domain=[bin_centers],
         ),
         FieldData(
-            name="term_pressure", values=term_pressure, domain=[bin_centers]
+            name="term_pressure",
+            values=term_pressure,
+            domain=[bin_centers],
         ),
         FieldData(
-            name="term_gravity", values=term_gravity, domain=[bin_centers]
+            name="term_gravity",
+            values=term_gravity,
+            domain=[bin_centers],
         ),
         FieldData(
-            name="term_residual", values=term_residual, domain=[bin_centers]
+            name="term_residual",
+            values=term_residual,
+            domain=[bin_centers],
         ),
     ]
 

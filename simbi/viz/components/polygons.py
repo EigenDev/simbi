@@ -13,6 +13,7 @@ from matplotlib.collections import PolyCollection
 from matplotlib.figure import Figure
 from pydantic import ValidationInfo, field_validator
 
+from simbi.reader.io import BodyCollection
 from simbi.types.bodies import Body
 
 from ..config import StyleConfig
@@ -65,6 +66,7 @@ class PolygonPlotComponent(Component):
         self.props = props
         self._poly_collection: Optional[PolyCollection] = None
         self._initialized: bool = False
+        self._first_render: bool = True
         self.bodies: Optional[dict[str, Body]] = bodies
 
     def initialize(self, fig: Figure, ax: Axes) -> None:
@@ -112,6 +114,14 @@ class PolygonPlotComponent(Component):
         patches = data.domain
         values = data.values
 
+        # compute domain bounds for setting axis limits
+        import numpy as np
+
+        all_x = [pt[0] for patch in patches for pt in patch]
+        all_y = [pt[1] for patch in patches for pt in patch]
+        x_min, x_max = np.min(all_x), np.max(all_x)
+        y_min, y_max = np.min(all_y), np.max(all_y)
+
         # Create color normalization
         norm = _create_color_normalization(
             values,
@@ -138,6 +148,20 @@ class PolygonPlotComponent(Component):
                 linewidths=edge_width,
                 alpha=self.props.alpha,
             )
+            self.ax.add_collection(self._poly_collection)
+        else:
+            # update existing collection
+            self._poly_collection.set_verts(patches)
+            self._poly_collection.set_array(values)
+            self._poly_collection.set_norm(norm)
+
+        # set limits only on first render (preserves CLI limits and user zoom)
+        if self._first_render:
+            self.ax.set_xlim(x_min, x_max)
+            self.ax.set_ylim(y_min, y_max)
+            self._first_render = False
+
+        self.ax.set_aspect("equal", adjustable="box")
 
         if style.draw_bodies and self.bodies:
             self.draw_bodies(
@@ -146,20 +170,13 @@ class PolygonPlotComponent(Component):
                 axes=data.axis_names if data.axis_names else ["x1", "x2"],
             )
 
-        self._poly_collection.set_array(values)
-        self._poly_collection.set_norm(norm)
-
-        self.ax.add_collection(self._poly_collection)
-        self.ax.autoscale_view()
-        self.ax.set_aspect("equal", adjustable="box")
-
         return RenderResult(
             artists={"collection": self._poly_collection},
             metadata={"mappable": self._poly_collection},
         )
 
     def draw_bodies(
-        self, bodies: dict[str, Body], zorder: int, axes: Sequence[str]
+        self, body_collection: BodyCollection, zorder: int, axes: Sequence[str]
     ) -> None:
         """Draw immersed bodies on the plot."""
         # This function can be simplified as it no longer
@@ -171,7 +188,7 @@ class PolygonPlotComponent(Component):
         n_i = LOGICAL_AXIS_MAP[axes[0]]
         n_j = LOGICAL_AXIS_MAP[axes[1]]
 
-        for _, body in bodies.items():
+        for body in body_collection.bodies:
             radius = body.radius
             if body.accretion is not None:
                 radius = body.accretion.accretion_radius

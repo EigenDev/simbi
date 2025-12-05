@@ -106,6 +106,7 @@ def apply_slicing(
                 values=sliced_values,
                 domain=list(sliced_domain),
                 axis_names=plan.final_axis_names,
+                time=field.time,
             )
         )
 

@@ -469,3 +469,27 @@ def compose_2d_render(
         return _compose_polygons(fields_2d)
     else:
         raise ValueError(f"Unknown render_mode: {render_mode}")
+
+
+def compose_fields_for_render(
+    fields: Sequence[FieldData], config: "VisualizationConfig"
+) -> Sequence[FieldData]:
+    """
+    pure function: applies composition logic based on refinement and dimensionality.
+
+    returns fields ready for component dispatch (may be polygons, pcolormesh, or unchanged).
+    """
+    if not fields:
+        return fields
+
+    nlvls = 1 + sum("_L" in f.name for f in fields)
+    is_refined = nlvls > 1
+
+    use_polygons = is_refined or config.refinement.render_mode == "polygons"
+    force_pcolormesh = config.refinement.render_mode == "pcolormesh"
+
+    is_2d = fields[0].ndim == 2
+    if is_2d and use_polygons and not force_pcolormesh:
+        return [_compose_polygons(list(fields))]
+    else:
+        return fields

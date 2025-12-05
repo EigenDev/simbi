@@ -6,6 +6,8 @@ from matplotlib.figure import Figure
 from matplotlib.lines import Line2D
 from pydantic import ValidationInfo, field_validator
 
+from simbi.viz.utility import get_field_str
+
 from ..config import StyleConfig
 from ..types import Array, FieldData, RenderResult
 from .interface import Component, ComponentProps
@@ -31,12 +33,11 @@ class TimeSeriesPlotProps(ComponentProps):
     """Properties for time_series plot component."""
 
     label: Optional[str] = None
-    color: Optional[str] = None
     linestyle: str = "-"
     linewidth: float = 2.0
     marker: Optional[str] = None
     marker_size: float = 6.0
-    alpha: float = 1.0
+    alpha: float = 0.6
     normalization: Optional[float] = None
 
     show_moving_average: bool = False
@@ -94,14 +95,15 @@ class TimeSeriesPlotComponent(Component[TimeSeriesPlotProps, FieldData]):
     def _get_labels(self, num_lines: int) -> list[str]:
         """Get labels for one or more lines."""
         labels: list[str] = []
-        base_label = (
-            self.data.name
-        )  # get_field_str(self.props.label or self.data.name)
+        if not self.data.name.startswith("$"):
+            base_label = get_field_str(self.props.label or self.data.name)
+        else:
+            base_label = self.data.name
 
         if num_lines == 1:
             labels = [base_label]
         elif self.data.body_names and len(self.data.body_names) == num_lines:
-            labels = [f"{base_label} ({name})" for name in self.data.body_names]
+            labels = [f"${name}$" for name in self.data.body_names]
         else:
             labels = [f"{base_label}_{i}" for i in range(num_lines)]
         return labels
@@ -141,8 +143,6 @@ class TimeSeriesPlotComponent(Component[TimeSeriesPlotProps, FieldData]):
                 times,
                 line_values / norm,
                 label=line_label,
-                marker=self.props.marker,
-                linestyle=self.props.linestyle,
                 linewidth=self.props.linewidth,
                 alpha=self.props.alpha,
             )[0]

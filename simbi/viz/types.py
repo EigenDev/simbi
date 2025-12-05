@@ -40,7 +40,7 @@
 #         type: matplotlib artist object (ScalarMappable)
 #         use: direct pointer for the formatter to create a colorbar
 #
-#     - "label": preferred label string for the component (e.g., "$\\rho$")
+#     - "label": preferred label string for the component (e.g., "$\rho$")
 #         type: str
 #         use: used for y-axis labels, legend entries or colorbar labels when
 #              the component doesn't provide them via artist properties.
@@ -159,7 +159,7 @@ class RenderResult(BaseModel):
       - artists: mapping of semantic keys (e.g., 'mesh', 'collection', 'line')
                  to matplotlib artist objects or other renderables.
       - metadata: optional dictionary for extra information about the render
-                  (e.g., {'mappable': quadmesh, 'label': '$\\rho$', 'is_line': True}).
+                  (e.g., {'mappable': quadmesh, 'label': '$\rho$', 'is_line': True}).
 
     Best practices:
       - prefer returning a `mappable` in metadata when the component creates a
@@ -222,6 +222,17 @@ class PlotData(BaseModel):
     def get_base_fields(self) -> list[FieldData]:
         """Get all base level fields"""
         return [f for f in self.fields if "_L" not in f.name]
+
+    def count_plot_lines(self) -> int:
+        """Count total number of individual lines that will be rendered."""
+        total = 0
+        for field in self.fields:
+            if field.values.ndim == 1:
+                total += 1
+            elif field.values.ndim == 2:
+                # 2d field data means N_bodies individual lines
+                total += field.values.shape[1]
+        return total
 
     model_config = {
         "arbitrary_types_allowed": True,  # Allow arbitrary types like CoordSystem

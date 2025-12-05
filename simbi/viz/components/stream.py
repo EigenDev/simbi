@@ -105,7 +105,8 @@ class StreamPlotComponent(Component):
 
         # Stream plots are static and must be cleared and redrawn
         self.cleanup()
-
+        x = 0.5 * (x[1:] + x[:-1])
+        y = 0.5 * (y[1:] + y[:-1])
         self._streamplot = self.ax.streamplot(
             x,
             y,

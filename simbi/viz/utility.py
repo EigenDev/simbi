@@ -102,6 +102,7 @@ FIELD_MAP: dict[str, str] = {
     "term_gravity": r"$-\rho \nabla \Phi$",
     "term_pressure": r"$-\nabla p$",
     "term_residual": r"$\mathbf{R}$",
+    "schlieren": r"$|\nabla \ln \rho|$",
 }
 
 UNITS: dict[str, str] = {

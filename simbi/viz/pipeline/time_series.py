@@ -4,7 +4,6 @@ import numpy as np
 from numpy.typing import NDArray
 
 from simbi.reader.adapter import SimData
-from simbi.viz.utility import get_field_str
 
 from ..config import VisualizationConfig
 from ..types import Array, FieldData, PlotData
@@ -155,13 +154,10 @@ def create_time_series_data(
                     np.sum(values_array, axis=1),
                     time_scale=config.style.time_scale or 2 * np.pi,
                 )
-                fancy_name = get_field_str(name)
-                if fancy_name.endswith("$") and fancy_name.startswith("$"):
-                    fancy_name = fancy_name[1:-1]
                 if ma_times.any():
                     final_fields.append(
                         FieldData(
-                            name=rf"$\langle {fancy_name} \rangle_{{\rm tot}}$ (orbital)",
+                            name=r"$\langle \dot{M} \rangle_{\rm tot}$ (orbital)",
                             values=ma_total_mdot,
                             domain=[ma_times],
                         )

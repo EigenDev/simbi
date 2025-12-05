@@ -347,7 +347,7 @@ class Figure:
         # build a map of the original component payload \"signatures\" so we can
         # request the same plotted fields for each frame.
         component_signatures: List[object] = []
-        for component, payload in self._components:
+        for _, payload in self._components:
             component_signatures.append(payload)
 
         def _find_field(plot_data, name: str):
@@ -378,6 +378,24 @@ class Figure:
             field_names = getattr(self.config.plot, "fields", [])
             frame_plot_data = create_plot_data(
                 sim_data, field_names, self.config
+            )
+
+            # apply composition to match component initialization
+            from simbi.viz.pipeline.plot_data import PlotData
+            from simbi.viz.pipeline.transforms import compose_fields_for_render
+
+            composed_fields = compose_fields_for_render(
+                frame_plot_data.fields, self.config
+            )
+
+            # create new PlotData with composed fields (PlotData is frozen)
+            frame_plot_data = PlotData(
+                fields=composed_fields,
+                body_collection=frame_plot_data.body_collection,
+                time=frame_plot_data.time,
+                dimensions=composed_fields[0].ndim if composed_fields else 0,
+                coord_system=frame_plot_data.coord_system,
+                hierarchy=frame_plot_data.hierarchy,
             )
 
             # dispatch updated payloads to components and collect returned artist dicts
@@ -434,30 +452,16 @@ class Figure:
                     # do not break the animation loop for a single component failure
                     continue
 
-            # per-frame formatting: delegate to the FigureFormatter so animation
-            # matches single-file rendering behavior
+            # update title with current time (only dynamic element)
             main_ax = self.axes.get("main") if hasattr(self, "axes") else None
-            if main_ax is not None:
-                # prefer the first available plotted field for formatting context
-                first_plot_field = (
-                    frame_plot_data.fields[0]
-                    if frame_plot_data.fields
-                    else None
-                )
+            if main_ax is not None and frame_plot_data.fields:
+                from simbi.viz.formatting import set_title
+
                 try:
                     assert self.fig is not None
-                    self.formatter.apply_figure_formatting(
-                        self.fig,
-                        main_ax,
-                        rendered_artists_frame,
-                        first_plot_field,
-                        coord_system=self.coord_system,
-                        xlabel=None,
-                        ylabel=None,
-                        show_legend=True,
-                    )
+                    time = getattr(frame_plot_data.fields[0], "time", None)
+                    set_title(main_ax, self.fig, self.config.style, time)
                 except Exception:
-                    # don't let formatting errors stop the animation
                     pass
 
             # redraw canvas for this frame
@@ -469,17 +473,102 @@ class Figure:
                     self.fig.canvas.draw()
             return []
 
-        # render the first frame immediately so the displayed figure is the
-        # exact first-frame formatting (and not a blank canvas)
+        # render first frame with full formatting (colorbar, limits, labels)
+        # subsequent frames only update data and title
         try:
-            _update(0)
+            file_path = files[0]
+            sim_data = load_data(file_path)
+            field_names = getattr(self.config.plot, "fields", [])
+            frame_plot_data = create_plot_data(
+                sim_data, field_names, self.config
+            )
+
+            from simbi.viz.pipeline.plot_data import PlotData
+            from simbi.viz.pipeline.transforms import compose_fields_for_render
+
+            composed_fields = compose_fields_for_render(
+                frame_plot_data.fields, self.config
+            )
+
+            frame_plot_data = PlotData(
+                fields=composed_fields,
+                body_collection=frame_plot_data.body_collection,
+                time=frame_plot_data.time,
+                dimensions=composed_fields[0].ndim if composed_fields else 0,
+                coord_system=frame_plot_data.coord_system,
+                hierarchy=frame_plot_data.hierarchy,
+            )
+
+            # render components for frame 0
+            rendered_artists_frame = []
+            for (component, orig_payload), signature in zip(
+                self._components, component_signatures
+            ):
+                try:
+                    artist = None
+                    if isinstance(signature, PlotFieldData):
+                        name = signature.name
+                        new_field = _find_field(frame_plot_data, name)
+                        if new_field is not None:
+                            artist = component.render(
+                                new_field, self.config.style
+                            )
+                        elif frame_plot_data.fields:
+                            artist = component.render(
+                                frame_plot_data.fields[0], self.config.style
+                            )
+                    elif isinstance(signature, (list, tuple)):
+                        new_payload = []
+                        for elt in signature:
+                            if hasattr(elt, "name"):
+                                found = _find_field(frame_plot_data, elt.name)
+                                if found is not None:
+                                    new_payload.append(found)
+                        if new_payload:
+                            artist = component.render(
+                                new_payload, self.config.style
+                            )
+                        else:
+                            artist = component.render(
+                                frame_plot_data.fields, self.config.style
+                            )
+                    else:
+                        artist = component.render(
+                            frame_plot_data, self.config.style
+                        )
+
+                    if artist is not None:
+                        artists_dict, metadata = _normalize_render_output(
+                            artist
+                        )
+                        rendered_artists_frame.append((artists_dict, metadata))
+                except Exception:
+                    continue
+
+            # apply full formatting once for first frame
+            main_ax = self.axes.get("main") if hasattr(self, "axes") else None
+            if main_ax is not None and frame_plot_data.fields:
+                try:
+                    assert self.fig is not None
+                    self.formatter.apply_figure_formatting(
+                        self.fig,
+                        main_ax,
+                        rendered_artists_frame,
+                        frame_plot_data.fields[0],
+                        coord_system=self.coord_system,
+                        xlabel=None,
+                        ylabel=None,
+                        show_legend=True,
+                    )
+                except Exception:
+                    pass
+
             if self.fig is not None:
                 try:
                     self.fig.canvas.draw_idle()
                 except Exception:
                     self.fig.canvas.draw()
         except Exception:
-            # if first frame render fails, continue to construct the animation
             pass
 
         # construct the animation

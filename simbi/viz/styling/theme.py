@@ -61,20 +61,38 @@ class ThemeConfig:
         """Apply theme to matplotlib global settings"""
         plt.style.use("default")
 
+        # cycle linestyle first, then color, then marker
+        # this ensures overlapping lines differ in linestyle before color
+        nlines = nfields * nfiles
+        base_linestyles = ["-", "--", "-.", ":"]
+        base_markers = ["o", "s", "^", "D", "v", "<", ">", "p"]
+
+        # calculate how many colors needed
         colormap = plt.get_cmap(next(cycle(self.color_maps)))
-        nlines = nfields
-        nind_curves = nlines * nfiles
-        colors = np.array(
-            [colormap(k) for k in np.linspace(0.1, 0.9, nind_curves)]
+        n_base_colors = max(
+            4, (nlines + len(base_linestyles) - 1) // len(base_linestyles)
         )
-        linestyles = [
-            x[0] for x in zip(cycle(["-", "--", ":", "-."]), range(nlines))
+        base_colors = [
+            colormap(k) for k in np.linspace(0.1, 0.9, n_base_colors)
         ]
-        default_cycler = cycler(color=colors)
-        # if len(colors) == len(linestyles):
-        #     default_cycler = cycler(color=colors) * cycler(linestyle=linestyles)
-        # else:
-        #     default_cycler = cycler(color=colors) * cycler(linestyle=linestyles)
+
+        # build cycler: all properties advance in lockstep for maximum distinction
+        colors = []
+        linestyles = []
+        markers = []
+        for i in range(nlines):
+            linestyle_idx = i % len(base_linestyles)
+            color_idx = i % len(base_colors)
+            marker_idx = i % len(base_markers)
+
+            linestyles.append(base_linestyles[linestyle_idx])
+            colors.append(base_colors[color_idx])
+            markers.append(base_markers[marker_idx])
+
+        default_cycler = (
+            cycler(color=colors) + cycler(linestyle=linestyles)
+            # + cycler(marker=markers)
+        )
 
         plt.rcParams.update(
             {
