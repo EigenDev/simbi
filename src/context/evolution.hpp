@@ -16,7 +16,7 @@
 #include "checkpoint.hpp"
 #include "compat.hpp"
 #include "ecs/systems.hpp"
-#include "io/console/printb.hpp"
+#include "io/console/dprintb.hpp"
 #include "io/exceptions.hpp"
 #include "physics/ib/motion.hpp"
 #include "progress.hpp"
@@ -139,7 +139,7 @@ namespace simbi::evolution {
         progress::finalize(state.progress);
 
         if (state.stats.count > 0) {
-            util::writeln(
+            io::writeln(
                 "Average zone update/sec for {:>5} iterations was {:>5.2e} "
                 "zones/sec",
                 meta.iteration,
@@ -307,7 +307,6 @@ namespace simbi::evolution {
                     // accumulate coarse F(u*) weighted by 0.5*dt (trapezoidal)
                     accumulate_coarse_flux_system_t{}(sim, lvl, fine_level, 0.5 * dt);
                 }
-
                 rk2_stage2_system_t<Ops>{ops}(sim, block_geo, lvl);
 
                 // === REFLUX AND SYNCHRONIZE ===
@@ -332,11 +331,14 @@ namespace simbi::evolution {
             if (meta.subcycling_mode == subcycling_mode_t::NONE) {
                 return 1;
             }
-            else if (meta.subcycling_mode == subcycling_mode_t::ADAPTIVE) {
+            else if (meta.subcycling_mode == subcycling_mode_t::STANDARD) {
+                return sim.level_info(child_lvl).refinement_ratio;
+            }
+            else if (meta.subcycling_mode == subcycling_mode_t::MANUAL) {
                 return meta.level_substeps[child_lvl];
             }
-            else { // STANDARD
-                return sim.level_info(child_lvl).refinement_ratio;
+            else { // ADAPTIVE
+                return meta.level_substeps[child_lvl];
             }
         }
 
