@@ -51,12 +51,7 @@ namespace simbi::dispatch {
     // validity concept - defines which template combinations are supported
     // =============================================================================
 
-    template <
-        regime_t R,
-        std::uint64_t D,
-        geometry_t G,
-        solver_t S,
-        reconstruction_t Rec>
+    template <regime_t R, std::uint64_t D, geometry_t G, solver_t S, reconstruction_t Rec>
     concept valid_combination =
         // basic constraints
         (D >= 1 && D <= 3) &&
@@ -66,13 +61,11 @@ namespace simbi::dispatch {
 
         // geometry constraints
         (G == geometry_t::CARTESIAN || G == geometry_t::CYLINDRICAL ||
-         G == geometry_t::AXIS_CYLINDRICAL ||
-         G == geometry_t::PLANAR_CYLINDRICAL || G == geometry_t::SPHERICAL) &&
+         G == geometry_t::AXIS_CYLINDRICAL || G == geometry_t::PLANAR_CYLINDRICAL ||
+         G == geometry_t::SPHERICAL) &&
 
         // geometry-dimension constraints
-        ((G != geometry_t::AXIS_CYLINDRICAL &&
-          G != geometry_t::PLANAR_CYLINDRICAL) ||
-         D == 2) &&
+        ((G != geometry_t::AXIS_CYLINDRICAL && G != geometry_t::PLANAR_CYLINDRICAL) || D == 2) &&
         ((G != geometry_t::CYLINDRICAL) || D == 3) &&
 
         // regime-specific constraints
@@ -125,20 +118,20 @@ namespace simbi::dispatch {
         // terminal dispatch - builds simulation and calls visitor
         // -------------------------------------------------------------------------
         template <
-            regime_t R,
-            std::uint64_t D,
-            geometry_t G,
-            solver_t S,
+            regime_t         R,
+            std::uint64_t    D,
+            geometry_t       G,
+            solver_t         S,
             reconstruction_t Rec,
             typename EoS,
             typename Visitor>
         auto call_visitor_with_state(
-            Visitor&& visitor,
-            py::iterator prim_gen,
-            vector_t<py::iterator, 3> bfield_gens,
+            Visitor&&                        visitor,
+            py::iterator                     prim_gen,
+            vector_t<py::iterator, 3>        bfield_gens,
             std::function<real(real)> const& scale_factor,
             std::function<real(real)> const& scale_factor_derivative,
-            const ecs::blueprint_set_t<D>& blueprints
+            const ecs::blueprint_set_t<D>&   blueprints
         ) -> std::enable_if_t<valid_combination<R, D, G, S, Rec>, void>
         {
             using namespace ecs;
@@ -155,6 +148,11 @@ namespace simbi::dispatch {
                                .configure_expressions(blueprints.expressions)
                                .configure_bodies(blueprints.bodies);
 
+            // configure gravitational system if present
+            if (blueprints.gravitational_system.has_value()) {
+                builder.configure_gravitational_system(*blueprints.gravitational_system);
+            }
+
             // configure decomposition if present
             if (blueprints.decomposition.has_value()) {
                 builder.configure_decomposition(*blueprints.decomposition);
@@ -164,19 +162,22 @@ namespace simbi::dispatch {
 
             // initialize fields from generators
             using sim_t = decltype(sim);
-            creation::field_initializer_t<sim_t>::initialize(
-                sim,
-                prim_gen,
-                bfield_gens,
-                blueprints.physics.gamma
-            );
+            // if restart file is provided, skip initialization
+            if (blueprints.execution.restart_file.empty()) {
+                creation::field_initializer_t<sim_t>::initialize(
+                    sim,
+                    prim_gen,
+                    bfield_gens,
+                    blueprints.physics.gamma
+                );
+            }
 
             // configure moving mesh if enabled
             if (blueprints.mesh.moving_mesh) {
                 mesh_motion_config_t motion_config;
                 motion_config.scale_factor            = scale_factor;
                 motion_config.scale_factor_derivative = scale_factor_derivative;
-                motion_config.homologous = blueprints.mesh.homologous_expansion;
+                motion_config.homologous              = blueprints.mesh.homologous_expansion;
                 sim.registry.add(sim.global, std::move(motion_config));
             }
 
@@ -189,10 +190,10 @@ namespace simbi::dispatch {
 
         // fallback for invalid combinations
         template <
-            regime_t R,
-            std::uint64_t D,
-            geometry_t G,
-            solver_t S,
+            regime_t         R,
+            std::uint64_t    D,
+            geometry_t       G,
+            solver_t         S,
             reconstruction_t Rec,
             typename EoS,
             typename Visitor>
@@ -205,39 +206,31 @@ namespace simbi::dispatch {
             const ecs::blueprint_set_t<D>&
         ) -> std::enable_if_t<!valid_combination<R, D, G, S, Rec>, void>
         {
-            throw unsupported_configuration(
-                "invalid combination detected at compile time"
-            );
+            throw unsupported_configuration("invalid combination detected at compile time");
         }
 
         // -------------------------------------------------------------------------
         // eos dispatch
         // -------------------------------------------------------------------------
         template <
-            regime_t R,
-            std::uint64_t D,
-            geometry_t G,
-            solver_t S,
+            regime_t         R,
+            std::uint64_t    D,
+            geometry_t       G,
+            solver_t         S,
             reconstruction_t Rec,
             typename Visitor>
         void dispatch_eos(
-            Visitor&& visitor,
-            py::iterator prim_gen,
-            vector_t<py::iterator, 3> bfield_gen,
+            Visitor&&                        visitor,
+            py::iterator                     prim_gen,
+            vector_t<py::iterator, 3>        bfield_gen,
             std::function<real(real)> const& scale_factor,
             std::function<real(real)> const& scale_factor_derivative,
-            const ecs::blueprint_set_t<D>& blueprints
+            const ecs::blueprint_set_t<D>&   blueprints
         )
         {
             if constexpr (R == regime_t::NEWTONIAN) {
                 if (blueprints.physics.gamma > 1.0) {
-                    call_visitor_with_state<
-                        R,
-                        D,
-                        G,
-                        S,
-                        Rec,
-                        eos::ideal_gas_eos_t<R>>(
+                    call_visitor_with_state<R, D, G, S, Rec, eos::ideal_gas_eos_t<R>>(
                         std::forward<Visitor>(visitor),
                         prim_gen,
                         bfield_gen,
@@ -247,13 +240,7 @@ namespace simbi::dispatch {
                     );
                 }
                 else {
-                    call_visitor_with_state<
-                        R,
-                        D,
-                        G,
-                        S,
-                        Rec,
-                        eos::isothermal_gas_eos_t>(
+                    call_visitor_with_state<R, D, G, S, Rec, eos::isothermal_gas_eos_t>(
                         std::forward<Visitor>(visitor),
                         prim_gen,
                         bfield_gen,
@@ -264,13 +251,7 @@ namespace simbi::dispatch {
                 }
             }
             else {
-                call_visitor_with_state<
-                    R,
-                    D,
-                    G,
-                    S,
-                    Rec,
-                    eos::ideal_gas_eos_t<R>>(
+                call_visitor_with_state<R, D, G, S, Rec, eos::ideal_gas_eos_t<R>>(
                     std::forward<Visitor>(visitor),
                     prim_gen,
                     bfield_gen,
@@ -284,20 +265,15 @@ namespace simbi::dispatch {
         // -------------------------------------------------------------------------
         // reconstruction dispatch
         // -------------------------------------------------------------------------
-        template <
-            regime_t R,
-            std::uint64_t D,
-            geometry_t G,
-            solver_t S,
-            typename Visitor>
+        template <regime_t R, std::uint64_t D, geometry_t G, solver_t S, typename Visitor>
         void dispatch_reconstruction(
-            reconstruction_t rec,
-            Visitor&& visitor,
-            py::iterator prim_gen,
-            vector_t<py::iterator, 3> bfield_gen,
+            reconstruction_t                 rec,
+            Visitor&&                        visitor,
+            py::iterator                     prim_gen,
+            vector_t<py::iterator, 3>        bfield_gen,
             std::function<real(real)> const& scale_factor,
             std::function<real(real)> const& scale_factor_derivative,
-            const ecs::blueprint_set_t<D>& blueprints
+            const ecs::blueprint_set_t<D>&   blueprints
         )
         {
             switch (rec) {
@@ -323,8 +299,7 @@ namespace simbi::dispatch {
                     break;
                 default:
                     throw unsupported_configuration(
-                        "unsupported reconstruction: " +
-                        std::to_string(static_cast<int>(rec))
+                        "unsupported reconstruction: " + std::to_string(static_cast<int>(rec))
                     );
             }
         }
@@ -334,14 +309,14 @@ namespace simbi::dispatch {
         // -------------------------------------------------------------------------
         template <regime_t R, std::uint64_t D, geometry_t G, typename Visitor>
         void dispatch_solver(
-            solver_t solver,
-            reconstruction_t rec,
-            Visitor&& visitor,
-            py::iterator prim_gen,
-            vector_t<py::iterator, 3> bfield_gen,
+            solver_t                         solver,
+            reconstruction_t                 rec,
+            Visitor&&                        visitor,
+            py::iterator                     prim_gen,
+            vector_t<py::iterator, 3>        bfield_gen,
             std::function<real(real)> const& scale_factor,
             std::function<real(real)> const& scale_factor_derivative,
-            const ecs::blueprint_set_t<D>& blueprints
+            const ecs::blueprint_set_t<D>&   blueprints
         )
         {
             switch (solver) {
@@ -380,8 +355,7 @@ namespace simbi::dispatch {
                     break;
                 default:
                     throw unsupported_configuration(
-                        "unsupported solver: " +
-                        std::to_string(static_cast<int>(solver))
+                        "unsupported solver: " + std::to_string(static_cast<int>(solver))
                     );
             }
         }
@@ -391,15 +365,15 @@ namespace simbi::dispatch {
         // -------------------------------------------------------------------------
         template <regime_t R, std::uint64_t D, typename Visitor>
         void dispatch_geometry(
-            geometry_t geometry,
-            solver_t solver,
-            reconstruction_t rec,
-            Visitor&& visitor,
-            py::iterator prim_gen,
-            vector_t<py::iterator, 3> bfield_gen,
+            geometry_t                       geometry,
+            solver_t                         solver,
+            reconstruction_t                 rec,
+            Visitor&&                        visitor,
+            py::iterator                     prim_gen,
+            vector_t<py::iterator, 3>        bfield_gen,
             std::function<real(real)> const& scale_factor,
             std::function<real(real)> const& scale_factor_derivative,
-            const ecs::blueprint_set_t<D>& blueprints
+            const ecs::blueprint_set_t<D>&   blueprints
         )
         {
             switch (geometry) {
@@ -465,8 +439,7 @@ namespace simbi::dispatch {
                     break;
                 default:
                     throw unsupported_configuration(
-                        "unsupported geometry: " +
-                        std::to_string(static_cast<int>(geometry))
+                        "unsupported geometry: " + std::to_string(static_cast<int>(geometry))
                     );
             }
         }
@@ -478,22 +451,21 @@ namespace simbi::dispatch {
         // -------------------------------------------------------------------------
         template <regime_t R, typename Visitor>
         void dispatch_dimensions(
-            std::uint64_t dims,
-            geometry_t geometry,
-            solver_t solver,
-            reconstruction_t rec,
-            Visitor&& visitor,
-            py::iterator prim_gen,
-            vector_t<py::iterator, 3> bfield_gen,
+            std::uint64_t                    dims,
+            geometry_t                       geometry,
+            solver_t                         solver,
+            reconstruction_t                 rec,
+            Visitor&&                        visitor,
+            py::iterator                     prim_gen,
+            vector_t<py::iterator, 3>        bfield_gen,
             std::function<real(real)> const& scale_factor,
             std::function<real(real)> const& scale_factor_derivative,
-            const config_dict_t& config
+            const config_dict_t&             config
         )
         {
             switch (dims) {
                 case 1: {
-                    auto blueprints =
-                        ecs::blueprint_set_t<1>::from_config(config);
+                    auto blueprints = ecs::blueprint_set_t<1>::from_config(config);
                     dispatch_geometry<R, 1>(
                         geometry,
                         solver,
@@ -508,8 +480,7 @@ namespace simbi::dispatch {
                     break;
                 }
                 case 2: {
-                    auto blueprints =
-                        ecs::blueprint_set_t<2>::from_config(config);
+                    auto blueprints = ecs::blueprint_set_t<2>::from_config(config);
                     dispatch_geometry<R, 2>(
                         geometry,
                         solver,
@@ -524,8 +495,7 @@ namespace simbi::dispatch {
                     break;
                 }
                 case 3: {
-                    auto blueprints =
-                        ecs::blueprint_set_t<3>::from_config(config);
+                    auto blueprints = ecs::blueprint_set_t<3>::from_config(config);
                     dispatch_geometry<R, 3>(
                         geometry,
                         solver,
@@ -551,17 +521,17 @@ namespace simbi::dispatch {
         // -------------------------------------------------------------------------
         template <typename Visitor>
         void dispatch_regime(
-            regime_t regime,
-            std::uint64_t dims,
-            geometry_t geometry,
-            solver_t solver,
-            reconstruction_t rec,
-            Visitor&& visitor,
-            py::iterator prim_gen,
-            vector_t<py::iterator, 3> bfield_gen,
+            regime_t                         regime,
+            std::uint64_t                    dims,
+            geometry_t                       geometry,
+            solver_t                         solver,
+            reconstruction_t                 rec,
+            Visitor&&                        visitor,
+            py::iterator                     prim_gen,
+            vector_t<py::iterator, 3>        bfield_gen,
             std::function<real(real)> const& scale_factor,
             std::function<real(real)> const& scale_factor_derivative,
-            const config_dict_t& config
+            const config_dict_t&             config
         )
         {
             switch (regime) {
@@ -609,13 +579,12 @@ namespace simbi::dispatch {
                     break;
                 default:
                     throw unsupported_configuration(
-                        "unsupported regime: " +
-                        std::to_string(static_cast<int>(regime))
+                        "unsupported regime: " + std::to_string(static_cast<int>(regime))
                     );
             }
         }
 
-    }   // namespace detail
+    } // namespace detail
 
     // =============================================================================
     // main entry point
@@ -632,12 +601,12 @@ namespace simbi::dispatch {
      */
     template <typename Visitor>
     void with_hydro_state(
-        const config_dict_t& config,
-        py::iterator prim_gen,
-        vector_t<py::iterator, 3> bfield_gen,
+        const config_dict_t&             config,
+        py::iterator                     prim_gen,
+        vector_t<py::iterator, 3>        bfield_gen,
         std::function<real(real)> const& scale_factor,
         std::function<real(real)> const& scale_factor_derivative,
-        Visitor&& visitor
+        Visitor&&                        visitor
     )
     {
         using namespace ecs::creation;
@@ -671,14 +640,13 @@ namespace simbi::dispatch {
             );
         }
         catch (const configuration_error&) {
-            std::string msg =
-                "regime=" + regime_str + ", dims=" + std::to_string(dims) +
-                ", geometry=" + geometry_str + ", solver=" + solver_str +
-                ", reconstruction=" + rec_str;
+            std::string msg = "regime=" + regime_str + ", dims=" + std::to_string(dims) +
+                              ", geometry=" + geometry_str + ", solver=" + solver_str +
+                              ", reconstruction=" + rec_str;
             throw unsupported_configuration(msg);
         }
     }
 
-}   // namespace simbi::dispatch
+} // namespace simbi::dispatch
 
-#endif   // HYDRO_DISPATCH_HPP
+#endif // HYDRO_DISPATCH_HPP
