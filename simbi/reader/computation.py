@@ -247,8 +247,9 @@ def create_computation_pipeline(data: Checkpoint) -> dict[str, Any]:
 
         def evaluate(self, level: int) -> Array:
             # assemble fields and mesh for the requested level
+            from simbi.reader.adapter import MeshAdapter
+
             level_data = data.levels[level]
-            mesh = level_data.mesh
 
             # only single-partition supported currently
             if level_data.num_partitions != 1:
@@ -257,6 +258,16 @@ def create_computation_pipeline(data: Checkpoint) -> dict[str, Any]:
                 )
 
             partition = level_data.partitions[0]
+
+            # create mesh adapter with coordinate generation
+            owned_domain = None
+            if level > 0:
+                owned_domain = (
+                    partition.owned_domain.start,
+                    partition.owned_domain.fin,
+                )
+
+            mesh = MeshAdapter(level_data.mesh, owned_domain=owned_domain)
             halo = mesh.halo_radius
 
             # build base field mapping from FieldData objects:
@@ -484,7 +495,8 @@ def create_computation_pipeline(data: Checkpoint) -> dict[str, Any]:
 
     def angular_momentum_density(level_data: dict[str, Array]) -> Array:
         mesh = getattr(level_data, "mesh")
-        x, y = mesh.x1c, mesh.x2c
+        x = 0.5 * (mesh.x1v[1:] + mesh.x1v[:-1])
+        y = 0.5 * (mesh.x2v[1:] + mesh.x2v[:-1])
         Sx = labframe_momentum(
             level_data["rho"],
             level_data["p"],
@@ -507,7 +519,8 @@ def create_computation_pipeline(data: Checkpoint) -> dict[str, Any]:
 
     def specific_angular_momentum(level_data: dict[str, Array]) -> Array:
         mesh = getattr(level_data, "mesh")
-        x, y = mesh.x1c, mesh.x2c
+        x = 0.5 * (mesh.x1v[1:] + mesh.x1v[:-1])
+        y = 0.5 * (mesh.x2v[1:] + mesh.x2v[:-1])
         Sx = labframe_momentum(
             level_data["rho"],
             level_data["p"],
@@ -546,11 +559,12 @@ def create_computation_pipeline(data: Checkpoint) -> dict[str, Any]:
 
     def mass_flux(level_data: dict[str, Any]) -> Array:
         mesh = getattr(level_data, "mesh")
-        x, y = mesh.x1c, mesh.x2c
+        x = 0.5 * (mesh.x1v[1:] + mesh.x1v[:-1])
+        y = 0.5 * (mesh.x2v[1:] + mesh.x2v[:-1])
         vx, vy = level_data["v1"], level_data["v2"]
 
         if vx.ndim == 3:
-            z = mesh.x3c
+            z = 0.5 * (mesh.x3v[1:] + mesh.x3v[:-1])
             r = np.sqrt(x**2 + y**2 + z**2)
             vz = level_data["v3"]
             vr = (x * vx + y * vy + z * vz) / (r + np.finfo(float).tiny)
@@ -563,14 +577,15 @@ def create_computation_pipeline(data: Checkpoint) -> dict[str, Any]:
     def compute_divergence(level_data: dict[str, Array]) -> Array:
         mesh = getattr(level_data, "mesh")
         vx, vy = level_data["v1"], level_data["v2"]
-        x, y = mesh.x1c, mesh.x2c
+        x = 0.5 * (mesh.x1v[1:] + mesh.x1v[:-1])
+        y = 0.5 * (mesh.x2v[1:] + mesh.x2v[:-1])
 
         dvx_dx = np.gradient(vx, x, axis=ndim - 1)
         dvy_dy = np.gradient(vy, y, axis=ndim - 2)
 
         if ndim == 3:
             vz = level_data["v3"]
-            z = mesh.x3c
+            z = 0.5 * (mesh.x3v[1:] + mesh.x3v[:-1])
             dvz_dz = np.gradient(vz, z, axis=0)
             return np.asarray(dvx_dx + dvy_dy + dvz_dz)
         return np.asarray(dvx_dx + dvy_dy)
@@ -578,11 +593,47 @@ def create_computation_pipeline(data: Checkpoint) -> dict[str, Any]:
     def compute_vorticity_z(level_data: dict[str, Array]) -> Array:
         mesh = getattr(level_data, "mesh")
         vx, vy = level_data["v1"], level_data["v2"]
-        x, y = mesh.x1c, mesh.x2c
+        x = 0.5 * (mesh.x1v[1:] + mesh.x1v[:-1])
+        y = 0.5 * (mesh.x2v[1:] + mesh.x2v[:-1])
 
         dvy_dx = np.gradient(vy, x, axis=ndim - 1)
         dvx_dy = np.gradient(vx, y, axis=ndim - 2)
         return np.asarray(dvy_dx - dvx_dy)
+
+    def compute_schlieren(level_data: dict[str, Array]) -> Array:
+        """
+        numerical schlieren: gradient magnitude of log(density).
+        highlights shocks and contact discontinuities.
+        """
+        mesh = getattr(level_data, "mesh")
+        rho = level_data["rho"]
+
+        # work with log(density) for better shock sensitivity
+        log_rho = np.log(rho + 1e-20)  # avoid log(0)
+
+        # compute gradient components
+        grads = []
+        coords = []
+
+        if ndim >= 1:
+            x = 0.5 * (mesh.x1v[1:] + mesh.x1v[:-1])
+            coords.append(x)
+        if ndim >= 2:
+            y = 0.5 * (mesh.x2v[1:] + mesh.x2v[:-1])
+            coords.append(y)
+        if ndim >= 3:
+            z = 0.5 * (mesh.x3v[1:] + mesh.x3v[:-1])
+            coords.append(z)
+
+        # gradient along each active dimension
+        for axis in range(ndim):
+            grad = np.gradient(log_rho, coords[axis], axis=ndim - 1 - axis)
+            grads.append(grad)
+
+        # magnitude: sqrt(sum of squares)
+        grad_mag = np.sqrt(sum(g**2 for g in grads))
+
+        return np.asarray(grad_mag)
 
     # build base pipeline of functions
     base_pipeline: dict[str, Callable[..., Any]] = {
@@ -604,6 +655,7 @@ def create_computation_pipeline(data: Checkpoint) -> dict[str, Any]:
         "Sigma": surface_density,
         "vorticity": compute_vorticity_z,
         "div_v": compute_divergence,
+        "schlieren": compute_schlieren,
     }
 
     # add component fields
