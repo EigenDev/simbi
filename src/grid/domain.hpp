@@ -13,7 +13,8 @@ namespace simbi::grid {
     // domain: pure topology defined by integer vectors
     // represents the half-open interval [start, end)
     template <std::uint64_t Rank>
-    struct domain_t {
+    struct domain_t
+    {
         // strict 64-bit indexing
         using coord_t = vector_t<std::int64_t, Rank>;
         // local geometry
@@ -21,12 +22,18 @@ namespace simbi::grid {
         coord_t fin;
 
         // geometric queries
-        DUAL constexpr coord_t shape() const { return fin - start; }
+        DUAL constexpr coord_t shape() const
+        {
+            return fin - start;
+        }
         DUAL constexpr std::int64_t size() const
         {
             return fp::product(shape());
         }
-        DUAL constexpr bool empty() const { return size() <= 0; }
+        DUAL constexpr bool empty() const
+        {
+            return size() <= 0;
+        }
 
         DUAL constexpr bool contains(const coord_t& c) const
         {
@@ -44,10 +51,8 @@ namespace simbi::grid {
         {
             domain_t res = *this;
             for (std::uint64_t ii = 0; ii < Rank; ++ii) {
-                res.start[ii] =
-                    (start[ii] > other.start[ii]) ? start[ii] : other.start[ii];
-                res.fin[ii] =
-                    (fin[ii] < other.fin[ii]) ? fin[ii] : other.fin[ii];
+                res.start[ii] = (start[ii] > other.start[ii]) ? start[ii] : other.start[ii];
+                res.fin[ii]   = (fin[ii] < other.fin[ii]) ? fin[ii] : other.fin[ii];
             }
             return res;
         }
@@ -87,18 +92,14 @@ namespace simbi::grid {
         // returns a new domain clipped to [split_start, split_end)
         // automatically downgrades boundaries to 'partition' if detached from
         // global edge
-        DUAL constexpr domain_t slice(
-            std::int64_t axis,
-            std::int64_t split_start,
-            std::int64_t split_fin
-        ) const
+        DUAL constexpr domain_t
+        slice(std::int64_t axis, std::int64_t split_start, std::int64_t split_fin) const
         {
             domain_t shard = *this;
 
             // geometric clip
-            shard.start[axis] =
-                (start[axis] > split_start) ? start[axis] : split_start;
-            shard.fin[axis] = (fin[axis] < split_fin) ? fin[axis] : split_fin;
+            shard.start[axis] = (start[axis] > split_start) ? start[axis] : split_start;
+            shard.fin[axis]   = (fin[axis] < split_fin) ? fin[axis] : split_fin;
 
             return shard;
         }
@@ -135,6 +136,6 @@ namespace simbi::grid {
         return os;
     }
 
-}   // namespace simbi::grid
+} // namespace simbi::grid
 
-#endif   // GRID_DOMAIN_HPP
+#endif // GRID_DOMAIN_HPP
